@@ -77,21 +77,25 @@ def generate_cookbook(
     # Deps used in the function body
     deps = _discover_dependencies(snippet, imports, assignments, exclude_symbol=symbol)
 
-    # Also include ALL module-level imports and factory calls —
-    # they execute on `await import()` and need mocking even if
-    # the target function doesn't reference them directly.
+    # Also include module-level factory calls (const x = getX()) —
+    # they execute on `await import()` and crash if not mocked.
+    # Bare imports (import { Class } from '...') don't need mocking
+    # unless the module has init-time side effects.
     snippet_bindings = {d["binding"] for d in deps}
-    for binding in sorted(set(imports.keys()) | set(assignments.keys())):
+    for binding, assignment in assignments.items():
         if binding in snippet_bindings or binding == symbol:
             continue
-        import_meta = imports.get(binding)
-        assignment = assignments.get(binding)
-        # Include if it's a direct import or a factory call at module level
-        if import_meta or (assignment and assignment.get("called_symbol")):
-            dep = {"binding": binding}
-            if import_meta:
-                dep["source_module"] = import_meta["source_module"]
-            deps.append(dep)
+        called = assignment.get("called_symbol")
+        if not called:
+            continue
+        # This is a factory call like `const logger = getLogger()`
+        # Include the factory's source module
+        factory_import = imports.get(called)
+        if factory_import:
+            deps.append({
+                "binding": binding,
+                "source_module": factory_import["source_module"],
+            })
 
     module_load_dependencies = []
     execution_dependencies = []
