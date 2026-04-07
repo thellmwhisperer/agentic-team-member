@@ -172,6 +172,26 @@ class TestNoDependencies:
         assert "describe(" in result or "test(" in result
 
 
+class TestFindFunctionEndPython:
+    """_find_function_end correctly bounds class methods, not just top-level."""
+
+    def test_class_method_stops_at_next_sibling(self, tmp_path):
+        _write_ts(tmp_path, "src/calc.py", """\
+            class Calculator:
+                def add(self, a, b):
+                    return a + b
+
+                def subtract(self, a, b):
+                    return a - b
+        """)
+        from agentic_tdd_runner.cookbook import _find_function_end
+        source = (tmp_path / "src/calc.py").read_text()
+        # add starts at line 2, subtract at line 5
+        end = _find_function_end(source, 2)
+        assert end is not None
+        assert end <= 5  # must stop before or at subtract
+
+
 class TestBuildSystemPrompt:
     """build_system_prompt injects cookbook into the base prompt."""
 
