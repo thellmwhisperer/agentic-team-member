@@ -252,6 +252,30 @@ class TestArrowFunctionSignature:
         assert "age" in result
 
 
+class TestMultiLineSignatureDetection:
+    """TS functions with multi-line signatures must be fully captured."""
+
+    def test_multiline_signature_captures_body(self, tmp_path):
+        _write_ts(tmp_path, "src/handler.ts", """\
+            import { getLogger } from '../logger';
+
+            const logger = getLogger();
+
+            export function handleResub(
+              channel: string,
+              username: string,
+              months: number,
+            ): void {
+              logger.event('resub', { username, months });
+              const response = 'hello';
+            }
+        """)
+        result = generate_cookbook("src/handler.ts", "handleResub", str(tmp_path))
+        assert "mock.module(" in result
+        assert "../logger" in result
+        assert "logger" in result
+
+
 class TestSingleParamArrowFunction:
     """Single-param arrow functions without parens must be detected."""
 

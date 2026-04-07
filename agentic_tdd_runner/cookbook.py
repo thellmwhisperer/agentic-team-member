@@ -48,7 +48,7 @@ def generate_cookbook(
     signature = _extract_signature(source_text, symbol)
 
     sym_line = line_start or _find_symbol_line(source_text, symbol)
-    fn_end = line_end or _find_function_end(source_text, sym_line)
+    fn_end = line_end or _find_function_end(source_text, sym_line, lang=lang)
 
     # Detect class methods (indented def in Python)
     owner_class = None
@@ -175,15 +175,17 @@ def build_system_prompt(
     return f"{base_prompt}\n\n{cookbook}"
 
 
-def _find_function_end(source_text: str, start_line: int | None) -> int | None:
-    """Heuristic: find the closing brace/dedent of a function starting at start_line."""
+def _find_function_end(source_text: str, start_line: int | None, *, lang=None) -> int | None:
+    """Find the closing brace/dedent of a function starting at start_line."""
     if not start_line:
         return None
     lines = source_text.splitlines()
     if start_line > len(lines):
         return None
 
-    is_python = not any(line.rstrip().endswith("{") for line in lines[start_line - 1: start_line + 2])
+    is_python = lang.name == "python" if lang else not any(
+        line.rstrip().endswith("{") for line in lines[start_line - 1: start_line + 2]
+    )
 
     if is_python:
         header = lines[start_line - 1]
