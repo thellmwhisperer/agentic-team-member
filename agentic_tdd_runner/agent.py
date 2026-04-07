@@ -179,7 +179,7 @@ def verify_red_green(test_file: str) -> tuple[bool, str]:
 
     emit("\n=== RED-GREEN VERIFICATION ===")
 
-    subprocess.run("git stash", shell=True, cwd=WORKDIR, capture_output=True)
+    subprocess.run("git stash --include-untracked", shell=True, cwd=WORKDIR, capture_output=True)
 
     emit("  [RED] Running test WITHOUT fix...")
     red_result = subprocess.run(
@@ -218,7 +218,7 @@ def verify_red_green(test_file: str) -> tuple[bool, str]:
             f"REJECTED: Your test ({test_file}) passes even WITHOUT your source fix. "
             f"This means it doesn't test the real code — it probably uses local stub functions "
             f"instead of importing from the source. Rewrite the test to import the real "
-            f"handleResub function from ./client using mock.module() for all dependencies."
+            f"function and mock its dependencies properly."
         )
 
     if not green_passed:
