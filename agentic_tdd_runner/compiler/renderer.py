@@ -301,6 +301,8 @@ def _render_assertion(assertion_surface, *, runner):
         if runner == "pytest":
             return "assert result == expected_value"
         return "expect(result).toBe(expected_value);"
+    if runner == "pytest":
+        return f"# TODO: assert {kind} on {binding}.{member}"
     return f"// TODO: assert {kind} on {binding}.{member}"
 
 
