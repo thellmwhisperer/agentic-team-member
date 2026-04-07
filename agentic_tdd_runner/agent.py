@@ -393,9 +393,9 @@ def main():
                         emit(f"{'='*60}")
                         diff = subprocess.run("git diff", shell=True, cwd=WORKDIR, capture_output=True, text=True)
                         emit(f"\n--- GIT DIFF ---\n{diff.stdout}")
-                        untracked = subprocess.run("git ls-files --others --exclude-standard", shell=True, cwd=WORKDIR, capture_output=True, text=True)
+                        untracked = subprocess.run(["git", "ls-files", "--others", "--exclude-standard"], cwd=WORKDIR, capture_output=True, text=True)
                         if untracked.stdout.strip():
-                            emit(f"\n--- NEW FILES ---")
+                            emit("\n--- NEW FILES ---")
                             for f in untracked.stdout.strip().split("\n"):
                                 emit(f"  {f}")
                                 content_result = subprocess.run(f"cat '{f}'", shell=True, cwd=WORKDIR, capture_output=True, text=True)

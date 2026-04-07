@@ -10,6 +10,7 @@ def _extract_signature(source_text, symbol):
     patterns = [
         rf"^(?:export\s+)?(?:async\s+)?function\s+{re.escape(symbol)}\s*\((.*?)\)(?:\s*:\s*([^\{{]+))?",
         rf"^(?:export\s+)?(?:const|let|var)\s+{re.escape(symbol)}\s*=\s*\((.*?)\)(?:\s*:\s*([^=\{{]+))?\s*=>",
+        rf"^(?:export\s+)?(?:const|let|var)\s+{re.escape(symbol)}\s*=\s*([A-Za-z_$][\w$]*)\s*=>",
         rf"^def\s+{re.escape(symbol)}\s*\((.*?)\)(?:\s*->\s*([^:]+))?",
     ]
     for pattern in patterns:
@@ -17,7 +18,7 @@ def _extract_signature(source_text, symbol):
         if not match:
             continue
         params = match.group(1).strip()
-        returns = match.group(2).strip() if match.lastindex and match.group(2) else None
+        returns = match.group(2).strip() if match.lastindex >= 2 and match.group(2) else None
         if returns:
             return f"{symbol}({params}): {returns}"
         return f"{symbol}({params})"
