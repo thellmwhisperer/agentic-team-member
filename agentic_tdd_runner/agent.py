@@ -148,13 +148,13 @@ def chat(messages: list) -> dict:
 def find_test_file() -> str | None:
     """Find the test file the agent created."""
     import fnmatch
-    pattern = _CONFIG["runner"]["test_file_pattern"]
+    patterns = _CONFIG["runner"]["test_file_patterns"]
     exclude = _CONFIG["runner"].get("exclude_dirs", [])
     for root, _dirs, files in os.walk(WORKDIR):
         if any(ex in root for ex in exclude):
             continue
         for f in files:
-            if fnmatch.fnmatch(f, pattern):
+            if any(fnmatch.fnmatch(f, p) for p in patterns):
                 full = os.path.join(root, f)
                 rel = os.path.relpath(full, WORKDIR)
                 result = subprocess.run(
