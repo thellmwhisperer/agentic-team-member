@@ -95,6 +95,36 @@ class TestFindTestFile:
         # Hint file doesn't exist, falls back to discovery
         assert find_test_file(hint="src/nonexistent.test.ts") == "src/foo.test.ts"
 
+    def test_verify_red_green_preserves_untracked_test(self, tmp_path, monkeypatch):
+        """An untracked test file must survive the stash cycle in verify_red_green."""
+        import subprocess as sp
+        from agentic_tdd_runner.agent import verify_red_green
+
+        # Set up a git repo with committed source
+        sp.run("git init", shell=True, cwd=tmp_path, capture_output=True)
+        sp.run(["git", "config", "user.email", "test@test.com"], cwd=tmp_path, capture_output=True)
+        sp.run(["git", "config", "user.name", "test"], cwd=tmp_path, capture_output=True)
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "math.ts").write_text("original")
+        sp.run("git add -A && git commit -m base", shell=True, cwd=tmp_path, capture_output=True)
+
+        # Agent creates: modified source (fix) + new untracked test file
+        (src / "math.ts").write_text("fixed")
+        (src / "math.test.ts").write_text("test content")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "runner": {"command": "echo", "test_file_patterns": ["*.test.ts"], "exclude_dirs": []},
+            "timeouts": {"test_run": 10},
+        })
+
+        verify_red_green("src/math.test.ts")
+
+        # Both files must exist after verification
+        assert (src / "math.test.ts").exists(), "Untracked test file disappeared"
+        assert (src / "math.ts").read_text() == "fixed", "Source fix not restored"
+
     def test_python_test_uses_pytest_command(self, tmp_path, monkeypatch):
         """When a Python test is found, verify_red_green should use pytest, not bun test."""
         # This tests that the runner command adapts to the file type

@@ -304,6 +304,28 @@ def _render_cookbook_text(contract: dict, lang) -> str:
     # Test scaffold
     scaffold = contract.get("scaffold", {})
     rendered = scaffold.get("rendered_test", "")
+    if owner_class and runner == "pytest":
+        # Override scaffold for class methods
+        import_path = contract["test_file"].get("source_import_path", "")
+        sig = target.get("signature", f"{target['symbol']}(self)")
+        # Extract params excluding self
+        param_match = re.search(r"\((.*?)\)", sig)
+        params = []
+        if param_match:
+            for p in param_match.group(1).split(","):
+                name = p.strip().split(":")[0].split("=")[0].strip()
+                if name and name != "self":
+                    params.append(name)
+        param_setup = "\n".join(f"    {p} = ..." for p in params)
+        param_args = ", ".join(params)
+        rendered = (
+            f"from {import_path} import {owner_class}\n\n\n"
+            f"def test_{target['symbol']}():\n"
+            f"{param_setup}\n\n"
+            f"    obj = {owner_class}()\n"
+            f"    result = obj.{target['symbol']}({param_args})\n\n"
+            f"    assert result == ...\n"
+        )
     if rendered:
         code_lang = "python" if runner == "pytest" else "ts"
         parts.append(f"### Test Scaffold ({contract['test_file']['path']})")

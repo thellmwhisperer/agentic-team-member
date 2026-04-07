@@ -216,10 +216,20 @@ class TestPythonClassMethod:
                     return a + b
         """)
         result = generate_cookbook("src/calc.py", "add", str(tmp_path))
-        # Must reference the owning class
         assert "Calculator" in result
-        # Must indicate it's a method, not a standalone function
         assert "method" in result.lower()
+
+    def test_scaffold_imports_class_not_method(self, tmp_path):
+        _write_ts(tmp_path, "src/calc.py", """\
+            class Calculator:
+                def add(self, a, b):
+                    return a + b
+        """)
+        result = generate_cookbook("src/calc.py", "add", str(tmp_path))
+        # Scaffold must import the class, not the bare method
+        assert "import add" not in result or "import Calculator" in result
+        # Scaffold must instantiate the class
+        assert "Calculator()" in result
 
 
 class TestArrowFunctionSignature:
