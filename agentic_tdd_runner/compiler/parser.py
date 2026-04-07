@@ -26,8 +26,20 @@ def _extract_signature(source_text, symbol):
 
 
 def _find_symbol_line(source_text, symbol):
+    esc = re.escape(symbol)
+    # Prefer the definition line over any reference
+    definition_patterns = [
+        rf"(?:export\s+)?(?:async\s+)?function\s+{esc}\s*\(",
+        rf"(?:export\s+)?(?:const|let|var)\s+{esc}\s*=",
+        rf"^\s*def\s+{esc}\s*\(",
+    ]
     for idx, line in enumerate(source_text.splitlines(), start=1):
-        if re.search(rf"\b{re.escape(symbol)}\b", line):
+        for pattern in definition_patterns:
+            if re.search(pattern, line):
+                return idx
+    # Fallback: first occurrence
+    for idx, line in enumerate(source_text.splitlines(), start=1):
+        if re.search(rf"\b{esc}\b", line):
             return idx
     return None
 
