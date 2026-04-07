@@ -242,6 +242,18 @@ class TestArrowFunctionSignature:
         assert "age" in result
 
 
+class TestSingleParamArrowFunction:
+    """Single-param arrow functions without parens must be detected."""
+
+    def test_single_param_arrow_detected(self, tmp_path):
+        _write_ts(tmp_path, "src/utils.ts", """\
+            export const double = x => x * 2;
+        """)
+        result = generate_cookbook("src/utils.ts", "double", str(tmp_path))
+        assert "x" in result
+        assert "double" in result
+
+
 class TestPythonReturnValueScaffold:
     """Python scaffold must not produce 'result = result = fn()'."""
 
