@@ -40,6 +40,13 @@ You have tools to read files, run commands, edit files, and create files. All pa
 - Tests that define local stub/simulation functions are NOT valid. The harness will reject them.
 - If the import fails because of module initialization errors, fix the mocks — don't give up and write stubs.
 
+## Test strategy
+- Write tests for: the expected behavior, edge cases (boundary values, empty/null), and the specific bug.
+- Put shared setup (mocks, test doubles, seam calls) in beforeEach, not duplicated in each test.
+- Use expect.stringContaining() for message assertions — never exact match on interpolated strings.
+- Never use `as any`. Type your test doubles properly.
+- Never use `eslint-disable` or `@ts-ignore`.
+
 ## Other rules
 - Read before editing — you need the exact text for str_replace_editor.
 - Make minimal changes. Don't refactor unrelated code.
