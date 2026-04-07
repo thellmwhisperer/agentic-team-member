@@ -128,25 +128,46 @@ def _build_assertion_surface(assertion_surface, snippet, symbol):
         return assertion_surface, []
 
     calls = list(_CALL_RE.finditer(snippet))
+
+    # If the function has a return statement, check if outbound calls are on
+    # actual dependencies (not parameters). Prefer return_value when all calls
+    # are on parameters or locals.
+    has_return = "return " in snippet
     if calls:
+        # Extract parameter names from the first line (crude but effective)
+        first_line = snippet.strip().splitlines()[0] if snippet.strip() else ""
+        param_match = re.search(r"\((.*?)\)", first_line)
+        param_names = set()
+        if param_match:
+            for p in param_match.group(1).split(","):
+                name = p.strip().split(":")[0].split("=")[0].strip().lstrip("*")
+                if name:
+                    param_names.add(name)
+
         ranked = []
         for index, match in enumerate(calls):
+            binding = match.group(1)
             member = match.group(2)
+            # Skip calls on parameters — they're not mockable dependencies
+            if binding in param_names:
+                continue
             ranked.append((_ASSERTION_MEMBER_SCORES.get(member, 40), index, match))
-        _, _, best = max(ranked, key=lambda item: (item[0], item[1]))
-        binding = best.group(1)
-        member = best.group(2)
-        return (
-            {
-                "kind": "outbound_call_arguments",
-                "binding": binding,
-                "member": member,
-                "assertion_shape": f"toHaveBeenCalledWith(...{binding}.{member}...)",
-            },
-            [],
-        )
 
-    if "return " in snippet:
+        if ranked:
+            _, _, best = max(ranked, key=lambda item: (item[0], item[1]))
+            binding = best.group(1)
+            member = best.group(2)
+            return (
+                {
+                    "kind": "outbound_call_arguments",
+                    "binding": binding,
+                    "member": member,
+                    "assertion_shape": f"toHaveBeenCalledWith(...{binding}.{member}...)",
+                },
+                [],
+            )
+
+    if has_return:
         return (
             {
                 "kind": "return_value",

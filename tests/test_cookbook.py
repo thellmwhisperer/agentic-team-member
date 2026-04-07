@@ -172,6 +172,22 @@ class TestNoDependencies:
         assert "describe(" in result or "test(" in result
 
 
+class TestAssertionPrefersReturnOverParamCall:
+    """When a function returns a value, prefer return_value over spying on param methods."""
+
+    def test_return_value_over_param_method(self, tmp_path):
+        _write_ts(tmp_path, "src/utils.ts", """\
+            export function process(item: string): string {
+              return item.toUpperCase();
+            }
+        """)
+        result = generate_cookbook("src/utils.ts", "process", str(tmp_path))
+        # Should NOT generate a spy on item.toUpperCase
+        assert "item_toUpperCase_spy" not in result
+        # Should use return value assertion
+        assert "result" in result.lower() or "return" in result.lower() or "toBe" in result
+
+
 class TestDiscoverDependenciesExcludesTarget:
     """_discover_dependencies must not treat the target symbol as a dependency."""
 
