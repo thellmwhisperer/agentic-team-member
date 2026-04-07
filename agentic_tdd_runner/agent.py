@@ -75,7 +75,7 @@ def execute_tool(name: str, args: dict) -> str:
                 cwd=WORKDIR,
                 capture_output=True,
                 text=True,
-                timeout=60,
+                timeout=_CONFIG["timeouts"]["tool_execution"],
             )
             output = result.stdout + result.stderr
             return output if output.strip() else "(no output)"
@@ -129,19 +129,23 @@ def chat(messages: list) -> dict:
         "top_p": llm.get("top_p", 0.95),
         "top_k": llm.get("top_k", 20),
     }
-    resp = requests.post(llm["url"], json=payload, timeout=600)
+    resp = requests.post(llm["url"], json=payload, timeout=_CONFIG["timeouts"]["llm_request"])
     resp.raise_for_status()
     return resp.json()
 
 
 def find_test_file() -> str | None:
     """Find the test file the agent created."""
+    import fnmatch
+    pattern = _CONFIG["runner"]["test_file_pattern"]
+    exclude = _CONFIG["runner"].get("exclude_dirs", [])
     for root, _dirs, files in os.walk(WORKDIR):
+        if any(ex in root for ex in exclude):
+            continue
         for f in files:
-            if f.endswith('.test.ts') and 'node_modules' not in root:
+            if fnmatch.fnmatch(f, pattern):
                 full = os.path.join(root, f)
                 rel = os.path.relpath(full, WORKDIR)
-                # Skip pre-existing test files (check git)
                 result = subprocess.run(
                     f"git ls-files '{rel}'",
                     shell=True, cwd=WORKDIR, capture_output=True, text=True
@@ -152,25 +156,24 @@ def find_test_file() -> str | None:
 
 
 def verify_red_green(test_file: str) -> tuple[bool, str]:
-    """Verify that the test actually tests the fix by doing red-green check.
+    """Verify red-green: test fails without fix, passes with fix.
 
-    1. Revert source changes (git checkout -- src/)
+    1. Stash current changes (with fix)
     2. Run test — should FAIL (red)
-    3. Re-apply fix (git checkout stash)
+    3. Restore fix from stash
     4. Run test — should PASS (green)
-
-    Returns (passed, message).
     """
+    run_cmd = _CONFIG["runner"]["command"]
+    test_timeout = _CONFIG["timeouts"]["test_run"]
+
     emit("\n=== RED-GREEN VERIFICATION ===")
 
-    # Stash current state (with fix applied)
     subprocess.run("git stash", shell=True, cwd=WORKDIR, capture_output=True)
 
-    # Run test without fix — should FAIL
     emit("  [RED] Running test WITHOUT fix...")
     red_result = subprocess.run(
-        f"bun test {test_file}",
-        shell=True, cwd=WORKDIR, capture_output=True, text=True, timeout=30,
+        f"{run_cmd} {test_file}",
+        shell=True, cwd=WORKDIR, capture_output=True, text=True, timeout=test_timeout,
     )
     red_passed = red_result.returncode == 0
     red_output = (red_result.stdout + red_result.stderr)[:500]
@@ -178,14 +181,12 @@ def verify_red_green(test_file: str) -> tuple[bool, str]:
     for line in red_output.split("\n")[:10]:
         emit(f"    {line}")
 
-    # Restore fix
     subprocess.run("git stash pop", shell=True, cwd=WORKDIR, capture_output=True)
 
-    # Run test with fix — should PASS
     emit("  [GREEN] Running test WITH fix...")
     green_result = subprocess.run(
-        f"bun test {test_file}",
-        shell=True, cwd=WORKDIR, capture_output=True, text=True, timeout=30,
+        f"{run_cmd} {test_file}",
+        shell=True, cwd=WORKDIR, capture_output=True, text=True, timeout=test_timeout,
     )
     green_passed = green_result.returncode == 0
     green_output = (green_result.stdout + green_result.stderr)[:500]

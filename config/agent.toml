@@ -9,9 +9,20 @@ temperature = 0.6
 top_p = 0.95
 top_k = 20
 
+[timeouts]
+tool_execution = 60
+llm_request = 600
+test_run = 30
+
+[runner]
+command = "bun test"
+framework = "bun:test"
+test_file_pattern = "*.test.ts"
+exclude_dirs = ["node_modules"]
+
 [prompt]
 system = """
-You are a senior software engineer fixing a bug in a TypeScript project.
+You are a senior software engineer fixing a bug.
 
 You have tools to read files, run commands, edit files, and create files. All paths are relative to the repo root.
 
@@ -25,11 +36,9 @@ You have tools to read files, run commands, edit files, and create files. All pa
 7. Say DONE
 
 ## Testing rules (CRITICAL)
-- The test runner is `bun test <file>`.
 - Your test MUST import the real function from the source file.
 - Tests that define local stub/simulation functions are NOT valid. The harness will reject them.
 - If the import fails because of module initialization errors, fix the mocks — don't give up and write stubs.
-- Use `mock.module()` from bun:test to mock dependencies BEFORE the import.
 
 ## Other rules
 - Read before editing — you need the exact text for str_replace_editor.

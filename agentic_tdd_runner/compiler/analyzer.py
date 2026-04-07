@@ -93,9 +93,9 @@ def _compile_dependency(dep, snippet, imports, assignments):
     seam_available = dep.get("seam_available")
     if seam_available is None:
         seam_available = exec_strategy != "set_test_seam"
-    blocks_p2 = dep.get("blocks_p2_if_missing")
-    if blocks_p2 is None:
-        blocks_p2 = exec_strategy == "set_test_seam"
+    blocks = dep.get("blocks_if_missing")
+    if blocks is None:
+        blocks = exec_strategy == "set_test_seam"
 
     return {
         "execution": {
@@ -114,7 +114,7 @@ def _compile_dependency(dep, snippet, imports, assignments):
             "steps": [
                 f"provide controllable test double for {binding}"
             ],
-            "blocks_p2_if_missing": blocks_p2,
+            "blocks_if_missing": blocks,
             "seam_available": seam_available,
         },
     }
@@ -359,7 +359,7 @@ def _build_pattern_files(pattern_files, tdd):
 def _gaps_from_injection_plan(injection_plan):
     gaps = []
     for entry in injection_plan:
-        if entry.get("blocks_p2_if_missing") and not entry.get("seam_available", False):
+        if entry.get("blocks_if_missing") and not entry.get("seam_available", False):
             gaps.append(
                 {
                     "kind": "missing_test_seam",
