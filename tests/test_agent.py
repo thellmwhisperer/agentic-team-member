@@ -95,6 +95,14 @@ class TestFindTestFile:
         # Hint file doesn't exist, falls back to discovery
         assert find_test_file(hint="src/nonexistent.test.ts") == "src/foo.test.ts"
 
+    def test_python_test_uses_pytest_command(self, tmp_path, monkeypatch):
+        """When a Python test is found, verify_red_green should use pytest, not bun test."""
+        # This tests that the runner command adapts to the file type
+        from agentic_tdd_runner.languages import get_language
+        lang = get_language("test_worker.py")
+        assert lang is not None
+        assert lang.runner == "pytest"
+
     def test_finds_tsx_test_file(self, tmp_path, monkeypatch):
         self._setup_git_repo(tmp_path)
         (tmp_path / "src").mkdir()

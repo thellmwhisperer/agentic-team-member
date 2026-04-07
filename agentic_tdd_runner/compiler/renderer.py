@@ -324,7 +324,7 @@ def _render_full_test(
                 f"def test_{target_name}():",
                 _indent_block(arrange_block, 4),
                 "",
-                _indent_block(f"result = {act_block}", 4),
+                _indent_block(act_block if act_block.startswith("result") else f"result = {act_block}", 4),
                 "",
                 _indent_block(assert_block, 4),
                 "",
