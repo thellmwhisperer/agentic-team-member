@@ -172,6 +172,24 @@ class TestNoDependencies:
         assert "describe(" in result or "test(" in result
 
 
+class TestDiscoverDependenciesExcludesTarget:
+    """_discover_dependencies must not treat the target symbol as a dependency."""
+
+    def test_const_export_not_treated_as_seam(self, tmp_path):
+        _write_ts(tmp_path, "src/handler.ts", """\
+            import { getLogger } from '../logger';
+
+            const logger = getLogger();
+
+            export const process = (name: string): string => {
+              logger.info(name);
+              return name.toUpperCase();
+            };
+        """)
+        result = generate_cookbook("src/handler.ts", "process", str(tmp_path))
+        assert "__setProcessForTests" not in result
+
+
 class TestFindFunctionEndPython:
     """_find_function_end correctly bounds class methods, not just top-level."""
 
