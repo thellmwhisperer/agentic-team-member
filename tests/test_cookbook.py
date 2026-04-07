@@ -206,6 +206,26 @@ class TestDiscoverDependenciesExcludesTarget:
         assert "__setProcessForTests" not in result
 
 
+class TestArrowFunctionSignature:
+    """Arrow function exports must have their signature detected."""
+
+    def test_arrow_function_params_in_scaffold(self, tmp_path):
+        _write_ts(tmp_path, "src/handler.ts", """\
+            import { getLogger } from '../logger';
+
+            const logger = getLogger();
+
+            export const process = (name: string, age: number): string => {
+              logger.info(name);
+              return name.toUpperCase();
+            };
+        """)
+        result = generate_cookbook("src/handler.ts", "process", str(tmp_path))
+        # Scaffold should have the params, not just process()
+        assert "name" in result
+        assert "age" in result
+
+
 class TestPythonReturnValueScaffold:
     """Python scaffold must not produce 'result = result = fn()'."""
 
