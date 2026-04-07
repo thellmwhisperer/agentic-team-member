@@ -206,6 +206,22 @@ class TestDiscoverDependenciesExcludesTarget:
         assert "__setProcessForTests" not in result
 
 
+class TestPythonClassMethod:
+    """Class methods should be identified and the class name referenced."""
+
+    def test_class_method_references_class(self, tmp_path):
+        _write_ts(tmp_path, "src/calc.py", """\
+            class Calculator:
+                def add(self, a, b):
+                    return a + b
+        """)
+        result = generate_cookbook("src/calc.py", "add", str(tmp_path))
+        # Must reference the owning class
+        assert "Calculator" in result
+        # Must indicate it's a method, not a standalone function
+        assert "method" in result.lower()
+
+
 class TestArrowFunctionSignature:
     """Arrow function exports must have their signature detected."""
 

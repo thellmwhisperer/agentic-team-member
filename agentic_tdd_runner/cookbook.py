@@ -50,9 +50,23 @@ def generate_cookbook(
     sym_line = line_start or _find_symbol_line(source_text, symbol)
     fn_end = line_end or _find_function_end(source_text, sym_line)
 
+    # Detect class methods (indented def in Python)
+    owner_class = None
+    if sym_line and lang.name == "python":
+        lines = source_text.splitlines()
+        sym_line_text = lines[sym_line - 1] if sym_line <= len(lines) else ""
+        if sym_line_text.startswith((" ", "\t")):
+            # Find the class that owns this method
+            for i in range(sym_line - 2, -1, -1):
+                m = re.match(r"^class\s+(\w+)", lines[i])
+                if m:
+                    owner_class = m.group(1)
+                    break
+
     target = {
         "symbol": symbol,
-        "kind": "function",
+        "kind": "method" if owner_class else "function",
+        "owner_class": owner_class,
         "source_path": source_path,
         "line_start": sym_line or 1,
         "line_end": fn_end or len(source_text.splitlines()),
@@ -223,8 +237,16 @@ def _render_cookbook_text(contract: dict, lang) -> str:
     """Render a contract as human-readable text for the agent's system prompt."""
     parts = []
     target = contract["target"]
-    parts.append(f"## Mock Cookbook for {target['symbol']}")
-    parts.append("")
+    owner_class = target.get("owner_class")
+    if owner_class:
+        parts.append(f"## Mock Cookbook for {owner_class}.{target['symbol']}")
+        parts.append("")
+        parts.append(f"**Note:** `{target['symbol']}` is a method of `{owner_class}`. "
+                      f"Import `{owner_class}` and test via `{owner_class}().{target['symbol']}(...)`.")
+        parts.append("")
+    else:
+        parts.append(f"## Mock Cookbook for {target['symbol']}")
+        parts.append("")
 
     # Source edits
     edits = contract.get("pre_test_source_edits", [])
