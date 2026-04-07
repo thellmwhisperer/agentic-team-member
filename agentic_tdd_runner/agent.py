@@ -25,12 +25,9 @@ if _env_path.exists():
 sys.stdout.reconfigure(line_buffering=True)
 sys.stderr.reconfigure(line_buffering=True)
 
-# --- Config (from .env / env vars / CLI args) ---
-LLAMA_URL = os.environ.get("AGENT_LLM_URL", "http://127.0.0.1:11435/v1/chat/completions")
-MODEL = os.environ.get("AGENT_MODEL", "qwen3.5-27b")
+# --- Config (loaded from TOML, overridden by env vars / CLI args) ---
+_CONFIG = None  # populated by main()
 WORKDIR = os.environ.get("AGENT_WORKDIR", os.getcwd())
-MAX_STEPS = int(os.environ.get("AGENT_MAX_STEPS", "50"))
-MAX_TOOL_OUTPUT = int(os.environ.get("AGENT_MAX_TOOL_OUTPUT", "8000"))
 LOG_DIR = os.environ.get("AGENT_LOG_DIR", os.getcwd())
 
 # --- Logging ---
@@ -41,7 +38,7 @@ def init_log():
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
     path = os.path.join(LOG_DIR, f"agent-{ts}.jsonl")
     _log_file = open(path, "w")
-    log("init", {"workdir": WORKDIR, "max_steps": MAX_STEPS, "model": MODEL, "log": path})
+    log("init", {"workdir": WORKDIR, "max_steps": _CONFIG["agent"]["max_steps"], "model": _CONFIG["llm"]["model"], "log": path})
     emit(f"LOG: {path}")
     return path
 
@@ -57,113 +54,8 @@ def log(event: str, data: dict):
 def emit(msg: str):
     print(msg, flush=True)
 
-# --- Tools ---
-TOOLS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "read_file",
-            "description": "Read the contents of a file. If path is a directory, lists its contents.",
-            "parameters": {
-                "type": "object",
-                "required": ["path"],
-                "properties": {
-                    "path": {"type": "string", "description": "Path relative to the repo root"}
-                }
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "run_command",
-            "description": "Run a shell command in the repo root and return stdout+stderr. Use for: grep, find, running tests (bun test <file>), git diff, etc.",
-            "parameters": {
-                "type": "object",
-                "required": ["command"],
-                "properties": {
-                    "command": {"type": "string", "description": "Shell command to execute"}
-                }
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "str_replace_editor",
-            "description": "Replace an exact string in a file with new content. old_str must match exactly (including whitespace). Use for editing source code.",
-            "parameters": {
-                "type": "object",
-                "required": ["path", "old_str", "new_str"],
-                "properties": {
-                    "path": {"type": "string", "description": "Path relative to repo root"},
-                    "old_str": {"type": "string", "description": "Exact string to find (must match file content exactly)"},
-                    "new_str": {"type": "string", "description": "Replacement string"}
-                }
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "create_file",
-            "description": "Create a new file with the given content. Fails if the file already exists.",
-            "parameters": {
-                "type": "object",
-                "required": ["path", "content"],
-                "properties": {
-                    "path": {"type": "string", "description": "Path relative to repo root"},
-                    "content": {"type": "string", "description": "Full file content"}
-                }
-            }
-        }
-    }
-]
 
-SYSTEM_PROMPT = """You are a senior software engineer fixing a bug in a TypeScript project.
-
-You have tools to read files, run commands, edit files, and create files. All paths are relative to the repo root.
-
-## Workflow
-1. Read the relevant source files to understand the bug
-2. Read existing test files to understand testing patterns
-3. Export the function if needed so it can be imported in tests
-4. Write a test that imports the REAL function and fails (reproduces the bug)
-5. Fix the source code
-6. Run the test — it must pass
-7. Say DONE
-
-## Testing rules (CRITICAL)
-- The test runner is `bun test <file>`.
-- Your test MUST import the real function from the source file.
-- Tests that define local stub/simulation functions are NOT valid. The harness will reject them.
-- If the import fails because of module initialization errors, fix the mocks — don't give up and write stubs.
-- Use `mock.module()` from bun:test to mock dependencies BEFORE the import.
-
-## Mock pattern for this project
-This is how tests in this project mock dependencies (from token.test.ts):
-
-```typescript
-import { beforeEach, describe, expect, mock, test } from 'bun:test';
-
-// Mocks MUST come before importing the module under test
-mock.module('../logger', () => ({
-  log: { info: () => {}, error: () => {}, warn: () => {}, verbose: () => true, flush: () => {} },
-  getLogger: () => ({ event: () => {}, response: () => {} }),
-}));
-
-// After all mock.module() calls, import the real function:
-import { myFunction } from './my-module';
-```
-
-If client.ts has many dependencies that initialize on import, you need to mock ALL of them before importing. Read client.ts imports to find what needs mocking.
-
-## Other rules
-- Read before editing — you need the exact text for str_replace_editor.
-- Make minimal changes. Don't refactor unrelated code.
-- If a test fails, read the error carefully and fix it. Don't give up.
-- When all tests pass, say DONE.
-"""
+# Tools and prompts loaded from config/agent.toml + config/tools.json
 
 
 def execute_tool(name: str, args: dict) -> str:
@@ -218,7 +110,9 @@ def execute_tool(name: str, args: dict) -> str:
         return f"ERROR: {type(e).__name__}: {e}"
 
 
-def truncate(text: str, max_chars: int = MAX_TOOL_OUTPUT) -> str:
+def truncate(text: str, max_chars: int = 0) -> str:
+    if max_chars == 0:
+        max_chars = _CONFIG["agent"]["max_tool_output"]
     if len(text) <= max_chars:
         return text
     half = max_chars // 2
@@ -226,15 +120,16 @@ def truncate(text: str, max_chars: int = MAX_TOOL_OUTPUT) -> str:
 
 
 def chat(messages: list) -> dict:
+    llm = _CONFIG["llm"]
     payload = {
-        "model": MODEL,
+        "model": llm["model"],
         "messages": messages,
-        "tools": TOOLS,
-        "temperature": 0.6,
-        "top_p": 0.95,
-        "top_k": 20,
+        "tools": _CONFIG["tools"],
+        "temperature": llm.get("temperature", 0.6),
+        "top_p": llm.get("top_p", 0.95),
+        "top_k": llm.get("top_k", 20),
     }
-    resp = requests.post(LLAMA_URL, json=payload, timeout=600)
+    resp = requests.post(llm["url"], json=payload, timeout=600)
     resp.raise_for_status()
     return resp.json()
 
@@ -323,26 +218,33 @@ def verify_red_green(test_file: str) -> tuple[bool, str]:
     return True, "VERIFIED: Test fails without fix, passes with fix. Real red-green."
 
 
+def _default_config_path():
+    """Find config/agent.toml relative to the package."""
+    pkg = Path(__file__).parent.parent / "config" / "agent.toml"
+    if pkg.exists():
+        return str(pkg)
+    return None
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Agentic TDD runner — local LLM fixes bugs with tests")
     parser.add_argument("issue", help="Issue text, or path to a file containing the issue description")
     parser.add_argument("--source", type=str, help="Source file path relative to workdir (e.g. src/twitch/client.ts)")
     parser.add_argument("--symbol", type=str, help="Target function/method name (e.g. handleResub)")
     parser.add_argument("--workdir", type=str, default=WORKDIR, help="Project root directory (default: cwd)")
-    parser.add_argument("--url", type=str, default=LLAMA_URL, help="LLM API URL (default: $AGENT_LLM_URL or localhost:11435)")
-    parser.add_argument("--model", type=str, default=MODEL, help="Model name (default: $AGENT_MODEL or qwen3.5-27b)")
-    parser.add_argument("--max-steps", type=int, default=MAX_STEPS, help="Max agent steps (default: 50)")
+    parser.add_argument("--config", type=str, default=_default_config_path(), help="Path to agent.toml config file")
     parser.add_argument("--log-dir", type=str, default=LOG_DIR, help="Directory for JSONL logs (default: cwd)")
     return parser.parse_args()
 
 
 def main():
-    global WORKDIR, LLAMA_URL, MODEL, MAX_STEPS, LOG_DIR
+    global _CONFIG, WORKDIR, LOG_DIR
     args = parse_args()
+
+    from agentic_tdd_runner.config import load_config
+    _CONFIG = load_config(args.config)
+
     WORKDIR = args.workdir
-    LLAMA_URL = args.url
-    MODEL = args.model
-    MAX_STEPS = args.max_steps
     LOG_DIR = args.log_dir
 
     log_path = init_log()
@@ -354,11 +256,11 @@ def main():
             issue_text = f.read()
 
     # Build system prompt — inject cookbook if source/symbol provided
-    system_prompt = SYSTEM_PROMPT
+    system_prompt = _CONFIG["prompt"]["system"].strip()
     if args.source and args.symbol:
         from agentic_tdd_runner.cookbook import build_system_prompt
         system_prompt = build_system_prompt(
-            base_prompt=SYSTEM_PROMPT,
+            base_prompt=system_prompt,
             issue_text=issue_text,
             source_path=args.source,
             symbol=args.symbol,
@@ -373,7 +275,8 @@ def main():
     ]
 
     emit(f"{'='*60}")
-    emit(f"AGENT START — max {MAX_STEPS} steps")
+    max_steps = _CONFIG["agent"]["max_steps"]
+    emit(f"AGENT START — max {max_steps} steps")
     emit(f"Workdir: {WORKDIR}")
     emit(f"Log: {log_path}")
     emit(f"{'='*60}")
@@ -382,7 +285,8 @@ def main():
 
     done_rejected = 0  # how many times we rejected DONE
 
-    for step in range(MAX_STEPS):
+    max_rejections = _CONFIG["verification"]["max_rejections"]
+    for step in range(max_steps):
         emit(f"\n>>> Step {step} — requesting LLM...")
         t0 = time.time()
 
@@ -459,7 +363,7 @@ def main():
                     else:
                         # Reject and nudge
                         done_rejected += 1
-                        if done_rejected >= 3:
+                        if done_rejected >= max_rejections:
                             emit(f"\n  [GIVE UP] Rejected DONE {done_rejected} times. Stopping.")
                             log("give_up", {"step": step, "done_rejected": done_rejected})
                             return 1
@@ -474,7 +378,7 @@ def main():
                     messages.append(msg)
                     messages.append({
                         "role": "user",
-                        "content": "You said DONE but I can't find a test file. Create a test that imports the real function.",
+                        "content": _CONFIG["prompt"]["no_test_found"],
                     })
                     continue
 
@@ -530,16 +434,16 @@ def main():
             if step > 3:
                 messages.append({
                     "role": "user",
-                    "content": "Continue. If all tests pass, say DONE."
+                    "content": _CONFIG["prompt"]["nudge"]
                 })
                 emit("  [NUDGE] Continue prompt injected")
         else:
             emit(f"  [FINISH] {finish}")
 
     emit(f"\n{'='*60}")
-    emit(f"AGENT EXHAUSTED — {MAX_STEPS} steps without DONE")
+    emit(f"AGENT EXHAUSTED — {max_steps} steps without DONE")
     emit(f"{'='*60}")
-    log("exhausted", {"steps": MAX_STEPS})
+    log("exhausted", {"steps": max_steps})
     return 1
 
 
