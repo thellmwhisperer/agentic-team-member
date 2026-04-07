@@ -86,7 +86,10 @@ def _build_bun_scaffold(contract):
     todo_slots.append("expected_assertion_value")
 
     act_args = ", ".join(params)
-    act_block = f"{target_name}({act_args});"
+    if assertion_surface.get("kind") == "return_value":
+        act_block = f"const result = {target_name}({act_args});"
+    else:
+        act_block = f"{target_name}({act_args});"
     assert_block = _render_assertion(assertion_surface, runner="bun:test")
     if "TODO" in assert_block:
         todo_slots.append("assertion_surface_binding")
@@ -171,7 +174,10 @@ def _build_pytest_scaffold(contract):
     todo_slots.append("expected_assertion_value")
 
     act_args = ", ".join(params)
-    act_block = f"{target_name}({act_args})"
+    if assertion_surface.get("kind") == "return_value":
+        act_block = f"result = {target_name}({act_args})"
+    else:
+        act_block = f"{target_name}({act_args})"
     assert_block = _render_assertion(assertion_surface, runner="pytest")
     if "TODO" in assert_block:
         todo_slots.append("assertion_surface_binding")
