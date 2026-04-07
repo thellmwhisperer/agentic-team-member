@@ -252,6 +252,29 @@ class TestArrowFunctionSignature:
         assert "age" in result
 
 
+class TestModuleLevelDepsIncluded:
+    """Cookbook must include module-level deps that run on import, not just function deps."""
+
+    def test_includes_module_level_imports(self, tmp_path):
+        _write_ts(tmp_path, "src/service.ts", """\
+            import { env } from '../env';
+            import { getLogger } from '../logger';
+            import { getTokenManager } from './token';
+
+            const logger = getLogger();
+            const tokenManager = getTokenManager();
+
+            export function process(): void {
+              logger.event('start');
+            }
+        """)
+        result = generate_cookbook("src/service.ts", "process", str(tmp_path))
+        # process() only uses logger, but env and token run on module load
+        assert "../env" in result
+        assert "../logger" in result
+        assert "./token" in result
+
+
 class TestMultiLineSignatureDetection:
     """TS functions with multi-line signatures must be fully captured."""
 
