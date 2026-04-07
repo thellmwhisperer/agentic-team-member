@@ -58,10 +58,21 @@ def emit(msg: str):
 # Tools and prompts loaded from config/agent.toml + config/tools.json
 
 
+def _resolve_repo_path(path: str, workdir: str = None) -> Path:
+    """Resolve a relative path within the workdir. Raises if it escapes."""
+    repo_root = Path(workdir or WORKDIR).resolve()
+    candidate = (repo_root / path).resolve()
+    try:
+        candidate.relative_to(repo_root)
+    except ValueError as exc:
+        raise ValueError(f"path escapes workdir: {path}") from exc
+    return candidate
+
+
 def execute_tool(name: str, args: dict) -> str:
     try:
         if name == "read_file":
-            full_path = os.path.join(WORKDIR, args["path"])
+            full_path = _resolve_repo_path(args["path"])
             if os.path.isdir(full_path):
                 entries = os.listdir(full_path)
                 return "\n".join(sorted(entries))
@@ -81,7 +92,7 @@ def execute_tool(name: str, args: dict) -> str:
             return output if output.strip() else "(no output)"
 
         elif name == "str_replace_editor":
-            full_path = os.path.join(WORKDIR, args["path"])
+            full_path = _resolve_repo_path(args["path"])
             with open(full_path, "r") as f:
                 content = f.read()
             old_str = args["old_str"]
@@ -95,7 +106,7 @@ def execute_tool(name: str, args: dict) -> str:
             return f"OK: replaced in {args['path']}"
 
         elif name == "create_file":
-            full_path = os.path.join(WORKDIR, args["path"])
+            full_path = _resolve_repo_path(args["path"])
             if os.path.exists(full_path):
                 return f"ERROR: {args['path']} already exists. Use str_replace_editor to modify it."
             os.makedirs(os.path.dirname(full_path), exist_ok=True)
