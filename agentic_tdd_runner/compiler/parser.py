@@ -9,6 +9,7 @@ from agentic_tdd_runner.languages import get_language
 def _extract_signature(source_text, symbol):
     patterns = [
         rf"^(?:export\s+)?(?:async\s+)?function\s+{re.escape(symbol)}\s*\((.*?)\)(?:\s*:\s*([^\{{]+))?",
+        rf"^(?:export\s+)?(?:const|let|var)\s+{re.escape(symbol)}\s*=\s*\((.*?)\)(?:\s*:\s*([^=\{{]+))?\s*=>",
         rf"^def\s+{re.escape(symbol)}\s*\((.*?)\)(?:\s*->\s*([^:]+))?",
     ]
     for pattern in patterns:
