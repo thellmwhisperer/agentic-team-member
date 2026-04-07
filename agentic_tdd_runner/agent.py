@@ -163,8 +163,8 @@ def find_test_file(hint: str | None = None) -> str | None:
                 full = os.path.join(root, f)
                 rel = os.path.relpath(full, WORKDIR)
                 result = subprocess.run(
-                    f"git ls-files '{rel}'",
-                    shell=True, cwd=WORKDIR, capture_output=True, text=True
+                    ["git", "ls-files", "--", rel],
+                    cwd=WORKDIR, capture_output=True, text=True
                 )
                 if not result.stdout.strip():
                     return rel
@@ -189,7 +189,22 @@ def verify_red_green(test_file: str) -> tuple[bool, str]:
 
     emit("\n=== RED-GREEN VERIFICATION ===")
 
+    # Preserve the test file (may be untracked) before stashing
+    import shutil
+    import tempfile
+    test_full = os.path.join(WORKDIR, test_file)
+    test_backup = None
+    if os.path.isfile(test_full):
+        test_backup = tempfile.mktemp(suffix=os.path.basename(test_file))
+        shutil.copy2(test_full, test_backup)
+
+    # Stash all changes including untracked (reverts source fix + new files)
     subprocess.run("git stash --include-untracked", shell=True, cwd=WORKDIR, capture_output=True)
+
+    # Restore the test file so the red phase can run it
+    if test_backup:
+        os.makedirs(os.path.dirname(test_full), exist_ok=True)
+        shutil.copy2(test_backup, test_full)
 
     emit("  [RED] Running test WITHOUT fix...")
     red_result = subprocess.run(
@@ -201,6 +216,11 @@ def verify_red_green(test_file: str) -> tuple[bool, str]:
     emit(f"  [RED] exit={red_result.returncode} {'PASS (BAD!)' if red_passed else 'FAIL (good)'}")
     for line in red_output.split("\n")[:10]:
         emit(f"    {line}")
+
+    # Remove the restored test before popping stash (avoid conflict)
+    if test_backup:
+        os.remove(test_full)
+        os.remove(test_backup)
 
     subprocess.run("git stash pop", shell=True, cwd=WORKDIR, capture_output=True)
 
