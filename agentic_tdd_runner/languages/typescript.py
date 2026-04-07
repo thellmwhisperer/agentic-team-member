@@ -104,6 +104,24 @@ class TypeScriptLanguage:
             f"}}"
         )
 
+    def import_path(self, test_path: str, source_path: str) -> str:
+        test_dir = PurePosixPath(test_path).parent
+        source_no_ext = PurePosixPath(source_path).with_suffix("")
+        target_parts = source_no_ext.parts
+        start_parts = test_dir.parts
+        common = 0
+        for left, right in zip(target_parts, start_parts):
+            if left != right:
+                break
+            common += 1
+        up = [".."] * (len(start_parts) - common)
+        down = list(target_parts[common:])
+        parts = up + down
+        rel = "/".join(parts) if parts else "."
+        if not rel.startswith("."):
+            rel = f"./{rel}"
+        return rel
+
     def prepend_export(self, line: str) -> str:
         stripped = line.lstrip()
         indent = line[: len(line) - len(stripped)]

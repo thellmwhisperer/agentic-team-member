@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import re
-from pathlib import PurePosixPath
 
 from agentic_tdd_runner.languages import get_language
 
@@ -45,40 +44,23 @@ def _extract_target_snippet(source_text, target):
 
 def _compute_source_import_path(test_path, source_path):
     lang = get_language(source_path)
-    if lang and lang.name == "python":
-        return _python_import_path(source_path)
-
+    if lang:
+        return lang.import_path(test_path, source_path)
+    # Fallback for unknown languages: relative path without extension
+    from pathlib import PurePosixPath
     test_dir = PurePosixPath(test_path).parent
     source_no_ext = PurePosixPath(source_path).with_suffix("")
-    relative = PurePosixPath(
-        _relpath_posix(source_no_ext.as_posix(), test_dir.as_posix())
-    ).as_posix()
-    if not relative.startswith("."):
-        relative = f"./{relative}"
-    return relative
-
-
-def _python_import_path(source_path):
-    source = PurePosixPath(source_path)
-    parts = list(source.parts)
-    if parts and parts[-1].endswith(".py"):
-        parts[-1] = parts[-1][:-3]
-    if parts and parts[-1] == "__init__":
-        parts = parts[:-1]
-    return ".".join(part for part in parts if part)
-
-
-def _relpath_posix(target, start):
-    target_parts = PurePosixPath(target).parts
-    start_parts = PurePosixPath(start).parts
-
+    target_parts = source_no_ext.parts
+    start_parts = test_dir.parts
     common = 0
     for left, right in zip(target_parts, start_parts):
         if left != right:
             break
         common += 1
-
     up = [".."] * (len(start_parts) - common)
     down = list(target_parts[common:])
     parts = up + down
-    return "." if not parts else "/".join(parts)
+    rel = "/".join(parts) if parts else "."
+    if not rel.startswith("."):
+        rel = f"./{rel}"
+    return rel
