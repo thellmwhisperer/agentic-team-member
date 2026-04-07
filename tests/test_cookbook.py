@@ -206,6 +206,18 @@ class TestDiscoverDependenciesExcludesTarget:
         assert "__setProcessForTests" not in result
 
 
+class TestPythonReturnValueScaffold:
+    """Python scaffold must not produce 'result = result = fn()'."""
+
+    def test_no_double_assignment(self, tmp_path):
+        _write_ts(tmp_path, "src/worker.py", """\
+            def process(item):
+                return item.upper()
+        """)
+        result = generate_cookbook("src/worker.py", "process", str(tmp_path))
+        assert "result = result =" not in result
+
+
 class TestFindFunctionEndPython:
     """_find_function_end correctly bounds class methods, not just top-level."""
 

@@ -178,7 +178,12 @@ def verify_red_green(test_file: str) -> tuple[bool, str]:
     3. Restore fix from stash
     4. Run test — should PASS (green)
     """
-    run_cmd = _CONFIG["runner"]["command"]
+    from agentic_tdd_runner.languages import get_language
+    lang = get_language(test_file)
+    if lang and lang.runner == "pytest":
+        run_cmd = "python3 -m pytest"
+    else:
+        run_cmd = _CONFIG["runner"]["command"]
     test_timeout = _CONFIG["timeouts"]["test_run"]
 
     emit("\n=== RED-GREEN VERIFICATION ===")
