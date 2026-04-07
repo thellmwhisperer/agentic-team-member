@@ -1,5 +1,5 @@
-"""Tests for deterministic P1 -> P2 contract building."""
-from agentic_tdd_runner.compiler import build_p1p2_contract
+"""Tests for the compiler — contract building from analysis facts."""
+from agentic_tdd_runner.compiler import build_contract
 
 
 def _handle_resub_facts():
@@ -95,13 +95,13 @@ def _handle_resub_facts():
 
 
 def test_computes_source_import_path():
-    contract = build_p1p2_contract(_handle_resub_facts())
+    contract = build_contract(_handle_resub_facts())
     assert contract["test_file"]["source_import_path"] == "./client"
 
 
 def test_marks_contract_not_ready_when_framework_seam_is_missing():
-    contract = build_p1p2_contract(_handle_resub_facts())
-    assert contract["ready_for_p2"] is False
+    contract = build_contract(_handle_resub_facts())
+    assert contract["ready"] is False
     assert contract["gaps"] == [
         {
             "kind": "missing_test_seam",
@@ -117,7 +117,7 @@ def test_marks_contract_not_ready_when_framework_seam_is_missing():
 
 
 def test_renders_module_mocks_and_source_import():
-    contract = build_p1p2_contract(_handle_resub_facts())
+    contract = build_contract(_handle_resub_facts())
     block = contract["scaffold"]["module_mocks_block"]
     assert "mock.module('../logger'" in block
     assert "getLogger: () => ({" in block
@@ -128,7 +128,7 @@ def test_renders_module_mocks_and_source_import():
 
 
 def test_renders_arrange_act_and_assert_blocks():
-    contract = build_p1p2_contract(_handle_resub_facts())
+    contract = build_contract(_handle_resub_facts())
     scaffold = contract["scaffold"]
     assert "const client_say_spy = mock(() => undefined);" in scaffold["arrange_block"]
     assert "const channel = /* TODO */;" in scaffold["arrange_block"]
@@ -140,7 +140,7 @@ def test_renders_arrange_act_and_assert_blocks():
 
 
 def test_rendered_test_contains_minimal_template():
-    contract = build_p1p2_contract(_handle_resub_facts())
+    contract = build_contract(_handle_resub_facts())
     rendered = contract["scaffold"]["rendered_test"]
     assert "import { describe, expect, mock, test } from 'bun:test';" in rendered
     assert "describe('handleResub'" in rendered

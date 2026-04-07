@@ -27,7 +27,7 @@ from agentic_tdd_runner.compiler import (
     _realize_generated_test_seams,
     _render_module_mocks,
     _setter_name,
-    build_p1p2_contract,
+    build_contract,
 )
 
 
@@ -142,7 +142,7 @@ def generate_cookbook(
         "gaps": assertion_gaps,
     }
 
-    contract = build_p1p2_contract(facts)
+    contract = build_contract(facts)
     return _render_cookbook_text(contract)
 
 
