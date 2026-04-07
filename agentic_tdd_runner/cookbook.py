@@ -60,7 +60,7 @@ def generate_cookbook(
     }
     snippet = _extract_target_snippet(source_text, target)
 
-    deps = _discover_dependencies(snippet, imports, assignments)
+    deps = _discover_dependencies(snippet, imports, assignments, exclude_symbol=symbol)
 
     module_load_dependencies = []
     execution_dependencies = []
@@ -198,11 +198,13 @@ def _find_function_end(source_text: str, start_line: int | None) -> int | None:
     return len(lines)
 
 
-def _discover_dependencies(snippet, imports, assignments):
+def _discover_dependencies(snippet, imports, assignments, *, exclude_symbol=None):
     """Scan the snippet for all bindings (from imports and assignments) that are used."""
     deps = []
     seen = set()
     all_bindings = set(imports.keys()) | set(assignments.keys())
+    if exclude_symbol:
+        all_bindings.discard(exclude_symbol)
     for binding in sorted(all_bindings):
         if binding in seen:
             continue
