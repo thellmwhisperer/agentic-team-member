@@ -72,6 +72,29 @@ class TestFindTestFile:
         })
         assert find_test_file() is None
 
+    def test_uses_hint_path_when_exists(self, tmp_path, monkeypatch):
+        self._setup_git_repo(tmp_path)
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src" / "handleResub.test.ts").write_text("test")
+        (tmp_path / "src" / "other.test.ts").write_text("test")
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "runner": {"test_file_patterns": ["*.test.ts"], "exclude_dirs": []},
+        })
+        # With hint, returns the hinted path directly
+        assert find_test_file(hint="src/handleResub.test.ts") == "src/handleResub.test.ts"
+
+    def test_falls_back_to_discovery_when_hint_missing(self, tmp_path, monkeypatch):
+        self._setup_git_repo(tmp_path)
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src" / "foo.test.ts").write_text("test")
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "runner": {"test_file_patterns": ["*.test.ts"], "exclude_dirs": []},
+        })
+        # Hint file doesn't exist, falls back to discovery
+        assert find_test_file(hint="src/nonexistent.test.ts") == "src/foo.test.ts"
+
     def test_finds_tsx_test_file(self, tmp_path, monkeypatch):
         self._setup_git_repo(tmp_path)
         (tmp_path / "src").mkdir()
