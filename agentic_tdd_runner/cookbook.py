@@ -74,7 +74,24 @@ def generate_cookbook(
     }
     snippet = _extract_target_snippet(source_text, target)
 
+    # Deps used in the function body
     deps = _discover_dependencies(snippet, imports, assignments, exclude_symbol=symbol)
+
+    # Also include ALL module-level imports and factory calls —
+    # they execute on `await import()` and need mocking even if
+    # the target function doesn't reference them directly.
+    snippet_bindings = {d["binding"] for d in deps}
+    for binding in sorted(set(imports.keys()) | set(assignments.keys())):
+        if binding in snippet_bindings or binding == symbol:
+            continue
+        import_meta = imports.get(binding)
+        assignment = assignments.get(binding)
+        # Include if it's a direct import or a factory call at module level
+        if import_meta or (assignment and assignment.get("called_symbol")):
+            dep = {"binding": binding}
+            if import_meta:
+                dep["source_module"] = import_meta["source_module"]
+            deps.append(dep)
 
     module_load_dependencies = []
     execution_dependencies = []
