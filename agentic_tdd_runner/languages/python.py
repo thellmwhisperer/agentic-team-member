@@ -79,6 +79,14 @@ class PythonLanguage:
     def is_exported(self, source_text: str, symbol: str) -> bool:
         return True  # Python functions are always importable
 
+    def import_path(self, test_path: str, source_path: str) -> str:
+        parts = list(PurePosixPath(source_path).parts)
+        if parts and parts[-1].endswith(".py"):
+            parts[-1] = parts[-1][:-3]
+        if parts and parts[-1] == "__init__":
+            parts = parts[:-1]
+        return ".".join(part for part in parts if part)
+
     def render_seam_setter(self, binding: str, assignment: dict) -> str:
         name = self.setter_name(binding)
         return (

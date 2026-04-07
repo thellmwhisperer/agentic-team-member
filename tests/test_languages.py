@@ -56,6 +56,30 @@ class TestTypeScriptPlugin:
         assert lang.is_exported("function foo() {}", "foo") is False
 
 
+class TestTypeScriptImportPath:
+    """TypeScript plugin computes relative import paths."""
+
+    def test_sibling_import_path(self):
+        lang = get_language("file.ts")
+        assert lang.import_path("src/twitch/handleResub.test.ts", "src/twitch/client.ts") == "./client"
+
+    def test_parent_import_path(self):
+        lang = get_language("file.ts")
+        assert lang.import_path("src/twitch/test.ts", "src/logger.ts") == "../logger"
+
+
+class TestPythonImportPath:
+    """Python plugin computes dotted import paths."""
+
+    def test_module_import_path(self):
+        lang = get_language("file.py")
+        assert lang.import_path("src/test_worker.py", "src/worker.py") == "src.worker"
+
+    def test_init_import_path(self):
+        lang = get_language("file.py")
+        assert lang.import_path("tests/test_foo.py", "src/pkg/__init__.py") == "src.pkg"
+
+
 class TestPythonPlugin:
     """Python plugin parses imports and generates pytest scaffolds."""
 
