@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-"""
-Minimal agentic coding loop using llama-server native tool calling.
-Sends a GitHub issue to Qwen3.5-27B and lets it explore, test, and fix.
-
-v2.1: anti-stub prompt, mock example, red-green verification in harness.
-"""
+"""Agentic TDD runner — local LLM fixes bugs with tests."""
 
 import argparse
 import json
@@ -13,21 +8,30 @@ import subprocess
 import sys
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 
 import requests
 
+# --- Load .env if present ---
+_env_path = Path.cwd() / ".env"
+if _env_path.exists():
+    for line in _env_path.read_text().splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            key, _, value = line.partition("=")
+            os.environ.setdefault(key.strip(), value.strip())
 
 # --- Force unbuffered stdout ---
 sys.stdout.reconfigure(line_buffering=True)
 sys.stderr.reconfigure(line_buffering=True)
 
-# --- Config ---
-LLAMA_URL = "http://127.0.0.1:11435/v1/chat/completions"
-MODEL = "qwen3.5-27b"
-WORKDIR = "/Volumes/CrucialX9/tmp/manolito-agent-test"
-MAX_STEPS = 50
-MAX_TOOL_OUTPUT = 8000  # chars, not tokens
-LOG_DIR = "/Volumes/CrucialX9/tmp"
+# --- Config (from .env / env vars / CLI args) ---
+LLAMA_URL = os.environ.get("AGENT_LLM_URL", "http://127.0.0.1:11435/v1/chat/completions")
+MODEL = os.environ.get("AGENT_MODEL", "qwen3.5-27b")
+WORKDIR = os.environ.get("AGENT_WORKDIR", os.getcwd())
+MAX_STEPS = int(os.environ.get("AGENT_MAX_STEPS", "50"))
+MAX_TOOL_OUTPUT = int(os.environ.get("AGENT_MAX_TOOL_OUTPUT", "8000"))
+LOG_DIR = os.environ.get("AGENT_LOG_DIR", os.getcwd())
 
 # --- Logging ---
 _log_file = None
@@ -320,40 +324,34 @@ def verify_red_green(test_file: str) -> tuple[bool, str]:
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="TDD agent with llama-server")
-    parser.add_argument("issue", nargs="?", default=None, help="Issue text or path to issue file")
+    parser = argparse.ArgumentParser(description="Agentic TDD runner — local LLM fixes bugs with tests")
+    parser.add_argument("issue", help="Issue text, or path to a file containing the issue description")
     parser.add_argument("--source", type=str, help="Source file path relative to workdir (e.g. src/twitch/client.ts)")
     parser.add_argument("--symbol", type=str, help="Target function/method name (e.g. handleResub)")
-    parser.add_argument("--workdir", type=str, default=WORKDIR, help="Project root directory")
-    parser.add_argument("--url", type=str, default=LLAMA_URL, help="LLM API URL")
-    parser.add_argument("--model", type=str, default=MODEL, help="Model name")
+    parser.add_argument("--workdir", type=str, default=WORKDIR, help="Project root directory (default: cwd)")
+    parser.add_argument("--url", type=str, default=LLAMA_URL, help="LLM API URL (default: $AGENT_LLM_URL or localhost:11435)")
+    parser.add_argument("--model", type=str, default=MODEL, help="Model name (default: $AGENT_MODEL or qwen3.5-27b)")
+    parser.add_argument("--max-steps", type=int, default=MAX_STEPS, help="Max agent steps (default: 50)")
+    parser.add_argument("--log-dir", type=str, default=LOG_DIR, help="Directory for JSONL logs (default: cwd)")
     return parser.parse_args()
 
 
-DEFAULT_ISSUE = """Bug: handleResub reports '0 meses' for all resubscriptions
-
-When a user resubscribes, Manolito always says "lleva 0 meses" regardless of how many months they've been subscribed.
-
-Where: src/twitch/client.ts → handleResub()
-
-Root cause: The function receives streakMonths (3rd param from tmi.js) but treats it as cumulative months. The tmi.js resub event signature is: resub(channel, username, months, message, userstate, methods). The 3rd param is streak months (often 0). Cumulative months are in userstate['msg-param-cumulative-months'].
-
-Expected: A user subscribed for 6 months should produce "¡username lleva 6 meses!"
-
-Test approach: Export handleResub, import it in a test, mock dependencies, call with streakMonths=0 and userstate containing msg-param-cumulative-months='6', verify response contains "6 meses"."""
-
-
 def main():
-    global WORKDIR, LLAMA_URL, MODEL
+    global WORKDIR, LLAMA_URL, MODEL, MAX_STEPS, LOG_DIR
     args = parse_args()
-    if args.workdir:
-        WORKDIR = args.workdir
+    WORKDIR = args.workdir
     LLAMA_URL = args.url
     MODEL = args.model
+    MAX_STEPS = args.max_steps
+    LOG_DIR = args.log_dir
 
     log_path = init_log()
 
-    issue_text = args.issue or DEFAULT_ISSUE
+    # Issue can be inline text or a path to a file
+    issue_text = args.issue
+    if os.path.isfile(issue_text):
+        with open(issue_text) as f:
+            issue_text = f.read()
 
     # Build system prompt — inject cookbook if source/symbol provided
     system_prompt = SYSTEM_PROMPT
