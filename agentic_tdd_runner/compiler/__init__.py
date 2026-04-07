@@ -5,27 +5,18 @@ from copy import deepcopy
 
 from agentic_tdd_runner.compiler.parser import (
     _compute_source_import_path,
-    _default_test_path,
     _extract_signature,
     _extract_target_snippet,
     _find_symbol_line,
-    _infer_runner,
-    _is_exported,
-    _parse_import_bindings,
-    _parse_top_level_assignments,
-    _prepend_export,
 )
 from agentic_tdd_runner.compiler.analyzer import (
     _build_assertion_surface,
-    _build_pattern_files,
     _compile_dependency,
     _dedupe_gaps,
     _enrich_module_load_dependencies,
     _gaps_from_injection_plan,
     _has_blocking_gaps,
-    _merge_required_shapes,
     _observed_members,
-    _required_shape_from_members,
 )
 from agentic_tdd_runner.compiler.renderer import (
     _build_scaffold,
