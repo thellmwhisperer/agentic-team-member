@@ -300,9 +300,9 @@ def _merge_required_shape_value(existing, incoming):
     if isinstance(existing, list) and isinstance(incoming, list):
         return _merge_unique(existing, incoming)
     if isinstance(existing, list):
-        return deepcopy(existing)
+        return deepcopy(existing) if existing else incoming
     if isinstance(incoming, list):
-        return deepcopy(incoming)
+        return deepcopy(incoming) if incoming else existing
     if isinstance(existing, dict):
         return deepcopy(existing)
     if isinstance(incoming, dict):
