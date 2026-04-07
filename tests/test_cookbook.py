@@ -255,11 +255,12 @@ class TestArrowFunctionSignature:
 class TestModuleLevelDepsIncluded:
     """Cookbook must include module-level deps that run on import, not just function deps."""
 
-    def test_includes_module_level_imports(self, tmp_path):
+    def test_includes_factory_calls_at_module_level(self, tmp_path):
         _write_ts(tmp_path, "src/service.ts", """\
             import { env } from '../env';
             import { getLogger } from '../logger';
             import { getTokenManager } from './token';
+            import { AIService } from '../ai';
 
             const logger = getLogger();
             const tokenManager = getTokenManager();
@@ -269,10 +270,11 @@ class TestModuleLevelDepsIncluded:
             }
         """)
         result = generate_cookbook("src/service.ts", "process", str(tmp_path))
-        # process() only uses logger, but env and token run on module load
-        assert "../env" in result
-        assert "../logger" in result
-        assert "./token" in result
+        # Factory calls at module level need mocking (they execute on import)
+        assert "../logger" in result  # used in function + factory call
+        assert "./token" in result    # factory call at module level
+        # Static imports without factory calls don't need mocking
+        assert "../ai" not in result  # just a class import, no side effect
 
 
 class TestMultiLineSignatureDetection:
