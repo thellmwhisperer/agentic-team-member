@@ -1,4 +1,3 @@
-"""Auto-extracted from compiler monolith."""
 from __future__ import annotations
 
 import re
