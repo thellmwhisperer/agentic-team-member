@@ -49,8 +49,9 @@ def log(event: str, data: dict):
         "event": event,
         **data,
     }
-    _log_file.write(json.dumps(entry, ensure_ascii=False) + "\n")
-    _log_file.flush()
+    if _log_file:
+        _log_file.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        _log_file.flush()
 
 def emit(msg: str):
     print(msg, flush=True)
