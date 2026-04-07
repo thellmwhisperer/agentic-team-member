@@ -172,9 +172,14 @@ def _find_function_end(source_text: str, start_line: int | None) -> int | None:
     is_python = not any(line.rstrip().endswith("{") for line in lines[start_line - 1: start_line + 2])
 
     if is_python:
+        header = lines[start_line - 1]
+        base_indent = len(header) - len(header.lstrip(" \t"))
         for i in range(start_line, len(lines)):
             line = lines[i]
-            if line.strip() and not line.startswith((" ", "\t")) and i > start_line:
+            if not line.strip():
+                continue
+            indent = len(line) - len(line.lstrip(" \t"))
+            if i > start_line and indent <= base_indent:
                 return i
         return len(lines)
 
