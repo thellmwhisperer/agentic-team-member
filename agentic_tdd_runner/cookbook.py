@@ -14,21 +14,16 @@ from agentic_tdd_runner.compiler import (
     _build_pre_test_source_edits,
     _compile_dependency,
     _compute_source_import_path,
-    _default_test_path,
     _enrich_module_load_dependencies,
     _extract_signature,
     _extract_target_snippet,
     _find_symbol_line,
-    _infer_runner,
-    _is_exported,
     _observed_members,
-    _parse_import_bindings,
-    _parse_top_level_assignments,
     _realize_generated_test_seams,
     _render_module_mocks,
-    _setter_name,
     build_contract,
 )
+from agentic_tdd_runner.languages import get_language
 
 
 def generate_cookbook(
@@ -44,8 +39,12 @@ def generate_cookbook(
     full_path = Path(project_root) / source_path
     source_text = full_path.read_text()
 
-    imports = _parse_import_bindings(source_text)
-    assignments = _parse_top_level_assignments(source_text)
+    lang = get_language(source_path)
+    if lang is None:
+        raise ValueError(f"Unsupported file type: {source_path}")
+
+    imports = lang.parse_imports(source_text)
+    assignments = lang.parse_assignments(source_text)
     signature = _extract_signature(source_text, symbol)
 
     sym_line = line_start or _find_symbol_line(source_text, symbol)
@@ -117,12 +116,12 @@ def generate_cookbook(
     )
     pre_test_source_edits = _build_pre_test_source_edits(
         target, source_text,
-        exported_hint=_is_exported(source_text, symbol),
+        exported_hint=lang.is_exported(source_text, symbol),
         seam_edits=seam_edits,
     )
 
-    resolved_test_path = test_path or _default_test_path(source_path, symbol)
-    runner = _infer_runner(source_path)
+    resolved_test_path = test_path or lang.test_path(source_path, symbol)
+    runner = lang.runner
 
     facts = {
         "target": target,
@@ -143,7 +142,7 @@ def generate_cookbook(
     }
 
     contract = build_contract(facts)
-    return _render_cookbook_text(contract)
+    return _render_cookbook_text(contract, lang)
 
 
 def build_system_prompt(
@@ -154,11 +153,7 @@ def build_system_prompt(
     symbol: str | None = None,
     project_root: str | None = None,
 ) -> str:
-    """Build a system prompt with an optional cookbook section injected.
-
-    If source_path and symbol are provided, generates a cookbook and appends it.
-    Otherwise returns the base prompt unchanged.
-    """
+    """Build a system prompt with an optional cookbook section injected."""
     if not source_path or not symbol or not project_root:
         return base_prompt
 
@@ -177,7 +172,6 @@ def _find_function_end(source_text: str, start_line: int | None) -> int | None:
     is_python = not any(line.rstrip().endswith("{") for line in lines[start_line - 1: start_line + 2])
 
     if is_python:
-        # Python: find dedent back to column 0
         for i in range(start_line, len(lines)):
             line = lines[i]
             if line.strip() and not line.startswith((" ", "\t")) and i > start_line:
@@ -218,7 +212,7 @@ def _discover_dependencies(snippet, imports, assignments):
     return deps
 
 
-def _render_cookbook_text(contract: dict) -> str:
+def _render_cookbook_text(contract: dict, lang) -> str:
     """Render a contract as human-readable text for the agent's system prompt."""
     parts = []
     target = contract["target"]
@@ -260,7 +254,7 @@ def _render_cookbook_text(contract: dict) -> str:
         parts.append("### Test Seams")
         for dep in seam_deps:
             binding = dep["binding"]
-            setter = dep.get("setter_name") or _setter_name(binding, target["source_path"])
+            setter = dep.get("setter_name") or lang.setter_name(binding)
             members = dep.get("observed_members", [])
             members_str = ", ".join(members) if members else "..."
             parts.append(
@@ -282,10 +276,9 @@ def _render_cookbook_text(contract: dict) -> str:
     scaffold = contract.get("scaffold", {})
     rendered = scaffold.get("rendered_test", "")
     if rendered:
-        runner = contract["test_file"]["runner"]
-        lang = "python" if runner == "pytest" else "ts"
+        code_lang = "python" if runner == "pytest" else "ts"
         parts.append(f"### Test Scaffold ({contract['test_file']['path']})")
-        parts.append(f"```{lang}")
+        parts.append(f"```{code_lang}")
         parts.append(rendered.rstrip())
         parts.append("```")
         parts.append("")
