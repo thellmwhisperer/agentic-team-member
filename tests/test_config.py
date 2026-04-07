@@ -5,6 +5,16 @@ from pathlib import Path
 from agentic_tdd_runner.config import load_config
 
 
+class TestProductionConfig:
+    """The shipped config/agent.toml loads without errors."""
+
+    def test_production_toml_loads(self):
+        prod = Path(__file__).parent.parent / "config" / "agent.toml"
+        cfg = load_config(prod)
+        assert len(cfg["tools"]) > 0
+        assert "system" in cfg["prompt"]
+
+
 class TestLoadConfig:
     """load_config reads agent.toml + tools.json into a unified config dict."""
 

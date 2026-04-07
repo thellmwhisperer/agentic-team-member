@@ -55,4 +55,4 @@ no_test_found = "You said DONE but I can't find a test file. Create a test that 
 max_rejections = 3
 
 [tools]
-file = "config/tools.json"
+file = "tools.json"
