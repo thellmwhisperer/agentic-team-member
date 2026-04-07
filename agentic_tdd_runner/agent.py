@@ -37,6 +37,7 @@ def init_log():
     global _log_file
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
     path = os.path.join(LOG_DIR, f"agent-{ts}.jsonl")
+    os.makedirs(LOG_DIR, exist_ok=True)
     _log_file = open(path, "w")
     log("init", {"workdir": WORKDIR, "max_steps": _CONFIG["agent"]["max_steps"], "model": _CONFIG["llm"]["model"], "log": path})
     emit(f"LOG: {path}")
