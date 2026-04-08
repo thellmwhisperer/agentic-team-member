@@ -165,6 +165,7 @@ def _build_pytest_scaffold(contract):
         if dep.get("strategy") != "mock_module":
             continue
         module_path = dep["source_module"]
+        origin_kind = dep.get("origin_kind", "")
         required_shape = dep.get("required_shape", {})
         for export_name, members in required_shape.items():
             if isinstance(members, list) and members:
@@ -177,7 +178,11 @@ def _build_pytest_scaffold(contract):
                     else:
                         member_mocks.append(f"{m}=Mock()")
                 mock_kwargs = ", ".join(member_mocks)
-                factory_mock = f"Mock(return_value=Mock({mock_kwargs}))"
+                inner_mock = f"Mock({mock_kwargs})"
+                if origin_kind == "factory_result":
+                    factory_mock = f"Mock(return_value={inner_mock})"
+                else:
+                    factory_mock = inner_mock
             elif isinstance(members, list):
                 # Empty members — direct import (e.g. from alerts import send)
                 # If this is the assertion binding, extract as named spy
