@@ -25,7 +25,7 @@ def _build_pre_test_source_edits(target, source_text, *, exported_hint, seam_edi
                 "new": lang.prepend_export(line),
             })
             return edits
-        if stripped.startswith(f"const {symbol} ") or stripped.startswith(f"let {symbol} "):
+        if stripped.startswith(f"const {symbol} ") or stripped.startswith(f"let {symbol} ") or stripped.startswith(f"var {symbol} "):
             edits.insert(0, {
                 "kind": "mechanical_export",
                 "path": source_path,

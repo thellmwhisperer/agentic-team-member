@@ -6,7 +6,10 @@ from pathlib import PurePosixPath
 
 from agentic_tdd_runner.languages import register
 
-_PY_FROM_IMPORT_RE = re.compile(r"^\s*from\s+([.\w]+)\s+import\s+(.+)$", re.MULTILINE)
+_PY_FROM_IMPORT_RE = re.compile(
+    r"^\s*from\s+([.\w]+)\s+import\s+\(([^)]+)\)|^\s*from\s+([.\w]+)\s+import\s+(.+)$",
+    re.MULTILINE | re.DOTALL,
+)
 _PY_IMPORT_RE = re.compile(r"^\s*import\s+(.+)$", re.MULTILINE)
 _TOP_LEVEL_PY_ASSIGN_RE = re.compile(r"^([A-Za-z_]\w*)(?:\s*:\s*[^=]+)?\s*=\s*(.+)\s*$")
 
@@ -19,8 +22,10 @@ class PythonLanguage:
     def parse_imports(self, source_text: str) -> dict:
         imports = {}
         for match in _PY_FROM_IMPORT_RE.finditer(source_text):
-            module_name = match.group(1)
-            for piece in match.group(2).split(","):
+            # Groups 1,2 = parenthesized form; groups 3,4 = single-line form
+            module_name = match.group(1) or match.group(3)
+            names_str = match.group(2) or match.group(4)
+            for piece in names_str.split(","):
                 item = piece.strip()
                 if not item:
                     continue
