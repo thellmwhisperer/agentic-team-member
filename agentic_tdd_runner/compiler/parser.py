@@ -7,6 +7,7 @@ from agentic_tdd_runner.languages import get_language
 
 
 def _extract_signature(source_text, symbol):
+    # First try single-line patterns
     patterns = [
         rf"^(?:export\s+)?(?:async\s+)?function\s+{re.escape(symbol)}\s*\((.*?)\)(?:\s*:\s*([^\{{]+))?",
         rf"^(?:export\s+)?(?:const|let|var)\s+{re.escape(symbol)}\s*=\s*\((.*?)\)(?:\s*:\s*([^=\{{]+))?\s*=>",
@@ -22,6 +23,42 @@ def _extract_signature(source_text, symbol):
         if returns:
             return f"{symbol}({params}): {returns}"
         return f"{symbol}({params})"
+
+    # Multiline: find the opening paren and collect until the closing paren
+    multiline_openers = [
+        rf"^(?:export\s+)?(?:async\s+)?function\s+{re.escape(symbol)}\s*\(",
+        rf"^(?:export\s+)?(?:const|let|var)\s+{re.escape(symbol)}\s*=\s*\(",
+        rf"^\s*def\s+{re.escape(symbol)}\s*\(",
+    ]
+    for opener in multiline_openers:
+        match = re.search(opener, source_text, re.MULTILINE)
+        if not match:
+            continue
+        # Collect from the opening paren to the closing paren
+        start = source_text.index("(", match.start())
+        depth = 0
+        end = start
+        for i in range(start, len(source_text)):
+            if source_text[i] == "(":
+                depth += 1
+            elif source_text[i] == ")":
+                depth -= 1
+                if depth == 0:
+                    end = i + 1
+                    break
+        params_raw = source_text[start + 1:end - 1]
+        # Normalize whitespace
+        params = re.sub(r"\s+", " ", params_raw).strip()
+        # Check for return type after closing paren
+        rest = source_text[end:end + 50].strip()
+        ret_match = re.match(r"(?:\s*:\s*([^{\n:]+)|\s*->\s*([^:\n]+))", rest)
+        returns = None
+        if ret_match:
+            returns = (ret_match.group(1) or ret_match.group(2) or "").strip()
+        if returns:
+            return f"{symbol}({params}): {returns}"
+        return f"{symbol}({params})"
+
     return symbol
 
 

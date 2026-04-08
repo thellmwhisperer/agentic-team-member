@@ -4,6 +4,7 @@
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -71,6 +72,41 @@ def _resolve_repo_path(path: str, workdir: str = None) -> Path:
     return candidate
 
 
+_ALLOWED_COMMANDS = frozenset({
+    "git", "grep", "rg", "find", "ls", "cat", "head", "tail", "wc",
+    "bun", "node", "npm", "npx", "pnpm", "yarn", "deno",
+    "python", "python3", "pip", "pip3", "pytest",
+    "echo", "sort", "uniq", "diff", "tr", "cut", "tee",
+    "sed", "awk", "xargs", "dirname", "basename",
+    "tree", "file", "which", "env", "true", "false", "test",
+})
+
+
+def _validate_command(command: str) -> None:
+    """Validate that all commands in a pipeline/chain use allowed binaries."""
+    import shlex
+    if not command or not command.strip():
+        raise ValueError("empty command")
+    # Split on shell operators to validate each sub-command
+    parts = re.split(r"\s*(?:\|\||&&|[|;])\s*", command)
+    for part in parts:
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            tokens = shlex.split(part)
+        except ValueError:
+            tokens = part.split()
+        if not tokens:
+            continue
+        binary = os.path.basename(tokens[0])
+        if binary not in _ALLOWED_COMMANDS:
+            raise ValueError(
+                f"command '{binary}' is not in the allowed list. "
+                f"Allowed: {', '.join(sorted(_ALLOWED_COMMANDS))}"
+            )
+
+
 def execute_tool(name: str, args: dict) -> str:
     try:
         if name == "read_file":
@@ -82,6 +118,7 @@ def execute_tool(name: str, args: dict) -> str:
                 return f.read()
 
         elif name == "run_command":
+            _validate_command(args["command"])
             result = subprocess.run(
                 args["command"],
                 shell=True,
@@ -200,17 +237,20 @@ def verify_red_green(test_file: str) -> tuple[bool, str]:
         shutil.copy2(test_full, test_backup)
 
     # Stash all changes including untracked (reverts source fix + new files)
-    subprocess.run("git stash --include-untracked", shell=True, cwd=WORKDIR, capture_output=True)
+    subprocess.run(["git", "stash", "--include-untracked"], cwd=WORKDIR, capture_output=True)
 
     # Restore the test file so the red phase can run it
     if test_backup:
         os.makedirs(os.path.dirname(test_full), exist_ok=True)
         shutil.copy2(test_backup, test_full)
 
+    import shlex
+    run_argv = shlex.split(run_cmd)
+
     emit("  [RED] Running test WITHOUT fix...")
     red_result = subprocess.run(
-        f"{run_cmd} {test_file}",
-        shell=True, cwd=WORKDIR, capture_output=True, text=True, timeout=test_timeout,
+        [*run_argv, test_file],
+        cwd=WORKDIR, capture_output=True, text=True, timeout=test_timeout,
     )
     red_passed = red_result.returncode == 0
     red_output = (red_result.stdout + red_result.stderr)[:500]
@@ -223,12 +263,12 @@ def verify_red_green(test_file: str) -> tuple[bool, str]:
         os.remove(test_full)
         os.remove(test_backup)
 
-    subprocess.run("git stash pop", shell=True, cwd=WORKDIR, capture_output=True)
+    subprocess.run(["git", "stash", "pop"], cwd=WORKDIR, capture_output=True)
 
     emit("  [GREEN] Running test WITH fix...")
     green_result = subprocess.run(
-        f"{run_cmd} {test_file}",
-        shell=True, cwd=WORKDIR, capture_output=True, text=True, timeout=test_timeout,
+        [*run_argv, test_file],
+        cwd=WORKDIR, capture_output=True, text=True, timeout=test_timeout,
     )
     green_passed = green_result.returncode == 0
     green_output = (green_result.stdout + green_result.stderr)[:500]
@@ -392,15 +432,19 @@ def main():
                         emit(f"\n{'='*60}")
                         emit(f"AGENT DONE at step {step} — VERIFIED")
                         emit(f"{'='*60}")
-                        diff = subprocess.run("git diff", shell=True, cwd=WORKDIR, capture_output=True, text=True)
+                        diff = subprocess.run(["git", "diff"], cwd=WORKDIR, capture_output=True, text=True)
                         emit(f"\n--- GIT DIFF ---\n{diff.stdout}")
                         untracked = subprocess.run(["git", "ls-files", "--others", "--exclude-standard"], cwd=WORKDIR, capture_output=True, text=True)
                         if untracked.stdout.strip():
                             emit("\n--- NEW FILES ---")
                             for f in untracked.stdout.strip().split("\n"):
                                 emit(f"  {f}")
-                                content_result = subprocess.run(f"cat '{f}'", shell=True, cwd=WORKDIR, capture_output=True, text=True)
-                                emit(content_result.stdout)
+                                full = os.path.join(WORKDIR, f)
+                                try:
+                                    with open(full) as fh:
+                                        emit(fh.read())
+                                except OSError:
+                                    pass
                         log("done", {"step": step, "verified": True})
                         return 0
                     else:

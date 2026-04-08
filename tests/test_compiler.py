@@ -1,5 +1,6 @@
 """Tests for the compiler — contract building from analysis facts."""
 from agentic_tdd_runner.compiler import build_contract
+from agentic_tdd_runner.compiler.renderer import _parse_signature_params
 
 
 def _handle_resub_facts():
@@ -146,3 +147,134 @@ def test_rendered_test_contains_minimal_template():
     assert "describe('handleResub'" in rendered
     assert "test('TODO behavior'" in rendered
     assert "handleResub(channel, username, months);" in rendered
+
+
+class TestPytestScaffoldModuleLoadDeps:
+    """pytest scaffold must patch module_load dependencies."""
+
+    def _pytest_facts(self):
+        return {
+            "target": {
+                "symbol": "process",
+                "kind": "function",
+                "source_path": "src/worker.py",
+                "line_start": 5,
+                "line_end": 8,
+                "signature": "process(item)",
+            },
+            "test_file": {
+                "path": "src/test_process.py",
+                "runner": "pytest",
+            },
+            "pre_test_source_edits": [],
+            "module_load_dependencies": [{
+                "binding": "logger",
+                "origin_kind": "factory_result",
+                "source_module": "src.logger",
+                "required_shape": {"get_logger": ["info"]},
+                "strategy": "mock_module",
+            }],
+            "execution_dependencies": [{
+                "binding": "client",
+                "origin_kind": "module_local_mutable",
+                "required_shape": {"say": []},
+                "strategy": "set_test_seam",
+                "observed_members": ["say"],
+            }],
+            "injection_plan": [{
+                "binding": "client",
+                "strategy": "set_test_seam",
+                "setter_name": "__set_client_for_tests",
+                "steps": ["inject a spy for say(channel, message)"],
+                "blocks_if_missing": False,
+                "seam_available": True,
+            }],
+            "assertion_surface": {
+                "kind": "outbound_call_arguments",
+                "binding": "client",
+                "member": "say",
+                "assertion_shape": "toHaveBeenCalledWith(...)",
+            },
+            "pattern_files": [],
+        }
+
+    def test_pytest_uses_mock_not_dict(self):
+        """Execution dep doubles must use Mock() for attribute access, not dict."""
+        contract = build_contract(self._pytest_facts())
+        rendered = contract["scaffold"]["rendered_test"]
+        # Should use Mock() not dict literal for the double
+        assert "Mock(" in rendered
+        assert "client_test_double = {" not in rendered
+
+    def test_pytest_patches_module_load_deps(self):
+        """Module-load deps should be patched in the pytest scaffold."""
+        contract = build_contract(self._pytest_facts())
+        rendered = contract["scaffold"]["rendered_test"]
+        assert "patch" in rendered or "mock" in rendered.lower()
+
+
+class TestBunScaffoldSpyBinding:
+    """When assertion targets a module_load dep, the spy must be a named variable."""
+
+    def _bun_facts_with_module_assertion(self):
+        return {
+            "target": {
+                "symbol": "process",
+                "kind": "function",
+                "source_path": "src/service.ts",
+                "line_start": 5,
+                "line_end": 8,
+                "signature": "process()",
+            },
+            "test_file": {
+                "path": "src/service.test.ts",
+                "runner": "bun:test",
+            },
+            "pre_test_source_edits": [],
+            "module_load_dependencies": [{
+                "binding": "logger",
+                "origin_kind": "factory_result",
+                "source_module": "../logger",
+                "required_shape": {"getLogger": ["event", "response"]},
+                "strategy": "mock_module",
+            }],
+            "execution_dependencies": [],
+            "injection_plan": [],
+            "assertion_surface": {
+                "kind": "outbound_call_arguments",
+                "binding": "logger",
+                "member": "event",
+                "assertion_shape": "toHaveBeenCalledWith(...)",
+            },
+            "pattern_files": [],
+        }
+
+    def test_spy_variable_defined_before_use(self):
+        contract = build_contract(self._bun_facts_with_module_assertion())
+        rendered = contract["scaffold"]["rendered_test"]
+        assert "const logger_event_spy = mock(() =>" in rendered
+        # The spy must be defined before the assertion uses it
+        spy_pos = rendered.index("const logger_event_spy")
+        assert_pos = rendered.index("expect(logger_event_spy)")
+        assert spy_pos < assert_pos
+
+
+class TestParseSignatureParams:
+    """_parse_signature_params must handle complex type annotations."""
+
+    def test_simple_params(self):
+        assert _parse_signature_params("foo(a, b)") == ["a", "b"]
+
+    def test_typed_params(self):
+        assert _parse_signature_params("foo(a: string, b: number)") == ["a", "b"]
+
+    def test_generic_type_params(self):
+        result = _parse_signature_params("foo(a: dict[str, int], b: int)")
+        assert result == ["a", "b"]
+
+    def test_empty_params(self):
+        assert _parse_signature_params("foo()") == []
+
+    def test_python_defaults(self):
+        result = _parse_signature_params("foo(a: str, b=10)")
+        assert result == ["a", "b"]
