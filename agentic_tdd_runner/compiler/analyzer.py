@@ -73,7 +73,10 @@ def _compile_dependency(dep, snippet, imports, assignments):
         if direct_import:
             module_name = source_module or direct_import["source_module"]
             export_name = direct_import["export_name"]
-            if not required_shape:
+            # Always normalize shape under the export name so the patch targets
+            # the right symbol (e.g. patch('pkg.logger', Mock(info=...)))
+            # instead of individual members (e.g. patch('pkg.info', ...))
+            if export_name not in required_shape:
                 required_shape = {export_name: observed_members}
             render_hint = render_hint or (
                 "module_object" if direct_import["import_kind"] in {"default", "namespace"} else None
