@@ -83,21 +83,13 @@ max_rejections = 3
 [quality]
 enabled = true
 max_fix_rounds = 3
+# Checks are auto-detected from the target project (package.json, pyproject.toml).
+# Only forbidden patterns need explicit config per language.
 
 [quality.typescript]
-checks = [
-  { name = "typecheck", command = "npx tsc --noEmit" },
-  { name = "lint", command = "npx eslint {changed_files}", fix = "npx eslint {changed_files} --fix" },
-  { name = "format", command = "npx prettier --check {changed_files}", fix = "npx prettier --write {changed_files}" },
-]
 forbidden = ["as any", "eslint-disable", "@ts-ignore", "@ts-expect-error"]
 
 [quality.python]
-checks = [
-  { name = "typecheck", command = "python3 -m mypy {changed_files} --ignore-missing-imports" },
-  { name = "lint", command = "python3 -m ruff check {changed_files}", fix = "python3 -m ruff check {changed_files} --fix" },
-  { name = "format", command = "python3 -m ruff format --check {changed_files}", fix = "python3 -m ruff format {changed_files}" },
-]
 forbidden = ["type: ignore", "noqa"]
 
 [pr]

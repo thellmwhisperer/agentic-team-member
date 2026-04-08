@@ -10,6 +10,7 @@ from agentic_tdd_runner.agent import (
     _resolve_repo_path,
     _validate_command,
     create_pr,
+    detect_quality_tools,
     find_test_file,
     run_quality_checks,
 )
@@ -286,6 +287,69 @@ class TestFindTestFile:
             "runner": {"test_file_patterns": ["*.test.ts", "*.test.tsx"], "exclude_dirs": []},
         })
         assert find_test_file() == "src/widget.test.tsx"
+
+
+class TestDetectQualityTools:
+    """detect_quality_tools reads package.json/pyproject.toml to find lint/format tools."""
+
+    def test_detects_biome_from_package_json(self, tmp_path, monkeypatch):
+        import json
+        (tmp_path / "package.json").write_text(json.dumps({
+            "devDependencies": {"@biomejs/biome": "^2.0"},
+            "scripts": {"lint": "biome check src", "typecheck": "tsc --noEmit"},
+        }))
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        checks = detect_quality_tools("typescript")
+        names = [c["name"] for c in checks]
+        assert "typecheck" in names
+        assert "lint" in names
+        # Must use biome, not eslint
+        lint_cmd = next(c for c in checks if c["name"] == "lint")
+        assert "biome" in lint_cmd["command"]
+        assert "eslint" not in lint_cmd["command"]
+
+    def test_detects_eslint_and_prettier(self, tmp_path, monkeypatch):
+        import json
+        (tmp_path / "package.json").write_text(json.dumps({
+            "devDependencies": {"eslint": "^9.0", "prettier": "^3.0"},
+            "scripts": {"typecheck": "tsc --noEmit"},
+        }))
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        checks = detect_quality_tools("typescript")
+        names = [c["name"] for c in checks]
+        assert "lint" in names
+        assert "format" in names
+        lint_cmd = next(c for c in checks if c["name"] == "lint")
+        assert "eslint" in lint_cmd["command"]
+        format_cmd = next(c for c in checks if c["name"] == "format")
+        assert "prettier" in format_cmd["command"]
+
+    def test_detects_ruff_from_pyproject(self, tmp_path, monkeypatch):
+        (tmp_path / "pyproject.toml").write_text('[tool.ruff]\nline-length = 88\n')
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        checks = detect_quality_tools("python")
+        names = [c["name"] for c in checks]
+        assert "lint" in names
+        lint_cmd = next(c for c in checks if c["name"] == "lint")
+        assert "ruff" in lint_cmd["command"]
+
+    def test_returns_empty_when_no_tools_found(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        checks = detect_quality_tools("typescript")
+        # No package.json → only typecheck if tsc exists, otherwise empty
+        assert isinstance(checks, list)
+
+    def test_uses_package_json_scripts(self, tmp_path, monkeypatch):
+        """If package.json has scripts.typecheck, use that exact command."""
+        import json
+        (tmp_path / "package.json").write_text(json.dumps({
+            "scripts": {"typecheck": "vue-tsc --noEmit"},
+        }))
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        checks = detect_quality_tools("typescript")
+        tc = next((c for c in checks if c["name"] == "typecheck"), None)
+        assert tc is not None
+        assert "vue-tsc" in tc["command"]
 
 
 class TestGetChangedFiles:

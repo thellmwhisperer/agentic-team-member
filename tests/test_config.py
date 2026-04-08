@@ -65,9 +65,8 @@ class TestLoadConfig:
         cfg = load_config(prod)
         assert cfg["quality"]["enabled"] is True
         assert cfg["quality"]["max_fix_rounds"] == 3
-        assert len(cfg["quality"]["typescript"]["checks"]) == 3
         assert "as any" in cfg["quality"]["typescript"]["forbidden"]
-        assert len(cfg["quality"]["python"]["checks"]) == 3
+        assert "type: ignore" in cfg["quality"]["python"]["forbidden"]
 
     def test_production_pr_section(self):
         """Production config has pr section."""

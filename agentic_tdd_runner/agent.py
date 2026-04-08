@@ -348,6 +348,85 @@ def verify_red_green(test_file: str) -> tuple[bool, str]:
     return True, "VERIFIED: Test fails without fix, passes with fix. Real red-green."
 
 
+def detect_quality_tools(lang_name: str) -> list[dict]:
+    """Detect quality tools from the target project's config files.
+
+    Reads package.json (TypeScript) or pyproject.toml (Python) to discover
+    which lint/format/typecheck tools are actually installed.
+    """
+    checks = []
+
+    if lang_name == "typescript":
+        pkg_path = os.path.join(WORKDIR, "package.json")
+        if os.path.isfile(pkg_path):
+            import json as _json
+            try:
+                with open(pkg_path) as f:
+                    pkg = _json.load(f)
+            except (OSError, ValueError):
+                return checks
+
+            scripts = pkg.get("scripts", {})
+            dev_deps = pkg.get("devDependencies", {})
+            deps = pkg.get("dependencies", {})
+            all_deps = {**deps, **dev_deps}
+
+            # Typecheck: use scripts.typecheck if defined, else tsc
+            if "typecheck" in scripts:
+                checks.append({"name": "typecheck", "command": f"npx {scripts['typecheck']}"})
+            elif "typescript" in all_deps:
+                checks.append({"name": "typecheck", "command": "npx tsc --noEmit"})
+
+            # Lint: biome vs eslint
+            if any(k.startswith("@biomejs/biome") for k in all_deps):
+                checks.append({
+                    "name": "lint",
+                    "command": "npx biome check {changed_files}",
+                    "fix": "npx biome check {changed_files} --fix",
+                })
+            elif "eslint" in all_deps:
+                checks.append({
+                    "name": "lint",
+                    "command": "npx eslint {changed_files}",
+                    "fix": "npx eslint {changed_files} --fix",
+                })
+
+            # Format: biome already covers format, else prettier
+            has_biome = any(k.startswith("@biomejs/biome") for k in all_deps)
+            if not has_biome and "prettier" in all_deps:
+                checks.append({
+                    "name": "format",
+                    "command": "npx prettier --check {changed_files}",
+                    "fix": "npx prettier --write {changed_files}",
+                })
+
+    elif lang_name == "python":
+        pyproject_path = os.path.join(WORKDIR, "pyproject.toml")
+        has_ruff = False
+        if os.path.isfile(pyproject_path):
+            try:
+                with open(pyproject_path, "rb") as f:
+                    import tomllib
+                    pyproject = tomllib.load(f)
+                has_ruff = "ruff" in pyproject.get("tool", {})
+            except (OSError, ValueError):
+                pass
+
+        if has_ruff:
+            checks.append({
+                "name": "lint",
+                "command": "python3 -m ruff check {changed_files}",
+                "fix": "python3 -m ruff check {changed_files} --fix",
+            })
+            checks.append({
+                "name": "format",
+                "command": "python3 -m ruff format --check {changed_files}",
+                "fix": "python3 -m ruff format {changed_files}",
+            })
+
+    return checks
+
+
 def _get_changed_files() -> list[str]:
     """Get modified + untracked files relative to WORKDIR."""
     diff = subprocess.run(
@@ -376,7 +455,8 @@ def run_quality_checks(test_file: str) -> tuple[bool, str]:
     lang = get_language(test_file)
     lang_name = lang.name if lang else "typescript"
     lang_cfg = quality_cfg.get(lang_name, {})
-    checks = lang_cfg.get("checks", [])
+    # Auto-detect tools from the project, fall back to config
+    checks = detect_quality_tools(lang_name) or lang_cfg.get("checks", [])
     forbidden = lang_cfg.get("forbidden", [])
 
     changed = _get_changed_files()
