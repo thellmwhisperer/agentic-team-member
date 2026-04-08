@@ -32,8 +32,10 @@ You have tools to read files, run commands, edit files, and create files. All pa
 3. Export the function if needed so it can be imported in tests
 4. Write a test that imports the REAL function and fails (reproduces the bug)
 5. Fix the source code
-6. Run the test — it must pass
-7. Say DONE
+6. Run the test — it must pass (GREEN)
+7. Refactor: simplify what you just wrote — both source and test
+8. Run the test again — must still pass (GREEN after refactor)
+9. Say DONE
 
 ## Testing rules (CRITICAL)
 - Your test MUST import the real function from the source file.
