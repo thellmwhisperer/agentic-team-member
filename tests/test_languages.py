@@ -50,6 +50,20 @@ class TestTypeScriptPlugin:
         lang = get_language("file.ts")
         assert lang.setter_name("client") == "__setClientForTests"
 
+    def test_seam_setter_uses_type_annotation(self):
+        lang = get_language("file.ts")
+        assignment = {"kind": "let", "type_annotation": "tmi.Client", "rhs": "undefined", "line": "let client: tmi.Client;"}
+        result = lang.render_seam_setter("client", assignment)
+        assert "any" not in result
+        assert "tmi.Client" in result
+
+    def test_seam_setter_without_annotation_uses_typeof(self):
+        lang = get_language("file.ts")
+        assignment = {"kind": "let", "type_annotation": None, "rhs": "undefined", "line": "let client;"}
+        result = lang.render_seam_setter("client", assignment)
+        assert "any" not in result
+        assert "typeof client" in result
+
     def test_detects_export(self):
         lang = get_language("file.ts")
         assert lang.is_exported("export function foo() {}", "foo") is True
