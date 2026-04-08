@@ -5,9 +5,13 @@ import subprocess
 import pytest
 
 from agentic_tdd_runner.agent import (
+    _get_changed_files,
+    _parse_pr_content,
     _resolve_repo_path,
     _validate_command,
+    create_pr,
     find_test_file,
+    run_quality_checks,
 )
 
 
@@ -282,3 +286,226 @@ class TestFindTestFile:
             "runner": {"test_file_patterns": ["*.test.ts", "*.test.tsx"], "exclude_dirs": []},
         })
         assert find_test_file() == "src/widget.test.tsx"
+
+
+class TestGetChangedFiles:
+    """_get_changed_files returns modified + untracked files."""
+
+    def test_returns_modified_and_untracked(self, tmp_path, monkeypatch):
+        subprocess.run("git init", shell=True, cwd=tmp_path, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "t@t"], cwd=tmp_path, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "t"], cwd=tmp_path, capture_output=True)
+        (tmp_path / "tracked.ts").write_text("original")
+        subprocess.run("git add -A && git commit -m init", shell=True, cwd=tmp_path, capture_output=True)
+        (tmp_path / "tracked.ts").write_text("modified")
+        (tmp_path / "new.ts").write_text("new")
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        files = _get_changed_files()
+        assert "tracked.ts" in files
+        assert "new.ts" in files
+
+
+class TestRunQualityChecks:
+    """run_quality_checks enforces lint, format, and forbidden patterns."""
+
+    def _setup_repo(self, tmp_path, monkeypatch):
+        subprocess.run("git init", shell=True, cwd=tmp_path, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "t@t"], cwd=tmp_path, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "t"], cwd=tmp_path, capture_output=True)
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src" / "file.ts").write_text("original")
+        subprocess.run("git add -A && git commit -m init", shell=True, cwd=tmp_path, capture_output=True)
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+
+    def test_passes_when_disabled(self, tmp_path, monkeypatch):
+        self._setup_repo(tmp_path, monkeypatch)
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "quality": {"enabled": False},
+            "timeouts": {"tool_execution": 10},
+        })
+        ok, msg = run_quality_checks("src/file.test.ts")
+        assert ok is True
+
+    def test_detects_forbidden_pattern(self, tmp_path, monkeypatch):
+        self._setup_repo(tmp_path, monkeypatch)
+        (tmp_path / "src" / "file.test.ts").write_text("const x = {} as any;")
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "quality": {
+                "enabled": True, "max_fix_rounds": 3,
+                "typescript": {"checks": [], "forbidden": ["as any"]},
+            },
+            "timeouts": {"tool_execution": 10},
+            "prompt": {"quality_failed": "FAIL: {details}"},
+        })
+        ok, msg = run_quality_checks("src/file.test.ts")
+        assert ok is False
+        assert "as any" in msg
+
+    def test_passes_clean_code(self, tmp_path, monkeypatch):
+        self._setup_repo(tmp_path, monkeypatch)
+        (tmp_path / "src" / "file.test.ts").write_text("const x: number = 1;")
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "quality": {
+                "enabled": True, "max_fix_rounds": 3,
+                "typescript": {"checks": [], "forbidden": ["as any"]},
+            },
+            "timeouts": {"tool_execution": 10},
+            "prompt": {"quality_failed": "FAIL: {details}"},
+        })
+        ok, msg = run_quality_checks("src/file.test.ts")
+        assert ok is True
+
+    def test_runs_check_command_and_reports_failure(self, tmp_path, monkeypatch):
+        self._setup_repo(tmp_path, monkeypatch)
+        (tmp_path / "src" / "file.test.ts").write_text("clean")
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "quality": {
+                "enabled": True, "max_fix_rounds": 3,
+                "typescript": {
+                    "checks": [{"name": "lint", "command": "false"}],
+                    "forbidden": [],
+                },
+            },
+            "timeouts": {"tool_execution": 10},
+            "prompt": {"quality_failed": "FAIL: {details}"},
+        })
+        ok, msg = run_quality_checks("src/file.test.ts")
+        assert ok is False
+        assert "lint" in msg
+
+    def test_runs_fix_before_check(self, tmp_path, monkeypatch):
+        self._setup_repo(tmp_path, monkeypatch)
+        bad_file = tmp_path / "src" / "file.test.ts"
+        bad_file.write_text("UNFIXED")
+        # fix command rewrites the file; check command passes if content is "FIXED"
+        fix_cmd = f"echo FIXED > {bad_file}"
+        check_cmd = f"grep FIXED {bad_file}"
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "quality": {
+                "enabled": True, "max_fix_rounds": 3,
+                "typescript": {
+                    "checks": [{"name": "format", "command": check_cmd, "fix": fix_cmd}],
+                    "forbidden": [],
+                },
+            },
+            "timeouts": {"tool_execution": 10},
+            "prompt": {"quality_failed": "FAIL: {details}"},
+        })
+        ok, msg = run_quality_checks("src/file.test.ts")
+        assert ok is True
+
+    def test_filters_by_language(self, tmp_path, monkeypatch):
+        self._setup_repo(tmp_path, monkeypatch)
+        (tmp_path / "src" / "test_worker.py").write_text("clean")
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "quality": {
+                "enabled": True, "max_fix_rounds": 3,
+                "typescript": {
+                    "checks": [{"name": "tsc", "command": "false"}],  # would fail
+                    "forbidden": [],
+                },
+                "python": {"checks": [], "forbidden": []},
+            },
+            "timeouts": {"tool_execution": 10},
+            "prompt": {"quality_failed": "FAIL: {details}"},
+        })
+        # Python test file → only python checks run (none), TS checks skipped
+        ok, msg = run_quality_checks("src/test_worker.py")
+        assert ok is True
+
+
+class TestParsePrContent:
+    """_parse_pr_content extracts title and body from LLM response."""
+
+    def test_extracts_title_and_body(self):
+        content = "PR_TITLE: fix: use cumulative months in handleResub\nPR_BODY: The bug was in handleResub."
+        title, body = _parse_pr_content(content)
+        assert title == "fix: use cumulative months in handleResub"
+        assert "handleResub" in body
+
+    def test_truncates_long_title(self):
+        content = "PR_TITLE: " + "x" * 100 + "\nPR_BODY: body"
+        title, body = _parse_pr_content(content)
+        assert len(title) <= 70
+
+    def test_returns_none_on_missing_format(self):
+        content = "Here is a PR for you."
+        title, body = _parse_pr_content(content)
+        assert title is None
+        assert body is None
+
+    def test_multiline_body(self):
+        content = "PR_TITLE: fix bug\nPR_BODY: ## Summary\n\n- Fixed the bug\n- Added tests"
+        title, body = _parse_pr_content(content)
+        assert "Summary" in body
+        assert "Added tests" in body
+
+
+class TestCreatePr:
+    """create_pr asks the LLM for content and runs git+gh commands."""
+
+    def test_creates_branch_commit_push_pr(self, tmp_path, monkeypatch):
+        from unittest.mock import patch as mock_patch, call
+
+        subprocess.run("git init", shell=True, cwd=tmp_path, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "t@t"], cwd=tmp_path, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "t"], cwd=tmp_path, capture_output=True)
+        (tmp_path / "file.ts").write_text("code")
+        subprocess.run("git add -A && git commit -m init", shell=True, cwd=tmp_path, capture_output=True)
+        # Agent's fix: modified source + new test (unstaged changes for PR)
+        (tmp_path / "file.ts").write_text("fixed code")
+        (tmp_path / "file.test.ts").write_text("test code")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "pr": {"enabled": True, "base_branch": "main", "branch_prefix": "atm/fix-"},
+            "prompt": {"pr_prompt": "Generate PR"},
+            "llm": {"model": "test", "url": "http://localhost:9999/v1/chat/completions"},
+            "timeouts": {"llm_request": 10},
+        })
+
+        # Mock chat to return PR content
+        mock_response = {
+            "choices": [{"message": {"content": "PR_TITLE: fix: handle cumulative months\nPR_BODY: Fixed the bug."}}],
+        }
+
+        commands_run = []
+        original_run = subprocess.run
+
+        def track_run(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            if isinstance(cmd, list):
+                commands_run.append(cmd)
+                # Fake success for git push and gh commands (no real remote)
+                if cmd[0] == "gh" or (cmd[0] == "git" and "push" in cmd):
+                    return subprocess.CompletedProcess(cmd, 0, stdout="https://github.com/test/pr/1\n")
+                return original_run(*args, **kwargs)
+            return original_run(*args, **kwargs)
+
+        with mock_patch("agentic_tdd_runner.agent.chat", return_value=mock_response):
+            with mock_patch("subprocess.run", side_effect=track_run):
+                result = create_pr([], {}, "test.ts", 10)
+
+        # Verify git commands were called in order
+        cmd_strs = [" ".join(c) for c in commands_run]
+        assert any("checkout -b" in c for c in cmd_strs), f"No checkout -b: {cmd_strs}"
+        assert any("git add" in c for c in cmd_strs), f"No git add: {cmd_strs}"
+        assert any("git commit" in c for c in cmd_strs), f"No git commit: {cmd_strs}"
+        assert any("git push" in c for c in cmd_strs), f"No git push: {cmd_strs}"
+        assert any("gh pr create" in c for c in cmd_strs), f"No gh pr create: {cmd_strs}"
+
+    def test_returns_none_on_chat_failure(self, tmp_path, monkeypatch):
+        from unittest.mock import patch as mock_patch
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "pr": {"enabled": True, "base_branch": "main", "branch_prefix": "atm/fix-"},
+            "prompt": {"pr_prompt": "Generate PR"},
+            "llm": {"model": "test", "url": "http://localhost:9999/v1/chat/completions"},
+            "timeouts": {"llm_request": 10},
+        })
+
+        with mock_patch("agentic_tdd_runner.agent.chat", side_effect=Exception("timeout")):
+            result = create_pr([], {}, "test.ts", 10)
+
+        assert result is None

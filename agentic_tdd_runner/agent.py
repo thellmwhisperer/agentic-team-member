@@ -348,6 +348,162 @@ def verify_red_green(test_file: str) -> tuple[bool, str]:
     return True, "VERIFIED: Test fails without fix, passes with fix. Real red-green."
 
 
+def _get_changed_files() -> list[str]:
+    """Get modified + untracked files relative to WORKDIR."""
+    diff = subprocess.run(
+        ["git", "diff", "--name-only"], cwd=WORKDIR, capture_output=True, text=True,
+    )
+    untracked = subprocess.run(
+        ["git", "ls-files", "--others", "--exclude-standard"],
+        cwd=WORKDIR, capture_output=True, text=True,
+    )
+    files = set()
+    for line in (diff.stdout + untracked.stdout).splitlines():
+        line = line.strip()
+        if line:
+            files.add(line)
+    return sorted(files)
+
+
+def run_quality_checks(test_file: str) -> tuple[bool, str]:
+    """Run quality checks on changed files. Returns (passed, message)."""
+    from agentic_tdd_runner.languages import get_language
+
+    quality_cfg = _CONFIG.get("quality", {})
+    if not quality_cfg.get("enabled", False):
+        return True, "Quality checks disabled"
+
+    lang = get_language(test_file)
+    lang_name = lang.name if lang else "typescript"
+    lang_cfg = quality_cfg.get(lang_name, {})
+    checks = lang_cfg.get("checks", [])
+    forbidden = lang_cfg.get("forbidden", [])
+
+    changed = _get_changed_files()
+    if not changed:
+        return True, "No changed files"
+
+    changed_str = " ".join(changed)
+    failures = []
+
+    # Run checks (fix first if available, then verify)
+    for check in checks:
+        fix_cmd = check.get("fix", "").replace("{changed_files}", changed_str)
+        if fix_cmd:
+            subprocess.run(
+                fix_cmd, shell=True, cwd=WORKDIR, capture_output=True,
+                timeout=_CONFIG["timeouts"]["tool_execution"],
+            )
+        cmd = check["command"].replace("{changed_files}", changed_str)
+        result = subprocess.run(
+            cmd, shell=True, cwd=WORKDIR, capture_output=True, text=True,
+            timeout=_CONFIG["timeouts"]["tool_execution"],
+        )
+        if result.returncode != 0:
+            output = (result.stdout + result.stderr)[:500]
+            failures.append(f"[{check['name']}] FAILED:\n{output}")
+
+    # Grep forbidden patterns in changed files
+    for f in changed:
+        full = os.path.join(WORKDIR, f)
+        if not os.path.isfile(full):
+            continue
+        try:
+            with open(full) as fh:
+                content = fh.read()
+        except OSError:
+            continue
+        for pattern in forbidden:
+            for i, line in enumerate(content.splitlines(), 1):
+                if pattern in line:
+                    failures.append(
+                        f"[Forbidden] '{pattern}' in {f}:{i}: {line.strip()}"
+                    )
+
+    if failures:
+        details = "\n\n".join(failures)
+        template = _CONFIG.get("prompt", {}).get(
+            "quality_failed", "QUALITY CHECK FAILED:\n\n{details}",
+        )
+        return False, template.replace("{details}", details)
+
+    return True, "All quality checks passed"
+
+
+def _parse_pr_content(content: str) -> tuple[str | None, str | None]:
+    """Parse PR_TITLE and PR_BODY from LLM response."""
+    title = None
+    body = None
+    title_match = re.search(r"PR_TITLE:\s*(.+?)(?:\n|$)", content)
+    if title_match:
+        title = title_match.group(1).strip()[:70]
+    body_match = re.search(r"PR_BODY:\s*(.+)", content, re.DOTALL)
+    if body_match:
+        body = body_match.group(1).strip()
+    return title, body
+
+
+def create_pr(messages: list, last_msg: dict, test_file: str, step: int) -> str | None:
+    """Ask LLM for PR content, then create branch/commit/push/PR."""
+    pr_cfg = _CONFIG.get("pr", {})
+
+    # Ask LLM for title and description
+    pr_messages = messages.copy()
+    pr_messages.append(last_msg)
+    pr_messages.append({
+        "role": "user",
+        "content": _CONFIG["prompt"]["pr_prompt"],
+    })
+
+    try:
+        response = chat(pr_messages)
+        content = response["choices"][0]["message"].get("content", "")
+    except Exception as e:
+        emit(f"  [PR] LLM failed to generate PR content: {e}")
+        return None
+
+    title, body = _parse_pr_content(content)
+    if not title:
+        title = f"fix: agent fix at step {step}"
+    if not body:
+        body = "Automated fix by ATM agent."
+
+    base = pr_cfg.get("base_branch", "main")
+    prefix = pr_cfg.get("branch_prefix", "atm/fix-")
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    branch_name = f"{prefix}{timestamp}"
+
+    try:
+        subprocess.run(
+            ["git", "checkout", "-b", branch_name],
+            cwd=WORKDIR, capture_output=True, check=True,
+        )
+        subprocess.run(
+            ["git", "add", "-A"],
+            cwd=WORKDIR, capture_output=True, check=True,
+        )
+        subprocess.run(
+            ["git", "commit", "-m", title, "-m", body],
+            cwd=WORKDIR, capture_output=True, check=True,
+        )
+        subprocess.run(
+            ["git", "push", "-u", "origin", branch_name],
+            cwd=WORKDIR, capture_output=True, check=True,
+        )
+        result = subprocess.run(
+            ["gh", "pr", "create", "--title", title, "--body", body, "--base", base],
+            cwd=WORKDIR, capture_output=True, text=True, check=True,
+        )
+        pr_url = result.stdout.strip()
+        log("pr", {"url": pr_url, "branch": branch_name, "title": title})
+        return pr_url
+
+    except subprocess.CalledProcessError as e:
+        emit(f"  [PR] Command failed: {e.stderr}")
+        log("pr_error", {"error": str(e)})
+        return None
+
+
 def _default_config_path():
     """Find config/agent.toml relative to the package."""
     pkg = Path(__file__).parent.parent / "config" / "agent.toml"
@@ -414,8 +570,10 @@ def main():
     log("start", {"issue": issue_text[:200]})
 
     done_rejected = 0  # how many times we rejected DONE
+    quality_rejected = 0
 
     max_rejections = _CONFIG["verification"]["max_rejections"]
+    max_quality_rounds = _CONFIG.get("quality", {}).get("max_fix_rounds", 3)
     for step in range(max_steps):
         emit(f"\n>>> Step {step} — requesting LLM...")
         t0 = time.time()
@@ -476,6 +634,23 @@ def main():
                     log("verify_result", {"verified": verified, "message": verify_msg, "test_file": test_file})
 
                     if verified:
+                        # --- QUALITY ENFORCEMENT ---
+                        if _CONFIG.get("quality", {}).get("enabled", False):
+                            emit("\n=== QUALITY CHECKS ===")
+                            quality_ok, quality_msg = run_quality_checks(test_file)
+                            emit(f"  [QUALITY] {quality_msg[:200]}")
+                            log("quality", {"passed": quality_ok, "message": quality_msg[:500]})
+
+                            if not quality_ok:
+                                quality_rejected += 1
+                                if quality_rejected >= max_quality_rounds:
+                                    emit(f"\n  [GIVE UP] Quality failed {quality_rejected} times. Stopping.")
+                                    log("quality_give_up", {"step": step, "quality_rejected": quality_rejected})
+                                    return 1
+                                messages.append(msg)
+                                messages.append({"role": "user", "content": quality_msg})
+                                continue
+
                         emit(f"\n{'='*60}")
                         emit(f"AGENT DONE at step {step} — VERIFIED")
                         emit(f"{'='*60}")
@@ -492,6 +667,15 @@ def main():
                                         emit(fh.read())
                                 except OSError:
                                     pass
+                        # --- PR CREATION ---
+                        if _CONFIG.get("pr", {}).get("enabled", False):
+                            emit("\n=== PR CREATION ===")
+                            pr_url = create_pr(messages, msg, test_file, step)
+                            if pr_url:
+                                emit(f"  [PR] {pr_url}")
+                            else:
+                                emit("  [PR] Failed — diff printed above, create PR manually")
+
                         log("done", {"step": step, "verified": True})
                         return 0
                     else:

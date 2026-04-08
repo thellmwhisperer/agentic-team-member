@@ -52,6 +52,30 @@ class TestLoadConfig:
         cfg = load_config(tmp_path / "agent.toml")
         assert cfg["verification"]["max_rejections"] == 3
 
+    def test_quality_section_optional(self, tmp_path):
+        """Config without [quality] loads fine (backward compat)."""
+        _write_config(tmp_path)
+        cfg = load_config(tmp_path / "agent.toml")
+        # No quality section in minimal config → empty dict or missing
+        assert cfg.get("quality", {}).get("enabled", False) is False
+
+    def test_production_quality_section(self):
+        """Production config has quality section with expected structure."""
+        prod = Path(__file__).parent.parent / "config" / "agent.toml"
+        cfg = load_config(prod)
+        assert cfg["quality"]["enabled"] is True
+        assert cfg["quality"]["max_fix_rounds"] == 3
+        assert len(cfg["quality"]["typescript"]["checks"]) == 3
+        assert "as any" in cfg["quality"]["typescript"]["forbidden"]
+        assert len(cfg["quality"]["python"]["checks"]) == 3
+
+    def test_production_pr_section(self):
+        """Production config has pr section."""
+        prod = Path(__file__).parent.parent / "config" / "agent.toml"
+        cfg = load_config(prod)
+        assert cfg["pr"]["enabled"] is False
+        assert cfg["pr"]["base_branch"] == "main"
+
     def test_tools_path_relative_to_toml(self, tmp_path):
         """tools.json path in TOML is relative to the TOML file's directory."""
         sub = tmp_path / "nested"
