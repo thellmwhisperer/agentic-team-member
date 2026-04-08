@@ -67,15 +67,41 @@ languages/
 
 Each plugin provides: `parse_imports`, `parse_assignments`, `test_path`, `setter_name`, `is_exported`, `import_path`, `render_seam_setter`.
 
-## Skills (future)
+## Skills
 
-ATM is designed as a multi-skill agent. Each skill is a different cookbook strategy sharing the same agent loop:
+ATM is one agent with multiple skills. Each skill is a different cookbook — the agent loop, verifier, and language plugins are shared. Teaching ATM a new skill means writing a new cookbook, not a new agent.
 
 ```bash
 atm fix --issue 41              # TDD fix (current)
-atm migrate --pr 123            # Apply migration guide to Dependabot PR (future)
-atm review --pr 456             # Code review (future)
+atm migrate --pr 123            # Dependency migration (planned)
+atm refactor --symbol X         # Codemod (planned)
 ```
+
+### fix (current)
+
+Receives a bug report, analyzes the target function, generates mock recipes, writes a failing test, fixes the code, verifies red-green, opens a PR. The full TDD cycle.
+
+### migrate (planned)
+
+The Dependabot problem: Dependabot opens a PR bumping a dependency from v3 to v4, but doesn't fix the breaking changes. You have to read the migration guide, understand what broke, and fix it file by file.
+
+ATM can do this. The migration cookbook reads the upgrade guide (a URL or markdown file), extracts transformation rules (class renames, API changes, config changes), and generates a deterministic artefact. The agent applies the rules file by file, runs the build and tests after each batch, and pushes to the same Dependabot PR.
+
+Renovate can't do this either. No tool in the ecosystem closes this gap today.
+
+### refactor (planned)
+
+Large-scale codemods guided by rules — not regex replacement, but an agent that understands the code. Same pattern: a cookbook generates the transformation rules, the agent applies them with verification.
+
+### The pattern
+
+Every skill follows the same architecture:
+
+1. **Cookbook** (deterministic) — analyze the problem, generate an artefact
+2. **Agent** (LLM) — execute the plan with tools
+3. **Verifier** (deterministic) — confirm the work is correct
+
+What changes between skills is step 1. The cookbook is the semantic layer — it's what turns a generic model into a specialist.
 
 ## Benchmark
 
