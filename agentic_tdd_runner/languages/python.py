@@ -6,10 +6,10 @@ from pathlib import PurePosixPath
 
 from agentic_tdd_runner.languages import register
 
-_PY_FROM_IMPORT_RE = re.compile(
-    r"^\s*from\s+([.\w]+)\s+import\s+\(([^)]+)\)|^\s*from\s+([.\w]+)\s+import\s+(.+)$",
-    re.MULTILINE | re.DOTALL,
+_PY_FROM_IMPORT_PAREN_RE = re.compile(
+    r"^\s*from\s+([.\w]+)\s+import\s+\(([^)]+)\)", re.MULTILINE | re.DOTALL,
 )
+_PY_FROM_IMPORT_RE = re.compile(r"^\s*from\s+([.\w]+)\s+import\s+(.+)$", re.MULTILINE)
 _PY_IMPORT_RE = re.compile(r"^\s*import\s+(.+)$", re.MULTILINE)
 _TOP_LEVEL_PY_ASSIGN_RE = re.compile(r"^([A-Za-z_]\w*)(?:\s*:\s*[^=]+)?\s*=\s*(.+)\s*$")
 
@@ -21,23 +21,15 @@ class PythonLanguage:
 
     def parse_imports(self, source_text: str) -> dict:
         imports = {}
+        # First pass: parenthesized imports (from pkg import (\n    a,\n    b\n))
+        for match in _PY_FROM_IMPORT_PAREN_RE.finditer(source_text):
+            self._add_from_imports(imports, match.group(1), match.group(2))
+        # Second pass: single-line imports (from pkg import a, b)
         for match in _PY_FROM_IMPORT_RE.finditer(source_text):
-            # Groups 1,2 = parenthesized form; groups 3,4 = single-line form
-            module_name = match.group(1) or match.group(3)
-            names_str = match.group(2) or match.group(4)
-            for piece in names_str.split(","):
-                item = piece.strip()
-                if not item:
-                    continue
-                if " as " in item:
-                    export_name, local_name = [p.strip() for p in item.split(" as ", 1)]
-                else:
-                    export_name = local_name = item
-                imports[local_name] = {
-                    "source_module": module_name,
-                    "export_name": export_name,
-                    "import_kind": "named",
-                }
+            # Skip if this line is part of a parenthesized import (has opening paren)
+            if "(" in match.group(0):
+                continue
+            self._add_from_imports(imports, match.group(1), match.group(2))
         for match in _PY_IMPORT_RE.finditer(source_text):
             for piece in match.group(1).split(","):
                 item = piece.strip()
@@ -53,6 +45,22 @@ class PythonLanguage:
                     "import_kind": "module",
                 }
         return imports
+
+    @staticmethod
+    def _add_from_imports(imports, module_name, names_str):
+        for piece in names_str.split(","):
+            item = piece.strip()
+            if not item:
+                continue
+            if " as " in item:
+                export_name, local_name = [p.strip() for p in item.split(" as ", 1)]
+            else:
+                export_name = local_name = item
+            imports[local_name] = {
+                "source_module": module_name,
+                "export_name": export_name,
+                "import_kind": "named",
+            }
 
     def parse_assignments(self, source_text: str) -> dict:
         assignments = {}

@@ -154,6 +154,11 @@ def _build_pytest_scaffold(contract):
     needs_patch = bool(module_load_dependencies)
 
     # Build patch context managers for module-load deps
+    # If the assertion surface targets a module_load member, extract its spy as named var
+    a_binding = assertion_surface.get("binding")
+    a_member = assertion_surface.get("member")
+    spy_preamble_lines = []
+
     patch_lines = []
     for dep in _merge_module_mock_dependencies(module_load_dependencies):
         if dep.get("strategy") != "mock_module":
@@ -162,7 +167,15 @@ def _build_pytest_scaffold(contract):
         required_shape = dep.get("required_shape", {})
         for export_name, members in required_shape.items():
             if isinstance(members, list) and members:
-                mock_kwargs = ", ".join(f"{m}=Mock()" for m in members)
+                member_mocks = []
+                for m in members:
+                    if m == a_member and dep["binding"] == a_binding:
+                        spy_name = f"{a_binding}_{a_member}_spy"
+                        spy_preamble_lines.append(f"{spy_name} = Mock()")
+                        member_mocks.append(f"{m}={spy_name}")
+                    else:
+                        member_mocks.append(f"{m}=Mock()")
+                mock_kwargs = ", ".join(member_mocks)
                 factory_mock = f"Mock(return_value=Mock({mock_kwargs}))"
             elif isinstance(members, list):
                 factory_mock = "Mock()"
@@ -253,6 +266,7 @@ def _build_pytest_scaffold(contract):
             patch_lines=patch_lines,
             source_import_path=source_import_path,
             import_names=import_names,
+            spy_preamble_lines=spy_preamble_lines,
         ),
     }
 
@@ -398,6 +412,11 @@ def _render_assertion(assertion_surface, *, runner):
             f"expect({spy_name}).toHaveBeenCalledWith("
             "/* TODO: channel */, expected_message);"
         )
+    if kind == "outbound_call":
+        spy_name = f"{binding}_spy"
+        if runner == "pytest":
+            return f"{spy_name}.assert_called_with(expected_value)"
+        return f"expect({spy_name}).toHaveBeenCalledWith(expected_message);"
     if kind == "return_value":
         if runner == "pytest":
             return "assert result == expected_value"
@@ -420,6 +439,7 @@ def _render_full_test(
     patch_lines=None,
     source_import_path=None,
     import_names=None,
+    spy_preamble_lines=None,
 ):
     if runner == "pytest":
         parts = [imports_block, ""]
@@ -431,6 +451,12 @@ def _render_full_test(
                 "",
                 f"def test_{target_name}():",
             ])
+            # Spy preamble: named spy variables must be defined before the patch
+            # so they can be referenced inside the patch Mock() call
+            if spy_preamble_lines:
+                for spl in spy_preamble_lines:
+                    parts.append(f"    {spl}")
+                parts.append("")
             indent = 4
             for pl in patch_lines:
                 parts.append(f"{' ' * indent}with {pl}:")
