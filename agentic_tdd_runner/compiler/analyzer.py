@@ -389,7 +389,7 @@ def _build_pattern_files(pattern_files, tdd):
         reusable_shapes = []
         try:
             content = tdd.read_file(path)["content"]
-        except Exception:
+        except (FileNotFoundError, PermissionError, OSError, KeyError):
             content = ""
         if "mock.module(" in content:
             reusable_shapes.append("mock.module(...)")

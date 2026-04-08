@@ -218,10 +218,10 @@ class TestPytestScaffoldModuleLoadDeps:
         rendered = contract["scaffold"]["rendered_test"]
         lines = rendered.splitlines()
         import_line = next(
-            (i for i, l in enumerate(lines) if "from src.worker import" in l), None
+            (i for i, line in enumerate(lines) if "from src.worker import" in line), None
         )
         def_line = next(
-            (i for i, l in enumerate(lines) if l.strip().startswith("def test_")), None
+            (i for i, line in enumerate(lines) if line.strip().startswith("def test_")), None
         )
         assert import_line is not None and def_line is not None
         assert import_line > def_line, (

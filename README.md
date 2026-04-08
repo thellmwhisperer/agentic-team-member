@@ -1,6 +1,6 @@
 # ATM — Agentic Team Member
 
-Point a local LLM at a bug. Get back a fix with tests and a pull request.
+Point a local LLM at a bug. Get back a fix with tests — verified red-green.
 
 ## What it does
 
@@ -9,13 +9,13 @@ Given a GitHub issue and a repository, ATM:
 1. **Generates a cookbook** — deterministic static analysis of the target function: imports, dependency graph, mock strategies, test scaffolds. No LLM involved.
 2. **Runs an agent loop** — a local model (Qwen 3.5 27B) reads the source, applies the cookbook, writes failing tests, fixes the bug, and refactors.
 3. **Verifies red-green** — reverts the fix and runs the test (must fail), restores and runs again (must pass). If both pass, the fix is real.
-4. **Opens a pull request** — the model writes the commit message and PR description. The harness executes git and GitHub operations.
+4. **Outputs a verified diff** — the harness prints the git diff and new files. PR submission is planned but not yet implemented.
 
 ## Architecture
 
-```
+```text
 ┌─────────────────────────────────────────────────────┐
-│                    CLI: atm fix                      │
+│              python -m agentic_tdd_runner.agent       │
 │   repo + issue + source + symbol + model endpoint    │
 └──────────────┬──────────────────────────────────────┘
                │
@@ -58,7 +58,7 @@ The cookbook solves this deterministically before the agent starts:
 
 Languages are plugins. Adding a new language requires zero changes to existing code:
 
-```
+```text
 languages/
   typescript.py   # TS/JS: bun:test, mock.module(), export detection
   python.py       # Python: pytest, unittest.mock, class method support
@@ -79,7 +79,7 @@ atm refactor --symbol X         # Codemod (planned)
 
 ### fix (current)
 
-Receives a bug report, analyzes the target function, generates mock recipes, writes a failing test, fixes the code, verifies red-green, opens a PR. The full TDD cycle.
+Receives a bug report, analyzes the target function, generates mock recipes, writes a failing test, fixes the code, verifies red-green, outputs the diff. The full TDD cycle.
 
 ### migrate (planned)
 
@@ -149,7 +149,7 @@ system = """..."""
 - `requests`
 - A local LLM server: [llama-server](https://github.com/ggml-org/llama.cpp) or [Ollama](https://ollama.ai)
 - A GGUF model with tool-calling support (tested with Qwen 3.5 27B)
-- `gh` CLI (for PR creation)
+- `gh` CLI (planned, for future PR creation)
 
 ## Usage
 

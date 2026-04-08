@@ -9,7 +9,7 @@ from agentic_tdd_runner.cookbook import generate_cookbook
 # ── Fixtures ────────────────────────────────────────────────────────
 
 
-def _write_ts(tmp_path, relative_path, content):
+def _write_file(tmp_path, relative_path, content):
     path = tmp_path / relative_path
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(textwrap.dedent(content))
@@ -23,7 +23,7 @@ class TestMinimalTsFunction:
     """Minimal TS function with one import → generates correct mock.module."""
 
     def test_contains_mock_module_block(self, tmp_path):
-        _write_ts(tmp_path, "src/utils.ts", """\
+        _write_file(tmp_path, "src/utils.ts", """\
             import { getLogger } from '../logger';
 
             const logger = getLogger();
@@ -37,7 +37,7 @@ class TestMinimalTsFunction:
         assert "../logger" in result
 
     def test_contains_test_scaffold(self, tmp_path):
-        _write_ts(tmp_path, "src/utils.ts", """\
+        _write_file(tmp_path, "src/utils.ts", """\
             import { getLogger } from '../logger';
 
             const logger = getLogger();
@@ -51,7 +51,7 @@ class TestMinimalTsFunction:
         assert "greet" in result
 
     def test_contains_import_path(self, tmp_path):
-        _write_ts(tmp_path, "src/utils.ts", """\
+        _write_file(tmp_path, "src/utils.ts", """\
             import { getLogger } from '../logger';
 
             const logger = getLogger();
@@ -69,7 +69,7 @@ class TestUnexportedFunction:
     """Non-exported function → cookbook includes export instruction."""
 
     def test_includes_export_edit(self, tmp_path):
-        _write_ts(tmp_path, "src/internal.ts", """\
+        _write_file(tmp_path, "src/internal.ts", """\
             function secret(): string {
               return 'hidden';
             }
@@ -83,7 +83,7 @@ class TestFactoryDependency:
     """Factory pattern: const logger = getLogger() → mock with factory shape."""
 
     def test_mock_has_factory_shape(self, tmp_path):
-        _write_ts(tmp_path, "src/service.ts", """\
+        _write_file(tmp_path, "src/service.ts", """\
             import { getLogger } from '../logger';
 
             const logger = getLogger();
@@ -105,7 +105,7 @@ class TestModuleLocalMutable:
     """Module-local mutable binding (let client) → test seam setter."""
 
     def test_includes_seam_setter(self, tmp_path):
-        _write_ts(tmp_path, "src/bot.ts", """\
+        _write_file(tmp_path, "src/bot.ts", """\
             let client: any;
 
             export function sendMessage(channel: string, msg: string): void {
@@ -122,7 +122,7 @@ class TestAssertionSurfaceScoring:
     """Assertion surface: say (120) > info (10) > get (-10)."""
 
     def test_picks_say_over_info(self, tmp_path):
-        _write_ts(tmp_path, "src/handler.ts", """\
+        _write_file(tmp_path, "src/handler.ts", """\
             import { getLogger } from '../logger';
 
             const logger = getLogger();
@@ -143,7 +143,7 @@ class TestPythonSource:
     """Python source → generates pytest scaffold, not bun:test."""
 
     def test_uses_pytest(self, tmp_path):
-        _write_ts(tmp_path, "src/worker.py", """\
+        _write_file(tmp_path, "src/worker.py", """\
             from src.logger import get_logger
 
             logger = get_logger()
@@ -161,7 +161,7 @@ class TestNoDependencies:
     """Pure function with no deps → clean scaffold, no mocks section."""
 
     def test_no_mock_blocks(self, tmp_path):
-        _write_ts(tmp_path, "src/math.ts", """\
+        _write_file(tmp_path, "src/math.ts", """\
             export function add(a: number, b: number): number {
               return a + b;
             }
@@ -176,7 +176,7 @@ class TestAssertionPrefersReturnOverParamCall:
     """When a function returns a value, prefer return_value over spying on param methods."""
 
     def test_return_value_over_param_method(self, tmp_path):
-        _write_ts(tmp_path, "src/utils.ts", """\
+        _write_file(tmp_path, "src/utils.ts", """\
             export function process(item: string): string {
               return item.toUpperCase();
             }
@@ -192,7 +192,7 @@ class TestDiscoverDependenciesExcludesTarget:
     """_discover_dependencies must not treat the target symbol as a dependency."""
 
     def test_const_export_not_treated_as_seam(self, tmp_path):
-        _write_ts(tmp_path, "src/handler.ts", """\
+        _write_file(tmp_path, "src/handler.ts", """\
             import { getLogger } from '../logger';
 
             const logger = getLogger();
@@ -210,7 +210,7 @@ class TestDirectCallableScaffold:
     """Direct callable (send(item)) must produce a scaffold with the spy defined."""
 
     def test_spy_variable_defined(self, tmp_path):
-        _write_ts(tmp_path, "src/notifier.py", """\
+        _write_file(tmp_path, "src/notifier.py", """\
             from alerts import send
 
             def process(item):
@@ -231,7 +231,7 @@ class TestDirectImportWithMembers:
     """from pkg import logger; logger.info(x) — patch shape must be correct."""
 
     def test_patches_module_not_member(self, tmp_path):
-        _write_ts(tmp_path, "src/worker.py", """\
+        _write_file(tmp_path, "src/worker.py", """\
             from pkg import logger
 
             def process(item):
@@ -247,7 +247,7 @@ class TestDirectImportWithMembers:
     def test_direct_import_object_not_wrapped_as_factory(self, tmp_path):
         """Direct import (from pkg import logger) must patch with Mock(info=spy),
         not Mock(return_value=Mock(info=spy)) which is for factories."""
-        _write_ts(tmp_path, "src/worker.py", """\
+        _write_file(tmp_path, "src/worker.py", """\
             from pkg import logger
 
             def process(item):
@@ -265,7 +265,7 @@ class TestVarExportMechanical:
     """var declarations must get mechanical export like const and let."""
 
     def test_var_target_gets_export(self, tmp_path):
-        _write_ts(tmp_path, "src/handler.ts", """\
+        _write_file(tmp_path, "src/handler.ts", """\
             var process = function(item) {
               return item;
             };
@@ -278,7 +278,7 @@ class TestPythonClassMethod:
     """Class methods should be identified and the class name referenced."""
 
     def test_class_method_references_class(self, tmp_path):
-        _write_ts(tmp_path, "src/calc.py", """\
+        _write_file(tmp_path, "src/calc.py", """\
             class Calculator:
                 def add(self, a, b):
                     return a + b
@@ -288,7 +288,7 @@ class TestPythonClassMethod:
         assert "method" in result.lower()
 
     def test_scaffold_imports_class_not_method(self, tmp_path):
-        _write_ts(tmp_path, "src/calc.py", """\
+        _write_file(tmp_path, "src/calc.py", """\
             class Calculator:
                 def add(self, a, b):
                     return a + b
@@ -304,7 +304,7 @@ class TestArrowFunctionSignature:
     """Arrow function exports must have their signature detected."""
 
     def test_arrow_function_params_in_scaffold(self, tmp_path):
-        _write_ts(tmp_path, "src/handler.ts", """\
+        _write_file(tmp_path, "src/handler.ts", """\
             import { getLogger } from '../logger';
 
             const logger = getLogger();
@@ -324,7 +324,7 @@ class TestModuleLevelDepsIncluded:
     """Cookbook must include module-level deps that run on import, not just function deps."""
 
     def test_includes_factory_calls_at_module_level(self, tmp_path):
-        _write_ts(tmp_path, "src/service.ts", """\
+        _write_file(tmp_path, "src/service.ts", """\
             import { env } from '../env';
             import { getLogger } from '../logger';
             import { getTokenManager } from './token';
@@ -349,7 +349,7 @@ class TestMultiLineSignatureDetection:
     """TS functions with multi-line signatures must be fully captured."""
 
     def test_multiline_signature_captures_body(self, tmp_path):
-        _write_ts(tmp_path, "src/handler.ts", """\
+        _write_file(tmp_path, "src/handler.ts", """\
             import { getLogger } from '../logger';
 
             const logger = getLogger();
@@ -373,7 +373,7 @@ class TestSingleParamArrowFunction:
     """Single-param arrow functions without parens must be detected."""
 
     def test_single_param_arrow_detected(self, tmp_path):
-        _write_ts(tmp_path, "src/utils.ts", """\
+        _write_file(tmp_path, "src/utils.ts", """\
             export const double = x => x * 2;
         """)
         result = generate_cookbook("src/utils.ts", "double", str(tmp_path))
@@ -385,7 +385,7 @@ class TestPythonReturnValueScaffold:
     """Python scaffold must not produce 'result = result = fn()'."""
 
     def test_no_double_assignment(self, tmp_path):
-        _write_ts(tmp_path, "src/worker.py", """\
+        _write_file(tmp_path, "src/worker.py", """\
             def process(item):
                 return item.upper()
         """)
@@ -397,7 +397,7 @@ class TestFindFunctionEndPython:
     """_find_function_end correctly bounds class methods, not just top-level."""
 
     def test_class_method_stops_at_next_sibling(self, tmp_path):
-        _write_ts(tmp_path, "src/calc.py", """\
+        _write_file(tmp_path, "src/calc.py", """\
             class Calculator:
                 def add(self, a, b):
                     return a + b
@@ -419,7 +419,7 @@ class TestBuildSystemPrompt:
     def test_injects_cookbook_section(self, tmp_path):
         from agentic_tdd_runner.cookbook import build_system_prompt
 
-        _write_ts(tmp_path, "src/service.ts", """\
+        _write_file(tmp_path, "src/service.ts", """\
             import { getLogger } from '../logger';
 
             const logger = getLogger();
