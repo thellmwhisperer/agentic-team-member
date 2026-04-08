@@ -1,0 +1,61 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "read_file",
+      "description": "Read the contents of a file. If path is a directory, lists its contents.",
+      "parameters": {
+        "type": "object",
+        "required": ["path"],
+        "properties": {
+          "path": { "type": "string", "description": "Path relative to the repo root" }
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "run_command",
+      "description": "Run a shell command in the repo root and return stdout+stderr. Use for: grep, find, running tests (bun test <file>), git diff, etc.",
+      "parameters": {
+        "type": "object",
+        "required": ["command"],
+        "properties": {
+          "command": { "type": "string", "description": "Shell command to execute" }
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "str_replace_editor",
+      "description": "Replace an exact string in a file with new content. old_str must match exactly (including whitespace). Use for editing source code.",
+      "parameters": {
+        "type": "object",
+        "required": ["path", "old_str", "new_str"],
+        "properties": {
+          "path": { "type": "string", "description": "Path relative to repo root" },
+          "old_str": { "type": "string", "description": "Exact string to find (must match file content exactly)" },
+          "new_str": { "type": "string", "description": "Replacement string" }
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "create_file",
+      "description": "Create a new file with the given content. Fails if the file already exists.",
+      "parameters": {
+        "type": "object",
+        "required": ["path", "content"],
+        "properties": {
+          "path": { "type": "string", "description": "Path relative to repo root" },
+          "content": { "type": "string", "description": "Full file content" }
+        }
+      }
+    }
+  }
+]
