@@ -244,6 +244,22 @@ class TestDirectImportWithMembers:
         # Should patch the object: patch('pkg.logger', ...)
         assert "patch('pkg.logger'" in result
 
+    def test_direct_import_object_not_wrapped_as_factory(self, tmp_path):
+        """Direct import (from pkg import logger) must patch with Mock(info=spy),
+        not Mock(return_value=Mock(info=spy)) which is for factories."""
+        _write_ts(tmp_path, "src/worker.py", """\
+            from pkg import logger
+
+            def process(item):
+                logger.info(item)
+                return item.upper()
+        """)
+        result = generate_cookbook("src/worker.py", "process", str(tmp_path))
+        # Must NOT use return_value — logger is an object, not a factory
+        assert "return_value" not in result
+        # Must use direct Mock(info=spy)
+        assert "Mock(info=logger_info_spy)" in result
+
 
 class TestVarExportMechanical:
     """var declarations must get mechanical export like const and let."""
