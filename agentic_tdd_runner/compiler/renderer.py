@@ -152,14 +152,8 @@ def _build_pytest_scaffold(contract):
         if setter_name and setter_name not in import_names:
             import_names.append(setter_name)
     needs_patch = bool(module_load_dependencies)
-    imports_block = (
-        f"from unittest.mock import Mock{', patch' if needs_patch else ''}\n"
-        f"from {source_import_path} import {', '.join(import_names)}"
-    )
-    arrange_lines = []
-    todo_slots = []
 
-    # Module-load dependencies → patch decorators or context managers
+    # Build patch context managers for module-load deps
     patch_lines = []
     for dep in _merge_module_mock_dependencies(module_load_dependencies):
         if dep.get("strategy") != "mock_module":
@@ -175,9 +169,22 @@ def _build_pytest_scaffold(contract):
             else:
                 factory_mock = "Mock()"
             patch_lines.append(
-                f"@patch('{module_path}.{export_name}', {factory_mock})"
+                f"patch('{module_path}.{export_name}', {factory_mock})"
             )
-    module_mocks_block = "\n".join(patch_lines) if patch_lines else ""
+
+    if needs_patch:
+        # Only import Mock/patch at top level; target imported inside test after patches
+        imports_block = (
+            f"from unittest.mock import Mock, patch"
+        )
+    else:
+        imports_block = (
+            f"from unittest.mock import Mock\n"
+            f"from {source_import_path} import {', '.join(import_names)}"
+        )
+    module_mocks_block = ""
+    arrange_lines = []
+    todo_slots = []
 
     for dep in execution_dependencies:
         binding = dep["binding"]
@@ -243,6 +250,9 @@ def _build_pytest_scaffold(contract):
             act_block=act_block,
             assert_block=assert_block,
             runner="pytest",
+            patch_lines=patch_lines,
+            source_import_path=source_import_path,
+            import_names=import_names,
         ),
     }
 
@@ -255,12 +265,21 @@ def _parse_signature_params(signature):
     raw = match.group(1).strip()
     if not raw:
         return []
-    # Split on commas that are not inside brackets/parens
+    # Split on commas that are not inside brackets/parens/strings
     params = []
     depth = 0
+    in_string = None
     current = []
     for ch in raw:
-        if ch in "([{<":
+        if in_string:
+            current.append(ch)
+            if ch == in_string:
+                in_string = None
+            continue
+        if ch in ("'", '"'):
+            in_string = ch
+            current.append(ch)
+        elif ch in "([{<":
             depth += 1
             current.append(ch)
         elif ch in ")]}>":
@@ -398,22 +417,51 @@ def _render_full_test(
     act_block,
     assert_block,
     runner,
+    patch_lines=None,
+    source_import_path=None,
+    import_names=None,
 ):
     if runner == "pytest":
         parts = [imports_block, ""]
-        if module_mocks_block:
-            parts.extend([module_mocks_block, ""])
-        parts.extend(
-            [
+        if patch_lines:
+            # Module-load deps need patching before import.
+            # Use `with patch(...)` inside the test so the target module
+            # is imported after the patches are active.
+            parts.extend([
+                "",
                 f"def test_{target_name}():",
-                _indent_block(arrange_block, 4),
-                "",
-                _indent_block(act_block if act_block.startswith("result") else f"result = {act_block}", 4),
-                "",
-                _indent_block(assert_block, 4),
-                "",
-            ]
-        )
+            ])
+            indent = 4
+            for pl in patch_lines:
+                parts.append(f"{' ' * indent}with {pl}:")
+                indent += 4
+            # Lazy import inside the with block
+            names = ", ".join(import_names or [target_name])
+            parts.append(f"{' ' * indent}from {source_import_path} import {names}")
+            parts.append("")
+            parts.append(_indent_block(arrange_block, indent))
+            parts.append("")
+            parts.append(_indent_block(
+                act_block if act_block.startswith("result") else f"result = {act_block}",
+                indent,
+            ))
+            parts.append("")
+            parts.append(_indent_block(assert_block, indent))
+            parts.append("")
+        else:
+            if module_mocks_block:
+                parts.extend([module_mocks_block, ""])
+            parts.extend(
+                [
+                    f"def test_{target_name}():",
+                    _indent_block(arrange_block, 4),
+                    "",
+                    _indent_block(act_block if act_block.startswith("result") else f"result = {act_block}", 4),
+                    "",
+                    _indent_block(assert_block, 4),
+                    "",
+                ]
+            )
         return "\n".join(parts).rstrip() + "\n"
 
     return (

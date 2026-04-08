@@ -212,6 +212,25 @@ class TestPytestScaffoldModuleLoadDeps:
         rendered = contract["scaffold"]["rendered_test"]
         assert "patch" in rendered or "mock" in rendered.lower()
 
+    def test_pytest_imports_after_patches_active(self):
+        """Target import must happen after patches are active, not at module level."""
+        contract = build_contract(self._pytest_facts())
+        rendered = contract["scaffold"]["rendered_test"]
+        # The import of the target should be inside the test function (after patches),
+        # not at module top level where module-load factories would run unpatched
+        lines = rendered.splitlines()
+        import_line = next(
+            (i for i, l in enumerate(lines) if "from src.worker import" in l), None
+        )
+        def_line = next(
+            (i for i, l in enumerate(lines) if l.strip().startswith("def test_")), None
+        )
+        assert import_line is not None and def_line is not None
+        assert import_line > def_line, (
+            f"Target import at line {import_line} must be inside the test function "
+            f"(after def at line {def_line}), not at module level"
+        )
+
 
 class TestBunScaffoldSpyBinding:
     """When assertion targets a module_load dep, the spy must be a named variable."""
@@ -278,3 +297,11 @@ class TestParseSignatureParams:
     def test_python_defaults(self):
         result = _parse_signature_params("foo(a: str, b=10)")
         assert result == ["a", "b"]
+
+    def test_string_default_with_comma(self):
+        result = _parse_signature_params("process(message: str = 'a,b')")
+        assert result == ["message"]
+
+    def test_double_quote_string_default(self):
+        result = _parse_signature_params('process(sep: str = ",", count: int = 1)')
+        assert result == ["sep", "count"]

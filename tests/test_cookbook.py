@@ -206,6 +206,19 @@ class TestDiscoverDependenciesExcludesTarget:
         assert "__setProcessForTests" not in result
 
 
+class TestVarExportMechanical:
+    """var declarations must get mechanical export like const and let."""
+
+    def test_var_target_gets_export(self, tmp_path):
+        _write_ts(tmp_path, "src/handler.ts", """\
+            var process = function(item) {
+              return item;
+            };
+        """)
+        result = generate_cookbook("src/handler.ts", "process", str(tmp_path))
+        assert "export" in result
+
+
 class TestPythonClassMethod:
     """Class methods should be identified and the class name referenced."""
 

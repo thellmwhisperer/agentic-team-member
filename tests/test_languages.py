@@ -89,6 +89,15 @@ class TestPythonPlugin:
         assert "get_logger" in imports
         assert imports["get_logger"]["source_module"] == "src.logger"
 
+    def test_parses_parenthesized_from_import(self):
+        lang = get_language("file.py")
+        source = "from pkg import (\n    client,\n    logger,\n)"
+        imports = lang.parse_imports(source)
+        assert "client" in imports
+        assert "logger" in imports
+        assert imports["client"]["source_module"] == "pkg"
+        assert "(" not in imports  # must not parse the paren as a name
+
     def test_parses_top_level_assign(self):
         lang = get_language("file.py")
         assigns = lang.parse_assignments("logger = get_logger()")
