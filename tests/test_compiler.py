@@ -216,8 +216,6 @@ class TestPytestScaffoldModuleLoadDeps:
         """Target import must happen after patches are active, not at module level."""
         contract = build_contract(self._pytest_facts())
         rendered = contract["scaffold"]["rendered_test"]
-        # The import of the target should be inside the test function (after patches),
-        # not at module top level where module-load factories would run unpatched
         lines = rendered.splitlines()
         import_line = next(
             (i for i, l in enumerate(lines) if "from src.worker import" in l), None
@@ -230,6 +228,25 @@ class TestPytestScaffoldModuleLoadDeps:
             f"Target import at line {import_line} must be inside the test function "
             f"(after def at line {def_line}), not at module level"
         )
+
+    def test_pytest_spy_defined_for_assertion_surface(self):
+        """When assertion targets a module_load dep, the spy variable must exist."""
+        facts = self._pytest_facts()
+        # Make assertion target the module_load dep instead of execution dep
+        facts["assertion_surface"] = {
+            "kind": "outbound_call_arguments",
+            "binding": "logger",
+            "member": "info",
+            "assertion_shape": "toHaveBeenCalledWith(...)",
+        }
+        contract = build_contract(facts)
+        rendered = contract["scaffold"]["rendered_test"]
+        # The spy must be a named variable, not anonymous inside patch()
+        assert "logger_info_spy" in rendered
+        # And it must be defined before the assertion
+        spy_def = rendered.index("logger_info_spy")
+        assert_usage = rendered.index("logger_info_spy.assert_called_with")
+        assert spy_def < assert_usage
 
 
 class TestBunScaffoldSpyBinding:

@@ -3,6 +3,7 @@ from agentic_tdd_runner.compiler.analyzer import (
     _build_assertion_surface,
     _merge_required_shape_value,
 )
+from agentic_tdd_runner.compiler.renderer import _render_assertion
 
 
 class TestMergeRequiredShapeValue:
@@ -51,3 +52,21 @@ class TestBuildAssertionSurface:
         surface, gaps = _build_assertion_surface(explicit, "anything", "sym")
         assert surface["kind"] == "outbound_call_arguments"
         assert surface["binding"] == "x"
+
+
+class TestRenderAssertionDirectCall:
+    """outbound_call kind must render a usable assertion, not a TODO."""
+
+    def test_bun_direct_call_assertion(self):
+        surface = {"kind": "outbound_call", "binding": "send", "member": "send",
+                    "assertion_shape": "toHaveBeenCalled(...)"}
+        result = _render_assertion(surface, runner="bun:test")
+        assert "TODO" not in result
+        assert "send" in result
+
+    def test_pytest_direct_call_assertion(self):
+        surface = {"kind": "outbound_call", "binding": "send", "member": "send",
+                    "assertion_shape": "toHaveBeenCalled(...)"}
+        result = _render_assertion(surface, runner="pytest")
+        assert "TODO" not in result
+        assert "send" in result
