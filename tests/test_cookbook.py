@@ -206,6 +206,45 @@ class TestDiscoverDependenciesExcludesTarget:
         assert "__setProcessForTests" not in result
 
 
+class TestDirectCallableScaffold:
+    """Direct callable (send(item)) must produce a scaffold with the spy defined."""
+
+    def test_spy_variable_defined(self, tmp_path):
+        _write_ts(tmp_path, "src/notifier.py", """\
+            from alerts import send
+
+            def process(item):
+                send(item)
+        """)
+        result = generate_cookbook("src/notifier.py", "process", str(tmp_path))
+        assert "send_spy" in result
+        # spy must be defined before assertion
+        lines = result.splitlines()
+        def_lines = [i for i, l in enumerate(lines) if "send_spy" in l and "=" in l and "assert" not in l.lower()]
+        use_lines = [i for i, l in enumerate(lines) if "send_spy" in l and ("assert" in l.lower() or "expect" in l.lower())]
+        assert def_lines, "send_spy must be defined"
+        assert use_lines, "send_spy must be used in an assertion"
+        assert def_lines[0] < use_lines[0], "spy definition must precede assertion"
+
+
+class TestDirectImportWithMembers:
+    """from pkg import logger; logger.info(x) — patch shape must be correct."""
+
+    def test_patches_module_not_member(self, tmp_path):
+        _write_ts(tmp_path, "src/worker.py", """\
+            from pkg import logger
+
+            def process(item):
+                logger.info(item)
+                return item.upper()
+        """)
+        result = generate_cookbook("src/worker.py", "process", str(tmp_path))
+        # Should NOT patch individual members like patch('pkg.info')
+        assert "patch('pkg.info'" not in result
+        # Should patch the object: patch('pkg.logger', ...)
+        assert "patch('pkg.logger'" in result
+
+
 class TestVarExportMechanical:
     """var declarations must get mechanical export like const and let."""
 

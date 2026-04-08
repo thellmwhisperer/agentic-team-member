@@ -155,6 +155,7 @@ def _build_pytest_scaffold(contract):
 
     # Build patch context managers for module-load deps
     # If the assertion surface targets a module_load member, extract its spy as named var
+    a_kind = assertion_surface.get("kind")
     a_binding = assertion_surface.get("binding")
     a_member = assertion_surface.get("member")
     spy_preamble_lines = []
@@ -178,9 +179,22 @@ def _build_pytest_scaffold(contract):
                 mock_kwargs = ", ".join(member_mocks)
                 factory_mock = f"Mock(return_value=Mock({mock_kwargs}))"
             elif isinstance(members, list):
-                factory_mock = "Mock()"
+                # Empty members — direct import (e.g. from alerts import send)
+                # If this is the assertion binding, extract as named spy
+                if export_name == a_binding and a_kind == "outbound_call":
+                    spy_name = f"{a_binding}_spy"
+                    spy_preamble_lines.append(f"{spy_name} = Mock()")
+                    factory_mock = spy_name
+                else:
+                    factory_mock = "Mock()"
             else:
-                factory_mock = "Mock()"
+                # Scalar value like "function" or "value"
+                if export_name == a_binding and a_kind == "outbound_call":
+                    spy_name = f"{a_binding}_spy"
+                    spy_preamble_lines.append(f"{spy_name} = Mock()")
+                    factory_mock = spy_name
+                else:
+                    factory_mock = "Mock()"
             patch_lines.append(
                 f"patch('{module_path}.{export_name}', {factory_mock})"
             )
