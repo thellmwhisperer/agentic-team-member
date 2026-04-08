@@ -458,6 +458,40 @@ class TestRunQualityChecks:
         ok, msg = run_quality_checks("src/file.test.ts")
         assert ok is True
 
+    def test_detects_duplicated_setup_lines(self, tmp_path, monkeypatch):
+        self._setup_repo(tmp_path, monkeypatch)
+        test_file = tmp_path / "src" / "file.test.ts"
+        test_file.write_text(
+            "describe('x', () => {\n"
+            "  test('a', () => {\n"
+            "    const spy = mock(() => {});\n"
+            "    __setClient(spy);\n"
+            "    doThing();\n"
+            "  });\n"
+            "  test('b', () => {\n"
+            "    const spy = mock(() => {});\n"
+            "    __setClient(spy);\n"
+            "    doOther();\n"
+            "  });\n"
+            "  test('c', () => {\n"
+            "    const spy = mock(() => {});\n"
+            "    __setClient(spy);\n"
+            "    doAnother();\n"
+            "  });\n"
+            "});\n"
+        )
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "quality": {
+                "enabled": True, "max_fix_rounds": 3,
+                "typescript": {"checks": [], "forbidden": []},
+            },
+            "timeouts": {"tool_execution": 10},
+            "prompt": {"quality_failed": "FAIL: {details}"},
+        })
+        ok, msg = run_quality_checks("src/file.test.ts")
+        assert ok is False
+        assert "duplicated" in msg.lower() or "beforeEach" in msg
+
     def test_filters_by_language(self, tmp_path, monkeypatch):
         self._setup_repo(tmp_path, monkeypatch)
         (tmp_path / "src" / "test_worker.py").write_text("clean")

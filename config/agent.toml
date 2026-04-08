@@ -73,9 +73,12 @@ quality_failed = """QUALITY CHECK FAILED. Fix the issues below and say DONE agai
 
 pr_prompt = """All checks passed. Generate a pull request.
 
+Write the PR description in the voice/personality of the project (read the README if unsure).
+Keep the title short and conventional (fix:, feat:, etc.).
+
 Respond EXACTLY in this format:
-PR_TITLE: <short title, max 70 chars>
-PR_BODY: <markdown description: what the bug was, what the fix does, what tests were added>"""
+PR_TITLE: <short title, max 70 chars, conventional commit style>
+PR_BODY: <markdown description in the project's voice: what the bug was, what the fix does, what tests were added>"""
 
 [verification]
 max_rejections = 3
@@ -93,7 +96,7 @@ forbidden = ["as any", "eslint-disable", "@ts-ignore", "@ts-expect-error"]
 forbidden = ["type: ignore", "noqa"]
 
 [pr]
-enabled = false
+enabled = true
 base_branch = "main"
 branch_prefix = "atm/fix-"
 

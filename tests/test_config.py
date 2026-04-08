@@ -72,7 +72,7 @@ class TestLoadConfig:
         """Production config has pr section."""
         prod = Path(__file__).parent.parent / "config" / "agent.toml"
         cfg = load_config(prod)
-        assert cfg["pr"]["enabled"] is False
+        assert cfg["pr"]["enabled"] is True
         assert cfg["pr"]["base_branch"] == "main"
 
     def test_tools_path_relative_to_toml(self, tmp_path):

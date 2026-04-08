@@ -500,6 +500,27 @@ def run_quality_checks(test_file: str) -> tuple[bool, str]:
                         f"[Forbidden] '{pattern}' in {f}:{i}: {line.strip()}"
                     )
 
+    # Detect duplicated setup lines in test files
+    test_files = [f for f in changed if "test" in f]
+    for f in test_files:
+        full = os.path.join(WORKDIR, f)
+        if not os.path.isfile(full):
+            continue
+        try:
+            with open(full) as fh:
+                lines = [l.strip() for l in fh if l.strip() and len(l.strip()) > 20]
+        except OSError:
+            continue
+        from collections import Counter
+        counts = Counter(lines)
+        dupes = [line for line, n in counts.items() if n >= 3]
+        if dupes:
+            sample = "\n".join(f"  {n}x: {line[:80]}" for line, n in counts.items() if n >= 3)
+            failures.append(
+                f"[Duplicated setup] {f} has {len(dupes)} lines repeated 3+ times. "
+                f"Move shared setup to beforeEach (TS) or a fixture (Python):\n{sample}"
+            )
+
     if failures:
         details = "\n\n".join(failures)
         template = _CONFIG.get("prompt", {}).get(
