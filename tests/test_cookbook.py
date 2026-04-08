@@ -295,7 +295,8 @@ class TestPythonClassMethod:
         """)
         result = generate_cookbook("src/calc.py", "add", str(tmp_path))
         # Scaffold must import the class, not the bare method
-        assert "import add" not in result or "import Calculator" in result
+        assert "import Calculator" in result, "scaffold must import the class"
+        assert "import add" not in result, "scaffold must not import the bare method"
         # Scaffold must instantiate the class
         assert "Calculator()" in result
 
