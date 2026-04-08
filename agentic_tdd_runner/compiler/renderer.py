@@ -206,9 +206,7 @@ def _build_pytest_scaffold(contract):
 
     if needs_patch:
         # Only import Mock/patch at top level; target imported inside test after patches
-        imports_block = (
-            f"from unittest.mock import Mock, patch"
-        )
+        imports_block = "from unittest.mock import Mock, patch"
     else:
         imports_block = (
             f"from unittest.mock import Mock\n"

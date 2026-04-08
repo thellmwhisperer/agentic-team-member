@@ -78,8 +78,16 @@ _ALLOWED_COMMANDS = frozenset({
     "python", "python3", "pip", "pip3", "pytest",
     "echo", "sort", "uniq", "diff", "tr", "cut", "tee",
     "sed", "awk", "xargs", "dirname", "basename",
-    "tree", "file", "which", "env", "true", "false", "test",
+    "tree", "file", "which", "true", "false", "test",
 })
+
+# Flags that allow arbitrary code execution on otherwise safe binaries
+_BLOCKED_FLAGS = {
+    "python": {"-c"},
+    "python3": {"-c"},
+    "node": {"-e", "--eval"},
+    "deno": {"eval"},
+}
 
 
 def _validate_command(command: str) -> None:
@@ -87,6 +95,9 @@ def _validate_command(command: str) -> None:
     import shlex
     if not command or not command.strip():
         raise ValueError("empty command")
+    # Reject newlines — they bypass shell operator splitting
+    if "\n" in command:
+        raise ValueError("newlines not allowed in commands")
     # Split on shell operators to validate each sub-command
     parts = re.split(r"\s*(?:\|\||&&|[|;])\s*", command)
     for part in parts:
@@ -102,9 +113,38 @@ def _validate_command(command: str) -> None:
         binary = os.path.basename(tokens[0])
         if binary not in _ALLOWED_COMMANDS:
             raise ValueError(
-                f"command '{binary}' is not in the allowed list. "
+                f"command '{binary}' is not allowed. "
                 f"Allowed: {', '.join(sorted(_ALLOWED_COMMANDS))}"
             )
+        # Block dangerous flag combinations
+        blocked = _BLOCKED_FLAGS.get(binary, set())
+        if blocked:
+            for token in tokens[1:]:
+                if token in blocked:
+                    raise ValueError(
+                        f"flag '{token}' not allowed with '{binary}'"
+                    )
+        # Block env as a wrapper to run arbitrary binaries
+        if binary == "env":
+            # env VAR=val cmd or env cmd — validate the actual command too
+            for token in tokens[1:]:
+                if "=" in token:
+                    continue  # env var assignment
+                # This is the actual binary being wrapped
+                wrapped = os.path.basename(token)
+                if wrapped not in _ALLOWED_COMMANDS:
+                    raise ValueError(
+                        f"command '{wrapped}' (via env) is not allowed"
+                    )
+                # Check blocked flags for the wrapped binary too
+                wrapped_blocked = _BLOCKED_FLAGS.get(wrapped, set())
+                remaining = tokens[tokens.index(token) + 1:]
+                for flag in remaining:
+                    if flag in wrapped_blocked:
+                        raise ValueError(
+                            f"flag '{flag}' not allowed with '{wrapped}' (via env)"
+                        )
+                break
 
 
 def execute_tool(name: str, args: dict) -> str:
@@ -239,31 +279,38 @@ def verify_red_green(test_file: str) -> tuple[bool, str]:
     # Stash all changes including untracked (reverts source fix + new files)
     subprocess.run(["git", "stash", "--include-untracked"], cwd=WORKDIR, capture_output=True)
 
-    # Restore the test file so the red phase can run it
-    if test_backup:
-        os.makedirs(os.path.dirname(test_full), exist_ok=True)
-        shutil.copy2(test_backup, test_full)
-
     import shlex
     run_argv = shlex.split(run_cmd)
 
-    emit("  [RED] Running test WITHOUT fix...")
-    red_result = subprocess.run(
-        [*run_argv, test_file],
-        cwd=WORKDIR, capture_output=True, text=True, timeout=test_timeout,
-    )
-    red_passed = red_result.returncode == 0
-    red_output = (red_result.stdout + red_result.stderr)[:500]
-    emit(f"  [RED] exit={red_result.returncode} {'PASS (BAD!)' if red_passed else 'FAIL (good)'}")
-    for line in red_output.split("\n")[:10]:
-        emit(f"    {line}")
+    red_passed = False
+    red_output = ""
+    green_passed = False
+    green_output = ""
 
-    # Remove the restored test before popping stash (avoid conflict)
-    if test_backup:
-        os.remove(test_full)
-        os.remove(test_backup)
+    try:
+        # Restore the test file so the red phase can run it
+        if test_backup:
+            os.makedirs(os.path.dirname(test_full), exist_ok=True)
+            shutil.copy2(test_backup, test_full)
 
-    subprocess.run(["git", "stash", "pop"], cwd=WORKDIR, capture_output=True)
+        emit("  [RED] Running test WITHOUT fix...")
+        red_result = subprocess.run(
+            [*run_argv, test_file],
+            cwd=WORKDIR, capture_output=True, text=True, timeout=test_timeout,
+        )
+        red_passed = red_result.returncode == 0
+        red_output = (red_result.stdout + red_result.stderr)[:500]
+        emit(f"  [RED] exit={red_result.returncode} {'PASS (BAD!)' if red_passed else 'FAIL (good)'}")
+        for line in red_output.split("\n")[:10]:
+            emit(f"    {line}")
+    finally:
+        # Always clean up temp files and pop stash, even after exceptions
+        if test_backup:
+            if os.path.isfile(test_full):
+                os.remove(test_full)
+            if os.path.isfile(test_backup):
+                os.remove(test_backup)
+        subprocess.run(["git", "stash", "pop"], cwd=WORKDIR, capture_output=True)
 
     emit("  [GREEN] Running test WITH fix...")
     green_result = subprocess.run(

@@ -26,30 +26,30 @@ class TestBuildAssertionSurface:
 
     def test_param_method_prefers_return_value(self):
         snippet = "def process(item):\n    return item.upper()\n"
-        surface, gaps = _build_assertion_surface(None, snippet, "process")
+        surface, _ = _build_assertion_surface(None, snippet, "process")
         assert surface["kind"] == "return_value"
 
     def test_outbound_member_call(self):
         snippet = "function handle(ch) {\n  logger.send(ch, 'hi');\n}\n"
-        surface, gaps = _build_assertion_surface(None, snippet, "handle")
+        surface, _ = _build_assertion_surface(None, snippet, "handle")
         assert surface["kind"] == "outbound_call_arguments"
         assert surface["binding"] == "logger"
 
     def test_direct_callable_with_return(self):
         snippet = "def process(item):\n    return format_name(item)\n"
-        surface, gaps = _build_assertion_surface(None, snippet, "process")
+        surface, _ = _build_assertion_surface(None, snippet, "process")
         assert surface["kind"] == "return_value"
 
     def test_direct_callable_side_effect_no_return(self):
         """Direct callables (not binding.member) should be detected as outbound calls."""
         snippet = "def process(item):\n    send_notification(item)\n"
-        surface, gaps = _build_assertion_surface(None, snippet, "process")
+        surface, _ = _build_assertion_surface(None, snippet, "process")
         assert surface["kind"] == "outbound_call"
         assert surface["binding"] == "send_notification"
 
     def test_preserves_explicit_surface(self):
         explicit = {"kind": "outbound_call_arguments", "binding": "x", "member": "y"}
-        surface, gaps = _build_assertion_surface(explicit, "anything", "sym")
+        surface, _ = _build_assertion_surface(explicit, "anything", "sym")
         assert surface["kind"] == "outbound_call_arguments"
         assert surface["binding"] == "x"
 
