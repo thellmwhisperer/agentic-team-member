@@ -218,6 +218,7 @@ def chat(messages: list) -> dict:
         "temperature": llm.get("temperature", 0.6),
         "top_p": llm.get("top_p", 0.95),
         "top_k": llm.get("top_k", 20),
+        "cache_prompt": True,
     }
     resp = requests.post(llm["url"], json=payload, timeout=_CONFIG["timeouts"]["llm_request"])
     resp.raise_for_status()
