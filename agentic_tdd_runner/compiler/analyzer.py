@@ -178,6 +178,37 @@ def _build_assertion_surface(assertion_surface, snippet, symbol):
             [],
         )
 
+    # Direct callable side effects: foo(args) without binding.member() pattern
+    direct_call_re = re.compile(r"(?<![.\w])([A-Za-z_]\w*)\s*\(")
+    first_line = snippet.strip().splitlines()[0] if snippet.strip() else ""
+    param_match = re.search(r"\((.*?)\)", first_line)
+    param_names = {symbol}
+    if param_match:
+        for p in param_match.group(1).split(","):
+            name = p.strip().split(":")[0].split("=")[0].strip().lstrip("*")
+            if name:
+                param_names.add(name)
+    # Also exclude common keywords
+    param_names.update({"if", "for", "while", "return", "print", "len", "range", "str", "int", "float", "bool", "list", "dict", "set", "type"})
+
+    direct_calls = []
+    for match in direct_call_re.finditer(snippet):
+        name = match.group(1)
+        if name not in param_names:
+            direct_calls.append(name)
+
+    if direct_calls:
+        best = direct_calls[0]
+        return (
+            {
+                "kind": "outbound_call",
+                "binding": best,
+                "member": best,
+                "assertion_shape": f"toHaveBeenCalled(...{best}...)",
+            },
+            [],
+        )
+
     return (
         {
             "kind": "unknown",

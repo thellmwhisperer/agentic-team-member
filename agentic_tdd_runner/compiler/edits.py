@@ -44,6 +44,8 @@ def _realize_generated_test_seams(
     injection_plan,
 ):
     lang = get_language(source_path)
+    if not lang:
+        return []
     edits = []
     exec_by_binding = {entry["binding"]: entry for entry in execution_dependencies}
     for plan in injection_plan:

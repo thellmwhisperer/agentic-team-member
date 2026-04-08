@@ -28,7 +28,29 @@ def _build_bun_scaffold(contract):
     params = _parse_signature_params(target.get("signature", ""))
 
     imports_block = "import { describe, expect, mock, test } from 'bun:test';"
-    module_mocks_block = _render_module_mocks(module_load_dependencies)
+
+    # If assertion targets a module_load dep, extract spy as named variable
+    spy_extractions = {}  # {(binding, member): spy_var_name}
+    spy_decl_lines = []
+    if assertion_surface.get("kind") == "outbound_call_arguments":
+        a_binding = assertion_surface["binding"]
+        a_member = assertion_surface["member"]
+        # Check if assertion binding is in module_load (not execution)
+        module_bindings = set()
+        for dep in module_load_dependencies:
+            module_bindings.add(dep["binding"])
+            # Also check if a factory produces the binding
+            shape = dep.get("required_shape", {})
+            for export_name, members in shape.items():
+                if isinstance(members, list) and a_member in members:
+                    spy_name = f"{a_binding}_{a_member}_spy"
+                    spy_extractions[(export_name, a_member)] = spy_name
+                    spy_decl_lines.append(f"const {spy_name} = mock(() => {{}});")
+
+    module_mocks_block = _render_module_mocks(module_load_dependencies, spy_extractions=spy_extractions)
+    if spy_decl_lines:
+        module_mocks_block = "\n".join(spy_decl_lines) + "\n\n" + module_mocks_block
+
     import_names = [target_name]
     for binding, plan in injection_plan.items():
         setter_name = plan.get("setter_name")
@@ -118,6 +140,7 @@ def _build_pytest_scaffold(contract):
     target = contract["target"]
     target_name = target["symbol"]
     source_import_path = contract["test_file"]["source_import_path"]
+    module_load_dependencies = contract["module_load_dependencies"]
     execution_dependencies = contract["execution_dependencies"]
     injection_plan = {entry["binding"]: entry for entry in contract["injection_plan"]}
     assertion_surface = contract["assertion_surface"]
@@ -128,12 +151,33 @@ def _build_pytest_scaffold(contract):
         setter_name = plan.get("setter_name")
         if setter_name and setter_name not in import_names:
             import_names.append(setter_name)
+    needs_patch = bool(module_load_dependencies)
     imports_block = (
-        "from unittest.mock import Mock\n"
+        f"from unittest.mock import Mock{', patch' if needs_patch else ''}\n"
         f"from {source_import_path} import {', '.join(import_names)}"
     )
     arrange_lines = []
     todo_slots = []
+
+    # Module-load dependencies → patch decorators or context managers
+    patch_lines = []
+    for dep in _merge_module_mock_dependencies(module_load_dependencies):
+        if dep.get("strategy") != "mock_module":
+            continue
+        module_path = dep["source_module"]
+        required_shape = dep.get("required_shape", {})
+        for export_name, members in required_shape.items():
+            if isinstance(members, list) and members:
+                mock_kwargs = ", ".join(f"{m}=Mock()" for m in members)
+                factory_mock = f"Mock(return_value=Mock({mock_kwargs}))"
+            elif isinstance(members, list):
+                factory_mock = "Mock()"
+            else:
+                factory_mock = "Mock()"
+            patch_lines.append(
+                f"@patch('{module_path}.{export_name}', {factory_mock})"
+            )
+    module_mocks_block = "\n".join(patch_lines) if patch_lines else ""
 
     for dep in execution_dependencies:
         binding = dep["binding"]
@@ -144,17 +188,19 @@ def _build_pytest_scaffold(contract):
             setter_name = plan.get("setter_name")
             if setter_name:
                 double_name = f"{binding}_test_double"
-                shape_lines = []
+                spy_defs = []
+                mock_kwargs = []
                 for member in observed:
                     spy_name = f"{binding}_{member}_spy"
-                    arrange_lines.append(f"{spy_name} = Mock()")
-                    shape_lines.append(f"    '{member}': {spy_name},")
-                if shape_lines:
+                    spy_defs.append(f"{spy_name} = Mock()")
+                    mock_kwargs.append(f"{member}={spy_name}")
+                arrange_lines.extend(spy_defs)
+                if mock_kwargs:
                     arrange_lines.append(
-                        f"{double_name} = {{\n" + "\n".join(shape_lines) + "\n}"
+                        f"{double_name} = Mock({', '.join(mock_kwargs)})"
                     )
                 else:
-                    arrange_lines.append(f"{double_name} = {{}}")
+                    arrange_lines.append(f"{double_name} = Mock()")
                 arrange_lines.append(f"{setter_name}({double_name})")
             else:
                 member = observed[0] if observed else "value"
@@ -184,14 +230,14 @@ def _build_pytest_scaffold(contract):
 
     return {
         "imports_block": imports_block,
-        "module_mocks_block": "",
+        "module_mocks_block": module_mocks_block,
         "arrange_block": "\n".join(arrange_lines),
         "act_block": act_block,
         "assert_block": assert_block,
         "todo_slots": todo_slots,
         "rendered_test": _render_full_test(
             imports_block=imports_block,
-            module_mocks_block="",
+            module_mocks_block=module_mocks_block,
             target_name=target_name,
             arrange_block="\n".join(arrange_lines),
             act_block=act_block,
@@ -209,17 +255,37 @@ def _parse_signature_params(signature):
     raw = match.group(1).strip()
     if not raw:
         return []
+    # Split on commas that are not inside brackets/parens
     params = []
-    for piece in raw.split(","):
-        name = piece.strip().split(":", 1)[0].strip()
-        name = name.split("=", 1)[0].strip()
+    depth = 0
+    current = []
+    for ch in raw:
+        if ch in "([{<":
+            depth += 1
+            current.append(ch)
+        elif ch in ")]}>":
+            depth -= 1
+            current.append(ch)
+        elif ch == "," and depth == 0:
+            piece = "".join(current).strip()
+            if piece:
+                name = piece.split(":")[0].split("=")[0].strip()
+                if name:
+                    params.append(name.lstrip("*"))
+            current = []
+        else:
+            current.append(ch)
+    # Last piece
+    piece = "".join(current).strip()
+    if piece:
+        name = piece.split(":")[0].split("=")[0].strip()
         if name:
             params.append(name.lstrip("*"))
     return params
 
 
 
-def _render_module_mocks(dependencies):
+def _render_module_mocks(dependencies, *, spy_extractions=None):
     blocks = []
     for dep in _merge_module_mock_dependencies(dependencies):
         if dep.get("strategy") != "mock_module":
@@ -227,7 +293,10 @@ def _render_module_mocks(dependencies):
         module_path = dep["source_module"]
         required_shape = dep.get("required_shape", {})
         render_hint = dep.get("render_hint")
-        body = _render_module_shape(required_shape, render_hint=render_hint, depth=2)
+        body = _render_module_shape(
+            required_shape, render_hint=render_hint, depth=2,
+            spy_extractions=spy_extractions,
+        )
         blocks.append(
             f"mock.module('{module_path}', () => (\n"
             f"{{\n{body}\n}}\n"
@@ -237,33 +306,46 @@ def _render_module_mocks(dependencies):
 
 
 
-def _render_module_shape(shape, *, render_hint=None, depth=0):
+def _render_module_shape(shape, *, render_hint=None, depth=0, spy_extractions=None):
     lines = []
     indent = " " * depth
     for key, value in shape.items():
-        rendered = _render_binding_value(key, value, render_hint=render_hint, depth=depth)
+        rendered = _render_binding_value(
+            key, value, render_hint=render_hint, depth=depth,
+            spy_extractions=spy_extractions, parent_key=key,
+        )
         lines.append(f"{indent}{key}: {rendered},")
     return "\n".join(lines)
 
 
 
-def _render_binding_value(key, value, *, render_hint=None, depth=0):
+def _render_binding_value(key, value, *, render_hint=None, depth=0, spy_extractions=None, parent_key=None):
     indent = " " * depth
     inner_indent = " " * (depth + 2)
     if isinstance(value, dict):
-        inner = _render_module_shape(value, render_hint=render_hint, depth=depth + 2)
+        inner = _render_module_shape(
+            value, render_hint=render_hint, depth=depth + 2,
+            spy_extractions=spy_extractions,
+        )
         return f"{{\n{inner}\n{indent}}}"
     if isinstance(value, list):
+        def _member_value(member):
+            # Check if this member has a named spy extraction
+            lookup_key = parent_key or key
+            if spy_extractions and (lookup_key, member) in spy_extractions:
+                return spy_extractions[(lookup_key, member)]
+            return "mock(() => {})"
+
         if render_hint == "module_object":
             members = "\n".join(
-                f"{inner_indent}{member}: mock(() => {{}})," for member in value
+                f"{inner_indent}{member}: {_member_value(member)}," for member in value
             )
             if not members:
                 return "{}"
             return f"{{\n{members}\n{indent}}}"
         if key.startswith(("get", "create", "build", "make")):
             members = "\n".join(
-                f"{inner_indent}{member}: mock(() => {{}})," for member in value
+                f"{inner_indent}{member}: {_member_value(member)}," for member in value
             )
             if not members:
                 return "() => ({})"
@@ -271,7 +353,7 @@ def _render_binding_value(key, value, *, render_hint=None, depth=0):
         if not value:
             return "{}"
         members = "\n".join(
-            f"{inner_indent}{member}: mock(() => {{}})," for member in value
+            f"{inner_indent}{member}: {_member_value(member)}," for member in value
         )
         return f"{{\n{members}\n{indent}}}"
     if value == "function":

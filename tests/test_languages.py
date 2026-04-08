@@ -95,6 +95,24 @@ class TestPythonPlugin:
         assert "logger" in assigns
         assert assigns["logger"]["called_symbol"] == "get_logger"
 
+    def test_parses_typed_assignment(self):
+        lang = get_language("file.py")
+        assigns = lang.parse_assignments("logger: Logger = get_logger()")
+        assert "logger" in assigns
+        assert assigns["logger"]["called_symbol"] == "get_logger"
+
+    def test_parses_typed_assignment_without_call(self):
+        lang = get_language("file.py")
+        assigns = lang.parse_assignments("name: str = 'hello'")
+        assert "name" in assigns
+        assert assigns["name"]["called_symbol"] is None
+
+    def test_aliased_module_import_preserves_original_name(self):
+        lang = get_language("file.py")
+        imports = lang.parse_imports("import numpy as np")
+        assert imports["np"]["source_module"] == "numpy"
+        assert imports["np"]["export_name"] == "numpy"
+
     def test_runner_is_pytest(self):
         lang = get_language("file.py")
         assert lang.runner == "pytest"

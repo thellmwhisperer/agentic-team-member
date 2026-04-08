@@ -1,5 +1,5 @@
 """Tests for compiler parser functions."""
-from agentic_tdd_runner.compiler.parser import _find_symbol_line
+from agentic_tdd_runner.compiler.parser import _extract_signature, _find_symbol_line
 
 
 class TestFindSymbolLine:
@@ -25,3 +25,37 @@ class TestFindSymbolLine:
     def test_finds_arrow_function(self):
         source = "const other = 1;\nexport const process = (x) => x * 2;\n"
         assert _find_symbol_line(source, "process") == 2
+
+
+class TestExtractSignature:
+    def test_multiline_ts_function(self):
+        source = (
+            "export function handleResub(\n"
+            "  channel: string,\n"
+            "  username: string,\n"
+            "  months: number,\n"
+            "): void {\n"
+            "  // body\n"
+            "}\n"
+        )
+        sig = _extract_signature(source, "handleResub")
+        assert "channel" in sig
+        assert "username" in sig
+        assert "months" in sig
+
+    def test_multiline_python_def(self):
+        source = (
+            "def process(\n"
+            "    item: str,\n"
+            "    count: int,\n"
+            ") -> str:\n"
+            "    return item\n"
+        )
+        sig = _extract_signature(source, "process")
+        assert "item" in sig
+        assert "count" in sig
+
+    def test_single_line_still_works(self):
+        source = "export function greet(name: string): void {\n"
+        sig = _extract_signature(source, "greet")
+        assert "name" in sig

@@ -8,7 +8,7 @@ from agentic_tdd_runner.languages import register
 
 _PY_FROM_IMPORT_RE = re.compile(r"^\s*from\s+([.\w]+)\s+import\s+(.+)$", re.MULTILINE)
 _PY_IMPORT_RE = re.compile(r"^\s*import\s+(.+)$", re.MULTILINE)
-_TOP_LEVEL_PY_ASSIGN_RE = re.compile(r"^([A-Za-z_]\w*)\s*=\s*(.+)\s*$")
+_TOP_LEVEL_PY_ASSIGN_RE = re.compile(r"^([A-Za-z_]\w*)(?:\s*:\s*[^=]+)?\s*=\s*(.+)\s*$")
 
 
 class PythonLanguage:
@@ -44,7 +44,7 @@ class PythonLanguage:
                     module_name = local_name = item
                 imports[local_name] = {
                     "source_module": module_name,
-                    "export_name": local_name,
+                    "export_name": module_name,
                     "import_kind": "module",
                 }
         return imports
