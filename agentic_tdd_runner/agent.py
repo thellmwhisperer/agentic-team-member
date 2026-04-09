@@ -349,8 +349,14 @@ def verify_red_green(test_file: str) -> tuple[bool, str]:
     return True, "VERIFIED: Test fails without fix, passes with fix. Real red-green."
 
 
-def _detect_package_manager() -> str:
-    """Detect the package manager from lockfiles in WORKDIR. Defaults to npm."""
+def _detect_package_manager(pkg: dict | None = None) -> str:
+    """Detect the package manager. Checks packageManager field first, then lockfiles."""
+    if pkg:
+        pm_field = pkg.get("packageManager", "")
+        if pm_field:
+            name = pm_field.split("@")[0]
+            if name in ("pnpm", "yarn", "bun", "npm"):
+                return name
     lockfiles = {
         "pnpm-lock.yaml": "pnpm",
         "yarn.lock": "yarn",
@@ -387,7 +393,7 @@ def detect_quality_tools(lang_name: str) -> list[dict]:
 
             # Typecheck: use scripts.typecheck if defined, else tsc
             if "typecheck" in scripts:
-                pm = _detect_package_manager()
+                pm = _detect_package_manager(pkg)
                 checks.append({"name": "typecheck", "command": f"{pm} run typecheck"})
             elif "typescript" in all_deps:
                 checks.append({"name": "typecheck", "command": "npx tsc --noEmit"})

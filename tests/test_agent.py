@@ -363,7 +363,29 @@ class TestDetectQualityTools:
         tc = next((c for c in checks if c["name"] == "typecheck"), None)
         assert tc is not None
         assert tc["command"] == expected_cmd
-        assert "vue-tsc" not in tc["command"]
+
+    @pytest.mark.parametrize("pm_field,expected_pm", [
+        ("pnpm@8.6.0", "pnpm"),
+        ("yarn@4.1.0", "yarn"),
+        ("bun@1.2.0", "bun"),
+        ("npm@10.0.0", "npm"),
+    ])
+    def test_packagemanager_field_takes_priority_over_lockfile(
+        self, tmp_path, monkeypatch, pm_field, expected_pm,
+    ):
+        """packageManager in package.json wins over lockfiles."""
+        import json
+        (tmp_path / "package.json").write_text(json.dumps({
+            "scripts": {"typecheck": "vue-tsc --noEmit"},
+            "packageManager": pm_field,
+        }))
+        # Conflicting lockfile to prove packageManager wins
+        (tmp_path / "yarn.lock").touch()
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        checks = detect_quality_tools("typescript")
+        tc = next((c for c in checks if c["name"] == "typecheck"), None)
+        assert tc is not None
+        assert tc["command"] == f"{expected_pm} run typecheck"
 
 
 class TestGetChangedFiles:
