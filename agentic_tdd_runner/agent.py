@@ -5,6 +5,7 @@ import argparse
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import time
@@ -280,7 +281,6 @@ def verify_red_green(test_file: str) -> tuple[bool, str]:
     # Stash all changes including untracked (reverts source fix + new files)
     subprocess.run(["git", "stash", "--include-untracked"], cwd=WORKDIR, capture_output=True)
 
-    import shlex
     run_argv = shlex.split(run_cmd)
 
     red_passed = False
@@ -349,6 +349,19 @@ def verify_red_green(test_file: str) -> tuple[bool, str]:
     return True, "VERIFIED: Test fails without fix, passes with fix. Real red-green."
 
 
+def _detect_package_manager() -> str:
+    """Detect the package manager from lockfiles in WORKDIR. Defaults to npm."""
+    lockfiles = {
+        "pnpm-lock.yaml": "pnpm",
+        "yarn.lock": "yarn",
+        "bun.lock": "bun",
+    }
+    for filename, pm in lockfiles.items():
+        if os.path.isfile(os.path.join(WORKDIR, filename)):
+            return pm
+    return "npm"
+
+
 def detect_quality_tools(lang_name: str) -> list[dict]:
     """Detect quality tools from the target project's config files.
 
@@ -374,7 +387,8 @@ def detect_quality_tools(lang_name: str) -> list[dict]:
 
             # Typecheck: use scripts.typecheck if defined, else tsc
             if "typecheck" in scripts:
-                checks.append({"name": "typecheck", "command": f"npx {scripts['typecheck']}"})
+                pm = _detect_package_manager()
+                checks.append({"name": "typecheck", "command": f"{pm} run typecheck"})
             elif "typescript" in all_deps:
                 checks.append({"name": "typecheck", "command": "npx tsc --noEmit"})
 
@@ -464,7 +478,7 @@ def run_quality_checks(test_file: str) -> tuple[bool, str]:
     if not changed:
         return True, "No changed files"
 
-    changed_str = " ".join(changed)
+    changed_str = " ".join(shlex.quote(path) for path in changed)
     failures = []
 
     # Run checks (fix first if available, then verify)
@@ -751,6 +765,28 @@ def main():
                                     return 1
                                 messages.append(msg)
                                 messages.append({"role": "user", "content": quality_msg})
+                                continue
+
+                        if _CONFIG.get("quality", {}).get("enabled", False):
+                            emit("\n=== POST-QUALITY VERIFICATION ===")
+                            verified, verify_msg = verify_red_green(test_file)
+                            emit(f"  [RE-VERIFY] {verify_msg}")
+                            log("post_quality_verify_result", {
+                                "verified": verified,
+                                "message": verify_msg,
+                                "test_file": test_file,
+                            })
+                            if not verified:
+                                done_rejected += 1
+                                if done_rejected >= max_rejections:
+                                    emit(f"\n  [GIVE UP] Rejected DONE {done_rejected} times. Stopping.")
+                                    log("give_up", {"step": step, "done_rejected": done_rejected})
+                                    return 1
+                                messages.append(msg)
+                                messages.append({
+                                    "role": "user",
+                                    "content": verify_msg,
+                                })
                                 continue
 
                         emit(f"\n{'='*60}")

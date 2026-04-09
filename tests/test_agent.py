@@ -1,6 +1,7 @@
 """Tests for agent tool execution and file discovery."""
 import os
 import subprocess
+from types import SimpleNamespace
 
 import pytest
 
@@ -12,6 +13,7 @@ from agentic_tdd_runner.agent import (
     create_pr,
     detect_quality_tools,
     find_test_file,
+    main,
     run_quality_checks,
 )
 
@@ -339,17 +341,29 @@ class TestDetectQualityTools:
         # No package.json → only typecheck if tsc exists, otherwise empty
         assert isinstance(checks, list)
 
-    def test_uses_package_json_scripts(self, tmp_path, monkeypatch):
-        """If package.json has scripts.typecheck, use that exact command."""
+    @pytest.mark.parametrize("lockfile,expected_cmd", [
+        ("pnpm-lock.yaml", "pnpm run typecheck"),
+        ("yarn.lock", "yarn run typecheck"),
+        ("bun.lock", "bun run typecheck"),
+        (None, "npm run typecheck"),
+    ])
+    def test_uses_package_json_scripts_via_detected_pm(
+        self, tmp_path, monkeypatch, lockfile, expected_cmd,
+    ):
+        """scripts.typecheck is invoked by name via the detected package manager,
+        never by executing the raw script body."""
         import json
         (tmp_path / "package.json").write_text(json.dumps({
             "scripts": {"typecheck": "vue-tsc --noEmit"},
         }))
+        if lockfile:
+            (tmp_path / lockfile).touch()
         monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
         checks = detect_quality_tools("typescript")
         tc = next((c for c in checks if c["name"] == "typecheck"), None)
         assert tc is not None
-        assert "vue-tsc" in tc["command"]
+        assert tc["command"] == expected_cmd
+        assert "vue-tsc" not in tc["command"]
 
 
 class TestGetChangedFiles:
@@ -456,6 +470,24 @@ class TestRunQualityChecks:
             "prompt": {"quality_failed": "FAIL: {details}"},
         })
         ok, msg = run_quality_checks("src/file.test.ts")
+        assert ok is True
+
+    def test_quotes_changed_filenames_in_shell_commands(self, tmp_path, monkeypatch):
+        self._setup_repo(tmp_path, monkeypatch)
+        spaced_file = tmp_path / "src" / "my file.test.ts"
+        spaced_file.write_text("clean")
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "quality": {
+                "enabled": True, "max_fix_rounds": 3,
+                "typescript": {
+                    "checks": [{"name": "lint", "command": "cat {changed_files} >/dev/null"}],
+                    "forbidden": [],
+                },
+            },
+            "timeouts": {"tool_execution": 10},
+            "prompt": {"quality_failed": "FAIL: {details}"},
+        })
+        ok, msg = run_quality_checks("src/my file.test.ts")
         assert ok is True
 
     def test_detects_duplicated_setup_lines(self, tmp_path, monkeypatch):
@@ -607,3 +639,58 @@ class TestCreatePr:
             result = create_pr([], {}, "test.ts", 10)
 
         assert result is None
+
+
+class TestMain:
+    """main() should only report VERIFIED after the final tree is re-checked."""
+
+    def test_reverifies_after_quality_pass(self, tmp_path, monkeypatch):
+        config = {
+            "agent": {"max_steps": 1},
+            "verification": {"max_rejections": 3},
+            "quality": {"enabled": True, "max_fix_rounds": 3},
+            "prompt": {
+                "system": "system prompt",
+                "nudge": "continue",
+                "no_test_found": "no test",
+            },
+            "llm": {"model": "test-model"},
+            "pr": {"enabled": False},
+        }
+        args = SimpleNamespace(
+            issue="bug text",
+            source=None,
+            symbol=None,
+            workdir=str(tmp_path),
+            config="unused.toml",
+            log_dir=str(tmp_path),
+        )
+        verify_calls = []
+
+        monkeypatch.setattr("agentic_tdd_runner.config.load_config", lambda path: config)
+        monkeypatch.setattr("agentic_tdd_runner.agent.parse_args", lambda: args)
+        monkeypatch.setattr("agentic_tdd_runner.agent.init_log", lambda: str(tmp_path / "agent.jsonl"))
+        monkeypatch.setattr("agentic_tdd_runner.agent.emit", lambda msg: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.log", lambda *args, **kwargs: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.chat", lambda messages: {
+            "choices": [{"message": {"content": "DONE"}, "finish_reason": "stop"}],
+            "usage": {},
+            "timings": {},
+        })
+        monkeypatch.setattr("agentic_tdd_runner.agent.find_test_file", lambda hint=None: "src/file.test.ts")
+        monkeypatch.setattr("agentic_tdd_runner.agent.run_quality_checks", lambda test_file: (True, "All quality checks passed"))
+        monkeypatch.setattr(
+            "agentic_tdd_runner.agent.subprocess.run",
+            lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, stdout="", stderr=""),
+        )
+
+        def fake_verify(test_file):
+            verify_calls.append(test_file)
+            return True, "verified"
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.verify_red_green", fake_verify)
+
+        result = main()
+
+        assert result == 0
+        assert verify_calls == ["src/file.test.ts", "src/file.test.ts"]
