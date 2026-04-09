@@ -460,7 +460,7 @@ def _get_changed_files() -> list[str]:
     files = set()
     for line in (diff.stdout + untracked.stdout).splitlines():
         line = line.strip()
-        if line:
+        if line and os.path.exists(os.path.join(WORKDIR, line)):
             files.add(line)
     return sorted(files)
 

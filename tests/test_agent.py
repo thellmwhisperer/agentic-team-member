@@ -404,6 +404,20 @@ class TestGetChangedFiles:
         assert "tracked.ts" in files
         assert "new.ts" in files
 
+    def test_excludes_deleted_files(self, tmp_path, monkeypatch):
+        subprocess.run("git init", shell=True, cwd=tmp_path, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "t@t"], cwd=tmp_path, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "t"], cwd=tmp_path, capture_output=True)
+        (tmp_path / "keep.ts").write_text("keep")
+        (tmp_path / "deleted.ts").write_text("gone soon")
+        subprocess.run("git add -A && git commit -m init", shell=True, cwd=tmp_path, capture_output=True)
+        (tmp_path / "deleted.ts").unlink()
+        (tmp_path / "keep.ts").write_text("modified")
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        files = _get_changed_files()
+        assert "keep.ts" in files
+        assert "deleted.ts" not in files
+
 
 class TestRunQualityChecks:
     """run_quality_checks enforces lint, format, and forbidden patterns."""
