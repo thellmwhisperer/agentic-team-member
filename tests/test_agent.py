@@ -147,6 +147,8 @@ class TestFindTestFile:
 
     def _setup_git_repo(self, tmp_path):
         subprocess.run([GIT, "init"], cwd=tmp_path, capture_output=True, check=True)
+        subprocess.run([GIT, "config", "user.email", "t@t"], cwd=tmp_path, capture_output=True)
+        subprocess.run([GIT, "config", "user.name", "t"], cwd=tmp_path, capture_output=True)
         subprocess.run([GIT, "commit", "--allow-empty", "-m", "init"], cwd=tmp_path, capture_output=True, check=True)
 
     def test_finds_ts_test_file(self, tmp_path, monkeypatch):
@@ -741,6 +743,52 @@ class TestCreatePr:
         assert "file.test.ts" in staged_files, f"New test file missing: {staged_files}"
         assert "agent-session.jsonl" not in staged_files, f"Log file staged: {staged_files}"
         assert "notes.md" not in staged_files, f"Non-language file staged: {staged_files}"
+
+    def test_pr_chat_call_excludes_tools(self, tmp_path, monkeypatch):
+        """create_pr must call chat without tools so the LLM returns text, not tool_calls."""
+        from unittest.mock import patch as mock_patch
+
+        self._init_repo(tmp_path)
+        (tmp_path / "file.ts").write_text("code")
+        subprocess.run([GIT, "add", "-A"], cwd=tmp_path, capture_output=True, check=True)
+        subprocess.run([GIT, "commit", "-m", "init"], cwd=tmp_path, capture_output=True, check=True)
+        (tmp_path / "file.ts").write_text("fixed")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "pr": {"enabled": True, "base_branch": "main", "branch_prefix": "atm/fix-"},
+            "prompt": {"pr_prompt": "Generate PR"},
+            "llm": {"model": "test", "url": "http://localhost:9999/v1/chat/completions"},
+            "timeouts": {"llm_request": 10},
+            "tools": [{"type": "function", "function": {"name": "run_test"}}],
+        })
+
+        chat_kwargs = []
+        mock_response = {
+            "choices": [{"message": {"content": "PR_TITLE: fix\nPR_BODY: done"}}],
+        }
+
+        original_chat = None
+
+        def capture_chat(messages, include_tools=True):
+            chat_kwargs.append({"include_tools": include_tools})
+            return mock_response
+
+        original_run = subprocess.run
+
+        def fake_run(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            if isinstance(cmd, list) and (cmd[0] == "gh" or (cmd[0] == "git" and "push" in cmd)):
+                return subprocess.CompletedProcess(cmd, 0, stdout="https://github.com/test/pr/1\n")
+            return original_run(*args, **kwargs)
+
+        with mock_patch("agentic_tdd_runner.agent.chat", side_effect=capture_chat):
+            with mock_patch("subprocess.run", side_effect=fake_run):
+                create_pr([], {}, "file.ts", 1)
+
+        assert len(chat_kwargs) == 1, f"Expected 1 chat call, got {chat_kwargs}"
+        assert chat_kwargs[0]["include_tools"] is False, \
+            "create_pr should call chat with include_tools=False to prevent tool_calls"
 
     def test_returns_none_on_chat_failure(self, tmp_path, monkeypatch):
         from unittest.mock import patch as mock_patch

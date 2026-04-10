@@ -210,17 +210,18 @@ def truncate(text: str, max_chars: int = 0) -> str:
     return text[:half] + f"\n\n... ({len(text) - max_chars} chars truncated) ...\n\n" + text[-half:]
 
 
-def chat(messages: list) -> dict:
+def chat(messages: list, include_tools: bool = True) -> dict:
     llm = _CONFIG["llm"]
     payload = {
         "model": llm["model"],
         "messages": messages,
-        "tools": _CONFIG["tools"],
         "temperature": llm.get("temperature", 0.6),
         "top_p": llm.get("top_p", 0.95),
         "top_k": llm.get("top_k", 20),
         "cache_prompt": True,
     }
+    if include_tools:
+        payload["tools"] = _CONFIG["tools"]
     resp = requests.post(llm["url"], json=payload, timeout=_CONFIG["timeouts"]["llm_request"])
     resp.raise_for_status()
     return resp.json()
@@ -578,7 +579,7 @@ def create_pr(messages: list, last_msg: dict, test_file: str, step: int) -> str 
     """Ask LLM for PR content, then create branch/commit/push/PR."""
     pr_cfg = _CONFIG.get("pr", {})
 
-    # Ask LLM for title and description
+    # Ask LLM for title and description — without tools to avoid tool_calls
     pr_messages = messages.copy()
     pr_messages.append(last_msg)
     pr_messages.append({
@@ -587,7 +588,7 @@ def create_pr(messages: list, last_msg: dict, test_file: str, step: int) -> str 
     })
 
     try:
-        response = chat(pr_messages)
+        response = chat(pr_messages, include_tools=False)
         content = response["choices"][0]["message"].get("content", "")
     except Exception as e:
         emit(f"  [PR] LLM failed to generate PR content: {e}")
