@@ -19,6 +19,8 @@ from agentic_tdd_runner.agent import (
     _parse_pr_content,
     _resolve_repo_path,
     _tool_applied_status,
+    _tool_loop_signature,
+    _tool_loop_warning_message,
     _validate_command,
     create_pr,
     detect_quality_tools,
@@ -2386,6 +2388,95 @@ class TestMain:
         events = [event for event, _data in logged]
         assert "context_preserved" in events
         assert "context_compacted" not in events
+
+    def test_loop_detection_nudges_after_three_identical_exploratory_tools(self, tmp_path, monkeypatch):
+        logged = []
+        chat_calls = []
+
+        config = {
+            "agent": {"max_steps": 4, "max_tool_output": 2000},
+            "verification": {"max_rejections": 3},
+            "quality": {"enabled": False},
+            "prompt": {
+                "system": "system prompt",
+                "nudge": "Step {step}/{max_steps}. Continue.",
+                "no_test_found": "no test",
+                "quality_failed": "FAIL: {details}",
+            },
+            "llm": {"model": "test-model"},
+            "timeouts": {"tool_execution": 10, "llm_request": 10},
+            "runner": {"command": "bun test", "test_file_patterns": ["*.test.ts"], "exclude_dirs": []},
+            "tools": [],
+            "pr": {"enabled": False},
+        }
+        args = SimpleNamespace(
+            issue="bug text",
+            source=None,
+            symbol=None,
+            workdir=str(tmp_path),
+            config="unused.toml",
+            log_dir=str(tmp_path),
+        )
+
+        def fake_chat(messages, include_tools=True):
+            chat_calls.append([dict(msg) for msg in messages])
+            if len(chat_calls) <= 3:
+                return {
+                    "choices": [{"message": {
+                        "content": None,
+                        "tool_calls": [{
+                            "id": f"call_{len(chat_calls)}",
+                            "function": {
+                                "name": "read_file",
+                                "arguments": '{"path": "src/file.ts"}',
+                            },
+                        }],
+                    }, "finish_reason": "tool_calls"}],
+                    "usage": {},
+                    "timings": {},
+                }
+
+            return {
+                "choices": [{"message": {"content": "DONE"}, "finish_reason": "stop"}],
+                "usage": {},
+                "timings": {},
+            }
+
+        monkeypatch.setattr("agentic_tdd_runner.config.load_config", lambda path: config)
+        monkeypatch.setattr("agentic_tdd_runner.agent.parse_args", lambda: args)
+        monkeypatch.setattr("agentic_tdd_runner.agent.init_log", lambda: str(tmp_path / "agent.jsonl"))
+        monkeypatch.setattr("agentic_tdd_runner.agent.emit", lambda msg: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.log", lambda event, data: logged.append((event, data)))
+        monkeypatch.setattr("agentic_tdd_runner.agent.chat", fake_chat)
+        monkeypatch.setattr("agentic_tdd_runner.agent.execute_tool", lambda name, args: "file contents")
+        monkeypatch.setattr("agentic_tdd_runner.agent.find_test_file", lambda hint=None: "src/file.test.ts")
+        monkeypatch.setattr("agentic_tdd_runner.agent.verify_red_green", lambda tf: (True, "verified"))
+        monkeypatch.setattr(
+            "agentic_tdd_runner.agent.subprocess.run",
+            lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, stdout="", stderr=""),
+        )
+
+        result = main()
+
+        assert result == 0
+        events = [event for event, _data in logged]
+        assert "loop_detected" in events
+        assert any(
+            msg.get("role") == "user" and "repeated the same exploratory tool call" in msg.get("content", "")
+            for msg in chat_calls[3]
+        )
+
+    def test_tool_loop_signature_only_tracks_exploratory_reads(self):
+        assert _tool_loop_signature("read_file", {"path": "src/foo.ts"}) == "read_file:src/foo.ts"
+        assert _tool_loop_signature("run_command", {"command": "grep -n foo src/"}) == "run_command:grep -n foo src/"
+        assert _tool_loop_signature("run_command", {"command": "bun test"}) is None
+        assert _tool_loop_signature("str_replace_editor", {}) is None
+
+    def test_tool_loop_warning_message_points_model_toward_progress(self):
+        msg = _tool_loop_warning_message("read_file:src/foo.ts")
+        assert "read_file:src/foo.ts" in msg
+        assert "three times" in msg
+        assert "edit" in msg.lower() or "DONE" in msg
 
 
 class TestApplyMechanicalEdits:

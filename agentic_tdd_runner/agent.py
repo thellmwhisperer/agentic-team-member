@@ -189,6 +189,36 @@ def _tool_applied_status(name: str, result: str) -> bool | None:
     return result.startswith("OK:")
 
 
+def _tool_loop_signature(name: str, args: dict) -> str | None:
+    if name == "read_file":
+        return f"read_file:{args.get('path', '')}"
+    if name != "run_command":
+        return None
+    command = args.get("command", "")
+    try:
+        parts = shlex.split(command)
+    except ValueError:
+        return None
+    if not parts:
+        return None
+    exploratory = {
+        "grep", "rg", "find", "ls", "cat", "head", "tail", "sed", "awk",
+        "wc", "sort", "uniq", "cut", "tr", "dirname", "basename", "tree",
+        "file", "which", "test",
+    }
+    if parts[0] not in exploratory:
+        return None
+    return f"run_command:{command}"
+
+
+def _tool_loop_warning_message(signature: str) -> str:
+    return (
+        "Loop warning: you have repeated the same exploratory tool call "
+        f"({signature}) three times without editing files. Stop rereading and "
+        "either make an edit, explain the blocker, or say DONE if the test already passes."
+    )
+
+
 def _resolve_repo_path(path: str, workdir: str = None) -> Path:
     """Resolve a relative path within the workdir. Raises if it escapes."""
     repo_root = Path(workdir or WORKDIR).resolve()
@@ -1238,6 +1268,7 @@ def main():
     done_rejected = 0
     quality_rejected = 0
     max_rejections = _CONFIG["verification"]["max_rejections"]
+    recent_exploratory_signatures: list[str] = []
 
     # --- Completion pipeline: verify → quality → done ---
     # Extracted so both DONE and auto-trigger can use it.
@@ -1426,6 +1457,7 @@ def main():
                 tool_elapsed = time.time() - t1
                 result_truncated = truncate(result)
                 applied = _tool_applied_status(name, result)
+                loop_signature = _tool_loop_signature(name, args)
 
                 log("tool", {
                     "step": step,
@@ -1452,6 +1484,26 @@ def main():
                     "tool_call_id": tc["id"],
                     "content": result_truncated,
                 })
+
+                if applied is True:
+                    recent_exploratory_signatures.clear()
+                elif loop_signature:
+                    recent_exploratory_signatures.append(loop_signature)
+                    recent_exploratory_signatures[:] = recent_exploratory_signatures[-3:]
+                    if (
+                        len(recent_exploratory_signatures) == 3
+                        and len(set(recent_exploratory_signatures)) == 1
+                    ):
+                        warning = _tool_loop_warning_message(loop_signature)
+                        messages.append({"role": "user", "content": warning})
+                        log("loop_detected", {
+                            "step": step,
+                            "signature": loop_signature,
+                            "count": 3,
+                        })
+                        recent_exploratory_signatures.clear()
+                else:
+                    recent_exploratory_signatures.clear()
 
                 if _is_test_pass(name, args):
                     test_passed = True
