@@ -1213,7 +1213,7 @@ class TestCreatePr:
     """create_pr asks the LLM for content and runs git+gh commands."""
 
     def _init_repo(self, tmp_path):
-        subprocess.run([GIT, "init"], cwd=tmp_path, capture_output=True, check=True)
+        subprocess.run([GIT, "init", "-b", "main"], cwd=tmp_path, capture_output=True, check=True)
         subprocess.run([GIT, "config", "user.email", "t@t"], cwd=tmp_path, capture_output=True)
         subprocess.run([GIT, "config", "user.name", "t"], cwd=tmp_path, capture_output=True)
 
@@ -1261,6 +1261,33 @@ class TestCreatePr:
         assert any("commit" in c for c in cmd_strs), f"No git commit: {cmd_strs}"
         assert any("push" in c for c in cmd_strs), f"No git push: {cmd_strs}"
         assert any("gh pr create" in c for c in cmd_strs), f"No gh pr create: {cmd_strs}"
+
+    def test_returns_none_when_head_diverged_from_base_branch(self, tmp_path, monkeypatch):
+        from unittest.mock import patch as mock_patch
+
+        self._init_repo(tmp_path)
+        (tmp_path / "file.ts").write_text("code")
+        subprocess.run([GIT, "add", "-A"], cwd=tmp_path, capture_output=True, check=True)
+        subprocess.run([GIT, "commit", "-m", "init"], cwd=tmp_path, capture_output=True, check=True)
+        subprocess.run([GIT, "checkout", "-b", "feature/drift"], cwd=tmp_path, capture_output=True, check=True)
+        (tmp_path / "extra.ts").write_text("history drift")
+        subprocess.run([GIT, "add", "-A"], cwd=tmp_path, capture_output=True, check=True)
+        subprocess.run([GIT, "commit", "-m", "drift"], cwd=tmp_path, capture_output=True, check=True)
+        (tmp_path / "file.ts").write_text("fixed code")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "pr": {"enabled": True, "base_branch": "main", "branch_prefix": "atm/fix-"},
+            "prompt": {"pr_prompt": "Generate PR"},
+            "llm": {"model": "test", "url": "http://localhost:9999/v1/chat/completions"},
+            "timeouts": {"llm_request": 10, "tool_execution": 10},
+        })
+
+        with mock_patch("agentic_tdd_runner.agent.chat") as chat_mock:
+            result = create_pr([], {}, "file.ts", 1)
+
+        assert result is None
+        chat_mock.assert_not_called()
 
     def test_pr_stages_tracked_changes_and_filters_untracked(self, tmp_path, monkeypatch):
         """create_pr stages all tracked modified files (incl config) but only language-matching untracked."""
