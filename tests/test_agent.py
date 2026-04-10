@@ -288,6 +288,50 @@ class TestFindTestFile:
         assert lang is not None
         assert lang.runner == "pytest"
 
+    def test_verify_red_green_rejects_red_phase_that_fails_on_missing_test_seam(self, tmp_path, monkeypatch):
+        """A red phase that dies on missing __setXForTests is not a valid proof of the bug."""
+        from unittest.mock import patch as mock_patch
+        from agentic_tdd_runner.agent import verify_red_green
+
+        sp_run = subprocess.run
+        sp_run([GIT, "init"], cwd=tmp_path, capture_output=True, check=True)
+        sp_run([GIT, "config", "user.email", "test@test.com"], cwd=tmp_path, capture_output=True)
+        sp_run([GIT, "config", "user.name", "test"], cwd=tmp_path, capture_output=True)
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "math.ts").write_text("fixed")
+        (src / "math.test.ts").write_text("test")
+        sp_run([GIT, "add", "-A"], cwd=tmp_path, capture_output=True, check=True)
+        sp_run([GIT, "commit", "-m", "base"], cwd=tmp_path, capture_output=True, check=True)
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "runner": {"command": "bun test", "test_file_patterns": ["*.test.ts"], "exclude_dirs": []},
+            "timeouts": {"test_run": 10},
+        })
+
+        calls = {"count": 0}
+
+        def fake_run(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            if isinstance(cmd, list) and any("math.test.ts" in str(c) for c in cmd):
+                calls["count"] += 1
+                if calls["count"] == 1:
+                    return subprocess.CompletedProcess(
+                        cmd,
+                        1,
+                        stdout="TypeError: __setClientForTests is not a function\n",
+                        stderr="",
+                    )
+                return subprocess.CompletedProcess(cmd, 0, stdout="1 pass\n", stderr="")
+            return sp_run(*args, **kwargs)
+
+        with mock_patch("subprocess.run", side_effect=fake_run):
+            ok, msg = verify_red_green("src/math.test.ts")
+
+        assert ok is False
+        assert "test scaffold is incomplete" in msg.lower()
+
     def test_finds_tsx_test_file(self, tmp_path, monkeypatch):
         self._setup_git_repo(tmp_path)
         (tmp_path / "src").mkdir()
@@ -1357,6 +1401,43 @@ class TestCreatePr:
 
         assert result is None
 
+    def test_returns_none_on_pr_command_timeout(self, tmp_path, monkeypatch):
+        from unittest.mock import patch as mock_patch
+
+        self._init_repo(tmp_path)
+        (tmp_path / "file.ts").write_text("code")
+        subprocess.run([GIT, "add", "-A"], cwd=tmp_path, capture_output=True, check=True)
+        subprocess.run([GIT, "commit", "-m", "init"], cwd=tmp_path, capture_output=True, check=True)
+        (tmp_path / "file.ts").write_text("fixed")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "pr": {"enabled": True, "base_branch": "main", "branch_prefix": "atm/fix-"},
+            "prompt": {"pr_prompt": "Generate PR"},
+            "llm": {"model": "test", "url": "http://localhost:9999/v1/chat/completions"},
+            "timeouts": {"llm_request": 10, "tool_execution": 10},
+        })
+
+        mock_response = {
+            "choices": [{"message": {"content": "PR_TITLE: fix\nPR_BODY: done"}}],
+        }
+
+        original_run = subprocess.run
+
+        def run_raises_timeout_on_gh(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            if isinstance(cmd, list) and cmd[0] == "gh":
+                raise subprocess.TimeoutExpired(cmd, 10)
+            if isinstance(cmd, list) and cmd[0] == "git" and "push" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, stdout="")
+            return original_run(*args, **kwargs)
+
+        with mock_patch("agentic_tdd_runner.agent.chat", return_value=mock_response):
+            with mock_patch("subprocess.run", side_effect=run_raises_timeout_on_gh):
+                result = create_pr([], {}, "file.ts", 1)
+
+        assert result is None
+
     def test_returns_none_on_chat_failure(self, tmp_path, monkeypatch):
         from unittest.mock import patch as mock_patch
 
@@ -1415,6 +1496,58 @@ class TestMain:
         assert result == 1
         events = [event for event, _data in logged]
         assert "llm_timeout" in events
+        assert "exhausted" not in events
+
+    def test_logs_done_even_if_postamble_fails(self, tmp_path, monkeypatch):
+        logged = []
+        args = SimpleNamespace(
+            issue="bug text", source=None, symbol=None,
+            workdir=str(tmp_path), config="unused.toml", log_dir=str(tmp_path),
+        )
+        config = {
+            "agent": {"max_steps": 1, "max_tool_output": 2000},
+            "verification": {"max_rejections": 3},
+            "quality": {"enabled": False},
+            "prompt": {
+                "system": "system prompt",
+                "nudge": "Step {step}/{max_steps}. Continue.",
+                "no_test_found": "no test",
+                "quality_failed": "FAIL: {details}",
+            },
+            "llm": {"model": "test-model"},
+            "timeouts": {"llm_request": 10, "tool_execution": 10, "test_run": 10},
+            "runner": {"command": "bun test", "test_file_patterns": ["*.test.ts"], "exclude_dirs": []},
+            "tools": [],
+            "pr": {"enabled": False},
+        }
+
+        monkeypatch.setattr("agentic_tdd_runner.config.load_config", lambda path: config)
+        monkeypatch.setattr("agentic_tdd_runner.agent.parse_args", lambda: args)
+        monkeypatch.setattr("agentic_tdd_runner.agent.init_log", lambda: str(tmp_path / "agent.jsonl"))
+        monkeypatch.setattr("agentic_tdd_runner.agent.emit", lambda msg: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.log", lambda event, data: logged.append((event, data)))
+        monkeypatch.setattr("agentic_tdd_runner.agent.chat", lambda messages, include_tools=True: {
+            "choices": [{"message": {"content": "DONE"}, "finish_reason": "stop"}],
+            "usage": {},
+            "timings": {},
+        })
+        monkeypatch.setattr("agentic_tdd_runner.agent.find_test_file", lambda hint=None: "src/file.test.ts")
+        monkeypatch.setattr("agentic_tdd_runner.agent.verify_red_green", lambda tf: (True, "verified"))
+
+        def fake_run(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            if cmd == ["git", "diff"]:
+                raise subprocess.TimeoutExpired(cmd, 10)
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.subprocess.run", fake_run)
+
+        result = main()
+
+        assert result == 0
+        events = [event for event, _data in logged]
+        assert "done" in events
+        assert "postamble_error" in events
         assert "exhausted" not in events
 
     def test_logs_full_issue_text_on_start(self, tmp_path, monkeypatch):

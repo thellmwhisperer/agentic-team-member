@@ -125,6 +125,20 @@ def _tool_loop_warning_message(signature: str) -> str:
     )
 
 
+def _is_invalid_red_phase_failure(output: str) -> bool:
+    lowered = output.lower()
+    if "__set" not in lowered and "fortests" not in lowered:
+        return False
+    invalid_markers = (
+        "not a function",
+        "is undefined",
+        "cannot import",
+        "does not provide an export",
+        "has no exported member",
+    )
+    return any(marker in lowered for marker in invalid_markers)
+
+
 def _resolve_repo_path(path: str, workdir: str = None) -> Path:
     """Resolve a relative path within the workdir. Raises if it escapes."""
     repo_root = Path(workdir or WORKDIR).resolve()
@@ -490,6 +504,14 @@ def verify_red_green(test_file: str) -> tuple[bool, str]:
             f"This means it doesn't test the real code — it probably uses local stub functions "
             f"instead of importing from the source. Rewrite the test to import the real "
             f"function and mock its dependencies properly."
+        )
+
+    if _is_invalid_red_phase_failure(red_output):
+        return False, (
+            f"REJECTED: Your red phase for {test_file} failed because the test scaffold is incomplete, "
+            "not because the bug was reproduced. The failure mentions missing test-only seams/exports "
+            f"(for example __setXForTests). Rework the test so the pre-fix run executes the real code path "
+            f"and fails on behavior. Error: {red_output[:300]}"
         )
 
     if not green_passed:
@@ -909,6 +931,7 @@ def _parse_pr_content(content: str) -> tuple[str | None, str | None]:
 def create_pr(messages: list, last_msg: dict, test_file: str, step: int) -> str | None:
     """Ask LLM for PR content, then create branch/commit/push/PR."""
     pr_cfg = _CONFIG.get("pr", {})
+    command_timeout = _CONFIG.get("timeouts", {}).get("tool_execution", 10)
 
     # Ask LLM for title and description — without tools to avoid tool_calls
     pr_messages = messages.copy()
@@ -939,14 +962,14 @@ def create_pr(messages: list, last_msg: dict, test_file: str, step: int) -> str 
     try:
         subprocess.run(
             ["git", "checkout", "-b", branch_name],
-            cwd=WORKDIR, capture_output=True, check=True,
+            cwd=WORKDIR, capture_output=True, check=True, timeout=command_timeout,
         )
         # Tracked modified/staged: always part of the fix (includes config files)
         tracked = subprocess.run(
-            ["git", "diff", "--name-only"], cwd=WORKDIR, capture_output=True, text=True,
+            ["git", "diff", "--name-only"], cwd=WORKDIR, capture_output=True, text=True, timeout=command_timeout,
         )
         staged = subprocess.run(
-            ["git", "diff", "--cached", "--name-only"], cwd=WORKDIR, capture_output=True, text=True,
+            ["git", "diff", "--cached", "--name-only"], cwd=WORKDIR, capture_output=True, text=True, timeout=command_timeout,
         )
         tracked_files = {
             f.strip() for f in (tracked.stdout + staged.stdout).splitlines()
@@ -958,7 +981,7 @@ def create_pr(messages: list, last_msg: dict, test_file: str, step: int) -> str 
         extensions = lang.extensions if lang else [".ts", ".tsx", ".js", ".jsx"]
         untracked = subprocess.run(
             ["git", "ls-files", "--others", "--exclude-standard"],
-            cwd=WORKDIR, capture_output=True, text=True,
+            cwd=WORKDIR, capture_output=True, text=True, timeout=command_timeout,
         )
         untracked_files = {
             f.strip() for f in untracked.stdout.splitlines()
@@ -969,19 +992,19 @@ def create_pr(messages: list, last_msg: dict, test_file: str, step: int) -> str 
         if changed:
             subprocess.run(
                 ["git", "add", "--"] + changed,
-                cwd=WORKDIR, capture_output=True, check=True,
+                cwd=WORKDIR, capture_output=True, check=True, timeout=command_timeout,
             )
         subprocess.run(
             ["git", "commit", "-m", title, "-m", body],
-            cwd=WORKDIR, capture_output=True, check=True,
+            cwd=WORKDIR, capture_output=True, check=True, timeout=command_timeout,
         )
         subprocess.run(
             ["git", "push", "-u", "origin", branch_name],
-            cwd=WORKDIR, capture_output=True, check=True,
+            cwd=WORKDIR, capture_output=True, check=True, timeout=command_timeout,
         )
         result = subprocess.run(
             ["gh", "pr", "create", "--title", title, "--body", body, "--base", base],
-            cwd=WORKDIR, capture_output=True, text=True, check=True,
+            cwd=WORKDIR, capture_output=True, text=True, check=True, timeout=command_timeout,
         )
         pr_url = result.stdout.strip()
         log("pr", {"url": pr_url, "branch": branch_name, "title": title})
@@ -993,6 +1016,10 @@ def create_pr(messages: list, last_msg: dict, test_file: str, step: int) -> str 
         return None
     except OSError as e:
         emit(f"  [PR] Tool missing: {e}")
+        log("pr_error", {"error": str(e)})
+        return None
+    except subprocess.TimeoutExpired as e:
+        emit(f"  [PR] Command timed out: {e}")
         log("pr_error", {"error": str(e)})
         return None
 
@@ -1138,28 +1165,44 @@ def main():
         emit(f"\n{'='*60}")
         emit(f"AGENT DONE at step {step} — VERIFIED")
         emit(f"{'='*60}")
-        diff = subprocess.run(["git", "diff"], cwd=WORKDIR, capture_output=True, text=True)
-        emit(f"\n--- GIT DIFF ---\n{diff.stdout}")
-        untracked = subprocess.run(["git", "ls-files", "--others", "--exclude-standard"], cwd=WORKDIR, capture_output=True, text=True)
-        if untracked.stdout.strip():
-            emit("\n--- NEW FILES ---")
-            for f in untracked.stdout.strip().split("\n"):
-                emit(f"  {f}")
-                full = os.path.join(WORKDIR, f)
-                try:
-                    with open(full) as fh:
-                        emit(fh.read())
-                except OSError:
-                    pass
-        if _CONFIG.get("pr", {}).get("enabled", False):
-            emit("\n=== PR CREATION ===")
-            pr_url = create_pr(messages, msg, test_file, step)
-            if pr_url:
-                emit(f"  [PR] {pr_url}")
-            else:
-                emit("  [PR] Failed — diff printed above, create PR manually")
-
         log("done", {"step": step, "verified": True})
+        try:
+            command_timeout = _CONFIG.get("timeouts", {}).get("tool_execution", 10)
+            diff = subprocess.run(
+                ["git", "diff"],
+                cwd=WORKDIR,
+                capture_output=True,
+                text=True,
+                timeout=command_timeout,
+            )
+            emit(f"\n--- GIT DIFF ---\n{diff.stdout}")
+            untracked = subprocess.run(
+                ["git", "ls-files", "--others", "--exclude-standard"],
+                cwd=WORKDIR,
+                capture_output=True,
+                text=True,
+                timeout=command_timeout,
+            )
+            if untracked.stdout.strip():
+                emit("\n--- NEW FILES ---")
+                for f in untracked.stdout.strip().split("\n"):
+                    emit(f"  {f}")
+                    full = os.path.join(WORKDIR, f)
+                    try:
+                        with open(full) as fh:
+                            emit(fh.read())
+                    except OSError:
+                        pass
+            if _CONFIG.get("pr", {}).get("enabled", False):
+                emit("\n=== PR CREATION ===")
+                pr_url = create_pr(messages, msg, test_file, step)
+                if pr_url:
+                    emit(f"  [PR] {pr_url}")
+                else:
+                    emit("  [PR] Failed — diff printed above, create PR manually")
+        except Exception as e:
+            emit(f"  [POSTAMBLE] Failed: {e}")
+            log("postamble_error", {"step": step, "error": str(e)})
         return "done"
 
     for step in range(max_steps):
