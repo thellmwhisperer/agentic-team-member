@@ -275,14 +275,16 @@ def _render_cookbook_text(contract: dict, lang) -> str:
     parts.append("- Write the first failing test against the real callable contract from source.")
     parts.append("- Do not change the target's runtime signature just to fit the test scaffold.")
     parts.append("- For callbacks, handlers, and framework listeners, preserve the production contract.")
-    parts.append("- Apply only mechanical export or test-seam edits before the first failing test.")
+    parts.append("- Apply only mechanical export edits before the first failing test; defer generated test seams until after a behavioral red.")
     parts.append("")
 
     # Source edits
     edits = contract.get("pre_test_source_edits", [])
-    if edits:
+    immediate_edits = [edit for edit in edits if edit.get("kind") != "mechanical_test_seam"]
+    deferred_seam_edits = [edit for edit in edits if edit.get("kind") == "mechanical_test_seam"]
+    if immediate_edits:
         parts.append("### Source Edits (apply before testing)")
-        for edit in edits:
+        for edit in immediate_edits:
             parts.append(f"EDIT: {edit['path']}")
             parts.append("OLD:")
             parts.append(edit["old"])
@@ -310,14 +312,22 @@ def _render_cookbook_text(contract: dict, lang) -> str:
         if dep.get("strategy") == "set_test_seam"
     ]
     if seam_deps:
-        parts.append("### Test Seams")
+        parts.append("### Deferred Test Seams")
+        parts.append(
+            "Only add these seams if the first failing test still cannot reach the real code path "
+            "after module mocks and mechanical exports."
+        )
         for dep in seam_deps:
             binding = dep["binding"]
             setter = dep.get("setter_name") or lang.setter_name(binding)
             members = dep.get("observed_members", [])
             members_str = ", ".join(members) if members else "..."
             parts.append(
-                f"- `{binding}` → call `{setter}({{ {members_str} }})` before invoking target"
+                f"- `{binding}` → if needed later, use setter `{setter}` with a test double exposing `{members_str}`"
+            )
+        for edit in deferred_seam_edits:
+            parts.append(
+                f"- Deferred source edit in `{edit['path']}`: add setter `{edit['setter_name']}` only after a behavioral red."
             )
         parts.append("")
 
@@ -334,6 +344,8 @@ def _render_cookbook_text(contract: dict, lang) -> str:
     # Test scaffold
     scaffold = contract.get("scaffold", {})
     rendered = scaffold.get("rendered_test", "")
+    if seam_deps:
+        rendered = _render_first_red_scaffold(contract, owner_class=owner_class)
     if owner_class and runner == "pytest":
         # Override scaffold for class methods
         import_path = contract["test_file"].get("source_import_path", "")
@@ -358,10 +370,108 @@ def _render_cookbook_text(contract: dict, lang) -> str:
         )
     if rendered:
         code_lang = "python" if runner == "pytest" else "ts"
-        parts.append(f"### Test Scaffold ({contract['test_file']['path']})")
+        if seam_deps:
+            parts.append("Write this first red test before introducing any `__setXForTests` helpers.")
+            parts.append("")
+            parts.append(f"### First Red Test Scaffold ({contract['test_file']['path']})")
+        else:
+            parts.append(f"### Test Scaffold ({contract['test_file']['path']})")
         parts.append(f"```{code_lang}")
         parts.append(rendered.rstrip())
         parts.append("```")
         parts.append("")
 
     return "\n".join(parts)
+
+
+def _parse_signature_params_for_cookbook(signature: str) -> list[str]:
+    match = re.search(r"\((.*?)\)", signature, re.DOTALL)
+    if not match:
+        return []
+    params = []
+    for raw in match.group(1).split(","):
+        name = raw.strip().split(":")[0].split("=")[0].strip()
+        if name and name != "self":
+            params.append(name)
+    return params
+
+
+def _render_first_red_scaffold(contract: dict, *, owner_class: str | None = None) -> str:
+    runner = contract["test_file"]["runner"]
+    target = contract["target"]
+    target_name = target["symbol"]
+    import_path = contract["test_file"]["source_import_path"]
+    params = _parse_signature_params_for_cookbook(target.get("signature", ""))
+    assertion = contract.get("assertion_surface", {})
+
+    if runner == "pytest":
+        param_setup = "\n".join(f"    {param} = ..." for param in params)
+        call_target = (
+            f"    obj = {owner_class}()\n"
+            f"    obj.{target_name}({', '.join(params)})"
+            if owner_class
+            else f"    {target_name}({', '.join(params)})"
+        )
+        header_import = (
+            f"from {import_path} import {owner_class}\n\n\n"
+            if owner_class
+            else f"from {import_path} import {target_name}\n\n\n"
+        )
+        if assertion.get("kind") == "return_value":
+            act_block = (
+                f"    obj = {owner_class}()\n"
+                f"    result = obj.{target_name}({', '.join(params)})"
+                if owner_class
+                else f"    result = {target_name}({', '.join(params)})"
+            )
+            assert_block = "    assert result == expected_value"
+        else:
+            assert_block = (
+                "    # First red phase: assert through the real observable behavior, "
+                "not test-only seams.\n"
+                "    assert ... == expected_value"
+            )
+        return (
+            f"{header_import}"
+            f"def test_{target_name}():\n"
+            f"{param_setup}\n"
+            f"    expected_value = ...\n\n"
+            f"{act_block if assertion.get('kind') == 'return_value' else call_target}\n\n"
+            f"{assert_block}\n"
+        )
+
+    imports_block = "import { describe, expect, test } from 'bun:test';"
+    if owner_class:
+        module_import = f"import {{ {owner_class} }} from '{import_path}';"
+        act_line = f"const obj = new {owner_class}();\n    obj.{target_name}({', '.join(params)});"
+        if assertion.get("kind") == "return_value":
+            act_line = f"const obj = new {owner_class}();\n    const result = obj.{target_name}({', '.join(params)});"
+    else:
+        module_import = f"import {{ {target_name} }} from '{import_path}';"
+        act_line = f"{target_name}({', '.join(params)});"
+        if assertion.get("kind") == "return_value":
+            act_line = f"const result = {target_name}({', '.join(params)});"
+
+    arrange_lines = [f"const {param} = /* TODO */;" for param in params]
+    arrange_lines.append("const expected_value = /* TODO */;")
+
+    if assertion.get("kind") == "return_value":
+        assert_block = "expect(result).toBe(expected_value);"
+    else:
+        assert_block = (
+            "// First red phase: assert through the real observable behavior, not test-only seams.\n"
+            "expect(/* real observable */).toBe(expected_value);"
+        )
+
+    arrange_block = "\n    ".join(arrange_lines)
+    return (
+        f"{imports_block}\n"
+        f"{module_import}\n\n"
+        f"describe('{target_name}', () => {{\n"
+        f"  test('TODO behavior', () => {{\n"
+        f"    {arrange_block}\n\n"
+        f"    {act_line}\n\n"
+        f"    {assert_block}\n"
+        f"  }});\n"
+        f"}});\n"
+    )

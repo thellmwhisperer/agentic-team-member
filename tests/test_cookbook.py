@@ -117,6 +117,20 @@ class TestModuleLocalMutable:
         assert "client" in result
         assert "set" in result.lower() or "seam" in result.lower() or "inject" in result.lower()
 
+    def test_defers_test_seam_from_first_red_scaffold(self, tmp_path):
+        _write_file(tmp_path, "src/bot.ts", """\
+            let client: any;
+
+            export function sendMessage(channel: string, msg: string): void {
+              client.say(channel, msg);
+            }
+        """)
+        result = generate_cookbook("src/bot.ts", "sendMessage", str(tmp_path))
+        assert "### Deferred Test Seams" in result
+        assert "Write this first red test before introducing any `__setXForTests` helpers." in result
+        assert "__setClientForTests(" not in result
+        assert "expect(/* real observable */).toBe(expected_value);" in result
+
 
 class TestAssertionSurfaceScoring:
     """Assertion surface: say (120) > info (10) > get (-10)."""
@@ -389,6 +403,20 @@ class TestCookbookGuardrails:
         assert "Do not change the target's runtime signature just to fit the test scaffold." in result
         assert "Write the first failing test against the real callable contract from source." in result
         assert "For callbacks, handlers, and framework listeners, preserve the production contract." in result
+
+    def test_keeps_export_edit_but_defers_generated_test_seams(self, tmp_path):
+        _write_file(tmp_path, "src/handler.ts", """\
+            let client: any;
+
+            function handleResub(channel: string, username: string, months: number): void {
+              client.say(channel, `${username} lleva ${months} meses`);
+            }
+        """)
+        result = generate_cookbook("src/handler.ts", "handleResub", str(tmp_path))
+        assert "### Source Edits (apply before testing)" in result
+        assert "export function handleResub" in result
+        assert "### Deferred Test Seams" in result
+        assert "__setClientForTests(" not in result
 
 
 class TestSingleParamArrowFunction:
