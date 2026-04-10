@@ -480,9 +480,15 @@ def run_quality_checks(test_file: str) -> tuple[bool, str]:
     checks = detect_quality_tools(lang_name) or lang_cfg.get("checks", [])
     forbidden = lang_cfg.get("forbidden", [])
 
-    changed = _get_changed_files()
-    if not changed:
+    all_changed = _get_changed_files()
+    if not all_changed:
         return True, "No changed files"
+
+    # Filter to files matching the active language's extensions
+    extensions = lang.extensions if lang else [".ts", ".tsx", ".js", ".jsx"]
+    changed = [f for f in all_changed if os.path.splitext(f)[1] in extensions]
+    if not changed:
+        return True, "No changed files matching language"
 
     changed_str = " ".join(shlex.quote(path) for path in changed)
     failures = []

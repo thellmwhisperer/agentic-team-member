@@ -560,24 +560,49 @@ class TestRunQualityChecks:
         assert ok is False
         assert "duplicated" in msg.lower() or "beforeEach" in msg
 
-    def test_filters_by_language(self, tmp_path, monkeypatch):
+    def test_filters_changed_files_by_language_extensions(self, tmp_path, monkeypatch):
+        """Only files matching the active language's extensions are scanned."""
         self._setup_repo(tmp_path, monkeypatch)
-        (tmp_path / "src" / "test_worker.py").write_text("clean")
+        # TS file (matches lang) — clean
+        (tmp_path / "src" / "file.test.ts").write_text("const x: number = 1;")
+        # TOML file (wrong lang) — contains a TS forbidden pattern
+        (tmp_path / "config.toml").write_text('value = "as any"')
+        # Python file (wrong lang) — also contains TS forbidden pattern
+        (tmp_path / "helper.py").write_text("x = 'as any'")
         monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
             "quality": {
                 "enabled": True, "max_fix_rounds": 3,
-                "typescript": {
-                    "checks": [{"name": "tsc", "command": "false"}],  # would fail
-                    "forbidden": [],
-                },
-                "python": {"checks": [], "forbidden": []},
+                "typescript": {"checks": [], "forbidden": ["as any"]},
             },
             "timeouts": {"tool_execution": 10},
             "prompt": {"quality_failed": "FAIL: {details}"},
         })
-        # Python test file → only python checks run (none), TS checks skipped
-        ok, msg = run_quality_checks("src/test_worker.py")
-        assert ok is True
+        # TS quality gate should NOT flag .toml or .py files
+        ok, msg = run_quality_checks("src/file.test.ts")
+        assert ok is True, f"Non-TS files should be excluded from TS quality scan: {msg}"
+
+    def test_filters_by_language_for_checks(self, tmp_path, monkeypatch):
+        """Check commands only receive files matching the active language."""
+        self._setup_repo(tmp_path, monkeypatch)
+        (tmp_path / "src" / "file.test.ts").write_text("clean")
+        (tmp_path / "stray.py").write_text("stray python file")
+        # Command that fails if it sees any .py file in its arguments
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "quality": {
+                "enabled": True, "max_fix_rounds": 3,
+                "typescript": {
+                    "checks": [{
+                        "name": "ts-only",
+                        "command": "echo {changed_files} | grep -v '\\.py'",
+                    }],
+                    "forbidden": [],
+                },
+            },
+            "timeouts": {"tool_execution": 10},
+            "prompt": {"quality_failed": "FAIL: {details}"},
+        })
+        ok, msg = run_quality_checks("src/file.test.ts")
+        assert ok is True, f".py should not appear in TS check commands: {msg}"
 
 
 class TestParsePrContent:
