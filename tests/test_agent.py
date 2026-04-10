@@ -846,6 +846,44 @@ class TestCreatePr:
         assert chat_kwargs[0]["include_tools"] is False, \
             "create_pr should call chat with include_tools=False to prevent tool_calls"
 
+    def test_returns_none_when_gh_missing(self, tmp_path, monkeypatch):
+        """create_pr must return None (not crash) when gh CLI is absent."""
+        from unittest.mock import patch as mock_patch
+
+        self._init_repo(tmp_path)
+        (tmp_path / "file.ts").write_text("code")
+        subprocess.run([GIT, "add", "-A"], cwd=tmp_path, capture_output=True, check=True)
+        subprocess.run([GIT, "commit", "-m", "init"], cwd=tmp_path, capture_output=True, check=True)
+        (tmp_path / "file.ts").write_text("fixed")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "pr": {"enabled": True, "base_branch": "main", "branch_prefix": "atm/fix-"},
+            "prompt": {"pr_prompt": "Generate PR"},
+            "llm": {"model": "test", "url": "http://localhost:9999/v1/chat/completions"},
+            "timeouts": {"llm_request": 10},
+        })
+
+        mock_response = {
+            "choices": [{"message": {"content": "PR_TITLE: fix\nPR_BODY: done"}}],
+        }
+
+        original_run = subprocess.run
+
+        def run_raises_on_gh(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            if isinstance(cmd, list) and cmd[0] == "gh":
+                raise FileNotFoundError("No such file or directory: 'gh'")
+            if isinstance(cmd, list) and cmd[0] == "git" and "push" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, stdout="")
+            return original_run(*args, **kwargs)
+
+        with mock_patch("agentic_tdd_runner.agent.chat", return_value=mock_response):
+            with mock_patch("subprocess.run", side_effect=run_raises_on_gh):
+                result = create_pr([], {}, "file.ts", 1)
+
+        assert result is None
+
     def test_returns_none_on_chat_failure(self, tmp_path, monkeypatch):
         from unittest.mock import patch as mock_patch
 

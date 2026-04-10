@@ -665,6 +665,10 @@ def create_pr(messages: list, last_msg: dict, test_file: str, step: int) -> str 
         emit(f"  [PR] Command failed: {e.stderr}")
         log("pr_error", {"error": str(e)})
         return None
+    except OSError as e:
+        emit(f"  [PR] Tool missing: {e}")
+        log("pr_error", {"error": str(e)})
+        return None
 
 
 def _default_config_path():
