@@ -609,10 +609,36 @@ def create_pr(messages: list, last_msg: dict, test_file: str, step: int) -> str 
             ["git", "checkout", "-b", branch_name],
             cwd=WORKDIR, capture_output=True, check=True,
         )
-        subprocess.run(
-            ["git", "add", "-A"],
-            cwd=WORKDIR, capture_output=True, check=True,
+        # Tracked modified/staged: always part of the fix (includes config files)
+        tracked = subprocess.run(
+            ["git", "diff", "--name-only"], cwd=WORKDIR, capture_output=True, text=True,
         )
+        staged = subprocess.run(
+            ["git", "diff", "--cached", "--name-only"], cwd=WORKDIR, capture_output=True, text=True,
+        )
+        tracked_files = {
+            f.strip() for f in (tracked.stdout + staged.stdout).splitlines()
+            if f.strip()
+        }
+        # Untracked: only include if they match the active language (new source/test files)
+        from agentic_tdd_runner.languages import get_language
+        lang = get_language(test_file)
+        extensions = lang.extensions if lang else [".ts", ".tsx", ".js", ".jsx"]
+        untracked = subprocess.run(
+            ["git", "ls-files", "--others", "--exclude-standard"],
+            cwd=WORKDIR, capture_output=True, text=True,
+        )
+        untracked_files = {
+            f.strip() for f in untracked.stdout.splitlines()
+            if f.strip() and os.path.exists(os.path.join(WORKDIR, f.strip()))
+            and os.path.splitext(f.strip())[1] in extensions
+        }
+        changed = sorted(tracked_files | untracked_files)
+        if changed:
+            subprocess.run(
+                ["git", "add", "--"] + changed,
+                cwd=WORKDIR, capture_output=True, check=True,
+            )
         subprocess.run(
             ["git", "commit", "-m", title, "-m", body],
             cwd=WORKDIR, capture_output=True, check=True,

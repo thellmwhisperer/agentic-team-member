@@ -698,6 +698,70 @@ class TestCreatePr:
         assert any("git push" in c for c in cmd_strs), f"No git push: {cmd_strs}"
         assert any("gh pr create" in c for c in cmd_strs), f"No gh pr create: {cmd_strs}"
 
+    def test_pr_stages_tracked_changes_and_filters_untracked(self, tmp_path, monkeypatch):
+        """create_pr stages all tracked modified files (incl config) but only language-matching untracked."""
+        from unittest.mock import patch as mock_patch
+
+        subprocess.run("git init", shell=True, cwd=tmp_path, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "t@t"], cwd=tmp_path, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "t"], cwd=tmp_path, capture_output=True)
+        (tmp_path / "file.ts").write_text("code")
+        (tmp_path / "package.json").write_text('{"name": "test"}')
+        (tmp_path / "obsolete.ts").write_text("dead code")
+        subprocess.run("git add -A && git commit -m init", shell=True, cwd=tmp_path, capture_output=True)
+        # Tracked modified files — ALL should be staged regardless of extension
+        (tmp_path / "file.ts").write_text("fixed code")
+        (tmp_path / "package.json").write_text('{"name": "test", "scripts": {"typecheck": "tsc"}}')
+        # Tracked deletion — removing dead code is part of the fix
+        (tmp_path / "obsolete.ts").unlink()
+        # Untracked language file — should be staged (new test file)
+        (tmp_path / "file.test.ts").write_text("test code")
+        # Untracked non-language files — should NOT be staged
+        (tmp_path / "agent-session.jsonl").write_text('{"log": "entry"}')
+        (tmp_path / "notes.md").write_text("scratch notes")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "pr": {"enabled": True, "base_branch": "main", "branch_prefix": "atm/fix-"},
+            "prompt": {"pr_prompt": "Generate PR"},
+            "llm": {"model": "test", "url": "http://localhost:9999/v1/chat/completions"},
+            "timeouts": {"llm_request": 10},
+        })
+
+        mock_response = {
+            "choices": [{"message": {"content": "PR_TITLE: fix bug\nPR_BODY: Fixed."}}],
+        }
+
+        add_commands = []
+        original_run = subprocess.run
+
+        def track_run(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            if isinstance(cmd, list):
+                if cmd[0] == "git" and len(cmd) > 1 and cmd[1] == "add":
+                    add_commands.append(cmd)
+                if cmd[0] == "gh" or (cmd[0] == "git" and "push" in cmd):
+                    return subprocess.CompletedProcess(cmd, 0, stdout="https://github.com/test/pr/1\n")
+                return original_run(*args, **kwargs)
+            return original_run(*args, **kwargs)
+
+        with mock_patch("agentic_tdd_runner.agent.chat", return_value=mock_response):
+            with mock_patch("subprocess.run", side_effect=track_run):
+                create_pr([], {}, "file.test.ts", 10)
+
+        assert len(add_commands) == 1, f"Expected one git add call, got {add_commands}"
+        staged_files = add_commands[0][3:]  # after ['git', 'add', '--']
+        # Tracked modified: always staged
+        assert "file.ts" in staged_files, f"Source file missing: {staged_files}"
+        assert "package.json" in staged_files, f"Config file missing from PR: {staged_files}"
+        # Tracked deletion: staged (removing dead code is a valid fix)
+        assert "obsolete.ts" in staged_files, f"Deleted file missing from PR: {staged_files}"
+        # Untracked language match: staged
+        assert "file.test.ts" in staged_files, f"New test file missing: {staged_files}"
+        # Untracked non-language: excluded
+        assert "agent-session.jsonl" not in staged_files, f"Log file staged: {staged_files}"
+        assert "notes.md" not in staged_files, f"Non-language file staged: {staged_files}"
+
     def test_returns_none_on_chat_failure(self, tmp_path, monkeypatch):
         from unittest.mock import patch as mock_patch
 
