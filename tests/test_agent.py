@@ -8,14 +8,16 @@ import pytest
 import requests
 
 from agentic_tdd_runner.agent import (
-    _compact_messages_after_quality_failure,
     _build_duplicated_setup_judge_prompt,
+    _compact_messages_after_quality_failure,
     _get_changed_files,
     _is_obvious_act_line,
     _is_obvious_assert_line,
     _parse_pr_content,
     _resolve_repo_path,
     _tool_applied_status,
+    _tool_loop_signature,
+    _tool_loop_warning_message,
     _validate_command,
     create_pr,
     detect_quality_tools,
@@ -985,6 +987,18 @@ class TestExecuteToolReactiveChecks:
         assert _tool_applied_status("str_replace_editor", "ERROR: old_str not found") is False
         assert _tool_applied_status("read_file", "contents") is None
 
+    def test_tool_loop_signature_only_tracks_exploratory_reads(self):
+        assert _tool_loop_signature("read_file", {"path": "src/file.ts"}) == "read_file:src/file.ts"
+        assert _tool_loop_signature("run_command", {"command": "rg months src"}) == "run_command:rg months src"
+        assert _tool_loop_signature("run_command", {"command": "bun test src/file.test.ts"}) is None
+        assert _tool_loop_signature("str_replace_editor", {"path": "src/file.ts"}) is None
+
+    def test_tool_loop_warning_message_points_model_toward_progress(self):
+        msg = _tool_loop_warning_message("read_file:src/file.ts")
+        assert "repeated the same exploratory tool call" in msg
+        assert "make an edit" in msg
+        assert "DONE" in msg
+
     def test_str_replace_editor_appends_reactive_typecheck_failure(self, tmp_path, monkeypatch):
         src = tmp_path / "src"
         src.mkdir()
@@ -1732,3 +1746,80 @@ class TestMain:
         assert quality_call_count == 2
         events = [event for event, _data in logged]
         assert "context_compacted" in events
+
+    def test_loop_detection_nudges_after_three_identical_exploratory_tools(self, tmp_path, monkeypatch):
+        logged = []
+        chat_calls = []
+
+        config = {
+            "agent": {"max_steps": 4, "max_tool_output": 2000},
+            "verification": {"max_rejections": 3},
+            "quality": {"enabled": False},
+            "prompt": {
+                "system": "system prompt",
+                "nudge": "Step {step}/{max_steps}. Continue.",
+                "no_test_found": "no test",
+                "quality_failed": "FAIL: {details}",
+            },
+            "llm": {"model": "test-model"},
+            "timeouts": {"tool_execution": 10, "llm_request": 10},
+            "runner": {"command": "bun test", "test_file_patterns": ["*.test.ts"], "exclude_dirs": []},
+            "tools": [],
+            "pr": {"enabled": False},
+        }
+        args = SimpleNamespace(
+            issue="bug text",
+            source=None,
+            symbol=None,
+            workdir=str(tmp_path),
+            config="unused.toml",
+            log_dir=str(tmp_path),
+        )
+
+        def fake_chat(messages, include_tools=True):
+            chat_calls.append([dict(msg) for msg in messages])
+            if len(chat_calls) <= 3:
+                return {
+                    "choices": [{"message": {
+                        "content": None,
+                        "tool_calls": [{
+                            "id": f"call_{len(chat_calls)}",
+                            "function": {
+                                "name": "read_file",
+                                "arguments": '{"path": "src/file.ts"}',
+                            },
+                        }],
+                    }, "finish_reason": "tool_calls"}],
+                    "usage": {},
+                    "timings": {},
+                }
+
+            return {
+                "choices": [{"message": {"content": "DONE"}, "finish_reason": "stop"}],
+                "usage": {},
+                "timings": {},
+            }
+
+        monkeypatch.setattr("agentic_tdd_runner.config.load_config", lambda path: config)
+        monkeypatch.setattr("agentic_tdd_runner.agent.parse_args", lambda: args)
+        monkeypatch.setattr("agentic_tdd_runner.agent.init_log", lambda: str(tmp_path / "agent.jsonl"))
+        monkeypatch.setattr("agentic_tdd_runner.agent.emit", lambda msg: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.log", lambda event, data: logged.append((event, data)))
+        monkeypatch.setattr("agentic_tdd_runner.agent.chat", fake_chat)
+        monkeypatch.setattr("agentic_tdd_runner.agent.execute_tool", lambda name, args: "file contents")
+        monkeypatch.setattr("agentic_tdd_runner.agent.find_test_file", lambda hint=None: "src/file.test.ts")
+        monkeypatch.setattr("agentic_tdd_runner.agent.verify_red_green", lambda tf: (True, "verified"))
+        monkeypatch.setattr(
+            "agentic_tdd_runner.agent.subprocess.run",
+            lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, stdout="", stderr=""),
+        )
+
+        result = main()
+
+        assert result == 0
+        events = [event for event, _data in logged]
+        assert "loop_detected" in events
+        assert any(
+            msg.get("role") == "user" and "repeated the same exploratory tool call" in msg.get("content", "")
+            for msg in chat_calls[3]
+        )
