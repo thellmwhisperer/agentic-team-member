@@ -1046,10 +1046,79 @@ def _parse_pr_content(content: str) -> tuple[str | None, str | None]:
     return title, body
 
 
+def _resolve_pr_base_ref(base_branch: str, command_timeout: int) -> str | None:
+    """Resolve the git ref the PR should be based on, preferring origin/<base>."""
+    for ref in (f"origin/{base_branch}", base_branch):
+        result = subprocess.run(
+            ["git", "rev-parse", "--verify", ref],
+            cwd=WORKDIR,
+            capture_output=True,
+            text=True,
+            timeout=command_timeout,
+        )
+        if result.returncode == 0:
+            return ref
+    return None
+
+
+def _check_pr_base_hygiene(base_branch: str, command_timeout: int) -> tuple[bool, str]:
+    """Require the run worktree to still be exactly on the configured PR base."""
+    base_ref = _resolve_pr_base_ref(base_branch, command_timeout)
+    if not base_ref:
+        return False, f"Refusing to create PR: could not resolve base ref for {base_branch}."
+
+    result = subprocess.run(
+        ["git", "rev-list", "--left-right", "--count", f"{base_ref}...HEAD"],
+        cwd=WORKDIR,
+        capture_output=True,
+        text=True,
+        timeout=command_timeout,
+    )
+    if result.returncode != 0:
+        return False, (
+            f"Refusing to create PR: could not compare HEAD against {base_ref}: "
+            f"{result.stderr.strip()}"
+        )
+
+    counts = result.stdout.strip().split()
+    if len(counts) != 2:
+        return False, (
+            f"Refusing to create PR: unexpected git ancestry output for {base_ref}: "
+            f"{result.stdout.strip()}"
+        )
+
+    behind, ahead = counts
+    if behind != "0" or ahead != "0":
+        return False, (
+            f"Refusing to create PR: current HEAD is not cleanly based on {base_ref} "
+            f"(behind={behind}, ahead={ahead}). Start from a clean worktree based on the PR base."
+        )
+
+    return True, base_ref
+
+
 def create_pr(messages: list, last_msg: dict, test_file: str, step: int) -> str | None:
     """Ask LLM for PR content, then create branch/commit/push/PR."""
     pr_cfg = _CONFIG.get("pr", {})
     pr_timeout = _CONFIG["timeouts"]["pr_create"]
+    base = pr_cfg.get("base_branch", "main")
+    prefix = pr_cfg.get("branch_prefix", "atm/fix-")
+
+    try:
+        clean_base, base_info = _check_pr_base_hygiene(base, pr_timeout)
+    except OSError as e:
+        emit(f"  [PR] Tool missing: {e}")
+        log("pr_error", {"error": str(e)})
+        return None
+    except subprocess.TimeoutExpired as e:
+        emit(f"  [PR] Command timed out: {e}")
+        log("pr_error", {"error": str(e)})
+        return None
+
+    if not clean_base:
+        emit(f"  [PR] {base_info}")
+        log("pr_error", {"error": base_info, "base_branch": base})
+        return None
 
     # Ask LLM for title and description — without tools to avoid tool_calls
     pr_messages = messages.copy()
@@ -1072,8 +1141,6 @@ def create_pr(messages: list, last_msg: dict, test_file: str, step: int) -> str 
     if not body:
         body = "Automated fix by ATM agent."
 
-    base = pr_cfg.get("base_branch", "main")
-    prefix = pr_cfg.get("branch_prefix", "atm/fix-")
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     branch_name = f"{prefix}{timestamp}"
 
