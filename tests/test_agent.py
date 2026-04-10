@@ -608,6 +608,62 @@ class TestRunQualityChecks:
         ok, msg = run_quality_checks("src/file.test.ts")
         assert ok is True, f".py should not appear in TS check commands: {msg}"
 
+    def test_timeout_degrades_to_failure_not_crash(self, tmp_path, monkeypatch):
+        """A timed-out check command must return (False, msg), not raise."""
+        self._setup_repo(tmp_path, monkeypatch)
+        (tmp_path / "src" / "file.test.ts").write_text("clean")
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "quality": {
+                "enabled": True, "max_fix_rounds": 3,
+                "typescript": {
+                    "checks": [{"name": "slow", "command": "sleep 60"}],
+                    "forbidden": [],
+                },
+            },
+            "timeouts": {"tool_execution": 0.1},
+            "prompt": {"quality_failed": "FAIL: {details}"},
+        })
+        ok, msg = run_quality_checks("src/file.test.ts")
+        assert ok is False
+        assert "slow" in msg.lower() or "timeout" in msg.lower()
+
+    def test_non_utf8_tool_output_degrades_to_failure_not_crash(self, tmp_path, monkeypatch):
+        """A check command that emits non-UTF-8 bytes must not crash the helper."""
+        self._setup_repo(tmp_path, monkeypatch)
+        (tmp_path / "src" / "file.test.ts").write_text("clean")
+        # printf outputs raw bytes that are invalid UTF-8
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "quality": {
+                "enabled": True, "max_fix_rounds": 3,
+                "typescript": {
+                    "checks": [{"name": "badout", "command": "printf '\\xff\\xfe' && exit 1"}],
+                    "forbidden": [],
+                },
+            },
+            "timeouts": {"tool_execution": 10},
+            "prompt": {"quality_failed": "FAIL: {details}"},
+        })
+        ok, msg = run_quality_checks("src/file.test.ts")
+        assert ok is False
+        assert "badout" in msg.lower()
+
+    def test_binary_file_degrades_to_failure_not_crash(self, tmp_path, monkeypatch):
+        """A binary file in changed list must not crash the forbidden-pattern scan."""
+        self._setup_repo(tmp_path, monkeypatch)
+        # Write a binary file with a .ts extension so it passes the language filter
+        (tmp_path / "src" / "data.ts").write_bytes(b"\x00\x01\x02\xff\xfe")
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "quality": {
+                "enabled": True, "max_fix_rounds": 3,
+                "typescript": {"checks": [], "forbidden": ["as any"]},
+            },
+            "timeouts": {"tool_execution": 10},
+            "prompt": {"quality_failed": "FAIL: {details}"},
+        })
+        # Must not raise UnicodeDecodeError
+        ok, msg = run_quality_checks("src/file.test.ts")
+        assert isinstance(ok, bool)
+
 
 class TestParsePrContent:
     """_parse_pr_content extracts title and body from LLM response."""

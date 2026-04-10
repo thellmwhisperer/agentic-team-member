@@ -499,20 +499,25 @@ def run_quality_checks(test_file: str) -> tuple[bool, str]:
 
     # Run checks (fix first if available, then verify)
     for check in checks:
-        fix_cmd = check.get("fix", "").replace("{changed_files}", changed_str)
-        if fix_cmd:
-            subprocess.run(
-                fix_cmd, shell=True, cwd=WORKDIR, capture_output=True,
+        try:
+            fix_cmd = check.get("fix", "").replace("{changed_files}", changed_str)
+            if fix_cmd:
+                subprocess.run(
+                    fix_cmd, shell=True, cwd=WORKDIR, capture_output=True,
+                    timeout=_CONFIG["timeouts"]["tool_execution"],
+                )
+            cmd = check["command"].replace("{changed_files}", changed_str)
+            result = subprocess.run(
+                cmd, shell=True, cwd=WORKDIR, capture_output=True, text=True,
                 timeout=_CONFIG["timeouts"]["tool_execution"],
             )
-        cmd = check["command"].replace("{changed_files}", changed_str)
-        result = subprocess.run(
-            cmd, shell=True, cwd=WORKDIR, capture_output=True, text=True,
-            timeout=_CONFIG["timeouts"]["tool_execution"],
-        )
-        if result.returncode != 0:
-            output = (result.stdout + result.stderr)[:500]
-            failures.append(f"[{check['name']}] FAILED:\n{output}")
+            if result.returncode != 0:
+                output = (result.stdout + result.stderr)[:500]
+                failures.append(f"[{check['name']}] FAILED:\n{output}")
+        except subprocess.TimeoutExpired:
+            failures.append(f"[{check['name']}] TIMEOUT: command timed out")
+        except (OSError, UnicodeDecodeError) as e:
+            failures.append(f"[{check['name']}] ERROR: {e}")
 
     # Grep forbidden patterns in changed files
     for f in changed:
@@ -520,7 +525,7 @@ def run_quality_checks(test_file: str) -> tuple[bool, str]:
         if not os.path.isfile(full):
             continue
         try:
-            with open(full) as fh:
+            with open(full, errors="replace") as fh:
                 content = fh.read()
         except OSError:
             continue
@@ -538,8 +543,8 @@ def run_quality_checks(test_file: str) -> tuple[bool, str]:
         if not os.path.isfile(full):
             continue
         try:
-            with open(full) as fh:
-                lines = [l.strip() for l in fh if l.strip() and len(l.strip()) > 20]
+            with open(full, errors="replace") as fh:
+                lines = [ln.strip() for ln in fh if ln.strip() and len(ln.strip()) > 20]
         except OSError:
             continue
         from collections import Counter
