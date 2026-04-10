@@ -8,9 +8,10 @@ import re
 import shlex
 import subprocess
 import sys
+import textwrap
 import time
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import requests
 
@@ -31,6 +32,7 @@ sys.stderr.reconfigure(line_buffering=True)
 _CONFIG = None  # populated by main()
 WORKDIR = os.environ.get("AGENT_WORKDIR", os.getcwd())
 LOG_DIR = os.environ.get("AGENT_LOG_DIR", os.getcwd())
+_last_run_exit_code: int | None = None
 
 # --- Logging ---
 _log_file = None
@@ -60,6 +62,37 @@ def emit(msg: str):
 
 
 # Tools and prompts loaded from config/agent.toml + config/tools.json
+
+
+def _is_llm_timeout_error(exc: Exception) -> bool:
+    if isinstance(exc, requests.exceptions.Timeout):
+        return True
+    return "timed out" in str(exc).lower()
+
+
+def _compact_messages_after_quality_failure(messages: list[dict], quality_msg: str, test_file: str) -> list[dict]:
+    compacted: list[dict] = []
+    if messages and messages[0].get("role") == "system":
+        compacted.append(messages[0])
+
+    issue_msg = next((msg for msg in messages[1:] if msg.get("role") == "user"), None)
+    if issue_msg:
+        compacted.append(issue_msg)
+
+    compacted.append({
+        "role": "user",
+        "content": (
+            f"Verification already passed for {test_file}. Preserve the current fix behavior and "
+            f"only address the residual quality issues below.\n\n{quality_msg}"
+        ),
+    })
+    return compacted
+
+
+def _tool_applied_status(name: str, result: str) -> bool | None:
+    if name not in {"str_replace_editor", "create_file"}:
+        return None
+    return result.startswith("OK:")
 
 
 def _resolve_repo_path(path: str, workdir: str = None) -> Path:
@@ -159,6 +192,7 @@ def execute_tool(name: str, args: dict) -> str:
                 return f.read()
 
         elif name == "run_command":
+            global _last_run_exit_code
             _validate_command(args["command"])
             result = subprocess.run(
                 args["command"],
@@ -168,6 +202,7 @@ def execute_tool(name: str, args: dict) -> str:
                 text=True,
                 timeout=_CONFIG["timeouts"]["tool_execution"],
             )
+            _last_run_exit_code = result.returncode
             output = result.stdout + result.stderr
             return output if output.strip() else "(no output)"
 
@@ -183,7 +218,8 @@ def execute_tool(name: str, args: dict) -> str:
             new_content = content.replace(old_str, args["new_str"], 1)
             with open(full_path, "w") as f:
                 f.write(new_content)
-            return f"OK: replaced in {args['path']}"
+            result = f"OK: replaced in {args['path']}"
+            return result + _reactive_typecheck_feedback(args["path"])
 
         elif name == "create_file":
             full_path = _resolve_repo_path(args["path"])
@@ -192,13 +228,98 @@ def execute_tool(name: str, args: dict) -> str:
             os.makedirs(os.path.dirname(full_path), exist_ok=True)
             with open(full_path, "w") as f:
                 f.write(args["content"])
-            return f"OK: created {args['path']}"
+            result = f"OK: created {args['path']}"
+            return result + _reactive_typecheck_feedback(args["path"]) + _reactive_test_feedback(args["path"])
 
         else:
             return f"ERROR: unknown tool {name}"
 
     except Exception as e:
         return f"ERROR: {type(e).__name__}: {e}"
+
+
+def _reactive_typecheck_feedback(path: str) -> str:
+    suffix = Path(path).suffix.lower()
+    if suffix not in {".ts", ".tsx", ".js", ".jsx"}:
+        return ""
+
+    checks = detect_quality_tools("typescript")
+    typecheck = next((check for check in checks if check.get("name") == "typecheck"), None)
+    if not typecheck:
+        return ""
+    timeout_s = (_CONFIG or {}).get("timeouts", {}).get("tool_execution", 10)
+
+    try:
+        result = subprocess.run(
+            typecheck["command"],
+            shell=True,
+            cwd=WORKDIR,
+            capture_output=True,
+            text=True,
+            timeout=timeout_s,
+        )
+    except subprocess.TimeoutExpired:
+        return "\n\n[Reactive typecheck] TIMEOUT: command timed out"
+    except (OSError, UnicodeDecodeError) as e:
+        return f"\n\n[Reactive typecheck] ERROR: {e}"
+
+    if result.returncode == 0:
+        return ""
+
+    raw = (result.stdout or "") + (result.stderr or "")
+    error_lines = [ln for ln in raw.splitlines() if ln.strip() and "error" in ln.lower()]
+    n_errors = len(error_lines) if error_lines else 1
+    sample = "\n".join(f"  {ln.strip()}" for ln in error_lines[:3])
+    if not sample:
+        sample = f"  {raw[:200]}"
+    return f"\n\n[Reactive typecheck] {n_errors} errors:\n{sample}"
+
+
+def _reactive_test_feedback(path: str) -> str:
+    if not _is_test_file_path(path):
+        return ""
+
+    run_cmd = _test_runner_command_for_file(path)
+    timeout_s = (_CONFIG or {}).get("timeouts", {}).get("test_run", 30)
+    run_argv = shlex.split(run_cmd) + [path]
+
+    try:
+        result = subprocess.run(
+            run_argv,
+            cwd=WORKDIR,
+            capture_output=True,
+            text=True,
+            timeout=timeout_s,
+        )
+    except subprocess.TimeoutExpired:
+        return "\n\n[Reactive test] TIMEOUT: command timed out"
+    except (OSError, UnicodeDecodeError) as e:
+        return f"\n\n[Reactive test] ERROR: {e}"
+
+    if result.returncode == 0:
+        return ""
+
+    raw = (result.stdout or "") + (result.stderr or "")
+    sample_lines = [ln for ln in raw.splitlines() if ln.strip()][:5]
+    sample = "\n".join(f"  {ln}" for ln in sample_lines) if sample_lines else f"  {raw[:200]}"
+    return f"\n\n[Reactive test] failed:\n{sample}"
+
+
+def _is_test_file_path(path: str) -> bool:
+    patterns = (_CONFIG or {}).get("runner", {}).get("test_file_patterns", [])
+    import fnmatch
+    name = PurePosixPath(path).name
+    if not patterns:
+        return "test" in name.lower()
+    return any(fnmatch.fnmatch(name, pattern) for pattern in patterns)
+
+
+def _test_runner_command_for_file(path: str) -> str:
+    from agentic_tdd_runner.languages import get_language
+    lang = get_language(path)
+    if lang and lang.runner == "pytest":
+        return "python3 -m pytest"
+    return (_CONFIG or {}).get("runner", {}).get("command", "bun test")
 
 
 def truncate(text: str, max_chars: int = 0) -> str:
@@ -512,14 +633,20 @@ def run_quality_checks(test_file: str) -> tuple[bool, str]:
                 timeout=_CONFIG["timeouts"]["tool_execution"],
             )
             if result.returncode != 0:
-                output = (result.stdout + result.stderr)[:500]
-                failures.append(f"[{check['name']}] FAILED:\n{output}")
+                raw = (result.stdout + result.stderr).strip()
+                error_lines = [ln for ln in raw.splitlines() if ln.strip() and "error" in ln.lower()]
+                n_errors = len(error_lines) if error_lines else 1
+                sample = "\n".join(f"  {ln.strip()}" for ln in error_lines[:3])
+                if not sample:
+                    sample = f"  {raw[:200]}"
+                failures.append(f"[{check['name']}] {n_errors} errors:\n{sample}")
         except subprocess.TimeoutExpired:
             failures.append(f"[{check['name']}] TIMEOUT: command timed out")
         except (OSError, UnicodeDecodeError) as e:
             failures.append(f"[{check['name']}] ERROR: {e}")
 
-    # Grep forbidden patterns in changed files
+    # Grep forbidden patterns in changed files — group by file
+    forbidden_by_file: dict[str, list[str]] = {}
     for f in changed:
         full = os.path.join(WORKDIR, f)
         if not os.path.isfile(full):
@@ -532,11 +659,13 @@ def run_quality_checks(test_file: str) -> tuple[bool, str]:
         for pattern in forbidden:
             for i, line in enumerate(content.splitlines(), 1):
                 if pattern in line:
-                    failures.append(
-                        f"[Forbidden] '{pattern}' in {f}:{i}: {line.strip()}"
-                    )
+                    forbidden_by_file.setdefault(f, []).append(f"  {f}:{i} '{pattern}'")
+    for f, hits in forbidden_by_file.items():
+        sample = "\n".join(hits[:3])
+        n = len(hits)
+        failures.append(f"[Forbidden] {f}: {n} forbidden patterns\n{sample}")
 
-    # Detect duplicated setup lines in test files
+    # Detect duplicated setup lines in test files — report identifiers, not full lines
     test_files = [f for f in changed if "test" in f]
     for f in test_files:
         full = os.path.join(WORKDIR, f)
@@ -544,17 +673,26 @@ def run_quality_checks(test_file: str) -> tuple[bool, str]:
             continue
         try:
             with open(full, errors="replace") as fh:
-                lines = [ln.strip() for ln in fh if ln.strip() and len(ln.strip()) > 20]
+                file_text = fh.read()
         except OSError:
             continue
-        from collections import Counter
-        counts = Counter(lines)
-        dupes = [line for line, n in counts.items() if n >= 3]
-        if dupes:
-            sample = "\n".join(f"  {n}x: {line[:80]}" for line, n in counts.items() if n >= 3)
+        setup_dupes, ambiguous_dupes = _partition_duplicated_test_lines(file_text)
+        report_lines = list(setup_dupes)
+        if not report_lines and ambiguous_dupes:
+            judge_result = _judge_duplicated_setup(full, file_text, ambiguous_dupes)
+            if judge_result is True:
+                report_lines = list(ambiguous_dupes)
+        if report_lines:
+            # Extract identifiers from duplicated lines
+            import re as _re
+            identifiers = []
+            for line in report_lines:
+                ids = _re.findall(r'\b([a-zA-Z_]\w+)\s*[=(]', line)
+                identifiers.extend(ids)
+            id_list = ", ".join(dict.fromkeys(identifiers)) if identifiers else "shared setup"
             failures.append(
-                f"[Duplicated setup] {f} has {len(dupes)} lines repeated 3+ times. "
-                f"Move shared setup to beforeEach (TS) or a fixture (Python):\n{sample}"
+                f"[Duplicated setup] {f}: {len(report_lines)} repeated lines. "
+                f"Move to beforeEach (TS) or fixture (Python): {id_list}"
             )
 
     if failures:
@@ -565,6 +703,164 @@ def run_quality_checks(test_file: str) -> tuple[bool, str]:
         return False, template.replace("{details}", details)
 
     return True, "All quality checks passed"
+
+
+def _is_obvious_assert_line(line: str) -> bool:
+    stripped = line.strip()
+    if re.search(r"\bexpect\s*\(", stripped):
+        return True
+    if re.match(r"^assert\b", stripped):
+        return True
+    if re.search(
+        r"\b(?:toHaveBeenCalledWith|toHaveBeenCalled|toEqual|toBe|toContain|toMatch|toStrictEqual|toBeTruthy|toBeFalsy)\s*\(",
+        stripped,
+    ):
+        return True
+    return False
+
+
+def _is_obvious_setup_line(line: str) -> bool:
+    stripped = line.strip()
+    if re.search(r"\b(mock|spyOn)\s*\(", stripped):
+        return True
+    if re.search(r"\b(?:vi|jest)\.(?:fn|mock)\s*\(", stripped):
+        return True
+    if re.search(r"__set[A-Za-z_]\w*\s*\(", stripped):
+        return True
+    if re.match(r"^(?:const|let|var)\s+\w*(?:spy|mock|stub|double|fixture)\w*\s*=", stripped, re.IGNORECASE):
+        return True
+    return False
+
+
+def _is_obvious_act_line(line: str) -> bool:
+    stripped = line.strip()
+    if _is_obvious_assert_line(stripped) or _is_obvious_setup_line(stripped):
+        return False
+    if re.match(r"^(?:await\s+)?[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*\s*\(", stripped):
+        return True
+    if re.match(
+        r"^(?:const|let|var)\s+\w+\s*=\s*(?:await\s+)?[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*\s*\(",
+        stripped,
+    ):
+        return True
+    return False
+
+
+def _partition_duplicated_test_lines(file_text: str) -> tuple[list[str], list[str]]:
+    from collections import Counter
+
+    lines = [ln.strip() for ln in file_text.splitlines() if ln.strip() and len(ln.strip()) > 20]
+    counts = Counter(lines)
+    dupes = [line for line, n in counts.items() if n >= 3]
+
+    setup_dupes: list[str] = []
+    ambiguous_dupes: list[str] = []
+    for line in dupes:
+        if _is_obvious_assert_line(line) or _is_obvious_act_line(line):
+            continue
+        if _is_obvious_setup_line(line):
+            setup_dupes.append(line)
+        else:
+            ambiguous_dupes.append(line)
+    return setup_dupes, ambiguous_dupes
+
+
+def _build_duplicated_setup_judge_prompt(file_path: str, file_text: str, duplicated_lines: list[str]) -> str:
+    suffix = Path(file_path).suffix.lower()
+    fence = "py" if suffix == ".py" else "ts"
+    repeated_lines = "\n".join(
+        f"{idx}. {line}" for idx, line in enumerate(duplicated_lines, start=1)
+    )
+    return textwrap.dedent(
+        f"""\
+        You are a strict binary classifier for duplicated test setup.
+
+        Task:
+        Decide whether the repeated lines below are SHARED SETUP that should move to beforeEach/fixture.
+
+        Answer YES only if the repeated lines are setup code shared across tests, such as:
+        - creating spies, mocks, fakes, or test doubles
+        - calling seam setters like __setXForTests(...)
+        - repeated object construction for fixtures
+        - repeated arrange-only initialization with no assertion
+
+        Answer NO if the repeated lines are legitimate per-test ACT or ASSERT, such as:
+        - calling the function under test
+        - expect(...)
+        - assertions on spy calls
+        - per-test inputs or expected outputs
+        - lines whose meaning depends on the specific test case
+
+        Rules:
+        - Repeated ACT is NOT duplicated setup.
+        - Repeated ASSERT is NOT duplicated setup.
+        - Never answer YES because of expect(...), matcher chains like toHaveBeenCalledWith(...), or the direct call to the function under test.
+        - If repeated lines mix setup with ACT/ASSERT, ignore the ACT/ASSERT lines and judge only the remaining setup candidates.
+        - If unsure, answer NO.
+        - Return exactly one word: YES or NO.
+
+        Example 1
+        Repeated lines:
+        - const spy = mock(() => {{}});
+        - __setClientForTests(client_test_double);
+        Answer: YES
+
+        Example 2
+        Repeated lines:
+        - handleResub(channel, username, streakMonths, message, userstate);
+        - expect(client_say_spy).toHaveBeenCalledWith(channel, expected_message);
+        Answer: NO
+
+        Test file:
+        ```{fence}
+        {file_text}
+        ```
+
+        Repeated lines to classify:
+        {repeated_lines}
+        """
+    ).strip()
+
+
+def _judge_duplicated_setup(file_path: str, file_text: str, duplicated_lines: list[str]) -> bool | None:
+    """Return True/False from the small judge, or None when unavailable."""
+    judge_cfg = _CONFIG.get("quality", {}).get("duplicated_setup_judge", {})
+    if not judge_cfg.get("enabled", False):
+        return None
+
+    prompt = _build_duplicated_setup_judge_prompt(file_path, file_text, duplicated_lines)
+    payload = {
+        "model": judge_cfg.get("model", "qwen3.5:0.8b"),
+        "messages": [{"role": "user", "content": prompt}],
+        "stream": False,
+        "think": judge_cfg.get("think", False),
+        "options": {
+            "temperature": judge_cfg.get("temperature", 0),
+            "num_ctx": judge_cfg.get("num_ctx", 4096),
+        },
+    }
+    timeout_s = judge_cfg.get("timeout", 10)
+    url = judge_cfg.get("url", "http://127.0.0.1:11434/api/chat")
+
+    try:
+        response = requests.post(url, json=payload, timeout=timeout_s)
+        response.raise_for_status()
+        content = response.json().get("message", {}).get("content", "").strip().upper()
+    except Exception as exc:
+        log("duplicated_setup_judge_error", {"file": file_path, "error": str(exc)})
+        return None
+
+    if content == "YES":
+        log("duplicated_setup_judge", {"file": file_path, "decision": "YES"})
+        return True
+    if content == "NO":
+        log("duplicated_setup_judge", {"file": file_path, "decision": "NO"})
+        return False
+
+    log("duplicated_setup_judge_error", {
+        "file": file_path, "error": f"unexpected response: {content[:50]}",
+    })
+    return None
 
 
 def _parse_pr_content(content: str) -> tuple[str | None, str | None]:
@@ -671,6 +967,15 @@ def create_pr(messages: list, last_msg: dict, test_file: str, step: int) -> str 
         return None
 
 
+def _is_test_pass(name: str, args: dict) -> bool:
+    """Detect if a tool call was a test runner that exited 0."""
+    if name != "run_command" or _last_run_exit_code != 0:
+        return False
+    cmd = args.get("command", "")
+    test_runners = ("bun test", "pytest", "python3 -m pytest", "npm test", "npx jest")
+    return any(runner in cmd for runner in test_runners)
+
+
 def _default_config_path():
     """Find config/agent.toml relative to the package."""
     pkg = Path(__file__).parent.parent / "config" / "agent.toml"
@@ -734,12 +1039,98 @@ def main():
     emit(f"Log: {log_path}")
     emit(f"{'='*60}")
 
-    log("start", {"issue": issue_text[:200]})
+    log("start", {"issue": issue_text})
 
-    done_rejected = 0  # how many times we rejected DONE
+    done_rejected = 0
     quality_rejected = 0
-
     max_rejections = _CONFIG["verification"]["max_rejections"]
+
+    # --- Completion pipeline: verify → quality → done ---
+    # Extracted so both DONE and auto-trigger can use it.
+    # Returns: "done" | "quality_fail" | "verify_fail" | "give_up" | "no_test"
+    def try_complete(step):
+        nonlocal done_rejected, quality_rejected
+        test_file = find_test_file()
+        if not test_file:
+            emit("  [WARN] No test file found — cannot verify")
+            messages.append({"role": "user", "content": _CONFIG["prompt"]["no_test_found"]})
+            return "no_test"
+
+        verified, verify_msg = verify_red_green(test_file)
+        emit(f"\n  [VERIFY] {verify_msg}")
+        log("verify_result", {"verified": verified, "message": verify_msg, "test_file": test_file})
+
+        if not verified:
+            done_rejected += 1
+            if done_rejected >= max_rejections:
+                emit(f"\n  [GIVE UP] Rejected {done_rejected} times. Stopping.")
+                log("give_up", {"step": step, "done_rejected": done_rejected})
+                return "give_up"
+            messages.append({"role": "user", "content": verify_msg})
+            return "verify_fail"
+
+        if _CONFIG.get("quality", {}).get("enabled", False):
+            emit("\n=== QUALITY CHECKS ===")
+            quality_ok, quality_msg = run_quality_checks(test_file)
+            emit(f"  [QUALITY] {quality_msg[:200]}")
+            log("quality", {"passed": quality_ok, "message": quality_msg[:500]})
+
+            if not quality_ok:
+                quality_rejected += 1
+                emit(f"  [QUALITY] Round {quality_rejected} — feeding back to model")
+                before_count = len(messages)
+                messages[:] = _compact_messages_after_quality_failure(messages, quality_msg, test_file)
+                log("context_compacted", {
+                    "reason": "quality_fail",
+                    "before_messages": before_count,
+                    "after_messages": len(messages),
+                    "test_file": test_file,
+                })
+                return "quality_fail"
+
+        if _CONFIG.get("quality", {}).get("enabled", False):
+            emit("\n=== POST-QUALITY VERIFICATION ===")
+            verified, verify_msg = verify_red_green(test_file)
+            emit(f"  [RE-VERIFY] {verify_msg}")
+            log("post_quality_verify_result", {
+                "verified": verified, "message": verify_msg, "test_file": test_file,
+            })
+            if not verified:
+                done_rejected += 1
+                if done_rejected >= max_rejections:
+                    emit(f"\n  [GIVE UP] Rejected {done_rejected} times. Stopping.")
+                    log("give_up", {"step": step, "done_rejected": done_rejected})
+                    return "give_up"
+                messages.append({"role": "user", "content": verify_msg})
+                return "verify_fail"
+
+        emit(f"\n{'='*60}")
+        emit(f"AGENT DONE at step {step} — VERIFIED")
+        emit(f"{'='*60}")
+        diff = subprocess.run(["git", "diff"], cwd=WORKDIR, capture_output=True, text=True)
+        emit(f"\n--- GIT DIFF ---\n{diff.stdout}")
+        untracked = subprocess.run(["git", "ls-files", "--others", "--exclude-standard"], cwd=WORKDIR, capture_output=True, text=True)
+        if untracked.stdout.strip():
+            emit("\n--- NEW FILES ---")
+            for f in untracked.stdout.strip().split("\n"):
+                emit(f"  {f}")
+                full = os.path.join(WORKDIR, f)
+                try:
+                    with open(full) as fh:
+                        emit(fh.read())
+                except OSError:
+                    pass
+        if _CONFIG.get("pr", {}).get("enabled", False):
+            emit("\n=== PR CREATION ===")
+            pr_url = create_pr(messages, msg, test_file, step)
+            if pr_url:
+                emit(f"  [PR] {pr_url}")
+            else:
+                emit("  [PR] Failed — diff printed above, create PR manually")
+
+        log("done", {"step": step, "verified": True})
+        return "done"
+
     for step in range(max_steps):
         emit(f"\n>>> Step {step}/{max_steps} — requesting LLM...")
         t0 = time.time()
@@ -747,6 +1138,10 @@ def main():
         try:
             response = chat(messages)
         except Exception as e:
+            if _is_llm_timeout_error(e):
+                emit(f"  LLM TIMEOUT: {e}")
+                log("llm_timeout", {"step": step, "error": str(e)})
+                return 1
             emit(f"  ERROR: {e}")
             log("error", {"step": step, "error": str(e)})
             break
@@ -792,103 +1187,18 @@ def main():
         if msg.get("content"):
             emit(f"  [SAY] {msg['content']}")
             if "DONE" in msg["content"].upper():
-                # --- RED-GREEN VERIFICATION ---
-                test_file = find_test_file()
-                if test_file:
-                    verified, verify_msg = verify_red_green(test_file)
-                    emit(f"\n  [VERIFY] {verify_msg}")
-                    log("verify_result", {"verified": verified, "message": verify_msg, "test_file": test_file})
-
-                    if verified:
-                        # --- QUALITY ENFORCEMENT ---
-                        if _CONFIG.get("quality", {}).get("enabled", False):
-                            emit("\n=== QUALITY CHECKS ===")
-                            quality_ok, quality_msg = run_quality_checks(test_file)
-                            emit(f"  [QUALITY] {quality_msg[:200]}")
-                            log("quality", {"passed": quality_ok, "message": quality_msg[:500]})
-
-                            if not quality_ok:
-                                quality_rejected += 1
-                                emit(f"  [QUALITY] Round {quality_rejected} — feeding back to model")
-                                messages.append(msg)
-                                messages.append({"role": "user", "content": quality_msg})
-                                continue
-
-                        if _CONFIG.get("quality", {}).get("enabled", False):
-                            emit("\n=== POST-QUALITY VERIFICATION ===")
-                            verified, verify_msg = verify_red_green(test_file)
-                            emit(f"  [RE-VERIFY] {verify_msg}")
-                            log("post_quality_verify_result", {
-                                "verified": verified,
-                                "message": verify_msg,
-                                "test_file": test_file,
-                            })
-                            if not verified:
-                                done_rejected += 1
-                                if done_rejected >= max_rejections:
-                                    emit(f"\n  [GIVE UP] Rejected DONE {done_rejected} times. Stopping.")
-                                    log("give_up", {"step": step, "done_rejected": done_rejected})
-                                    return 1
-                                messages.append(msg)
-                                messages.append({
-                                    "role": "user",
-                                    "content": verify_msg,
-                                })
-                                continue
-
-                        emit(f"\n{'='*60}")
-                        emit(f"AGENT DONE at step {step} — VERIFIED")
-                        emit(f"{'='*60}")
-                        diff = subprocess.run(["git", "diff"], cwd=WORKDIR, capture_output=True, text=True)
-                        emit(f"\n--- GIT DIFF ---\n{diff.stdout}")
-                        untracked = subprocess.run(["git", "ls-files", "--others", "--exclude-standard"], cwd=WORKDIR, capture_output=True, text=True)
-                        if untracked.stdout.strip():
-                            emit("\n--- NEW FILES ---")
-                            for f in untracked.stdout.strip().split("\n"):
-                                emit(f"  {f}")
-                                full = os.path.join(WORKDIR, f)
-                                try:
-                                    with open(full) as fh:
-                                        emit(fh.read())
-                                except OSError:
-                                    pass
-                        # --- PR CREATION ---
-                        if _CONFIG.get("pr", {}).get("enabled", False):
-                            emit("\n=== PR CREATION ===")
-                            pr_url = create_pr(messages, msg, test_file, step)
-                            if pr_url:
-                                emit(f"  [PR] {pr_url}")
-                            else:
-                                emit("  [PR] Failed — diff printed above, create PR manually")
-
-                        log("done", {"step": step, "verified": True})
-                        return 0
-                    else:
-                        # Reject and nudge
-                        done_rejected += 1
-                        if done_rejected >= max_rejections:
-                            emit(f"\n  [GIVE UP] Rejected DONE {done_rejected} times. Stopping.")
-                            log("give_up", {"step": step, "done_rejected": done_rejected})
-                            return 1
-                        messages.append(msg)
-                        messages.append({
-                            "role": "user",
-                            "content": verify_msg,
-                        })
-                        continue
-                else:
-                    emit("  [WARN] No test file found — cannot verify")
-                    messages.append(msg)
-                    messages.append({
-                        "role": "user",
-                        "content": _CONFIG["prompt"]["no_test_found"],
-                    })
-                    continue
+                completion = try_complete(step)
+                if completion == "done":
+                    return 0
+                if completion == "give_up":
+                    return 1
+                continue
 
         # Append assistant message to history
         messages.append(msg)
 
         if finish == "tool_calls" and msg.get("tool_calls"):
+            test_passed = False
             for tc in msg["tool_calls"]:
                 fn = tc["function"]
                 name = fn["name"]
@@ -907,11 +1217,13 @@ def main():
                 result = execute_tool(name, args)
                 tool_elapsed = time.time() - t1
                 result_truncated = truncate(result)
+                applied = _tool_applied_status(name, result)
 
                 log("tool", {
                     "step": step,
                     "name": name,
                     "args": args,
+                    "applied": applied,
                     "result_chars": len(result),
                     "result_truncated": len(result) != len(result_truncated),
                     "elapsed_s": round(tool_elapsed, 3),
@@ -932,6 +1244,19 @@ def main():
                     "tool_call_id": tc["id"],
                     "content": result_truncated,
                 })
+
+                if _is_test_pass(name, args):
+                    test_passed = True
+
+            # --- AUTO-TRIGGER: test passed → verify → quality → done ---
+            if test_passed:
+                emit("\n  [AUTO] Test pass detected — triggering verification pipeline")
+                completion = try_complete(step)
+                if completion == "done":
+                    return 0
+                if completion == "give_up":
+                    return 1
+                # quality_fail, verify_fail, no_test → continue loop
 
         elif finish == "stop":
             if step > 3:

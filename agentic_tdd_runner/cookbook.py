@@ -271,6 +271,13 @@ def _render_cookbook_text(contract: dict, lang) -> str:
         parts.append(f"## Mock Cookbook for {target['symbol']}")
         parts.append("")
 
+    parts.append("### Guardrails")
+    parts.append("- Write the first failing test against the real callable contract from source.")
+    parts.append("- Do not change the target's runtime signature just to fit the test scaffold.")
+    parts.append("- For callbacks, handlers, and framework listeners, preserve the production contract.")
+    parts.append("- Apply only mechanical export or test-seam edits before the first failing test.")
+    parts.append("")
+
     # Source edits
     edits = contract.get("pre_test_source_edits", [])
     if edits:

@@ -5,14 +5,21 @@ import subprocess
 from types import SimpleNamespace
 
 import pytest
+import requests
 
 from agentic_tdd_runner.agent import (
+    _compact_messages_after_quality_failure,
+    _build_duplicated_setup_judge_prompt,
     _get_changed_files,
+    _is_obvious_act_line,
+    _is_obvious_assert_line,
     _parse_pr_content,
     _resolve_repo_path,
+    _tool_applied_status,
     _validate_command,
     create_pr,
     detect_quality_tools,
+    execute_tool,
     find_test_file,
     main,
     run_quality_checks,
@@ -465,6 +472,21 @@ class TestRunQualityChecks:
         assert ok is False
         assert "as any" in msg
 
+    def test_detects_colon_any_as_forbidden_pattern(self, tmp_path, monkeypatch):
+        self._setup_repo(tmp_path, monkeypatch)
+        (tmp_path / "src" / "file.test.ts").write_text("function f(x: any) { return x; }")
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "quality": {
+                "enabled": True, "max_fix_rounds": 3,
+                "typescript": {"checks": [], "forbidden": ["as any", ": any"]},
+            },
+            "timeouts": {"tool_execution": 10},
+            "prompt": {"quality_failed": "FAIL: {details}"},
+        })
+        ok, msg = run_quality_checks("src/file.test.ts")
+        assert ok is False
+        assert ": any" in msg
+
     def test_passes_clean_code(self, tmp_path, monkeypatch):
         self._setup_repo(tmp_path, monkeypatch)
         (tmp_path / "src" / "file.test.ts").write_text("const x: number = 1;")
@@ -664,6 +686,417 @@ class TestRunQualityChecks:
         ok, msg = run_quality_checks("src/file.test.ts")
         assert isinstance(ok, bool)
 
+    def test_check_failure_reports_error_count_not_raw_output(self, tmp_path, monkeypatch):
+        """Check failures should report a compact summary, not raw tool output."""
+        self._setup_repo(tmp_path, monkeypatch)
+        (tmp_path / "src" / "file.test.ts").write_text("clean")
+        # Command that produces verbose multi-line output
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "quality": {
+                "enabled": True, "max_fix_rounds": 3,
+                "typescript": {
+                    "checks": [{"name": "typecheck", "command": "echo 'src/a.ts(1,1): error TS123\nsrc/b.ts(2,2): error TS456\nsrc/c.ts(3,3): error TS789' && exit 1"}],
+                    "forbidden": [],
+                },
+            },
+            "timeouts": {"tool_execution": 10},
+            "prompt": {"quality_failed": "FAIL: {details}"},
+        })
+        ok, msg = run_quality_checks("src/file.test.ts")
+        assert ok is False
+        # Should report error count, not dump all output
+        assert "3 errors" in msg or "3 error" in msg
+
+    def test_duplicated_setup_reports_identifiers_not_full_lines(self, tmp_path, monkeypatch):
+        """Duplicated setup should list identifiers to move, not full lines."""
+        self._setup_repo(tmp_path, monkeypatch)
+        test_file = tmp_path / "src" / "file.test.ts"
+        test_file.write_text(
+            "describe('x', () => {\n"
+            "  test('a', () => {\n"
+            "    const spy = mock(() => {});\n"
+            "    __setClient(spy);\n"
+            "    doThing();\n"
+            "  });\n"
+            "  test('b', () => {\n"
+            "    const spy = mock(() => {});\n"
+            "    __setClient(spy);\n"
+            "    doOther();\n"
+            "  });\n"
+            "  test('c', () => {\n"
+            "    const spy = mock(() => {});\n"
+            "    __setClient(spy);\n"
+            "    doAnother();\n"
+            "  });\n"
+            "});\n"
+        )
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "quality": {
+                "enabled": True, "max_fix_rounds": 3,
+                "typescript": {"checks": [], "forbidden": []},
+            },
+            "timeouts": {"tool_execution": 10},
+            "prompt": {"quality_failed": "FAIL: {details}"},
+        })
+        ok, msg = run_quality_checks("src/file.test.ts")
+        assert ok is False
+        # Should mention beforeEach and list identifiers, not dump full lines
+        assert "beforeEach" in msg
+        assert "1 line" in msg or "1 repeated" in msg
+        # Should NOT contain the full repeated line content
+        assert "const spy = mock(() => {});" not in msg
+
+    def test_duplicated_setup_judge_can_suppress_false_positive(self, tmp_path, monkeypatch):
+        """Judge should suppress duplicated-setup findings for repeated act/assert."""
+        self._setup_repo(tmp_path, monkeypatch)
+        test_file = tmp_path / "src" / "file.test.ts"
+        test_file.write_text(
+            "describe('x', () => {\n"
+            "  test('a', () => {\n"
+            "    handleResub(channel, username, streakMonths, message, userstate);\n"
+            "    expect(client_say_spy).toHaveBeenCalledWith(channel, expected_message);\n"
+            "  });\n"
+            "  test('b', () => {\n"
+            "    handleResub(channel, username, streakMonths, message, userstate);\n"
+            "    expect(client_say_spy).toHaveBeenCalledWith(channel, expected_message);\n"
+            "  });\n"
+            "  test('c', () => {\n"
+            "    handleResub(channel, username, streakMonths, message, userstate);\n"
+            "    expect(client_say_spy).toHaveBeenCalledWith(channel, expected_message);\n"
+            "  });\n"
+            "});\n"
+        )
+
+        class FakeResponse:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {"message": {"content": "NO"}}
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.requests.post", lambda *a, **kw: FakeResponse())
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "quality": {
+                "enabled": True, "max_fix_rounds": 3,
+                "duplicated_setup_judge": {"enabled": True},
+                "typescript": {"checks": [], "forbidden": []},
+            },
+            "timeouts": {"tool_execution": 10},
+            "prompt": {"quality_failed": "FAIL: {details}"},
+        })
+
+        ok, msg = run_quality_checks("src/file.test.ts")
+
+        assert ok is True
+        assert "Duplicated setup" not in msg
+
+    def test_duplicated_setup_ignores_repeated_act_assert_without_judge(self, tmp_path, monkeypatch):
+        """Repeated act/assert lines should not require the small judge to be suppressed."""
+        self._setup_repo(tmp_path, monkeypatch)
+        test_file = tmp_path / "src" / "file.test.ts"
+        test_file.write_text(
+            "describe('x', () => {\n"
+            "  test('a', () => {\n"
+            "    handleResub(channel, username, streakMonths, message, userstate);\n"
+            "    expect(client_say_spy).toHaveBeenCalledWith(channel, expected_message);\n"
+            "  });\n"
+            "  test('b', () => {\n"
+            "    handleResub(channel, username, streakMonths, message, userstate);\n"
+            "    expect(client_say_spy).toHaveBeenCalledWith(channel, expected_message);\n"
+            "  });\n"
+            "  test('c', () => {\n"
+            "    handleResub(channel, username, streakMonths, message, userstate);\n"
+            "    expect(client_say_spy).toHaveBeenCalledWith(channel, expected_message);\n"
+            "  });\n"
+            "});\n"
+        )
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "quality": {
+                "enabled": True, "max_fix_rounds": 3,
+                "typescript": {"checks": [], "forbidden": []},
+            },
+            "timeouts": {"tool_execution": 10},
+            "prompt": {"quality_failed": "FAIL: {details}"},
+        })
+
+        ok, msg = run_quality_checks("src/file.test.ts")
+
+        assert ok is True
+        assert "Duplicated setup" not in msg
+
+    def test_duplicated_setup_treats_matcher_chain_as_assert(self):
+        assert _is_obvious_assert_line("toHaveBeenCalledWith(channel, expected_message);") is True
+
+    def test_duplicated_setup_treats_function_under_test_call_as_act(self):
+        assert _is_obvious_act_line("handleResub(channel, username, streakMonths, message, userstate);") is True
+
+    def test_duplicated_setup_judge_prompt_explicitly_bans_act_assert_in_before_each(self):
+        prompt = _build_duplicated_setup_judge_prompt(
+            "src/file.test.ts",
+            "describe('x', () => {})\n",
+            [
+                "handleResub(channel, username, streakMonths, message, userstate);",
+                "expect(client_say_spy).toHaveBeenCalledWith(channel, expected_message);",
+            ],
+        )
+
+        assert "Never answer YES because of expect(...)" in prompt
+        assert "toHaveBeenCalledWith(...)" in prompt
+        assert "the direct call to the function under test" in prompt
+
+    def test_duplicated_setup_reports_only_real_setup_from_mixed_duplicates(self, tmp_path, monkeypatch):
+        """Mixed duplicate groups should report setup lines, not act/assert calls."""
+        self._setup_repo(tmp_path, monkeypatch)
+        test_file = tmp_path / "src" / "file.test.ts"
+        test_file.write_text(
+            "describe('x', () => {\n"
+            "  test('a', () => {\n"
+            "    const client_say_spy = mock(() => undefined);\n"
+            "    __setClientForTests(client_say_spy);\n"
+            "    handleResub(channel, username, streakMonths, message, userstate);\n"
+            "    expect(client_say_spy).toHaveBeenCalledWith(channel, expected_message);\n"
+            "  });\n"
+            "  test('b', () => {\n"
+            "    const client_say_spy = mock(() => undefined);\n"
+            "    __setClientForTests(client_say_spy);\n"
+            "    handleResub(channel, username, streakMonths, message, userstate);\n"
+            "    expect(client_say_spy).toHaveBeenCalledWith(channel, expected_message);\n"
+            "  });\n"
+            "  test('c', () => {\n"
+            "    const client_say_spy = mock(() => undefined);\n"
+            "    __setClientForTests(client_say_spy);\n"
+            "    handleResub(channel, username, streakMonths, message, userstate);\n"
+            "    expect(client_say_spy).toHaveBeenCalledWith(channel, expected_message);\n"
+            "  });\n"
+            "});\n"
+        )
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "quality": {
+                "enabled": True, "max_fix_rounds": 3,
+                "typescript": {"checks": [], "forbidden": []},
+            },
+            "timeouts": {"tool_execution": 10},
+            "prompt": {"quality_failed": "FAIL: {details}"},
+        })
+
+        ok, msg = run_quality_checks("src/file.test.ts")
+
+        assert ok is False
+        assert "client_say_spy" in msg
+        assert "handleResub" not in msg
+
+    def test_duplicated_setup_judge_keeps_real_setup_finding_on_yes(self, tmp_path, monkeypatch):
+        """Judge YES should keep the duplicated-setup failure."""
+        self._setup_repo(tmp_path, monkeypatch)
+        test_file = tmp_path / "src" / "file.test.ts"
+        test_file.write_text(
+            "describe('x', () => {\n"
+            "  test('a', () => {\n"
+            "    const spy = mock(() => {});\n"
+            "    __setClient(spy);\n"
+            "    doThing();\n"
+            "  });\n"
+            "  test('b', () => {\n"
+            "    const spy = mock(() => {});\n"
+            "    __setClient(spy);\n"
+            "    doOther();\n"
+            "  });\n"
+            "  test('c', () => {\n"
+            "    const spy = mock(() => {});\n"
+            "    __setClient(spy);\n"
+            "    doAnother();\n"
+            "  });\n"
+            "});\n"
+        )
+
+        class FakeResponse:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {"message": {"content": "YES"}}
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.requests.post", lambda *a, **kw: FakeResponse())
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "quality": {
+                "enabled": True, "max_fix_rounds": 3,
+                "duplicated_setup_judge": {"enabled": True},
+                "typescript": {"checks": [], "forbidden": []},
+            },
+            "timeouts": {"tool_execution": 10},
+            "prompt": {"quality_failed": "FAIL: {details}"},
+        })
+
+        ok, msg = run_quality_checks("src/file.test.ts")
+
+        assert ok is False
+        assert "Duplicated setup" in msg
+
+    def test_duplicated_setup_judge_falls_back_to_conservative_behavior(self, tmp_path, monkeypatch):
+        """Judge failure should keep the duplicated-setup finding instead of weakening the gate."""
+        self._setup_repo(tmp_path, monkeypatch)
+        test_file = tmp_path / "src" / "file.test.ts"
+        test_file.write_text(
+            "describe('x', () => {\n"
+            "  test('a', () => {\n"
+            "    const spy = mock(() => {});\n"
+            "    __setClient(spy);\n"
+            "    doThing();\n"
+            "  });\n"
+            "  test('b', () => {\n"
+            "    const spy = mock(() => {});\n"
+            "    __setClient(spy);\n"
+            "    doOther();\n"
+            "  });\n"
+            "  test('c', () => {\n"
+            "    const spy = mock(() => {});\n"
+            "    __setClient(spy);\n"
+            "    doAnother();\n"
+            "  });\n"
+            "});\n"
+        )
+
+        def raise_error(*_args, **_kwargs):
+            raise RuntimeError("ollama unavailable")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.requests.post", raise_error)
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "quality": {
+                "enabled": True, "max_fix_rounds": 3,
+                "duplicated_setup_judge": {"enabled": True},
+                "typescript": {"checks": [], "forbidden": []},
+            },
+            "timeouts": {"tool_execution": 10},
+            "prompt": {"quality_failed": "FAIL: {details}"},
+        })
+
+        ok, msg = run_quality_checks("src/file.test.ts")
+
+        assert ok is False
+        assert "Duplicated setup" in msg
+
+
+class TestExecuteToolReactiveChecks:
+    """Edits to TS files should surface typecheck failures inline."""
+
+    def test_tool_applied_status_marks_edit_success_and_failure(self):
+        assert _tool_applied_status("str_replace_editor", "OK: replaced in src/file.ts") is True
+        assert _tool_applied_status("create_file", "OK: created src/file.test.ts") is True
+        assert _tool_applied_status("str_replace_editor", "ERROR: old_str not found") is False
+        assert _tool_applied_status("read_file", "contents") is None
+
+    def test_str_replace_editor_appends_reactive_typecheck_failure(self, tmp_path, monkeypatch):
+        src = tmp_path / "src"
+        src.mkdir()
+        target = src / "file.ts"
+        target.write_text("const value = 1;\n")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr(
+            "agentic_tdd_runner.agent.detect_quality_tools",
+            lambda lang_name: [{"name": "typecheck", "command": "fake-tsc --noEmit"}]
+            if lang_name == "typescript" else [],
+        )
+
+        def fake_run(command, **kwargs):
+            assert command == "fake-tsc --noEmit"
+            return SimpleNamespace(
+                returncode=1,
+                stdout="src/file.ts(1,1): error TS123 broken types\n",
+                stderr="",
+            )
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.subprocess.run", fake_run)
+
+        result = execute_tool("str_replace_editor", {
+            "path": "src/file.ts",
+            "old_str": "const value = 1;\n",
+            "new_str": "const value = 'bad';\n",
+        })
+
+        assert result.startswith("OK: replaced in src/file.ts")
+        assert "[Reactive typecheck]" in result
+        assert "TS123" in result
+
+    def test_str_replace_editor_keeps_success_silent_when_typecheck_passes(self, tmp_path, monkeypatch):
+        src = tmp_path / "src"
+        src.mkdir()
+        target = src / "file.ts"
+        target.write_text("const value = 1;\n")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr(
+            "agentic_tdd_runner.agent.detect_quality_tools",
+            lambda lang_name: [{"name": "typecheck", "command": "fake-tsc --noEmit"}]
+            if lang_name == "typescript" else [],
+        )
+
+        monkeypatch.setattr(
+            "agentic_tdd_runner.agent.subprocess.run",
+            lambda command, **kwargs: SimpleNamespace(returncode=0, stdout="", stderr=""),
+        )
+
+        result = execute_tool("str_replace_editor", {
+            "path": "src/file.ts",
+            "old_str": "const value = 1;\n",
+            "new_str": "const value = 2;\n",
+        })
+
+        assert result == "OK: replaced in src/file.ts"
+
+    def test_create_file_appends_reactive_test_failure(self, tmp_path, monkeypatch):
+        src = tmp_path / "src"
+        src.mkdir()
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "runner": {"command": "bun test"},
+            "timeouts": {"tool_execution": 10, "test_run": 10},
+        })
+        monkeypatch.setattr("agentic_tdd_runner.agent.detect_quality_tools", lambda lang_name: [])
+
+        def fake_run(command, **kwargs):
+            assert command == ["bun", "test", "src/file.test.ts"]
+            return SimpleNamespace(
+                returncode=1,
+                stdout="src/file.test.ts:\n10 | expect(true).toBe(false)\n",
+                stderr="",
+            )
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.subprocess.run", fake_run)
+
+        result = execute_tool("create_file", {
+            "path": "src/file.test.ts",
+            "content": "test('x', () => {});\n",
+        })
+
+        assert result.startswith("OK: created src/file.test.ts")
+        assert "[Reactive test]" in result
+        assert "expect(true).toBe(false)" in result
+
+    def test_create_file_keeps_success_silent_when_test_passes(self, tmp_path, monkeypatch):
+        src = tmp_path / "src"
+        src.mkdir()
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "runner": {"command": "bun test"},
+            "timeouts": {"tool_execution": 10, "test_run": 10},
+        })
+        monkeypatch.setattr("agentic_tdd_runner.agent.detect_quality_tools", lambda lang_name: [])
+
+        monkeypatch.setattr(
+            "agentic_tdd_runner.agent.subprocess.run",
+            lambda command, **kwargs: SimpleNamespace(returncode=0, stdout="3 pass\n", stderr=""),
+        )
+
+        result = execute_tool("create_file", {
+            "path": "src/file.test.ts",
+            "content": "test('x', () => {});\n",
+        })
+
+        assert result == "OK: created src/file.test.ts"
+
 
 class TestParsePrContent:
     """_parse_pr_content extracts title and body from LLM response."""
@@ -690,6 +1123,32 @@ class TestParsePrContent:
         title, body = _parse_pr_content(content)
         assert "Summary" in body
         assert "Added tests" in body
+
+
+class TestMessageCompaction:
+    """Quality-fail retries should carry compact state, not stale tool chatter."""
+
+    def test_compacts_quality_retry_to_system_issue_and_feedback(self):
+        messages = [
+            {"role": "system", "content": "system prompt"},
+            {"role": "user", "content": "Fix this bug:\n\nbug text"},
+            {"role": "assistant", "content": None, "tool_calls": [{"id": "call_1"}]},
+            {"role": "tool", "tool_call_id": "call_1", "content": "very long tool output"},
+            {"role": "user", "content": "old retry feedback"},
+        ]
+
+        compacted = _compact_messages_after_quality_failure(
+            messages,
+            "QUALITY CHECK FAILED\n\n[typecheck] boom",
+            "src/file.test.ts",
+        )
+
+        assert [msg["role"] for msg in compacted] == ["system", "user", "user"]
+        assert compacted[0]["content"] == "system prompt"
+        assert compacted[1]["content"] == "Fix this bug:\n\nbug text"
+        assert "Verification already passed for src/file.test.ts" in compacted[2]["content"]
+        assert "QUALITY CHECK FAILED" in compacted[2]["content"]
+        assert "very long tool output" not in compacted[2]["content"]
 
 
 class TestCreatePr:
@@ -904,6 +1363,83 @@ class TestCreatePr:
 class TestMain:
     """main() should only report VERIFIED after the final tree is re-checked."""
 
+    def test_llm_timeout_logs_timeout_not_exhausted(self, tmp_path, monkeypatch):
+        logged = []
+        args = SimpleNamespace(
+            issue="bug text", source=None, symbol=None,
+            workdir=str(tmp_path), config="unused.toml", log_dir=str(tmp_path),
+        )
+        config = {
+            "agent": {"max_steps": 3, "max_tool_output": 2000},
+            "verification": {"max_rejections": 3},
+            "quality": {"enabled": False},
+            "prompt": {
+                "system": "system prompt",
+                "nudge": "Step {step}/{max_steps}. Continue.",
+                "no_test_found": "no test",
+                "quality_failed": "FAIL: {details}",
+            },
+            "llm": {"model": "test-model"},
+            "timeouts": {"llm_request": 10, "tool_execution": 10, "test_run": 10},
+            "runner": {"command": "bun test", "test_file_patterns": ["*.test.ts"], "exclude_dirs": []},
+            "tools": [],
+            "pr": {"enabled": False},
+        }
+
+        monkeypatch.setattr("agentic_tdd_runner.config.load_config", lambda path: config)
+        monkeypatch.setattr("agentic_tdd_runner.agent.parse_args", lambda: args)
+        monkeypatch.setattr("agentic_tdd_runner.agent.init_log", lambda: str(tmp_path / "agent.jsonl"))
+        monkeypatch.setattr("agentic_tdd_runner.agent.emit", lambda msg: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.log", lambda event, data: logged.append((event, data)))
+        monkeypatch.setattr(
+            "agentic_tdd_runner.agent.chat",
+            lambda messages, include_tools=True: (_ for _ in ()).throw(requests.exceptions.ReadTimeout("read timed out")),
+        )
+
+        result = main()
+
+        assert result == 1
+        events = [event for event, _data in logged]
+        assert "llm_timeout" in events
+        assert "exhausted" not in events
+
+    def test_logs_full_issue_text_on_start(self, tmp_path, monkeypatch):
+        logged = []
+        issue = "A" * 400
+        config = {
+            "agent": {"max_steps": 0},
+            "verification": {"max_rejections": 3},
+            "quality": {"enabled": False},
+            "prompt": {
+                "system": "system prompt",
+                "nudge": "continue",
+                "no_test_found": "no test",
+            },
+            "llm": {"model": "test-model"},
+            "pr": {"enabled": False},
+        }
+        args = SimpleNamespace(
+            issue=issue,
+            source=None,
+            symbol=None,
+            workdir=str(tmp_path),
+            config="unused.toml",
+            log_dir=str(tmp_path),
+        )
+
+        monkeypatch.setattr("agentic_tdd_runner.config.load_config", lambda path: config)
+        monkeypatch.setattr("agentic_tdd_runner.agent.parse_args", lambda: args)
+        monkeypatch.setattr("agentic_tdd_runner.agent.init_log", lambda: str(tmp_path / "agent.jsonl"))
+        monkeypatch.setattr("agentic_tdd_runner.agent.emit", lambda msg: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.log", lambda event, data: logged.append((event, data)))
+
+        result = main()
+
+        assert result == 1
+        start_logs = [data for event, data in logged if event == "start"]
+        assert len(start_logs) == 1
+        assert start_logs[0]["issue"] == issue
+
     def test_reverifies_after_quality_pass(self, tmp_path, monkeypatch):
         config = {
             "agent": {"max_steps": 1},
@@ -954,6 +1490,110 @@ class TestMain:
 
         assert result == 0
         assert verify_calls == ["src/file.test.ts", "src/file.test.ts"]
+
+    def _make_auto_trigger_config(self):
+        return {
+            "agent": {"max_steps": 5, "max_tool_output": 8000},
+            "verification": {"max_rejections": 3},
+            "quality": {"enabled": True},
+            "prompt": {
+                "system": "system prompt",
+                "nudge": "Step {step}/{max_steps}. Continue.",
+                "no_test_found": "no test",
+                "quality_failed": "FAIL: {details}",
+            },
+            "llm": {"model": "test-model"},
+            "pr": {"enabled": False},
+            "runner": {"command": "bun test", "test_file_patterns": ["*.test.ts"], "exclude_dirs": []},
+            "timeouts": {"tool_execution": 10},
+        }
+
+    def _make_chat_with_tool_call(self, step_count, command="bun test src/file.test.ts"):
+        def chat_fn(messages, include_tools=True):
+            step_count[0] += 1
+            if step_count[0] == 1:
+                return {
+                    "choices": [{"message": {
+                        "content": None,
+                        "tool_calls": [{
+                            "id": "call_1",
+                            "function": {
+                                "name": "run_command",
+                                "arguments": '{"command": "' + command + '"}',
+                            },
+                        }],
+                    }, "finish_reason": "tool_calls"}],
+                    "usage": {},
+                    "timings": {},
+                }
+            return {
+                "choices": [{"message": {"content": "still going"}, "finish_reason": "stop"}],
+                "usage": {},
+                "timings": {},
+            }
+        return chat_fn
+
+    def test_auto_triggers_verify_when_test_exits_zero(self, tmp_path, monkeypatch):
+        """Harness auto-triggers verify→quality→done when test runner exits 0."""
+        import agentic_tdd_runner.agent as _agent_mod
+        verify_calls = []
+        step_count = [0]
+
+        def fake_execute(name, args):
+            _agent_mod._last_run_exit_code = 0
+            return "bun test v1.3.5\n\n 3 pass\n 0 fail\nRan 3 tests across 1 file.\n"
+
+        args = SimpleNamespace(
+            issue="bug text", source=None, symbol=None,
+            workdir=str(tmp_path), config="unused.toml", log_dir=str(tmp_path),
+        )
+        monkeypatch.setattr("agentic_tdd_runner.config.load_config", lambda path: self._make_auto_trigger_config())
+        monkeypatch.setattr("agentic_tdd_runner.agent.parse_args", lambda: args)
+        monkeypatch.setattr("agentic_tdd_runner.agent.init_log", lambda: str(tmp_path / "agent.jsonl"))
+        monkeypatch.setattr("agentic_tdd_runner.agent.emit", lambda msg: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.log", lambda *a, **kw: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.chat", self._make_chat_with_tool_call(step_count))
+        monkeypatch.setattr("agentic_tdd_runner.agent.find_test_file", lambda hint=None: "src/file.test.ts")
+        monkeypatch.setattr("agentic_tdd_runner.agent.run_quality_checks", lambda tf: (True, "All quality checks passed"))
+        monkeypatch.setattr("agentic_tdd_runner.agent.execute_tool", fake_execute)
+        monkeypatch.setattr("agentic_tdd_runner.agent.verify_red_green", lambda tf: (verify_calls.append(tf), (True, "verified"))[1])
+
+        result = main()
+
+        assert result == 0, "Harness should auto-complete when tests pass"
+        assert len(verify_calls) >= 1, "Verify should have been called automatically"
+        assert step_count[0] == 1, f"Model should only have been called once, got {step_count[0]}"
+
+    def test_no_auto_trigger_when_test_exits_nonzero(self, tmp_path, monkeypatch):
+        """Harness must NOT auto-trigger verify when test runner crashes (exit != 0)."""
+        import agentic_tdd_runner.agent as _agent_mod
+        verify_calls = []
+        step_count = [0]
+
+        def fake_execute(name, args):
+            _agent_mod._last_run_exit_code = 1  # test failed
+            return "# Unhandled error between tests\nError: deepseek requires an API key\n"
+
+        args = SimpleNamespace(
+            issue="bug text", source=None, symbol=None,
+            workdir=str(tmp_path), config="unused.toml", log_dir=str(tmp_path),
+        )
+        monkeypatch.setattr("agentic_tdd_runner.config.load_config", lambda path: self._make_auto_trigger_config())
+        monkeypatch.setattr("agentic_tdd_runner.agent.parse_args", lambda: args)
+        monkeypatch.setattr("agentic_tdd_runner.agent.init_log", lambda: str(tmp_path / "agent.jsonl"))
+        monkeypatch.setattr("agentic_tdd_runner.agent.emit", lambda msg: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.log", lambda *a, **kw: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.chat", self._make_chat_with_tool_call(step_count))
+        monkeypatch.setattr("agentic_tdd_runner.agent.find_test_file", lambda hint=None: "src/file.test.ts")
+        monkeypatch.setattr("agentic_tdd_runner.agent.run_quality_checks", lambda tf: (True, "All quality checks passed"))
+        monkeypatch.setattr("agentic_tdd_runner.agent.execute_tool", fake_execute)
+        monkeypatch.setattr("agentic_tdd_runner.agent.verify_red_green", lambda tf: (verify_calls.append(tf), (True, "verified"))[1])
+
+        result = main()
+
+        # Should exhaust steps without auto-triggering verify
+        assert result == 1, "Should not auto-complete on failed tests"
+        assert len(verify_calls) == 0, f"Verify should NOT have been called, got {verify_calls}"
 
     def test_quality_rounds_not_capped_by_max_fix_rounds(self, tmp_path, monkeypatch):
         """Quality iterations should be bounded by step budget, not max_fix_rounds."""
@@ -1011,3 +1651,84 @@ class TestMain:
 
         assert result == 0, "Agent should succeed after quality eventually passes"
         assert quality_call_count == 5, f"Expected 5 quality calls (4 fails + 1 pass), got {quality_call_count}"
+
+    def test_quality_fail_compacts_context_before_retry(self, tmp_path, monkeypatch):
+        import agentic_tdd_runner.agent as _agent_mod
+
+        chat_calls = []
+        quality_call_count = 0
+        logged = []
+
+        config = self._make_auto_trigger_config()
+        config["agent"]["max_steps"] = 3
+
+        args = SimpleNamespace(
+            issue="bug text",
+            source=None,
+            symbol=None,
+            workdir=str(tmp_path),
+            config="unused.toml",
+            log_dir=str(tmp_path),
+        )
+
+        def fake_chat(messages, include_tools=True):
+            chat_calls.append(messages)
+            if len(chat_calls) == 1:
+                return {
+                    "choices": [{"message": {
+                        "content": None,
+                        "tool_calls": [{
+                            "id": "call_1",
+                            "function": {
+                                "name": "run_command",
+                                "arguments": '{"command": "bun test src/file.test.ts"}',
+                            },
+                        }],
+                    }, "finish_reason": "tool_calls"}],
+                    "usage": {},
+                    "timings": {},
+                }
+
+            assert [msg["role"] for msg in messages] == ["system", "user", "user"]
+            assert messages[1]["content"] == "Fix this bug:\n\nbug text"
+            assert "Verification already passed for src/file.test.ts" in messages[2]["content"]
+            assert "QUALITY FAIL #1" in messages[2]["content"]
+
+            return {
+                "choices": [{"message": {"content": "DONE"}, "finish_reason": "stop"}],
+                "usage": {},
+                "timings": {},
+            }
+
+        def fake_execute(name, args):
+            _agent_mod._last_run_exit_code = 0
+            return "bun test v1.3.5\n\n 3 pass\n 0 fail\n"
+
+        def quality_fails_then_passes(_test_file):
+            nonlocal quality_call_count
+            quality_call_count += 1
+            if quality_call_count == 1:
+                return False, "QUALITY FAIL #1"
+            return True, "All quality checks passed"
+
+        monkeypatch.setattr("agentic_tdd_runner.config.load_config", lambda path: config)
+        monkeypatch.setattr("agentic_tdd_runner.agent.parse_args", lambda: args)
+        monkeypatch.setattr("agentic_tdd_runner.agent.init_log", lambda: str(tmp_path / "agent.jsonl"))
+        monkeypatch.setattr("agentic_tdd_runner.agent.emit", lambda msg: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.log", lambda event, data: logged.append((event, data)))
+        monkeypatch.setattr("agentic_tdd_runner.agent.chat", fake_chat)
+        monkeypatch.setattr("agentic_tdd_runner.agent.find_test_file", lambda hint=None: "src/file.test.ts")
+        monkeypatch.setattr("agentic_tdd_runner.agent.run_quality_checks", quality_fails_then_passes)
+        monkeypatch.setattr("agentic_tdd_runner.agent.execute_tool", fake_execute)
+        monkeypatch.setattr("agentic_tdd_runner.agent.verify_red_green", lambda tf: (True, "verified"))
+        monkeypatch.setattr(
+            "agentic_tdd_runner.agent.subprocess.run",
+            lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, stdout="", stderr=""),
+        )
+
+        result = main()
+
+        assert result == 0
+        assert quality_call_count == 2
+        events = [event for event, _data in logged]
+        assert "context_compacted" in events

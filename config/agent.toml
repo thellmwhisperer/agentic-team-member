@@ -55,12 +55,13 @@ When you're past 70% of steps, prioritize getting to DONE over perfecting code.
 ## Test strategy
 - Write tests for: the expected behavior, edge cases (boundary values, empty/null), and the specific bug.
 - Put shared setup (mocks, test doubles, seam calls) in beforeEach, not duplicated in each test.
+- Never move the direct call to the function under test, or assertions/matchers like expect(...) / toHaveBeenCalledWith(...), into beforeEach.
 - Use expect.stringContaining() for message assertions — never exact match on interpolated strings.
-- Never use `as any`. Type your test doubles properly.
+- Never use `any` or `as any`. Type your test doubles properly.
 - Never use `eslint-disable` or `@ts-ignore`.
 
 ## Quality (enforced by harness — violations auto-reject DONE)
-- Never use `as any`. Type your doubles properly.
+- Never use `any` or `as any`. Type your doubles properly.
 - Never use `eslint-disable`, `@ts-ignore`, or `@ts-expect-error`.
 - Duplicated setup across tests must go in beforeEach (TS) or a fixture (Python).
 
@@ -98,10 +99,19 @@ max_fix_rounds = 3
 # Only forbidden patterns need explicit config per language.
 
 [quality.typescript]
-forbidden = ["as any", "eslint-disable", "@ts-ignore", "@ts-expect-error"]
+forbidden = ["as any", ": any", "eslint-disable", "@ts-ignore", "@ts-expect-error"]
 
 [quality.python]
 forbidden = ["type: ignore", "noqa"]
+
+[quality.duplicated_setup_judge]
+enabled = true
+url = "http://127.0.0.1:11434/api/chat"
+model = "qwen3.5:0.8b"
+temperature = 0
+num_ctx = 4096
+think = false
+timeout = 10
 
 [pr]
 enabled = true

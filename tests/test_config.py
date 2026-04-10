@@ -13,6 +13,7 @@ class TestProductionConfig:
         cfg = load_config(prod)
         assert len(cfg["tools"]) > 0
         assert "system" in cfg["prompt"]
+        assert "Never move the direct call to the function under test" in cfg["prompt"]["system"]
 
 
 class TestLoadConfig:
@@ -66,6 +67,7 @@ class TestLoadConfig:
         assert cfg["quality"]["enabled"] is True
         assert cfg["quality"]["max_fix_rounds"] == 3
         assert "as any" in cfg["quality"]["typescript"]["forbidden"]
+        assert ": any" in cfg["quality"]["typescript"]["forbidden"]
         assert "type: ignore" in cfg["quality"]["python"]["forbidden"]
 
     def test_production_pr_section(self):

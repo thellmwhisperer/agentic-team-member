@@ -370,6 +370,27 @@ class TestMultiLineSignatureDetection:
         assert "logger" in result
 
 
+class TestCookbookGuardrails:
+    """Cookbook must warn the agent not to invent a new callable contract."""
+
+    def test_warns_to_preserve_runtime_signature_before_testing(self, tmp_path):
+        _write_file(tmp_path, "src/handler.ts", """\
+            import tmi from 'tmi.js';
+
+            let client: tmi.Client;
+
+            client.on('resub', handleResub);
+
+            function handleResub(channel: string, username: string, months: number): void {
+              client.say(channel, `${username} lleva ${months} meses`);
+            }
+        """)
+        result = generate_cookbook("src/handler.ts", "handleResub", str(tmp_path))
+        assert "Do not change the target's runtime signature just to fit the test scaffold." in result
+        assert "Write the first failing test against the real callable contract from source." in result
+        assert "For callbacks, handlers, and framework listeners, preserve the production contract." in result
+
+
 class TestSingleParamArrowFunction:
     """Single-param arrow functions without parens must be detected."""
 
