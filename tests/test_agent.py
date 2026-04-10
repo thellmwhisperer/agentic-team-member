@@ -404,6 +404,19 @@ class TestGetChangedFiles:
         assert "tracked.ts" in files
         assert "new.ts" in files
 
+    def test_includes_staged_files(self, tmp_path, monkeypatch):
+        subprocess.run("git init", shell=True, cwd=tmp_path, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "t@t"], cwd=tmp_path, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "t"], cwd=tmp_path, capture_output=True)
+        (tmp_path / "initial.ts").write_text("original")
+        subprocess.run("git add -A && git commit -m init", shell=True, cwd=tmp_path, capture_output=True)
+        # Stage a modification — no longer in working tree diff, only in --cached
+        (tmp_path / "initial.ts").write_text("staged change")
+        subprocess.run(["git", "add", "initial.ts"], cwd=tmp_path, capture_output=True)
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        files = _get_changed_files()
+        assert "initial.ts" in files, "Staged files must be included in quality gate"
+
     def test_excludes_deleted_files(self, tmp_path, monkeypatch):
         subprocess.run("git init", shell=True, cwd=tmp_path, capture_output=True)
         subprocess.run(["git", "config", "user.email", "t@t"], cwd=tmp_path, capture_output=True)

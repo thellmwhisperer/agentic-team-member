@@ -449,16 +449,19 @@ def detect_quality_tools(lang_name: str) -> list[dict]:
 
 
 def _get_changed_files() -> list[str]:
-    """Get modified + untracked files relative to WORKDIR."""
+    """Get modified + staged + untracked files relative to WORKDIR."""
     diff = subprocess.run(
         ["git", "diff", "--name-only"], cwd=WORKDIR, capture_output=True, text=True,
+    )
+    staged = subprocess.run(
+        ["git", "diff", "--cached", "--name-only"], cwd=WORKDIR, capture_output=True, text=True,
     )
     untracked = subprocess.run(
         ["git", "ls-files", "--others", "--exclude-standard"],
         cwd=WORKDIR, capture_output=True, text=True,
     )
     files = set()
-    for line in (diff.stdout + untracked.stdout).splitlines():
+    for line in (diff.stdout + staged.stdout + untracked.stdout).splitlines():
         line = line.strip()
         if line and os.path.exists(os.path.join(WORKDIR, line)):
             files.add(line)
