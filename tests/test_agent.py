@@ -954,3 +954,60 @@ class TestMain:
 
         assert result == 0
         assert verify_calls == ["src/file.test.ts", "src/file.test.ts"]
+
+    def test_quality_rounds_not_capped_by_max_fix_rounds(self, tmp_path, monkeypatch):
+        """Quality iterations should be bounded by step budget, not max_fix_rounds."""
+        quality_call_count = 0
+
+        def quality_fails_then_passes(test_file):
+            nonlocal quality_call_count
+            quality_call_count += 1
+            # Fail 4 times (more than max_fix_rounds=3), then pass
+            if quality_call_count <= 4:
+                return False, f"QUALITY FAIL #{quality_call_count}"
+            return True, "All quality checks passed"
+
+        config = {
+            "agent": {"max_steps": 10},
+            "verification": {"max_rejections": 3},
+            "quality": {"enabled": True, "max_fix_rounds": 3},
+            "prompt": {
+                "system": "system prompt",
+                "nudge": "Step {step}/{max_steps}. Continue.",
+                "no_test_found": "no test",
+                "quality_failed": "FAIL: {details}",
+            },
+            "llm": {"model": "test-model"},
+            "pr": {"enabled": False},
+        }
+        args = SimpleNamespace(
+            issue="bug text",
+            source=None,
+            symbol=None,
+            workdir=str(tmp_path),
+            config="unused.toml",
+            log_dir=str(tmp_path),
+        )
+
+        monkeypatch.setattr("agentic_tdd_runner.config.load_config", lambda path: config)
+        monkeypatch.setattr("agentic_tdd_runner.agent.parse_args", lambda: args)
+        monkeypatch.setattr("agentic_tdd_runner.agent.init_log", lambda: str(tmp_path / "agent.jsonl"))
+        monkeypatch.setattr("agentic_tdd_runner.agent.emit", lambda msg: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.log", lambda *args, **kwargs: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.chat", lambda messages, include_tools=True: {
+            "choices": [{"message": {"content": "DONE"}, "finish_reason": "stop"}],
+            "usage": {},
+            "timings": {},
+        })
+        monkeypatch.setattr("agentic_tdd_runner.agent.find_test_file", lambda hint=None: "src/file.test.ts")
+        monkeypatch.setattr("agentic_tdd_runner.agent.run_quality_checks", quality_fails_then_passes)
+        monkeypatch.setattr("agentic_tdd_runner.agent.verify_red_green", lambda tf: (True, "verified"))
+        monkeypatch.setattr(
+            "agentic_tdd_runner.agent.subprocess.run",
+            lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, stdout="", stderr=""),
+        )
+
+        result = main()
+
+        assert result == 0, "Agent should succeed after quality eventually passes"
+        assert quality_call_count == 5, f"Expected 5 quality calls (4 fails + 1 pass), got {quality_call_count}"

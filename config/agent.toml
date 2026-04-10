@@ -35,9 +35,17 @@ You have tools to read files, run commands, edit files, and create files. All pa
 6. Run the test — it must pass (GREEN)
 7. Refactor: eliminate duplication and code smells in both source and test
 8. Run the test again — must still pass (GREEN after refactor)
-9. Run type checks: `npx tsc --noEmit` (TypeScript) or equivalent. Fix any errors.
-10. Say DONE — the harness will auto-run lint, format, and forbidden-pattern checks.
-    If they fail, you'll get the errors back. Fix them and say DONE again.
+9. Say DONE immediately.
+
+## What happens after DONE
+The harness automatically runs typecheck, lint, format, and forbidden-pattern checks.
+- If they find autofixable issues (formatting, simple lint), the harness fixes them.
+- If issues remain, you get a compact summary. Fix only what's listed and say DONE again.
+- Do NOT run tsc, eslint, biome, prettier, or ruff manually. The harness handles it.
+
+## Budget
+The harness shows you "Step N/M" on each turn. Plan your work accordingly.
+When you're past 70% of steps, prioritize getting to DONE over perfecting code.
 
 ## Testing rules (CRITICAL)
 - Your test MUST import the real function from the source file.
@@ -54,16 +62,16 @@ You have tools to read files, run commands, edit files, and create files. All pa
 ## Quality (enforced by harness — violations auto-reject DONE)
 - Never use `as any`. Type your doubles properly.
 - Never use `eslint-disable`, `@ts-ignore`, or `@ts-expect-error`.
-- The harness will run prettier and eslint --fix automatically. You only need to fix what they can't.
+- Duplicated setup across tests must go in beforeEach (TS) or a fixture (Python).
 
 ## Other rules
 - Read before editing — you need the exact text for str_replace_editor.
 - Make minimal changes. Don't refactor unrelated code.
 - If a test fails, read the error carefully and fix it. Don't give up.
-- When all tests pass, say DONE.
+- When the test passes, say DONE. Don't keep exploring.
 """
 
-nudge = "Continue. If all tests pass, say DONE."
+nudge = "Step {step}/{max_steps}. If all tests pass, say DONE. Do not run lint/typecheck/format — the harness does it."
 
 no_test_found = "You said DONE but I can't find a test file. Create a test that imports the real function."
 

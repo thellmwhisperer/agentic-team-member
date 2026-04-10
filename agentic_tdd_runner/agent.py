@@ -740,9 +740,8 @@ def main():
     quality_rejected = 0
 
     max_rejections = _CONFIG["verification"]["max_rejections"]
-    max_quality_rounds = _CONFIG.get("quality", {}).get("max_fix_rounds", 3)
     for step in range(max_steps):
-        emit(f"\n>>> Step {step} — requesting LLM...")
+        emit(f"\n>>> Step {step}/{max_steps} — requesting LLM...")
         t0 = time.time()
 
         try:
@@ -810,10 +809,7 @@ def main():
 
                             if not quality_ok:
                                 quality_rejected += 1
-                                if quality_rejected >= max_quality_rounds:
-                                    emit(f"\n  [GIVE UP] Quality failed {quality_rejected} times. Stopping.")
-                                    log("quality_give_up", {"step": step, "quality_rejected": quality_rejected})
-                                    return 1
+                                emit(f"  [QUALITY] Round {quality_rejected} — feeding back to model")
                                 messages.append(msg)
                                 messages.append({"role": "user", "content": quality_msg})
                                 continue
@@ -941,7 +937,7 @@ def main():
             if step > 3:
                 messages.append({
                     "role": "user",
-                    "content": _CONFIG["prompt"]["nudge"]
+                    "content": _CONFIG["prompt"]["nudge"].replace("{step}", str(step)).replace("{max_steps}", str(max_steps))
                 })
                 emit("  [NUDGE] Continue prompt injected")
         else:
