@@ -1,5 +1,6 @@
 """Tests for agent tool execution and file discovery."""
 import os
+import shutil
 import subprocess
 from types import SimpleNamespace
 
@@ -16,6 +17,8 @@ from agentic_tdd_runner.agent import (
     main,
     run_quality_checks,
 )
+
+GIT = shutil.which("git") or "git"
 
 
 class TestResolveRepoPath:
@@ -143,8 +146,8 @@ class TestFindTestFile:
     """find_test_file discovers new test files matching configured patterns."""
 
     def _setup_git_repo(self, tmp_path):
-        subprocess.run("git init", shell=True, cwd=tmp_path, capture_output=True)
-        subprocess.run("git commit --allow-empty -m init", shell=True, cwd=tmp_path, capture_output=True)
+        subprocess.run([GIT, "init"], cwd=tmp_path, capture_output=True, check=True)
+        subprocess.run([GIT, "commit", "--allow-empty", "-m", "init"], cwd=tmp_path, capture_output=True, check=True)
 
     def test_finds_ts_test_file(self, tmp_path, monkeypatch):
         self._setup_git_repo(tmp_path)
@@ -185,7 +188,6 @@ class TestFindTestFile:
         monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
             "runner": {"test_file_patterns": ["*.test.ts"], "exclude_dirs": []},
         })
-        # With hint, returns the hinted path directly
         assert find_test_file(hint="src/handleResub.test.ts") == "src/handleResub.test.ts"
 
     def test_falls_back_to_discovery_when_hint_missing(self, tmp_path, monkeypatch):
@@ -196,24 +198,22 @@ class TestFindTestFile:
         monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
             "runner": {"test_file_patterns": ["*.test.ts"], "exclude_dirs": []},
         })
-        # Hint file doesn't exist, falls back to discovery
         assert find_test_file(hint="src/nonexistent.test.ts") == "src/foo.test.ts"
 
     def test_verify_red_green_preserves_untracked_test(self, tmp_path, monkeypatch):
         """An untracked test file must survive the stash cycle in verify_red_green."""
-        import subprocess as sp
         from agentic_tdd_runner.agent import verify_red_green
 
-        # Set up a git repo with committed source
-        sp.run("git init", shell=True, cwd=tmp_path, capture_output=True)
-        sp.run(["git", "config", "user.email", "test@test.com"], cwd=tmp_path, capture_output=True)
-        sp.run(["git", "config", "user.name", "test"], cwd=tmp_path, capture_output=True)
+        sp_run = subprocess.run
+        sp_run([GIT, "init"], cwd=tmp_path, capture_output=True, check=True)
+        sp_run([GIT, "config", "user.email", "test@test.com"], cwd=tmp_path, capture_output=True)
+        sp_run([GIT, "config", "user.name", "test"], cwd=tmp_path, capture_output=True)
         src = tmp_path / "src"
         src.mkdir()
         (src / "math.ts").write_text("original")
-        sp.run("git add -A && git commit -m base", shell=True, cwd=tmp_path, capture_output=True)
+        sp_run([GIT, "add", "-A"], cwd=tmp_path, capture_output=True, check=True)
+        sp_run([GIT, "commit", "-m", "base"], cwd=tmp_path, capture_output=True, check=True)
 
-        # Agent creates: modified source (fix) + new untracked test file
         (src / "math.ts").write_text("fixed")
         (src / "math.test.ts").write_text("test content")
 
@@ -225,22 +225,22 @@ class TestFindTestFile:
 
         verify_red_green("src/math.test.ts")
 
-        # Both files must exist after verification
         assert (src / "math.test.ts").exists(), "Untracked test file disappeared"
         assert (src / "math.ts").read_text() == "fixed", "Source fix not restored"
 
     def test_stash_popped_after_red_phase_exception(self, tmp_path, monkeypatch):
         """git stash must be popped even if the red-phase test run raises."""
-        import subprocess as sp
         from unittest.mock import patch as mock_patch
         from agentic_tdd_runner.agent import verify_red_green
 
-        sp.run("git init", shell=True, cwd=tmp_path, capture_output=True)
-        sp.run(["git", "config", "user.email", "t@t"], cwd=tmp_path, capture_output=True)
-        sp.run(["git", "config", "user.name", "t"], cwd=tmp_path, capture_output=True)
+        sp_run = subprocess.run
+        sp_run([GIT, "init"], cwd=tmp_path, capture_output=True, check=True)
+        sp_run([GIT, "config", "user.email", "t@t"], cwd=tmp_path, capture_output=True)
+        sp_run([GIT, "config", "user.name", "t"], cwd=tmp_path, capture_output=True)
         (tmp_path / "src").mkdir()
         (tmp_path / "src" / "math.ts").write_text("original")
-        sp.run("git add -A && git commit -m base", shell=True, cwd=tmp_path, capture_output=True)
+        sp_run([GIT, "add", "-A"], cwd=tmp_path, capture_output=True, check=True)
+        sp_run([GIT, "commit", "-m", "base"], cwd=tmp_path, capture_output=True, check=True)
         (tmp_path / "src" / "math.ts").write_text("fixed")
         (tmp_path / "src" / "math.test.ts").write_text("test")
 
@@ -250,31 +250,28 @@ class TestFindTestFile:
             "timeouts": {"test_run": 10},
         })
 
-        original_run = sp.run
+        original_run = subprocess.run
         red_phase_done = False
 
         def run_that_raises(*args, **kwargs):
             nonlocal red_phase_done
             cmd = args[0] if args else kwargs.get("args", [])
-            # Raise on the first test run (red phase) only
             if isinstance(cmd, list) and any("math.test.ts" in str(c) for c in cmd) and not red_phase_done:
                 red_phase_done = True
-                raise sp.TimeoutExpired(cmd, 10)
+                raise subprocess.TimeoutExpired(cmd, 10)
             return original_run(*args, **kwargs)
 
         with mock_patch("subprocess.run", side_effect=run_that_raises):
             try:
                 verify_red_green("src/math.test.ts")
-            except sp.TimeoutExpired:
-                pass  # This is what we expect WITHOUT the fix
+            except subprocess.TimeoutExpired:
+                pass
 
-        # Stash must be clean after the function returns or raises
-        stash_list = sp.run(["git", "stash", "list"], cwd=tmp_path, capture_output=True, text=True)
+        stash_list = subprocess.run([GIT, "stash", "list"], cwd=tmp_path, capture_output=True, text=True)
         assert stash_list.stdout.strip() == "", f"Stash not popped: {stash_list.stdout}"
 
     def test_python_test_uses_pytest_command(self, tmp_path, monkeypatch):
         """When a Python test is found, verify_red_green should use pytest, not bun test."""
-        # This tests that the runner command adapts to the file type
         from agentic_tdd_runner.languages import get_language
         lang = get_language("test_worker.py")
         assert lang is not None
@@ -305,7 +302,6 @@ class TestDetectQualityTools:
         names = [c["name"] for c in checks]
         assert "typecheck" in names
         assert "lint" in names
-        # Must use biome, not eslint
         lint_cmd = next(c for c in checks if c["name"] == "lint")
         assert "biome" in lint_cmd["command"]
         assert "eslint" not in lint_cmd["command"]
@@ -338,7 +334,6 @@ class TestDetectQualityTools:
     def test_returns_empty_when_no_tools_found(self, tmp_path, monkeypatch):
         monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
         checks = detect_quality_tools("typescript")
-        # No package.json → only typecheck if tsc exists, otherwise empty
         assert isinstance(checks, list)
 
     @pytest.mark.parametrize("lockfile,expected_cmd", [
@@ -350,8 +345,7 @@ class TestDetectQualityTools:
     def test_uses_package_json_scripts_via_detected_pm(
         self, tmp_path, monkeypatch, lockfile, expected_cmd,
     ):
-        """scripts.typecheck is invoked by name via the detected package manager,
-        never by executing the raw script body."""
+        """scripts.typecheck is invoked by name via the detected package manager."""
         import json
         (tmp_path / "package.json").write_text(json.dumps({
             "scripts": {"typecheck": "vue-tsc --noEmit"},
@@ -379,7 +373,6 @@ class TestDetectQualityTools:
             "scripts": {"typecheck": "vue-tsc --noEmit"},
             "packageManager": pm_field,
         }))
-        # Conflicting lockfile to prove packageManager wins
         (tmp_path / "yarn.lock").touch()
         monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
         checks = detect_quality_tools("typescript")
@@ -389,14 +382,18 @@ class TestDetectQualityTools:
 
 
 class TestGetChangedFiles:
-    """_get_changed_files returns modified + untracked files."""
+    """_get_changed_files returns modified + staged + untracked files."""
+
+    def _init_repo(self, tmp_path):
+        subprocess.run([GIT, "init"], cwd=tmp_path, capture_output=True, check=True)
+        subprocess.run([GIT, "config", "user.email", "t@t"], cwd=tmp_path, capture_output=True)
+        subprocess.run([GIT, "config", "user.name", "t"], cwd=tmp_path, capture_output=True)
 
     def test_returns_modified_and_untracked(self, tmp_path, monkeypatch):
-        subprocess.run("git init", shell=True, cwd=tmp_path, capture_output=True)
-        subprocess.run(["git", "config", "user.email", "t@t"], cwd=tmp_path, capture_output=True)
-        subprocess.run(["git", "config", "user.name", "t"], cwd=tmp_path, capture_output=True)
+        self._init_repo(tmp_path)
         (tmp_path / "tracked.ts").write_text("original")
-        subprocess.run("git add -A && git commit -m init", shell=True, cwd=tmp_path, capture_output=True)
+        subprocess.run([GIT, "add", "-A"], cwd=tmp_path, capture_output=True, check=True)
+        subprocess.run([GIT, "commit", "-m", "init"], cwd=tmp_path, capture_output=True, check=True)
         (tmp_path / "tracked.ts").write_text("modified")
         (tmp_path / "new.ts").write_text("new")
         monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
@@ -405,25 +402,22 @@ class TestGetChangedFiles:
         assert "new.ts" in files
 
     def test_includes_staged_files(self, tmp_path, monkeypatch):
-        subprocess.run("git init", shell=True, cwd=tmp_path, capture_output=True)
-        subprocess.run(["git", "config", "user.email", "t@t"], cwd=tmp_path, capture_output=True)
-        subprocess.run(["git", "config", "user.name", "t"], cwd=tmp_path, capture_output=True)
+        self._init_repo(tmp_path)
         (tmp_path / "initial.ts").write_text("original")
-        subprocess.run("git add -A && git commit -m init", shell=True, cwd=tmp_path, capture_output=True)
-        # Stage a modification — no longer in working tree diff, only in --cached
+        subprocess.run([GIT, "add", "-A"], cwd=tmp_path, capture_output=True, check=True)
+        subprocess.run([GIT, "commit", "-m", "init"], cwd=tmp_path, capture_output=True, check=True)
         (tmp_path / "initial.ts").write_text("staged change")
-        subprocess.run(["git", "add", "initial.ts"], cwd=tmp_path, capture_output=True)
+        subprocess.run([GIT, "add", "initial.ts"], cwd=tmp_path, capture_output=True, check=True)
         monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
         files = _get_changed_files()
         assert "initial.ts" in files, "Staged files must be included in quality gate"
 
     def test_excludes_deleted_files(self, tmp_path, monkeypatch):
-        subprocess.run("git init", shell=True, cwd=tmp_path, capture_output=True)
-        subprocess.run(["git", "config", "user.email", "t@t"], cwd=tmp_path, capture_output=True)
-        subprocess.run(["git", "config", "user.name", "t"], cwd=tmp_path, capture_output=True)
+        self._init_repo(tmp_path)
         (tmp_path / "keep.ts").write_text("keep")
         (tmp_path / "deleted.ts").write_text("gone soon")
-        subprocess.run("git add -A && git commit -m init", shell=True, cwd=tmp_path, capture_output=True)
+        subprocess.run([GIT, "add", "-A"], cwd=tmp_path, capture_output=True, check=True)
+        subprocess.run([GIT, "commit", "-m", "init"], cwd=tmp_path, capture_output=True, check=True)
         (tmp_path / "deleted.ts").unlink()
         (tmp_path / "keep.ts").write_text("modified")
         monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
@@ -436,12 +430,13 @@ class TestRunQualityChecks:
     """run_quality_checks enforces lint, format, and forbidden patterns."""
 
     def _setup_repo(self, tmp_path, monkeypatch):
-        subprocess.run("git init", shell=True, cwd=tmp_path, capture_output=True)
-        subprocess.run(["git", "config", "user.email", "t@t"], cwd=tmp_path, capture_output=True)
-        subprocess.run(["git", "config", "user.name", "t"], cwd=tmp_path, capture_output=True)
+        subprocess.run([GIT, "init"], cwd=tmp_path, capture_output=True, check=True)
+        subprocess.run([GIT, "config", "user.email", "t@t"], cwd=tmp_path, capture_output=True)
+        subprocess.run([GIT, "config", "user.name", "t"], cwd=tmp_path, capture_output=True)
         (tmp_path / "src").mkdir()
         (tmp_path / "src" / "file.ts").write_text("original")
-        subprocess.run("git add -A && git commit -m init", shell=True, cwd=tmp_path, capture_output=True)
+        subprocess.run([GIT, "add", "-A"], cwd=tmp_path, capture_output=True, check=True)
+        subprocess.run([GIT, "commit", "-m", "init"], cwd=tmp_path, capture_output=True, check=True)
         monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
 
     def test_passes_when_disabled(self, tmp_path, monkeypatch):
@@ -504,7 +499,6 @@ class TestRunQualityChecks:
         self._setup_repo(tmp_path, monkeypatch)
         bad_file = tmp_path / "src" / "file.test.ts"
         bad_file.write_text("UNFIXED")
-        # fix command rewrites the file; check command passes if content is "FIXED"
         fix_cmd = f"echo FIXED > {bad_file}"
         check_cmd = f"grep FIXED {bad_file}"
         monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
@@ -576,11 +570,8 @@ class TestRunQualityChecks:
     def test_filters_changed_files_by_language_extensions(self, tmp_path, monkeypatch):
         """Only files matching the active language's extensions are scanned."""
         self._setup_repo(tmp_path, monkeypatch)
-        # TS file (matches lang) — clean
         (tmp_path / "src" / "file.test.ts").write_text("const x: number = 1;")
-        # TOML file (wrong lang) — contains a TS forbidden pattern
         (tmp_path / "config.toml").write_text('value = "as any"')
-        # Python file (wrong lang) — also contains TS forbidden pattern
         (tmp_path / "helper.py").write_text("x = 'as any'")
         monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
             "quality": {
@@ -590,7 +581,6 @@ class TestRunQualityChecks:
             "timeouts": {"tool_execution": 10},
             "prompt": {"quality_failed": "FAIL: {details}"},
         })
-        # TS quality gate should NOT flag .toml or .py files
         ok, msg = run_quality_checks("src/file.test.ts")
         assert ok is True, f"Non-TS files should be excluded from TS quality scan: {msg}"
 
@@ -599,7 +589,6 @@ class TestRunQualityChecks:
         self._setup_repo(tmp_path, monkeypatch)
         (tmp_path / "src" / "file.test.ts").write_text("clean")
         (tmp_path / "stray.py").write_text("stray python file")
-        # Command that fails if it sees any .py file in its arguments
         monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
             "quality": {
                 "enabled": True, "max_fix_rounds": 3,
@@ -648,15 +637,18 @@ class TestParsePrContent:
 class TestCreatePr:
     """create_pr asks the LLM for content and runs git+gh commands."""
 
+    def _init_repo(self, tmp_path):
+        subprocess.run([GIT, "init"], cwd=tmp_path, capture_output=True, check=True)
+        subprocess.run([GIT, "config", "user.email", "t@t"], cwd=tmp_path, capture_output=True)
+        subprocess.run([GIT, "config", "user.name", "t"], cwd=tmp_path, capture_output=True)
+
     def test_creates_branch_commit_push_pr(self, tmp_path, monkeypatch):
         from unittest.mock import patch as mock_patch, call
 
-        subprocess.run("git init", shell=True, cwd=tmp_path, capture_output=True)
-        subprocess.run(["git", "config", "user.email", "t@t"], cwd=tmp_path, capture_output=True)
-        subprocess.run(["git", "config", "user.name", "t"], cwd=tmp_path, capture_output=True)
+        self._init_repo(tmp_path)
         (tmp_path / "file.ts").write_text("code")
-        subprocess.run("git add -A && git commit -m init", shell=True, cwd=tmp_path, capture_output=True)
-        # Agent's fix: modified source + new test (unstaged changes for PR)
+        subprocess.run([GIT, "add", "-A"], cwd=tmp_path, capture_output=True, check=True)
+        subprocess.run([GIT, "commit", "-m", "init"], cwd=tmp_path, capture_output=True, check=True)
         (tmp_path / "file.ts").write_text("fixed code")
         (tmp_path / "file.test.ts").write_text("test code")
 
@@ -668,7 +660,6 @@ class TestCreatePr:
             "timeouts": {"llm_request": 10},
         })
 
-        # Mock chat to return PR content
         mock_response = {
             "choices": [{"message": {"content": "PR_TITLE: fix: handle cumulative months\nPR_BODY: Fixed the bug."}}],
         }
@@ -680,7 +671,6 @@ class TestCreatePr:
             cmd = args[0] if args else kwargs.get("args", [])
             if isinstance(cmd, list):
                 commands_run.append(cmd)
-                # Fake success for git push and gh commands (no real remote)
                 if cmd[0] == "gh" or (cmd[0] == "git" and "push" in cmd):
                     return subprocess.CompletedProcess(cmd, 0, stdout="https://github.com/test/pr/1\n")
                 return original_run(*args, **kwargs)
@@ -690,33 +680,27 @@ class TestCreatePr:
             with mock_patch("subprocess.run", side_effect=track_run):
                 result = create_pr([], {}, "test.ts", 10)
 
-        # Verify git commands were called in order
         cmd_strs = [" ".join(c) for c in commands_run]
         assert any("checkout -b" in c for c in cmd_strs), f"No checkout -b: {cmd_strs}"
-        assert any("git add" in c for c in cmd_strs), f"No git add: {cmd_strs}"
-        assert any("git commit" in c for c in cmd_strs), f"No git commit: {cmd_strs}"
-        assert any("git push" in c for c in cmd_strs), f"No git push: {cmd_strs}"
+        assert any("add" in c for c in cmd_strs), f"No git add: {cmd_strs}"
+        assert any("commit" in c for c in cmd_strs), f"No git commit: {cmd_strs}"
+        assert any("push" in c for c in cmd_strs), f"No git push: {cmd_strs}"
         assert any("gh pr create" in c for c in cmd_strs), f"No gh pr create: {cmd_strs}"
 
     def test_pr_stages_tracked_changes_and_filters_untracked(self, tmp_path, monkeypatch):
         """create_pr stages all tracked modified files (incl config) but only language-matching untracked."""
         from unittest.mock import patch as mock_patch
 
-        subprocess.run("git init", shell=True, cwd=tmp_path, capture_output=True)
-        subprocess.run(["git", "config", "user.email", "t@t"], cwd=tmp_path, capture_output=True)
-        subprocess.run(["git", "config", "user.name", "t"], cwd=tmp_path, capture_output=True)
+        self._init_repo(tmp_path)
         (tmp_path / "file.ts").write_text("code")
         (tmp_path / "package.json").write_text('{"name": "test"}')
         (tmp_path / "obsolete.ts").write_text("dead code")
-        subprocess.run("git add -A && git commit -m init", shell=True, cwd=tmp_path, capture_output=True)
-        # Tracked modified files — ALL should be staged regardless of extension
+        subprocess.run([GIT, "add", "-A"], cwd=tmp_path, capture_output=True, check=True)
+        subprocess.run([GIT, "commit", "-m", "init"], cwd=tmp_path, capture_output=True, check=True)
         (tmp_path / "file.ts").write_text("fixed code")
         (tmp_path / "package.json").write_text('{"name": "test", "scripts": {"typecheck": "tsc"}}')
-        # Tracked deletion — removing dead code is part of the fix
         (tmp_path / "obsolete.ts").unlink()
-        # Untracked language file — should be staged (new test file)
         (tmp_path / "file.test.ts").write_text("test code")
-        # Untracked non-language files — should NOT be staged
         (tmp_path / "agent-session.jsonl").write_text('{"log": "entry"}')
         (tmp_path / "notes.md").write_text("scratch notes")
 
@@ -738,9 +722,9 @@ class TestCreatePr:
         def track_run(*args, **kwargs):
             cmd = args[0] if args else kwargs.get("args", [])
             if isinstance(cmd, list):
-                if cmd[0] == "git" and len(cmd) > 1 and cmd[1] == "add":
+                if len(cmd) > 1 and cmd[1] == "add":
                     add_commands.append(cmd)
-                if cmd[0] == "gh" or (cmd[0] == "git" and "push" in cmd):
+                if cmd[0] == "gh" or (len(cmd) > 1 and "push" in cmd):
                     return subprocess.CompletedProcess(cmd, 0, stdout="https://github.com/test/pr/1\n")
                 return original_run(*args, **kwargs)
             return original_run(*args, **kwargs)
@@ -750,15 +734,11 @@ class TestCreatePr:
                 create_pr([], {}, "file.test.ts", 10)
 
         assert len(add_commands) == 1, f"Expected one git add call, got {add_commands}"
-        staged_files = add_commands[0][3:]  # after ['git', 'add', '--']
-        # Tracked modified: always staged
+        staged_files = add_commands[0][3:]  # after [GIT, 'add', '--']
         assert "file.ts" in staged_files, f"Source file missing: {staged_files}"
         assert "package.json" in staged_files, f"Config file missing from PR: {staged_files}"
-        # Tracked deletion: staged (removing dead code is a valid fix)
         assert "obsolete.ts" in staged_files, f"Deleted file missing from PR: {staged_files}"
-        # Untracked language match: staged
         assert "file.test.ts" in staged_files, f"New test file missing: {staged_files}"
-        # Untracked non-language: excluded
         assert "agent-session.jsonl" not in staged_files, f"Log file staged: {staged_files}"
         assert "notes.md" not in staged_files, f"Non-language file staged: {staged_files}"
 
