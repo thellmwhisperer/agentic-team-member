@@ -332,6 +332,50 @@ class TestFindTestFile:
         assert ok is False
         assert "test scaffold is incomplete" in msg.lower()
 
+    def test_verify_red_green_rejects_red_phase_that_fails_on_missing_export(self, tmp_path, monkeypatch):
+        """A red phase that dies on missing exports/import wiring is not a valid proof of the bug."""
+        from unittest.mock import patch as mock_patch
+        from agentic_tdd_runner.agent import verify_red_green
+
+        sp_run = subprocess.run
+        sp_run([GIT, "init"], cwd=tmp_path, capture_output=True, check=True)
+        sp_run([GIT, "config", "user.email", "test@test.com"], cwd=tmp_path, capture_output=True)
+        sp_run([GIT, "config", "user.name", "test"], cwd=tmp_path, capture_output=True)
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "math.ts").write_text("fixed")
+        (src / "math.test.ts").write_text("test")
+        sp_run([GIT, "add", "-A"], cwd=tmp_path, capture_output=True, check=True)
+        sp_run([GIT, "commit", "-m", "base"], cwd=tmp_path, capture_output=True, check=True)
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "runner": {"command": "bun test", "test_file_patterns": ["*.test.ts"], "exclude_dirs": []},
+            "timeouts": {"test_run": 10},
+        })
+
+        calls = {"count": 0}
+
+        def fake_run(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            if isinstance(cmd, list) and any("math.test.ts" in str(c) for c in cmd):
+                calls["count"] += 1
+                if calls["count"] == 1:
+                    return subprocess.CompletedProcess(
+                        cmd,
+                        1,
+                        stdout="SyntaxError: The requested module './math' does not provide an export named 'handleResub'\n",
+                        stderr="",
+                    )
+                return subprocess.CompletedProcess(cmd, 0, stdout="1 pass\n", stderr="")
+            return sp_run(*args, **kwargs)
+
+        with mock_patch("subprocess.run", side_effect=fake_run):
+            ok, msg = verify_red_green("src/math.test.ts")
+
+        assert ok is False
+        assert "test scaffold is incomplete" in msg.lower()
+
     def test_finds_tsx_test_file(self, tmp_path, monkeypatch):
         self._setup_git_repo(tmp_path)
         (tmp_path / "src").mkdir()
@@ -1056,8 +1100,13 @@ class TestExecuteToolReactiveChecks:
             if lang_name == "typescript" else [],
         )
 
+        calls = {"count": 0}
+
         def fake_run(command, **kwargs):
             assert command == "fake-tsc --noEmit"
+            calls["count"] += 1
+            if calls["count"] == 1:
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
             return SimpleNamespace(
                 returncode=1,
                 stdout="src/file.ts(1,1): error TS123 broken types\n",
@@ -1075,6 +1124,83 @@ class TestExecuteToolReactiveChecks:
         assert result.startswith("OK: replaced in src/file.ts")
         assert "[Reactive typecheck]" in result
         assert "TS123" in result
+
+    def test_str_replace_editor_reports_only_new_reactive_typecheck_errors(self, tmp_path, monkeypatch):
+        src = tmp_path / "src"
+        src.mkdir()
+        target = src / "file.ts"
+        target.write_text("const value = 1;\n")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr(
+            "agentic_tdd_runner.agent.detect_quality_tools",
+            lambda lang_name: [{"name": "typecheck", "command": "fake-tsc --noEmit"}]
+            if lang_name == "typescript" else [],
+        )
+
+        calls = {"count": 0}
+
+        def fake_run(command, **kwargs):
+            assert command == "fake-tsc --noEmit"
+            calls["count"] += 1
+            if calls["count"] == 1:
+                return SimpleNamespace(
+                    returncode=1,
+                    stdout="src/shared.ts(1,1): error TS999 preexisting problem\n",
+                    stderr="",
+                )
+            return SimpleNamespace(
+                returncode=1,
+                stdout=(
+                    "src/shared.ts(1,1): error TS999 preexisting problem\n"
+                    "src/file.ts(2,2): error TS123 newly introduced\n"
+                ),
+                stderr="",
+            )
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.subprocess.run", fake_run)
+
+        result = execute_tool("str_replace_editor", {
+            "path": "src/file.ts",
+            "old_str": "const value = 1;\n",
+            "new_str": "const value = 'bad';\n",
+        })
+
+        assert result.startswith("OK: replaced in src/file.ts")
+        assert "[Reactive typecheck] 1 new errors:" in result
+        assert "TS123 newly introduced" in result
+        assert "TS999 preexisting problem" not in result
+
+    def test_str_replace_editor_suppresses_reactive_typecheck_when_only_preexisting_errors_remain(self, tmp_path, monkeypatch):
+        src = tmp_path / "src"
+        src.mkdir()
+        target = src / "file.ts"
+        target.write_text("const value = 1;\n")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr(
+            "agentic_tdd_runner.agent.detect_quality_tools",
+            lambda lang_name: [{"name": "typecheck", "command": "fake-tsc --noEmit"}]
+            if lang_name == "typescript" else [],
+        )
+
+        def fake_run(command, **kwargs):
+            assert command == "fake-tsc --noEmit"
+            return SimpleNamespace(
+                returncode=1,
+                stdout="src/shared.ts(1,1): error TS999 preexisting problem\n",
+                stderr="",
+            )
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.subprocess.run", fake_run)
+
+        result = execute_tool("str_replace_editor", {
+            "path": "src/file.ts",
+            "old_str": "const value = 1;\n",
+            "new_str": "const value = 2;\n",
+        })
+
+        assert result == "OK: replaced in src/file.ts"
 
     def test_str_replace_editor_keeps_success_silent_when_typecheck_passes(self, tmp_path, monkeypatch):
         src = tmp_path / "src"

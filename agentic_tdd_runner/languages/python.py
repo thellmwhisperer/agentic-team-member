@@ -100,7 +100,9 @@ class PythonLanguage:
             parts = parts[:-1]
         return ".".join(part for part in parts if part)
 
-    def render_seam_setter(self, binding: str, assignment: dict) -> str:
+    def render_seam_setter(
+        self, binding: str, assignment: dict, *, observed_members: list[str] | None = None,
+    ) -> str:
         name = self.setter_name(binding)
         return (
             f"def {name}(value):\n"

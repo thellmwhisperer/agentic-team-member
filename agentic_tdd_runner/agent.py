@@ -127,16 +127,22 @@ def _tool_loop_warning_message(signature: str) -> str:
 
 def _is_invalid_red_phase_failure(output: str) -> bool:
     lowered = output.lower()
-    if "__set" not in lowered and "fortests" not in lowered:
-        return False
-    invalid_markers = (
-        "not a function",
-        "is undefined",
-        "cannot import",
+    seam_markers = (
+        "__set" in lowered and "fortests" in lowered
+        and any(marker in lowered for marker in ("not a function", "is undefined", "is not defined"))
+    )
+    export_markers = any(marker in lowered for marker in (
+        "cannot import name",
         "does not provide an export",
         "has no exported member",
-    )
-    return any(marker in lowered for marker in invalid_markers)
+        "is not exported by",
+    ))
+    module_markers = any(marker in lowered for marker in (
+        "cannot find module",
+        "could not resolve",
+        "module not found",
+    ))
+    return seam_markers or export_markers or module_markers
 
 
 def _resolve_repo_path(path: str, workdir: str = None) -> Path:
@@ -252,6 +258,7 @@ def execute_tool(name: str, args: dict) -> str:
 
         elif name == "str_replace_editor":
             full_path = _resolve_repo_path(args["path"])
+            reactive_typecheck_baseline = _capture_reactive_typecheck_baseline(args["path"])
             with open(full_path, "r") as f:
                 content = f.read()
             old_str = args["old_str"]
@@ -263,7 +270,7 @@ def execute_tool(name: str, args: dict) -> str:
             with open(full_path, "w") as f:
                 f.write(new_content)
             result = f"OK: replaced in {args['path']}"
-            return result + _reactive_typecheck_feedback(args["path"])
+            return result + _reactive_typecheck_feedback(args["path"], baseline=reactive_typecheck_baseline)
 
         elif name == "create_file":
             full_path = _resolve_repo_path(args["path"])
@@ -282,7 +289,52 @@ def execute_tool(name: str, args: dict) -> str:
         return f"ERROR: {type(e).__name__}: {e}"
 
 
-def _reactive_typecheck_feedback(path: str) -> str:
+def _capture_reactive_typecheck_baseline(path: str) -> tuple[int, str] | None:
+    suffix = Path(path).suffix.lower()
+    if suffix not in {".ts", ".tsx", ".js", ".jsx"}:
+        return None
+
+    checks = detect_quality_tools("typescript")
+    typecheck = next((check for check in checks if check.get("name") == "typecheck"), None)
+    if not typecheck:
+        return None
+    timeout_s = (_CONFIG or {}).get("timeouts", {}).get("tool_execution", 10)
+
+    try:
+        result = subprocess.run(
+            typecheck["command"],
+            shell=True,
+            cwd=WORKDIR,
+            capture_output=True,
+            text=True,
+            timeout=timeout_s,
+        )
+    except subprocess.TimeoutExpired:
+        return 124, "__TIMEOUT__"
+    except (OSError, UnicodeDecodeError) as e:
+        return 1, f"__ERROR__: {e}"
+
+    return result.returncode, (result.stdout or "") + (result.stderr or "")
+
+
+def _extract_reactive_error_lines(raw: str) -> list[str]:
+    lines = []
+    for line in raw.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        lowered = stripped.lower()
+        if "error" in lowered or lowered.startswith("failed:") or lowered.startswith("failure:"):
+            lines.append(stripped)
+    return lines
+
+
+def _reactive_failure_delta(raw: str, baseline_raw: str) -> list[str]:
+    baseline_lines = {line.strip() for line in _extract_reactive_error_lines(baseline_raw)}
+    return [line for line in _extract_reactive_error_lines(raw) if line.strip() not in baseline_lines]
+
+
+def _reactive_typecheck_feedback(path: str, baseline: tuple[int, str] | None = None) -> str:
     suffix = Path(path).suffix.lower()
     if suffix not in {".ts", ".tsx", ".js", ".jsx"}:
         return ""
@@ -311,12 +363,18 @@ def _reactive_typecheck_feedback(path: str) -> str:
         return ""
 
     raw = (result.stdout or "") + (result.stderr or "")
-    error_lines = [ln for ln in raw.splitlines() if ln.strip() and "error" in ln.lower()]
+    baseline_code, baseline_raw = baseline or (0, "")
+    error_lines = _extract_reactive_error_lines(raw)
+    if baseline_code != 0:
+        error_lines = _reactive_failure_delta(raw, baseline_raw)
+        if not error_lines:
+            return ""
     n_errors = len(error_lines) if error_lines else 1
     sample = "\n".join(f"  {ln.strip()}" for ln in error_lines[:3])
     if not sample:
         sample = f"  {raw[:200]}"
-    return f"\n\n[Reactive typecheck] {n_errors} errors:\n{sample}"
+    label = "new errors" if baseline_code != 0 else "errors"
+    return f"\n\n[Reactive typecheck] {n_errors} {label}:\n{sample}"
 
 
 def _reactive_test_feedback(path: str) -> str:

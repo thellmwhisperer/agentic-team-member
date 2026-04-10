@@ -60,6 +60,7 @@ def _realize_generated_test_seams(
         plan["setter_name"] = name
         plan["steps"] = [f"call {name}(testDouble) before invoking target"]
         execution_entry = exec_by_binding.get(binding)
+        observed_members = execution_entry.get("observed_members", []) if execution_entry else []
         if execution_entry is not None:
             execution_entry["setter_name"] = name
         if name in source_text:
@@ -72,7 +73,7 @@ def _realize_generated_test_seams(
             "old": assignment["line"],
             "new": assignment["line"]
             + ("\n\n" if not assignment["line"].endswith("\n") else "\n")
-            + lang.render_seam_setter(binding, assignment),
+            + lang.render_seam_setter(binding, assignment, observed_members=observed_members),
         })
     return edits
 

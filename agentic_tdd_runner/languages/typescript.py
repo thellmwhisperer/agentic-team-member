@@ -96,12 +96,20 @@ class TypeScriptLanguage:
         ]
         return any(re.search(p, source_text, re.MULTILINE) for p in patterns)
 
-    def render_seam_setter(self, binding: str, assignment: dict) -> str:
+    def render_seam_setter(
+        self, binding: str, assignment: dict, *, observed_members: list[str] | None = None,
+    ) -> str:
         name = self.setter_name(binding)
         type_hint = assignment.get("type_annotation") or f"typeof {binding}"
+        observed_members = observed_members or []
+        if observed_members:
+            quoted_members = " | ".join(f"'{member}'" for member in observed_members)
+            value_type = f"Pick<NonNullable<{type_hint}>, {quoted_members}>"
+        else:
+            value_type = type_hint
         return (
-            f"export function {name}(value: {type_hint}): void {{\n"
-            f"  {binding} = value;\n"
+            f"export function {name}(value: {value_type}): void {{\n"
+            f"  {binding} = value as {type_hint};\n"
             f"}}"
         )
 
