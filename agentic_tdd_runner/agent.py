@@ -219,6 +219,20 @@ def _tool_loop_warning_message(signature: str) -> str:
     )
 
 
+def _is_invalid_red_phase_failure(output: str) -> bool:
+    lowered = output.lower()
+    if "__set" not in lowered and "fortests" not in lowered:
+        return False
+    invalid_markers = (
+        "not a function",
+        "is undefined",
+        "cannot import",
+        "does not provide an export",
+        "has no exported member",
+    )
+    return any(marker in lowered for marker in invalid_markers)
+
+
 def _resolve_repo_path(path: str, workdir: str = None) -> Path:
     """Resolve a relative path within the workdir. Raises if it escapes."""
     repo_root = Path(workdir or WORKDIR).resolve()
@@ -624,6 +638,14 @@ def verify_red_green(test_file: str) -> tuple[bool, str]:
             f"This means it doesn't test the real code — it probably uses local stub functions "
             f"instead of importing from the source. Rewrite the test to import the real "
             f"function and mock its dependencies properly."
+        )
+
+    if _is_invalid_red_phase_failure(red_output):
+        return False, (
+            f"REJECTED: Your red phase for {test_file} failed because the test scaffold is incomplete, "
+            "not because the bug was reproduced. The failure mentions missing test-only seams/exports "
+            f"(for example __setXForTests). Rework the test so the pre-fix run executes the real code path "
+            f"and fails on behavior. Error: {red_output[:300]}"
         )
 
     if green_result is None:
@@ -1412,28 +1434,44 @@ def main():
         emit(f"\n{'='*60}")
         emit(f"AGENT DONE at step {step} — VERIFIED")
         emit(f"{'='*60}")
-        diff = subprocess.run(["git", "diff"], cwd=WORKDIR, capture_output=True, text=True)
-        emit(f"\n--- GIT DIFF ---\n{diff.stdout}")
-        untracked = subprocess.run(["git", "ls-files", "--others", "--exclude-standard"], cwd=WORKDIR, capture_output=True, text=True)
-        if untracked.stdout.strip():
-            emit("\n--- NEW FILES ---")
-            for f in untracked.stdout.strip().split("\n"):
-                emit(f"  {f}")
-                full = os.path.join(WORKDIR, f)
-                try:
-                    with open(full) as fh:
-                        emit(fh.read())
-                except OSError:
-                    pass
-        if _CONFIG.get("pr", {}).get("enabled", False):
-            emit("\n=== PR CREATION ===")
-            pr_url = create_pr(messages, msg, test_file, step)
-            if pr_url:
-                emit(f"  [PR] {pr_url}")
-            else:
-                emit("  [PR] Failed — diff printed above, create PR manually")
-
         log("done", {"step": step, "verified": True})
+        try:
+            command_timeout = _CONFIG.get("timeouts", {}).get("tool_execution", 10)
+            diff = subprocess.run(
+                ["git", "diff"],
+                cwd=WORKDIR,
+                capture_output=True,
+                text=True,
+                timeout=command_timeout,
+            )
+            emit(f"\n--- GIT DIFF ---\n{diff.stdout}")
+            untracked = subprocess.run(
+                ["git", "ls-files", "--others", "--exclude-standard"],
+                cwd=WORKDIR,
+                capture_output=True,
+                text=True,
+                timeout=command_timeout,
+            )
+            if untracked.stdout.strip():
+                emit("\n--- NEW FILES ---")
+                for f in untracked.stdout.strip().split("\n"):
+                    emit(f"  {f}")
+                    full = os.path.join(WORKDIR, f)
+                    try:
+                        with open(full) as fh:
+                            emit(fh.read())
+                    except OSError:
+                        pass
+            if _CONFIG.get("pr", {}).get("enabled", False):
+                emit("\n=== PR CREATION ===")
+                pr_url = create_pr(messages, msg, test_file, step)
+                if pr_url:
+                    emit(f"  [PR] {pr_url}")
+                else:
+                    emit("  [PR] Failed — diff printed above, create PR manually")
+        except Exception as e:
+            emit(f"  [POSTAMBLE] Failed: {e}")
+            log("postamble_error", {"step": step, "error": str(e)})
         return "done"
 
     for step in range(max_steps):
