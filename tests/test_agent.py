@@ -1732,3 +1732,225 @@ class TestMain:
         assert quality_call_count == 2
         events = [event for event, _data in logged]
         assert "context_compacted" in events
+
+
+class TestApplyMechanicalEdits:
+    """apply_mechanical_edits applies pre_test_source_edits to disk before the agent loop."""
+
+    def test_applies_string_replacement_to_file(self, tmp_path):
+        from agentic_tdd_runner.agent import apply_mechanical_edits
+
+        src = tmp_path / "src" / "client.ts"
+        src.parent.mkdir(parents=True)
+        src.write_text("function handleResub(event) {\n  return event;\n}\n")
+
+        edits = [{
+            "path": "src/client.ts",
+            "old": "function handleResub(event) {",
+            "new": "export function handleResub(event) {",
+        }]
+
+        applied = apply_mechanical_edits(edits, str(tmp_path))
+
+        assert applied == 1
+        assert "export function handleResub" in src.read_text()
+
+    def test_skips_edit_when_old_not_found(self, tmp_path):
+        from agentic_tdd_runner.agent import apply_mechanical_edits
+
+        src = tmp_path / "src" / "client.ts"
+        src.parent.mkdir(parents=True)
+        src.write_text("export function handleResub(event) {\n  return event;\n}\n")
+
+        edits = [{
+            "path": "src/client.ts",
+            "old": "const UNRELATED = 42;",
+            "new": "export const UNRELATED = 42;",
+        }]
+
+        applied = apply_mechanical_edits(edits, str(tmp_path))
+
+        assert applied == 0
+        assert src.read_text() == "export function handleResub(event) {\n  return event;\n}\n"
+
+    def test_applies_multiple_edits_across_files(self, tmp_path):
+        from agentic_tdd_runner.agent import apply_mechanical_edits
+
+        src1 = tmp_path / "src" / "a.ts"
+        src1.parent.mkdir(parents=True)
+        src1.write_text("function foo() {}\n")
+
+        src2 = tmp_path / "src" / "b.ts"
+        src2.write_text("const bar = 1;\n")
+
+        edits = [
+            {"path": "src/a.ts", "old": "function foo()", "new": "export function foo()"},
+            {"path": "src/b.ts", "old": "const bar = 1;", "new": "export const bar = 1;"},
+        ]
+
+        applied = apply_mechanical_edits(edits, str(tmp_path))
+
+        assert applied == 2
+        assert "export function foo" in src1.read_text()
+        assert "export const bar" in src2.read_text()
+
+
+class TestPhasedRunner:
+    """When --source/--symbol are provided, main() uses phased prompts."""
+
+    def _make_config(self):
+        return {
+            "agent": {"max_steps": 5, "max_tool_output": 8000},
+            "verification": {"max_rejections": 3},
+            "quality": {"enabled": False},
+            "prompt": {
+                "system": "system prompt",
+                "nudge": "Step {step}/{max_steps}. Continue.",
+                "no_test_found": "no test",
+            },
+            "llm": {"model": "test-model"},
+            "pr": {"enabled": False},
+            "runner": {"command": "bun test", "test_file_patterns": ["*.test.ts"], "exclude_dirs": []},
+            "timeouts": {"tool_execution": 10, "llm_request": 10, "test_run": 10},
+            "tools": [],
+        }
+
+    def test_applies_mechanical_edits_before_loop(self, tmp_path, monkeypatch):
+        """When episode context has pre_test_source_edits, they're applied to disk
+        before the agent loop starts."""
+        import agentic_tdd_runner.agent as _agent_mod
+
+        src = tmp_path / "src" / "client.ts"
+        src.parent.mkdir(parents=True)
+        src.write_text("function handleResub(event) {\n  return event;\n}\n")
+
+        episode = {
+            "source_file": "src/client.ts",
+            "target_symbol": "handleResub",
+            "test_file": "src/client.test.ts",
+            "source_import_path": "./client",
+            "runner": "bun:test",
+            "mocks_text": "",
+            "pre_test_source_edits": [
+                {"path": "src/client.ts", "old": "function handleResub(", "new": "export function handleResub("},
+            ],
+            "conditional_source_edits": [],
+            "assertion_hint": "assert on the return value",
+            "cookbook_text": "## Mock Cookbook for handleResub\n",
+        }
+
+        chat_messages = []
+
+        def fake_chat(messages, include_tools=True):
+            chat_messages.append([m.copy() for m in messages])
+            return {
+                "choices": [{"message": {"content": "still going"}, "finish_reason": "stop"}],
+                "usage": {},
+                "timings": {},
+            }
+
+        args = SimpleNamespace(
+            issue="bug text", source="src/client.ts", symbol="handleResub",
+            workdir=str(tmp_path), config="unused.toml", log_dir=str(tmp_path),
+        )
+        monkeypatch.setattr("agentic_tdd_runner.config.load_config", lambda path: self._make_config())
+        monkeypatch.setattr("agentic_tdd_runner.agent.parse_args", lambda: args)
+        monkeypatch.setattr("agentic_tdd_runner.agent.init_log", lambda: str(tmp_path / "agent.jsonl"))
+        monkeypatch.setattr("agentic_tdd_runner.agent.emit", lambda msg: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.log", lambda *a, **kw: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.chat", fake_chat)
+        monkeypatch.setattr(
+            "agentic_tdd_runner.cookbook.build_episode_context",
+            lambda **kw: episode,
+        )
+
+        main()
+
+        # Source file should have been edited on disk before the loop
+        assert "export function handleResub" in src.read_text()
+
+        # First user message should be the phase-1 prompt, NOT "Fix this bug"
+        first_call_messages = chat_messages[0]
+        user_msg = next(m for m in first_call_messages if m["role"] == "user")
+        assert "Fix this bug" not in user_msg["content"]
+        assert "handleResub" in user_msg["content"]
+
+    def test_injects_fix_nudge_after_test_file_created(self, tmp_path, monkeypatch):
+        """After model creates a test file, harness injects a nudge to run + fix."""
+        import agentic_tdd_runner.agent as _agent_mod
+
+        src = tmp_path / "src" / "client.ts"
+        src.parent.mkdir(parents=True)
+        src.write_text("export function handleResub(event) {\n  return event;\n}\n")
+
+        episode = {
+            "source_file": "src/client.ts",
+            "target_symbol": "handleResub",
+            "test_file": "src/client.test.ts",
+            "source_import_path": "./client",
+            "runner": "bun:test",
+            "mocks_text": "",
+            "pre_test_source_edits": [],
+            "conditional_source_edits": [],
+            "assertion_hint": "",
+            "cookbook_text": "## Mock Cookbook\n",
+        }
+
+        chat_call_count = [0]
+        captured_messages = []
+
+        def fake_chat(messages, include_tools=True):
+            chat_call_count[0] += 1
+            captured_messages.append([m.copy() for m in messages])
+            if chat_call_count[0] == 1:
+                # Model creates the test file
+                return {
+                    "choices": [{"message": {
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [{
+                            "id": "call_1",
+                            "function": {
+                                "name": "create_file",
+                                "arguments": '{"path": "src/client.test.ts", "content": "test code"}',
+                            },
+                        }],
+                    }, "finish_reason": "tool_calls"}],
+                    "usage": {},
+                    "timings": {},
+                }
+            # All subsequent calls: stop
+            return {
+                "choices": [{"message": {"role": "assistant", "content": "continuing"}, "finish_reason": "stop"}],
+                "usage": {},
+                "timings": {},
+            }
+
+        def fake_execute(name, args):
+            _agent_mod._last_run_exit_code = None
+            return f"OK: created {args.get('path', '')}"
+
+        args = SimpleNamespace(
+            issue="bug text", source="src/client.ts", symbol="handleResub",
+            workdir=str(tmp_path), config="unused.toml", log_dir=str(tmp_path),
+        )
+        monkeypatch.setattr("agentic_tdd_runner.config.load_config", lambda path: self._make_config())
+        monkeypatch.setattr("agentic_tdd_runner.agent.parse_args", lambda: args)
+        monkeypatch.setattr("agentic_tdd_runner.agent.init_log", lambda: str(tmp_path / "agent.jsonl"))
+        monkeypatch.setattr("agentic_tdd_runner.agent.emit", lambda msg: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.log", lambda *a, **kw: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.chat", fake_chat)
+        monkeypatch.setattr("agentic_tdd_runner.agent.execute_tool", fake_execute)
+        monkeypatch.setattr(
+            "agentic_tdd_runner.cookbook.build_episode_context",
+            lambda **kw: episode,
+        )
+
+        main()
+
+        # After the create_file tool result, a user nudge should have been injected
+        # Check the messages sent to the second chat call
+        assert chat_call_count[0] >= 2
+        second_call_msgs = captured_messages[1]
+        user_nudges = [m for m in second_call_msgs if m["role"] == "user" and "run" in m.get("content", "").lower() and "fix" in m.get("content", "").lower()]
+        assert len(user_nudges) >= 1, f"Expected a run+fix nudge after test creation, got messages: {[m['content'][:80] for m in second_call_msgs if m['role'] == 'user']}"

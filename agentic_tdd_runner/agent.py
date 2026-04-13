@@ -64,6 +64,26 @@ def emit(msg: str):
 # Tools and prompts loaded from config/agent.toml + config/tools.json
 
 
+def apply_mechanical_edits(edits: list[dict], workdir: str) -> int:
+    """Apply pre_test_source_edits to files on disk. Returns count of edits applied."""
+    applied = 0
+    for edit in edits:
+        full_path = os.path.join(workdir, edit["path"])
+        try:
+            content = Path(full_path).read_text()
+        except FileNotFoundError:
+            emit(f"  [PREP] SKIP: {edit['path']} not found")
+            continue
+        if edit["old"] not in content:
+            emit(f"  [PREP] SKIP: old text not found in {edit['path']}")
+            continue
+        content = content.replace(edit["old"], edit["new"], 1)
+        Path(full_path).write_text(content)
+        emit(f"  [PREP] Applied edit to {edit['path']}")
+        applied += 1
+    return applied
+
+
 def _is_llm_timeout_error(exc: Exception) -> bool:
     if isinstance(exc, requests.exceptions.Timeout):
         return True
@@ -1015,22 +1035,46 @@ def main():
 
     # Build system prompt — inject cookbook if source/symbol provided
     system_prompt = _CONFIG["prompt"]["system"].strip()
+    episode = None
     if args.source and args.symbol:
-        from agentic_tdd_runner.cookbook import build_system_prompt
-        system_prompt = build_system_prompt(
-            base_prompt=system_prompt,
-            issue_text=issue_text,
+        from agentic_tdd_runner.cookbook import build_episode_context
+        episode = build_episode_context(
             source_path=args.source,
             symbol=args.symbol,
             project_root=WORKDIR,
         )
-        emit(f"[COOKBOOK] Injected mock cookbook for {args.symbol} in {args.source}")
-        log("cookbook", {"source": args.source, "symbol": args.symbol, "prompt_len": len(system_prompt)})
+        system_prompt = f"{system_prompt}\n\n{episode['cookbook_text']}"
+        emit(f"[EPISODE] Built episode context for {args.symbol} in {args.source}")
+        log("episode", {
+            "source": args.source,
+            "symbol": args.symbol,
+            "test_file": episode["test_file"],
+            "mechanical_edits": len(episode.get("pre_test_source_edits", [])),
+        })
 
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": f"Fix this bug:\n\n{issue_text}"},
-    ]
+        # Apply mechanical edits (export, seams) before the agent loop
+        edits = episode.get("pre_test_source_edits", [])
+        if edits:
+            n = apply_mechanical_edits(edits, WORKDIR)
+            emit(f"[PREP] Applied {n}/{len(edits)} mechanical source edits")
+            log("mechanical_edits", {"applied": n, "total": len(edits)})
+
+    if episode:
+        phase1_msg = (
+            f"Read {episode['source_file']} and understand the bug below. "
+            f"Focus on the function `{episode['target_symbol']}`. "
+            f"Then create a failing test in {episode['test_file']} that reproduces it.\n\n"
+            f"Bug:\n{issue_text}"
+        )
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": phase1_msg},
+        ]
+    else:
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": f"Fix this bug:\n\n{issue_text}"},
+        ]
 
     emit(f"{'='*60}")
     max_steps = _CONFIG["agent"]["max_steps"]
@@ -1247,6 +1291,22 @@ def main():
 
                 if _is_test_pass(name, args):
                     test_passed = True
+
+            # --- PHASE NUDGE: test file created → nudge to run + fix ---
+            if episode:
+                created_test = any(
+                    tc["function"]["name"] == "create_file"
+                    and _is_test_file_path(json.loads(tc["function"]["arguments"]).get("path", ""))
+                    for tc in msg.get("tool_calls", [])
+                )
+                if created_test:
+                    nudge = (
+                        f"Good. Now run the test to confirm it fails, then fix "
+                        f"{episode['source_file']} to make it pass. Say DONE when green."
+                    )
+                    messages.append({"role": "user", "content": nudge})
+                    emit("  [PHASE] Test created → injected run+fix nudge")
+                    log("phase_nudge", {"phase": "fix", "test_file": episode["test_file"]})
 
             # --- AUTO-TRIGGER: test passed → verify → quality → done ---
             if test_passed:

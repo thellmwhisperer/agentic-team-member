@@ -476,3 +476,60 @@ class TestBuildSystemPrompt:
         )
         assert prompt == base
         assert "Mock Cookbook" not in prompt
+
+
+class TestBuildEpisodeContext:
+    """build_episode_context returns structured data for phased runner."""
+
+    def test_returns_mocks_text_and_paths(self, tmp_path):
+        from agentic_tdd_runner.cookbook import build_episode_context
+
+        _write_file(tmp_path, "src/handler.ts", """\
+            import { getLogger } from '../logger';
+
+            const logger = getLogger();
+
+            function handle(name: string): void {
+              logger.info(name);
+            }
+        """)
+        ctx = build_episode_context("src/handler.ts", "handle", str(tmp_path))
+        assert ctx["source_file"] == "src/handler.ts"
+        assert ctx["target_symbol"] == "handle"
+        assert "test" in ctx["test_file"]
+        assert "handle" in ctx["test_file"]
+        assert "../logger" in ctx["mocks_text"]
+        assert "mock.module(" in ctx["mocks_text"]
+
+    def test_includes_pre_test_source_edits_for_unexported(self, tmp_path):
+        from agentic_tdd_runner.cookbook import build_episode_context
+
+        _write_file(tmp_path, "src/worker.ts", """\
+            import { getLogger } from '../logger';
+
+            const logger = getLogger();
+
+            function process(item: string): void {
+              logger.info(item);
+            }
+        """)
+        ctx = build_episode_context("src/worker.ts", "process", str(tmp_path))
+        edits = ctx["pre_test_source_edits"]
+        assert len(edits) >= 1
+        assert any("export" in e["new"] for e in edits)
+
+    def test_includes_assertion_hint(self, tmp_path):
+        from agentic_tdd_runner.cookbook import build_episode_context
+
+        _write_file(tmp_path, "src/notifier.ts", """\
+            import { getLogger } from '../logger';
+
+            const logger = getLogger();
+
+            export function notify(msg: string): void {
+              logger.info(msg);
+            }
+        """)
+        ctx = build_episode_context("src/notifier.ts", "notify", str(tmp_path))
+        assert "assertion_hint" in ctx
+        assert ctx["assertion_hint"]  # non-empty
