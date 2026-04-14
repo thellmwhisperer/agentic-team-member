@@ -259,11 +259,12 @@ def execute_tool(name: str, args: dict) -> str:
 
 
 def _reactive_typecheck_feedback(path: str) -> str:
-    suffix = Path(path).suffix.lower()
-    if suffix not in {".ts", ".tsx", ".js", ".jsx"}:
+    from agentic_tdd_runner.languages import get_language
+    lang = get_language(path)
+    if not lang:
         return ""
 
-    checks = detect_quality_tools("typescript")
+    checks = detect_quality_tools(lang.name)
     typecheck = next((check for check in checks if check.get("name") == "typecheck"), None)
     if not typecheck:
         return ""
@@ -287,11 +288,11 @@ def _reactive_typecheck_feedback(path: str) -> str:
         return ""
 
     raw = (result.stdout or "") + (result.stderr or "")
-    error_lines = [ln for ln in raw.splitlines() if ln.strip() and "error" in ln.lower()]
-    n_errors = len(error_lines) if error_lines else 1
-    sample = "\n".join(f"  {ln.strip()}" for ln in error_lines[:3])
+    lines = [ln for ln in raw.splitlines() if ln.strip()]
+    n_errors = sum(1 for ln in lines if "error" in ln.lower())
+    sample = "\n".join(f"  {ln}" for ln in lines[:30])
     if not sample:
-        sample = f"  {raw[:200]}"
+        sample = f"  {raw[:500]}"
     return f"\n\n[Reactive typecheck] {n_errors} errors:\n{sample}"
 
 
@@ -654,11 +655,11 @@ def run_quality_checks(test_file: str) -> tuple[bool, str]:
             )
             if result.returncode != 0:
                 raw = (result.stdout + result.stderr).strip()
-                error_lines = [ln for ln in raw.splitlines() if ln.strip() and "error" in ln.lower()]
-                n_errors = len(error_lines) if error_lines else 1
-                sample = "\n".join(f"  {ln.strip()}" for ln in error_lines[:3])
+                lines = [ln for ln in raw.splitlines() if ln.strip()]
+                n_errors = sum(1 for ln in lines if "error" in ln.lower())
+                sample = "\n".join(f"  {ln}" for ln in lines[:30])
                 if not sample:
-                    sample = f"  {raw[:200]}"
+                    sample = f"  {raw[:500]}"
                 failures.append(f"[{check['name']}] {n_errors} errors:\n{sample}")
         except subprocess.TimeoutExpired:
             failures.append(f"[{check['name']}] TIMEOUT: command timed out")

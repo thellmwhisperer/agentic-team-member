@@ -519,6 +519,69 @@ class TestRunQualityChecks:
         assert ok is False
         assert "lint" in msg
 
+    def test_check_failure_shows_multiline_error_context(self, tmp_path, monkeypatch):
+        """tsc errors span multiple lines; quality gate must show continuation lines
+        so the model sees type names like SubUserstate without exploring node_modules."""
+        self._setup_repo(tmp_path, monkeypatch)
+        (tmp_path / "src" / "file.test.ts").write_text("clean")
+
+        tsc_output = (
+            "src/file.ts(123,10): error TS2769: No overload matches this call.\n"
+            "  Overload 1 of 2, '(event: \"resub\", listener: (..., "
+            "userstate: SubUserstate, methods: SubMethods) => void): Client'\n"
+            "  gave the following error.\n"
+            "    Argument of type '(a: string) => void' is not assignable.\n"
+        )
+        # Write a script that emits the tsc output and exits 1
+        script = tmp_path / "fake-tsc.sh"
+        script.write_text(f"#!/bin/sh\ncat <<'TSCEOF'\n{tsc_output}TSCEOF\nexit 1\n")
+        script.chmod(0o755)
+
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "quality": {
+                "enabled": True, "max_fix_rounds": 3,
+                "typescript": {
+                    "checks": [{"name": "typecheck", "command": str(script)}],
+                    "forbidden": [],
+                },
+            },
+            "timeouts": {"tool_execution": 10},
+            "prompt": {"quality_failed": "FAIL: {details}"},
+        })
+        ok, msg = run_quality_checks("src/file.test.ts")
+        assert ok is False
+        assert "SubUserstate" in msg, f"Type name from continuation line missing: {msg}"
+        assert "SubMethods" in msg
+
+    def test_check_failure_shows_all_errors_not_just_three(self, tmp_path, monkeypatch):
+        """Quality gate must not truncate to 3 error lines when there are more."""
+        self._setup_repo(tmp_path, monkeypatch)
+        (tmp_path / "src" / "file.test.ts").write_text("clean")
+
+        errors = "\n".join(
+            f"src/file.ts({i},1): error TS{2000+i}: problem {i}"
+            for i in range(1, 8)
+        )
+        script = tmp_path / "fake-tsc.sh"
+        script.write_text(f"#!/bin/sh\ncat <<'TSCEOF'\n{errors}\nTSCEOF\nexit 1\n")
+        script.chmod(0o755)
+
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "quality": {
+                "enabled": True, "max_fix_rounds": 3,
+                "typescript": {
+                    "checks": [{"name": "typecheck", "command": str(script)}],
+                    "forbidden": [],
+                },
+            },
+            "timeouts": {"tool_execution": 10},
+            "prompt": {"quality_failed": "FAIL: {details}"},
+        })
+        ok, msg = run_quality_checks("src/file.test.ts")
+        assert ok is False
+        for i in range(1, 8):
+            assert f"TS{2000+i}" in msg, f"error TS{2000+i} was truncated: {msg}"
+
     def test_runs_fix_before_check(self, tmp_path, monkeypatch):
         self._setup_repo(tmp_path, monkeypatch)
         bad_file = tmp_path / "src" / "file.test.ts"
@@ -1018,6 +1081,83 @@ class TestExecuteToolReactiveChecks:
         assert "[Reactive typecheck]" in result
         assert "TS123" in result
 
+    def test_reactive_typecheck_shows_multiline_error_context(self, tmp_path, monkeypatch):
+        """tsc errors are multiline — the type name often appears on a continuation line.
+        The reactive feedback must include those lines, not just lines containing 'error'."""
+        src = tmp_path / "src"
+        src.mkdir()
+        target = src / "file.ts"
+        target.write_text("const value = 1;\n")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr(
+            "agentic_tdd_runner.agent.detect_quality_tools",
+            lambda lang_name: [{"name": "typecheck", "command": "fake-tsc --noEmit"}]
+            if lang_name == "typescript" else [],
+        )
+
+        # Real tsc output: error line + continuation with the expected type
+        tsc_output = (
+            "src/file.ts(123,10): error TS2769: No overload matches this call.\n"
+            "  Overload 1 of 2, '(event: \"resub\", listener: (channel: string, "
+            "username: string, months: number, message: string, "
+            "userstate: SubUserstate, methods: SubMethods) => void): Client'\n"
+            "  gave the following error.\n"
+            "    Argument of type '(channel: string, username: string) => void' "
+            "is not assignable to parameter of type '(channel: string, username: string, "
+            "months: number, message: string, userstate: SubUserstate, methods: SubMethods) => void'.\n"
+        )
+
+        def fake_run(command, **kwargs):
+            return SimpleNamespace(returncode=1, stdout=tsc_output, stderr="")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.subprocess.run", fake_run)
+
+        result = execute_tool("str_replace_editor", {
+            "path": "src/file.ts",
+            "old_str": "const value = 1;\n",
+            "new_str": "const value = 'bad';\n",
+        })
+
+        # The model MUST see 'SubUserstate' — that's the type it needs to import
+        assert "SubUserstate" in result
+        # And 'SubMethods' — the full overload signature
+        assert "SubMethods" in result
+
+    def test_reactive_typecheck_shows_all_errors_not_just_three(self, tmp_path, monkeypatch):
+        """When tsc reports >3 errors, all should be visible, not truncated to 3."""
+        src = tmp_path / "src"
+        src.mkdir()
+        target = src / "file.ts"
+        target.write_text("const value = 1;\n")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr(
+            "agentic_tdd_runner.agent.detect_quality_tools",
+            lambda lang_name: [{"name": "typecheck", "command": "fake-tsc --noEmit"}]
+            if lang_name == "typescript" else [],
+        )
+
+        tsc_output = "\n".join(
+            f"src/file.ts({i},1): error TS{1000+i}: error number {i}"
+            for i in range(1, 8)  # 7 errors
+        ) + "\n"
+
+        def fake_run(command, **kwargs):
+            return SimpleNamespace(returncode=1, stdout=tsc_output, stderr="")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.subprocess.run", fake_run)
+
+        result = execute_tool("str_replace_editor", {
+            "path": "src/file.ts",
+            "old_str": "const value = 1;\n",
+            "new_str": "const value = 'bad';\n",
+        })
+
+        # All 7 errors must be present, not just the first 3
+        for i in range(1, 8):
+            assert f"TS{1000+i}" in result, f"error TS{1000+i} was truncated from output"
+
     def test_str_replace_editor_keeps_success_silent_when_typecheck_passes(self, tmp_path, monkeypatch):
         src = tmp_path / "src"
         src.mkdir()
@@ -1043,6 +1183,41 @@ class TestExecuteToolReactiveChecks:
         })
 
         assert result == "OK: replaced in src/file.ts"
+
+    def test_reactive_typecheck_fires_for_python_files(self, tmp_path, monkeypatch):
+        """Editing a .py file should trigger reactive typecheck if mypy/pyright is detected."""
+        src = tmp_path / "src"
+        src.mkdir()
+        target = src / "util.py"
+        target.write_text("def greet(name: str) -> str:\n    return name\n")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr(
+            "agentic_tdd_runner.agent.detect_quality_tools",
+            lambda lang_name: [{"name": "typecheck", "command": "fake-mypy"}]
+            if lang_name == "python" else [],
+        )
+
+        mypy_output = (
+            "src/util.py:2: error: Incompatible return value type "
+            "(got \"int\", expected \"str\")  [return-value]\n"
+            "Found 1 error in 1 file (checked 1 source file)\n"
+        )
+
+        def fake_run(command, **kwargs):
+            return SimpleNamespace(returncode=1, stdout=mypy_output, stderr="")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.subprocess.run", fake_run)
+
+        result = execute_tool("str_replace_editor", {
+            "path": "src/util.py",
+            "old_str": "    return name\n",
+            "new_str": "    return 42\n",
+        })
+
+        assert "[Reactive typecheck]" in result
+        assert "Incompatible return value type" in result
+        assert "expected \"str\"" in result
 
     def test_create_file_appends_reactive_test_failure(self, tmp_path, monkeypatch):
         src = tmp_path / "src"
