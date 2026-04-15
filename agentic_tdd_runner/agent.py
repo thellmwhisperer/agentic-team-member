@@ -182,7 +182,8 @@ def execute_tool(name: str, args: dict) -> str:
             new_content = content.replace(old_str, args["new_str"], 1)
             with open(full_path, "w") as f:
                 f.write(new_content)
-            return f"OK: replaced in {args['path']}"
+            result = f"OK: replaced in {args['path']}"
+            return result + _reactive_typecheck_feedback(args["path"])
 
         elif name == "create_file":
             full_path = _resolve_repo_path(args["path"])
@@ -191,13 +192,199 @@ def execute_tool(name: str, args: dict) -> str:
             os.makedirs(os.path.dirname(full_path), exist_ok=True)
             with open(full_path, "w") as f:
                 f.write(args["content"])
-            return f"OK: created {args['path']}"
+            result = f"OK: created {args['path']}"
+            return result + _reactive_typecheck_feedback(args["path"]) + _reactive_test_feedback(args["path"])
 
         else:
             return f"ERROR: unknown tool {name}"
 
     except Exception as e:
         return f"ERROR: {type(e).__name__}: {e}"
+
+
+def _reactive_typecheck_feedback(path: str) -> str:
+    """Run typecheck after edit/create and return inline error summary."""
+    from agentic_tdd_runner.languages import get_language
+    lang = get_language(path)
+    if not lang:
+        return ""
+
+    checks = detect_quality_tools(lang.name)
+    typecheck = next((check for check in checks if check.get("name") == "typecheck"), None)
+    if not typecheck:
+        return ""
+    timeout_s = (_CONFIG or {}).get("timeouts", {}).get("tool_execution", 10)
+
+    try:
+        result = subprocess.run(
+            typecheck["command"],
+            shell=True,
+            cwd=WORKDIR,
+            capture_output=True,
+            text=True,
+            timeout=timeout_s,
+        )
+    except subprocess.TimeoutExpired:
+        return "\n\n[Reactive typecheck] TIMEOUT: command timed out"
+    except (OSError, UnicodeDecodeError) as e:
+        return f"\n\n[Reactive typecheck] ERROR: {e}"
+
+    if result.returncode == 0:
+        return ""
+
+    raw = (result.stdout or "") + (result.stderr or "")
+    lines = [ln for ln in raw.splitlines() if ln.strip()]
+    n_errors = sum(1 for ln in lines if "error" in ln.lower())
+    sample = "\n".join(f"  {ln}" for ln in lines[:30])
+    if not sample:
+        sample = f"  {raw[:500]}"
+    return f"\n\n[Reactive typecheck] {n_errors} errors:\n{sample}"
+
+
+def _reactive_test_feedback(path: str) -> str:
+    """Run tests after create_file on test files and return inline failure summary."""
+    if not _is_test_file_path(path):
+        return ""
+
+    import shlex
+    run_cmd = _test_runner_command_for_file(path)
+    timeout_s = (_CONFIG or {}).get("timeouts", {}).get("test_run", 30)
+    run_argv = shlex.split(run_cmd) + [path]
+
+    try:
+        result = subprocess.run(
+            run_argv,
+            cwd=WORKDIR,
+            capture_output=True,
+            text=True,
+            timeout=timeout_s,
+        )
+    except subprocess.TimeoutExpired:
+        return "\n\n[Reactive test] TIMEOUT: command timed out"
+    except (OSError, UnicodeDecodeError) as e:
+        return f"\n\n[Reactive test] ERROR: {e}"
+
+    if result.returncode == 0:
+        return ""
+
+    raw = (result.stdout or "") + (result.stderr or "")
+    sample_lines = [ln for ln in raw.splitlines() if ln.strip()][:5]
+    sample = "\n".join(f"  {ln}" for ln in sample_lines) if sample_lines else f"  {raw[:200]}"
+    return f"\n\n[Reactive test] failed:\n{sample}"
+
+
+def _is_test_file_path(path: str) -> bool:
+    from pathlib import PurePosixPath
+    import fnmatch
+    patterns = (_CONFIG or {}).get("runner", {}).get("test_file_patterns", [])
+    name = PurePosixPath(path).name
+    if not patterns:
+        return "test" in name.lower()
+    return any(fnmatch.fnmatch(name, pattern) for pattern in patterns)
+
+
+def _test_runner_command_for_file(path: str) -> str:
+    from agentic_tdd_runner.languages import get_language
+    lang = get_language(path)
+    if lang and lang.runner == "pytest":
+        return "python3 -m pytest"
+    return (_CONFIG or {}).get("runner", {}).get("command", "bun test")
+
+
+def _detect_package_manager(pkg: dict | None = None) -> str:
+    """Detect the package manager. Checks packageManager field first, then lockfiles."""
+    if pkg:
+        pm_field = pkg.get("packageManager", "")
+        if pm_field:
+            name = pm_field.split("@")[0]
+            if name in ("pnpm", "yarn", "bun", "npm"):
+                return name
+    lockfiles = {
+        "pnpm-lock.yaml": "pnpm",
+        "yarn.lock": "yarn",
+        "bun.lock": "bun",
+    }
+    for filename, pm in lockfiles.items():
+        if os.path.isfile(os.path.join(WORKDIR, filename)):
+            return pm
+    return "npm"
+
+
+def detect_quality_tools(lang_name: str) -> list[dict]:
+    """Detect quality tools from the target project's config files.
+
+    Reads package.json (TypeScript) or pyproject.toml (Python) to discover
+    which lint/format/typecheck tools are actually installed.
+    """
+    checks = []
+
+    if lang_name == "typescript":
+        pkg_path = os.path.join(WORKDIR, "package.json")
+        if os.path.isfile(pkg_path):
+            import json as _json
+            try:
+                with open(pkg_path) as f:
+                    pkg = _json.load(f)
+            except (OSError, ValueError):
+                return checks
+
+            scripts = pkg.get("scripts", {})
+            dev_deps = pkg.get("devDependencies", {})
+            deps = pkg.get("dependencies", {})
+            all_deps = {**deps, **dev_deps}
+
+            if "typecheck" in scripts:
+                pm = _detect_package_manager(pkg)
+                checks.append({"name": "typecheck", "command": f"{pm} run typecheck"})
+            elif "typescript" in all_deps:
+                checks.append({"name": "typecheck", "command": "npx tsc --noEmit"})
+
+            if any(k.startswith("@biomejs/biome") for k in all_deps):
+                checks.append({
+                    "name": "lint",
+                    "command": "npx biome check {changed_files}",
+                    "fix": "npx biome check {changed_files} --fix",
+                })
+            elif "eslint" in all_deps:
+                checks.append({
+                    "name": "lint",
+                    "command": "npx eslint {changed_files}",
+                    "fix": "npx eslint {changed_files} --fix",
+                })
+
+            has_biome = any(k.startswith("@biomejs/biome") for k in all_deps)
+            if not has_biome and "prettier" in all_deps:
+                checks.append({
+                    "name": "format",
+                    "command": "npx prettier --check {changed_files}",
+                    "fix": "npx prettier --write {changed_files}",
+                })
+
+    elif lang_name == "python":
+        pyproject_path = os.path.join(WORKDIR, "pyproject.toml")
+        has_ruff = False
+        if os.path.isfile(pyproject_path):
+            try:
+                with open(pyproject_path, "rb") as f:
+                    import tomllib
+                    pyproject = tomllib.load(f)
+                has_ruff = "ruff" in pyproject.get("tool", {})
+            except (OSError, ValueError):
+                pass
+
+        if has_ruff:
+            checks.append({
+                "name": "lint",
+                "command": "python3 -m ruff check {changed_files}",
+                "fix": "python3 -m ruff check {changed_files} --fix",
+            })
+            checks.append({
+                "name": "format",
+                "command": "python3 -m ruff format --check {changed_files}",
+                "fix": "python3 -m ruff format {changed_files}",
+            })
+
+    return checks
 
 
 def truncate(text: str, max_chars: int = 0) -> str:
