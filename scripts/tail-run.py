@@ -17,6 +17,12 @@ print(f"Following: {latest}\n")
 SEP = "─" * 80
 
 
+def fmt_metric(value, spec, suffix=""):
+    if isinstance(value, (int, float)):
+        return f"{value:{spec}}{suffix}"
+    return f"?{suffix}"
+
+
 def fmt_tool(name, args, elapsed, result_chars, result, applied=None):
     status = ""
     if applied is True:
@@ -74,7 +80,7 @@ for line in proc.stdout:
             finish = d.get("finish_reason", "")
             content = d.get("content", "")
             thinking = d.get("thinking", "")
-            timings = d.get("timings", {})
+            timings = d.get("timings") or {}
             prompt_ms = timings.get("prompt_ms", 0)
             pred_ms = timings.get("predicted_ms", 0)
             tok_s = timings.get("predicted_per_second", 0)
@@ -83,9 +89,15 @@ for line in proc.stdout:
             c_tok = usage.get("completion_tokens", "?")
             tc = d.get("tool_calls", [])
             tc_names = ", ".join(t.get("name", "?") for t in tc) if tc else ""
+            tok_s_str = fmt_metric(tok_s, ".1f", " tok/s")
+            prompt_ms_str = fmt_metric(prompt_ms, ".0f", "ms")
+            pred_ms_str = fmt_metric(pred_ms, ".0f", "ms")
 
             print(f"\n{SEP}")
-            print(f"  Step [{s}]  finish={finish}  {p_tok}→{c_tok} tok  {tok_s:.1f} tok/s  prompt={prompt_ms:.0f}ms  pred={pred_ms:.0f}ms")
+            print(
+                f"  Step [{s}]  finish={finish}  {p_tok}→{c_tok} tok  "
+                f"{tok_s_str}  prompt={prompt_ms_str}  pred={pred_ms_str}"
+            )
             if tc_names:
                 print(f"  tools: {tc_names}")
             if thinking:

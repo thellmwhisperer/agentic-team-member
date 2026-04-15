@@ -33,6 +33,7 @@ _CONFIG = None  # populated by main()
 WORKDIR = os.environ.get("AGENT_WORKDIR", os.getcwd())
 LOG_DIR = os.environ.get("AGENT_LOG_DIR", os.getcwd())
 _last_run_exit_code: int | None = None
+_file_read_cache: dict[str, float] = {}  # {resolved_path: mtime} for read dedup
 
 # --- Logging ---
 _log_file = None
@@ -91,6 +92,7 @@ def _is_llm_timeout_error(exc: Exception) -> bool:
 
 
 def _compact_messages_after_quality_failure(messages: list[dict], quality_msg: str, test_file: str) -> list[dict]:
+    _file_read_cache.clear()
     compacted: list[dict] = []
     if messages and messages[0].get("role") == "system":
         compacted.append(messages[0])
@@ -107,6 +109,74 @@ def _compact_messages_after_quality_failure(messages: list[dict], quality_msg: s
         ),
     })
     return compacted
+
+
+def _quality_retry_feedback_message(quality_msg: str, test_file: str) -> dict:
+    return {
+        "role": "user",
+        "content": (
+            f"Verification already passed for {test_file}. Preserve the current fix behavior and "
+            f"only address the residual quality issues below.\n\n{quality_msg}"
+        ),
+    }
+
+
+def _llm_context_window_tokens() -> int:
+    llm_cfg = _CONFIG.get("llm", {})
+    raw_value = (
+        llm_cfg.get("context_window_tokens")
+        or llm_cfg.get("context_window")
+        or llm_cfg.get("num_ctx")
+        or 32768
+    )
+    try:
+        return int(raw_value)
+    except (TypeError, ValueError):
+        return 32768
+
+
+def _coerce_int(value) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        value = value.strip()
+        if value.isdigit():
+            return int(value)
+    return None
+
+
+def _should_compact_after_quality_failure(last_usage: dict | None) -> tuple[bool, dict]:
+    quality_cfg = _CONFIG.get("quality", {})
+    context_window = _llm_context_window_tokens()
+    threshold_ratio = float(quality_cfg.get("compact_threshold_ratio", 0.85))
+    min_headroom_tokens = int(quality_cfg.get("compact_min_headroom_tokens", 2048))
+    prompt_tokens = _coerce_int((last_usage or {}).get("prompt_tokens"))
+
+    info = {
+        "context_window_tokens": context_window,
+        "threshold_ratio": threshold_ratio,
+        "min_headroom_tokens": min_headroom_tokens,
+        "prompt_tokens": prompt_tokens,
+    }
+
+    if prompt_tokens is None:
+        info["reason"] = "missing_prompt_tokens"
+        return False, info
+
+    headroom_tokens = context_window - prompt_tokens
+    info["headroom_tokens"] = headroom_tokens
+    info["prompt_ratio"] = round(prompt_tokens / context_window, 4) if context_window else None
+
+    should_compact = (
+        prompt_tokens >= int(context_window * threshold_ratio)
+        or headroom_tokens <= min_headroom_tokens
+    )
+    info["reason"] = "near_context_limit" if should_compact else "enough_headroom"
+    return should_compact, info
 
 
 def _tool_applied_status(name: str, result: str) -> bool | None:
@@ -208,8 +278,13 @@ def execute_tool(name: str, args: dict) -> str:
             if os.path.isdir(full_path):
                 entries = os.listdir(full_path)
                 return "\n".join(sorted(entries))
+            mtime = os.path.getmtime(full_path)
+            if full_path in _file_read_cache and _file_read_cache[full_path] == mtime:
+                return "File unchanged since last read. The content from the earlier read_file result in this conversation is still current — refer to that instead of re-reading."
             with open(full_path, "r") as f:
-                return f.read()
+                content = f.read()
+            _file_read_cache[full_path] = mtime
+            return content
 
         elif name == "run_command":
             global _last_run_exit_code
@@ -238,6 +313,7 @@ def execute_tool(name: str, args: dict) -> str:
             new_content = content.replace(old_str, args["new_str"], 1)
             with open(full_path, "w") as f:
                 f.write(new_content)
+            _file_read_cache.pop(full_path, None)
             result = f"OK: replaced in {args['path']}"
             return result + _reactive_typecheck_feedback(args["path"])
 
@@ -362,6 +438,8 @@ def chat(messages: list, include_tools: bool = True) -> dict:
         "top_k": llm.get("top_k", 20),
         "cache_prompt": True,
     }
+    if "thinking_budget_tokens" in llm:
+        payload["thinking_budget_tokens"] = llm["thinking_budget_tokens"]
     if include_tools:
         payload["tools"] = _CONFIG["tools"]
     resp = requests.post(llm["url"], json=payload, timeout=_CONFIG["timeouts"]["llm_request"])
@@ -1093,8 +1171,10 @@ def main():
     # --- Completion pipeline: verify → quality → done ---
     # Extracted so both DONE and auto-trigger can use it.
     # Returns: "done" | "quality_fail" | "verify_fail" | "give_up" | "no_test"
+    last_usage: dict | None = None
+
     def try_complete(step):
-        nonlocal done_rejected, quality_rejected
+        nonlocal done_rejected, quality_rejected, last_usage
         test_file = find_test_file()
         if not test_file:
             emit("  [WARN] No test file found — cannot verify")
@@ -1123,14 +1203,25 @@ def main():
             if not quality_ok:
                 quality_rejected += 1
                 emit(f"  [QUALITY] Round {quality_rejected} — feeding back to model")
-                before_count = len(messages)
-                messages[:] = _compact_messages_after_quality_failure(messages, quality_msg, test_file)
-                log("context_compacted", {
-                    "reason": "quality_fail",
-                    "before_messages": before_count,
-                    "after_messages": len(messages),
-                    "test_file": test_file,
-                })
+                should_compact, compact_info = _should_compact_after_quality_failure(last_usage)
+                if should_compact:
+                    before_count = len(messages)
+                    messages[:] = _compact_messages_after_quality_failure(messages, quality_msg, test_file)
+                    log("context_compacted", {
+                        "reason": "quality_fail",
+                        "before_messages": before_count,
+                        "after_messages": len(messages),
+                        "test_file": test_file,
+                        **compact_info,
+                    })
+                else:
+                    messages.append(_quality_retry_feedback_message(quality_msg, test_file))
+                    log("context_preserved", {
+                        "reason": "quality_fail",
+                        "message_count": len(messages),
+                        "test_file": test_file,
+                        **compact_info,
+                    })
                 return "quality_fail"
 
         if _CONFIG.get("quality", {}).get("enabled", False):
@@ -1197,6 +1288,7 @@ def main():
         msg = choice["message"]
         finish = choice["finish_reason"]
         usage = response.get("usage", {})
+        last_usage = usage
         timings = response.get("timings", {})
         thinking = msg.get("reasoning_content", "")
 

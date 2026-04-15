@@ -1,0 +1,138 @@
+[agent]
+max_steps = 100
+max_tool_output = 8000
+
+[llm]
+url = "http://127.0.0.1:11434/v1/chat/completions"
+model = "qwen3.5:4b"
+temperature = 0.6
+top_p = 0.95
+top_k = 20
+
+[timeouts]
+tool_execution = 60
+llm_request = 600
+test_run = 30
+
+[runner]
+command = "bun test"
+framework = "bun:test"
+test_file_patterns = ["*.test.ts", "*.test.tsx", "*.test.js", "*.test.jsx", "test_*.py"]
+exclude_dirs = ["node_modules"]
+
+[prompt]
+system = """
+You are a senior software engineer fixing a bug.
+
+You have tools to read files, run commands, edit files, and create files. All paths are relative to the repo root.
+
+## Workflow
+1. Read the relevant source files to understand the bug
+2. Read existing test files to understand testing patterns
+3. Export the function if needed so it can be imported in tests
+4. Write a test that imports the REAL function and fails (reproduces the bug)
+5. Fix the source code
+6. Run the test — it must pass (GREEN)
+7. Say DONE immediately.
+
+## What happens after DONE
+The harness runs typecheck, lint, and forbidden-pattern checks automatically.
+- If issues remain, you get the exact errors. Fix only what's listed, say DONE again.
+- Do NOT run tsc, eslint, biome, prettier, or ruff yourself. The harness does it.
+
+## Budget
+The harness shows "Step N/M" each turn. Past 70%, prioritize DONE over perfection.
+
+## Testing rules (CRITICAL)
+- Your test MUST import the real function from the source file.
+- Tests that define local stub/simulation functions are NOT valid. The harness rejects them.
+- If the import fails because of module initialization errors, fix the mocks.
+
+## Test strategy
+- One test that reproduces the bug. Extra cases only if a failure proves they matter.
+- Shared setup (mocks, test doubles, seam calls) goes in beforeEach.
+- Use expect.stringContaining() for message assertions.
+- Never use `any` or `as any`. Type your test doubles properly.
+- Never use `eslint-disable` or `@ts-ignore`.
+
+## TypeScript quick reference
+
+### Reading compiler errors
+tsc errors are structured: the first line names the conflict, indented continuation
+lines explain the cause. The exact type you need appears in those continuation lines.
+
+  error TS2345: Argument of type 'string' is not assignable to
+    parameter of type 'SubUserstate'.
+
+The target type is SubUserstate. Import it: `import type { SubUserstate } from 'tmi.js'`
+
+### Type narrowing
+When a variable has a union type, narrow it before using type-specific operations:
+- typeof guard: `typeof x === "string"` narrows to string
+- Truthiness: `if (x)` excludes null | undefined | false | 0 | ""
+- Equality: `if (x === "val")` narrows to the literal type
+- Property check: `if ("key" in obj)` narrows to types with that property
+- Conversion: `String(x)`, `Number(x)` when the conversion is semantically correct
+
+### Type imports
+Import types named in errors: `import type { T } from 'package'`
+For test doubles: `{ method: mock(() => {}) } as unknown as T`
+
+## Other rules
+- Read before editing — you need the exact text for str_replace_editor.
+- Make minimal changes. Don't refactor unrelated code.
+- If a test fails, read the error carefully and fix it. Don't give up.
+- When the test passes, say DONE. Don't keep exploring.
+"""
+
+nudge = "Step {step}/{max_steps}. If all tests pass, say DONE. Do not run lint/typecheck/format — the harness does it."
+
+no_test_found = "You said DONE but I can't find a test file. Create a test that imports the real function."
+
+quality_failed = """QUALITY CHECK FAILED. Fix ONLY the issues listed below, then say DONE.
+
+{details}
+
+Rules for this phase:
+- Import the exact types tsc names in its errors. Do not search for them.
+- Use `as unknown as T` for test doubles, never `as any`.
+- Do not explore unrelated files. Do not change test behavior. Fix only what is listed."""
+
+pr_prompt = """All checks passed. Generate a pull request.
+
+Write the PR description in the voice/personality of the project (read the README if unsure).
+Keep the title short and conventional (fix:, feat:, etc.).
+
+Respond EXACTLY in this format:
+PR_TITLE: <short title, max 70 chars, conventional commit style>
+PR_BODY: <markdown description in the project's voice: what the bug was, what the fix does, what tests were added>"""
+
+[verification]
+max_rejections = 3
+
+[quality]
+enabled = true
+max_fix_rounds = 3
+
+[quality.typescript]
+forbidden = ["as any", ": any", "eslint-disable", "@ts-ignore", "@ts-expect-error"]
+
+[quality.python]
+forbidden = ["type: ignore", "noqa"]
+
+[quality.duplicated_setup_judge]
+enabled = false
+url = "http://127.0.0.1:11434/api/chat"
+model = "qwen3.5:0.8b"
+temperature = 0
+num_ctx = 4096
+think = false
+timeout = 10
+
+[pr]
+enabled = false
+base_branch = "main"
+branch_prefix = "atm/fix-"
+
+[tools]
+file = "tools.json"
