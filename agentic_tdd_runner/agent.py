@@ -105,11 +105,17 @@ def _quality_retry_feedback_message(quality_msg: str, test_file: str) -> dict:
 
 
 def _compact_messages_after_quality_failure(messages: list[dict], quality_msg: str, test_file: str) -> list[dict]:
+    # The read-file stub says "refer to the earlier read_file result"; after
+    # compaction that earlier turn is gone, so force the next read to return
+    # full file contents instead of a dedup hint.
     _file_read_cache.clear()
     compacted: list[dict] = []
     if messages and messages[0].get("role") == "system":
         compacted.append(messages[0])
 
+    # Keep only stable anchors after green: the system prompt, the original
+    # issue, and targeted quality feedback. The current fix is authoritative on
+    # disk, so transient assistant/tool chatter can be re-derived as needed.
     issue_msg = next((msg for msg in messages[1:] if msg.get("role") == "user"), None)
     if issue_msg:
         compacted.append(issue_msg)
@@ -124,6 +130,8 @@ def _llm_context_window_tokens() -> int:
         llm_cfg.get("context_window_tokens")
         or llm_cfg.get("context_window")
         or llm_cfg.get("num_ctx")
+        # Qwen 27B's native 32k window is our default local baseline; other
+        # models should override this explicitly in config.
         or 32768
     )
     try:
@@ -155,6 +163,8 @@ def _should_compact_after_quality_failure(last_usage: dict | None) -> tuple[bool
         threshold_ratio = 0.85
     min_headroom_tokens = _coerce_int(quality_cfg.get("compact_min_headroom_tokens"))
     if min_headroom_tokens is None:
+        # 2k keeps compaction conservative by default; bump per-model in config
+        # if longer tool calls or reasoning traces are getting truncated.
         min_headroom_tokens = 2048
     prompt_tokens = _coerce_int((last_usage or {}).get("prompt_tokens"))
 

@@ -1053,6 +1053,28 @@ class TestFileReadDedup:
 
         assert result == "const x = 2;\n"
 
+    def test_returns_full_content_after_external_mtime_invalidation(self, tmp_path, monkeypatch):
+        import agentic_tdd_runner.agent as _agent_mod
+
+        target = tmp_path / "src" / "file.ts"
+        target.parent.mkdir(parents=True)
+        target.write_text("const x = 1;\n")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        _agent_mod._file_read_cache.clear()
+
+        execute_tool("read_file", {"path": "src/file.ts"})
+
+        # Simulate an external formatter or command rewriting the file outside
+        # str_replace_editor/create_file, so invalidation relies purely on mtime.
+        target.write_text("const x: number = 1;\n")
+        stat = target.stat()
+        os.utime(target, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000))
+
+        result = execute_tool("read_file", {"path": "src/file.ts"})
+
+        assert result == "const x: number = 1;\n"
+
     def test_directory_listing_bypasses_cache(self, tmp_path, monkeypatch):
         import agentic_tdd_runner.agent as _agent_mod
 
