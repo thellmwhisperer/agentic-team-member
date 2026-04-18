@@ -26,7 +26,7 @@ from agentic_tdd_runner.compiler import (
 from agentic_tdd_runner.languages import get_language
 
 
-def generate_cookbook(
+def _build_contract_for_symbol(
     source_path: str,
     symbol: str,
     project_root: str,
@@ -34,8 +34,8 @@ def generate_cookbook(
     test_path: str | None = None,
     line_start: int | None = None,
     line_end: int | None = None,
-) -> str:
-    """Generate a text cookbook section for injection into the TDD agent's system prompt."""
+) -> tuple:
+    """Shared pipeline: build contract + lang + seam edits for a symbol."""
     full_path = Path(project_root) / source_path
     source_text = full_path.read_text()
 
@@ -177,7 +177,79 @@ def generate_cookbook(
     }
 
     contract = build_contract(facts)
+    return contract, lang, seam_edits
+
+
+def generate_cookbook(
+    source_path: str,
+    symbol: str,
+    project_root: str,
+    *,
+    test_path: str | None = None,
+    line_start: int | None = None,
+    line_end: int | None = None,
+) -> str:
+    """Generate a text cookbook section for injection into the TDD agent's system prompt."""
+    contract, lang, _seam_edits = _build_contract_for_symbol(
+        source_path,
+        symbol,
+        project_root,
+        test_path=test_path,
+        line_start=line_start,
+        line_end=line_end,
+    )
     return _render_cookbook_text(contract, lang)
+
+
+def build_episode_context(
+    source_path: str,
+    symbol: str,
+    project_root: str,
+    *,
+    test_path: str | None = None,
+    line_start: int | None = None,
+    line_end: int | None = None,
+) -> dict:
+    """Return structured episode data for the phased runner."""
+    contract, lang, seam_edits = _build_contract_for_symbol(
+        source_path,
+        symbol,
+        project_root,
+        test_path=test_path,
+        line_start=line_start,
+        line_end=line_end,
+    )
+    runner = contract["test_file"]["runner"]
+    resolved_test_path = contract["test_file"]["path"]
+    source_import_path = contract["test_file"].get("source_import_path", "")
+    mocks_text = _render_module_mocks(contract.get("module_load_dependencies", [])) if runner == "bun:test" else ""
+
+    assertion_surface = contract.get("assertion_surface", {})
+    assertion_hint = ""
+    if (
+        assertion_surface.get("kind") == "outbound_call_arguments"
+        and assertion_surface.get("binding")
+        and assertion_surface.get("member")
+    ):
+        assertion_hint = (
+            f"assert on {assertion_surface['binding']}.{assertion_surface['member']} "
+            "with toHaveBeenCalledWith"
+        )
+    elif assertion_surface.get("kind") == "return_value":
+        assertion_hint = "assert on the return value"
+
+    return {
+        "source_file": source_path,
+        "target_symbol": symbol,
+        "test_file": resolved_test_path,
+        "source_import_path": source_import_path,
+        "runner": runner,
+        "mocks_text": mocks_text,
+        "pre_test_source_edits": deepcopy(contract.get("pre_test_source_edits", [])),
+        "conditional_source_edits": deepcopy(seam_edits),
+        "assertion_hint": assertion_hint,
+        "cookbook_text": _render_cookbook_text(contract, lang),
+    }
 
 
 def build_system_prompt(
@@ -270,6 +342,13 @@ def _render_cookbook_text(contract: dict, lang) -> str:
     else:
         parts.append(f"## Mock Cookbook for {target['symbol']}")
         parts.append("")
+
+    parts.append("### Guardrails")
+    parts.append("- Write the first failing test against the real callable contract from source.")
+    parts.append("- Do not change the target's runtime signature just to fit the test scaffold.")
+    parts.append("- For callbacks, handlers, and framework listeners, preserve the production contract.")
+    parts.append("- Apply only mechanical export or test-seam edits before the first failing test.")
+    parts.append("")
 
     # Source edits
     edits = contract.get("pre_test_source_edits", [])
