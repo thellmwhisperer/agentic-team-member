@@ -805,7 +805,7 @@ def run_quality_checks(test_file: str) -> tuple[bool, str]:
         failures.append(f"[Forbidden] {f}: {n} forbidden patterns\n{sample}")
 
     # Detect duplicated setup lines in test files — report identifiers, not full lines
-    test_files = [f for f in changed if "test" in f]
+    test_files = [f for f in changed if _is_test_file_path(f)]
     for f in test_files:
         full = os.path.join(WORKDIR, f)
         if not os.path.isfile(full):
