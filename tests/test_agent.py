@@ -1179,6 +1179,23 @@ class TestApplyMechanicalEdits:
         assert "export function foo" in src1.read_text()
         assert "export const bar" in src2.read_text()
 
+    def test_skips_edit_when_path_escapes_workdir(self, tmp_path):
+        from agentic_tdd_runner.agent import apply_mechanical_edits
+
+        outside = tmp_path.parent / "outside.ts"
+        outside.write_text("function nope() {}\n")
+
+        edits = [{
+            "path": "../outside.ts",
+            "old": "function nope()",
+            "new": "export function nope()",
+        }]
+
+        applied = apply_mechanical_edits(edits, str(tmp_path))
+
+        assert applied == 0
+        assert outside.read_text() == "function nope() {}\n"
+
 
 class TestPhasedRunner:
     """When --source/--symbol are provided, main() uses phased prompts."""

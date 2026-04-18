@@ -34,7 +34,7 @@ def _build_contract_for_symbol(
     test_path: str | None = None,
     line_start: int | None = None,
     line_end: int | None = None,
-) -> tuple:
+) -> tuple[dict, object, list[dict]]:
     """Shared pipeline: build contract + lang + seam edits for a symbol."""
     full_path = Path(project_root) / source_path
     source_text = full_path.read_text()

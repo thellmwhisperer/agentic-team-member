@@ -66,17 +66,28 @@ def apply_mechanical_edits(edits: list[dict], workdir: str) -> int:
     """Apply pre_test_source_edits to files on disk. Returns count of edits applied."""
     applied = 0
     for edit in edits:
-        full_path = os.path.join(workdir, edit["path"])
         try:
-            content = Path(full_path).read_text()
+            full_path = _resolve_repo_path(edit["path"], workdir=workdir)
+        except ValueError:
+            emit(f"  [PREP] SKIP: path escapes workdir: {edit['path']}")
+            continue
+        try:
+            content = full_path.read_text()
         except FileNotFoundError:
             emit(f"  [PREP] SKIP: {edit['path']} not found")
+            continue
+        except OSError as exc:
+            emit(f"  [PREP] SKIP: cannot read {edit['path']}: {exc}")
             continue
         if edit["old"] not in content:
             emit(f"  [PREP] SKIP: old text not found in {edit['path']}")
             continue
         content = content.replace(edit["old"], edit["new"], 1)
-        Path(full_path).write_text(content)
+        try:
+            full_path.write_text(content)
+        except OSError as exc:
+            emit(f"  [PREP] SKIP: cannot write {edit['path']}: {exc}")
+            continue
         emit(f"  [PREP] Applied edit to {edit['path']}")
         applied += 1
     return applied
