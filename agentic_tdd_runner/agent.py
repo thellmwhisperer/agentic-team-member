@@ -1200,6 +1200,7 @@ def main():
             "symbol": args.symbol,
             "test_file": episode["test_file"],
             "mechanical_edits": len(episode.get("pre_test_source_edits", [])),
+            "function_line_range": episode.get("function_line_range"),
         })
 
         # Apply mechanical edits (export, seams) before the agent loop
@@ -1210,9 +1211,15 @@ def main():
             log("mechanical_edits", {"applied": n, "total": len(edits)})
 
     if episode:
+        rng = episode.get("function_line_range") or {}
+        line_hint = (
+            f" (lines {rng['start']}-{rng['end']})"
+            if rng.get("start") and rng.get("end")
+            else ""
+        )
         phase1_msg = (
             f"Read {episode['source_file']} and understand the bug below. "
-            f"Focus on the function `{episode['target_symbol']}`. "
+            f"Focus on the function `{episode['target_symbol']}`{line_hint}. "
             f"Then create a failing test in {episode['test_file']} that reproduces it.\n\n"
             f"Bug:\n{issue_text}"
         )

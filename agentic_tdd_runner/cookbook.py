@@ -224,6 +224,12 @@ def build_episode_context(
     elif assertion_surface.get("kind") == "return_value":
         assertion_hint = "assert on the return value"
 
+    target = contract.get("target", {})
+    function_line_range = {
+        "start": target.get("line_start", 1),
+        "end": target.get("line_end", target.get("line_start", 1)),
+    }
+
     return {
         "source_file": source_path,
         "target_symbol": symbol,
@@ -234,6 +240,7 @@ def build_episode_context(
         "pre_test_source_edits": deepcopy(contract.get("pre_test_source_edits", [])),
         "conditional_source_edits": deepcopy(seam_edits),
         "assertion_hint": assertion_hint,
+        "function_line_range": function_line_range,
         "cookbook_text": _render_cookbook_text(contract, lang),
     }
 

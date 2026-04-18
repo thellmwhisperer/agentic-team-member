@@ -2755,6 +2755,58 @@ class TestPhasedRunner:
         ]
         assert len(user_nudges) == 0
 
+    def test_phase1_message_includes_function_line_range(self, tmp_path, monkeypatch):
+        """Episode line range should be surfaced in the phase-1 prompt so the
+        model jumps straight to the symbol instead of grep/sed exploration."""
+        src = tmp_path / "src" / "server.py"
+        src.parent.mkdir(parents=True)
+        src.write_text("class H:\n    def _handle_query(self, args):\n        return None\n")
+
+        episode = {
+            "source_file": "src/server.py",
+            "target_symbol": "_handle_query",
+            "test_file": "src/test_server.py",
+            "source_import_path": "src.server",
+            "runner": "pytest",
+            "mocks_text": "",
+            "pre_test_source_edits": [],
+            "conditional_source_edits": [],
+            "assertion_hint": "",
+            "function_line_range": {"start": 1252, "end": 1289},
+            "cookbook_text": "## Mock Cookbook\n",
+        }
+
+        captured = []
+
+        def fake_chat(messages, include_tools=True):
+            captured.append([m.copy() for m in messages])
+            return {
+                "choices": [{"message": {"content": "still going"}, "finish_reason": "stop"}],
+                "usage": {},
+                "timings": {},
+            }
+
+        args = SimpleNamespace(
+            issue="bug text", source="src/server.py", symbol="_handle_query",
+            workdir=str(tmp_path), config="unused.toml", log_dir=str(tmp_path),
+        )
+        monkeypatch.setattr("agentic_tdd_runner.config.load_config", lambda path: self._make_config())
+        monkeypatch.setattr("agentic_tdd_runner.agent.parse_args", lambda: args)
+        monkeypatch.setattr("agentic_tdd_runner.agent.init_log", lambda: str(tmp_path / "agent.jsonl"))
+        monkeypatch.setattr("agentic_tdd_runner.agent.emit", lambda msg: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.log", lambda *a, **kw: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.chat", fake_chat)
+        monkeypatch.setattr(
+            "agentic_tdd_runner.cookbook.build_episode_context",
+            lambda **kw: episode,
+        )
+
+        main()
+
+        first_user_msg = next(m for m in captured[0] if m["role"] == "user")
+        assert "1252" in first_user_msg["content"]
+        assert "1289" in first_user_msg["content"]
+
 
 class TestChatPayload:
     """Verify that chat() builds the correct request payload."""
