@@ -205,6 +205,26 @@ class TestFindTestFile:
         # Hint file doesn't exist, falls back to discovery
         assert find_test_file(hint="src/nonexistent.test.ts") == "src/foo.test.ts"
 
+    def test_raises_when_git_tracking_check_fails(self, tmp_path, monkeypatch):
+        self._setup_git_repo(tmp_path)
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src" / "foo.test.ts").write_text("test")
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "runner": {"test_file_patterns": ["*.test.ts"], "exclude_dirs": []},
+        })
+        original_run = subprocess.run
+
+        def fake_run(command, **kwargs):
+            if command == ["git", "ls-files", "--", "src/foo.test.ts"]:
+                return subprocess.CompletedProcess(command, 1, stdout="", stderr="fatal: index broken")
+            return original_run(command, **kwargs)
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.subprocess.run", fake_run)
+
+        with pytest.raises(RuntimeError, match="test-file discovery via `git ls-files -- src/foo.test.ts` failed"):
+            find_test_file()
+
     def test_verify_red_green_preserves_untracked_test(self, tmp_path, monkeypatch):
         """An untracked test file must survive the stash cycle in verify_red_green."""
         import subprocess as sp
@@ -487,6 +507,19 @@ class TestGetChangedFiles:
         assert "untracked.ts" in files
         assert "deleted.ts" not in files
 
+    def test_raises_when_git_discovery_fails(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+
+        def fake_run(command, **kwargs):
+            if command == ["git", "diff", "--name-only"]:
+                return subprocess.CompletedProcess(command, 1, stdout="", stderr="fatal: not a git repository")
+            raise AssertionError(f"unexpected command: {command}")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.subprocess.run", fake_run)
+
+        with pytest.raises(RuntimeError, match="changed-file discovery via `git diff --name-only` failed"):
+            _get_changed_files()
+
 
 class TestRunQualityChecks:
     """run_quality_checks enforces checks and forbidden patterns on changed files."""
@@ -661,6 +694,37 @@ class TestRunQualityChecks:
         assert ok is False
         assert "[Forbidden] src/file.ts: 6 forbidden patterns" in msg
         assert "src/file.ts:6 'as any'" in msg
+
+    def test_reports_malformed_quality_checks_without_crashing(self, tmp_path, monkeypatch):
+        _init_git_repo(tmp_path)
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "file.ts").write_text("const value = 1;\n")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "quality": {
+                "enabled": True,
+                "typescript": {"forbidden": []},
+            },
+            "prompt": {"quality_failed": "FAIL: {details}"},
+            "timeouts": {"tool_execution": 10},
+        })
+        monkeypatch.setattr(
+            "agentic_tdd_runner.agent.detect_quality_tools",
+            lambda lang_name: [
+                {"command": "fake-lint {changed_files}"},
+                {"name": "lint", "command": 123},
+                {"name": "format", "command": "fake-format {changed_files}", "fix": ["bad"]},
+            ],
+        )
+
+        ok, msg = run_quality_checks("src/file.test.ts")
+
+        assert ok is False
+        assert "[check #1] invalid quality check config: missing string 'name'" in msg
+        assert "[lint] invalid quality check config: missing string 'command'" in msg
+        assert "[format] invalid quality check config: 'fix' must be a string" in msg
 
 
 class TestExecuteToolReactiveChecks:
