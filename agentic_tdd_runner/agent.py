@@ -169,6 +169,8 @@ def _validate_command(command: str) -> None:
 
 
 def execute_tool(name: str, args: dict) -> str:
+    global _last_run_exit_code
+    _last_run_exit_code = None
     try:
         if name == "read_file":
             full_path = _resolve_repo_path(args["path"])
@@ -179,7 +181,6 @@ def execute_tool(name: str, args: dict) -> str:
                 return f.read()
 
         elif name == "run_command":
-            global _last_run_exit_code
             _validate_command(args["command"])
             result = subprocess.run(
                 args["command"],
@@ -746,9 +747,26 @@ def _is_test_pass(name: str, args: dict) -> bool:
     """Detect if a tool call was a test runner that exited 0."""
     if name != "run_command" or _last_run_exit_code != 0:
         return False
-    cmd = args.get("command", "")
-    test_runners = ("bun test", "pytest", "python3 -m pytest", "npm test", "npx jest")
-    return any(runner in cmd for runner in test_runners)
+    cmd = str(args.get("command", "")).strip()
+    if not cmd:
+        return False
+
+    configured_runner = ((_CONFIG or {}).get("runner", {}) or {}).get("command", "")
+    if configured_runner and (cmd == configured_runner or cmd.startswith(f"{configured_runner} ")):
+        return True
+
+    import shlex
+    try:
+        tokens = shlex.split(cmd)
+    except ValueError:
+        tokens = cmd.split()
+
+    for token in reversed(tokens[1:]):
+        if _is_test_file_path(token):
+            runner_cmd = _test_runner_command_for_file(token)
+            return cmd == runner_cmd or cmd.startswith(f"{runner_cmd} ")
+
+    return False
 
 
 def _default_config_path():
@@ -1042,7 +1060,11 @@ def main():
                     "content": result_truncated,
                 })
 
-                if name == "create_file" and _is_test_file_path(args.get("path", "")):
+                if (
+                    name == "create_file"
+                    and result.startswith("OK: created ")
+                    and _is_test_file_path(args.get("path", ""))
+                ):
                     created_test = True
                 if _is_test_pass(name, args):
                     test_passed = True
