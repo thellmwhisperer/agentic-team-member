@@ -1,15 +1,16 @@
 # ATM — Agentic Team Member
 
-Point a local LLM at a bug. Get back a fix with tests — verified red-green.
+Point a local LLM at a bug. Get back a fix with tests, a verified red-green, and a PR.
 
 ## What it does
 
 Given a GitHub issue and a repository, ATM:
 
 1. **Generates a cookbook** — deterministic static analysis of the target function: imports, dependency graph, mock strategies, test scaffolds. No LLM involved.
-2. **Runs an agent loop** — a local model (Qwen 3.5 27B) reads the source, applies the cookbook, writes failing tests, fixes the bug, and refactors.
+2. **Runs a phased agent loop** — a local model (Qwen 3.5 27B) follows a two-phase TDD cycle: first write a failing test, then fix the source. Tools: read, edit, create, run.
 3. **Verifies red-green** — reverts the fix and runs the test (must fail), restores and runs again (must pass). If both pass, the fix is real.
-4. **Outputs a verified diff** — the harness prints the git diff and new files. PR submission is planned but not yet implemented.
+4. **Runs quality checks** — typecheck, lint, format, and forbidden pattern checks. Autofixes what it can, feeds remaining issues back to the model.
+5. **Opens a PR** — when `[pr].enabled = true`, ATM commits the fix and test, pushes to a branch, and creates a pull request via `gh`.
 
 ## Architecture
 
@@ -25,19 +26,31 @@ Given a GitHub issue and a repository, ATM:
 │  compiler/ + cookbook.py  │  parse imports, trace deps,
 │                          │  generate mock blocks + scaffold
 └──────────────┬───────────┘
-               │ injected into system prompt
+               │ mechanical edits applied to disk
+               │ episode context injected into prompt
                ▼
 ┌──────────────────────────┐
-│      Agent Loop          │  LLM (local, tool-calling)
-│  agent.py                │  RED → GREEN → REFACTOR
-│                          │  tools: read, edit, create, run
+│   Phase 1: Test First    │  LLM writes a failing test
+│   Phase 2: Fix + Green   │  LLM fixes source, runs test
+│   agent.py               │  tools: read, edit, create, run
 └──────────────┬───────────┘
                │ DONE
                ▼
 ┌──────────────────────────┐
 │   Red-Green Verifier     │  deterministic, no LLM
-│   stash → test (FAIL)    │
-│   restore → test (PASS)  │
+│   stash fix → test FAIL  │
+│   restore  → test PASS   │
+└──────────────┬───────────┘
+               │ verified
+               ▼
+┌──────────────────────────┐
+│   Quality Gate           │  typecheck + lint + format +
+│                          │  forbidden patterns
+└──────────────┬───────────┘
+               │ all green
+               ▼
+┌──────────────────────────┐
+│   PR Creation            │  git commit + push + gh pr
 └──────────────────────────┘
 ```
 
@@ -66,6 +79,50 @@ languages/
 ```
 
 Each plugin provides: `parse_imports`, `parse_assignments`, `test_path`, `setter_name`, `is_exported`, `import_path`, `render_seam_setter`.
+
+## How the runtime works
+
+The agent loop is a harness around a local LLM. Every design decision optimizes for fewer steps and higher KV cache hit rates.
+
+### Phased prompting
+
+The agent runs in two phases with distinct prompts:
+
+1. **Phase 1 (test-first)**: the model receives the bug description, the cookbook output (mocks, seams, assertion hints), and a prompt that says "write a failing test, then fix the source." This eliminates source-first drift — the model goes straight to TDD.
+2. **Phase 2 (quality fix)**: after red-green verification, quality issues (`: any`, missing types, lint) are fed back. The model fixes only what's listed.
+
+A step-counter nudge ("Step N/M") is appended as the last user message on each turn. This placement is deliberate — appending at the tail preserves the KV cache prefix for all preceding messages.
+
+### Context management
+
+The system prompt is built once before the loop and never mutated. This makes it byte-identical across turns, so the LLM server (llama-server) reuses 100% of the KV cache for the system prompt on every step.
+
+After a quality failure, the runner decides whether to compact based on actual token usage:
+
+- **Below 85% of context window**: preserve all messages, append quality feedback. The model keeps full context and doesn't need to re-read files.
+- **Above 85%**: compact to 3 messages (system prompt, issue, quality feedback) as a safety net.
+
+In practice, most runs never compact. The handleResub benchmark uses ~9k of 32k tokens at the quality boundary — compacting there destroyed useful context and added 2-3 steps of re-reading.
+
+### File read dedup
+
+The runner tracks the last `st_mtime_ns` seen for every `read_file` path. If the model re-reads an unchanged file, it gets a stub: "File unchanged since last read. Refer to the earlier content."
+
+The cache is invalidated when `str_replace_editor` or `create_file` modifies the file (explicit `pop`) and cleared entirely on compaction (the model loses the original tool result, so the cache must reset).
+
+### Reactive feedback
+
+After every `str_replace_editor` or `create_file`, the runner runs the project's typecheck and feeds errors back inline in the tool result. The model sees the tsc error immediately, not on the next test run. This cuts a full round-trip per type error.
+
+### TypeScript pill
+
+An optional ~250-token block of standard TypeScript handbook material in the system prompt:
+
+- How to read structured tsc errors (the target type appears in continuation lines)
+- Type narrowing techniques (`typeof`, truthiness, equality, `in`, `String()`)
+- Type import syntax (`import type { T }`)
+
+This isn't model-specific instruction — it's reference material. It reduces quality-phase steps by teaching the model to read tsc output instead of searching for types.
 
 ## Skills
 
@@ -105,42 +162,72 @@ What changes between skills is step 1. The cookbook is the semantic layer — it
 
 ## Benchmark
 
-Same bug (handleResub cumulative months), same issue text, clean sandbox each run:
+Same bug (handleResub cumulative months), same issue text, clean worktree each run.
 
-| Run | Model | Steps | Result | Time | Tests | Thinking |
-|---|---|---|---|---|---|---|
-| R1 | 27B distilled | 23 | VERIFIED | 19.5m | 3 | 9898 chars |
-| R2 | 27B distilled | 18 | VERIFIED | 14.5m | 1 | 6207 chars |
-| R3 | 27B base | 15 | VERIFIED | 17.3m | 3 | 6577 chars |
-| R6 | 27B base (v3 cookbook) | 17 | VERIFIED | 13.1m | 2 | 4781 chars |
-| R7 | 27B base (v3 + rules) | 20 | VERIFIED | 15.7m | 3 | 6505 chars |
-| R4 | 4B | 44+ | FAIL | killed | 0 | 3179 chars |
+### Current results (phased runner + quality gate)
+
+| Run | Config | Thinking | Green | Done | Notes |
+|---|---|---|---|---|---|
+| r32 | base | on | 4 | 15 | baseline with quality gate |
+| r34 | pill, 4B | on | 5 | 21 | 4B model, TypeScript pill validated |
+| r36 | pill | on | 4 | 11 | best pre-optimization |
+| r38 | base | off | ~5 | 19 | thinking_budget_tokens=0 |
+| r39 | pill+nothink | off | 7 | 16 | pill compensates for no thinking |
+| r41 | pill+think | on | 4 | 10 | with threshold compact + read dedup |
+
+Green = step where test passes. Done = total steps including quality fixes and PR.
+
+### Key findings
+
+- **27B is deterministic**: green at step 4 in every 27B run. Variance is only in quality phase.
+- **TypeScript pill matters**: ~250 tokens of TS handbook reference (narrowing, reading tsc errors, type imports) reduces quality-phase steps significantly.
+- **Thinking matters in quality phase**: the model uses extended reasoning to resolve type narrowing (`string | true` → `String()`). Without thinking, it takes more steps.
+- **Context preservation beats compaction**: compacting at 9k/32k (28% usage) destroyed useful context and forced re-reads. Threshold-based compaction (85%) preserves context when there's headroom.
+- **File read dedup**: `st_mtime_ns`-keyed cache avoids re-reading unchanged files. Invalidated on edit/write, cleared on compaction.
+
+### Earlier results (pre-phased runner)
+
+| Run | Model | Steps | Result |
+|---|---|---|---|
+| R1 | 27B distilled | 23 | VERIFIED |
+| R2 | 27B distilled | 18 | VERIFIED |
+| R3 | 27B base | 15 | VERIFIED |
+| R4 | 4B | 44+ | FAIL |
 
 Without the cookbook, the 27B ran 33+ steps (~90 min) and never finished.
 
-### Findings from thinking block analysis
-
-- Models that **re-read the source** during the run write more tests (3 vs 1)
-- **Deep thinking** (>3000 chars on one step) correlates with desvíos — the model is reasoning about something it shouldn't need to figure out
-- The 4B **doesn't reason about errors** — it tries permutations. The 27B reads the error, thinks about the cause, and edits precisely
-- Prompt rules about **what to do** (assertion style, test strategy) are obeyed. Rules about **how to organize** (beforeEach) are ignored unless the scaffold demonstrates it
-- Adding a **Refactor step** to the workflow (Red → Green → Refactor) produces cleaner code
-
 ## Configuration
 
-All configuration is in `config/agent.toml` and `config/tools.json`. No hardcoded values.
+Per-run configuration in TOML. Multiple configs for different models/strategies:
 
 ```toml
 [llm]
 model = "qwen3.5-27b"
+url = "http://127.0.0.1:11435/v1/chat/completions"
 temperature = 0.6
+thinking_budget_tokens = 0  # optional: disable thinking per-request
+
+[timeouts]
+tool_execution = 60
+llm_request = 600
+test_run = 30
+pr_create = 120  # timeout for git push + gh pr create when PR automation is enabled
 
 [runner]
 command = "bun test"
 test_file_patterns = ["*.test.ts", "*.test.tsx", "test_*.py"]
 
-[prompt]
-system = """..."""
+[quality]
+enabled = true
+compact_threshold_ratio = 0.85  # only compact when context is near limit
+
+[quality.typescript]
+forbidden = ["as any", ": any", "eslint-disable", "@ts-ignore"]
+
+[pr]
+enabled = true
+base_branch = "main"
+branch_prefix = "atm/fix-"
 ```
 
 ## Requirements
@@ -148,31 +235,32 @@ system = """..."""
 - Python 3.12+
 - `requests`
 - A local LLM server: [llama-server](https://github.com/ggml-org/llama.cpp) or [Ollama](https://ollama.ai)
-- A GGUF model with tool-calling support (tested with Qwen 3.5 27B)
-- `gh` CLI (planned, for future PR creation)
+- A GGUF model with tool-calling support (tested with Qwen 3.5 27B and 4B)
+- `gh` CLI for PR creation
 
 ## Usage
 
 ```bash
-# Start the model server
+# Start the model server (no --reasoning-budget for per-request control)
 llama-server \
   --model Qwen3.5-27B.Q4_K_M.gguf \
   --host 127.0.0.1 --port 11435 \
   --ctx-size 32768 --n-gpu-layers 999 \
-  --jinja --reasoning auto --no-webui
+  --jinja --no-webui
 
 # Run the agent
-PYTHONPATH=. python -m agentic_tdd_runner.agent \
+python3.14 -m agentic_tdd_runner.agent \
   --source src/twitch/client.ts \
   --symbol handleResub \
   --workdir /path/to/repo \
-  --config config/agent.toml \
-  "Bug: handleResub reports '0 meses' for all resubscriptions..."
+  --config config/agent-r35-27b-pill.toml \
+  --log-dir /tmp \
+  /path/to/issue.md
 ```
 
 ## Status
 
-Early development. The TDD fix skill works end-to-end with verified red-green. PR submission and migration skill are next.
+The TDD fix skill works end-to-end: cookbook → phased agent loop → verified red-green → quality gate → PR. Migration and refactor skills are planned.
 
 ## License
 
