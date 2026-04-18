@@ -13,6 +13,7 @@ from agentic_tdd_runner.agent import (
     _get_changed_files,
     _is_obvious_act_line,
     _is_obvious_assert_line,
+    _is_test_pass,
     _parse_pr_content,
     _resolve_repo_path,
     _tool_applied_status,
@@ -295,6 +296,18 @@ class TestFindTestFile:
             "runner": {"test_file_patterns": ["*.test.ts", "*.test.tsx"], "exclude_dirs": []},
         })
         assert find_test_file() == "src/widget.test.tsx"
+
+
+class TestIsTestPass:
+    """_is_test_pass should match real test runner commands, not substrings."""
+
+    def test_matches_tokenized_test_runner_prefix(self, monkeypatch):
+        monkeypatch.setattr("agentic_tdd_runner.agent._last_run_exit_code", 0)
+        assert _is_test_pass("run_command", {"command": "python3 -m pytest tests/test_agent.py"}) is True
+
+    def test_rejects_substring_false_positive(self, monkeypatch):
+        monkeypatch.setattr("agentic_tdd_runner.agent._last_run_exit_code", 0)
+        assert _is_test_pass("run_command", {"command": "grep pytest README.md"}) is False
 
 
 class TestDetectQualityTools:
@@ -2200,6 +2213,23 @@ class TestApplyMechanicalEdits:
         assert "export function foo" in src1.read_text()
         assert "export const bar" in src2.read_text()
 
+    def test_skips_path_that_escapes_workdir(self, tmp_path):
+        from agentic_tdd_runner.agent import apply_mechanical_edits
+
+        outside = tmp_path.parent / "outside.ts"
+        outside.write_text("function nope() {}\n")
+
+        edits = [{
+            "path": "../outside.ts",
+            "old": "function nope()",
+            "new": "export function nope()",
+        }]
+
+        applied = apply_mechanical_edits(edits, str(tmp_path))
+
+        assert applied == 0
+        assert outside.read_text() == "function nope() {}\n"
+
 
 class TestPhasedRunner:
     """When --source/--symbol are provided, main() uses phased prompts."""
@@ -2360,6 +2390,54 @@ class TestPhasedRunner:
         second_call_msgs = captured_messages[1]
         user_nudges = [m for m in second_call_msgs if m["role"] == "user" and "run" in m.get("content", "").lower() and "fix" in m.get("content", "").lower()]
         assert len(user_nudges) >= 1, f"Expected a run+fix nudge after test creation, got messages: {[m['content'][:80] for m in second_call_msgs if m['role'] == 'user']}"
+
+    def test_uses_episode_test_file_hint_during_completion(self, tmp_path, monkeypatch):
+        episode = {
+            "source_file": "src/client.ts",
+            "target_symbol": "handleResub",
+            "test_file": "src/client.test.ts",
+            "source_import_path": "./client",
+            "runner": "bun:test",
+            "mocks_text": "",
+            "pre_test_source_edits": [],
+            "conditional_source_edits": [],
+            "assertion_hint": "",
+            "cookbook_text": "## Mock Cookbook\n",
+        }
+        hinted = []
+
+        args = SimpleNamespace(
+            issue="bug text", source="src/client.ts", symbol="handleResub",
+            workdir=str(tmp_path), config="unused.toml", log_dir=str(tmp_path),
+        )
+        monkeypatch.setattr("agentic_tdd_runner.config.load_config", lambda path: self._make_config())
+        monkeypatch.setattr("agentic_tdd_runner.agent.parse_args", lambda: args)
+        monkeypatch.setattr("agentic_tdd_runner.agent.init_log", lambda: str(tmp_path / "agent.jsonl"))
+        monkeypatch.setattr("agentic_tdd_runner.agent.emit", lambda msg: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.log", lambda *a, **kw: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.chat", lambda messages, include_tools=True: {
+            "choices": [{"message": {"content": "DONE"}, "finish_reason": "stop"}],
+            "usage": {},
+            "timings": {},
+        })
+        monkeypatch.setattr(
+            "agentic_tdd_runner.cookbook.build_episode_context",
+            lambda **kw: episode,
+        )
+        monkeypatch.setattr(
+            "agentic_tdd_runner.agent.find_test_file",
+            lambda hint=None: hinted.append(hint) or "src/client.test.ts",
+        )
+        monkeypatch.setattr("agentic_tdd_runner.agent.verify_red_green", lambda test_file: (True, "verified"))
+        monkeypatch.setattr(
+            "agentic_tdd_runner.agent.subprocess.run",
+            lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, stdout="", stderr=""),
+        )
+
+        result = main()
+
+        assert result == 0
+        assert hinted == ["src/client.test.ts"]
 
     def test_skips_phase_nudge_when_create_file_arguments_are_malformed(self, tmp_path, monkeypatch):
         """Malformed create_file args should not crash or trigger the phase nudge."""
