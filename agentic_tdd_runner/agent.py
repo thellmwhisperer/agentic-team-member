@@ -205,6 +205,7 @@ def execute_tool(name: str, args: dict) -> str:
 def _reactive_typecheck_feedback(path: str) -> str:
     """Run typecheck after edit/create and return inline error summary."""
     from agentic_tdd_runner.languages import get_language
+    import shlex
     lang = get_language(path)
     if not lang:
         return ""
@@ -213,11 +214,14 @@ def _reactive_typecheck_feedback(path: str) -> str:
     typecheck = next((check for check in checks if check.get("name") == "typecheck"), None)
     if not typecheck:
         return ""
+    command = typecheck["command"]
+    if "{changed_files}" in command:
+        command = command.format(changed_files=shlex.quote(path))
     timeout_s = (_CONFIG or {}).get("timeouts", {}).get("tool_execution", 10)
 
     try:
         result = subprocess.run(
-            typecheck["command"],
+            command,
             shell=True,
             cwd=WORKDIR,
             capture_output=True,
@@ -363,14 +367,36 @@ def detect_quality_tools(lang_name: str) -> list[dict]:
     elif lang_name == "python":
         pyproject_path = os.path.join(WORKDIR, "pyproject.toml")
         has_ruff = False
+        python_typecheck = None
         if os.path.isfile(pyproject_path):
             try:
                 with open(pyproject_path, "rb") as f:
                     import tomllib
                     pyproject = tomllib.load(f)
-                has_ruff = "ruff" in pyproject.get("tool", {})
+                tool_cfg = pyproject.get("tool", {})
+                has_ruff = "ruff" in tool_cfg
+                if "mypy" in tool_cfg:
+                    python_typecheck = "python3 -m mypy {changed_files}"
+                elif "basedpyright" in tool_cfg:
+                    python_typecheck = "npx basedpyright {changed_files}"
+                elif "pyright" in tool_cfg:
+                    python_typecheck = "npx pyright {changed_files}"
             except (OSError, ValueError):
                 pass
+
+        if not python_typecheck:
+            if any(os.path.isfile(os.path.join(WORKDIR, name)) for name in ("mypy.ini", ".mypy.ini")):
+                python_typecheck = "python3 -m mypy {changed_files}"
+            elif os.path.isfile(os.path.join(WORKDIR, "basedpyrightconfig.json")):
+                python_typecheck = "npx basedpyright {changed_files}"
+            elif os.path.isfile(os.path.join(WORKDIR, "pyrightconfig.json")):
+                python_typecheck = "npx pyright {changed_files}"
+
+        if python_typecheck:
+            checks.append({
+                "name": "typecheck",
+                "command": python_typecheck,
+            })
 
         if has_ruff:
             checks.append({

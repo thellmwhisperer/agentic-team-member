@@ -288,7 +288,7 @@ class TestFindTestFile:
 
 
 class TestDetectQualityTools:
-    """detect_quality_tools reads package.json/pyproject.toml to find lint/format tools."""
+    """detect_quality_tools reads project config to find lint/format/typecheck tools."""
 
     def test_detects_biome_from_package_json(self, tmp_path, monkeypatch):
         import json
@@ -330,10 +330,34 @@ class TestDetectQualityTools:
         lint_cmd = next(c for c in checks if c["name"] == "lint")
         assert "ruff" in lint_cmd["command"]
 
+    def test_detects_mypy_from_pyproject(self, tmp_path, monkeypatch):
+        (tmp_path / "pyproject.toml").write_text('[tool.mypy]\npython_version = "3.12"\n')
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        checks = detect_quality_tools("python")
+        tc = next(c for c in checks if c["name"] == "typecheck")
+        assert tc["command"] == "python3 -m mypy {changed_files}"
+
+    @pytest.mark.parametrize(
+        ("config_name", "expected_command"),
+        [
+            ("mypy.ini", "python3 -m mypy {changed_files}"),
+            ("pyrightconfig.json", "npx pyright {changed_files}"),
+            ("basedpyrightconfig.json", "npx basedpyright {changed_files}"),
+        ],
+    )
+    def test_detects_python_typecheck_from_standalone_config(
+        self, tmp_path, monkeypatch, config_name, expected_command,
+    ):
+        (tmp_path / config_name).write_text("{}")
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        checks = detect_quality_tools("python")
+        tc = next(c for c in checks if c["name"] == "typecheck")
+        assert tc["command"] == expected_command
+
     def test_returns_empty_when_no_tools_found(self, tmp_path, monkeypatch):
         monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
         checks = detect_quality_tools("typescript")
-        assert isinstance(checks, list)
+        assert checks == []
 
     @pytest.mark.parametrize("lockfile,expected_cmd", [
         ("pnpm-lock.yaml", "pnpm run typecheck"),
@@ -549,6 +573,33 @@ class TestExecuteToolReactiveChecks:
         assert "[Reactive typecheck]" in result
         assert "Incompatible return value type" in result
         assert "expected \"str\"" in result
+
+    def test_reactive_typecheck_formats_changed_file_for_python_tools(self, tmp_path, monkeypatch):
+        src = tmp_path / "src"
+        src.mkdir()
+        target = src / "util.py"
+        target.write_text("def greet(name: str) -> str:\n    return name\n")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr(
+            "agentic_tdd_runner.agent.detect_quality_tools",
+            lambda lang_name: [{"name": "typecheck", "command": "fake-mypy {changed_files}"}]
+            if lang_name == "python" else [],
+        )
+
+        def fake_run(command, **kwargs):
+            assert command == "fake-mypy src/util.py"
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.subprocess.run", fake_run)
+
+        result = execute_tool("str_replace_editor", {
+            "path": "src/util.py",
+            "old_str": "    return name\n",
+            "new_str": "    return name.upper()\n",
+        })
+
+        assert result == "OK: replaced in src/util.py"
 
     def test_create_file_appends_reactive_test_failure(self, tmp_path, monkeypatch):
         src = tmp_path / "src"
