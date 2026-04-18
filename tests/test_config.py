@@ -1,8 +1,21 @@
 """Tests for config loading from TOML + JSON."""
 import json
+import tomllib
 from pathlib import Path
 
+import pytest
+
 from agentic_tdd_runner.config import load_config
+
+
+BENCHMARK_CONFIGS = [
+    "agent-r25.toml",
+    "agent-r33-4b.toml",
+    "agent-r34-4b.toml",
+    "agent-r35-27b-pill.toml",
+    "agent-r38-27b-nothink.toml",
+    "agent-r39-27b-pill-nothink.toml",
+]
 
 
 class TestProductionConfig:
@@ -76,6 +89,15 @@ class TestLoadConfig:
         cfg = load_config(prod)
         assert cfg["pr"]["enabled"] is True
         assert cfg["pr"]["base_branch"] == "main"
+        assert cfg["timeouts"]["pr_create"] == 120
+
+    @pytest.mark.parametrize("filename", BENCHMARK_CONFIGS)
+    def test_benchmark_configs_have_required_sections(self, filename):
+        config_path = Path(__file__).parent.parent / "config" / filename
+        with config_path.open("rb") as fh:
+            cfg = tomllib.load(fh)
+        for section in ("llm", "runner", "timeouts", "prompt", "agent"):
+            assert section in cfg
         assert cfg["timeouts"]["pr_create"] == 120
 
     def test_tools_path_relative_to_toml(self, tmp_path):
