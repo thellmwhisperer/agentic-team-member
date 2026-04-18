@@ -76,6 +76,7 @@ class TestLoadConfig:
         cfg = load_config(prod)
         assert cfg["pr"]["enabled"] is True
         assert cfg["pr"]["base_branch"] == "main"
+        assert cfg["timeouts"]["pr_create"] == 120
 
     def test_tools_path_relative_to_toml(self, tmp_path):
         """tools.json path in TOML is relative to the TOML file's directory."""

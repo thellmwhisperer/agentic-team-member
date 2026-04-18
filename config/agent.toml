@@ -13,6 +13,7 @@ top_k = 20
 tool_execution = 60
 llm_request = 600
 test_run = 30
+pr_create = 120
 
 [runner]
 command = "bun test"
