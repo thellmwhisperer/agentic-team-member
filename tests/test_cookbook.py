@@ -532,4 +532,4 @@ class TestBuildEpisodeContext:
         """)
         ctx = build_episode_context("src/notifier.ts", "notify", str(tmp_path))
         assert "assertion_hint" in ctx
-        assert ctx["assertion_hint"]
+        assert ctx["assertion_hint"]  # non-empty
