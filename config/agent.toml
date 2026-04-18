@@ -106,6 +106,9 @@ forbidden = ["type: ignore", "noqa"]
 
 [quality.duplicated_setup_judge]
 enabled = true
+# `duplicated_setup_judge.url` intentionally uses Ollama's native `/api/chat`
+# format, while `llm.url` above uses an OpenAI-compatible `/v1/chat/completions`
+# endpoint. Both formats coexist on purpose because they target different backends.
 url = "http://127.0.0.1:11434/api/chat"
 model = "qwen3.5:0.8b"
 temperature = 0

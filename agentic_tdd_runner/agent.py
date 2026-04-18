@@ -496,7 +496,12 @@ def verify_red_green(test_file: str) -> tuple[bool, str]:
     test_full = os.path.join(WORKDIR, test_file)
     test_backup = None
     if os.path.isfile(test_full):
-        test_backup = tempfile.mktemp(suffix=os.path.basename(test_file))
+        tmp = tempfile.NamedTemporaryFile(
+            suffix=os.path.basename(test_file),
+            delete=False,
+        )
+        test_backup = tmp.name
+        tmp.close()
         shutil.copy2(test_full, test_backup)
 
     # Stash all changes including untracked (reverts source fix + new files)
@@ -1037,7 +1042,7 @@ def create_pr(messages: list, last_msg: dict, test_file: str, step: int) -> str 
         changed = sorted(tracked_files | untracked_files)
         if changed:
             subprocess.run(
-                ["git", "add", "--"] + changed,
+                ["git", "add", "--", *changed],
                 cwd=WORKDIR, capture_output=True, check=True,
             )
         subprocess.run(
@@ -1173,7 +1178,7 @@ def main():
     # Returns: "done" | "quality_fail" | "verify_fail" | "give_up" | "no_test"
     last_usage: dict | None = None
 
-    def try_complete(step):
+    def try_complete(step, msg: dict):
         nonlocal done_rejected, quality_rejected, last_usage
         test_file = find_test_file()
         if not test_file:
@@ -1324,7 +1329,7 @@ def main():
         if msg.get("content"):
             emit(f"  [SAY] {msg['content']}")
             if "DONE" in msg["content"].upper():
-                completion = try_complete(step)
+                completion = try_complete(step, msg)
                 if completion == "done":
                     return 0
                 if completion == "give_up":
@@ -1387,11 +1392,18 @@ def main():
 
             # --- PHASE NUDGE: test file created → nudge to run + fix ---
             if episode:
-                created_test = any(
-                    tc["function"]["name"] == "create_file"
-                    and _is_test_file_path(json.loads(tc["function"]["arguments"]).get("path", ""))
-                    for tc in msg.get("tool_calls", [])
-                )
+                created_test = False
+                for tc in msg.get("tool_calls", []):
+                    try:
+                        fn = tc["function"]
+                        if fn["name"] != "create_file":
+                            continue
+                        tc_args = json.loads(fn["arguments"])
+                    except (json.JSONDecodeError, KeyError, TypeError):
+                        continue
+                    if _is_test_file_path(str(tc_args.get("path", ""))):
+                        created_test = True
+                        break
                 if created_test:
                     nudge = (
                         f"Good. Now run the test to confirm it fails, then fix "
@@ -1404,7 +1416,7 @@ def main():
             # --- AUTO-TRIGGER: test passed → verify → quality → done ---
             if test_passed:
                 emit("\n  [AUTO] Test pass detected — triggering verification pipeline")
-                completion = try_complete(step)
+                completion = try_complete(step, msg)
                 if completion == "done":
                     return 0
                 if completion == "give_up":

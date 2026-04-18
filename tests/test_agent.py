@@ -2361,6 +2361,87 @@ class TestPhasedRunner:
         user_nudges = [m for m in second_call_msgs if m["role"] == "user" and "run" in m.get("content", "").lower() and "fix" in m.get("content", "").lower()]
         assert len(user_nudges) >= 1, f"Expected a run+fix nudge after test creation, got messages: {[m['content'][:80] for m in second_call_msgs if m['role'] == 'user']}"
 
+    def test_skips_phase_nudge_when_create_file_arguments_are_malformed(self, tmp_path, monkeypatch):
+        """Malformed create_file args should not crash or trigger the phase nudge."""
+        import agentic_tdd_runner.agent as _agent_mod
+
+        src = tmp_path / "src" / "client.ts"
+        src.parent.mkdir(parents=True)
+        src.write_text("export function handleResub(event) {\n  return event;\n}\n")
+
+        episode = {
+            "source_file": "src/client.ts",
+            "target_symbol": "handleResub",
+            "test_file": "src/client.test.ts",
+            "source_import_path": "./client",
+            "runner": "bun:test",
+            "mocks_text": "",
+            "pre_test_source_edits": [],
+            "conditional_source_edits": [],
+            "assertion_hint": "",
+            "cookbook_text": "## Mock Cookbook\n",
+        }
+
+        chat_call_count = [0]
+        captured_messages = []
+
+        def fake_chat(messages, include_tools=True):
+            chat_call_count[0] += 1
+            captured_messages.append([m.copy() for m in messages])
+            if chat_call_count[0] == 1:
+                return {
+                    "choices": [{"message": {
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [{
+                            "id": "call_1",
+                            "function": {
+                                "name": "create_file",
+                                "arguments": '{"path": "src/client.test.ts"',
+                            },
+                        }],
+                    }, "finish_reason": "tool_calls"}],
+                    "usage": {},
+                    "timings": {},
+                }
+            return {
+                "choices": [{"message": {"role": "assistant", "content": "continuing"}, "finish_reason": "stop"}],
+                "usage": {},
+                "timings": {},
+            }
+
+        def fake_execute(name, args):
+            _agent_mod._last_run_exit_code = None
+            return f"OK: created {args.get('path', '')}"
+
+        args = SimpleNamespace(
+            issue="bug text", source="src/client.ts", symbol="handleResub",
+            workdir=str(tmp_path), config="unused.toml", log_dir=str(tmp_path),
+        )
+        monkeypatch.setattr("agentic_tdd_runner.config.load_config", lambda path: self._make_config())
+        monkeypatch.setattr("agentic_tdd_runner.agent.parse_args", lambda: args)
+        monkeypatch.setattr("agentic_tdd_runner.agent.init_log", lambda: str(tmp_path / "agent.jsonl"))
+        monkeypatch.setattr("agentic_tdd_runner.agent.emit", lambda msg: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.log", lambda *a, **kw: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.chat", fake_chat)
+        monkeypatch.setattr("agentic_tdd_runner.agent.execute_tool", fake_execute)
+        monkeypatch.setattr(
+            "agentic_tdd_runner.cookbook.build_episode_context",
+            lambda **kw: episode,
+        )
+
+        main()
+
+        assert chat_call_count[0] >= 2
+        second_call_msgs = captured_messages[1]
+        user_nudges = [
+            m for m in second_call_msgs
+            if m["role"] == "user"
+            and "run" in m.get("content", "").lower()
+            and "fix" in m.get("content", "").lower()
+        ]
+        assert len(user_nudges) == 0
+
 
 class TestChatPayload:
     """Verify that chat() builds the correct request payload."""
