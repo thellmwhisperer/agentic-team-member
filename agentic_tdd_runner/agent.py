@@ -69,9 +69,13 @@ def apply_mechanical_edits(edits: list[dict], workdir: str) -> int:
     """Apply pre_test_source_edits to files on disk. Returns count of edits applied."""
     applied = 0
     for edit in edits:
-        full_path = os.path.join(workdir, edit["path"])
         try:
-            content = Path(full_path).read_text()
+            full_path = _resolve_repo_path(edit["path"], workdir)
+        except ValueError:
+            emit(f"  [PREP] SKIP: path escapes workdir: {edit['path']}")
+            continue
+        try:
+            content = full_path.read_text()
         except FileNotFoundError:
             emit(f"  [PREP] SKIP: {edit['path']} not found")
             continue
@@ -79,7 +83,7 @@ def apply_mechanical_edits(edits: list[dict], workdir: str) -> int:
             emit(f"  [PREP] SKIP: old text not found in {edit['path']}")
             continue
         content = content.replace(edit["old"], edit["new"], 1)
-        Path(full_path).write_text(content)
+        full_path.write_text(content)
         emit(f"  [PREP] Applied edit to {edit['path']}")
         applied += 1
     return applied
@@ -1075,9 +1079,23 @@ def _is_test_pass(name: str, args: dict) -> bool:
     """Detect if a tool call was a test runner that exited 0."""
     if name != "run_command" or _last_run_exit_code != 0:
         return False
-    cmd = args.get("command", "")
-    test_runners = ("bun test", "pytest", "python3 -m pytest", "npm test", "npx jest")
-    return any(runner in cmd for runner in test_runners)
+    cmd = str(args.get("command", "")).strip()
+    if not cmd:
+        return False
+    try:
+        tokens = shlex.split(cmd)
+    except ValueError:
+        tokens = cmd.split()
+
+    test_runners = (
+        ("bun", "test"),
+        ("pytest",),
+        ("python", "-m", "pytest"),
+        ("python3", "-m", "pytest"),
+        ("npm", "test"),
+        ("npx", "jest"),
+    )
+    return any(tokens[:len(runner)] == list(runner) for runner in test_runners)
 
 
 def _default_config_path():
@@ -1180,7 +1198,7 @@ def main():
 
     def try_complete(step, msg: dict):
         nonlocal done_rejected, quality_rejected, last_usage
-        test_file = find_test_file()
+        test_file = find_test_file(episode.get("test_file") if episode else None)
         if not test_file:
             emit("  [WARN] No test file found — cannot verify")
             messages.append({"role": "user", "content": _CONFIG["prompt"]["no_test_found"]})
