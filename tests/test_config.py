@@ -85,6 +85,9 @@ class TestLoadConfig:
         assert cfg["pr"]["base_branch"] == "main"
         assert cfg["timeouts"]["pr_create"] == 120
 
+    def test_benchmark_configs_discovered(self):
+        assert BENCHMARK_CONFIGS, "No benchmark configs found under config/agent-r*.toml"
+
     @pytest.mark.parametrize("filename", BENCHMARK_CONFIGS)
     def test_benchmark_configs_have_required_sections(self, filename):
         config_path = CONFIG_DIR / filename

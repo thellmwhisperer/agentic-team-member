@@ -101,16 +101,21 @@ def main(argv=None):
     args = _build_parser().parse_args(argv)
     logfile = _resolve_logfile(args.logfile)
     if not logfile:
-        print("No agent logs found for today")
+        print("No agent logs found")
         return 1
 
     print(f"Following: {logfile}\n")
-    proc = subprocess.Popen(
-        ["tail", "-f", "-n", "+1", logfile],
-        stdout=subprocess.PIPE,
-        text=True,
-    )
-    for line in proc.stdout:
+    try:
+        proc = subprocess.Popen(
+            ["tail", "-f", "-n", "+1", logfile],
+            stdout=subprocess.PIPE,
+            text=True,
+        )
+    except OSError as exc:
+        print(f"Failed to start tail: {exc}", file=sys.stderr)
+        return 1
+
+    for line in proc.stdout or ():
         line = line.strip()
         if not line:
             continue
@@ -238,7 +243,7 @@ def main(argv=None):
         except Exception as ex:
             print(f"  [parse error: {ex}]")
 
-    return 0
+    return proc.wait()
 
 
 if __name__ == "__main__":
