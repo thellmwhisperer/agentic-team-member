@@ -52,6 +52,13 @@ class TestLoadConfig:
         cfg = load_config(tmp_path / "agent.toml")
         assert cfg["verification"]["max_rejections"] == 3
 
+    def test_loads_quality_settings(self, tmp_path):
+        _write_config(tmp_path)
+        cfg = load_config(tmp_path / "agent.toml")
+        assert cfg["quality"]["enabled"] is True
+        assert "as any" in cfg["quality"]["typescript"]["forbidden"]
+        assert "details" in cfg["prompt"]["quality_failed"]
+
     def test_tools_path_relative_to_toml(self, tmp_path):
         """tools.json path in TOML is relative to the TOML file's directory."""
         sub = tmp_path / "nested"
@@ -87,8 +94,19 @@ nudge = "Continue. If all tests pass, say DONE."
 
 no_test_found = "You said DONE but I can't find a test file."
 
+quality_failed = "QUALITY CHECK FAILED: {details}"
+
 [verification]
 max_rejections = 3
+
+[quality]
+enabled = true
+
+[quality.typescript]
+forbidden = ["as any"]
+
+[quality.python]
+forbidden = ["type: ignore"]
 
 [tools]
 file = "tools.json"
