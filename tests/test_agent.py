@@ -1139,7 +1139,7 @@ class TestQualityFailureCompactionPolicy:
             "quality": {},
         })
 
-        should_compact, info = _should_compact_after_quality_failure({"prompt_tokens": 9131})
+        should_compact, info = _should_compact_after_quality_failure(9131)
 
         assert should_compact is False
         assert info["reason"] == "enough_headroom"
@@ -1153,11 +1153,37 @@ class TestQualityFailureCompactionPolicy:
             "quality": {},
         })
 
-        should_compact, info = _should_compact_after_quality_failure({"prompt_tokens": 30000})
+        should_compact, info = _should_compact_after_quality_failure(30000)
 
         assert should_compact is True
         assert info["reason"] == "near_context_limit"
         assert info["headroom_tokens"] == 2768
+
+    def test_prospective_retry_prompt_counts_added_messages(self, monkeypatch):
+        from agentic_tdd_runner.agent import _prospective_quality_retry_prompt_tokens
+
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "llm": {"context_window_tokens": 32768},
+            "quality": {},
+        })
+        messages = [
+            {"role": "system", "content": "system prompt"},
+            {"role": "user", "content": "Fix this bug:\n\nbug text"},
+        ]
+        assistant_msg = {"role": "assistant", "content": "DONE"}
+        retry_feedback = {
+            "role": "user",
+            "content": "Verification already passed.\n\n" + ("x" * 8000),
+        }
+
+        prompt_tokens = _prospective_quality_retry_prompt_tokens(
+            messages,
+            assistant_msg,
+            retry_feedback,
+            {"prompt_tokens": 27000},
+        )
+
+        assert prompt_tokens > 27852
 
 
 class TestMainQualityGate:
@@ -1413,6 +1439,110 @@ class TestMainQualityGate:
         assert "Verification already passed for src/file.test.ts" in seen_messages[1][3]["content"]
         assert any(event == "context_preserved" for event, _data in logged)
         assert all(event != "context_compacted" for event, _data in logged)
+
+    def test_quality_failure_compacts_when_retry_payload_pushes_prompt_over_threshold(self, tmp_path, monkeypatch):
+        config = {
+            "agent": {"max_steps": 2, "max_tool_output": 8000},
+            "verification": {"max_rejections": 3},
+            "quality": {"enabled": True},
+            "prompt": {
+                "system": "system prompt",
+                "nudge": "continue",
+                "no_test_found": "no test",
+                "quality_failed": "FAIL: {details}",
+            },
+            "llm": {"model": "test-model", "context_window_tokens": 32768},
+            "timeouts": {"tool_execution": 10},
+        }
+        args = SimpleNamespace(
+            issue="bug text",
+            source=None,
+            symbol=None,
+            workdir=str(tmp_path),
+            config="unused.toml",
+            log_dir=str(tmp_path),
+        )
+        seen_messages = []
+        logged = []
+        quality_calls = []
+
+        def fake_chat(messages):
+            seen_messages.append([m.copy() for m in messages])
+            if len(seen_messages) == 1:
+                return {
+                    "choices": [{"message": {"role": "assistant", "content": "DONE"}, "finish_reason": "stop"}],
+                    "usage": {"prompt_tokens": 27000},
+                    "timings": {},
+                }
+            return {
+                "choices": [{"message": {"role": "assistant", "content": "DONE"}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 9000},
+                "timings": {},
+            }
+
+        def fake_quality(_test_file):
+            quality_calls.append("called")
+            if len(quality_calls) == 1:
+                return False, "FAIL: " + ("x" * 8000)
+            return True, "All quality checks passed"
+
+        monkeypatch.setattr("agentic_tdd_runner.config.load_config", lambda path: config)
+        monkeypatch.setattr("agentic_tdd_runner.agent.parse_args", lambda: args)
+        monkeypatch.setattr("agentic_tdd_runner.agent.init_log", lambda: str(tmp_path / "agent.jsonl"))
+        monkeypatch.setattr("agentic_tdd_runner.agent.emit", lambda msg: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.log", lambda event, data: logged.append((event, data)))
+        monkeypatch.setattr("agentic_tdd_runner.agent.chat", fake_chat)
+        monkeypatch.setattr("agentic_tdd_runner.agent.find_test_file", lambda hint=None: "src/file.test.ts")
+        monkeypatch.setattr("agentic_tdd_runner.agent.run_quality_checks", fake_quality)
+        monkeypatch.setattr("agentic_tdd_runner.agent.verify_red_green", lambda tf: (True, "verified"))
+        monkeypatch.setattr(
+            "agentic_tdd_runner.agent.subprocess.run",
+            lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, stdout="", stderr=""),
+        )
+
+        result = main()
+
+        assert result == 0
+        assert len(quality_calls) == 2
+        assert [msg.get("role") for msg in seen_messages[1]] == ["system", "user", "user"]
+        assert any(event == "context_compacted" for event, _data in logged)
+
+    def test_main_clears_file_read_cache_before_run(self, tmp_path, monkeypatch):
+        import agentic_tdd_runner.agent as _agent_mod
+
+        _agent_mod._file_read_cache[Path("/stale")] = 123
+
+        config = {
+            "agent": {"max_steps": 0, "max_tool_output": 8000},
+            "verification": {"max_rejections": 3},
+            "quality": {"enabled": False},
+            "prompt": {
+                "system": "system prompt",
+                "nudge": "continue",
+                "no_test_found": "no test",
+            },
+            "llm": {"model": "test-model"},
+            "timeouts": {"tool_execution": 10},
+            "tools": [],
+        }
+        args = SimpleNamespace(
+            issue="bug text",
+            source=None,
+            symbol=None,
+            workdir=str(tmp_path),
+            config="unused.toml",
+            log_dir=str(tmp_path),
+        )
+
+        monkeypatch.setattr("agentic_tdd_runner.config.load_config", lambda path: config)
+        monkeypatch.setattr("agentic_tdd_runner.agent.parse_args", lambda: args)
+        monkeypatch.setattr("agentic_tdd_runner.agent.init_log", lambda: str(tmp_path / "agent.jsonl"))
+        monkeypatch.setattr("agentic_tdd_runner.agent.emit", lambda msg: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.log", lambda *args, **kwargs: None)
+
+        main()
+
+        assert _agent_mod._file_read_cache == {}
 
 
 class TestApplyMechanicalEdits:

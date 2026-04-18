@@ -154,7 +154,32 @@ def _coerce_int(value) -> int | None:
     return None
 
 
-def _should_compact_after_quality_failure(last_usage: dict | None) -> tuple[bool, dict]:
+def _estimate_prompt_tokens(messages: list[dict]) -> int:
+    total = 0
+    for message in messages:
+        payload = json.dumps(message, ensure_ascii=False, sort_keys=True)
+        total += max(1, (len(payload) + 3) // 4) + 4
+    return total
+
+
+def _prospective_quality_retry_prompt_tokens(
+    messages: list[dict],
+    assistant_msg: dict | None,
+    retry_feedback: dict,
+    last_usage: dict | None,
+) -> int:
+    added_messages = [retry_feedback]
+    if assistant_msg:
+        added_messages.insert(0, assistant_msg)
+
+    base_prompt_tokens = _coerce_int((last_usage or {}).get("prompt_tokens"))
+    added_prompt_tokens = _estimate_prompt_tokens(added_messages)
+    if base_prompt_tokens is not None:
+        return base_prompt_tokens + added_prompt_tokens
+    return _estimate_prompt_tokens([*messages, *added_messages])
+
+
+def _should_compact_after_quality_failure(prompt_tokens: int | None) -> tuple[bool, dict]:
     quality_cfg = (_CONFIG or {}).get("quality", {})
     context_window = _llm_context_window_tokens()
     try:
@@ -166,7 +191,6 @@ def _should_compact_after_quality_failure(last_usage: dict | None) -> tuple[bool
         # 2k keeps compaction conservative by default; bump per-model in config
         # if longer tool calls or reasoning traces are getting truncated.
         min_headroom_tokens = 2048
-    prompt_tokens = _coerce_int((last_usage or {}).get("prompt_tokens"))
 
     info = {
         "context_window_tokens": context_window,
@@ -910,6 +934,7 @@ def parse_args():
 def main():
     global _CONFIG, WORKDIR, LOG_DIR
     args = parse_args()
+    _file_read_cache.clear()
 
     from agentic_tdd_runner.config import load_config
     _CONFIG = load_config(args.config)
@@ -1022,7 +1047,14 @@ def main():
                 "test_file": test_file,
             })
             if not quality_ok:
-                should_compact, compact_info = _should_compact_after_quality_failure(last_usage)
+                retry_feedback = _quality_retry_feedback_message(quality_msg, test_file)
+                prospective_prompt_tokens = _prospective_quality_retry_prompt_tokens(
+                    messages,
+                    assistant_msg,
+                    retry_feedback,
+                    last_usage,
+                )
+                should_compact, compact_info = _should_compact_after_quality_failure(prospective_prompt_tokens)
                 if should_compact:
                     before_count = len(messages)
                     messages[:] = _compact_messages_after_quality_failure(messages, quality_msg, test_file)
@@ -1036,7 +1068,7 @@ def main():
                 else:
                     if assistant_msg:
                         messages.append(assistant_msg)
-                    messages.append(_quality_retry_feedback_message(quality_msg, test_file))
+                    messages.append(retry_feedback)
                     log("context_preserved", {
                         "reason": "quality_fail",
                         "message_count": len(messages),
