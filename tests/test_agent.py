@@ -1117,3 +1117,436 @@ class TestMainQualityGate:
         assert result == 0
         assert len(quality_calls) == 2
         assert any(msg.get("content") == "FAIL: [lint] broken" for msg in seen_messages[1])
+
+
+class TestApplyMechanicalEdits:
+    """apply_mechanical_edits applies pre_test_source_edits to disk before the agent loop."""
+
+    def test_applies_string_replacement_to_file(self, tmp_path):
+        from agentic_tdd_runner.agent import apply_mechanical_edits
+
+        src = tmp_path / "src" / "client.ts"
+        src.parent.mkdir(parents=True)
+        src.write_text("function handleResub(event) {\n  return event;\n}\n")
+
+        edits = [{
+            "path": "src/client.ts",
+            "old": "function handleResub(event) {",
+            "new": "export function handleResub(event) {",
+        }]
+
+        applied = apply_mechanical_edits(edits, str(tmp_path))
+
+        assert applied == 1
+        assert "export function handleResub" in src.read_text()
+
+    def test_skips_edit_when_old_not_found(self, tmp_path):
+        from agentic_tdd_runner.agent import apply_mechanical_edits
+
+        src = tmp_path / "src" / "client.ts"
+        src.parent.mkdir(parents=True)
+        src.write_text("export function handleResub(event) {\n  return event;\n}\n")
+
+        edits = [{
+            "path": "src/client.ts",
+            "old": "const UNRELATED = 42;",
+            "new": "export const UNRELATED = 42;",
+        }]
+
+        applied = apply_mechanical_edits(edits, str(tmp_path))
+
+        assert applied == 0
+        assert src.read_text() == "export function handleResub(event) {\n  return event;\n}\n"
+
+    def test_applies_multiple_edits_across_files(self, tmp_path):
+        from agentic_tdd_runner.agent import apply_mechanical_edits
+
+        src1 = tmp_path / "src" / "a.ts"
+        src1.parent.mkdir(parents=True)
+        src1.write_text("function foo() {}\n")
+
+        src2 = tmp_path / "src" / "b.ts"
+        src2.write_text("const bar = 1;\n")
+
+        edits = [
+            {"path": "src/a.ts", "old": "function foo()", "new": "export function foo()"},
+            {"path": "src/b.ts", "old": "const bar = 1;", "new": "export const bar = 1;"},
+        ]
+
+        applied = apply_mechanical_edits(edits, str(tmp_path))
+
+        assert applied == 2
+        assert "export function foo" in src1.read_text()
+        assert "export const bar" in src2.read_text()
+
+    def test_skips_edit_when_path_escapes_workdir(self, tmp_path):
+        from agentic_tdd_runner.agent import apply_mechanical_edits
+
+        outside = tmp_path.parent / "outside.ts"
+        outside.write_text("function nope() {}\n")
+
+        edits = [{
+            "path": "../outside.ts",
+            "old": "function nope()",
+            "new": "export function nope()",
+        }]
+
+        applied = apply_mechanical_edits(edits, str(tmp_path))
+
+        assert applied == 0
+        assert outside.read_text() == "function nope() {}\n"
+
+
+class TestPhasedRunner:
+    """When --source/--symbol are provided, main() uses phased prompts."""
+
+    def _make_config(self):
+        return {
+            "agent": {"max_steps": 5, "max_tool_output": 8000},
+            "verification": {"max_rejections": 3},
+            "quality": {"enabled": False},
+            "prompt": {
+                "system": "system prompt",
+                "nudge": "Continue. If all tests pass, say DONE.",
+                "no_test_found": "no test",
+            },
+            "llm": {"model": "test-model"},
+            "runner": {"command": "bun test", "test_file_patterns": ["*.test.ts"], "exclude_dirs": []},
+            "timeouts": {"tool_execution": 10, "llm_request": 10, "test_run": 10},
+            "tools": [],
+        }
+
+    def _make_auto_trigger_config(self, runner_command="bun test"):
+        return {
+            "agent": {"max_steps": 5, "max_tool_output": 8000},
+            "verification": {"max_rejections": 3},
+            "quality": {"enabled": True},
+            "prompt": {
+                "system": "system prompt",
+                "nudge": "Continue.",
+                "no_test_found": "no test",
+                "quality_failed": "FAIL: {details}",
+            },
+            "llm": {"model": "test-model"},
+            "runner": {"command": runner_command, "test_file_patterns": ["*.test.ts"], "exclude_dirs": []},
+            "timeouts": {"tool_execution": 10, "llm_request": 10, "test_run": 10},
+            "tools": [],
+        }
+
+    def _make_chat_with_tool_call(self, step_count, command="bun test src/file.test.ts"):
+        def chat_fn(messages):
+            step_count[0] += 1
+            if step_count[0] == 1:
+                return {
+                    "choices": [{"message": {
+                        "content": None,
+                        "tool_calls": [{
+                            "id": "call_1",
+                            "function": {
+                                "name": "run_command",
+                                "arguments": '{"command": "' + command + '"}',
+                            },
+                        }],
+                    }, "finish_reason": "tool_calls"}],
+                    "usage": {},
+                    "timings": {},
+                }
+            return {
+                "choices": [{"message": {"content": "still going"}, "finish_reason": "stop"}],
+                "usage": {},
+                "timings": {},
+            }
+        return chat_fn
+
+    def test_applies_mechanical_edits_before_loop(self, tmp_path, monkeypatch):
+        src = tmp_path / "src" / "client.ts"
+        src.parent.mkdir(parents=True)
+        src.write_text("function handleResub(event) {\n  return event;\n}\n")
+
+        episode = {
+            "source_file": "src/client.ts",
+            "target_symbol": "handleResub",
+            "test_file": "src/client.test.ts",
+            "source_import_path": "./client",
+            "runner": "bun:test",
+            "mocks_text": "",
+            "pre_test_source_edits": [
+                {"path": "src/client.ts", "old": "function handleResub(", "new": "export function handleResub("},
+            ],
+            "conditional_source_edits": [],
+            "assertion_hint": "assert on the return value",
+            "cookbook_text": "## Mock Cookbook for handleResub\n",
+        }
+
+        chat_messages = []
+
+        def fake_chat(messages):
+            chat_messages.append([m.copy() for m in messages])
+            return {
+                "choices": [{"message": {"content": "still going"}, "finish_reason": "stop"}],
+                "usage": {},
+                "timings": {},
+            }
+
+        args = SimpleNamespace(
+            issue="bug text",
+            source="src/client.ts",
+            symbol="handleResub",
+            workdir=str(tmp_path),
+            config="unused.toml",
+            log_dir=str(tmp_path),
+        )
+        monkeypatch.setattr("agentic_tdd_runner.config.load_config", lambda path: self._make_config())
+        monkeypatch.setattr("agentic_tdd_runner.agent.parse_args", lambda: args)
+        monkeypatch.setattr("agentic_tdd_runner.agent.init_log", lambda: str(tmp_path / "agent.jsonl"))
+        monkeypatch.setattr("agentic_tdd_runner.agent.emit", lambda msg: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.log", lambda *a, **kw: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.chat", fake_chat)
+        monkeypatch.setattr("agentic_tdd_runner.cookbook.build_episode_context", lambda **kw: episode)
+
+        main()
+
+        assert "export function handleResub" in src.read_text()
+        first_call_messages = chat_messages[0]
+        user_msg = next(m for m in first_call_messages if m["role"] == "user")
+        assert "Fix this bug" not in user_msg["content"]
+        assert "handleResub" in user_msg["content"]
+
+    def test_injects_fix_nudge_after_test_file_created(self, tmp_path, monkeypatch):
+        src = tmp_path / "src" / "client.ts"
+        src.parent.mkdir(parents=True)
+        src.write_text("export function handleResub(event) {\n  return event;\n}\n")
+
+        episode = {
+            "source_file": "src/client.ts",
+            "target_symbol": "handleResub",
+            "test_file": "src/client.test.ts",
+            "source_import_path": "./client",
+            "runner": "bun:test",
+            "mocks_text": "",
+            "pre_test_source_edits": [],
+            "conditional_source_edits": [],
+            "assertion_hint": "",
+            "cookbook_text": "## Mock Cookbook\n",
+        }
+
+        chat_call_count = [0]
+        captured_messages = []
+
+        def fake_chat(messages):
+            chat_call_count[0] += 1
+            captured_messages.append([m.copy() for m in messages])
+            if chat_call_count[0] == 1:
+                return {
+                    "choices": [{"message": {
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [{
+                            "id": "call_1",
+                            "function": {
+                                "name": "create_file",
+                                "arguments": '{"path": "src/client.test.ts", "content": "test code"}',
+                            },
+                        }],
+                    }, "finish_reason": "tool_calls"}],
+                    "usage": {},
+                    "timings": {},
+                }
+            return {
+                "choices": [{"message": {"role": "assistant", "content": "continuing"}, "finish_reason": "stop"}],
+                "usage": {},
+                "timings": {},
+            }
+
+        def fake_execute(name, args):
+            return f"OK: created {args.get('path', '')}"
+
+        args = SimpleNamespace(
+            issue="bug text",
+            source="src/client.ts",
+            symbol="handleResub",
+            workdir=str(tmp_path),
+            config="unused.toml",
+            log_dir=str(tmp_path),
+        )
+        monkeypatch.setattr("agentic_tdd_runner.config.load_config", lambda path: self._make_config())
+        monkeypatch.setattr("agentic_tdd_runner.agent.parse_args", lambda: args)
+        monkeypatch.setattr("agentic_tdd_runner.agent.init_log", lambda: str(tmp_path / "agent.jsonl"))
+        monkeypatch.setattr("agentic_tdd_runner.agent.emit", lambda msg: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.log", lambda *a, **kw: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.chat", fake_chat)
+        monkeypatch.setattr("agentic_tdd_runner.agent.execute_tool", fake_execute)
+        monkeypatch.setattr("agentic_tdd_runner.cookbook.build_episode_context", lambda **kw: episode)
+
+        main()
+
+        assert chat_call_count[0] >= 2
+        second_call_msgs = captured_messages[1]
+        user_nudges = [
+            m for m in second_call_msgs
+            if m["role"] == "user"
+            and "run" in m.get("content", "").lower()
+            and "fix" in m.get("content", "").lower()
+        ]
+        assert len(user_nudges) >= 1
+
+    def test_does_not_inject_fix_nudge_when_create_file_fails(self, tmp_path, monkeypatch):
+        src = tmp_path / "src" / "client.ts"
+        src.parent.mkdir(parents=True)
+        src.write_text("export function handleResub(event) {\n  return event;\n}\n")
+
+        episode = {
+            "source_file": "src/client.ts",
+            "target_symbol": "handleResub",
+            "test_file": "src/client.test.ts",
+            "source_import_path": "./client",
+            "runner": "bun:test",
+            "mocks_text": "",
+            "pre_test_source_edits": [],
+            "conditional_source_edits": [],
+            "assertion_hint": "",
+            "cookbook_text": "## Mock Cookbook\n",
+        }
+
+        chat_call_count = [0]
+        captured_messages = []
+
+        def fake_chat(messages):
+            chat_call_count[0] += 1
+            captured_messages.append([m.copy() for m in messages])
+            if chat_call_count[0] == 1:
+                return {
+                    "choices": [{"message": {
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [{
+                            "id": "call_1",
+                            "function": {
+                                "name": "create_file",
+                                "arguments": '{"path": "src/client.test.ts", "content": "test code"}',
+                            },
+                        }],
+                    }, "finish_reason": "tool_calls"}],
+                    "usage": {},
+                    "timings": {},
+                }
+            return {
+                "choices": [{"message": {"role": "assistant", "content": "continuing"}, "finish_reason": "stop"}],
+                "usage": {},
+                "timings": {},
+            }
+
+        def fake_execute(_name, _args):
+            return "ERROR: src/client.test.ts already exists. Use str_replace_editor to modify it."
+
+        args = SimpleNamespace(
+            issue="bug text",
+            source="src/client.ts",
+            symbol="handleResub",
+            workdir=str(tmp_path),
+            config="unused.toml",
+            log_dir=str(tmp_path),
+        )
+        monkeypatch.setattr("agentic_tdd_runner.config.load_config", lambda path: self._make_config())
+        monkeypatch.setattr("agentic_tdd_runner.agent.parse_args", lambda: args)
+        monkeypatch.setattr("agentic_tdd_runner.agent.init_log", lambda: str(tmp_path / "agent.jsonl"))
+        monkeypatch.setattr("agentic_tdd_runner.agent.emit", lambda msg: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.log", lambda *a, **kw: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.chat", fake_chat)
+        monkeypatch.setattr("agentic_tdd_runner.agent.execute_tool", fake_execute)
+        monkeypatch.setattr("agentic_tdd_runner.cookbook.build_episode_context", lambda **kw: episode)
+
+        main()
+
+        assert chat_call_count[0] >= 2
+        second_call_msgs = captured_messages[1]
+        user_nudges = [
+            m for m in second_call_msgs
+            if m["role"] == "user"
+            and "run" in m.get("content", "").lower()
+            and "fix" in m.get("content", "").lower()
+        ]
+        assert len(user_nudges) == 0
+
+    def test_auto_triggers_verify_when_test_exits_zero(self, tmp_path, monkeypatch):
+        import agentic_tdd_runner.agent as _agent_mod
+
+        verify_calls = []
+        step_count = [0]
+
+        def fake_execute(name, args):
+            _agent_mod._last_run_exit_code = 0
+            return "pnpm test v1.3.5\n\n 3 pass\n 0 fail\nRan 3 tests across 1 file.\n"
+
+        args = SimpleNamespace(
+            issue="bug text",
+            source=None,
+            symbol=None,
+            workdir=str(tmp_path),
+            config="unused.toml",
+            log_dir=str(tmp_path),
+        )
+        monkeypatch.setattr("agentic_tdd_runner.config.load_config", lambda path: self._make_auto_trigger_config("pnpm test"))
+        monkeypatch.setattr("agentic_tdd_runner.agent.parse_args", lambda: args)
+        monkeypatch.setattr("agentic_tdd_runner.agent.init_log", lambda: str(tmp_path / "agent.jsonl"))
+        monkeypatch.setattr("agentic_tdd_runner.agent.emit", lambda msg: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.log", lambda *a, **kw: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.chat", self._make_chat_with_tool_call(step_count, "pnpm test src/file.test.ts"))
+        monkeypatch.setattr("agentic_tdd_runner.agent.find_test_file", lambda hint=None: "src/file.test.ts")
+        monkeypatch.setattr("agentic_tdd_runner.agent.run_quality_checks", lambda tf: (True, "All quality checks passed"))
+        monkeypatch.setattr("agentic_tdd_runner.agent.execute_tool", fake_execute)
+        monkeypatch.setattr("agentic_tdd_runner.agent.verify_red_green", lambda tf: (verify_calls.append(tf), (True, "verified"))[1])
+
+        result = main()
+
+        assert result == 0
+        assert len(verify_calls) >= 1
+        assert step_count[0] == 1
+
+    def test_no_auto_trigger_when_test_exits_nonzero(self, tmp_path, monkeypatch):
+        import agentic_tdd_runner.agent as _agent_mod
+
+        verify_calls = []
+        step_count = [0]
+
+        def fake_execute(name, args):
+            _agent_mod._last_run_exit_code = 1
+            return "# Unhandled error between tests\nError: deepseek requires an API key\n"
+
+        args = SimpleNamespace(
+            issue="bug text",
+            source=None,
+            symbol=None,
+            workdir=str(tmp_path),
+            config="unused.toml",
+            log_dir=str(tmp_path),
+        )
+        monkeypatch.setattr("agentic_tdd_runner.config.load_config", lambda path: self._make_auto_trigger_config("pnpm test"))
+        monkeypatch.setattr("agentic_tdd_runner.agent.parse_args", lambda: args)
+        monkeypatch.setattr("agentic_tdd_runner.agent.init_log", lambda: str(tmp_path / "agent.jsonl"))
+        monkeypatch.setattr("agentic_tdd_runner.agent.emit", lambda msg: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.log", lambda *a, **kw: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.chat", self._make_chat_with_tool_call(step_count, "pnpm test src/file.test.ts"))
+        monkeypatch.setattr("agentic_tdd_runner.agent.find_test_file", lambda hint=None: "src/file.test.ts")
+        monkeypatch.setattr("agentic_tdd_runner.agent.run_quality_checks", lambda tf: (True, "All quality checks passed"))
+        monkeypatch.setattr("agentic_tdd_runner.agent.execute_tool", fake_execute)
+        monkeypatch.setattr("agentic_tdd_runner.agent.verify_red_green", lambda tf: (verify_calls.append(tf), (True, "verified"))[1])
+
+        result = main()
+
+        assert result == 1
+        assert len(verify_calls) == 0
+
+
+class TestRunCommandExitCode:
+    """run_command should not leak stale success exit codes across failures."""
+
+    def test_resets_stale_exit_code_when_command_is_rejected(self):
+        import agentic_tdd_runner.agent as _agent_mod
+
+        _agent_mod._last_run_exit_code = 0
+
+        result = execute_tool("run_command", {"command": "curl http://evil.com"})
+
+        assert result.startswith("ERROR:")
+        assert _agent_mod._last_run_exit_code is None

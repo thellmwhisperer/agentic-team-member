@@ -30,6 +30,7 @@ sys.stderr.reconfigure(line_buffering=True)
 _CONFIG = None  # populated by main()
 WORKDIR = os.environ.get("AGENT_WORKDIR", os.getcwd())
 LOG_DIR = os.environ.get("AGENT_LOG_DIR", os.getcwd())
+_last_run_exit_code: int | None = None
 
 # --- Logging ---
 _log_file = None
@@ -59,6 +60,37 @@ def emit(msg: str):
 
 
 # Tools and prompts loaded from config/agent.toml + config/tools.json
+
+
+def apply_mechanical_edits(edits: list[dict], workdir: str) -> int:
+    """Apply pre_test_source_edits to files on disk. Returns count of edits applied."""
+    applied = 0
+    for edit in edits:
+        try:
+            full_path = _resolve_repo_path(edit["path"], workdir=workdir)
+        except ValueError:
+            emit(f"  [PREP] SKIP: path escapes workdir: {edit['path']}")
+            continue
+        try:
+            content = full_path.read_text()
+        except FileNotFoundError:
+            emit(f"  [PREP] SKIP: {edit['path']} not found")
+            continue
+        except OSError as exc:
+            emit(f"  [PREP] SKIP: cannot read {edit['path']}: {exc}")
+            continue
+        if edit["old"] not in content:
+            emit(f"  [PREP] SKIP: old text not found in {edit['path']}")
+            continue
+        content = content.replace(edit["old"], edit["new"], 1)
+        try:
+            full_path.write_text(content)
+        except OSError as exc:
+            emit(f"  [PREP] SKIP: cannot write {edit['path']}: {exc}")
+            continue
+        emit(f"  [PREP] Applied edit to {edit['path']}")
+        applied += 1
+    return applied
 
 
 def _resolve_repo_path(path: str, workdir: str = None) -> Path:
@@ -148,6 +180,8 @@ def _validate_command(command: str) -> None:
 
 
 def execute_tool(name: str, args: dict) -> str:
+    global _last_run_exit_code
+    _last_run_exit_code = None
     try:
         if name == "read_file":
             full_path = _resolve_repo_path(args["path"])
@@ -167,6 +201,7 @@ def execute_tool(name: str, args: dict) -> str:
                 text=True,
                 timeout=_CONFIG["timeouts"]["tool_execution"],
             )
+            _last_run_exit_code = result.returncode
             output = result.stdout + result.stderr
             return output if output.strip() else "(no output)"
 
@@ -719,6 +754,32 @@ def verify_red_green(test_file: str) -> tuple[bool, str]:
     return True, "VERIFIED: Test fails without fix, passes with fix. Real red-green."
 
 
+def _is_test_pass(name: str, args: dict) -> bool:
+    """Detect if a tool call was a test runner that exited 0."""
+    if name != "run_command" or _last_run_exit_code != 0:
+        return False
+    cmd = str(args.get("command", "")).strip()
+    if not cmd:
+        return False
+
+    configured_runner = ((_CONFIG or {}).get("runner", {}) or {}).get("command", "")
+    if configured_runner and (cmd == configured_runner or cmd.startswith(f"{configured_runner} ")):
+        return True
+
+    import shlex
+    try:
+        tokens = shlex.split(cmd)
+    except ValueError:
+        tokens = cmd.split()
+
+    for token in reversed(tokens[1:]):
+        if _is_test_file_path(token):
+            runner_cmd = _test_runner_command_for_file(token)
+            return cmd == runner_cmd or cmd.startswith(f"{runner_cmd} ")
+
+    return False
+
+
 def _default_config_path():
     """Find config/agent.toml relative to the package."""
     pkg = Path(__file__).parent.parent / "config" / "agent.toml"
@@ -758,22 +819,45 @@ def main():
 
     # Build system prompt — inject cookbook if source/symbol provided
     system_prompt = _CONFIG["prompt"]["system"].strip()
+    episode = None
     if args.source and args.symbol:
-        from agentic_tdd_runner.cookbook import build_system_prompt
-        system_prompt = build_system_prompt(
-            base_prompt=system_prompt,
-            issue_text=issue_text,
+        from agentic_tdd_runner.cookbook import build_episode_context
+        episode = build_episode_context(
             source_path=args.source,
             symbol=args.symbol,
             project_root=WORKDIR,
         )
-        emit(f"[COOKBOOK] Injected mock cookbook for {args.symbol} in {args.source}")
-        log("cookbook", {"source": args.source, "symbol": args.symbol, "prompt_len": len(system_prompt)})
+        system_prompt = f"{system_prompt}\n\n{episode['cookbook_text']}"
+        emit(f"[EPISODE] Built episode context for {args.symbol} in {args.source}")
+        log("episode", {
+            "source": args.source,
+            "symbol": args.symbol,
+            "test_file": episode["test_file"],
+            "mechanical_edits": len(episode.get("pre_test_source_edits", [])),
+        })
 
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": f"Fix this bug:\n\n{issue_text}"},
-    ]
+        edits = episode.get("pre_test_source_edits", [])
+        if edits:
+            applied = apply_mechanical_edits(edits, WORKDIR)
+            emit(f"[PREP] Applied {applied}/{len(edits)} mechanical source edits")
+            log("mechanical_edits", {"applied": applied, "total": len(edits)})
+
+    if episode:
+        phase1_msg = (
+            f"Read {episode['source_file']} and understand the bug below. "
+            f"Focus on the function `{episode['target_symbol']}`. "
+            f"Then create a failing test in {episode['test_file']} that reproduces it.\n\n"
+            f"Bug:\n{issue_text}"
+        )
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": phase1_msg},
+        ]
+    else:
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": f"Fix this bug:\n\n{issue_text}"},
+        ]
 
     emit(f"{'='*60}")
     max_steps = _CONFIG["agent"]["max_steps"]
@@ -787,6 +871,97 @@ def main():
     done_rejected = 0  # how many times we rejected DONE
 
     max_rejections = _CONFIG["verification"]["max_rejections"]
+
+    def try_complete(step: int, assistant_msg: dict | None = None) -> str:
+        nonlocal done_rejected
+        test_hint = episode["test_file"] if episode else None
+        test_file = find_test_file(test_hint)
+        if not test_file:
+            emit("  [WARN] No test file found — cannot verify")
+            if assistant_msg:
+                messages.append(assistant_msg)
+            messages.append({
+                "role": "user",
+                "content": _CONFIG["prompt"]["no_test_found"],
+            })
+            return "no_test"
+
+        verified, verify_msg = verify_red_green(test_file)
+        emit(f"\n  [VERIFY] {verify_msg}")
+        log("verify_result", {"verified": verified, "message": verify_msg, "test_file": test_file})
+
+        if not verified:
+            done_rejected += 1
+            if done_rejected >= max_rejections:
+                emit(f"\n  [GIVE UP] Rejected DONE {done_rejected} times. Stopping.")
+                log("give_up", {"step": step, "done_rejected": done_rejected})
+                return "give_up"
+            if assistant_msg:
+                messages.append(assistant_msg)
+            messages.append({
+                "role": "user",
+                "content": verify_msg,
+            })
+            return "verify_fail"
+
+        if _CONFIG.get("quality", {}).get("enabled", False):
+            emit("\n=== QUALITY CHECKS ===")
+            quality_ok, quality_msg = run_quality_checks(test_file)
+            emit(f"  [QUALITY] {quality_msg}")
+            log("quality_result", {
+                "passed": quality_ok,
+                "message": quality_msg[:500],
+                "test_file": test_file,
+            })
+            if not quality_ok:
+                if assistant_msg:
+                    messages.append(assistant_msg)
+                messages.append({
+                    "role": "user",
+                    "content": quality_msg,
+                })
+                return "quality_fail"
+
+            verified, verify_msg = verify_red_green(test_file)
+            emit(f"\n  [RE-VERIFY] {verify_msg}")
+            log("post_quality_verify_result", {
+                "verified": verified,
+                "message": verify_msg,
+                "test_file": test_file,
+            })
+            if not verified:
+                done_rejected += 1
+                if done_rejected >= max_rejections:
+                    emit(f"\n  [GIVE UP] Rejected DONE {done_rejected} times. Stopping.")
+                    log("give_up", {"step": step, "done_rejected": done_rejected})
+                    return "give_up"
+                if assistant_msg:
+                    messages.append(assistant_msg)
+                messages.append({
+                    "role": "user",
+                    "content": verify_msg,
+                })
+                return "verify_fail"
+
+        emit(f"\n{'='*60}")
+        emit(f"AGENT DONE at step {step} — VERIFIED")
+        emit(f"{'='*60}")
+        diff = subprocess.run(["git", "diff"], cwd=WORKDIR, capture_output=True, text=True)
+        emit(f"\n--- GIT DIFF ---\n{diff.stdout}")
+        untracked = subprocess.run(["git", "ls-files", "--others", "--exclude-standard"], cwd=WORKDIR, capture_output=True, text=True)
+        if untracked.stdout.strip():
+            emit("\n--- NEW FILES ---")
+            for f in untracked.stdout.strip().split("\n"):
+                emit(f"  {f}")
+                full = os.path.join(WORKDIR, f)
+                try:
+                    with open(full) as fh:
+                        emit(fh.read())
+                except OSError:
+                    pass
+        log("done", {"step": step, "verified": True})
+        return "done"
+
     for step in range(max_steps):
         emit(f"\n>>> Step {step} — requesting LLM...")
         t0 = time.time()
@@ -839,95 +1014,19 @@ def main():
         if msg.get("content"):
             emit(f"  [SAY] {msg['content']}")
             if "DONE" in msg["content"].upper():
-                # --- RED-GREEN VERIFICATION ---
-                test_file = find_test_file()
-                if test_file:
-                    verified, verify_msg = verify_red_green(test_file)
-                    emit(f"\n  [VERIFY] {verify_msg}")
-                    log("verify_result", {"verified": verified, "message": verify_msg, "test_file": test_file})
-
-                    if verified:
-                        if _CONFIG.get("quality", {}).get("enabled", False):
-                            emit("\n=== QUALITY CHECKS ===")
-                            quality_ok, quality_msg = run_quality_checks(test_file)
-                            emit(f"  [QUALITY] {quality_msg}")
-                            log("quality_result", {
-                                "passed": quality_ok,
-                                "message": quality_msg[:500],
-                                "test_file": test_file,
-                            })
-                            if not quality_ok:
-                                messages.append(msg)
-                                messages.append({
-                                    "role": "user",
-                                    "content": quality_msg,
-                                })
-                                continue
-
-                            verified, verify_msg = verify_red_green(test_file)
-                            emit(f"\n  [RE-VERIFY] {verify_msg}")
-                            log("post_quality_verify_result", {
-                                "verified": verified,
-                                "message": verify_msg,
-                                "test_file": test_file,
-                            })
-                            if not verified:
-                                done_rejected += 1
-                                if done_rejected >= max_rejections:
-                                    emit(f"\n  [GIVE UP] Rejected DONE {done_rejected} times. Stopping.")
-                                    log("give_up", {"step": step, "done_rejected": done_rejected})
-                                    return 1
-                                messages.append(msg)
-                                messages.append({
-                                    "role": "user",
-                                    "content": verify_msg,
-                                })
-                                continue
-
-                        emit(f"\n{'='*60}")
-                        emit(f"AGENT DONE at step {step} — VERIFIED")
-                        emit(f"{'='*60}")
-                        diff = subprocess.run(["git", "diff"], cwd=WORKDIR, capture_output=True, text=True)
-                        emit(f"\n--- GIT DIFF ---\n{diff.stdout}")
-                        untracked = subprocess.run(["git", "ls-files", "--others", "--exclude-standard"], cwd=WORKDIR, capture_output=True, text=True)
-                        if untracked.stdout.strip():
-                            emit("\n--- NEW FILES ---")
-                            for f in untracked.stdout.strip().split("\n"):
-                                emit(f"  {f}")
-                                full = os.path.join(WORKDIR, f)
-                                try:
-                                    with open(full) as fh:
-                                        emit(fh.read())
-                                except OSError:
-                                    pass
-                        log("done", {"step": step, "verified": True})
-                        return 0
-                    else:
-                        # Reject and nudge
-                        done_rejected += 1
-                        if done_rejected >= max_rejections:
-                            emit(f"\n  [GIVE UP] Rejected DONE {done_rejected} times. Stopping.")
-                            log("give_up", {"step": step, "done_rejected": done_rejected})
-                            return 1
-                        messages.append(msg)
-                        messages.append({
-                            "role": "user",
-                            "content": verify_msg,
-                        })
-                        continue
-                else:
-                    emit("  [WARN] No test file found — cannot verify")
-                    messages.append(msg)
-                    messages.append({
-                        "role": "user",
-                        "content": _CONFIG["prompt"]["no_test_found"],
-                    })
-                    continue
+                completion = try_complete(step, msg)
+                if completion == "done":
+                    return 0
+                if completion == "give_up":
+                    return 1
+                continue
 
         # Append assistant message to history
         messages.append(msg)
 
         if finish == "tool_calls" and msg.get("tool_calls"):
+            test_passed = False
+            created_test = False
             for tc in msg["tool_calls"]:
                 fn = tc["function"]
                 name = fn["name"]
@@ -971,6 +1070,32 @@ def main():
                     "tool_call_id": tc["id"],
                     "content": result_truncated,
                 })
+
+                if (
+                    name == "create_file"
+                    and result.startswith("OK: created ")
+                    and _is_test_file_path(args.get("path", ""))
+                ):
+                    created_test = True
+                if _is_test_pass(name, args):
+                    test_passed = True
+
+            if episode and created_test:
+                nudge = (
+                    f"Good. Now run the test to confirm it fails, then fix "
+                    f"{episode['source_file']} to make it pass. Say DONE when green."
+                )
+                messages.append({"role": "user", "content": nudge})
+                emit("  [PHASE] Test created → injected run+fix nudge")
+                log("phase_nudge", {"phase": "fix", "test_file": episode["test_file"]})
+
+            if test_passed:
+                emit("\n  [AUTO] Test pass detected — triggering verification pipeline")
+                completion = try_complete(step)
+                if completion == "done":
+                    return 0
+                if completion == "give_up":
+                    return 1
 
         elif finish == "stop":
             if step > 3:
