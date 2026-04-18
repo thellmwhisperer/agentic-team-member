@@ -563,3 +563,26 @@ class TestBuildEpisodeContext:
         """)
         ctx = build_episode_context("src/server.py", "_handle_query", str(tmp_path))
         assert ctx["test_file"] == "src/test__handle_query.py"
+
+    def test_episode_exposes_function_line_range(self, tmp_path):
+        """Large repos (1500-line server.py) waste steps locating the symbol
+        with sed/grep. Exposing the AST-resolved range lets the runner inject
+        a precise location hint into the agent's first message.
+        """
+        from agentic_tdd_runner.cookbook import build_episode_context
+
+        _write_file(tmp_path, "src/worker.py", """\
+            # filler line 1
+            # filler line 2
+
+            def helper():
+                return 1
+
+            def process(item):
+                # body
+                return item.upper()
+        """)
+        ctx = build_episode_context("src/worker.py", "process", str(tmp_path))
+        rng = ctx["function_line_range"]
+        assert rng["start"] >= 7  # process starts after helper
+        assert rng["end"] >= rng["start"]
