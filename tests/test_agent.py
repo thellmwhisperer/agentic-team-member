@@ -347,6 +347,11 @@ class TestIsTestPass:
         monkeypatch.setattr("agentic_tdd_runner.agent._last_run_exit_code", 0)
         assert _is_test_pass("run_command", {"command": "python3 -m pytest tests/test_agent.py"}) is True
 
+    def test_matches_configured_runner_prefix(self, monkeypatch):
+        monkeypatch.setattr("agentic_tdd_runner.agent._last_run_exit_code", 0)
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {"runner": {"command": "pnpm test"}})
+        assert _is_test_pass("run_command", {"command": "pnpm test src/file.test.ts"}) is True
+
     def test_rejects_substring_false_positive(self, monkeypatch):
         monkeypatch.setattr("agentic_tdd_runner.agent._last_run_exit_code", 0)
         assert _is_test_pass("run_command", {"command": "grep pytest README.md"}) is False
