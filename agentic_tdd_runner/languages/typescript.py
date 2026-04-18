@@ -98,8 +98,9 @@ class TypeScriptLanguage:
 
     def render_seam_setter(self, binding: str, assignment: dict) -> str:
         name = self.setter_name(binding)
+        type_hint = assignment.get("type_annotation") or f"typeof {binding}"
         return (
-            f"export function {name}(value: any): void {{\n"
+            f"export function {name}(value: {type_hint}): void {{\n"
             f"  {binding} = value;\n"
             f"}}"
         )
