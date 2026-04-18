@@ -422,17 +422,28 @@ def detect_quality_tools(lang_name: str) -> list[dict]:
     return checks
 
 
+def _run_git_capture(args: list[str], *, error_context: str) -> subprocess.CompletedProcess[str]:
+    """Run a git command and raise with stderr if it fails."""
+    result = subprocess.run(args, cwd=WORKDIR, capture_output=True, text=True)
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip() or "no output captured"
+        raise RuntimeError(f"{error_context} failed (rc={result.returncode}): {detail}")
+    return result
+
+
 def _get_changed_files() -> list[str]:
     """Get modified + staged + untracked files relative to WORKDIR."""
-    diff = subprocess.run(
-        ["git", "diff", "--name-only"], cwd=WORKDIR, capture_output=True, text=True,
+    diff = _run_git_capture(
+        ["git", "diff", "--name-only"],
+        error_context="changed-file discovery via `git diff --name-only`",
     )
-    staged = subprocess.run(
-        ["git", "diff", "--cached", "--name-only"], cwd=WORKDIR, capture_output=True, text=True,
+    staged = _run_git_capture(
+        ["git", "diff", "--cached", "--name-only"],
+        error_context="changed-file discovery via `git diff --cached --name-only`",
     )
-    untracked = subprocess.run(
+    untracked = _run_git_capture(
         ["git", "ls-files", "--others", "--exclude-standard"],
-        cwd=WORKDIR, capture_output=True, text=True,
+        error_context="changed-file discovery via `git ls-files --others --exclude-standard`",
     )
     files = set()
     for line in (diff.stdout + staged.stdout + untracked.stdout).splitlines():
@@ -471,9 +482,32 @@ def run_quality_checks(test_file: str) -> tuple[bool, str]:
     changed_str = " ".join(shlex.quote(path) for path in changed)
     failures = []
 
-    for check in checks:
+    for idx, check in enumerate(checks, 1):
+        if not isinstance(check, dict):
+            failures.append(
+                f"[check #{idx}] invalid quality check config: expected mapping, got {type(check).__name__}"
+            )
+            continue
+
+        check_name = check.get("name")
+        if not isinstance(check_name, str) or not check_name.strip():
+            failures.append(f"[check #{idx}] invalid quality check config: missing string 'name'")
+            continue
+
+        raw_cmd = check.get("command")
+        if not isinstance(raw_cmd, str) or not raw_cmd.strip():
+            failures.append(f"[{check_name}] invalid quality check config: missing string 'command'")
+            continue
+
+        raw_fix = check.get("fix", "")
+        if raw_fix is None:
+            raw_fix = ""
+        if not isinstance(raw_fix, str):
+            failures.append(f"[{check_name}] invalid quality check config: 'fix' must be a string")
+            continue
+
         try:
-            fix_cmd = check.get("fix", "").replace("{changed_files}", changed_str)
+            fix_cmd = raw_fix.replace("{changed_files}", changed_str)
             if fix_cmd:
                 fix_result = subprocess.run(
                     fix_cmd,
@@ -488,10 +522,10 @@ def run_quality_checks(test_file: str) -> tuple[bool, str]:
                     lines = [ln for ln in raw.splitlines() if ln.strip()]
                     sample = "\n".join(f"  {ln}" for ln in lines[:5]) if lines else "  no output captured"
                     failures.append(
-                        f"[{check['name']}:fix] autofix failed (rc={fix_result.returncode}):\n{sample}"
+                        f"[{check_name}:fix] autofix failed (rc={fix_result.returncode}):\n{sample}"
                     )
 
-            cmd = check["command"].replace("{changed_files}", changed_str)
+            cmd = raw_cmd.replace("{changed_files}", changed_str)
             result = subprocess.run(
                 cmd,
                 shell=True,
@@ -505,11 +539,11 @@ def run_quality_checks(test_file: str) -> tuple[bool, str]:
                 lines = [ln for ln in raw.splitlines() if ln.strip()]
                 n_errors = sum(1 for ln in lines if "error" in ln.lower()) or 1
                 sample = "\n".join(f"  {ln}" for ln in lines[:10]) if lines else f"  {raw[:200]}"
-                failures.append(f"[{check['name']}] {n_errors} errors:\n{sample}")
+                failures.append(f"[{check_name}] {n_errors} errors:\n{sample}")
         except subprocess.TimeoutExpired:
-            failures.append(f"[{check['name']}] TIMEOUT: command timed out")
+            failures.append(f"[{check_name}] TIMEOUT: command timed out")
         except (OSError, UnicodeDecodeError) as e:
-            failures.append(f"[{check['name']}] ERROR: {e}")
+            failures.append(f"[{check_name}] ERROR: {e}")
 
     forbidden_by_file: dict[str, list[str]] = {}
     for f in changed:
@@ -577,9 +611,9 @@ def find_test_file(hint: str | None = None) -> str | None:
             if any(fnmatch.fnmatch(f, p) for p in patterns):
                 full = os.path.join(root, f)
                 rel = os.path.relpath(full, WORKDIR)
-                result = subprocess.run(
+                result = _run_git_capture(
                     ["git", "ls-files", "--", rel],
-                    cwd=WORKDIR, capture_output=True, text=True
+                    error_context=f"test-file discovery via `git ls-files -- {rel}`",
                 )
                 if not result.stdout.strip():
                     return rel
