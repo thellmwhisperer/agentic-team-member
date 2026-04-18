@@ -121,6 +121,11 @@ def main(argv=None):
             continue
         try:
             d = json.loads(line)
+        except json.JSONDecodeError as ex:
+            print(f"  [parse error: {ex}] line={line[:120]!r}")
+            continue
+
+        try:
             e = d.get("event", "?")
             s = d.get("step", "")
 
@@ -240,8 +245,8 @@ def main(argv=None):
             else:
                 print(f"  {e}: {json.dumps(d, indent=2)}")
 
-        except Exception as ex:
-            print(f"  [parse error: {ex}]")
+        except (TypeError, AttributeError, ValueError) as ex:
+            print(f"  [event format error: {ex}]")
 
     return proc.wait()
 
