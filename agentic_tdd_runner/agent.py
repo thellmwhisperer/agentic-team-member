@@ -33,7 +33,7 @@ _CONFIG = None  # populated by main()
 WORKDIR = os.environ.get("AGENT_WORKDIR", os.getcwd())
 LOG_DIR = os.environ.get("AGENT_LOG_DIR", os.getcwd())
 _last_run_exit_code: int | None = None
-_file_read_cache: dict[Path, int] = {}  # {resolved_path: mtime_ns} for read dedup
+_file_read_cache: dict[Path, int] = {}  # keyed by st_mtime_ns for deterministic invalidation
 
 # --- Logging ---
 _log_file = None
@@ -1019,8 +1019,7 @@ def _parse_pr_content(content: str) -> tuple[str | None, str | None]:
 def create_pr(messages: list, last_msg: dict, test_file: str, step: int) -> str | None:
     """Ask LLM for PR content, then create branch/commit/push/PR."""
     pr_cfg = _CONFIG.get("pr", {})
-    timeouts = _CONFIG.get("timeouts", {})
-    pr_timeout = timeouts.get("pr_create", timeouts.get("tool_execution", timeouts.get("llm_request", 60)))
+    pr_timeout = _CONFIG["timeouts"]["pr_create"]
 
     # Ask LLM for title and description — without tools to avoid tool_calls
     pr_messages = messages.copy()

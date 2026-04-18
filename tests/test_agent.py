@@ -1650,7 +1650,7 @@ class TestCreatePr:
             "pr": {"enabled": True, "base_branch": "main", "branch_prefix": "atm/fix-"},
             "prompt": {"pr_prompt": "Generate PR"},
             "llm": {"model": "test", "url": "http://localhost:9999/v1/chat/completions"},
-            "timeouts": {"llm_request": 10},
+            "timeouts": {"llm_request": 10, "pr_create": 10},
         })
 
         mock_response = {
@@ -1702,7 +1702,7 @@ class TestCreatePr:
             "pr": {"enabled": True, "base_branch": "main", "branch_prefix": "atm/fix-"},
             "prompt": {"pr_prompt": "Generate PR"},
             "llm": {"model": "test", "url": "http://localhost:9999/v1/chat/completions"},
-            "timeouts": {"llm_request": 10},
+            "timeouts": {"llm_request": 10, "pr_create": 10},
         })
 
         mock_response = {
@@ -1750,7 +1750,7 @@ class TestCreatePr:
             "pr": {"enabled": True, "base_branch": "main", "branch_prefix": "atm/fix-"},
             "prompt": {"pr_prompt": "Generate PR"},
             "llm": {"model": "test", "url": "http://localhost:9999/v1/chat/completions"},
-            "timeouts": {"llm_request": 10},
+            "timeouts": {"llm_request": 10, "pr_create": 10},
             "tools": [{"type": "function", "function": {"name": "run_test"}}],
         })
 
@@ -1796,7 +1796,7 @@ class TestCreatePr:
             "pr": {"enabled": True, "base_branch": "main", "branch_prefix": "atm/fix-"},
             "prompt": {"pr_prompt": "Generate PR"},
             "llm": {"model": "test", "url": "http://localhost:9999/v1/chat/completions"},
-            "timeouts": {"llm_request": 10},
+            "timeouts": {"llm_request": 10, "pr_create": 10},
         })
 
         mock_response = {
@@ -1833,6 +1833,48 @@ class TestCreatePr:
             assert kwargs.get("text") is True
             assert kwargs.get("timeout") == 10
 
+    def test_returns_none_on_push_timeout_with_readable_message(self, tmp_path, monkeypatch):
+        """A push timeout should return None and emit a readable message."""
+        from unittest.mock import patch as mock_patch
+
+        self._init_repo(tmp_path)
+        (tmp_path / "file.ts").write_text("code")
+        subprocess.run([GIT, "add", "-A"], cwd=tmp_path, capture_output=True, check=True)
+        subprocess.run([GIT, "commit", "-m", "init"], cwd=tmp_path, capture_output=True, check=True)
+        (tmp_path / "file.ts").write_text("fixed")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "pr": {"enabled": True, "base_branch": "main", "branch_prefix": "atm/fix-"},
+            "prompt": {"pr_prompt": "Generate PR"},
+            "llm": {"model": "test", "url": "http://localhost:9999/v1/chat/completions"},
+            "timeouts": {"llm_request": 10, "pr_create": 10},
+        })
+
+        mock_response = {
+            "choices": [{"message": {"content": "PR_TITLE: fix\nPR_BODY: done"}}],
+        }
+
+        emitted = []
+        original_run = subprocess.run
+
+        def run_with_push_timeout(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            if isinstance(cmd, list) and cmd[:2] == ["git", "push"]:
+                raise subprocess.TimeoutExpired(cmd=cmd, timeout=10)
+            if isinstance(cmd, list) and cmd[0] == "gh":
+                return subprocess.CompletedProcess(cmd, 0, stdout="https://github.com/test/pr/1\n")
+            return original_run(*args, **kwargs)
+
+        with mock_patch("agentic_tdd_runner.agent.chat", return_value=mock_response):
+            with mock_patch("agentic_tdd_runner.agent.emit", side_effect=emitted.append):
+                with mock_patch("subprocess.run", side_effect=run_with_push_timeout):
+                    result = create_pr([], {}, "file.ts", 1)
+
+        assert result is None
+        assert any("Command timed out:" in msg for msg in emitted), emitted
+        assert not any("b'" in msg for msg in emitted), emitted
+
     def test_returns_none_when_gh_missing(self, tmp_path, monkeypatch):
         """create_pr must return None (not crash) when gh CLI is absent."""
         from unittest.mock import patch as mock_patch
@@ -1848,7 +1890,7 @@ class TestCreatePr:
             "pr": {"enabled": True, "base_branch": "main", "branch_prefix": "atm/fix-"},
             "prompt": {"pr_prompt": "Generate PR"},
             "llm": {"model": "test", "url": "http://localhost:9999/v1/chat/completions"},
-            "timeouts": {"llm_request": 10},
+            "timeouts": {"llm_request": 10, "pr_create": 10},
         })
 
         mock_response = {
@@ -1879,7 +1921,7 @@ class TestCreatePr:
             "pr": {"enabled": True, "base_branch": "main", "branch_prefix": "atm/fix-"},
             "prompt": {"pr_prompt": "Generate PR"},
             "llm": {"model": "test", "url": "http://localhost:9999/v1/chat/completions"},
-            "timeouts": {"llm_request": 10},
+            "timeouts": {"llm_request": 10, "pr_create": 10},
         })
 
         with mock_patch("agentic_tdd_runner.agent.chat", side_effect=Exception("timeout")):
