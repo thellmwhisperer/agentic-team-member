@@ -5,11 +5,13 @@ import argparse
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
+import textwrap
 import time
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import requests
 
@@ -31,7 +33,7 @@ _CONFIG = None  # populated by main()
 WORKDIR = os.environ.get("AGENT_WORKDIR", os.getcwd())
 LOG_DIR = os.environ.get("AGENT_LOG_DIR", os.getcwd())
 _last_run_exit_code: int | None = None
-_file_read_cache: dict[Path, int] = {}
+_file_read_cache: dict[str, float] = {}  # {resolved_path: mtime} for read dedup
 
 # --- Logging ---
 _log_file = None
@@ -67,31 +69,46 @@ def apply_mechanical_edits(edits: list[dict], workdir: str) -> int:
     """Apply pre_test_source_edits to files on disk. Returns count of edits applied."""
     applied = 0
     for edit in edits:
+        full_path = os.path.join(workdir, edit["path"])
         try:
-            full_path = _resolve_repo_path(edit["path"], workdir=workdir)
-        except ValueError:
-            emit(f"  [PREP] SKIP: path escapes workdir: {edit['path']}")
-            continue
-        try:
-            content = full_path.read_text()
+            content = Path(full_path).read_text()
         except FileNotFoundError:
             emit(f"  [PREP] SKIP: {edit['path']} not found")
-            continue
-        except OSError as exc:
-            emit(f"  [PREP] SKIP: cannot read {edit['path']}: {exc}")
             continue
         if edit["old"] not in content:
             emit(f"  [PREP] SKIP: old text not found in {edit['path']}")
             continue
         content = content.replace(edit["old"], edit["new"], 1)
-        try:
-            full_path.write_text(content)
-        except OSError as exc:
-            emit(f"  [PREP] SKIP: cannot write {edit['path']}: {exc}")
-            continue
+        Path(full_path).write_text(content)
         emit(f"  [PREP] Applied edit to {edit['path']}")
         applied += 1
     return applied
+
+
+def _is_llm_timeout_error(exc: Exception) -> bool:
+    if isinstance(exc, requests.exceptions.Timeout):
+        return True
+    return "timed out" in str(exc).lower()
+
+
+def _compact_messages_after_quality_failure(messages: list[dict], quality_msg: str, test_file: str) -> list[dict]:
+    _file_read_cache.clear()
+    compacted: list[dict] = []
+    if messages and messages[0].get("role") == "system":
+        compacted.append(messages[0])
+
+    issue_msg = next((msg for msg in messages[1:] if msg.get("role") == "user"), None)
+    if issue_msg:
+        compacted.append(issue_msg)
+
+    compacted.append({
+        "role": "user",
+        "content": (
+            f"Verification already passed for {test_file}. Preserve the current fix behavior and "
+            f"only address the residual quality issues below.\n\n{quality_msg}"
+        ),
+    })
+    return compacted
 
 
 def _quality_retry_feedback_message(quality_msg: str, test_file: str) -> dict:
@@ -104,34 +121,12 @@ def _quality_retry_feedback_message(quality_msg: str, test_file: str) -> dict:
     }
 
 
-def _compact_messages_after_quality_failure(messages: list[dict], quality_msg: str, test_file: str) -> list[dict]:
-    # The read-file stub says "refer to the earlier read_file result"; after
-    # compaction that earlier turn is gone, so force the next read to return
-    # full file contents instead of a dedup hint.
-    _file_read_cache.clear()
-    compacted: list[dict] = []
-    if messages and messages[0].get("role") == "system":
-        compacted.append(messages[0])
-
-    # Keep only stable anchors after green: the system prompt, the original
-    # issue, and targeted quality feedback. The current fix is authoritative on
-    # disk, so transient assistant/tool chatter can be re-derived as needed.
-    issue_msg = next((msg for msg in messages[1:] if msg.get("role") == "user"), None)
-    if issue_msg:
-        compacted.append(issue_msg)
-
-    compacted.append(_quality_retry_feedback_message(quality_msg, test_file))
-    return compacted
-
-
 def _llm_context_window_tokens() -> int:
-    llm_cfg = (_CONFIG or {}).get("llm", {})
+    llm_cfg = _CONFIG.get("llm", {})
     raw_value = (
         llm_cfg.get("context_window_tokens")
         or llm_cfg.get("context_window")
         or llm_cfg.get("num_ctx")
-        # Qwen 27B's native 32k window is our default local baseline; other
-        # models should override this explicitly in config.
         or 32768
     )
     try:
@@ -154,43 +149,12 @@ def _coerce_int(value) -> int | None:
     return None
 
 
-def _estimate_prompt_tokens(messages: list[dict]) -> int:
-    total = 0
-    for message in messages:
-        payload = json.dumps(message, ensure_ascii=False, sort_keys=True)
-        total += max(1, (len(payload) + 3) // 4) + 4
-    return total
-
-
-def _prospective_quality_retry_prompt_tokens(
-    messages: list[dict],
-    assistant_msg: dict | None,
-    retry_feedback: dict,
-    last_usage: dict | None,
-) -> int:
-    added_messages = [retry_feedback]
-    if assistant_msg:
-        added_messages.insert(0, assistant_msg)
-
-    base_prompt_tokens = _coerce_int((last_usage or {}).get("prompt_tokens"))
-    added_prompt_tokens = _estimate_prompt_tokens(added_messages)
-    if base_prompt_tokens is not None:
-        return base_prompt_tokens + added_prompt_tokens
-    return _estimate_prompt_tokens([*messages, *added_messages])
-
-
-def _should_compact_after_quality_failure(prompt_tokens: int | None) -> tuple[bool, dict]:
-    quality_cfg = (_CONFIG or {}).get("quality", {})
+def _should_compact_after_quality_failure(last_usage: dict | None) -> tuple[bool, dict]:
+    quality_cfg = _CONFIG.get("quality", {})
     context_window = _llm_context_window_tokens()
-    try:
-        threshold_ratio = float(quality_cfg.get("compact_threshold_ratio", 0.85))
-    except (TypeError, ValueError):
-        threshold_ratio = 0.85
-    min_headroom_tokens = _coerce_int(quality_cfg.get("compact_min_headroom_tokens"))
-    if min_headroom_tokens is None:
-        # 2k keeps compaction conservative by default; bump per-model in config
-        # if longer tool calls or reasoning traces are getting truncated.
-        min_headroom_tokens = 2048
+    threshold_ratio = float(quality_cfg.get("compact_threshold_ratio", 0.85))
+    min_headroom_tokens = int(quality_cfg.get("compact_min_headroom_tokens", 2048))
+    prompt_tokens = _coerce_int((last_usage or {}).get("prompt_tokens"))
 
     info = {
         "context_window_tokens": context_window,
@@ -213,6 +177,12 @@ def _should_compact_after_quality_failure(prompt_tokens: int | None) -> tuple[bo
     )
     info["reason"] = "near_context_limit" if should_compact else "enough_headroom"
     return should_compact, info
+
+
+def _tool_applied_status(name: str, result: str) -> bool | None:
+    if name not in {"str_replace_editor", "create_file"}:
+        return None
+    return result.startswith("OK:")
 
 
 def _resolve_repo_path(path: str, workdir: str = None) -> Path:
@@ -302,26 +272,22 @@ def _validate_command(command: str) -> None:
 
 
 def execute_tool(name: str, args: dict) -> str:
-    global _last_run_exit_code
-    _last_run_exit_code = None
     try:
         if name == "read_file":
             full_path = _resolve_repo_path(args["path"])
             if os.path.isdir(full_path):
                 entries = os.listdir(full_path)
                 return "\n".join(sorted(entries))
-            mtime_ns = full_path.stat().st_mtime_ns
-            if _file_read_cache.get(full_path) == mtime_ns:
-                return (
-                    "File unchanged since last read. The content from the earlier read_file result "
-                    "in this conversation is still current — refer to that instead of re-reading."
-                )
+            mtime = os.path.getmtime(full_path)
+            if full_path in _file_read_cache and _file_read_cache[full_path] == mtime:
+                return "File unchanged since last read. The content from the earlier read_file result in this conversation is still current — refer to that instead of re-reading."
             with open(full_path, "r") as f:
                 content = f.read()
-            _file_read_cache[full_path] = mtime_ns
+            _file_read_cache[full_path] = mtime
             return content
 
         elif name == "run_command":
+            global _last_run_exit_code
             _validate_command(args["command"])
             result = subprocess.run(
                 args["command"],
@@ -358,7 +324,6 @@ def execute_tool(name: str, args: dict) -> str:
             os.makedirs(os.path.dirname(full_path), exist_ok=True)
             with open(full_path, "w") as f:
                 f.write(args["content"])
-            _file_read_cache.pop(full_path, None)
             result = f"OK: created {args['path']}"
             return result + _reactive_typecheck_feedback(args["path"]) + _reactive_test_feedback(args["path"])
 
@@ -370,9 +335,7 @@ def execute_tool(name: str, args: dict) -> str:
 
 
 def _reactive_typecheck_feedback(path: str) -> str:
-    """Run typecheck after edit/create and return inline error summary."""
     from agentic_tdd_runner.languages import get_language
-    import shlex
     lang = get_language(path)
     if not lang:
         return ""
@@ -381,16 +344,11 @@ def _reactive_typecheck_feedback(path: str) -> str:
     typecheck = next((check for check in checks if check.get("name") == "typecheck"), None)
     if not typecheck:
         return ""
-    if typecheck.get("reactive") is False:
-        return "\n\n[Reactive typecheck] SKIPPED: project-wide fallback is too expensive; add scripts.typecheck to enable inline TS feedback"
-    command = typecheck["command"]
-    if "{changed_files}" in command:
-        command = command.format(changed_files=shlex.quote(path))
     timeout_s = (_CONFIG or {}).get("timeouts", {}).get("tool_execution", 10)
 
     try:
         result = subprocess.run(
-            command,
+            typecheck["command"],
             shell=True,
             cwd=WORKDIR,
             capture_output=True,
@@ -415,11 +373,9 @@ def _reactive_typecheck_feedback(path: str) -> str:
 
 
 def _reactive_test_feedback(path: str) -> str:
-    """Run tests after create_file on test files and return inline failure summary."""
     if not _is_test_file_path(path):
         return ""
 
-    import shlex
     run_cmd = _test_runner_command_for_file(path)
     timeout_s = (_CONFIG or {}).get("timeouts", {}).get("test_run", 30)
     run_argv = shlex.split(run_cmd) + [path]
@@ -447,15 +403,11 @@ def _reactive_test_feedback(path: str) -> str:
 
 
 def _is_test_file_path(path: str) -> bool:
-    from pathlib import PurePosixPath
-    import fnmatch
     patterns = (_CONFIG or {}).get("runner", {}).get("test_file_patterns", [])
+    import fnmatch
     name = PurePosixPath(path).name
     if not patterns:
-        stem = PurePosixPath(path).stem.lower()
-        if stem in {"test", "tests"}:
-            return True
-        return stem.startswith(("test_", "test-")) or stem.endswith(("_test", "-test", ".test"))
+        return "test" in name.lower()
     return any(fnmatch.fnmatch(name, pattern) for pattern in patterns)
 
 
@@ -467,277 +419,6 @@ def _test_runner_command_for_file(path: str) -> str:
     return (_CONFIG or {}).get("runner", {}).get("command", "bun test")
 
 
-def _detect_package_manager(pkg: dict | None = None) -> str:
-    """Detect the package manager. Checks packageManager field first, then lockfiles."""
-    if pkg:
-        pm_field = pkg.get("packageManager", "")
-        if pm_field:
-            name = pm_field.split("@")[0]
-            if name in ("pnpm", "yarn", "bun", "npm"):
-                return name
-    lockfiles = {
-        "pnpm-lock.yaml": "pnpm",
-        "yarn.lock": "yarn",
-        "bun.lock": "bun",
-    }
-    for filename, pm in lockfiles.items():
-        if os.path.isfile(os.path.join(WORKDIR, filename)):
-            return pm
-    return "npm"
-
-
-def detect_quality_tools(lang_name: str) -> list[dict]:
-    """Detect quality tools from the target project's config files.
-
-    Reads package.json (TypeScript) or pyproject.toml (Python) to discover
-    which lint/format/typecheck tools are actually installed.
-    """
-    checks = []
-
-    if lang_name == "typescript":
-        pkg_path = os.path.join(WORKDIR, "package.json")
-        if os.path.isfile(pkg_path):
-            import json as _json
-            try:
-                with open(pkg_path) as f:
-                    pkg = _json.load(f)
-            except (OSError, ValueError):
-                return checks
-
-            scripts = pkg.get("scripts", {})
-            dev_deps = pkg.get("devDependencies", {})
-            deps = pkg.get("dependencies", {})
-            all_deps = {**deps, **dev_deps}
-
-            if "typecheck" in scripts:
-                pm = _detect_package_manager(pkg)
-                checks.append({"name": "typecheck", "command": f"{pm} run typecheck"})
-            elif "typescript" in all_deps:
-                checks.append({
-                    "name": "typecheck",
-                    "command": "npx tsc --noEmit",
-                    "reactive": False,
-                })
-
-            if any(k.startswith("@biomejs/biome") for k in all_deps):
-                checks.append({
-                    "name": "lint",
-                    "command": "npx biome check {changed_files}",
-                    "fix": "npx biome check {changed_files} --fix",
-                })
-            elif "eslint" in all_deps:
-                checks.append({
-                    "name": "lint",
-                    "command": "npx eslint {changed_files}",
-                    "fix": "npx eslint {changed_files} --fix",
-                })
-
-            has_biome = any(k.startswith("@biomejs/biome") for k in all_deps)
-            if not has_biome and "prettier" in all_deps:
-                checks.append({
-                    "name": "format",
-                    "command": "npx prettier --check {changed_files}",
-                    "fix": "npx prettier --write {changed_files}",
-                })
-
-    elif lang_name == "python":
-        pyproject_path = os.path.join(WORKDIR, "pyproject.toml")
-        has_ruff = False
-        python_typecheck = None
-        if os.path.isfile(pyproject_path):
-            try:
-                with open(pyproject_path, "rb") as f:
-                    import tomllib
-                    pyproject = tomllib.load(f)
-                tool_cfg = pyproject.get("tool", {})
-                has_ruff = "ruff" in tool_cfg
-                if "mypy" in tool_cfg:
-                    python_typecheck = "python3 -m mypy {changed_files}"
-                elif "basedpyright" in tool_cfg:
-                    python_typecheck = "npx basedpyright {changed_files}"
-                elif "pyright" in tool_cfg:
-                    python_typecheck = "npx pyright {changed_files}"
-            except (OSError, ValueError):
-                pass
-
-        if not python_typecheck:
-            if any(os.path.isfile(os.path.join(WORKDIR, name)) for name in ("mypy.ini", ".mypy.ini")):
-                python_typecheck = "python3 -m mypy {changed_files}"
-            elif os.path.isfile(os.path.join(WORKDIR, "basedpyrightconfig.json")):
-                python_typecheck = "npx basedpyright {changed_files}"
-            elif os.path.isfile(os.path.join(WORKDIR, "pyrightconfig.json")):
-                python_typecheck = "npx pyright {changed_files}"
-
-        if python_typecheck:
-            checks.append({
-                "name": "typecheck",
-                "command": python_typecheck,
-            })
-
-        if has_ruff:
-            checks.append({
-                "name": "lint",
-                "command": "python3 -m ruff check {changed_files}",
-                "fix": "python3 -m ruff check {changed_files} --fix",
-            })
-            checks.append({
-                "name": "format",
-                "command": "python3 -m ruff format --check {changed_files}",
-                "fix": "python3 -m ruff format {changed_files}",
-            })
-
-    return checks
-
-
-def _run_git_capture(args: list[str], *, error_context: str) -> subprocess.CompletedProcess[str]:
-    """Run a git command and raise with stderr if it fails."""
-    result = subprocess.run(args, cwd=WORKDIR, capture_output=True, text=True)
-    if result.returncode != 0:
-        detail = (result.stderr or result.stdout or "").strip() or "no output captured"
-        raise RuntimeError(f"{error_context} failed (rc={result.returncode}): {detail}")
-    return result
-
-
-def _get_changed_files() -> list[str]:
-    """Get modified + staged + untracked files relative to WORKDIR."""
-    diff = _run_git_capture(
-        ["git", "diff", "--name-only"],
-        error_context="changed-file discovery via `git diff --name-only`",
-    )
-    staged = _run_git_capture(
-        ["git", "diff", "--cached", "--name-only"],
-        error_context="changed-file discovery via `git diff --cached --name-only`",
-    )
-    untracked = _run_git_capture(
-        ["git", "ls-files", "--others", "--exclude-standard"],
-        error_context="changed-file discovery via `git ls-files --others --exclude-standard`",
-    )
-    files = set()
-    for line in (diff.stdout + staged.stdout + untracked.stdout).splitlines():
-        line = line.strip()
-        if line and os.path.exists(os.path.join(WORKDIR, line)):
-            files.add(line)
-    return sorted(files)
-
-
-def run_quality_checks(test_file: str) -> tuple[bool, str]:
-    """Run quality checks on changed files. Returns (passed, message)."""
-    from agentic_tdd_runner.languages import get_language
-    import shlex
-
-    quality_cfg = _CONFIG.get("quality", {})
-    if not quality_cfg.get("enabled", False):
-        return True, "Quality checks disabled"
-
-    lang = get_language(test_file)
-    if lang is None:
-        return True, f"Quality checks skipped: no language plugin for {test_file!r}"
-
-    lang_name = lang.name
-    lang_cfg = quality_cfg.get(lang_name, {})
-    checks = detect_quality_tools(lang_name) or lang_cfg.get("checks", [])
-    forbidden = lang_cfg.get("forbidden", [])
-
-    all_changed = _get_changed_files()
-    if not all_changed:
-        return True, "No changed files"
-
-    changed = [f for f in all_changed if os.path.splitext(f)[1] in lang.extensions]
-    if not changed:
-        return True, "No changed files matching language"
-
-    changed_str = " ".join(shlex.quote(path) for path in changed)
-    failures = []
-
-    for idx, check in enumerate(checks, 1):
-        if not isinstance(check, dict):
-            failures.append(
-                f"[check #{idx}] invalid quality check config: expected mapping, got {type(check).__name__}"
-            )
-            continue
-
-        check_name = check.get("name")
-        if not isinstance(check_name, str) or not check_name.strip():
-            failures.append(f"[check #{idx}] invalid quality check config: missing string 'name'")
-            continue
-
-        raw_cmd = check.get("command")
-        if not isinstance(raw_cmd, str) or not raw_cmd.strip():
-            failures.append(f"[{check_name}] invalid quality check config: missing string 'command'")
-            continue
-
-        raw_fix = check.get("fix", "")
-        if raw_fix is None:
-            raw_fix = ""
-        if not isinstance(raw_fix, str):
-            failures.append(f"[{check_name}] invalid quality check config: 'fix' must be a string")
-            continue
-
-        try:
-            fix_cmd = raw_fix.replace("{changed_files}", changed_str)
-            if fix_cmd:
-                fix_result = subprocess.run(
-                    fix_cmd,
-                    shell=True,
-                    cwd=WORKDIR,
-                    capture_output=True,
-                    text=True,
-                    timeout=_CONFIG["timeouts"]["tool_execution"],
-                )
-                if fix_result.returncode != 0:
-                    raw = (fix_result.stdout or "") + (fix_result.stderr or "")
-                    lines = [ln for ln in raw.splitlines() if ln.strip()]
-                    sample = "\n".join(f"  {ln}" for ln in lines[:5]) if lines else "  no output captured"
-                    failures.append(
-                        f"[{check_name}:fix] autofix failed (rc={fix_result.returncode}):\n{sample}"
-                    )
-
-            cmd = raw_cmd.replace("{changed_files}", changed_str)
-            result = subprocess.run(
-                cmd,
-                shell=True,
-                cwd=WORKDIR,
-                capture_output=True,
-                text=True,
-                timeout=_CONFIG["timeouts"]["tool_execution"],
-            )
-            if result.returncode != 0:
-                raw = (result.stdout or "") + (result.stderr or "")
-                lines = [ln for ln in raw.splitlines() if ln.strip()]
-                n_errors = sum(1 for ln in lines if "error" in ln.lower()) or 1
-                sample = "\n".join(f"  {ln}" for ln in lines[:10]) if lines else f"  {raw[:200]}"
-                failures.append(f"[{check_name}] {n_errors} errors:\n{sample}")
-        except subprocess.TimeoutExpired:
-            failures.append(f"[{check_name}] TIMEOUT: command timed out")
-        except (OSError, UnicodeDecodeError) as e:
-            failures.append(f"[{check_name}] ERROR: {e}")
-
-    forbidden_by_file: dict[str, list[str]] = {}
-    for f in changed:
-        full = os.path.join(WORKDIR, f)
-        if not os.path.isfile(full):
-            continue
-        try:
-            with open(full, errors="replace") as fh:
-                content = fh.read()
-        except OSError:
-            continue
-        for pattern in forbidden:
-            for i, line in enumerate(content.splitlines(), 1):
-                if pattern in line:
-                    forbidden_by_file.setdefault(f, []).append(f"  {f}:{i} '{pattern}'")
-
-    for f, hits in forbidden_by_file.items():
-        failures.append(f"[Forbidden] {f}: {len(hits)} forbidden patterns\n" + "\n".join(hits[:20]))
-
-    if failures:
-        details = "\n\n".join(failures)
-        template = _CONFIG.get("prompt", {}).get("quality_failed", "QUALITY CHECK FAILED:\n\n{details}")
-        return False, template.replace("{details}", details)
-
-    return True, "All quality checks passed"
-
-
 def truncate(text: str, max_chars: int = 0) -> str:
     if max_chars == 0:
         max_chars = _CONFIG["agent"]["max_tool_output"]
@@ -747,16 +428,20 @@ def truncate(text: str, max_chars: int = 0) -> str:
     return text[:half] + f"\n\n... ({len(text) - max_chars} chars truncated) ...\n\n" + text[-half:]
 
 
-def chat(messages: list) -> dict:
+def chat(messages: list, include_tools: bool = True) -> dict:
     llm = _CONFIG["llm"]
     payload = {
         "model": llm["model"],
         "messages": messages,
-        "tools": _CONFIG["tools"],
         "temperature": llm.get("temperature", 0.6),
         "top_p": llm.get("top_p", 0.95),
         "top_k": llm.get("top_k", 20),
+        "cache_prompt": True,
     }
+    if "thinking_budget_tokens" in llm:
+        payload["thinking_budget_tokens"] = llm["thinking_budget_tokens"]
+    if include_tools:
+        payload["tools"] = _CONFIG["tools"]
     resp = requests.post(llm["url"], json=payload, timeout=_CONFIG["timeouts"]["llm_request"])
     resp.raise_for_status()
     return resp.json()
@@ -778,9 +463,9 @@ def find_test_file(hint: str | None = None) -> str | None:
             if any(fnmatch.fnmatch(f, p) for p in patterns):
                 full = os.path.join(root, f)
                 rel = os.path.relpath(full, WORKDIR)
-                result = _run_git_capture(
+                result = subprocess.run(
                     ["git", "ls-files", "--", rel],
-                    error_context=f"test-file discovery via `git ls-files -- {rel}`",
+                    cwd=WORKDIR, capture_output=True, text=True
                 )
                 if not result.stdout.strip():
                     return rel
@@ -817,7 +502,6 @@ def verify_red_green(test_file: str) -> tuple[bool, str]:
     # Stash all changes including untracked (reverts source fix + new files)
     subprocess.run(["git", "stash", "--include-untracked"], cwd=WORKDIR, capture_output=True)
 
-    import shlex
     run_argv = shlex.split(run_cmd)
 
     red_passed = False
@@ -886,30 +570,509 @@ def verify_red_green(test_file: str) -> tuple[bool, str]:
     return True, "VERIFIED: Test fails without fix, passes with fix. Real red-green."
 
 
+def _detect_package_manager(pkg: dict | None = None) -> str:
+    """Detect the package manager. Checks packageManager field first, then lockfiles."""
+    if pkg:
+        pm_field = pkg.get("packageManager", "")
+        if pm_field:
+            name = pm_field.split("@")[0]
+            if name in ("pnpm", "yarn", "bun", "npm"):
+                return name
+    lockfiles = {
+        "pnpm-lock.yaml": "pnpm",
+        "yarn.lock": "yarn",
+        "bun.lock": "bun",
+    }
+    for filename, pm in lockfiles.items():
+        if os.path.isfile(os.path.join(WORKDIR, filename)):
+            return pm
+    return "npm"
+
+
+def detect_quality_tools(lang_name: str) -> list[dict]:
+    """Detect quality tools from the target project's config files.
+
+    Reads package.json (TypeScript) or pyproject.toml (Python) to discover
+    which lint/format/typecheck tools are actually installed.
+    """
+    checks = []
+
+    if lang_name == "typescript":
+        pkg_path = os.path.join(WORKDIR, "package.json")
+        if os.path.isfile(pkg_path):
+            import json as _json
+            try:
+                with open(pkg_path) as f:
+                    pkg = _json.load(f)
+            except (OSError, ValueError):
+                return checks
+
+            scripts = pkg.get("scripts", {})
+            dev_deps = pkg.get("devDependencies", {})
+            deps = pkg.get("dependencies", {})
+            all_deps = {**deps, **dev_deps}
+
+            # Typecheck: use scripts.typecheck if defined, else tsc
+            if "typecheck" in scripts:
+                pm = _detect_package_manager(pkg)
+                checks.append({"name": "typecheck", "command": f"{pm} run typecheck"})
+            elif "typescript" in all_deps:
+                checks.append({"name": "typecheck", "command": "npx tsc --noEmit"})
+
+            # Lint: biome vs eslint
+            if any(k.startswith("@biomejs/biome") for k in all_deps):
+                checks.append({
+                    "name": "lint",
+                    "command": "npx biome check {changed_files}",
+                    "fix": "npx biome check {changed_files} --fix",
+                })
+            elif "eslint" in all_deps:
+                checks.append({
+                    "name": "lint",
+                    "command": "npx eslint {changed_files}",
+                    "fix": "npx eslint {changed_files} --fix",
+                })
+
+            # Format: biome already covers format, else prettier
+            has_biome = any(k.startswith("@biomejs/biome") for k in all_deps)
+            if not has_biome and "prettier" in all_deps:
+                checks.append({
+                    "name": "format",
+                    "command": "npx prettier --check {changed_files}",
+                    "fix": "npx prettier --write {changed_files}",
+                })
+
+    elif lang_name == "python":
+        pyproject_path = os.path.join(WORKDIR, "pyproject.toml")
+        has_ruff = False
+        if os.path.isfile(pyproject_path):
+            try:
+                with open(pyproject_path, "rb") as f:
+                    import tomllib
+                    pyproject = tomllib.load(f)
+                has_ruff = "ruff" in pyproject.get("tool", {})
+            except (OSError, ValueError):
+                pass
+
+        if has_ruff:
+            checks.append({
+                "name": "lint",
+                "command": "python3 -m ruff check {changed_files}",
+                "fix": "python3 -m ruff check {changed_files} --fix",
+            })
+            checks.append({
+                "name": "format",
+                "command": "python3 -m ruff format --check {changed_files}",
+                "fix": "python3 -m ruff format {changed_files}",
+            })
+
+    return checks
+
+
+def _get_changed_files() -> list[str]:
+    """Get modified + staged + untracked files relative to WORKDIR."""
+    diff = subprocess.run(
+        ["git", "diff", "--name-only"], cwd=WORKDIR, capture_output=True, text=True,
+    )
+    staged = subprocess.run(
+        ["git", "diff", "--cached", "--name-only"], cwd=WORKDIR, capture_output=True, text=True,
+    )
+    untracked = subprocess.run(
+        ["git", "ls-files", "--others", "--exclude-standard"],
+        cwd=WORKDIR, capture_output=True, text=True,
+    )
+    files = set()
+    for line in (diff.stdout + staged.stdout + untracked.stdout).splitlines():
+        line = line.strip()
+        if line and os.path.exists(os.path.join(WORKDIR, line)):
+            files.add(line)
+    return sorted(files)
+
+
+def run_quality_checks(test_file: str) -> tuple[bool, str]:
+    """Run quality checks on changed files. Returns (passed, message)."""
+    from agentic_tdd_runner.languages import get_language
+
+    quality_cfg = _CONFIG.get("quality", {})
+    if not quality_cfg.get("enabled", False):
+        return True, "Quality checks disabled"
+
+    lang = get_language(test_file)
+    lang_name = lang.name if lang else "typescript"
+    lang_cfg = quality_cfg.get(lang_name, {})
+    # Auto-detect tools from the project, fall back to config
+    checks = detect_quality_tools(lang_name) or lang_cfg.get("checks", [])
+    forbidden = lang_cfg.get("forbidden", [])
+
+    all_changed = _get_changed_files()
+    if not all_changed:
+        return True, "No changed files"
+
+    # Filter to files matching the active language's extensions
+    extensions = lang.extensions if lang else [".ts", ".tsx", ".js", ".jsx"]
+    changed = [f for f in all_changed if os.path.splitext(f)[1] in extensions]
+    if not changed:
+        return True, "No changed files matching language"
+
+    changed_str = " ".join(shlex.quote(path) for path in changed)
+    failures = []
+
+    # Run checks (fix first if available, then verify)
+    for check in checks:
+        try:
+            fix_cmd = check.get("fix", "").replace("{changed_files}", changed_str)
+            if fix_cmd:
+                subprocess.run(
+                    fix_cmd, shell=True, cwd=WORKDIR, capture_output=True,
+                    timeout=_CONFIG["timeouts"]["tool_execution"],
+                )
+            cmd = check["command"].replace("{changed_files}", changed_str)
+            result = subprocess.run(
+                cmd, shell=True, cwd=WORKDIR, capture_output=True, text=True,
+                timeout=_CONFIG["timeouts"]["tool_execution"],
+            )
+            if result.returncode != 0:
+                raw = (result.stdout + result.stderr).strip()
+                lines = [ln for ln in raw.splitlines() if ln.strip()]
+                n_errors = sum(1 for ln in lines if "error" in ln.lower())
+                sample = "\n".join(f"  {ln}" for ln in lines[:30])
+                if not sample:
+                    sample = f"  {raw[:500]}"
+                failures.append(f"[{check['name']}] {n_errors} errors:\n{sample}")
+        except subprocess.TimeoutExpired:
+            failures.append(f"[{check['name']}] TIMEOUT: command timed out")
+        except (OSError, UnicodeDecodeError) as e:
+            failures.append(f"[{check['name']}] ERROR: {e}")
+
+    # Grep forbidden patterns in changed files — group by file
+    forbidden_by_file: dict[str, list[str]] = {}
+    for f in changed:
+        full = os.path.join(WORKDIR, f)
+        if not os.path.isfile(full):
+            continue
+        try:
+            with open(full, errors="replace") as fh:
+                content = fh.read()
+        except OSError:
+            continue
+        for pattern in forbidden:
+            for i, line in enumerate(content.splitlines(), 1):
+                if pattern in line:
+                    forbidden_by_file.setdefault(f, []).append(f"  {f}:{i} '{pattern}'")
+    for f, hits in forbidden_by_file.items():
+        sample = "\n".join(hits[:3])
+        n = len(hits)
+        failures.append(f"[Forbidden] {f}: {n} forbidden patterns\n{sample}")
+
+    # Detect duplicated setup lines in test files — report identifiers, not full lines
+    test_files = [f for f in changed if "test" in f]
+    for f in test_files:
+        full = os.path.join(WORKDIR, f)
+        if not os.path.isfile(full):
+            continue
+        try:
+            with open(full, errors="replace") as fh:
+                file_text = fh.read()
+        except OSError:
+            continue
+        setup_dupes, ambiguous_dupes = _partition_duplicated_test_lines(file_text)
+        report_lines = list(setup_dupes)
+        if not report_lines and ambiguous_dupes:
+            judge_result = _judge_duplicated_setup(full, file_text, ambiguous_dupes)
+            if judge_result is True:
+                report_lines = list(ambiguous_dupes)
+        if report_lines:
+            # Extract identifiers from duplicated lines
+            import re as _re
+            identifiers = []
+            for line in report_lines:
+                ids = _re.findall(r'\b([a-zA-Z_]\w+)\s*[=(]', line)
+                identifiers.extend(ids)
+            id_list = ", ".join(dict.fromkeys(identifiers)) if identifiers else "shared setup"
+            failures.append(
+                f"[Duplicated setup] {f}: {len(report_lines)} repeated lines. "
+                f"Move to beforeEach (TS) or fixture (Python): {id_list}"
+            )
+
+    if failures:
+        details = "\n\n".join(failures)
+        template = _CONFIG.get("prompt", {}).get(
+            "quality_failed", "QUALITY CHECK FAILED:\n\n{details}",
+        )
+        return False, template.replace("{details}", details)
+
+    return True, "All quality checks passed"
+
+
+def _is_obvious_assert_line(line: str) -> bool:
+    stripped = line.strip()
+    if re.search(r"\bexpect\s*\(", stripped):
+        return True
+    if re.match(r"^assert\b", stripped):
+        return True
+    if re.search(
+        r"\b(?:toHaveBeenCalledWith|toHaveBeenCalled|toEqual|toBe|toContain|toMatch|toStrictEqual|toBeTruthy|toBeFalsy)\s*\(",
+        stripped,
+    ):
+        return True
+    return False
+
+
+def _is_obvious_setup_line(line: str) -> bool:
+    stripped = line.strip()
+    if re.search(r"\b(mock|spyOn)\s*\(", stripped):
+        return True
+    if re.search(r"\b(?:vi|jest)\.(?:fn|mock)\s*\(", stripped):
+        return True
+    if re.search(r"__set[A-Za-z_]\w*\s*\(", stripped):
+        return True
+    if re.match(r"^(?:const|let|var)\s+\w*(?:spy|mock|stub|double|fixture)\w*\s*=", stripped, re.IGNORECASE):
+        return True
+    return False
+
+
+def _is_obvious_act_line(line: str) -> bool:
+    stripped = line.strip()
+    if _is_obvious_assert_line(stripped) or _is_obvious_setup_line(stripped):
+        return False
+    if re.match(r"^(?:await\s+)?[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*\s*\(", stripped):
+        return True
+    if re.match(
+        r"^(?:const|let|var)\s+\w+\s*=\s*(?:await\s+)?[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*\s*\(",
+        stripped,
+    ):
+        return True
+    return False
+
+
+def _partition_duplicated_test_lines(file_text: str) -> tuple[list[str], list[str]]:
+    from collections import Counter
+
+    lines = [ln.strip() for ln in file_text.splitlines() if ln.strip() and len(ln.strip()) > 20]
+    counts = Counter(lines)
+    dupes = [line for line, n in counts.items() if n >= 3]
+
+    setup_dupes: list[str] = []
+    ambiguous_dupes: list[str] = []
+    for line in dupes:
+        if _is_obvious_assert_line(line) or _is_obvious_act_line(line):
+            continue
+        if _is_obvious_setup_line(line):
+            setup_dupes.append(line)
+        else:
+            ambiguous_dupes.append(line)
+    return setup_dupes, ambiguous_dupes
+
+
+def _build_duplicated_setup_judge_prompt(file_path: str, file_text: str, duplicated_lines: list[str]) -> str:
+    suffix = Path(file_path).suffix.lower()
+    fence = "py" if suffix == ".py" else "ts"
+    repeated_lines = "\n".join(
+        f"{idx}. {line}" for idx, line in enumerate(duplicated_lines, start=1)
+    )
+    return textwrap.dedent(
+        f"""\
+        You are a strict binary classifier for duplicated test setup.
+
+        Task:
+        Decide whether the repeated lines below are SHARED SETUP that should move to beforeEach/fixture.
+
+        Answer YES only if the repeated lines are setup code shared across tests, such as:
+        - creating spies, mocks, fakes, or test doubles
+        - calling seam setters like __setXForTests(...)
+        - repeated object construction for fixtures
+        - repeated arrange-only initialization with no assertion
+
+        Answer NO if the repeated lines are legitimate per-test ACT or ASSERT, such as:
+        - calling the function under test
+        - expect(...)
+        - assertions on spy calls
+        - per-test inputs or expected outputs
+        - lines whose meaning depends on the specific test case
+
+        Rules:
+        - Repeated ACT is NOT duplicated setup.
+        - Repeated ASSERT is NOT duplicated setup.
+        - Never answer YES because of expect(...), matcher chains like toHaveBeenCalledWith(...), or the direct call to the function under test.
+        - If repeated lines mix setup with ACT/ASSERT, ignore the ACT/ASSERT lines and judge only the remaining setup candidates.
+        - If unsure, answer NO.
+        - Return exactly one word: YES or NO.
+
+        Example 1
+        Repeated lines:
+        - const spy = mock(() => {{}});
+        - __setClientForTests(client_test_double);
+        Answer: YES
+
+        Example 2
+        Repeated lines:
+        - handleResub(channel, username, streakMonths, message, userstate);
+        - expect(client_say_spy).toHaveBeenCalledWith(channel, expected_message);
+        Answer: NO
+
+        Test file:
+        ```{fence}
+        {file_text}
+        ```
+
+        Repeated lines to classify:
+        {repeated_lines}
+        """
+    ).strip()
+
+
+def _judge_duplicated_setup(file_path: str, file_text: str, duplicated_lines: list[str]) -> bool | None:
+    """Return True/False from the small judge, or None when unavailable."""
+    judge_cfg = _CONFIG.get("quality", {}).get("duplicated_setup_judge", {})
+    if not judge_cfg.get("enabled", False):
+        return None
+
+    prompt = _build_duplicated_setup_judge_prompt(file_path, file_text, duplicated_lines)
+    payload = {
+        "model": judge_cfg.get("model", "qwen3.5:0.8b"),
+        "messages": [{"role": "user", "content": prompt}],
+        "stream": False,
+        "think": judge_cfg.get("think", False),
+        "options": {
+            "temperature": judge_cfg.get("temperature", 0),
+            "num_ctx": judge_cfg.get("num_ctx", 4096),
+        },
+    }
+    timeout_s = judge_cfg.get("timeout", 10)
+    url = judge_cfg.get("url", "http://127.0.0.1:11434/api/chat")
+
+    try:
+        response = requests.post(url, json=payload, timeout=timeout_s)
+        response.raise_for_status()
+        content = response.json().get("message", {}).get("content", "").strip().upper()
+    except Exception as exc:
+        log("duplicated_setup_judge_error", {"file": file_path, "error": str(exc)})
+        return None
+
+    if content == "YES":
+        log("duplicated_setup_judge", {"file": file_path, "decision": "YES"})
+        return True
+    if content == "NO":
+        log("duplicated_setup_judge", {"file": file_path, "decision": "NO"})
+        return False
+
+    log("duplicated_setup_judge_error", {
+        "file": file_path, "error": f"unexpected response: {content[:50]}",
+    })
+    return None
+
+
+def _parse_pr_content(content: str) -> tuple[str | None, str | None]:
+    """Parse PR_TITLE and PR_BODY from LLM response."""
+    title = None
+    body = None
+    title_match = re.search(r"PR_TITLE:\s*(.+?)(?:\n|$)", content)
+    if title_match:
+        title = title_match.group(1).strip()[:70]
+    body_match = re.search(r"PR_BODY:\s*(.+)", content, re.DOTALL)
+    if body_match:
+        body = body_match.group(1).strip()
+    return title, body
+
+
+def create_pr(messages: list, last_msg: dict, test_file: str, step: int) -> str | None:
+    """Ask LLM for PR content, then create branch/commit/push/PR."""
+    pr_cfg = _CONFIG.get("pr", {})
+
+    # Ask LLM for title and description — without tools to avoid tool_calls
+    pr_messages = messages.copy()
+    pr_messages.append(last_msg)
+    pr_messages.append({
+        "role": "user",
+        "content": _CONFIG["prompt"]["pr_prompt"],
+    })
+
+    try:
+        response = chat(pr_messages, include_tools=False)
+        content = response["choices"][0]["message"].get("content", "")
+    except Exception as e:
+        emit(f"  [PR] LLM failed to generate PR content: {e}")
+        return None
+
+    title, body = _parse_pr_content(content)
+    if not title:
+        title = f"fix: agent fix at step {step}"
+    if not body:
+        body = "Automated fix by ATM agent."
+
+    base = pr_cfg.get("base_branch", "main")
+    prefix = pr_cfg.get("branch_prefix", "atm/fix-")
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    branch_name = f"{prefix}{timestamp}"
+
+    try:
+        subprocess.run(
+            ["git", "checkout", "-b", branch_name],
+            cwd=WORKDIR, capture_output=True, check=True,
+        )
+        # Tracked modified/staged: always part of the fix (includes config files)
+        tracked = subprocess.run(
+            ["git", "diff", "--name-only"], cwd=WORKDIR, capture_output=True, text=True,
+        )
+        staged = subprocess.run(
+            ["git", "diff", "--cached", "--name-only"], cwd=WORKDIR, capture_output=True, text=True,
+        )
+        tracked_files = {
+            f.strip() for f in (tracked.stdout + staged.stdout).splitlines()
+            if f.strip()
+        }
+        # Untracked: only include if they match the active language (new source/test files)
+        from agentic_tdd_runner.languages import get_language
+        lang = get_language(test_file)
+        extensions = lang.extensions if lang else [".ts", ".tsx", ".js", ".jsx"]
+        untracked = subprocess.run(
+            ["git", "ls-files", "--others", "--exclude-standard"],
+            cwd=WORKDIR, capture_output=True, text=True,
+        )
+        untracked_files = {
+            f.strip() for f in untracked.stdout.splitlines()
+            if f.strip() and os.path.exists(os.path.join(WORKDIR, f.strip()))
+            and os.path.splitext(f.strip())[1] in extensions
+        }
+        changed = sorted(tracked_files | untracked_files)
+        if changed:
+            subprocess.run(
+                ["git", "add", "--"] + changed,
+                cwd=WORKDIR, capture_output=True, check=True,
+            )
+        subprocess.run(
+            ["git", "commit", "-m", title, "-m", body],
+            cwd=WORKDIR, capture_output=True, check=True,
+        )
+        subprocess.run(
+            ["git", "push", "-u", "origin", branch_name],
+            cwd=WORKDIR, capture_output=True, check=True,
+        )
+        result = subprocess.run(
+            ["gh", "pr", "create", "--title", title, "--body", body, "--base", base],
+            cwd=WORKDIR, capture_output=True, text=True, check=True,
+        )
+        pr_url = result.stdout.strip()
+        log("pr", {"url": pr_url, "branch": branch_name, "title": title})
+        return pr_url
+
+    except subprocess.CalledProcessError as e:
+        emit(f"  [PR] Command failed: {e.stderr}")
+        log("pr_error", {"error": str(e)})
+        return None
+    except OSError as e:
+        emit(f"  [PR] Tool missing: {e}")
+        log("pr_error", {"error": str(e)})
+        return None
+
+
 def _is_test_pass(name: str, args: dict) -> bool:
     """Detect if a tool call was a test runner that exited 0."""
     if name != "run_command" or _last_run_exit_code != 0:
         return False
-    cmd = str(args.get("command", "")).strip()
-    if not cmd:
-        return False
-
-    configured_runner = ((_CONFIG or {}).get("runner", {}) or {}).get("command", "")
-    if configured_runner and (cmd == configured_runner or cmd.startswith(f"{configured_runner} ")):
-        return True
-
-    import shlex
-    try:
-        tokens = shlex.split(cmd)
-    except ValueError:
-        tokens = cmd.split()
-
-    for token in reversed(tokens[1:]):
-        if _is_test_file_path(token):
-            runner_cmd = _test_runner_command_for_file(token)
-            return cmd == runner_cmd or cmd.startswith(f"{runner_cmd} ")
-
-    return False
+    cmd = args.get("command", "")
+    test_runners = ("bun test", "pytest", "python3 -m pytest", "npm test", "npx jest")
+    return any(runner in cmd for runner in test_runners)
 
 
 def _default_config_path():
@@ -934,7 +1097,6 @@ def parse_args():
 def main():
     global _CONFIG, WORKDIR, LOG_DIR
     args = parse_args()
-    _file_read_cache.clear()
 
     from agentic_tdd_runner.config import load_config
     _CONFIG = load_config(args.config)
@@ -969,11 +1131,12 @@ def main():
             "mechanical_edits": len(episode.get("pre_test_source_edits", [])),
         })
 
+        # Apply mechanical edits (export, seams) before the agent loop
         edits = episode.get("pre_test_source_edits", [])
         if edits:
-            applied = apply_mechanical_edits(edits, WORKDIR)
-            emit(f"[PREP] Applied {applied}/{len(edits)} mechanical source edits")
-            log("mechanical_edits", {"applied": applied, "total": len(edits)})
+            n = apply_mechanical_edits(edits, WORKDIR)
+            emit(f"[PREP] Applied {n}/{len(edits)} mechanical source edits")
+            log("mechanical_edits", {"applied": n, "total": len(edits)})
 
     if episode:
         phase1_msg = (
@@ -999,24 +1162,23 @@ def main():
     emit(f"Log: {log_path}")
     emit(f"{'='*60}")
 
-    log("start", {"issue": issue_text[:200]})
+    log("start", {"issue": issue_text})
 
-    done_rejected = 0  # how many times we rejected DONE
+    done_rejected = 0
+    quality_rejected = 0
     max_rejections = _CONFIG["verification"]["max_rejections"]
+
+    # --- Completion pipeline: verify → quality → done ---
+    # Extracted so both DONE and auto-trigger can use it.
+    # Returns: "done" | "quality_fail" | "verify_fail" | "give_up" | "no_test"
     last_usage: dict | None = None
 
-    def try_complete(step: int, assistant_msg: dict | None = None) -> str:
-        nonlocal done_rejected, last_usage
-        test_hint = episode["test_file"] if episode else None
-        test_file = find_test_file(test_hint)
+    def try_complete(step):
+        nonlocal done_rejected, quality_rejected, last_usage
+        test_file = find_test_file()
         if not test_file:
             emit("  [WARN] No test file found — cannot verify")
-            if assistant_msg:
-                messages.append(assistant_msg)
-            messages.append({
-                "role": "user",
-                "content": _CONFIG["prompt"]["no_test_found"],
-            })
+            messages.append({"role": "user", "content": _CONFIG["prompt"]["no_test_found"]})
             return "no_test"
 
         verified, verify_msg = verify_red_green(test_file)
@@ -1026,35 +1188,22 @@ def main():
         if not verified:
             done_rejected += 1
             if done_rejected >= max_rejections:
-                emit(f"\n  [GIVE UP] Rejected DONE {done_rejected} times. Stopping.")
+                emit(f"\n  [GIVE UP] Rejected {done_rejected} times. Stopping.")
                 log("give_up", {"step": step, "done_rejected": done_rejected})
                 return "give_up"
-            if assistant_msg:
-                messages.append(assistant_msg)
-            messages.append({
-                "role": "user",
-                "content": verify_msg,
-            })
+            messages.append({"role": "user", "content": verify_msg})
             return "verify_fail"
 
         if _CONFIG.get("quality", {}).get("enabled", False):
             emit("\n=== QUALITY CHECKS ===")
             quality_ok, quality_msg = run_quality_checks(test_file)
-            emit(f"  [QUALITY] {quality_msg}")
-            log("quality_result", {
-                "passed": quality_ok,
-                "message": quality_msg[:500],
-                "test_file": test_file,
-            })
+            emit(f"  [QUALITY] {quality_msg[:200]}")
+            log("quality", {"passed": quality_ok, "message": quality_msg[:500]})
+
             if not quality_ok:
-                retry_feedback = _quality_retry_feedback_message(quality_msg, test_file)
-                prospective_prompt_tokens = _prospective_quality_retry_prompt_tokens(
-                    messages,
-                    assistant_msg,
-                    retry_feedback,
-                    last_usage,
-                )
-                should_compact, compact_info = _should_compact_after_quality_failure(prospective_prompt_tokens)
+                quality_rejected += 1
+                emit(f"  [QUALITY] Round {quality_rejected} — feeding back to model")
+                should_compact, compact_info = _should_compact_after_quality_failure(last_usage)
                 if should_compact:
                     before_count = len(messages)
                     messages[:] = _compact_messages_after_quality_failure(messages, quality_msg, test_file)
@@ -1066,9 +1215,7 @@ def main():
                         **compact_info,
                     })
                 else:
-                    if assistant_msg:
-                        messages.append(assistant_msg)
-                    messages.append(retry_feedback)
+                    messages.append(_quality_retry_feedback_message(quality_msg, test_file))
                     log("context_preserved", {
                         "reason": "quality_fail",
                         "message_count": len(messages),
@@ -1077,25 +1224,20 @@ def main():
                     })
                 return "quality_fail"
 
+        if _CONFIG.get("quality", {}).get("enabled", False):
+            emit("\n=== POST-QUALITY VERIFICATION ===")
             verified, verify_msg = verify_red_green(test_file)
-            emit(f"\n  [RE-VERIFY] {verify_msg}")
+            emit(f"  [RE-VERIFY] {verify_msg}")
             log("post_quality_verify_result", {
-                "verified": verified,
-                "message": verify_msg,
-                "test_file": test_file,
+                "verified": verified, "message": verify_msg, "test_file": test_file,
             })
             if not verified:
                 done_rejected += 1
                 if done_rejected >= max_rejections:
-                    emit(f"\n  [GIVE UP] Rejected DONE {done_rejected} times. Stopping.")
+                    emit(f"\n  [GIVE UP] Rejected {done_rejected} times. Stopping.")
                     log("give_up", {"step": step, "done_rejected": done_rejected})
                     return "give_up"
-                if assistant_msg:
-                    messages.append(assistant_msg)
-                messages.append({
-                    "role": "user",
-                    "content": verify_msg,
-                })
+                messages.append({"role": "user", "content": verify_msg})
                 return "verify_fail"
 
         emit(f"\n{'='*60}")
@@ -1114,16 +1256,28 @@ def main():
                         emit(fh.read())
                 except OSError:
                     pass
+        if _CONFIG.get("pr", {}).get("enabled", False):
+            emit("\n=== PR CREATION ===")
+            pr_url = create_pr(messages, msg, test_file, step)
+            if pr_url:
+                emit(f"  [PR] {pr_url}")
+            else:
+                emit("  [PR] Failed — diff printed above, create PR manually")
+
         log("done", {"step": step, "verified": True})
         return "done"
 
     for step in range(max_steps):
-        emit(f"\n>>> Step {step} — requesting LLM...")
+        emit(f"\n>>> Step {step}/{max_steps} — requesting LLM...")
         t0 = time.time()
 
         try:
             response = chat(messages)
         except Exception as e:
+            if _is_llm_timeout_error(e):
+                emit(f"  LLM TIMEOUT: {e}")
+                log("llm_timeout", {"step": step, "error": str(e)})
+                return 1
             emit(f"  ERROR: {e}")
             log("error", {"step": step, "error": str(e)})
             break
@@ -1170,7 +1324,7 @@ def main():
         if msg.get("content"):
             emit(f"  [SAY] {msg['content']}")
             if "DONE" in msg["content"].upper():
-                completion = try_complete(step, msg)
+                completion = try_complete(step)
                 if completion == "done":
                     return 0
                 if completion == "give_up":
@@ -1182,7 +1336,6 @@ def main():
 
         if finish == "tool_calls" and msg.get("tool_calls"):
             test_passed = False
-            created_test = False
             for tc in msg["tool_calls"]:
                 fn = tc["function"]
                 name = fn["name"]
@@ -1201,11 +1354,13 @@ def main():
                 result = execute_tool(name, args)
                 tool_elapsed = time.time() - t1
                 result_truncated = truncate(result)
+                applied = _tool_applied_status(name, result)
 
                 log("tool", {
                     "step": step,
                     "name": name,
                     "args": args,
+                    "applied": applied,
                     "result_chars": len(result),
                     "result_truncated": len(result) != len(result_truncated),
                     "elapsed_s": round(tool_elapsed, 3),
@@ -1227,24 +1382,26 @@ def main():
                     "content": result_truncated,
                 })
 
-                if (
-                    name == "create_file"
-                    and result.startswith("OK: created ")
-                    and _is_test_file_path(args.get("path", ""))
-                ):
-                    created_test = True
                 if _is_test_pass(name, args):
                     test_passed = True
 
-            if episode and created_test:
-                nudge = (
-                    f"Good. Now run the test to confirm it fails, then fix "
-                    f"{episode['source_file']} to make it pass. Say DONE when green."
+            # --- PHASE NUDGE: test file created → nudge to run + fix ---
+            if episode:
+                created_test = any(
+                    tc["function"]["name"] == "create_file"
+                    and _is_test_file_path(json.loads(tc["function"]["arguments"]).get("path", ""))
+                    for tc in msg.get("tool_calls", [])
                 )
-                messages.append({"role": "user", "content": nudge})
-                emit("  [PHASE] Test created → injected run+fix nudge")
-                log("phase_nudge", {"phase": "fix", "test_file": episode["test_file"]})
+                if created_test:
+                    nudge = (
+                        f"Good. Now run the test to confirm it fails, then fix "
+                        f"{episode['source_file']} to make it pass. Say DONE when green."
+                    )
+                    messages.append({"role": "user", "content": nudge})
+                    emit("  [PHASE] Test created → injected run+fix nudge")
+                    log("phase_nudge", {"phase": "fix", "test_file": episode["test_file"]})
 
+            # --- AUTO-TRIGGER: test passed → verify → quality → done ---
             if test_passed:
                 emit("\n  [AUTO] Test pass detected — triggering verification pipeline")
                 completion = try_complete(step)
@@ -1252,12 +1409,13 @@ def main():
                     return 0
                 if completion == "give_up":
                     return 1
+                # quality_fail, verify_fail, no_test → continue loop
 
         elif finish == "stop":
             if step > 3:
                 messages.append({
                     "role": "user",
-                    "content": _CONFIG["prompt"]["nudge"]
+                    "content": _CONFIG["prompt"]["nudge"].replace("{step}", str(step)).replace("{max_steps}", str(max_steps))
                 })
                 emit("  [NUDGE] Continue prompt injected")
         else:
