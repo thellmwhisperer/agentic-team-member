@@ -144,6 +144,31 @@ class TestPythonPlugin:
         lang = get_language("file.py")
         assert lang.test_path("src/worker.py", "process_item") == "src/test_process_item.py"
 
+    def test_test_path_prefers_existing_module_test_file(self):
+        """If test_<module>.py already exists, prefer it over test_<symbol>.py.
+
+        Repos like roca-madre group method tests in one test_server.py file.
+        Creating test__handle_query.py for symbol _handle_query orphans the
+        scaffold from existing fixtures and patterns.
+        """
+        lang = get_language("file.py")
+        existing = {"src/test_worker.py"}
+        result = lang.test_path(
+            "src/worker.py", "process_item", exists=existing.__contains__,
+        )
+        assert result == "src/test_worker.py"
+
+    def test_test_path_falls_back_when_module_test_missing(self):
+        lang = get_language("file.py")
+        result = lang.test_path(
+            "src/worker.py", "process_item", exists=lambda _p: False,
+        )
+        assert result == "src/test_process_item.py"
+
+    def test_test_path_without_exists_keeps_legacy_behavior(self):
+        lang = get_language("file.py")
+        assert lang.test_path("src/worker.py", "process_item") == "src/test_process_item.py"
+
     def test_setter_name_convention(self):
         lang = get_language("file.py")
         assert lang.setter_name("client") == "__set_client_for_tests"

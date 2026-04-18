@@ -145,7 +145,10 @@ def _build_contract_for_symbol(
         seam_edits=seam_edits,
     )
 
-    resolved_test_path = test_path or lang.test_path(source_path, symbol)
+    def _exists(rel_path: str) -> bool:
+        return (Path(project_root) / rel_path).is_file()
+
+    resolved_test_path = test_path or lang.test_path(source_path, symbol, exists=_exists)
     runner = lang.runner
 
     facts = {
