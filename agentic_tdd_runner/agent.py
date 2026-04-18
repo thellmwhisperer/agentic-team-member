@@ -452,7 +452,10 @@ def run_quality_checks(test_file: str) -> tuple[bool, str]:
         return True, "Quality checks disabled"
 
     lang = get_language(test_file)
-    lang_name = lang.name if lang else "typescript"
+    if lang is None:
+        return True, f"Quality checks skipped: no language plugin for {test_file!r}"
+
+    lang_name = lang.name
     lang_cfg = quality_cfg.get(lang_name, {})
     checks = detect_quality_tools(lang_name) or lang_cfg.get("checks", [])
     forbidden = lang_cfg.get("forbidden", [])
@@ -461,8 +464,7 @@ def run_quality_checks(test_file: str) -> tuple[bool, str]:
     if not all_changed:
         return True, "No changed files"
 
-    extensions = lang.extensions if lang else [".ts", ".tsx", ".js", ".jsx"]
-    changed = [f for f in all_changed if os.path.splitext(f)[1] in extensions]
+    changed = [f for f in all_changed if os.path.splitext(f)[1] in lang.extensions]
     if not changed:
         return True, "No changed files matching language"
 
@@ -473,13 +475,21 @@ def run_quality_checks(test_file: str) -> tuple[bool, str]:
         try:
             fix_cmd = check.get("fix", "").replace("{changed_files}", changed_str)
             if fix_cmd:
-                subprocess.run(
+                fix_result = subprocess.run(
                     fix_cmd,
                     shell=True,
                     cwd=WORKDIR,
                     capture_output=True,
+                    text=True,
                     timeout=_CONFIG["timeouts"]["tool_execution"],
                 )
+                if fix_result.returncode != 0:
+                    raw = (fix_result.stdout or "") + (fix_result.stderr or "")
+                    lines = [ln for ln in raw.splitlines() if ln.strip()]
+                    sample = "\n".join(f"  {ln}" for ln in lines[:5]) if lines else "  no output captured"
+                    failures.append(
+                        f"[{check['name']}:fix] autofix failed (rc={fix_result.returncode}):\n{sample}"
+                    )
 
             cmd = check["command"].replace("{changed_files}", changed_str)
             result = subprocess.run(
@@ -517,7 +527,7 @@ def run_quality_checks(test_file: str) -> tuple[bool, str]:
                     forbidden_by_file.setdefault(f, []).append(f"  {f}:{i} '{pattern}'")
 
     for f, hits in forbidden_by_file.items():
-        failures.append(f"[Forbidden] {f}: {len(hits)} forbidden patterns\n" + "\n".join(hits[:5]))
+        failures.append(f"[Forbidden] {f}: {len(hits)} forbidden patterns\n" + "\n".join(hits[:20]))
 
     if failures:
         details = "\n\n".join(failures)

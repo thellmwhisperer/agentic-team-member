@@ -523,6 +523,22 @@ class TestRunQualityChecks:
         assert "[Forbidden] src/file.ts" in msg
         assert "as any" in msg
 
+    def test_skips_when_language_plugin_is_missing(self, tmp_path, monkeypatch):
+        _init_git_repo(tmp_path)
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "file.go").write_text("package main\n")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "quality": {"enabled": True},
+        })
+
+        ok, msg = run_quality_checks("src/file_test.go")
+
+        assert ok is True
+        assert msg == "Quality checks skipped: no language plugin for 'src/file_test.go'"
+
     def test_surfaces_check_failure_output(self, tmp_path, monkeypatch):
         _init_git_repo(tmp_path)
         src = tmp_path / "src"
@@ -560,6 +576,49 @@ class TestRunQualityChecks:
         assert "[lint]" in msg
         assert "broken lint" in msg
 
+    def test_surfaces_fix_command_failure_output(self, tmp_path, monkeypatch):
+        _init_git_repo(tmp_path)
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "file.ts").write_text("const value = 1;\n")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "quality": {
+                "enabled": True,
+                "typescript": {"forbidden": []},
+            },
+            "prompt": {"quality_failed": "FAIL: {details}"},
+            "timeouts": {"tool_execution": 10},
+        })
+        monkeypatch.setattr(
+            "agentic_tdd_runner.agent.detect_quality_tools",
+            lambda lang_name: [{
+                "name": "lint",
+                "fix": "fake-fix {changed_files}",
+                "command": "fake-lint {changed_files}",
+            }],
+        )
+
+        original_run = subprocess.run
+
+        def fake_run(command, **kwargs):
+            if isinstance(command, list):
+                return original_run(command, **kwargs)
+            if command == "fake-fix src/file.ts":
+                return SimpleNamespace(returncode=2, stdout="", stderr="formatter crashed\n")
+            if command == "fake-lint src/file.ts":
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+            raise AssertionError(f"unexpected command: {command}")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.subprocess.run", fake_run)
+
+        ok, msg = run_quality_checks("src/file.test.ts")
+
+        assert ok is False
+        assert "[lint:fix]" in msg
+        assert "formatter crashed" in msg
+
     def test_filters_changed_files_by_language_extensions(self, tmp_path, monkeypatch):
         _init_git_repo(tmp_path)
         (tmp_path / "README.md").write_text("avoid as any in docs\n")
@@ -579,6 +638,29 @@ class TestRunQualityChecks:
 
         assert ok is True
         assert msg == "No changed files matching language"
+
+    def test_reports_more_than_five_forbidden_hits(self, tmp_path, monkeypatch):
+        _init_git_repo(tmp_path)
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "file.ts").write_text("".join(f"const value{i} = item as any;\n" for i in range(6)))
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "quality": {
+                "enabled": True,
+                "typescript": {"forbidden": ["as any"]},
+            },
+            "prompt": {"quality_failed": "FAIL: {details}"},
+            "timeouts": {"tool_execution": 10},
+        })
+        monkeypatch.setattr("agentic_tdd_runner.agent.detect_quality_tools", lambda lang_name: [])
+
+        ok, msg = run_quality_checks("src/file.test.ts")
+
+        assert ok is False
+        assert "[Forbidden] src/file.ts: 6 forbidden patterns" in msg
+        assert "src/file.ts:6 'as any'" in msg
 
 
 class TestExecuteToolReactiveChecks:
