@@ -31,6 +31,7 @@ _CONFIG = None  # populated by main()
 WORKDIR = os.environ.get("AGENT_WORKDIR", os.getcwd())
 LOG_DIR = os.environ.get("AGENT_LOG_DIR", os.getcwd())
 _last_run_exit_code: int | None = None
+_file_read_cache: dict[Path, int] = {}
 
 # --- Logging ---
 _log_file = None
@@ -91,6 +92,127 @@ def apply_mechanical_edits(edits: list[dict], workdir: str) -> int:
         emit(f"  [PREP] Applied edit to {edit['path']}")
         applied += 1
     return applied
+
+
+def _quality_retry_feedback_message(quality_msg: str, test_file: str) -> dict:
+    return {
+        "role": "user",
+        "content": (
+            f"Verification already passed for {test_file}. Preserve the current fix behavior and "
+            f"only address the residual quality issues below.\n\n{quality_msg}"
+        ),
+    }
+
+
+def _compact_messages_after_quality_failure(messages: list[dict], quality_msg: str, test_file: str) -> list[dict]:
+    # The read-file stub says "refer to the earlier read_file result"; after
+    # compaction that earlier turn is gone, so force the next read to return
+    # full file contents instead of a dedup hint.
+    _file_read_cache.clear()
+    compacted: list[dict] = []
+    if messages and messages[0].get("role") == "system":
+        compacted.append(messages[0])
+
+    # Keep only stable anchors after green: the system prompt, the original
+    # issue, and targeted quality feedback. The current fix is authoritative on
+    # disk, so transient assistant/tool chatter can be re-derived as needed.
+    issue_msg = next((msg for msg in messages[1:] if msg.get("role") == "user"), None)
+    if issue_msg:
+        compacted.append(issue_msg)
+
+    compacted.append(_quality_retry_feedback_message(quality_msg, test_file))
+    return compacted
+
+
+def _llm_context_window_tokens() -> int:
+    llm_cfg = (_CONFIG or {}).get("llm", {})
+    raw_value = (
+        llm_cfg.get("context_window_tokens")
+        or llm_cfg.get("context_window")
+        or llm_cfg.get("num_ctx")
+        # Qwen 27B's native 32k window is our default local baseline; other
+        # models should override this explicitly in config.
+        or 32768
+    )
+    try:
+        return int(raw_value)
+    except (TypeError, ValueError):
+        return 32768
+
+
+def _coerce_int(value) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        value = value.strip()
+        if value.isdigit():
+            return int(value)
+    return None
+
+
+def _estimate_prompt_tokens(messages: list[dict]) -> int:
+    total = 0
+    for message in messages:
+        payload = json.dumps(message, ensure_ascii=False, sort_keys=True)
+        total += max(1, (len(payload) + 3) // 4) + 4
+    return total
+
+
+def _prospective_quality_retry_prompt_tokens(
+    messages: list[dict],
+    assistant_msg: dict | None,
+    retry_feedback: dict,
+    last_usage: dict | None,
+) -> int:
+    added_messages = [retry_feedback]
+    if assistant_msg:
+        added_messages.insert(0, assistant_msg)
+
+    base_prompt_tokens = _coerce_int((last_usage or {}).get("prompt_tokens"))
+    added_prompt_tokens = _estimate_prompt_tokens(added_messages)
+    if base_prompt_tokens is not None:
+        return base_prompt_tokens + added_prompt_tokens
+    return _estimate_prompt_tokens([*messages, *added_messages])
+
+
+def _should_compact_after_quality_failure(prompt_tokens: int | None) -> tuple[bool, dict]:
+    quality_cfg = (_CONFIG or {}).get("quality", {})
+    context_window = _llm_context_window_tokens()
+    try:
+        threshold_ratio = float(quality_cfg.get("compact_threshold_ratio", 0.85))
+    except (TypeError, ValueError):
+        threshold_ratio = 0.85
+    min_headroom_tokens = _coerce_int(quality_cfg.get("compact_min_headroom_tokens"))
+    if min_headroom_tokens is None:
+        # 2k keeps compaction conservative by default; bump per-model in config
+        # if longer tool calls or reasoning traces are getting truncated.
+        min_headroom_tokens = 2048
+
+    info = {
+        "context_window_tokens": context_window,
+        "threshold_ratio": threshold_ratio,
+        "min_headroom_tokens": min_headroom_tokens,
+        "prompt_tokens": prompt_tokens,
+    }
+
+    if prompt_tokens is None:
+        info["reason"] = "missing_prompt_tokens"
+        return False, info
+
+    headroom_tokens = context_window - prompt_tokens
+    info["headroom_tokens"] = headroom_tokens
+    info["prompt_ratio"] = round(prompt_tokens / context_window, 4) if context_window else None
+
+    should_compact = (
+        prompt_tokens >= int(context_window * threshold_ratio)
+        or headroom_tokens <= min_headroom_tokens
+    )
+    info["reason"] = "near_context_limit" if should_compact else "enough_headroom"
+    return should_compact, info
 
 
 def _resolve_repo_path(path: str, workdir: str = None) -> Path:
@@ -188,8 +310,16 @@ def execute_tool(name: str, args: dict) -> str:
             if os.path.isdir(full_path):
                 entries = os.listdir(full_path)
                 return "\n".join(sorted(entries))
+            mtime_ns = full_path.stat().st_mtime_ns
+            if _file_read_cache.get(full_path) == mtime_ns:
+                return (
+                    "File unchanged since last read. The content from the earlier read_file result "
+                    "in this conversation is still current — refer to that instead of re-reading."
+                )
             with open(full_path, "r") as f:
-                return f.read()
+                content = f.read()
+            _file_read_cache[full_path] = mtime_ns
+            return content
 
         elif name == "run_command":
             _validate_command(args["command"])
@@ -217,6 +347,7 @@ def execute_tool(name: str, args: dict) -> str:
             new_content = content.replace(old_str, args["new_str"], 1)
             with open(full_path, "w") as f:
                 f.write(new_content)
+            _file_read_cache.pop(full_path, None)
             result = f"OK: replaced in {args['path']}"
             return result + _reactive_typecheck_feedback(args["path"])
 
@@ -227,6 +358,7 @@ def execute_tool(name: str, args: dict) -> str:
             os.makedirs(os.path.dirname(full_path), exist_ok=True)
             with open(full_path, "w") as f:
                 f.write(args["content"])
+            _file_read_cache.pop(full_path, None)
             result = f"OK: created {args['path']}"
             return result + _reactive_typecheck_feedback(args["path"]) + _reactive_test_feedback(args["path"])
 
@@ -802,6 +934,7 @@ def parse_args():
 def main():
     global _CONFIG, WORKDIR, LOG_DIR
     args = parse_args()
+    _file_read_cache.clear()
 
     from agentic_tdd_runner.config import load_config
     _CONFIG = load_config(args.config)
@@ -869,11 +1002,11 @@ def main():
     log("start", {"issue": issue_text[:200]})
 
     done_rejected = 0  # how many times we rejected DONE
-
     max_rejections = _CONFIG["verification"]["max_rejections"]
+    last_usage: dict | None = None
 
     def try_complete(step: int, assistant_msg: dict | None = None) -> str:
-        nonlocal done_rejected
+        nonlocal done_rejected, last_usage
         test_hint = episode["test_file"] if episode else None
         test_file = find_test_file(test_hint)
         if not test_file:
@@ -914,12 +1047,34 @@ def main():
                 "test_file": test_file,
             })
             if not quality_ok:
-                if assistant_msg:
-                    messages.append(assistant_msg)
-                messages.append({
-                    "role": "user",
-                    "content": quality_msg,
-                })
+                retry_feedback = _quality_retry_feedback_message(quality_msg, test_file)
+                prospective_prompt_tokens = _prospective_quality_retry_prompt_tokens(
+                    messages,
+                    assistant_msg,
+                    retry_feedback,
+                    last_usage,
+                )
+                should_compact, compact_info = _should_compact_after_quality_failure(prospective_prompt_tokens)
+                if should_compact:
+                    before_count = len(messages)
+                    messages[:] = _compact_messages_after_quality_failure(messages, quality_msg, test_file)
+                    log("context_compacted", {
+                        "reason": "quality_fail",
+                        "before_messages": before_count,
+                        "after_messages": len(messages),
+                        "test_file": test_file,
+                        **compact_info,
+                    })
+                else:
+                    if assistant_msg:
+                        messages.append(assistant_msg)
+                    messages.append(retry_feedback)
+                    log("context_preserved", {
+                        "reason": "quality_fail",
+                        "message_count": len(messages),
+                        "test_file": test_file,
+                        **compact_info,
+                    })
                 return "quality_fail"
 
             verified, verify_msg = verify_red_green(test_file)
@@ -979,6 +1134,7 @@ def main():
         msg = choice["message"]
         finish = choice["finish_reason"]
         usage = response.get("usage", {})
+        last_usage = usage
         timings = response.get("timings", {})
         thinking = msg.get("reasoning_content", "")
 
