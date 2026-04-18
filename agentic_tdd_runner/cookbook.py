@@ -8,6 +8,7 @@ from __future__ import annotations
 import re
 from copy import deepcopy
 from pathlib import Path
+from typing import Any
 
 from agentic_tdd_runner.compiler import (
     _build_assertion_surface,
@@ -34,8 +35,11 @@ def _build_contract_for_symbol(
     test_path: str | None = None,
     line_start: int | None = None,
     line_end: int | None = None,
-) -> tuple[dict, object, list[dict]]:
-    """Shared pipeline: build contract + lang + seam edits for a symbol."""
+) -> tuple[dict, Any, list[dict]]:
+    """Shared pipeline: build contract + lang + seam edits for a symbol.
+
+    Returns (contract, lang, seam_edits).
+    """
     full_path = Path(project_root) / source_path
     source_text = full_path.read_text()
 
@@ -50,13 +54,11 @@ def _build_contract_for_symbol(
     sym_line = line_start or _find_symbol_line(source_text, symbol)
     fn_end = line_end or _find_function_end(source_text, sym_line, lang=lang)
 
-    # Detect class methods (indented def in Python)
     owner_class = None
     if sym_line and lang.name == "python":
         lines = source_text.splitlines()
         sym_line_text = lines[sym_line - 1] if sym_line <= len(lines) else ""
         if sym_line_text.startswith((" ", "\t")):
-            # Find the class that owns this method
             for i in range(sym_line - 2, -1, -1):
                 m = re.match(r"^class\s+(\w+)", lines[i])
                 if m:
@@ -74,13 +76,7 @@ def _build_contract_for_symbol(
     }
     snippet = _extract_target_snippet(source_text, target)
 
-    # Deps used in the function body
     deps = _discover_dependencies(snippet, imports, assignments, exclude_symbol=symbol)
-
-    # Also include module-level factory calls (const x = getX()) —
-    # they execute on `await import()` and crash if not mocked.
-    # Bare imports (import { Class } from '...') don't need mocking
-    # unless the module has init-time side effects.
     snippet_bindings = {d["binding"] for d in deps}
     for binding, assignment in assignments.items():
         if binding in snippet_bindings or binding == symbol:
@@ -88,14 +84,9 @@ def _build_contract_for_symbol(
         called = assignment.get("called_symbol")
         if not called:
             continue
-        # This is a factory call like `const logger = getLogger()`
-        # Include the factory's source module
         factory_import = imports.get(called)
         if factory_import:
-            deps.append({
-                "binding": binding,
-                "source_module": factory_import["source_module"],
-            })
+            deps.append({"binding": binding, "source_module": factory_import["source_module"]})
 
     module_load_dependencies = []
     execution_dependencies = []
@@ -125,7 +116,6 @@ def _build_contract_for_symbol(
 
     assertion_surface, assertion_gaps = _build_assertion_surface(None, snippet, symbol)
 
-    # Add assertion surface binding as execution dep if not already tracked
     inferred_binding = assertion_surface.get("binding")
     if (
         inferred_binding
@@ -191,12 +181,8 @@ def generate_cookbook(
 ) -> str:
     """Generate a text cookbook section for injection into the TDD agent's system prompt."""
     contract, lang, _seam_edits = _build_contract_for_symbol(
-        source_path,
-        symbol,
-        project_root,
-        test_path=test_path,
-        line_start=line_start,
-        line_end=line_end,
+        source_path, symbol, project_root,
+        test_path=test_path, line_start=line_start, line_end=line_end,
     )
     return _render_cookbook_text(contract, lang)
 
@@ -212,16 +198,13 @@ def build_episode_context(
 ) -> dict:
     """Return structured episode data for the phased runner."""
     contract, lang, seam_edits = _build_contract_for_symbol(
-        source_path,
-        symbol,
-        project_root,
-        test_path=test_path,
-        line_start=line_start,
-        line_end=line_end,
+        source_path, symbol, project_root,
+        test_path=test_path, line_start=line_start, line_end=line_end,
     )
     runner = contract["test_file"]["runner"]
     resolved_test_path = contract["test_file"]["path"]
     source_import_path = contract["test_file"].get("source_import_path", "")
+
     mocks_text = _render_module_mocks(contract.get("module_load_dependencies", [])) if runner == "bun:test" else ""
 
     assertion_surface = contract.get("assertion_surface", {})
