@@ -1,15 +1,22 @@
 """Tests for config loading from TOML + JSON."""
 import json
+import tomllib
 from pathlib import Path
 
+import pytest
+
 from agentic_tdd_runner.config import load_config
+
+
+CONFIG_DIR = Path(__file__).parent.parent / "config"
+BENCHMARK_CONFIGS = sorted(path.name for path in CONFIG_DIR.glob("agent-r*.toml"))
 
 
 class TestProductionConfig:
     """The shipped config/agent.toml loads without errors."""
 
     def test_production_toml_loads(self):
-        prod = Path(__file__).parent.parent / "config" / "agent.toml"
+        prod = CONFIG_DIR / "agent.toml"
         cfg = load_config(prod)
         assert len(cfg["tools"]) > 0
         assert "system" in cfg["prompt"]
@@ -62,7 +69,7 @@ class TestLoadConfig:
 
     def test_production_quality_section(self):
         """Production config has quality section with expected structure."""
-        prod = Path(__file__).parent.parent / "config" / "agent.toml"
+        prod = CONFIG_DIR / "agent.toml"
         cfg = load_config(prod)
         assert cfg["quality"]["enabled"] is True
         assert cfg["quality"]["max_fix_rounds"] == 3
@@ -72,10 +79,22 @@ class TestLoadConfig:
 
     def test_production_pr_section(self):
         """Production config has pr section."""
-        prod = Path(__file__).parent.parent / "config" / "agent.toml"
+        prod = CONFIG_DIR / "agent.toml"
         cfg = load_config(prod)
         assert cfg["pr"]["enabled"] is True
         assert cfg["pr"]["base_branch"] == "main"
+        assert cfg["timeouts"]["pr_create"] == 120
+
+    def test_benchmark_configs_discovered(self):
+        assert BENCHMARK_CONFIGS, "No benchmark configs found under config/agent-r*.toml"
+
+    @pytest.mark.parametrize("filename", BENCHMARK_CONFIGS)
+    def test_benchmark_configs_have_required_sections(self, filename):
+        config_path = CONFIG_DIR / filename
+        with config_path.open("rb") as fh:
+            cfg = tomllib.load(fh)
+        for section in ("llm", "runner", "timeouts", "prompt", "agent"):
+            assert section in cfg
         assert cfg["timeouts"]["pr_create"] == 120
 
     def test_tools_path_relative_to_toml(self, tmp_path):
