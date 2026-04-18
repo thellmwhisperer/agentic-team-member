@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from agentic_tdd_runner.agent import (
+    _is_test_file_path,
     _resolve_repo_path,
     _validate_command,
     detect_quality_tools,
@@ -285,6 +286,44 @@ class TestFindTestFile:
             "runner": {"test_file_patterns": ["*.test.ts", "*.test.tsx"], "exclude_dirs": []},
         })
         assert find_test_file() == "src/widget.test.tsx"
+
+
+class TestIsTestFilePath:
+    """Fallback test file detection should use conventional test naming only."""
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "src/test_worker.py",
+            "src/foo_test.py",
+            "src/foo-test.js",
+            "src/widget.test.ts",
+            "src/test.py",
+            "src/tests.py",
+        ],
+    )
+    def test_fallback_detects_conventional_test_names(self, monkeypatch, path):
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {"runner": {"test_file_patterns": []}})
+        assert _is_test_file_path(path) is True
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "src/contest.py",
+            "src/latest.js",
+            "src/testimony.py",
+            "src/integrationtest.ts",
+        ],
+    )
+    def test_fallback_rejects_non_conventional_names(self, monkeypatch, path):
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {"runner": {"test_file_patterns": []}})
+        assert _is_test_file_path(path) is False
+
+    def test_configured_patterns_still_use_fnmatch(self, monkeypatch):
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "runner": {"test_file_patterns": ["*.spec.ts"]},
+        })
+        assert _is_test_file_path("src/widget.spec.ts") is True
 
 
 class TestDetectQualityTools:

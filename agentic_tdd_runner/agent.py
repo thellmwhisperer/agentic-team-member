@@ -283,7 +283,10 @@ def _is_test_file_path(path: str) -> bool:
     patterns = (_CONFIG or {}).get("runner", {}).get("test_file_patterns", [])
     name = PurePosixPath(path).name
     if not patterns:
-        return "test" in name.lower()
+        stem = PurePosixPath(path).stem.lower()
+        if stem in {"test", "tests"}:
+            return True
+        return stem.startswith(("test_", "test-")) or stem.endswith(("_test", "-test", ".test"))
     return any(fnmatch.fnmatch(name, pattern) for pattern in patterns)
 
 
