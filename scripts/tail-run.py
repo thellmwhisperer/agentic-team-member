@@ -3,8 +3,10 @@
 import argparse
 import glob
 import json
+import os
 import subprocess
 import sys
+import tempfile
 
 SEP = "─" * 80
 
@@ -17,20 +19,33 @@ def _build_parser():
         "logfile",
         nargs="?",
         help=(
-            "Specific JSONL log to follow. Defaults to the latest "
-            "/Volumes/CrucialX9/tmp/agent-*.jsonl file."
+            "Specific JSONL log to follow. Defaults to the newest "
+            "agent-*.jsonl found in AGENT_LOG_DIR, the current directory, "
+            "XDG_RUNTIME_DIR, or the system temp directory."
         ),
     )
     return parser
 
 
+def _default_log_dirs():
+    candidates = [
+        os.environ.get("AGENT_LOG_DIR"),
+        os.getcwd(),
+        os.environ.get("XDG_RUNTIME_DIR"),
+        tempfile.gettempdir(),
+    ]
+    return [path for i, path in enumerate(candidates) if path and path not in candidates[:i]]
+
+
 def _resolve_logfile(logfile):
     if logfile:
         return logfile
-    files = glob.glob("/Volumes/CrucialX9/tmp/agent-*.jsonl")
+    files = []
+    for directory in _default_log_dirs():
+        files.extend(glob.glob(os.path.join(directory, "agent-*.jsonl")))
     if not files:
         return None
-    return sorted(files)[-1]
+    return max(set(files), key=os.path.getmtime)
 
 
 def fmt_metric(value, spec, suffix=""):
@@ -133,7 +148,7 @@ def main(argv=None):
                     for tline in thinking.strip().split("\n"):
                         print(f"    {tline}")
                 if content:
-                    print(f"\n  💬 Response:")
+                    print("\n  💬 Response:")
                     for cline in content.strip().split("\n"):
                         print(f"    {cline}")
 
