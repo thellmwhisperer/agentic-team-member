@@ -1114,16 +1114,25 @@ def _is_test_pass(name: str, args: dict) -> bool:
         tokens = shlex.split(cmd)
     except ValueError:
         tokens = cmd.split()
+    if not tokens:
+        return False
 
-    test_runners = (
-        ("bun", "test"),
-        ("pytest",),
-        ("python", "-m", "pytest"),
-        ("python3", "-m", "pytest"),
-        ("npm", "test"),
-        ("npx", "jest"),
-    )
-    return any(tokens[:len(runner)] == list(runner) for runner in test_runners)
+    def _matches_runner(runner_cmd: str) -> bool:
+        try:
+            runner_tokens = shlex.split(runner_cmd)
+        except ValueError:
+            runner_tokens = runner_cmd.split()
+        return bool(runner_tokens) and tokens[:len(runner_tokens)] == runner_tokens
+
+    configured_runner = ((_CONFIG or {}).get("runner", {}) or {}).get("command", "")
+    if configured_runner and _matches_runner(configured_runner):
+        return True
+
+    for token in reversed(tokens[1:]):
+        if _is_test_file_path(token) and _matches_runner(_test_runner_command_for_file(token)):
+            return True
+
+    return False
 
 
 def _default_config_path():
