@@ -1032,6 +1032,39 @@ class TestRunQualityChecks:
         assert "client_say_spy" in msg
         assert "handleResub" not in msg
 
+    def test_duplicated_setup_ignores_non_test_files_with_test_substring(self, tmp_path, monkeypatch):
+        """Non-test files like contest.ts must not be pulled into duplicated-setup scan."""
+        self._setup_repo(tmp_path, monkeypatch)
+        source_file = tmp_path / "src" / "contest.ts"
+        source_file.write_text(
+            "export function contest() {\n"
+            "  const spy = mock(() => {});\n"
+            "  __setClient(spy);\n"
+            "}\n"
+            "export function contestAgain() {\n"
+            "  const spy = mock(() => {});\n"
+            "  __setClient(spy);\n"
+            "}\n"
+            "export function contestThird() {\n"
+            "  const spy = mock(() => {});\n"
+            "  __setClient(spy);\n"
+            "}\n"
+        )
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "quality": {
+                "enabled": True, "max_fix_rounds": 3,
+                "typescript": {"checks": [], "forbidden": []},
+            },
+            "runner": {"test_file_patterns": ["*.test.ts", "*.test.tsx", "*.test.js", "test_*.py"]},
+            "timeouts": {"tool_execution": 10},
+            "prompt": {"quality_failed": "FAIL: {details}"},
+        })
+
+        ok, msg = run_quality_checks("src/file.test.ts")
+
+        assert ok is True, msg
+        assert "Duplicated setup" not in msg
+
     def test_duplicated_setup_judge_keeps_real_setup_finding_on_yes(self, tmp_path, monkeypatch):
         """Judge YES should keep the duplicated-setup failure."""
         self._setup_repo(tmp_path, monkeypatch)
