@@ -8,6 +8,7 @@ from __future__ import annotations
 import re
 from copy import deepcopy
 from pathlib import Path
+from typing import Any
 
 from agentic_tdd_runner.compiler import (
     _build_assertion_surface,
@@ -34,7 +35,7 @@ def _build_contract_for_symbol(
     test_path: str | None = None,
     line_start: int | None = None,
     line_end: int | None = None,
-) -> tuple:
+) -> tuple[dict, Any, list[dict]]:
     """Shared pipeline: build contract + lang + seam edits for a symbol.
 
     Returns (contract, lang, seam_edits).
@@ -206,11 +207,18 @@ def build_episode_context(
 
     mocks_text = _render_module_mocks(contract.get("module_load_dependencies", [])) if runner == "bun:test" else ""
 
-    a = contract.get("assertion_surface", {})
+    assertion_surface = contract.get("assertion_surface", {})
     assertion_hint = ""
-    if a.get("kind") == "outbound_call_arguments" and a.get("binding") and a.get("member"):
-        assertion_hint = f"assert on {a['binding']}.{a['member']} with toHaveBeenCalledWith"
-    elif a.get("kind") == "return_value":
+    if (
+        assertion_surface.get("kind") == "outbound_call_arguments"
+        and assertion_surface.get("binding")
+        and assertion_surface.get("member")
+    ):
+        assertion_hint = (
+            f"assert on {assertion_surface['binding']}.{assertion_surface['member']} "
+            "with toHaveBeenCalledWith"
+        )
+    elif assertion_surface.get("kind") == "return_value":
         assertion_hint = "assert on the return value"
 
     return {
