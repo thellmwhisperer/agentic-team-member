@@ -398,6 +398,17 @@ class TestDetectQualityTools:
         checks = detect_quality_tools("typescript")
         assert checks == []
 
+    def test_marks_project_wide_tsc_fallback_as_non_reactive(self, tmp_path, monkeypatch):
+        import json
+        (tmp_path / "package.json").write_text(json.dumps({
+            "devDependencies": {"typescript": "^5.8"},
+        }))
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        checks = detect_quality_tools("typescript")
+        tc = next(c for c in checks if c["name"] == "typecheck")
+        assert tc["command"] == "npx tsc --noEmit"
+        assert tc["reactive"] is False
+
     @pytest.mark.parametrize("lockfile,expected_cmd", [
         ("pnpm-lock.yaml", "pnpm run typecheck"),
         ("yarn.lock", "yarn run typecheck"),
@@ -577,6 +588,32 @@ class TestExecuteToolReactiveChecks:
         })
 
         assert result == "OK: replaced in src/file.ts"
+
+    def test_reactive_typecheck_skips_project_wide_tsc_fallback(self, tmp_path, monkeypatch):
+        import json
+        src = tmp_path / "src"
+        src.mkdir()
+        target = src / "file.ts"
+        target.write_text("const value = 1;\n")
+        (tmp_path / "package.json").write_text(json.dumps({
+            "devDependencies": {"typescript": "^5.8"},
+        }))
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+
+        def fail_if_called(*args, **kwargs):
+            raise AssertionError("project-wide tsc fallback should not run reactively")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.subprocess.run", fail_if_called)
+
+        result = execute_tool("str_replace_editor", {
+            "path": "src/file.ts",
+            "old_str": "const value = 1;\n",
+            "new_str": "const value = 2;\n",
+        })
+
+        assert "[Reactive typecheck] SKIPPED" in result
+        assert "scripts.typecheck" in result
 
     def test_reactive_typecheck_fires_for_python_files(self, tmp_path, monkeypatch):
         """Editing a .py file should trigger reactive typecheck if mypy/pyright is detected."""
