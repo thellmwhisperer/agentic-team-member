@@ -33,7 +33,7 @@ _CONFIG = None  # populated by main()
 WORKDIR = os.environ.get("AGENT_WORKDIR", os.getcwd())
 LOG_DIR = os.environ.get("AGENT_LOG_DIR", os.getcwd())
 _last_run_exit_code: int | None = None
-_file_read_cache: dict[Path, float] = {}  # {resolved_path: mtime} for read dedup
+_file_read_cache: dict[Path, int] = {}  # {resolved_path: mtime_ns} for read dedup
 
 # --- Logging ---
 _log_file = None
@@ -282,12 +282,12 @@ def execute_tool(name: str, args: dict) -> str:
             if os.path.isdir(full_path):
                 entries = os.listdir(full_path)
                 return "\n".join(sorted(entries))
-            mtime = os.path.getmtime(full_path)
-            if full_path in _file_read_cache and _file_read_cache[full_path] == mtime:
+            mtime_ns = full_path.stat().st_mtime_ns
+            if _file_read_cache.get(full_path) == mtime_ns:
                 return "File unchanged since last read. The content from the earlier read_file result in this conversation is still current — refer to that instead of re-reading."
             with open(full_path, "r") as f:
                 content = f.read()
-            _file_read_cache[full_path] = mtime
+            _file_read_cache[full_path] = mtime_ns
             return content
 
         elif name == "run_command":
@@ -329,6 +329,7 @@ def execute_tool(name: str, args: dict) -> str:
             os.makedirs(os.path.dirname(full_path), exist_ok=True)
             with open(full_path, "w") as f:
                 f.write(args["content"])
+            _file_read_cache.pop(full_path, None)
             result = f"OK: created {args['path']}"
             return result + _reactive_typecheck_feedback(args["path"]) + _reactive_test_feedback(args["path"])
 
@@ -1018,6 +1019,8 @@ def _parse_pr_content(content: str) -> tuple[str | None, str | None]:
 def create_pr(messages: list, last_msg: dict, test_file: str, step: int) -> str | None:
     """Ask LLM for PR content, then create branch/commit/push/PR."""
     pr_cfg = _CONFIG.get("pr", {})
+    timeouts = _CONFIG.get("timeouts", {})
+    pr_timeout = timeouts.get("pr_create", timeouts.get("tool_execution", timeouts.get("llm_request", 60)))
 
     # Ask LLM for title and description — without tools to avoid tool_calls
     pr_messages = messages.copy()
@@ -1048,14 +1051,16 @@ def create_pr(messages: list, last_msg: dict, test_file: str, step: int) -> str 
     try:
         subprocess.run(
             ["git", "checkout", "-b", branch_name],
-            cwd=WORKDIR, capture_output=True, check=True,
+            cwd=WORKDIR, capture_output=True, text=True, check=True, timeout=pr_timeout,
         )
         # Tracked modified/staged: always part of the fix (includes config files)
         tracked = subprocess.run(
-            ["git", "diff", "--name-only"], cwd=WORKDIR, capture_output=True, text=True,
+            ["git", "diff", "--name-only"],
+            cwd=WORKDIR, capture_output=True, text=True, timeout=pr_timeout,
         )
         staged = subprocess.run(
-            ["git", "diff", "--cached", "--name-only"], cwd=WORKDIR, capture_output=True, text=True,
+            ["git", "diff", "--cached", "--name-only"],
+            cwd=WORKDIR, capture_output=True, text=True, timeout=pr_timeout,
         )
         tracked_files = {
             f.strip() for f in (tracked.stdout + staged.stdout).splitlines()
@@ -1067,7 +1072,7 @@ def create_pr(messages: list, last_msg: dict, test_file: str, step: int) -> str 
         extensions = lang.extensions if lang else [".ts", ".tsx", ".js", ".jsx"]
         untracked = subprocess.run(
             ["git", "ls-files", "--others", "--exclude-standard"],
-            cwd=WORKDIR, capture_output=True, text=True,
+            cwd=WORKDIR, capture_output=True, text=True, timeout=pr_timeout,
         )
         untracked_files = {
             f.strip() for f in untracked.stdout.splitlines()
@@ -1078,24 +1083,28 @@ def create_pr(messages: list, last_msg: dict, test_file: str, step: int) -> str 
         if changed:
             subprocess.run(
                 ["git", "add", "--", *changed],
-                cwd=WORKDIR, capture_output=True, check=True,
+                cwd=WORKDIR, capture_output=True, text=True, check=True, timeout=pr_timeout,
             )
         subprocess.run(
             ["git", "commit", "-m", title, "-m", body],
-            cwd=WORKDIR, capture_output=True, check=True,
+            cwd=WORKDIR, capture_output=True, text=True, check=True, timeout=pr_timeout,
         )
         subprocess.run(
             ["git", "push", "-u", "origin", branch_name],
-            cwd=WORKDIR, capture_output=True, check=True,
+            cwd=WORKDIR, capture_output=True, text=True, check=True, timeout=pr_timeout,
         )
         result = subprocess.run(
             ["gh", "pr", "create", "--title", title, "--body", body, "--base", base],
-            cwd=WORKDIR, capture_output=True, text=True, check=True,
+            cwd=WORKDIR, capture_output=True, text=True, check=True, timeout=pr_timeout,
         )
         pr_url = result.stdout.strip()
         log("pr", {"url": pr_url, "branch": branch_name, "title": title})
         return pr_url
 
+    except subprocess.TimeoutExpired as e:
+        emit(f"  [PR] Command timed out: {e.cmd}")
+        log("pr_error", {"error": f"timeout: {e.cmd}"})
+        return None
     except subprocess.CalledProcessError as e:
         emit(f"  [PR] Command failed: {e.stderr}")
         log("pr_error", {"error": str(e)})
