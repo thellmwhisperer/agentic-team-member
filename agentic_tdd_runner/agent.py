@@ -214,6 +214,8 @@ def _reactive_typecheck_feedback(path: str) -> str:
     typecheck = next((check for check in checks if check.get("name") == "typecheck"), None)
     if not typecheck:
         return ""
+    if typecheck.get("reactive") is False:
+        return "\n\n[Reactive typecheck] SKIPPED: project-wide fallback is too expensive; add scripts.typecheck to enable inline TS feedback"
     command = typecheck["command"]
     if "{changed_files}" in command:
         command = command.format(changed_files=shlex.quote(path))
@@ -344,7 +346,11 @@ def detect_quality_tools(lang_name: str) -> list[dict]:
                 pm = _detect_package_manager(pkg)
                 checks.append({"name": "typecheck", "command": f"{pm} run typecheck"})
             elif "typescript" in all_deps:
-                checks.append({"name": "typecheck", "command": "npx tsc --noEmit"})
+                checks.append({
+                    "name": "typecheck",
+                    "command": "npx tsc --noEmit",
+                    "reactive": False,
+                })
 
             if any(k.startswith("@biomejs/biome") for k in all_deps):
                 checks.append({
