@@ -422,6 +422,155 @@ def detect_quality_tools(lang_name: str) -> list[dict]:
     return checks
 
 
+def _run_git_capture(args: list[str], *, error_context: str) -> subprocess.CompletedProcess[str]:
+    """Run a git command and raise with stderr if it fails."""
+    result = subprocess.run(args, cwd=WORKDIR, capture_output=True, text=True)
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip() or "no output captured"
+        raise RuntimeError(f"{error_context} failed (rc={result.returncode}): {detail}")
+    return result
+
+
+def _get_changed_files() -> list[str]:
+    """Get modified + staged + untracked files relative to WORKDIR."""
+    diff = _run_git_capture(
+        ["git", "diff", "--name-only"],
+        error_context="changed-file discovery via `git diff --name-only`",
+    )
+    staged = _run_git_capture(
+        ["git", "diff", "--cached", "--name-only"],
+        error_context="changed-file discovery via `git diff --cached --name-only`",
+    )
+    untracked = _run_git_capture(
+        ["git", "ls-files", "--others", "--exclude-standard"],
+        error_context="changed-file discovery via `git ls-files --others --exclude-standard`",
+    )
+    files = set()
+    for line in (diff.stdout + staged.stdout + untracked.stdout).splitlines():
+        line = line.strip()
+        if line and os.path.exists(os.path.join(WORKDIR, line)):
+            files.add(line)
+    return sorted(files)
+
+
+def run_quality_checks(test_file: str) -> tuple[bool, str]:
+    """Run quality checks on changed files. Returns (passed, message)."""
+    from agentic_tdd_runner.languages import get_language
+    import shlex
+
+    quality_cfg = _CONFIG.get("quality", {})
+    if not quality_cfg.get("enabled", False):
+        return True, "Quality checks disabled"
+
+    lang = get_language(test_file)
+    if lang is None:
+        return True, f"Quality checks skipped: no language plugin for {test_file!r}"
+
+    lang_name = lang.name
+    lang_cfg = quality_cfg.get(lang_name, {})
+    checks = detect_quality_tools(lang_name) or lang_cfg.get("checks", [])
+    forbidden = lang_cfg.get("forbidden", [])
+
+    all_changed = _get_changed_files()
+    if not all_changed:
+        return True, "No changed files"
+
+    changed = [f for f in all_changed if os.path.splitext(f)[1] in lang.extensions]
+    if not changed:
+        return True, "No changed files matching language"
+
+    changed_str = " ".join(shlex.quote(path) for path in changed)
+    failures = []
+
+    for idx, check in enumerate(checks, 1):
+        if not isinstance(check, dict):
+            failures.append(
+                f"[check #{idx}] invalid quality check config: expected mapping, got {type(check).__name__}"
+            )
+            continue
+
+        check_name = check.get("name")
+        if not isinstance(check_name, str) or not check_name.strip():
+            failures.append(f"[check #{idx}] invalid quality check config: missing string 'name'")
+            continue
+
+        raw_cmd = check.get("command")
+        if not isinstance(raw_cmd, str) or not raw_cmd.strip():
+            failures.append(f"[{check_name}] invalid quality check config: missing string 'command'")
+            continue
+
+        raw_fix = check.get("fix", "")
+        if raw_fix is None:
+            raw_fix = ""
+        if not isinstance(raw_fix, str):
+            failures.append(f"[{check_name}] invalid quality check config: 'fix' must be a string")
+            continue
+
+        try:
+            fix_cmd = raw_fix.replace("{changed_files}", changed_str)
+            if fix_cmd:
+                fix_result = subprocess.run(
+                    fix_cmd,
+                    shell=True,
+                    cwd=WORKDIR,
+                    capture_output=True,
+                    text=True,
+                    timeout=_CONFIG["timeouts"]["tool_execution"],
+                )
+                if fix_result.returncode != 0:
+                    raw = (fix_result.stdout or "") + (fix_result.stderr or "")
+                    lines = [ln for ln in raw.splitlines() if ln.strip()]
+                    sample = "\n".join(f"  {ln}" for ln in lines[:5]) if lines else "  no output captured"
+                    failures.append(
+                        f"[{check_name}:fix] autofix failed (rc={fix_result.returncode}):\n{sample}"
+                    )
+
+            cmd = raw_cmd.replace("{changed_files}", changed_str)
+            result = subprocess.run(
+                cmd,
+                shell=True,
+                cwd=WORKDIR,
+                capture_output=True,
+                text=True,
+                timeout=_CONFIG["timeouts"]["tool_execution"],
+            )
+            if result.returncode != 0:
+                raw = (result.stdout or "") + (result.stderr or "")
+                lines = [ln for ln in raw.splitlines() if ln.strip()]
+                n_errors = sum(1 for ln in lines if "error" in ln.lower()) or 1
+                sample = "\n".join(f"  {ln}" for ln in lines[:10]) if lines else f"  {raw[:200]}"
+                failures.append(f"[{check_name}] {n_errors} errors:\n{sample}")
+        except subprocess.TimeoutExpired:
+            failures.append(f"[{check_name}] TIMEOUT: command timed out")
+        except (OSError, UnicodeDecodeError) as e:
+            failures.append(f"[{check_name}] ERROR: {e}")
+
+    forbidden_by_file: dict[str, list[str]] = {}
+    for f in changed:
+        full = os.path.join(WORKDIR, f)
+        if not os.path.isfile(full):
+            continue
+        try:
+            with open(full, errors="replace") as fh:
+                content = fh.read()
+        except OSError:
+            continue
+        for pattern in forbidden:
+            for i, line in enumerate(content.splitlines(), 1):
+                if pattern in line:
+                    forbidden_by_file.setdefault(f, []).append(f"  {f}:{i} '{pattern}'")
+
+    for f, hits in forbidden_by_file.items():
+        failures.append(f"[Forbidden] {f}: {len(hits)} forbidden patterns\n" + "\n".join(hits[:20]))
+
+    if failures:
+        details = "\n\n".join(failures)
+        template = _CONFIG.get("prompt", {}).get("quality_failed", "QUALITY CHECK FAILED:\n\n{details}")
+        return False, template.replace("{details}", details)
+
+    return True, "All quality checks passed"
+
+
 def truncate(text: str, max_chars: int = 0) -> str:
     if max_chars == 0:
         max_chars = _CONFIG["agent"]["max_tool_output"]
@@ -462,9 +611,9 @@ def find_test_file(hint: str | None = None) -> str | None:
             if any(fnmatch.fnmatch(f, p) for p in patterns):
                 full = os.path.join(root, f)
                 rel = os.path.relpath(full, WORKDIR)
-                result = subprocess.run(
+                result = _run_git_capture(
                     ["git", "ls-files", "--", rel],
-                    cwd=WORKDIR, capture_output=True, text=True
+                    error_context=f"test-file discovery via `git ls-files -- {rel}`",
                 )
                 if not result.stdout.strip():
                     return rel
@@ -698,6 +847,43 @@ def main():
                     log("verify_result", {"verified": verified, "message": verify_msg, "test_file": test_file})
 
                     if verified:
+                        if _CONFIG.get("quality", {}).get("enabled", False):
+                            emit("\n=== QUALITY CHECKS ===")
+                            quality_ok, quality_msg = run_quality_checks(test_file)
+                            emit(f"  [QUALITY] {quality_msg}")
+                            log("quality_result", {
+                                "passed": quality_ok,
+                                "message": quality_msg[:500],
+                                "test_file": test_file,
+                            })
+                            if not quality_ok:
+                                messages.append(msg)
+                                messages.append({
+                                    "role": "user",
+                                    "content": quality_msg,
+                                })
+                                continue
+
+                            verified, verify_msg = verify_red_green(test_file)
+                            emit(f"\n  [RE-VERIFY] {verify_msg}")
+                            log("post_quality_verify_result", {
+                                "verified": verified,
+                                "message": verify_msg,
+                                "test_file": test_file,
+                            })
+                            if not verified:
+                                done_rejected += 1
+                                if done_rejected >= max_rejections:
+                                    emit(f"\n  [GIVE UP] Rejected DONE {done_rejected} times. Stopping.")
+                                    log("give_up", {"step": step, "done_rejected": done_rejected})
+                                    return 1
+                                messages.append(msg)
+                                messages.append({
+                                    "role": "user",
+                                    "content": verify_msg,
+                                })
+                                continue
+
                         emit(f"\n{'='*60}")
                         emit(f"AGENT DONE at step {step} — VERIFIED")
                         emit(f"{'='*60}")

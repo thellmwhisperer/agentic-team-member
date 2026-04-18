@@ -6,13 +6,22 @@ from types import SimpleNamespace
 import pytest
 
 from agentic_tdd_runner.agent import (
+    _get_changed_files,
     _is_test_file_path,
     _resolve_repo_path,
     _validate_command,
     detect_quality_tools,
     execute_tool,
     find_test_file,
+    main,
+    run_quality_checks,
 )
+
+
+def _init_git_repo(tmp_path):
+    subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=tmp_path, capture_output=True, check=True)
+    subprocess.run(["git", "config", "user.name", "Test User"], cwd=tmp_path, capture_output=True, check=True)
 
 
 class TestResolveRepoPath:
@@ -195,6 +204,26 @@ class TestFindTestFile:
         })
         # Hint file doesn't exist, falls back to discovery
         assert find_test_file(hint="src/nonexistent.test.ts") == "src/foo.test.ts"
+
+    def test_raises_when_git_tracking_check_fails(self, tmp_path, monkeypatch):
+        self._setup_git_repo(tmp_path)
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src" / "foo.test.ts").write_text("test")
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "runner": {"test_file_patterns": ["*.test.ts"], "exclude_dirs": []},
+        })
+        original_run = subprocess.run
+
+        def fake_run(command, **kwargs):
+            if command == ["git", "ls-files", "--", "src/foo.test.ts"]:
+                return subprocess.CompletedProcess(command, 1, stdout="", stderr="fatal: index broken")
+            return original_run(command, **kwargs)
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.subprocess.run", fake_run)
+
+        with pytest.raises(RuntimeError, match="test-file discovery via `git ls-files -- src/foo.test.ts` failed"):
+            find_test_file()
 
     def test_verify_red_green_preserves_untracked_test(self, tmp_path, monkeypatch):
         """An untracked test file must survive the stash cycle in verify_red_green."""
@@ -452,6 +481,250 @@ class TestDetectQualityTools:
         tc = next((c for c in checks if c["name"] == "typecheck"), None)
         assert tc is not None
         assert tc["command"] == f"{expected_pm} run typecheck"
+
+
+class TestGetChangedFiles:
+    """Changed-file detection should include modified, staged, and untracked files."""
+
+    def test_includes_modified_staged_and_untracked_but_not_deleted(self, tmp_path, monkeypatch):
+        _init_git_repo(tmp_path)
+        (tmp_path / "initial.ts").write_text("const a = 1;\n")
+        (tmp_path / "deleted.ts").write_text("const gone = 1;\n")
+        subprocess.run(["git", "add", "."], cwd=tmp_path, capture_output=True, check=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=tmp_path, capture_output=True, check=True)
+
+        (tmp_path / "initial.ts").write_text("const a = 2;\n")
+        (tmp_path / "staged.ts").write_text("const staged = 1;\n")
+        subprocess.run(["git", "add", "staged.ts"], cwd=tmp_path, capture_output=True, check=True)
+        (tmp_path / "untracked.ts").write_text("const fresh = 1;\n")
+        subprocess.run(["git", "rm", "deleted.ts"], cwd=tmp_path, capture_output=True, check=True)
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        files = _get_changed_files()
+
+        assert "initial.ts" in files
+        assert "staged.ts" in files
+        assert "untracked.ts" in files
+        assert "deleted.ts" not in files
+
+    def test_raises_when_git_discovery_fails(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+
+        def fake_run(command, **kwargs):
+            if command == ["git", "diff", "--name-only"]:
+                return subprocess.CompletedProcess(command, 1, stdout="", stderr="fatal: not a git repository")
+            raise AssertionError(f"unexpected command: {command}")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.subprocess.run", fake_run)
+
+        with pytest.raises(RuntimeError, match="changed-file discovery via `git diff --name-only` failed"):
+            _get_changed_files()
+
+
+class TestRunQualityChecks:
+    """run_quality_checks enforces checks and forbidden patterns on changed files."""
+
+    def test_returns_early_when_disabled(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "quality": {"enabled": False},
+        })
+        ok, msg = run_quality_checks("src/file.test.ts")
+        assert ok is True
+        assert msg == "Quality checks disabled"
+
+    def test_detects_forbidden_pattern(self, tmp_path, monkeypatch):
+        _init_git_repo(tmp_path)
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "file.ts").write_text("const value = {} as any;\n")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "quality": {
+                "enabled": True,
+                "typescript": {"forbidden": ["as any"]},
+            },
+            "prompt": {"quality_failed": "FAIL: {details}"},
+            "timeouts": {"tool_execution": 10},
+        })
+        monkeypatch.setattr("agentic_tdd_runner.agent.detect_quality_tools", lambda lang_name: [])
+
+        ok, msg = run_quality_checks("src/file.test.ts")
+
+        assert ok is False
+        assert "[Forbidden] src/file.ts" in msg
+        assert "as any" in msg
+
+    def test_skips_when_language_plugin_is_missing(self, tmp_path, monkeypatch):
+        _init_git_repo(tmp_path)
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "file.go").write_text("package main\n")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "quality": {"enabled": True},
+        })
+
+        ok, msg = run_quality_checks("src/file_test.go")
+
+        assert ok is True
+        assert msg == "Quality checks skipped: no language plugin for 'src/file_test.go'"
+
+    def test_surfaces_check_failure_output(self, tmp_path, monkeypatch):
+        _init_git_repo(tmp_path)
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "file.ts").write_text("const value = 1;\n")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "quality": {
+                "enabled": True,
+                "typescript": {"forbidden": []},
+            },
+            "prompt": {"quality_failed": "FAIL: {details}"},
+            "timeouts": {"tool_execution": 10},
+        })
+        monkeypatch.setattr(
+            "agentic_tdd_runner.agent.detect_quality_tools",
+            lambda lang_name: [{"name": "lint", "command": "fake-lint {changed_files}"}],
+        )
+
+        original_run = subprocess.run
+
+        def fake_run(command, **kwargs):
+            if isinstance(command, list):
+                return original_run(command, **kwargs)
+            if command == "fake-lint src/file.ts":
+                return SimpleNamespace(returncode=1, stdout="src/file.ts: error broken lint\n", stderr="")
+            raise AssertionError(f"unexpected command: {command}")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.subprocess.run", fake_run)
+
+        ok, msg = run_quality_checks("src/file.test.ts")
+
+        assert ok is False
+        assert "[lint]" in msg
+        assert "broken lint" in msg
+
+    def test_surfaces_fix_command_failure_output(self, tmp_path, monkeypatch):
+        _init_git_repo(tmp_path)
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "file.ts").write_text("const value = 1;\n")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "quality": {
+                "enabled": True,
+                "typescript": {"forbidden": []},
+            },
+            "prompt": {"quality_failed": "FAIL: {details}"},
+            "timeouts": {"tool_execution": 10},
+        })
+        monkeypatch.setattr(
+            "agentic_tdd_runner.agent.detect_quality_tools",
+            lambda lang_name: [{
+                "name": "lint",
+                "fix": "fake-fix {changed_files}",
+                "command": "fake-lint {changed_files}",
+            }],
+        )
+
+        original_run = subprocess.run
+
+        def fake_run(command, **kwargs):
+            if isinstance(command, list):
+                return original_run(command, **kwargs)
+            if command == "fake-fix src/file.ts":
+                return SimpleNamespace(returncode=2, stdout="", stderr="formatter crashed\n")
+            if command == "fake-lint src/file.ts":
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+            raise AssertionError(f"unexpected command: {command}")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.subprocess.run", fake_run)
+
+        ok, msg = run_quality_checks("src/file.test.ts")
+
+        assert ok is False
+        assert "[lint:fix]" in msg
+        assert "formatter crashed" in msg
+
+    def test_filters_changed_files_by_language_extensions(self, tmp_path, monkeypatch):
+        _init_git_repo(tmp_path)
+        (tmp_path / "README.md").write_text("avoid as any in docs\n")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "quality": {
+                "enabled": True,
+                "typescript": {"forbidden": ["as any"]},
+            },
+            "prompt": {"quality_failed": "FAIL: {details}"},
+            "timeouts": {"tool_execution": 10},
+        })
+        monkeypatch.setattr("agentic_tdd_runner.agent.detect_quality_tools", lambda lang_name: [])
+
+        ok, msg = run_quality_checks("src/file.test.ts")
+
+        assert ok is True
+        assert msg == "No changed files matching language"
+
+    def test_reports_more_than_five_forbidden_hits(self, tmp_path, monkeypatch):
+        _init_git_repo(tmp_path)
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "file.ts").write_text("".join(f"const value{i} = item as any;\n" for i in range(6)))
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "quality": {
+                "enabled": True,
+                "typescript": {"forbidden": ["as any"]},
+            },
+            "prompt": {"quality_failed": "FAIL: {details}"},
+            "timeouts": {"tool_execution": 10},
+        })
+        monkeypatch.setattr("agentic_tdd_runner.agent.detect_quality_tools", lambda lang_name: [])
+
+        ok, msg = run_quality_checks("src/file.test.ts")
+
+        assert ok is False
+        assert "[Forbidden] src/file.ts: 6 forbidden patterns" in msg
+        assert "src/file.ts:6 'as any'" in msg
+
+    def test_reports_malformed_quality_checks_without_crashing(self, tmp_path, monkeypatch):
+        _init_git_repo(tmp_path)
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "file.ts").write_text("const value = 1;\n")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "quality": {
+                "enabled": True,
+                "typescript": {"forbidden": []},
+            },
+            "prompt": {"quality_failed": "FAIL: {details}"},
+            "timeouts": {"tool_execution": 10},
+        })
+        monkeypatch.setattr(
+            "agentic_tdd_runner.agent.detect_quality_tools",
+            lambda lang_name: [
+                {"command": "fake-lint {changed_files}"},
+                {"name": "lint", "command": 123},
+                {"name": "format", "command": "fake-format {changed_files}", "fix": ["bad"]},
+            ],
+        )
+
+        ok, msg = run_quality_checks("src/file.test.ts")
+
+        assert ok is False
+        assert "[check #1] invalid quality check config: missing string 'name'" in msg
+        assert "[lint] invalid quality check config: missing string 'command'" in msg
+        assert "[format] invalid quality check config: 'fix' must be a string" in msg
 
 
 class TestExecuteToolReactiveChecks:
@@ -729,3 +1002,118 @@ class TestExecuteToolReactiveChecks:
         })
 
         assert result == "OK: created src/file.test.ts"
+
+
+class TestMainQualityGate:
+    """DONE should flow through verify, quality, and final success."""
+
+    def test_reverifies_after_quality_pass(self, tmp_path, monkeypatch):
+        config = {
+            "agent": {"max_steps": 1, "max_tool_output": 8000},
+            "verification": {"max_rejections": 3},
+            "quality": {"enabled": True},
+            "prompt": {
+                "system": "system prompt",
+                "nudge": "continue",
+                "no_test_found": "no test",
+                "quality_failed": "FAIL: {details}",
+            },
+            "llm": {"model": "test-model"},
+            "timeouts": {"tool_execution": 10},
+        }
+        args = SimpleNamespace(
+            issue="bug text",
+            source=None,
+            symbol=None,
+            workdir=str(tmp_path),
+            config="unused.toml",
+            log_dir=str(tmp_path),
+        )
+        verify_calls = []
+
+        monkeypatch.setattr("agentic_tdd_runner.config.load_config", lambda path: config)
+        monkeypatch.setattr("agentic_tdd_runner.agent.parse_args", lambda: args)
+        monkeypatch.setattr("agentic_tdd_runner.agent.init_log", lambda: str(tmp_path / "agent.jsonl"))
+        monkeypatch.setattr("agentic_tdd_runner.agent.emit", lambda msg: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.log", lambda *args, **kwargs: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.chat", lambda messages: {
+            "choices": [{"message": {"content": "DONE"}, "finish_reason": "stop"}],
+            "usage": {},
+            "timings": {},
+        })
+        monkeypatch.setattr("agentic_tdd_runner.agent.find_test_file", lambda hint=None: "src/file.test.ts")
+        monkeypatch.setattr("agentic_tdd_runner.agent.run_quality_checks", lambda test_file: (True, "All quality checks passed"))
+        monkeypatch.setattr(
+            "agentic_tdd_runner.agent.subprocess.run",
+            lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, stdout="", stderr=""),
+        )
+
+        def fake_verify(test_file):
+            verify_calls.append(test_file)
+            return True, "verified"
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.verify_red_green", fake_verify)
+
+        result = main()
+
+        assert result == 0
+        assert verify_calls == ["src/file.test.ts", "src/file.test.ts"]
+
+    def test_quality_failure_feeds_back_and_retries(self, tmp_path, monkeypatch):
+        config = {
+            "agent": {"max_steps": 2, "max_tool_output": 8000},
+            "verification": {"max_rejections": 3},
+            "quality": {"enabled": True},
+            "prompt": {
+                "system": "system prompt",
+                "nudge": "continue",
+                "no_test_found": "no test",
+                "quality_failed": "FAIL: {details}",
+            },
+            "llm": {"model": "test-model"},
+            "timeouts": {"tool_execution": 10},
+        }
+        args = SimpleNamespace(
+            issue="bug text",
+            source=None,
+            symbol=None,
+            workdir=str(tmp_path),
+            config="unused.toml",
+            log_dir=str(tmp_path),
+        )
+        quality_calls = []
+        seen_messages = []
+
+        def fake_chat(messages):
+            seen_messages.append([m.copy() for m in messages])
+            return {
+                "choices": [{"message": {"content": "DONE"}, "finish_reason": "stop"}],
+                "usage": {},
+                "timings": {},
+            }
+
+        def fake_quality(_test_file):
+            quality_calls.append("called")
+            if len(quality_calls) == 1:
+                return False, "FAIL: [lint] broken"
+            return True, "All quality checks passed"
+
+        monkeypatch.setattr("agentic_tdd_runner.config.load_config", lambda path: config)
+        monkeypatch.setattr("agentic_tdd_runner.agent.parse_args", lambda: args)
+        monkeypatch.setattr("agentic_tdd_runner.agent.init_log", lambda: str(tmp_path / "agent.jsonl"))
+        monkeypatch.setattr("agentic_tdd_runner.agent.emit", lambda msg: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.log", lambda *args, **kwargs: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.chat", fake_chat)
+        monkeypatch.setattr("agentic_tdd_runner.agent.find_test_file", lambda hint=None: "src/file.test.ts")
+        monkeypatch.setattr("agentic_tdd_runner.agent.run_quality_checks", fake_quality)
+        monkeypatch.setattr("agentic_tdd_runner.agent.verify_red_green", lambda tf: (True, "verified"))
+        monkeypatch.setattr(
+            "agentic_tdd_runner.agent.subprocess.run",
+            lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, stdout="", stderr=""),
+        )
+
+        result = main()
+
+        assert result == 0
+        assert len(quality_calls) == 2
+        assert any(msg.get("content") == "FAIL: [lint] broken" for msg in seen_messages[1])

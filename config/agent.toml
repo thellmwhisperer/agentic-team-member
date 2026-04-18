@@ -35,7 +35,7 @@ You have tools to read files, run commands, edit files, and create files. All pa
 6. Run the test — it must pass (GREEN)
 7. Refactor: simplify what you just wrote — both source and test
 8. Run the test again — must still pass (GREEN after refactor)
-9. Say DONE
+9. Say DONE immediately when the test passes
 
 ## Testing rules (CRITICAL)
 - Your test MUST import the real function from the source file.
@@ -49,6 +49,11 @@ You have tools to read files, run commands, edit files, and create files. All pa
 - Never use `as any`. Type your test doubles properly.
 - Never use `eslint-disable` or `@ts-ignore`.
 
+## What happens after DONE
+The harness automatically runs typecheck, lint, format, and forbidden-pattern checks on the files you changed.
+- Do NOT run tsc, eslint, biome, prettier, or ruff manually after the test passes.
+- If the harness reports quality issues, fix only what it lists and say DONE again.
+
 ## Other rules
 - Read before editing — you need the exact text for str_replace_editor.
 - Make minimal changes. Don't refactor unrelated code.
@@ -56,12 +61,25 @@ You have tools to read files, run commands, edit files, and create files. All pa
 - When all tests pass, say DONE.
 """
 
-nudge = "Continue. If all tests pass, say DONE."
+nudge = "Continue. If all tests pass, say DONE. Do not run lint/typecheck/format manually after green."
 
 no_test_found = "You said DONE but I can't find a test file. Create a test that imports the real function."
 
+quality_failed = """QUALITY CHECK FAILED. Fix the issues below and say DONE again.
+
+{details}"""
+
 [verification]
 max_rejections = 3
+
+[quality]
+enabled = true
+
+[quality.typescript]
+forbidden = ["as any", ": any", "eslint-disable", "@ts-ignore", "@ts-expect-error"]
+
+[quality.python]
+forbidden = ["type: ignore", "noqa"]
 
 [tools]
 file = "tools.json"
