@@ -1,5 +1,6 @@
 """Tests for agent tool execution and file discovery."""
 import os
+from pathlib import Path
 import shutil
 import subprocess
 from types import SimpleNamespace
@@ -13,6 +14,7 @@ from agentic_tdd_runner.agent import (
     _get_changed_files,
     _is_obvious_act_line,
     _is_obvious_assert_line,
+    _is_test_file_path,
     _is_test_pass,
     _parse_pr_content,
     _resolve_repo_path,
@@ -239,7 +241,7 @@ class TestFindTestFile:
         assert (src / "math.ts").read_text() == "fixed", "Source fix not restored"
 
     def test_stash_popped_after_red_phase_exception(self, tmp_path, monkeypatch):
-        """git stash must be popped even if the red-phase test run raises."""
+        """git stash must be popped even if the red-phase test run times out."""
         from unittest.mock import patch as mock_patch
         from agentic_tdd_runner.agent import verify_red_green
 
@@ -272,13 +274,53 @@ class TestFindTestFile:
             return original_run(*args, **kwargs)
 
         with mock_patch("subprocess.run", side_effect=run_that_raises):
-            try:
-                verify_red_green("src/math.test.ts")
-            except subprocess.TimeoutExpired:
-                pass
+            verified, message = verify_red_green("src/math.test.ts")
 
+        assert verified is False
+        assert "timed out without your source fix" in message.lower()
         stash_list = subprocess.run([GIT, "stash", "list"], cwd=tmp_path, capture_output=True, text=True)
         assert stash_list.stdout.strip() == "", f"Stash not popped: {stash_list.stdout}"
+
+    def test_returns_rejection_when_green_phase_times_out(self, tmp_path, monkeypatch):
+        """Green-phase timeouts should reject verification instead of propagating."""
+        from unittest.mock import patch as mock_patch
+        from agentic_tdd_runner.agent import verify_red_green
+
+        sp_run = subprocess.run
+        sp_run([GIT, "init"], cwd=tmp_path, capture_output=True, check=True)
+        sp_run([GIT, "config", "user.email", "t@t"], cwd=tmp_path, capture_output=True)
+        sp_run([GIT, "config", "user.name", "t"], cwd=tmp_path, capture_output=True)
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src" / "math.ts").write_text("original")
+        sp_run([GIT, "add", "-A"], cwd=tmp_path, capture_output=True, check=True)
+        sp_run([GIT, "commit", "-m", "base"], cwd=tmp_path, capture_output=True, check=True)
+        (tmp_path / "src" / "math.ts").write_text("fixed")
+        (tmp_path / "src" / "math.test.ts").write_text("test")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "runner": {"command": "echo", "test_file_patterns": ["*.test.ts"], "exclude_dirs": []},
+            "timeouts": {"test_run": 10},
+        })
+
+        original_run = subprocess.run
+        red_phase_done = False
+
+        def run_with_green_timeout(*args, **kwargs):
+            nonlocal red_phase_done
+            cmd = args[0] if args else kwargs.get("args", [])
+            if isinstance(cmd, list) and any("math.test.ts" in str(c) for c in cmd):
+                if not red_phase_done:
+                    red_phase_done = True
+                    return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="red failure")
+                raise subprocess.TimeoutExpired(cmd, 10)
+            return original_run(*args, **kwargs)
+
+        with mock_patch("subprocess.run", side_effect=run_with_green_timeout):
+            verified, message = verify_red_green("src/math.test.ts")
+
+        assert verified is False
+        assert "timed out with your source fix" in message.lower()
 
     def test_python_test_uses_pytest_command(self, tmp_path, monkeypatch):
         """When a Python test is found, verify_red_green should use pytest, not bun test."""
@@ -308,6 +350,18 @@ class TestIsTestPass:
     def test_rejects_substring_false_positive(self, monkeypatch):
         monkeypatch.setattr("agentic_tdd_runner.agent._last_run_exit_code", 0)
         assert _is_test_pass("run_command", {"command": "grep pytest README.md"}) is False
+
+
+class TestIsTestFilePath:
+    """Fallback test filename heuristics should avoid broad substring matches."""
+
+    def test_fallback_accepts_conventional_test_name(self, monkeypatch):
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {"runner": {"test_file_patterns": []}})
+        assert _is_test_file_path("src/test_worker.py") is True
+
+    def test_fallback_rejects_non_test_substring_name(self, monkeypatch):
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {"runner": {"test_file_patterns": []}})
+        assert _is_test_file_path("src/contest.py") is False
 
 
 class TestDetectQualityTools:
@@ -1157,8 +1211,8 @@ class TestFileReadDedup:
     def test_compaction_clears_cache(self, monkeypatch):
         import agentic_tdd_runner.agent as _agent_mod
 
-        _agent_mod._file_read_cache["/some/path"] = 12345.0
-        _agent_mod._file_read_cache["/other/path"] = 67890.0
+        _agent_mod._file_read_cache[Path("/some/path")] = 12345.0
+        _agent_mod._file_read_cache[Path("/other/path")] = 67890.0
 
         messages = [
             {"role": "system", "content": "system prompt"},
@@ -1171,6 +1225,23 @@ class TestFileReadDedup:
 
 class TestExecuteToolReactiveChecks:
     """Edits to TS files should surface typecheck failures inline."""
+
+    def test_run_command_clears_stale_exit_code_before_execution(self, tmp_path, monkeypatch):
+        import agentic_tdd_runner.agent as _agent_mod
+
+        def fake_run(*args, **kwargs):
+            assert _agent_mod._last_run_exit_code is None
+            return subprocess.CompletedProcess(args[0], 1, stdout="", stderr="boom")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {"timeouts": {"tool_execution": 10}})
+        monkeypatch.setattr("agentic_tdd_runner.agent.subprocess.run", fake_run)
+        _agent_mod._last_run_exit_code = 0
+
+        result = execute_tool("run_command", {"command": "git status"})
+
+        assert result == "boom"
+        assert _agent_mod._last_run_exit_code == 1
 
     def test_tool_applied_status_marks_edit_success_and_failure(self):
         assert _tool_applied_status("str_replace_editor", "OK: replaced in src/file.ts") is True

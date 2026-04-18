@@ -33,7 +33,7 @@ _CONFIG = None  # populated by main()
 WORKDIR = os.environ.get("AGENT_WORKDIR", os.getcwd())
 LOG_DIR = os.environ.get("AGENT_LOG_DIR", os.getcwd())
 _last_run_exit_code: int | None = None
-_file_read_cache: dict[str, float] = {}  # {resolved_path: mtime} for read dedup
+_file_read_cache: dict[Path, float] = {}  # {resolved_path: mtime} for read dedup
 
 # --- Logging ---
 _log_file = None
@@ -293,6 +293,7 @@ def execute_tool(name: str, args: dict) -> str:
         elif name == "run_command":
             global _last_run_exit_code
             _validate_command(args["command"])
+            _last_run_exit_code = None
             result = subprocess.run(
                 args["command"],
                 shell=True,
@@ -411,7 +412,8 @@ def _is_test_file_path(path: str) -> bool:
     import fnmatch
     name = PurePosixPath(path).name
     if not patterns:
-        return "test" in name.lower()
+        lower_name = name.lower()
+        return bool(re.search(r"(^test(?:[_\.-]|$)|(?:[_\.-]test)(?:[_\.-]|$))", lower_name))
     return any(fnmatch.fnmatch(name, pattern) for pattern in patterns)
 
 
@@ -513,8 +515,10 @@ def verify_red_green(test_file: str) -> tuple[bool, str]:
 
     run_argv = shlex.split(run_cmd)
 
+    red_result = None
     red_passed = False
     red_output = ""
+    green_result = None
     green_passed = False
     green_output = ""
 
@@ -525,15 +529,21 @@ def verify_red_green(test_file: str) -> tuple[bool, str]:
             shutil.copy2(test_backup, test_full)
 
         emit("  [RED] Running test WITHOUT fix...")
-        red_result = subprocess.run(
-            [*run_argv, test_file],
-            cwd=WORKDIR, capture_output=True, text=True, timeout=test_timeout,
-        )
-        red_passed = red_result.returncode == 0
-        red_output = (red_result.stdout + red_result.stderr)[:500]
-        emit(f"  [RED] exit={red_result.returncode} {'PASS (BAD!)' if red_passed else 'FAIL (good)'}")
-        for line in red_output.split("\n")[:10]:
-            emit(f"    {line}")
+        try:
+            red_result = subprocess.run(
+                [*run_argv, test_file],
+                cwd=WORKDIR, capture_output=True, text=True, timeout=test_timeout,
+            )
+            red_passed = red_result.returncode == 0
+            red_output = (red_result.stdout + red_result.stderr)[:500]
+            emit(f"  [RED] exit={red_result.returncode} {'PASS (BAD!)' if red_passed else 'FAIL (good)'}")
+            for line in red_output.split("\n")[:10]:
+                emit(f"    {line}")
+        except subprocess.TimeoutExpired:
+            red_passed = False
+            red_output = f"TIMEOUT: test command exceeded {test_timeout}s without fix."
+            emit(f"  [RED] TIMEOUT after {test_timeout}s")
+            emit(f"    {red_output}")
     finally:
         # Always clean up temp files and pop stash, even after exceptions
         if test_backup:
@@ -544,15 +554,21 @@ def verify_red_green(test_file: str) -> tuple[bool, str]:
         subprocess.run(["git", "stash", "pop"], cwd=WORKDIR, capture_output=True)
 
     emit("  [GREEN] Running test WITH fix...")
-    green_result = subprocess.run(
-        [*run_argv, test_file],
-        cwd=WORKDIR, capture_output=True, text=True, timeout=test_timeout,
-    )
-    green_passed = green_result.returncode == 0
-    green_output = (green_result.stdout + green_result.stderr)[:500]
-    emit(f"  [GREEN] exit={green_result.returncode} {'PASS (good)' if green_passed else 'FAIL (BAD!)'}")
-    for line in green_output.split("\n")[:10]:
-        emit(f"    {line}")
+    try:
+        green_result = subprocess.run(
+            [*run_argv, test_file],
+            cwd=WORKDIR, capture_output=True, text=True, timeout=test_timeout,
+        )
+        green_passed = green_result.returncode == 0
+        green_output = (green_result.stdout + green_result.stderr)[:500]
+        emit(f"  [GREEN] exit={green_result.returncode} {'PASS (good)' if green_passed else 'FAIL (BAD!)'}")
+        for line in green_output.split("\n")[:10]:
+            emit(f"    {line}")
+    except subprocess.TimeoutExpired:
+        green_passed = False
+        green_output = f"TIMEOUT: test command exceeded {test_timeout}s with fix."
+        emit(f"  [GREEN] TIMEOUT after {test_timeout}s")
+        emit(f"    {green_output}")
 
     log("verify", {
         "test_file": test_file,
@@ -562,12 +578,24 @@ def verify_red_green(test_file: str) -> tuple[bool, str]:
         "green_output": green_output,
     })
 
+    if red_result is None:
+        return False, (
+            f"REJECTED: Your test ({test_file}) timed out WITHOUT your source fix. "
+            f"Fix the timeout or make the test more targeted. Error: {red_output[:300]}"
+        )
+
     if red_passed:
         return False, (
             f"REJECTED: Your test ({test_file}) passes even WITHOUT your source fix. "
             f"This means it doesn't test the real code — it probably uses local stub functions "
             f"instead of importing from the source. Rewrite the test to import the real "
             f"function and mock its dependencies properly."
+        )
+
+    if green_result is None:
+        return False, (
+            f"REJECTED: Your test ({test_file}) timed out WITH your source fix. "
+            f"Fix the timeout or make the test more targeted. Error: {green_output[:300]}"
         )
 
     if not green_passed:
