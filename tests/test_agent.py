@@ -387,6 +387,57 @@ class TestFindTestFile:
         assert ok is False
         assert "test scaffold is incomplete" in msg.lower()
 
+    def test_verify_red_green_detects_scaffold_marker_past_500_chars(self, tmp_path, monkeypatch):
+        """The scaffold-failure guard must inspect the FULL output, not the 500-char preview.
+
+        Real test runners (pytest, bun test) print banners, collected items, and
+        traceback frames before the actual error. The __setXForTests marker can
+        easily fall past char 500. If the guard only sees the truncated preview,
+        invalid red phases sneak through and the LLM is told its broken test was
+        verified."""
+        from unittest.mock import patch as mock_patch
+        from agentic_tdd_runner.agent import verify_red_green
+
+        sp_run = subprocess.run
+        sp_run([GIT, "init"], cwd=tmp_path, capture_output=True, check=True)
+        sp_run([GIT, "config", "user.email", "test@test.com"], cwd=tmp_path, capture_output=True)
+        sp_run([GIT, "config", "user.name", "test"], cwd=tmp_path, capture_output=True)
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "math.ts").write_text("fixed")
+        (src / "math.test.ts").write_text("test")
+        sp_run([GIT, "add", "-A"], cwd=tmp_path, capture_output=True, check=True)
+        sp_run([GIT, "commit", "-m", "base"], cwd=tmp_path, capture_output=True, check=True)
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "runner": {"command": "bun test", "test_file_patterns": ["*.test.ts"], "exclude_dirs": []},
+            "timeouts": {"test_run": 10},
+        })
+
+        # Simulate a realistic runner output where the scaffold marker comes
+        # AFTER 500+ characters of banner/traceback noise.
+        padding = "bun test v1.2.3 (abcdef)\n" + ("  at internal/runner/frame:line\n" * 30)
+        assert len(padding) > 500
+        red_stdout = padding + "TypeError: __setClientForTests is not a function\n"
+
+        calls = {"count": 0}
+
+        def fake_run(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            if isinstance(cmd, list) and any("math.test.ts" in str(c) for c in cmd):
+                calls["count"] += 1
+                if calls["count"] == 1:
+                    return subprocess.CompletedProcess(cmd, 1, stdout=red_stdout, stderr="")
+                return subprocess.CompletedProcess(cmd, 0, stdout="1 pass\n", stderr="")
+            return sp_run(*args, **kwargs)
+
+        with mock_patch("subprocess.run", side_effect=fake_run):
+            ok, msg = verify_red_green("src/math.test.ts")
+
+        assert ok is False, "red phase with __setXForTests past char 500 must be rejected"
+        assert "test scaffold is incomplete" in msg.lower()
+
     def test_finds_tsx_test_file(self, tmp_path, monkeypatch):
         self._setup_git_repo(tmp_path)
         (tmp_path / "src").mkdir()
@@ -2625,6 +2676,106 @@ class TestMain:
             msg.get("role") == "user" and "repeated the same exploratory tool call" in msg.get("content", "")
             for msg in chat_calls[3]
         )
+
+    def test_loop_warning_appended_after_all_tool_results_in_multi_tool_call(self, tmp_path, monkeypatch):
+        """When a single assistant turn returns multiple tool_calls AND triggers loop
+        detection mid-iteration, the warning user message must come AFTER all sibling
+        tool results — never interleaved between them.
+
+        OpenAI's tool_calls API requires every assistant(tool_calls) to be followed by
+        exactly N contiguous role=tool messages (one per call). Inserting role=user
+        between siblings yields assistant→tool→user→tool, which the next chat call
+        will reject (or worse, silently misinterpret)."""
+        logged = []
+        chat_calls = []
+
+        config = {
+            "agent": {"max_steps": 4, "max_tool_output": 2000},
+            "verification": {"max_rejections": 3},
+            "quality": {"enabled": False},
+            "prompt": {
+                "system": "system prompt",
+                "nudge": "Step {step}/{max_steps}. Continue.",
+                "no_test_found": "no test",
+                "quality_failed": "FAIL: {details}",
+            },
+            "llm": {"model": "test-model"},
+            "timeouts": {"tool_execution": 10, "llm_request": 10},
+            "runner": {"command": "bun test", "test_file_patterns": ["*.test.ts"], "exclude_dirs": []},
+            "tools": [],
+            "pr": {"enabled": False},
+        }
+        args = SimpleNamespace(
+            issue="bug text",
+            source=None,
+            symbol=None,
+            workdir=str(tmp_path),
+            config="unused.toml",
+            log_dir=str(tmp_path),
+        )
+
+        # Plan: turns 1, 2 each issue ONE read_file (priming the loop counter to 2),
+        # then turn 3 issues TWO tool_calls — first one is the same read_file
+        # (triggers loop detection), second is a different read_file. The warning
+        # must NOT split the two tool results.
+        def fake_chat(messages, include_tools=True):
+            chat_calls.append([dict(msg) for msg in messages])
+            if len(chat_calls) == 1:
+                return {"choices": [{"message": {"content": None, "tool_calls": [
+                    {"id": "c1", "function": {"name": "read_file", "arguments": '{"path": "src/file.ts"}'}},
+                ]}, "finish_reason": "tool_calls"}], "usage": {}, "timings": {}}
+            if len(chat_calls) == 2:
+                return {"choices": [{"message": {"content": None, "tool_calls": [
+                    {"id": "c2", "function": {"name": "read_file", "arguments": '{"path": "src/file.ts"}'}},
+                ]}, "finish_reason": "tool_calls"}], "usage": {}, "timings": {}}
+            if len(chat_calls) == 3:
+                return {"choices": [{"message": {"content": None, "tool_calls": [
+                    {"id": "c3a", "function": {"name": "read_file", "arguments": '{"path": "src/file.ts"}'}},
+                    {"id": "c3b", "function": {"name": "read_file", "arguments": '{"path": "src/other.ts"}'}},
+                ]}, "finish_reason": "tool_calls"}], "usage": {}, "timings": {}}
+            return {"choices": [{"message": {"content": "DONE"}, "finish_reason": "stop"}], "usage": {}, "timings": {}}
+
+        monkeypatch.setattr("agentic_tdd_runner.config.load_config", lambda path: config)
+        monkeypatch.setattr("agentic_tdd_runner.agent.parse_args", lambda: args)
+        monkeypatch.setattr("agentic_tdd_runner.agent.init_log", lambda: str(tmp_path / "agent.jsonl"))
+        monkeypatch.setattr("agentic_tdd_runner.agent.emit", lambda msg: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.log", lambda event, data: logged.append((event, data)))
+        monkeypatch.setattr("agentic_tdd_runner.agent.chat", fake_chat)
+        monkeypatch.setattr("agentic_tdd_runner.agent.execute_tool", lambda name, args: "file contents")
+        monkeypatch.setattr("agentic_tdd_runner.agent.find_test_file", lambda hint=None: "src/file.test.ts")
+        monkeypatch.setattr("agentic_tdd_runner.agent.verify_red_green", lambda tf: (True, "verified"))
+        monkeypatch.setattr(
+            "agentic_tdd_runner.agent.subprocess.run",
+            lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, stdout="", stderr=""),
+        )
+
+        result = main()
+
+        assert result == 0
+        events = [event for event, _data in logged]
+        assert "loop_detected" in events, "loop should still be detected on the multi-call turn"
+
+        # Inspect the messages sent to the 4th chat call — that snapshot reflects
+        # what was appended after the multi-tool-call turn finished.
+        snapshot = chat_calls[3]
+        # Find the assistant message with tool_calls c3a + c3b. The raw LLM
+        # response dict doesn't carry an explicit role field, so identify it by
+        # the presence of the c3a tool_call.
+        idx = next(
+            i for i, m in enumerate(snapshot)
+            if any(tc.get("id") == "c3a" for tc in (m.get("tool_calls") or []))
+        )
+        # Next message MUST be the tool result for c3a, then c3b — contiguous.
+        assert snapshot[idx + 1].get("role") == "tool"
+        assert snapshot[idx + 1].get("tool_call_id") == "c3a"
+        assert snapshot[idx + 2].get("role") == "tool", (
+            "Loop warning split sibling tool results: "
+            f"got role={snapshot[idx + 2].get('role')!r} between c3a and c3b"
+        )
+        assert snapshot[idx + 2].get("tool_call_id") == "c3b"
+        # The user warning, if present, must come AFTER both tool results.
+        assert snapshot[idx + 3].get("role") == "user"
+        assert "repeated the same exploratory tool call" in snapshot[idx + 3].get("content", "")
 
     def test_tool_loop_signature_only_tracks_exploratory_reads(self):
         assert _tool_loop_signature("read_file", {"path": "src/foo.ts"}) == "read_file:src/foo.ts"

@@ -566,6 +566,7 @@ def verify_red_green(test_file: str) -> tuple[bool, str]:
     red_result = None
     red_passed = False
     red_output = ""
+    red_output_full = ""
     green_result = None
     green_passed = False
     green_output = ""
@@ -583,7 +584,8 @@ def verify_red_green(test_file: str) -> tuple[bool, str]:
                 cwd=WORKDIR, capture_output=True, text=True, timeout=test_timeout,
             )
             red_passed = red_result.returncode == 0
-            red_output = (red_result.stdout + red_result.stderr)[:500]
+            red_output_full = red_result.stdout + red_result.stderr
+            red_output = red_output_full[:500]
             emit(f"  [RED] exit={red_result.returncode} {'PASS (BAD!)' if red_passed else 'FAIL (good)'}")
             for line in red_output.split("\n")[:10]:
                 emit(f"    {line}")
@@ -640,7 +642,7 @@ def verify_red_green(test_file: str) -> tuple[bool, str]:
             f"function and mock its dependencies properly."
         )
 
-    if _is_invalid_red_phase_failure(red_output):
+    if _is_invalid_red_phase_failure(red_output_full):
         return False, (
             f"REJECTED: Your red phase for {test_file} failed because the test scaffold is incomplete, "
             "not because the bug was reproduced. The failure mentions missing test-only seams/exports "
@@ -1543,6 +1545,12 @@ def main():
 
         if finish == "tool_calls" and msg.get("tool_calls"):
             test_passed = False
+            # OpenAI's tool_calls API requires every assistant(tool_calls) to be
+            # followed by a contiguous run of role=tool messages — one per call.
+            # If loop detection fires mid-iteration, buffer the warning here and
+            # append it AFTER the loop, so siblings stay contiguous instead of
+            # producing assistant→tool→user→tool (an invalid transcript).
+            loop_warning = None
             for tc in msg["tool_calls"]:
                 fn = tc["function"]
                 name = fn["name"]
@@ -1599,8 +1607,7 @@ def main():
                         len(recent_exploratory_signatures) == 3
                         and len(set(recent_exploratory_signatures)) == 1
                     ):
-                        warning = _tool_loop_warning_message(loop_signature)
-                        messages.append({"role": "user", "content": warning})
+                        loop_warning = _tool_loop_warning_message(loop_signature)
                         log("loop_detected", {
                             "step": step,
                             "signature": loop_signature,
@@ -1612,6 +1619,9 @@ def main():
 
                 if _is_test_pass(name, args):
                     test_passed = True
+
+            if loop_warning is not None:
+                messages.append({"role": "user", "content": loop_warning})
 
             # --- PHASE NUDGE: test file created → nudge to run + fix ---
             if episode:
