@@ -82,8 +82,17 @@ class PythonLanguage:
                 }
         return assignments
 
-    def test_path(self, source_path: str, symbol: str) -> str:
+    def test_path(
+        self,
+        source_path: str,
+        symbol: str,
+        exists: "Callable[[str], bool] | None" = None,
+    ) -> str:
         source = PurePosixPath(source_path)
+        if exists is not None:
+            module_test = (source.parent / f"test_{source.stem}.py").as_posix()
+            if exists(module_test):
+                return module_test
         return (source.parent / f"test_{symbol}.py").as_posix()
 
     def setter_name(self, binding: str) -> str:

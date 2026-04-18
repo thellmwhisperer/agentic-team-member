@@ -533,3 +533,33 @@ class TestBuildEpisodeContext:
         ctx = build_episode_context("src/notifier.ts", "notify", str(tmp_path))
         assert "assertion_hint" in ctx
         assert ctx["assertion_hint"]  # non-empty
+
+    def test_python_episode_prefers_existing_module_test_file(self, tmp_path):
+        """When test_<module>.py exists, episode targets it instead of test_<symbol>.py.
+
+        Mirrors the roca-madre pattern: 1500-line server.py with all method
+        tests grouped in test_server.py. Routing the agent to a fresh
+        test__handle_query.py orphans it from existing fixtures.
+        """
+        from agentic_tdd_runner.cookbook import build_episode_context
+
+        _write_file(tmp_path, "src/server.py", """\
+            class Handler:
+                def _handle_query(self, args):
+                    return {"rows": []}
+        """)
+        _write_file(tmp_path, "src/test_server.py", "# existing tests\n")
+
+        ctx = build_episode_context("src/server.py", "_handle_query", str(tmp_path))
+        assert ctx["test_file"] == "src/test_server.py"
+
+    def test_python_episode_falls_back_when_no_module_test(self, tmp_path):
+        from agentic_tdd_runner.cookbook import build_episode_context
+
+        _write_file(tmp_path, "src/server.py", """\
+            class Handler:
+                def _handle_query(self, args):
+                    return {"rows": []}
+        """)
+        ctx = build_episode_context("src/server.py", "_handle_query", str(tmp_path))
+        assert ctx["test_file"] == "src/test__handle_query.py"
