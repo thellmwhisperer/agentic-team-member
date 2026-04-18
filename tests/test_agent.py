@@ -212,6 +212,18 @@ class TestFindTestFile:
         })
         assert find_test_file(hint="src/nonexistent.test.ts") == "src/foo.test.ts"
 
+    def test_ignores_hint_that_escapes_workdir(self, tmp_path, monkeypatch):
+        self._setup_git_repo(tmp_path)
+        outside = tmp_path.parent / "outside.test.ts"
+        outside.write_text("test")
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src" / "foo.test.ts").write_text("test")
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "runner": {"test_file_patterns": ["*.test.ts"], "exclude_dirs": []},
+        })
+        assert find_test_file(hint="../outside.test.ts") == "src/foo.test.ts"
+
     def test_verify_red_green_preserves_untracked_test(self, tmp_path, monkeypatch):
         """An untracked test file must survive the stash cycle in verify_red_green."""
         from agentic_tdd_runner.agent import verify_red_green
