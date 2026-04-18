@@ -1,6 +1,7 @@
 """Tests for agent tool execution and file discovery."""
 import os
 import subprocess
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -1004,6 +1005,139 @@ class TestExecuteToolReactiveChecks:
         assert result == "OK: created src/file.test.ts"
 
 
+class TestFileReadDedup:
+    """read_file should avoid re-sending unchanged file contents."""
+
+    def test_first_read_returns_full_content(self, tmp_path, monkeypatch):
+        import agentic_tdd_runner.agent as _agent_mod
+
+        target = tmp_path / "src" / "file.ts"
+        target.parent.mkdir(parents=True)
+        target.write_text("const x = 1;\n")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        _agent_mod._file_read_cache.clear()
+
+        result = execute_tool("read_file", {"path": "src/file.ts"})
+
+        assert result == "const x = 1;\n"
+
+    def test_second_read_returns_stub_when_unchanged(self, tmp_path, monkeypatch):
+        import agentic_tdd_runner.agent as _agent_mod
+
+        target = tmp_path / "src" / "file.ts"
+        target.parent.mkdir(parents=True)
+        target.write_text("const x = 1;\n")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        _agent_mod._file_read_cache.clear()
+
+        execute_tool("read_file", {"path": "src/file.ts"})
+        result = execute_tool("read_file", {"path": "src/file.ts"})
+
+        assert "unchanged since last read" in result.lower()
+
+    def test_returns_full_content_after_file_changes(self, tmp_path, monkeypatch):
+        import agentic_tdd_runner.agent as _agent_mod
+
+        target = tmp_path / "src" / "file.ts"
+        target.parent.mkdir(parents=True)
+        target.write_text("const x = 1;\n")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        _agent_mod._file_read_cache.clear()
+
+        execute_tool("read_file", {"path": "src/file.ts"})
+        target.write_text("const x = 2;\n")
+        result = execute_tool("read_file", {"path": "src/file.ts"})
+
+        assert result == "const x = 2;\n"
+
+    def test_directory_listing_bypasses_cache(self, tmp_path, monkeypatch):
+        import agentic_tdd_runner.agent as _agent_mod
+
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "a.ts").write_text("")
+        (src / "b.ts").write_text("")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        _agent_mod._file_read_cache.clear()
+
+        result1 = execute_tool("read_file", {"path": "src"})
+        result2 = execute_tool("read_file", {"path": "src"})
+
+        assert result1 == result2 == "a.ts\nb.ts"
+
+    def test_edit_invalidates_cache_for_that_path(self, tmp_path, monkeypatch):
+        import agentic_tdd_runner.agent as _agent_mod
+
+        src = tmp_path / "src"
+        src.mkdir()
+        target = src / "file.ts"
+        target.write_text("const x = 1;\n")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent.detect_quality_tools", lambda _lang_name: [])
+        _agent_mod._file_read_cache.clear()
+
+        execute_tool("read_file", {"path": "src/file.ts"})
+        execute_tool("str_replace_editor", {
+            "path": "src/file.ts",
+            "old_str": "const x = 1;\n",
+            "new_str": "const x = 2;\n",
+        })
+        result = execute_tool("read_file", {"path": "src/file.ts"})
+
+        assert result == "const x = 2;\n"
+
+    def test_compaction_clears_file_read_cache(self):
+        import agentic_tdd_runner.agent as _agent_mod
+        from agentic_tdd_runner.agent import _compact_messages_after_quality_failure
+
+        _agent_mod._file_read_cache[Path("/some/path")] = 12345
+        _agent_mod._file_read_cache[Path("/other/path")] = 67890
+
+        messages = [
+            {"role": "system", "content": "system prompt"},
+            {"role": "user", "content": "fix bug"},
+        ]
+
+        _compact_messages_after_quality_failure(messages, "quality fail", "src/file.test.ts")
+
+        assert _agent_mod._file_read_cache == {}
+
+
+class TestQualityFailureCompactionPolicy:
+    def test_skips_compaction_when_prompt_has_enough_headroom(self, monkeypatch):
+        from agentic_tdd_runner.agent import _should_compact_after_quality_failure
+
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "llm": {"context_window_tokens": 32768},
+            "quality": {},
+        })
+
+        should_compact, info = _should_compact_after_quality_failure({"prompt_tokens": 9131})
+
+        assert should_compact is False
+        assert info["reason"] == "enough_headroom"
+        assert info["headroom_tokens"] == 23637
+
+    def test_compacts_when_prompt_is_near_context_limit(self, monkeypatch):
+        from agentic_tdd_runner.agent import _should_compact_after_quality_failure
+
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "llm": {"context_window_tokens": 32768},
+            "quality": {},
+        })
+
+        should_compact, info = _should_compact_after_quality_failure({"prompt_tokens": 30000})
+
+        assert should_compact is True
+        assert info["reason"] == "near_context_limit"
+        assert info["headroom_tokens"] == 2768
+
+
 class TestMainQualityGate:
     """DONE should flow through verify, quality, and final success."""
 
@@ -1116,7 +1250,147 @@ class TestMainQualityGate:
 
         assert result == 0
         assert len(quality_calls) == 2
-        assert any(msg.get("content") == "FAIL: [lint] broken" for msg in seen_messages[1])
+        assert any("FAIL: [lint] broken" in msg.get("content", "") for msg in seen_messages[1])
+
+    def test_quality_failure_compacts_context_when_prompt_is_tight(self, tmp_path, monkeypatch):
+        config = {
+            "agent": {"max_steps": 2, "max_tool_output": 8000},
+            "verification": {"max_rejections": 3},
+            "quality": {"enabled": True},
+            "prompt": {
+                "system": "system prompt",
+                "nudge": "continue",
+                "no_test_found": "no test",
+                "quality_failed": "FAIL: {details}",
+            },
+            "llm": {"model": "test-model"},
+            "timeouts": {"tool_execution": 10},
+        }
+        args = SimpleNamespace(
+            issue="bug text",
+            source=None,
+            symbol=None,
+            workdir=str(tmp_path),
+            config="unused.toml",
+            log_dir=str(tmp_path),
+        )
+        seen_messages = []
+        logged = []
+        quality_calls = []
+
+        def fake_chat(messages):
+            seen_messages.append([m.copy() for m in messages])
+            if len(seen_messages) == 1:
+                return {
+                    "choices": [{"message": {"role": "assistant", "content": "DONE"}, "finish_reason": "stop"}],
+                    "usage": {"prompt_tokens": 30000},
+                    "timings": {},
+                }
+            return {
+                "choices": [{"message": {"role": "assistant", "content": "DONE"}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 9000},
+                "timings": {},
+            }
+
+        def fake_quality(_test_file):
+            quality_calls.append("called")
+            if len(quality_calls) == 1:
+                return False, "FAIL: [lint] broken"
+            return True, "All quality checks passed"
+
+        monkeypatch.setattr("agentic_tdd_runner.config.load_config", lambda path: config)
+        monkeypatch.setattr("agentic_tdd_runner.agent.parse_args", lambda: args)
+        monkeypatch.setattr("agentic_tdd_runner.agent.init_log", lambda: str(tmp_path / "agent.jsonl"))
+        monkeypatch.setattr("agentic_tdd_runner.agent.emit", lambda msg: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.log", lambda event, data: logged.append((event, data)))
+        monkeypatch.setattr("agentic_tdd_runner.agent.chat", fake_chat)
+        monkeypatch.setattr("agentic_tdd_runner.agent.find_test_file", lambda hint=None: "src/file.test.ts")
+        monkeypatch.setattr("agentic_tdd_runner.agent.run_quality_checks", fake_quality)
+        monkeypatch.setattr("agentic_tdd_runner.agent.verify_red_green", lambda tf: (True, "verified"))
+        monkeypatch.setattr(
+            "agentic_tdd_runner.agent.subprocess.run",
+            lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, stdout="", stderr=""),
+        )
+
+        result = main()
+
+        assert result == 0
+        assert len(quality_calls) == 2
+        assert [msg.get("role") for msg in seen_messages[1]] == ["system", "user", "user"]
+        assert seen_messages[1][1]["content"] == "Fix this bug:\n\nbug text"
+        assert "Verification already passed for src/file.test.ts" in seen_messages[1][2]["content"]
+        assert any(event == "context_compacted" for event, _data in logged)
+
+    def test_quality_failure_preserves_context_when_prompt_has_headroom(self, tmp_path, monkeypatch):
+        config = {
+            "agent": {"max_steps": 2, "max_tool_output": 8000},
+            "verification": {"max_rejections": 3},
+            "quality": {"enabled": True},
+            "prompt": {
+                "system": "system prompt",
+                "nudge": "continue",
+                "no_test_found": "no test",
+                "quality_failed": "FAIL: {details}",
+            },
+            "llm": {"model": "test-model"},
+            "timeouts": {"tool_execution": 10},
+        }
+        args = SimpleNamespace(
+            issue="bug text",
+            source=None,
+            symbol=None,
+            workdir=str(tmp_path),
+            config="unused.toml",
+            log_dir=str(tmp_path),
+        )
+        seen_messages = []
+        logged = []
+        quality_calls = []
+
+        def fake_chat(messages):
+            seen_messages.append([m.copy() for m in messages])
+            if len(seen_messages) == 1:
+                return {
+                    "choices": [{"message": {"role": "assistant", "content": "DONE"}, "finish_reason": "stop"}],
+                    "usage": {"prompt_tokens": 9131},
+                    "timings": {},
+                }
+            return {
+                "choices": [{"message": {"role": "assistant", "content": "DONE"}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 9500},
+                "timings": {},
+            }
+
+        def fake_quality(_test_file):
+            quality_calls.append("called")
+            if len(quality_calls) == 1:
+                return False, "FAIL: [lint] broken"
+            return True, "All quality checks passed"
+
+        monkeypatch.setattr("agentic_tdd_runner.config.load_config", lambda path: config)
+        monkeypatch.setattr("agentic_tdd_runner.agent.parse_args", lambda: args)
+        monkeypatch.setattr("agentic_tdd_runner.agent.init_log", lambda: str(tmp_path / "agent.jsonl"))
+        monkeypatch.setattr("agentic_tdd_runner.agent.emit", lambda msg: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.log", lambda event, data: logged.append((event, data)))
+        monkeypatch.setattr("agentic_tdd_runner.agent.chat", fake_chat)
+        monkeypatch.setattr("agentic_tdd_runner.agent.find_test_file", lambda hint=None: "src/file.test.ts")
+        monkeypatch.setattr("agentic_tdd_runner.agent.run_quality_checks", fake_quality)
+        monkeypatch.setattr("agentic_tdd_runner.agent.verify_red_green", lambda tf: (True, "verified"))
+        monkeypatch.setattr(
+            "agentic_tdd_runner.agent.subprocess.run",
+            lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, stdout="", stderr=""),
+        )
+
+        result = main()
+
+        assert result == 0
+        assert len(quality_calls) == 2
+        assert [msg.get("role") for msg in seen_messages[1]] == ["system", "user", "assistant", "user"]
+        assert seen_messages[1][1]["content"] == "Fix this bug:\n\nbug text"
+        assert seen_messages[1][2]["content"] == "DONE"
+        assert "Verification already passed for src/file.test.ts" in seen_messages[1][3]["content"]
+        assert any(event == "context_preserved" for event, _data in logged)
+        assert all(event != "context_compacted" for event, _data in logged)
 
 
 class TestApplyMechanicalEdits:
