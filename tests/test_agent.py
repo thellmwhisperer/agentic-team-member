@@ -1202,6 +1202,26 @@ class TestFileReadDedup:
         result = execute_tool("read_file", {"path": "src/file.ts"})
         assert result == "const x = 2;\n"
 
+    def test_returns_full_content_after_external_mtime_invalidation(self, tmp_path, monkeypatch):
+        import agentic_tdd_runner.agent as _agent_mod
+
+        target = tmp_path / "src" / "file.ts"
+        target.parent.mkdir(parents=True)
+        target.write_text("const x = 1;\n")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        _agent_mod._file_read_cache.clear()
+
+        execute_tool("read_file", {"path": "src/file.ts"})
+        cached = execute_tool("read_file", {"path": "src/file.ts"})
+        assert "unchanged since last read" in cached.lower()
+
+        stat = target.stat()
+        os.utime(target, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000))
+
+        result = execute_tool("read_file", {"path": "src/file.ts"})
+        assert result == "const x = 1;\n"
+
     def test_directory_listing_bypasses_cache(self, tmp_path, monkeypatch):
         import agentic_tdd_runner.agent as _agent_mod
 
@@ -1261,8 +1281,8 @@ class TestFileReadDedup:
     def test_compaction_clears_cache(self, monkeypatch):
         import agentic_tdd_runner.agent as _agent_mod
 
-        _agent_mod._file_read_cache[Path("/some/path")] = 12345.0
-        _agent_mod._file_read_cache[Path("/other/path")] = 67890.0
+        _agent_mod._file_read_cache[Path("/some/path")] = 12345
+        _agent_mod._file_read_cache[Path("/other/path")] = 67890
 
         messages = [
             {"role": "system", "content": "system prompt"},
@@ -1760,6 +1780,58 @@ class TestCreatePr:
         assert len(chat_kwargs) == 1, f"Expected 1 chat call, got {chat_kwargs}"
         assert chat_kwargs[0]["include_tools"] is False, \
             "create_pr should call chat with include_tools=False to prevent tool_calls"
+
+    def test_pr_subprocess_calls_use_text_and_timeout(self, tmp_path, monkeypatch):
+        """Checked subprocess calls in create_pr should use text mode and bounded timeouts."""
+        from unittest.mock import patch as mock_patch
+
+        self._init_repo(tmp_path)
+        (tmp_path / "file.ts").write_text("code")
+        subprocess.run([GIT, "add", "-A"], cwd=tmp_path, capture_output=True, check=True)
+        subprocess.run([GIT, "commit", "-m", "init"], cwd=tmp_path, capture_output=True, check=True)
+        (tmp_path / "file.ts").write_text("fixed")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "pr": {"enabled": True, "base_branch": "main", "branch_prefix": "atm/fix-"},
+            "prompt": {"pr_prompt": "Generate PR"},
+            "llm": {"model": "test", "url": "http://localhost:9999/v1/chat/completions"},
+            "timeouts": {"llm_request": 10},
+        })
+
+        mock_response = {
+            "choices": [{"message": {"content": "PR_TITLE: fix\nPR_BODY: done"}}],
+        }
+
+        observed = []
+        original_run = subprocess.run
+
+        def capture_run(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            if isinstance(cmd, list):
+                observed.append((cmd, kwargs))
+                if cmd[0] == "gh" or (cmd[0] == "git" and "push" in cmd):
+                    return subprocess.CompletedProcess(cmd, 0, stdout="https://github.com/test/pr/1\n")
+            return original_run(*args, **kwargs)
+
+        with mock_patch("agentic_tdd_runner.agent.chat", return_value=mock_response):
+            with mock_patch("subprocess.run", side_effect=capture_run):
+                create_pr([], {}, "file.ts", 1)
+
+        checked = [
+            (cmd, kwargs) for cmd, kwargs in observed
+            if isinstance(cmd, list) and (
+                cmd[:3] == ["git", "checkout", "-b"]
+                or cmd[:2] == ["git", "add"]
+                or cmd[:2] == ["git", "commit"]
+                or cmd[:2] == ["git", "push"]
+                or cmd[:3] == ["gh", "pr", "create"]
+            )
+        ]
+        assert checked, observed
+        for _cmd, kwargs in checked:
+            assert kwargs.get("text") is True
+            assert kwargs.get("timeout") == 10
 
     def test_returns_none_when_gh_missing(self, tmp_path, monkeypatch):
         """create_pr must return None (not crash) when gh CLI is absent."""
