@@ -49,6 +49,27 @@ class TestFindSymbolLine:
         )
         assert _find_symbol_line(source, "process") == 2
 
+    def test_finds_python_async_def(self):
+        """CodeRabbit (PR #14): the Python definition pattern only matched
+        `def foo(`, so `async def foo(` fell through to the bare-word
+        fallback and misclassified coroutine declarations. Now `async` is
+        optional and the real definition wins."""
+        source = (
+            "import asyncio\n"
+            "\n"
+            "async def fetch(url):\n"
+            "    return url\n"
+        )
+        assert _find_symbol_line(source, "fetch") == 3
+
+    def test_finds_indented_async_def(self):
+        source = (
+            "class Client:\n"
+            "    async def fetch(self, url):\n"
+            "        return url\n"
+        )
+        assert _find_symbol_line(source, "fetch") == 2
+
 
 class TestExtractSignature:
     def test_multiline_ts_function(self):
