@@ -228,6 +228,7 @@ def _is_invalid_red_phase_failure(output: str) -> bool:
     invalid_markers = (
         "not a function",
         "is undefined",
+        "is not defined",
         "cannot import",
         "does not provide an export",
         "has no exported member",
