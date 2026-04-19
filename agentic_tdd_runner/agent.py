@@ -1614,8 +1614,9 @@ def main():
                             "count": 3,
                         })
                         recent_exploratory_signatures.clear()
-                else:
-                    recent_exploratory_signatures.clear()
+                # No else: failed edits and unrelated tools leave the streak
+                # intact. Only a successful edit (applied is True) breaks it,
+                # because only a successful edit represents actual progress.
 
                 if _is_test_pass(name, args):
                     test_passed = True
