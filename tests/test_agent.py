@@ -438,6 +438,52 @@ class TestFindTestFile:
         assert ok is False, "red phase with __setXForTests past char 500 must be rejected"
         assert "test scaffold is incomplete" in msg.lower()
 
+    def test_verify_red_green_rejects_reference_error_is_not_defined(self, tmp_path, monkeypatch):
+        """CodeRabbit (PR #13, comment 3106087624): ReferenceError / NameError
+        around __setXForTests seams both produce the exact substring
+        'is not defined' (TS: 'ReferenceError: __setClientForTests is not
+        defined'; Python: \"NameError: name '__setClientForTests' is not
+        defined\"). These are the same invalid-red-phase bug as the
+        __setXForTests check, just a different runtime phrasing. Must be
+        rejected, not verified."""
+        from unittest.mock import patch as mock_patch
+        from agentic_tdd_runner.agent import verify_red_green
+
+        sp_run = subprocess.run
+        sp_run([GIT, "init"], cwd=tmp_path, capture_output=True, check=True)
+        sp_run([GIT, "config", "user.email", "test@test.com"], cwd=tmp_path, capture_output=True)
+        sp_run([GIT, "config", "user.name", "test"], cwd=tmp_path, capture_output=True)
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "math.ts").write_text("fixed")
+        (src / "math.test.ts").write_text("test")
+        sp_run([GIT, "add", "-A"], cwd=tmp_path, capture_output=True, check=True)
+        sp_run([GIT, "commit", "-m", "base"], cwd=tmp_path, capture_output=True, check=True)
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "runner": {"command": "bun test", "test_file_patterns": ["*.test.ts"], "exclude_dirs": []},
+            "timeouts": {"test_run": 10},
+        })
+
+        red_stdout = "ReferenceError: __setClientForTests is not defined\n"
+        calls = {"count": 0}
+
+        def fake_run(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            if isinstance(cmd, list) and any("math.test.ts" in str(c) for c in cmd):
+                calls["count"] += 1
+                if calls["count"] == 1:
+                    return subprocess.CompletedProcess(cmd, 1, stdout=red_stdout, stderr="")
+                return subprocess.CompletedProcess(cmd, 0, stdout="1 pass\n", stderr="")
+            return sp_run(*args, **kwargs)
+
+        with mock_patch("subprocess.run", side_effect=fake_run):
+            ok, msg = verify_red_green("src/math.test.ts")
+
+        assert ok is False, "red phase with 'is not defined' around __setXForTests must be rejected"
+        assert "test scaffold is incomplete" in msg.lower()
+
     def test_finds_tsx_test_file(self, tmp_path, monkeypatch):
         self._setup_git_repo(tmp_path)
         (tmp_path / "src").mkdir()
