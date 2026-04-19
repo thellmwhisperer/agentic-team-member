@@ -195,6 +195,8 @@ def _tool_loop_signature(name: str, args: dict) -> str | None:
     if name != "run_command":
         return None
     command = args.get("command", "")
+    if not isinstance(command, str):
+        return None
     try:
         parts = shlex.split(command)
     except ValueError:
