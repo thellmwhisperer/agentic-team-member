@@ -65,7 +65,7 @@ def _extract_signature(source_text, symbol):
 _DEFINITION_PATTERNS = (
     r"^\s*(?:export\s+)?(?:async\s+)?function\s+{esc}\s*\(",
     r"^\s*(?:export\s+)?(?:const|let|var)\s+{esc}\s*=",
-    r"^\s*def\s+{esc}\s*\(",
+    r"^\s*(?:async\s+)?def\s+{esc}\s*\(",
 )
 
 
