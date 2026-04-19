@@ -2677,6 +2677,84 @@ class TestMain:
             for msg in chat_calls[3]
         )
 
+    def test_loop_streak_survives_failed_edit_between_exploratory_reads(self, tmp_path, monkeypatch):
+        """Common stall pattern: read_file → failed str_replace_editor → read_file → read_file.
+        The failed edit doesn't change anything on disk, so it should not break the
+        exploratory streak. Only a successful edit (applied is True) means progress
+        was made. Without this, the loop guard misses the most common stall shape:
+        the model rereading the same file because its edits keep failing."""
+        logged = []
+        chat_calls = []
+
+        config = {
+            "agent": {"max_steps": 5, "max_tool_output": 2000},
+            "verification": {"max_rejections": 3},
+            "quality": {"enabled": False},
+            "prompt": {
+                "system": "system prompt",
+                "nudge": "Step {step}/{max_steps}. Continue.",
+                "no_test_found": "no test",
+                "quality_failed": "FAIL: {details}",
+            },
+            "llm": {"model": "test-model"},
+            "timeouts": {"tool_execution": 10, "llm_request": 10},
+            "runner": {"command": "bun test", "test_file_patterns": ["*.test.ts"], "exclude_dirs": []},
+            "tools": [],
+            "pr": {"enabled": False},
+        }
+        args = SimpleNamespace(
+            issue="bug text", source=None, symbol=None,
+            workdir=str(tmp_path), config="unused.toml", log_dir=str(tmp_path),
+        )
+
+        # Plan: read(A) → read(A) → failed str_replace_editor → read(A) → DONE.
+        # Three reads of A interleaved by a failed edit must trigger loop_detected.
+        def fake_chat(messages, include_tools=True):
+            chat_calls.append([dict(msg) for msg in messages])
+            if len(chat_calls) in (1, 2, 4):
+                return {"choices": [{"message": {"content": None, "tool_calls": [
+                    {"id": f"c{len(chat_calls)}", "function": {
+                        "name": "read_file", "arguments": '{"path": "src/file.ts"}',
+                    }},
+                ]}, "finish_reason": "tool_calls"}], "usage": {}, "timings": {}}
+            if len(chat_calls) == 3:
+                return {"choices": [{"message": {"content": None, "tool_calls": [
+                    {"id": "c3", "function": {
+                        "name": "str_replace_editor",
+                        "arguments": '{"path": "src/file.ts", "old": "x", "new": "y"}',
+                    }},
+                ]}, "finish_reason": "tool_calls"}], "usage": {}, "timings": {}}
+            return {"choices": [{"message": {"content": "DONE"}, "finish_reason": "stop"}], "usage": {}, "timings": {}}
+
+        # Failed edit returns anything not starting with "OK:" → applied is False.
+        def fake_execute(name, args):
+            if name == "str_replace_editor":
+                return "ERROR: old string not found"
+            return "file contents"
+
+        monkeypatch.setattr("agentic_tdd_runner.config.load_config", lambda path: config)
+        monkeypatch.setattr("agentic_tdd_runner.agent.parse_args", lambda: args)
+        monkeypatch.setattr("agentic_tdd_runner.agent.init_log", lambda: str(tmp_path / "agent.jsonl"))
+        monkeypatch.setattr("agentic_tdd_runner.agent.emit", lambda msg: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.log", lambda event, data: logged.append((event, data)))
+        monkeypatch.setattr("agentic_tdd_runner.agent.chat", fake_chat)
+        monkeypatch.setattr("agentic_tdd_runner.agent.execute_tool", fake_execute)
+        monkeypatch.setattr("agentic_tdd_runner.agent.find_test_file", lambda hint=None: "src/file.test.ts")
+        monkeypatch.setattr("agentic_tdd_runner.agent.verify_red_green", lambda tf: (True, "verified"))
+        monkeypatch.setattr(
+            "agentic_tdd_runner.agent.subprocess.run",
+            lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, stdout="", stderr=""),
+        )
+
+        main()
+
+        events = [event for event, _data in logged]
+        assert "loop_detected" in events, (
+            "Three identical exploratory reads with a failed (non-applied) edit "
+            "in between should still trip the loop guard. The failed edit didn't "
+            "change anything, so the streak shouldn't reset."
+        )
+
     def test_loop_warning_appended_after_all_tool_results_in_multi_tool_call(self, tmp_path, monkeypatch):
         """When a single assistant turn returns multiple tool_calls AND triggers loop
         detection mid-iteration, the warning user message must come AFTER all sibling
