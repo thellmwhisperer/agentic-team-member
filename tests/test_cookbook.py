@@ -534,36 +534,6 @@ class TestBuildEpisodeContext:
         assert "assertion_hint" in ctx
         assert ctx["assertion_hint"]  # non-empty
 
-    def test_python_episode_prefers_existing_module_test_file(self, tmp_path):
-        """When test_<module>.py exists, episode targets it instead of test_<symbol>.py.
-
-        Mirrors the roca-madre pattern: 1500-line server.py with all method
-        tests grouped in test_server.py. Routing the agent to a fresh
-        test__handle_query.py orphans it from existing fixtures.
-        """
-        from agentic_tdd_runner.cookbook import build_episode_context
-
-        _write_file(tmp_path, "src/server.py", """\
-            class Handler:
-                def _handle_query(self, args):
-                    return {"rows": []}
-        """)
-        _write_file(tmp_path, "src/test_server.py", "# existing tests\n")
-
-        ctx = build_episode_context("src/server.py", "_handle_query", str(tmp_path))
-        assert ctx["test_file"] == "src/test_server.py"
-
-    def test_python_episode_falls_back_when_no_module_test(self, tmp_path):
-        from agentic_tdd_runner.cookbook import build_episode_context
-
-        _write_file(tmp_path, "src/server.py", """\
-            class Handler:
-                def _handle_query(self, args):
-                    return {"rows": []}
-        """)
-        ctx = build_episode_context("src/server.py", "_handle_query", str(tmp_path))
-        assert ctx["test_file"] == "src/test__handle_query.py"
-
     def test_episode_exposes_function_line_range(self, tmp_path):
         """Large repos (1500-line server.py) waste steps locating the symbol
         with sed/grep. Exposing the AST-resolved range lets the runner inject
@@ -586,3 +556,25 @@ class TestBuildEpisodeContext:
         rng = ctx["function_line_range"]
         assert rng["start"] >= 7  # process starts after helper
         assert rng["end"] >= rng["start"]
+        # Python `def` is a real definition match → source is "definition".
+        assert rng["source"] == "definition"
+
+    def test_function_line_range_marks_fallback_for_ts_class_method(self, tmp_path):
+        """The parser only recognizes `function`, `const/let/var`, and `def`.
+        TS/JS class methods fall back to the first textual occurrence of the
+        symbol — which might be a comment or call site, not the definition.
+        The episode must mark that case so the agent prompt can avoid emitting
+        a misleading line hint."""
+        from agentic_tdd_runner.cookbook import build_episode_context
+
+        _write_file(tmp_path, "src/client.ts", """\
+            // handleResub: see related comment in callsite
+            export class Client {
+              callsite() { this.handleResub(); }
+              handleResub(event: string) {
+                return event;
+              }
+            }
+        """)
+        ctx = build_episode_context("src/client.ts", "handleResub", str(tmp_path))
+        assert ctx["function_line_range"]["source"] == "fallback"

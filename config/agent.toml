@@ -56,6 +56,7 @@ When you're past 70% of steps, prioritize getting to DONE over perfecting code.
 
 ## Test strategy
 - Write tests for: the expected behavior, edge cases (boundary values, empty/null), and the specific bug.
+- If an existing test module for the target already exists, READ it first and reuse its fixtures, imports, and mocking patterns. Write your regression as ONE narrow, focused test — not a mini-suite exploring the whole module. Do NOT investigate or fix unrelated failures you encounter in that module; stay anchored on the symbol in the issue.
 - Put shared setup (mocks, test doubles, seam calls) in beforeEach, not duplicated in each test.
 - Never move the direct call to the function under test, or assertions/matchers like expect(...) / toHaveBeenCalledWith(...), into beforeEach.
 - Use expect.stringContaining() for message assertions — never exact match on interpolated strings.

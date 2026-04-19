@@ -2755,9 +2755,38 @@ class TestPhasedRunner:
         ]
         assert len(user_nudges) == 0
 
-    def test_phase1_message_includes_function_line_range(self, tmp_path, monkeypatch):
-        """Episode line range should be surfaced in the phase-1 prompt so the
-        model jumps straight to the symbol instead of grep/sed exploration."""
+    def _run_phase1_with_episode(self, tmp_path, monkeypatch, episode):
+        captured = []
+
+        def fake_chat(messages, include_tools=True):
+            captured.append([m.copy() for m in messages])
+            return {
+                "choices": [{"message": {"content": "still going"}, "finish_reason": "stop"}],
+                "usage": {},
+                "timings": {},
+            }
+
+        args = SimpleNamespace(
+            issue="bug text", source=episode["source_file"], symbol=episode["target_symbol"],
+            workdir=str(tmp_path), config="unused.toml", log_dir=str(tmp_path),
+        )
+        monkeypatch.setattr("agentic_tdd_runner.config.load_config", lambda path: self._make_config())
+        monkeypatch.setattr("agentic_tdd_runner.agent.parse_args", lambda: args)
+        monkeypatch.setattr("agentic_tdd_runner.agent.init_log", lambda: str(tmp_path / "agent.jsonl"))
+        monkeypatch.setattr("agentic_tdd_runner.agent.emit", lambda msg: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.log", lambda *a, **kw: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.chat", fake_chat)
+        monkeypatch.setattr(
+            "agentic_tdd_runner.cookbook.build_episode_context",
+            lambda **kw: episode,
+        )
+        main()
+        return next(m for m in captured[0] if m["role"] == "user")["content"]
+
+    def test_phase1_message_includes_function_line_range_when_definition_match(self, tmp_path, monkeypatch):
+        """When the parser resolved the symbol from a real definition pattern
+        (`def`, `function`, `const/let/var`), surface the line range so the model
+        jumps straight to the symbol instead of grep/sed exploration."""
         src = tmp_path / "src" / "server.py"
         src.parent.mkdir(parents=True)
         src.write_text("class H:\n    def _handle_query(self, args):\n        return None\n")
@@ -2772,40 +2801,38 @@ class TestPhasedRunner:
             "pre_test_source_edits": [],
             "conditional_source_edits": [],
             "assertion_hint": "",
-            "function_line_range": {"start": 1252, "end": 1289},
+            "function_line_range": {"start": 1252, "end": 1289, "source": "definition"},
             "cookbook_text": "## Mock Cookbook\n",
         }
+        content = self._run_phase1_with_episode(tmp_path, monkeypatch, episode)
+        assert "1252" in content
+        assert "1289" in content
 
-        captured = []
+    def test_phase1_message_omits_line_range_when_fallback_match(self, tmp_path, monkeypatch):
+        """When the parser fell back to the first textual occurrence of the
+        symbol (no `def`/`function`/`const` pattern matched — e.g. TS class
+        methods), the line number may point at a comment or call site. Suppress
+        the hint entirely rather than misdirect the model."""
+        src = tmp_path / "src" / "client.ts"
+        src.parent.mkdir(parents=True)
+        src.write_text("// handleResub\nexport class C { handleResub() {} }\n")
 
-        def fake_chat(messages, include_tools=True):
-            captured.append([m.copy() for m in messages])
-            return {
-                "choices": [{"message": {"content": "still going"}, "finish_reason": "stop"}],
-                "usage": {},
-                "timings": {},
-            }
-
-        args = SimpleNamespace(
-            issue="bug text", source="src/server.py", symbol="_handle_query",
-            workdir=str(tmp_path), config="unused.toml", log_dir=str(tmp_path),
-        )
-        monkeypatch.setattr("agentic_tdd_runner.config.load_config", lambda path: self._make_config())
-        monkeypatch.setattr("agentic_tdd_runner.agent.parse_args", lambda: args)
-        monkeypatch.setattr("agentic_tdd_runner.agent.init_log", lambda: str(tmp_path / "agent.jsonl"))
-        monkeypatch.setattr("agentic_tdd_runner.agent.emit", lambda msg: None)
-        monkeypatch.setattr("agentic_tdd_runner.agent.log", lambda *a, **kw: None)
-        monkeypatch.setattr("agentic_tdd_runner.agent.chat", fake_chat)
-        monkeypatch.setattr(
-            "agentic_tdd_runner.cookbook.build_episode_context",
-            lambda **kw: episode,
-        )
-
-        main()
-
-        first_user_msg = next(m for m in captured[0] if m["role"] == "user")
-        assert "1252" in first_user_msg["content"]
-        assert "1289" in first_user_msg["content"]
+        episode = {
+            "source_file": "src/client.ts",
+            "target_symbol": "handleResub",
+            "test_file": "src/handleResub.test.ts",
+            "source_import_path": "./client",
+            "runner": "bun:test",
+            "mocks_text": "",
+            "pre_test_source_edits": [],
+            "conditional_source_edits": [],
+            "assertion_hint": "",
+            "function_line_range": {"start": 1, "end": 2, "source": "fallback"},
+            "cookbook_text": "## Mock Cookbook\n",
+        }
+        content = self._run_phase1_with_episode(tmp_path, monkeypatch, episode)
+        assert "lines 1-2" not in content
+        assert "(lines " not in content
 
 
 class TestChatPayload:

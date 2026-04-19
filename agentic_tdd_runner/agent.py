@@ -1212,9 +1212,13 @@ def main():
 
     if episode:
         rng = episode.get("function_line_range") or {}
+        # Only emit the line hint when the parser matched a real definition
+        # pattern (def / function / const|let|var). A 'fallback' match means we
+        # only located the symbol as a bare word — could be a comment or call
+        # site — so the number would misdirect the agent.
         line_hint = (
             f" (lines {rng['start']}-{rng['end']})"
-            if rng.get("start") and rng.get("end")
+            if rng.get("source") == "definition" and rng.get("start") and rng.get("end")
             else ""
         )
         phase1_msg = (
