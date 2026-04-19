@@ -533,3 +533,48 @@ class TestBuildEpisodeContext:
         ctx = build_episode_context("src/notifier.ts", "notify", str(tmp_path))
         assert "assertion_hint" in ctx
         assert ctx["assertion_hint"]  # non-empty
+
+    def test_episode_exposes_function_line_range(self, tmp_path):
+        """Large repos (1500-line server.py) waste steps locating the symbol
+        with sed/grep. Exposing the AST-resolved range lets the runner inject
+        a precise location hint into the agent's first message.
+        """
+        from agentic_tdd_runner.cookbook import build_episode_context
+
+        _write_file(tmp_path, "src/worker.py", """\
+            # filler line 1
+            # filler line 2
+
+            def helper():
+                return 1
+
+            def process(item):
+                # body
+                return item.upper()
+        """)
+        ctx = build_episode_context("src/worker.py", "process", str(tmp_path))
+        rng = ctx["function_line_range"]
+        assert rng["start"] >= 7  # process starts after helper
+        assert rng["end"] >= rng["start"]
+        # Python `def` is a real definition match → source is "definition".
+        assert rng["source"] == "definition"
+
+    def test_function_line_range_marks_fallback_for_ts_class_method(self, tmp_path):
+        """The parser only recognizes `function`, `const/let/var`, and `def`.
+        TS/JS class methods fall back to the first textual occurrence of the
+        symbol — which might be a comment or call site, not the definition.
+        The episode must mark that case so the agent prompt can avoid emitting
+        a misleading line hint."""
+        from agentic_tdd_runner.cookbook import build_episode_context
+
+        _write_file(tmp_path, "src/client.ts", """\
+            // handleResub: see related comment in callsite
+            export class Client {
+              callsite() { this.handleResub(); }
+              handleResub(event: string) {
+                return event;
+              }
+            }
+        """)
+        ctx = build_episode_context("src/client.ts", "handleResub", str(tmp_path))
+        assert ctx["function_line_range"]["source"] == "fallback"

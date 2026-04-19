@@ -26,6 +26,50 @@ class TestFindSymbolLine:
         source = "const other = 1;\nexport const process = (x) => x * 2;\n"
         assert _find_symbol_line(source, "process") == 2
 
+    def test_commented_out_decoy_does_not_mask_real_definition(self):
+        """CodeRabbit (PR #14, comment 3106068384): without a line-start anchor,
+        the TS/JS definition patterns match commented-out code like
+        `// function handleResub()`. The commented decoy at line 1 then wins
+        over the real definition below, sending the agent to the wrong
+        region. With ^\\s*, the real definition at line 3 is the one that
+        classifies as 'definition'."""
+        source = (
+            "// function handleResub(channel) {}  // old stub, kept for history\n"
+            "\n"
+            "export function handleResub(channel) {\n"
+            "  return channel;\n"
+            "}\n"
+        )
+        assert _find_symbol_line(source, "handleResub") == 3
+
+    def test_commented_out_const_decoy_does_not_mask_real_definition(self):
+        source = (
+            "// const process = (x) => x + 1;\n"
+            "export const process = (x) => x * 2;\n"
+        )
+        assert _find_symbol_line(source, "process") == 2
+
+    def test_finds_python_async_def(self):
+        """CodeRabbit (PR #14): the Python definition pattern only matched
+        `def foo(`, so `async def foo(` fell through to the bare-word
+        fallback and misclassified coroutine declarations. Now `async` is
+        optional and the real definition wins."""
+        source = (
+            "import asyncio\n"
+            "\n"
+            "async def fetch(url):\n"
+            "    return url\n"
+        )
+        assert _find_symbol_line(source, "fetch") == 3
+
+    def test_finds_indented_async_def(self):
+        source = (
+            "class Client:\n"
+            "    async def fetch(self, url):\n"
+            "        return url\n"
+        )
+        assert _find_symbol_line(source, "fetch") == 2
+
 
 class TestExtractSignature:
     def test_multiline_ts_function(self):

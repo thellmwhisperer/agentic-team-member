@@ -18,12 +18,12 @@ from agentic_tdd_runner.compiler import (
     _enrich_module_load_dependencies,
     _extract_signature,
     _extract_target_snippet,
-    _find_symbol_line,
     _observed_members,
     _realize_generated_test_seams,
     _render_module_mocks,
     build_contract,
 )
+from agentic_tdd_runner.compiler.parser import _find_symbol_line_with_source
 from agentic_tdd_runner.languages import get_language
 
 
@@ -51,7 +51,10 @@ def _build_contract_for_symbol(
     assignments = lang.parse_assignments(source_text)
     signature = _extract_signature(source_text, symbol)
 
-    sym_line = line_start or _find_symbol_line(source_text, symbol)
+    if line_start is not None:
+        sym_line, sym_line_source = line_start, "definition"
+    else:
+        sym_line, sym_line_source = _find_symbol_line_with_source(source_text, symbol)
     fn_end = line_end or _find_function_end(source_text, sym_line, lang=lang)
 
     owner_class = None
@@ -72,6 +75,7 @@ def _build_contract_for_symbol(
         "source_path": source_path,
         "line_start": sym_line or 1,
         "line_end": fn_end or len(source_text.splitlines()),
+        "line_source": sym_line_source or "fallback",
         "signature": signature,
     }
     snippet = _extract_target_snippet(source_text, target)
@@ -221,6 +225,13 @@ def build_episode_context(
     elif assertion_surface.get("kind") == "return_value":
         assertion_hint = "assert on the return value"
 
+    target = contract.get("target", {})
+    function_line_range = {
+        "start": target.get("line_start", 1),
+        "end": target.get("line_end", target.get("line_start", 1)),
+        "source": target.get("line_source", "fallback"),
+    }
+
     return {
         "source_file": source_path,
         "target_symbol": symbol,
@@ -231,6 +242,7 @@ def build_episode_context(
         "pre_test_source_edits": deepcopy(contract.get("pre_test_source_edits", [])),
         "conditional_source_edits": deepcopy(seam_edits),
         "assertion_hint": assertion_hint,
+        "function_line_range": function_line_range,
         "cookbook_text": _render_cookbook_text(contract, lang),
     }
 

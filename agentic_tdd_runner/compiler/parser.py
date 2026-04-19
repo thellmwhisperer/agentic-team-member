@@ -62,23 +62,36 @@ def _extract_signature(source_text, symbol):
     return symbol
 
 
+_DEFINITION_PATTERNS = (
+    r"^\s*(?:export\s+)?(?:async\s+)?function\s+{esc}\s*\(",
+    r"^\s*(?:export\s+)?(?:const|let|var)\s+{esc}\s*=",
+    r"^\s*(?:async\s+)?def\s+{esc}\s*\(",
+)
+
+
 def _find_symbol_line(source_text, symbol):
+    line, _source = _find_symbol_line_with_source(source_text, symbol)
+    return line
+
+
+def _find_symbol_line_with_source(source_text, symbol):
+    """Return (line, source) where source is 'definition', 'fallback', or None.
+
+    'definition' means we matched a real `function`/`const|let|var`/`def` pattern
+    and the line points at the authoritative declaration. 'fallback' means we
+    only found the symbol as a bare word — likely a comment, call site, or class
+    method (the parser doesn't yet recognize those). Callers gate guidance on
+    this so they don't misdirect the agent to the wrong region."""
     esc = re.escape(symbol)
-    # Prefer the definition line over any reference
-    definition_patterns = [
-        rf"(?:export\s+)?(?:async\s+)?function\s+{esc}\s*\(",
-        rf"(?:export\s+)?(?:const|let|var)\s+{esc}\s*=",
-        rf"^\s*def\s+{esc}\s*\(",
-    ]
+    definition_patterns = [p.format(esc=esc) for p in _DEFINITION_PATTERNS]
     for idx, line in enumerate(source_text.splitlines(), start=1):
         for pattern in definition_patterns:
             if re.search(pattern, line):
-                return idx
-    # Fallback: first occurrence
+                return idx, "definition"
     for idx, line in enumerate(source_text.splitlines(), start=1):
         if re.search(rf"\b{esc}\b", line):
-            return idx
-    return None
+            return idx, "fallback"
+    return None, None
 
 
 def _extract_target_snippet(source_text, target):

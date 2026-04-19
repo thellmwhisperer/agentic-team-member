@@ -22,6 +22,36 @@ class TestProductionConfig:
         assert "system" in cfg["prompt"]
         assert "Never move the direct call to the function under test" in cfg["prompt"]["system"]
 
+    def test_system_prompt_tells_agent_to_use_issue_location_hints(self):
+        """Bug reports often name the file/function/lines. Without an explicit
+        nudge, models default to broad keyword search and waste exploration
+        steps on large files (observed on roca-madre's 1500-line server.py)."""
+        prod = CONFIG_DIR / "agent.toml"
+        cfg = load_config(prod)
+        system = cfg["prompt"]["system"].lower()
+        assert "issue" in system, "prompt must reference the issue as a source"
+        assert "broad keyword search" in system, (
+            "prompt must explicitly steer the agent away from broad keyword search "
+            "and toward the location described in the issue"
+        )
+
+    def test_system_prompt_tells_agent_to_reuse_fixtures_and_write_narrow_regression(self):
+        """Observed on the Python run (agent-20260419-000440.jsonl): after
+        opening an existing test module, the agent expanded into a broad
+        mini-suite and got pulled into investigating unrelated failures in the
+        same file. Prompt must tell the agent to borrow fixtures/patterns from
+        the existing module but write its regression as a narrow, focused test
+        — not an ambient exploration of the whole module's behavior."""
+        prod = CONFIG_DIR / "agent.toml"
+        cfg = load_config(prod)
+        system = cfg["prompt"]["system"].lower()
+        assert "reuse" in system or "borrow" in system, (
+            "prompt must steer the agent toward reusing existing fixtures/patterns"
+        )
+        assert "narrow" in system, (
+            "prompt must tell the agent to write a NARROW regression test, not a mini-suite"
+        )
+
 
 class TestLoadConfig:
     """load_config reads agent.toml + tools.json into a unified config dict."""
