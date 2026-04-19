@@ -81,17 +81,8 @@ class TypeScriptLanguage:
                 }
         return assignments
 
-    def test_path(
-        self,
-        source_path: str,
-        symbol: str,
-        exists: "Callable[[str], bool] | None" = None,
-    ) -> str:
+    def test_path(self, source_path: str, symbol: str) -> str:
         source = PurePosixPath(source_path)
-        if exists is not None:
-            module_test = (source.parent / f"{source.stem}.test{source.suffix}").as_posix()
-            if exists(module_test):
-                return module_test
         return (source.parent / f"{symbol}.test{source.suffix}").as_posix()
 
     def setter_name(self, binding: str) -> str:
