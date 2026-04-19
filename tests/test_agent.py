@@ -19,6 +19,8 @@ from agentic_tdd_runner.agent import (
     _parse_pr_content,
     _resolve_repo_path,
     _tool_applied_status,
+    _tool_loop_signature,
+    _tool_loop_warning_message,
     _validate_command,
     create_pr,
     detect_quality_tools,
@@ -340,6 +342,147 @@ class TestFindTestFile:
         lang = get_language("test_worker.py")
         assert lang is not None
         assert lang.runner == "pytest"
+
+    def test_verify_red_green_rejects_red_phase_that_fails_on_missing_test_seam(self, tmp_path, monkeypatch):
+        """A red phase that dies on missing __setXForTests is not a valid proof of the bug."""
+        from unittest.mock import patch as mock_patch
+        from agentic_tdd_runner.agent import verify_red_green
+
+        sp_run = subprocess.run
+        sp_run([GIT, "init"], cwd=tmp_path, capture_output=True, check=True)
+        sp_run([GIT, "config", "user.email", "test@test.com"], cwd=tmp_path, capture_output=True)
+        sp_run([GIT, "config", "user.name", "test"], cwd=tmp_path, capture_output=True)
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "math.ts").write_text("fixed")
+        (src / "math.test.ts").write_text("test")
+        sp_run([GIT, "add", "-A"], cwd=tmp_path, capture_output=True, check=True)
+        sp_run([GIT, "commit", "-m", "base"], cwd=tmp_path, capture_output=True, check=True)
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "runner": {"command": "bun test", "test_file_patterns": ["*.test.ts"], "exclude_dirs": []},
+            "timeouts": {"test_run": 10},
+        })
+
+        calls = {"count": 0}
+
+        def fake_run(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            if isinstance(cmd, list) and any("math.test.ts" in str(c) for c in cmd):
+                calls["count"] += 1
+                if calls["count"] == 1:
+                    return subprocess.CompletedProcess(
+                        cmd,
+                        1,
+                        stdout="TypeError: __setClientForTests is not a function\n",
+                        stderr="",
+                    )
+                return subprocess.CompletedProcess(cmd, 0, stdout="1 pass\n", stderr="")
+            return sp_run(*args, **kwargs)
+
+        with mock_patch("subprocess.run", side_effect=fake_run):
+            ok, msg = verify_red_green("src/math.test.ts")
+
+        assert ok is False
+        assert "test scaffold is incomplete" in msg.lower()
+
+    def test_verify_red_green_detects_scaffold_marker_past_500_chars(self, tmp_path, monkeypatch):
+        """The scaffold-failure guard must inspect the FULL output, not the 500-char preview.
+
+        Real test runners (pytest, bun test) print banners, collected items, and
+        traceback frames before the actual error. The __setXForTests marker can
+        easily fall past char 500. If the guard only sees the truncated preview,
+        invalid red phases sneak through and the LLM is told its broken test was
+        verified."""
+        from unittest.mock import patch as mock_patch
+        from agentic_tdd_runner.agent import verify_red_green
+
+        sp_run = subprocess.run
+        sp_run([GIT, "init"], cwd=tmp_path, capture_output=True, check=True)
+        sp_run([GIT, "config", "user.email", "test@test.com"], cwd=tmp_path, capture_output=True)
+        sp_run([GIT, "config", "user.name", "test"], cwd=tmp_path, capture_output=True)
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "math.ts").write_text("fixed")
+        (src / "math.test.ts").write_text("test")
+        sp_run([GIT, "add", "-A"], cwd=tmp_path, capture_output=True, check=True)
+        sp_run([GIT, "commit", "-m", "base"], cwd=tmp_path, capture_output=True, check=True)
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "runner": {"command": "bun test", "test_file_patterns": ["*.test.ts"], "exclude_dirs": []},
+            "timeouts": {"test_run": 10},
+        })
+
+        # Simulate a realistic runner output where the scaffold marker comes
+        # AFTER 500+ characters of banner/traceback noise.
+        padding = "bun test v1.2.3 (abcdef)\n" + ("  at internal/runner/frame:line\n" * 30)
+        assert len(padding) > 500
+        red_stdout = padding + "TypeError: __setClientForTests is not a function\n"
+
+        calls = {"count": 0}
+
+        def fake_run(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            if isinstance(cmd, list) and any("math.test.ts" in str(c) for c in cmd):
+                calls["count"] += 1
+                if calls["count"] == 1:
+                    return subprocess.CompletedProcess(cmd, 1, stdout=red_stdout, stderr="")
+                return subprocess.CompletedProcess(cmd, 0, stdout="1 pass\n", stderr="")
+            return sp_run(*args, **kwargs)
+
+        with mock_patch("subprocess.run", side_effect=fake_run):
+            ok, msg = verify_red_green("src/math.test.ts")
+
+        assert ok is False, "red phase with __setXForTests past char 500 must be rejected"
+        assert "test scaffold is incomplete" in msg.lower()
+
+    def test_verify_red_green_rejects_reference_error_is_not_defined(self, tmp_path, monkeypatch):
+        """CodeRabbit (PR #13, comment 3106087624): ReferenceError / NameError
+        around __setXForTests seams both produce the exact substring
+        'is not defined' (TS: 'ReferenceError: __setClientForTests is not
+        defined'; Python: \"NameError: name '__setClientForTests' is not
+        defined\"). These are the same invalid-red-phase bug as the
+        __setXForTests check, just a different runtime phrasing. Must be
+        rejected, not verified."""
+        from unittest.mock import patch as mock_patch
+        from agentic_tdd_runner.agent import verify_red_green
+
+        sp_run = subprocess.run
+        sp_run([GIT, "init"], cwd=tmp_path, capture_output=True, check=True)
+        sp_run([GIT, "config", "user.email", "test@test.com"], cwd=tmp_path, capture_output=True)
+        sp_run([GIT, "config", "user.name", "test"], cwd=tmp_path, capture_output=True)
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "math.ts").write_text("fixed")
+        (src / "math.test.ts").write_text("test")
+        sp_run([GIT, "add", "-A"], cwd=tmp_path, capture_output=True, check=True)
+        sp_run([GIT, "commit", "-m", "base"], cwd=tmp_path, capture_output=True, check=True)
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "runner": {"command": "bun test", "test_file_patterns": ["*.test.ts"], "exclude_dirs": []},
+            "timeouts": {"test_run": 10},
+        })
+
+        red_stdout = "ReferenceError: __setClientForTests is not defined\n"
+        calls = {"count": 0}
+
+        def fake_run(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            if isinstance(cmd, list) and any("math.test.ts" in str(c) for c in cmd):
+                calls["count"] += 1
+                if calls["count"] == 1:
+                    return subprocess.CompletedProcess(cmd, 1, stdout=red_stdout, stderr="")
+                return subprocess.CompletedProcess(cmd, 0, stdout="1 pass\n", stderr="")
+            return sp_run(*args, **kwargs)
+
+        with mock_patch("subprocess.run", side_effect=fake_run):
+            ok, msg = verify_red_green("src/math.test.ts")
+
+        assert ok is False, "red phase with 'is not defined' around __setXForTests must be rejected"
+        assert "test scaffold is incomplete" in msg.lower()
 
     def test_finds_tsx_test_file(self, tmp_path, monkeypatch):
         self._setup_git_repo(tmp_path)
@@ -1631,7 +1774,7 @@ class TestCreatePr:
     """create_pr asks the LLM for content and runs git+gh commands."""
 
     def _init_repo(self, tmp_path):
-        subprocess.run([GIT, "init"], cwd=tmp_path, capture_output=True, check=True)
+        subprocess.run([GIT, "init", "-b", "main"], cwd=tmp_path, capture_output=True, check=True)
         subprocess.run([GIT, "config", "user.email", "t@t"], cwd=tmp_path, capture_output=True)
         subprocess.run([GIT, "config", "user.name", "t"], cwd=tmp_path, capture_output=True)
 
@@ -1679,6 +1822,33 @@ class TestCreatePr:
         assert any("commit" in c for c in cmd_strs), f"No git commit: {cmd_strs}"
         assert any("push" in c for c in cmd_strs), f"No git push: {cmd_strs}"
         assert any("gh pr create" in c for c in cmd_strs), f"No gh pr create: {cmd_strs}"
+
+    def test_returns_none_when_head_diverged_from_base_branch(self, tmp_path, monkeypatch):
+        from unittest.mock import patch as mock_patch
+
+        self._init_repo(tmp_path)
+        (tmp_path / "file.ts").write_text("code")
+        subprocess.run([GIT, "add", "-A"], cwd=tmp_path, capture_output=True, check=True)
+        subprocess.run([GIT, "commit", "-m", "init"], cwd=tmp_path, capture_output=True, check=True)
+        subprocess.run([GIT, "checkout", "-b", "feature/drift"], cwd=tmp_path, capture_output=True, check=True)
+        (tmp_path / "extra.ts").write_text("history drift")
+        subprocess.run([GIT, "add", "-A"], cwd=tmp_path, capture_output=True, check=True)
+        subprocess.run([GIT, "commit", "-m", "drift"], cwd=tmp_path, capture_output=True, check=True)
+        (tmp_path / "file.ts").write_text("fixed code")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "pr": {"enabled": True, "base_branch": "main", "branch_prefix": "atm/fix-"},
+            "prompt": {"pr_prompt": "Generate PR"},
+            "llm": {"model": "test", "url": "http://localhost:9999/v1/chat/completions"},
+            "timeouts": {"llm_request": 10, "pr_create": 10},
+        })
+
+        with mock_patch("agentic_tdd_runner.agent.chat") as chat_mock:
+            result = create_pr([], {}, "file.ts", 1)
+
+        assert result is None
+        chat_mock.assert_not_called()
 
     def test_pr_stages_tracked_changes_and_filters_untracked(self, tmp_path, monkeypatch):
         """create_pr stages all tracked modified files (incl config) but only language-matching untracked."""
@@ -1913,6 +2083,43 @@ class TestCreatePr:
 
         assert result is None
 
+    def test_returns_none_on_pr_command_timeout(self, tmp_path, monkeypatch):
+        from unittest.mock import patch as mock_patch
+
+        self._init_repo(tmp_path)
+        (tmp_path / "file.ts").write_text("code")
+        subprocess.run([GIT, "add", "-A"], cwd=tmp_path, capture_output=True, check=True)
+        subprocess.run([GIT, "commit", "-m", "init"], cwd=tmp_path, capture_output=True, check=True)
+        (tmp_path / "file.ts").write_text("fixed")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "pr": {"enabled": True, "base_branch": "main", "branch_prefix": "atm/fix-"},
+            "prompt": {"pr_prompt": "Generate PR"},
+            "llm": {"model": "test", "url": "http://localhost:9999/v1/chat/completions"},
+            "timeouts": {"llm_request": 10, "pr_create": 10},
+        })
+
+        mock_response = {
+            "choices": [{"message": {"content": "PR_TITLE: fix\nPR_BODY: done"}}],
+        }
+
+        original_run = subprocess.run
+
+        def run_raises_timeout_on_gh(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            if isinstance(cmd, list) and cmd[0] == "gh":
+                raise subprocess.TimeoutExpired(cmd, 10)
+            if isinstance(cmd, list) and cmd[0] == "git" and "push" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, stdout="")
+            return original_run(*args, **kwargs)
+
+        with mock_patch("agentic_tdd_runner.agent.chat", return_value=mock_response):
+            with mock_patch("subprocess.run", side_effect=run_raises_timeout_on_gh):
+                result = create_pr([], {}, "file.ts", 1)
+
+        assert result is None
+
     def test_returns_none_on_chat_failure(self, tmp_path, monkeypatch):
         from unittest.mock import patch as mock_patch
 
@@ -1971,6 +2178,58 @@ class TestMain:
         assert result == 1
         events = [event for event, _data in logged]
         assert "llm_timeout" in events
+        assert "exhausted" not in events
+
+    def test_logs_done_even_if_postamble_fails(self, tmp_path, monkeypatch):
+        logged = []
+        args = SimpleNamespace(
+            issue="bug text", source=None, symbol=None,
+            workdir=str(tmp_path), config="unused.toml", log_dir=str(tmp_path),
+        )
+        config = {
+            "agent": {"max_steps": 1, "max_tool_output": 2000},
+            "verification": {"max_rejections": 3},
+            "quality": {"enabled": False},
+            "prompt": {
+                "system": "system prompt",
+                "nudge": "Step {step}/{max_steps}. Continue.",
+                "no_test_found": "no test",
+                "quality_failed": "FAIL: {details}",
+            },
+            "llm": {"model": "test-model"},
+            "timeouts": {"llm_request": 10, "tool_execution": 10, "test_run": 10},
+            "runner": {"command": "bun test", "test_file_patterns": ["*.test.ts"], "exclude_dirs": []},
+            "tools": [],
+            "pr": {"enabled": False},
+        }
+
+        monkeypatch.setattr("agentic_tdd_runner.config.load_config", lambda path: config)
+        monkeypatch.setattr("agentic_tdd_runner.agent.parse_args", lambda: args)
+        monkeypatch.setattr("agentic_tdd_runner.agent.init_log", lambda: str(tmp_path / "agent.jsonl"))
+        monkeypatch.setattr("agentic_tdd_runner.agent.emit", lambda msg: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.log", lambda event, data: logged.append((event, data)))
+        monkeypatch.setattr("agentic_tdd_runner.agent.chat", lambda messages, include_tools=True: {
+            "choices": [{"message": {"content": "DONE"}, "finish_reason": "stop"}],
+            "usage": {},
+            "timings": {},
+        })
+        monkeypatch.setattr("agentic_tdd_runner.agent.find_test_file", lambda hint=None: "src/file.test.ts")
+        monkeypatch.setattr("agentic_tdd_runner.agent.verify_red_green", lambda tf: (True, "verified"))
+
+        def fake_run(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            if cmd == ["git", "diff"]:
+                raise subprocess.TimeoutExpired(cmd, 10)
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.subprocess.run", fake_run)
+
+        result = main()
+
+        assert result == 0
+        events = [event for event, _data in logged]
+        assert "done" in events
+        assert "postamble_error" in events
         assert "exhausted" not in events
 
     def test_logs_full_issue_text_on_start(self, tmp_path, monkeypatch):
@@ -2386,6 +2645,284 @@ class TestMain:
         events = [event for event, _data in logged]
         assert "context_preserved" in events
         assert "context_compacted" not in events
+
+    def test_loop_detection_nudges_after_three_identical_exploratory_tools(self, tmp_path, monkeypatch):
+        logged = []
+        chat_calls = []
+
+        config = {
+            "agent": {"max_steps": 4, "max_tool_output": 2000},
+            "verification": {"max_rejections": 3},
+            "quality": {"enabled": False},
+            "prompt": {
+                "system": "system prompt",
+                "nudge": "Step {step}/{max_steps}. Continue.",
+                "no_test_found": "no test",
+                "quality_failed": "FAIL: {details}",
+            },
+            "llm": {"model": "test-model"},
+            "timeouts": {"tool_execution": 10, "llm_request": 10},
+            "runner": {"command": "bun test", "test_file_patterns": ["*.test.ts"], "exclude_dirs": []},
+            "tools": [],
+            "pr": {"enabled": False},
+        }
+        args = SimpleNamespace(
+            issue="bug text",
+            source=None,
+            symbol=None,
+            workdir=str(tmp_path),
+            config="unused.toml",
+            log_dir=str(tmp_path),
+        )
+
+        def fake_chat(messages, include_tools=True):
+            chat_calls.append([dict(msg) for msg in messages])
+            if len(chat_calls) <= 3:
+                return {
+                    "choices": [{"message": {
+                        "content": None,
+                        "tool_calls": [{
+                            "id": f"call_{len(chat_calls)}",
+                            "function": {
+                                "name": "read_file",
+                                "arguments": '{"path": "src/file.ts"}',
+                            },
+                        }],
+                    }, "finish_reason": "tool_calls"}],
+                    "usage": {},
+                    "timings": {},
+                }
+
+            return {
+                "choices": [{"message": {"content": "DONE"}, "finish_reason": "stop"}],
+                "usage": {},
+                "timings": {},
+            }
+
+        monkeypatch.setattr("agentic_tdd_runner.config.load_config", lambda path: config)
+        monkeypatch.setattr("agentic_tdd_runner.agent.parse_args", lambda: args)
+        monkeypatch.setattr("agentic_tdd_runner.agent.init_log", lambda: str(tmp_path / "agent.jsonl"))
+        monkeypatch.setattr("agentic_tdd_runner.agent.emit", lambda msg: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.log", lambda event, data: logged.append((event, data)))
+        monkeypatch.setattr("agentic_tdd_runner.agent.chat", fake_chat)
+        monkeypatch.setattr("agentic_tdd_runner.agent.execute_tool", lambda name, args: "file contents")
+        monkeypatch.setattr("agentic_tdd_runner.agent.find_test_file", lambda hint=None: "src/file.test.ts")
+        monkeypatch.setattr("agentic_tdd_runner.agent.verify_red_green", lambda tf: (True, "verified"))
+        monkeypatch.setattr(
+            "agentic_tdd_runner.agent.subprocess.run",
+            lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, stdout="", stderr=""),
+        )
+
+        result = main()
+
+        assert result == 0
+        events = [event for event, _data in logged]
+        assert "loop_detected" in events
+        assert any(
+            msg.get("role") == "user" and "repeated the same exploratory tool call" in msg.get("content", "")
+            for msg in chat_calls[3]
+        )
+
+    def test_loop_streak_survives_failed_edit_between_exploratory_reads(self, tmp_path, monkeypatch):
+        """Common stall pattern: read_file → failed str_replace_editor → read_file → read_file.
+        The failed edit doesn't change anything on disk, so it should not break the
+        exploratory streak. Only a successful edit (applied is True) means progress
+        was made. Without this, the loop guard misses the most common stall shape:
+        the model rereading the same file because its edits keep failing."""
+        logged = []
+        chat_calls = []
+
+        config = {
+            "agent": {"max_steps": 5, "max_tool_output": 2000},
+            "verification": {"max_rejections": 3},
+            "quality": {"enabled": False},
+            "prompt": {
+                "system": "system prompt",
+                "nudge": "Step {step}/{max_steps}. Continue.",
+                "no_test_found": "no test",
+                "quality_failed": "FAIL: {details}",
+            },
+            "llm": {"model": "test-model"},
+            "timeouts": {"tool_execution": 10, "llm_request": 10},
+            "runner": {"command": "bun test", "test_file_patterns": ["*.test.ts"], "exclude_dirs": []},
+            "tools": [],
+            "pr": {"enabled": False},
+        }
+        args = SimpleNamespace(
+            issue="bug text", source=None, symbol=None,
+            workdir=str(tmp_path), config="unused.toml", log_dir=str(tmp_path),
+        )
+
+        # Plan: read(A) → read(A) → failed str_replace_editor → read(A) → DONE.
+        # Three reads of A interleaved by a failed edit must trigger loop_detected.
+        def fake_chat(messages, include_tools=True):
+            chat_calls.append([dict(msg) for msg in messages])
+            if len(chat_calls) in (1, 2, 4):
+                return {"choices": [{"message": {"content": None, "tool_calls": [
+                    {"id": f"c{len(chat_calls)}", "function": {
+                        "name": "read_file", "arguments": '{"path": "src/file.ts"}',
+                    }},
+                ]}, "finish_reason": "tool_calls"}], "usage": {}, "timings": {}}
+            if len(chat_calls) == 3:
+                return {"choices": [{"message": {"content": None, "tool_calls": [
+                    {"id": "c3", "function": {
+                        "name": "str_replace_editor",
+                        "arguments": '{"path": "src/file.ts", "old": "x", "new": "y"}',
+                    }},
+                ]}, "finish_reason": "tool_calls"}], "usage": {}, "timings": {}}
+            return {"choices": [{"message": {"content": "DONE"}, "finish_reason": "stop"}], "usage": {}, "timings": {}}
+
+        # Failed edit returns anything not starting with "OK:" → applied is False.
+        def fake_execute(name, args):
+            if name == "str_replace_editor":
+                return "ERROR: old string not found"
+            return "file contents"
+
+        monkeypatch.setattr("agentic_tdd_runner.config.load_config", lambda path: config)
+        monkeypatch.setattr("agentic_tdd_runner.agent.parse_args", lambda: args)
+        monkeypatch.setattr("agentic_tdd_runner.agent.init_log", lambda: str(tmp_path / "agent.jsonl"))
+        monkeypatch.setattr("agentic_tdd_runner.agent.emit", lambda msg: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.log", lambda event, data: logged.append((event, data)))
+        monkeypatch.setattr("agentic_tdd_runner.agent.chat", fake_chat)
+        monkeypatch.setattr("agentic_tdd_runner.agent.execute_tool", fake_execute)
+        monkeypatch.setattr("agentic_tdd_runner.agent.find_test_file", lambda hint=None: "src/file.test.ts")
+        monkeypatch.setattr("agentic_tdd_runner.agent.verify_red_green", lambda tf: (True, "verified"))
+        monkeypatch.setattr(
+            "agentic_tdd_runner.agent.subprocess.run",
+            lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, stdout="", stderr=""),
+        )
+
+        main()
+
+        events = [event for event, _data in logged]
+        assert "loop_detected" in events, (
+            "Three identical exploratory reads with a failed (non-applied) edit "
+            "in between should still trip the loop guard. The failed edit didn't "
+            "change anything, so the streak shouldn't reset."
+        )
+
+    def test_loop_warning_appended_after_all_tool_results_in_multi_tool_call(self, tmp_path, monkeypatch):
+        """When a single assistant turn returns multiple tool_calls AND triggers loop
+        detection mid-iteration, the warning user message must come AFTER all sibling
+        tool results — never interleaved between them.
+
+        OpenAI's tool_calls API requires every assistant(tool_calls) to be followed by
+        exactly N contiguous role=tool messages (one per call). Inserting role=user
+        between siblings yields assistant→tool→user→tool, which the next chat call
+        will reject (or worse, silently misinterpret)."""
+        logged = []
+        chat_calls = []
+
+        config = {
+            "agent": {"max_steps": 4, "max_tool_output": 2000},
+            "verification": {"max_rejections": 3},
+            "quality": {"enabled": False},
+            "prompt": {
+                "system": "system prompt",
+                "nudge": "Step {step}/{max_steps}. Continue.",
+                "no_test_found": "no test",
+                "quality_failed": "FAIL: {details}",
+            },
+            "llm": {"model": "test-model"},
+            "timeouts": {"tool_execution": 10, "llm_request": 10},
+            "runner": {"command": "bun test", "test_file_patterns": ["*.test.ts"], "exclude_dirs": []},
+            "tools": [],
+            "pr": {"enabled": False},
+        }
+        args = SimpleNamespace(
+            issue="bug text",
+            source=None,
+            symbol=None,
+            workdir=str(tmp_path),
+            config="unused.toml",
+            log_dir=str(tmp_path),
+        )
+
+        # Plan: turns 1, 2 each issue ONE read_file (priming the loop counter to 2),
+        # then turn 3 issues TWO tool_calls — first one is the same read_file
+        # (triggers loop detection), second is a different read_file. The warning
+        # must NOT split the two tool results.
+        def fake_chat(messages, include_tools=True):
+            chat_calls.append([dict(msg) for msg in messages])
+            if len(chat_calls) == 1:
+                return {"choices": [{"message": {"content": None, "tool_calls": [
+                    {"id": "c1", "function": {"name": "read_file", "arguments": '{"path": "src/file.ts"}'}},
+                ]}, "finish_reason": "tool_calls"}], "usage": {}, "timings": {}}
+            if len(chat_calls) == 2:
+                return {"choices": [{"message": {"content": None, "tool_calls": [
+                    {"id": "c2", "function": {"name": "read_file", "arguments": '{"path": "src/file.ts"}'}},
+                ]}, "finish_reason": "tool_calls"}], "usage": {}, "timings": {}}
+            if len(chat_calls) == 3:
+                return {"choices": [{"message": {"content": None, "tool_calls": [
+                    {"id": "c3a", "function": {"name": "read_file", "arguments": '{"path": "src/file.ts"}'}},
+                    {"id": "c3b", "function": {"name": "read_file", "arguments": '{"path": "src/other.ts"}'}},
+                ]}, "finish_reason": "tool_calls"}], "usage": {}, "timings": {}}
+            return {"choices": [{"message": {"content": "DONE"}, "finish_reason": "stop"}], "usage": {}, "timings": {}}
+
+        monkeypatch.setattr("agentic_tdd_runner.config.load_config", lambda path: config)
+        monkeypatch.setattr("agentic_tdd_runner.agent.parse_args", lambda: args)
+        monkeypatch.setattr("agentic_tdd_runner.agent.init_log", lambda: str(tmp_path / "agent.jsonl"))
+        monkeypatch.setattr("agentic_tdd_runner.agent.emit", lambda msg: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.log", lambda event, data: logged.append((event, data)))
+        monkeypatch.setattr("agentic_tdd_runner.agent.chat", fake_chat)
+        monkeypatch.setattr("agentic_tdd_runner.agent.execute_tool", lambda name, args: "file contents")
+        monkeypatch.setattr("agentic_tdd_runner.agent.find_test_file", lambda hint=None: "src/file.test.ts")
+        monkeypatch.setattr("agentic_tdd_runner.agent.verify_red_green", lambda tf: (True, "verified"))
+        monkeypatch.setattr(
+            "agentic_tdd_runner.agent.subprocess.run",
+            lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, stdout="", stderr=""),
+        )
+
+        result = main()
+
+        assert result == 0
+        events = [event for event, _data in logged]
+        assert "loop_detected" in events, "loop should still be detected on the multi-call turn"
+
+        # Inspect the messages sent to the 4th chat call — that snapshot reflects
+        # what was appended after the multi-tool-call turn finished.
+        snapshot = chat_calls[3]
+        # Find the assistant message with tool_calls c3a + c3b. The raw LLM
+        # response dict doesn't carry an explicit role field, so identify it by
+        # the presence of the c3a tool_call.
+        idx = next(
+            i for i, m in enumerate(snapshot)
+            if any(tc.get("id") == "c3a" for tc in (m.get("tool_calls") or []))
+        )
+        # Next message MUST be the tool result for c3a, then c3b — contiguous.
+        assert snapshot[idx + 1].get("role") == "tool"
+        assert snapshot[idx + 1].get("tool_call_id") == "c3a"
+        assert snapshot[idx + 2].get("role") == "tool", (
+            "Loop warning split sibling tool results: "
+            f"got role={snapshot[idx + 2].get('role')!r} between c3a and c3b"
+        )
+        assert snapshot[idx + 2].get("tool_call_id") == "c3b"
+        # The user warning, if present, must come AFTER both tool results.
+        assert snapshot[idx + 3].get("role") == "user"
+        assert "repeated the same exploratory tool call" in snapshot[idx + 3].get("content", "")
+
+    def test_tool_loop_signature_only_tracks_exploratory_reads(self):
+        assert _tool_loop_signature("read_file", {"path": "src/foo.ts"}) == "read_file:src/foo.ts"
+        assert _tool_loop_signature("run_command", {"command": "grep -n foo src/"}) == "run_command:grep -n foo src/"
+        assert _tool_loop_signature("run_command", {"command": "bun test"}) is None
+        assert _tool_loop_signature("str_replace_editor", {}) is None
+
+    def test_tool_loop_signature_handles_non_string_command(self):
+        """CodeRabbit PR #13: models sometimes emit malformed tool_calls where
+        `command` is a dict/list/int instead of a string. shlex.split raises
+        AttributeError on non-strings, which the ValueError handler below does
+        not catch. That would break the main loop. Return None for garbage
+        shapes instead of exploding."""
+        assert _tool_loop_signature("run_command", {"command": 123}) is None
+        assert _tool_loop_signature("run_command", {"command": {"cmd": "git status"}}) is None
+        assert _tool_loop_signature("run_command", {"command": ["git", "status"]}) is None
+        assert _tool_loop_signature("run_command", {}) is None
+
+    def test_tool_loop_warning_message_points_model_toward_progress(self):
+        msg = _tool_loop_warning_message("read_file:src/foo.ts")
+        assert "read_file:src/foo.ts" in msg
+        assert "three times" in msg
+        assert "edit" in msg.lower() or "DONE" in msg
 
 
 class TestApplyMechanicalEdits:
