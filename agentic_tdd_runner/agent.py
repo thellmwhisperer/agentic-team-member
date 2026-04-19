@@ -189,6 +189,53 @@ def _tool_applied_status(name: str, result: str) -> bool | None:
     return result.startswith("OK:")
 
 
+def _tool_loop_signature(name: str, args: dict) -> str | None:
+    if name == "read_file":
+        return f"read_file:{args.get('path', '')}"
+    if name != "run_command":
+        return None
+    command = args.get("command", "")
+    if not isinstance(command, str):
+        return None
+    try:
+        parts = shlex.split(command)
+    except ValueError:
+        return None
+    if not parts:
+        return None
+    exploratory = {
+        "grep", "rg", "find", "ls", "cat", "head", "tail", "sed", "awk",
+        "wc", "sort", "uniq", "cut", "tr", "dirname", "basename", "tree",
+        "file", "which", "test",
+    }
+    if parts[0] not in exploratory:
+        return None
+    return f"run_command:{command}"
+
+
+def _tool_loop_warning_message(signature: str) -> str:
+    return (
+        "Loop warning: you have repeated the same exploratory tool call "
+        f"({signature}) three times without editing files. Stop rereading and "
+        "either make an edit, explain the blocker, or say DONE if the test already passes."
+    )
+
+
+def _is_invalid_red_phase_failure(output: str) -> bool:
+    lowered = output.lower()
+    if "__set" not in lowered and "fortests" not in lowered:
+        return False
+    invalid_markers = (
+        "not a function",
+        "is undefined",
+        "is not defined",
+        "cannot import",
+        "does not provide an export",
+        "has no exported member",
+    )
+    return any(marker in lowered for marker in invalid_markers)
+
+
 def _resolve_repo_path(path: str, workdir: str = None) -> Path:
     """Resolve a relative path within the workdir. Raises if it escapes."""
     repo_root = Path(workdir or WORKDIR).resolve()
@@ -522,6 +569,7 @@ def verify_red_green(test_file: str) -> tuple[bool, str]:
     red_result = None
     red_passed = False
     red_output = ""
+    red_output_full = ""
     green_result = None
     green_passed = False
     green_output = ""
@@ -539,7 +587,8 @@ def verify_red_green(test_file: str) -> tuple[bool, str]:
                 cwd=WORKDIR, capture_output=True, text=True, timeout=test_timeout,
             )
             red_passed = red_result.returncode == 0
-            red_output = (red_result.stdout + red_result.stderr)[:500]
+            red_output_full = red_result.stdout + red_result.stderr
+            red_output = red_output_full[:500]
             emit(f"  [RED] exit={red_result.returncode} {'PASS (BAD!)' if red_passed else 'FAIL (good)'}")
             for line in red_output.split("\n")[:10]:
                 emit(f"    {line}")
@@ -594,6 +643,14 @@ def verify_red_green(test_file: str) -> tuple[bool, str]:
             f"This means it doesn't test the real code — it probably uses local stub functions "
             f"instead of importing from the source. Rewrite the test to import the real "
             f"function and mock its dependencies properly."
+        )
+
+    if _is_invalid_red_phase_failure(red_output_full):
+        return False, (
+            f"REJECTED: Your red phase for {test_file} failed because the test scaffold is incomplete, "
+            "not because the bug was reproduced. The failure mentions missing test-only seams/exports "
+            f"(for example __setXForTests). Rework the test so the pre-fix run executes the real code path "
+            f"and fails on behavior. Error: {red_output[:300]}"
         )
 
     if green_result is None:
@@ -1016,10 +1073,79 @@ def _parse_pr_content(content: str) -> tuple[str | None, str | None]:
     return title, body
 
 
+def _resolve_pr_base_ref(base_branch: str, command_timeout: int) -> str | None:
+    """Resolve the git ref the PR should be based on, preferring origin/<base>."""
+    for ref in (f"origin/{base_branch}", base_branch):
+        result = subprocess.run(
+            ["git", "rev-parse", "--verify", ref],
+            cwd=WORKDIR,
+            capture_output=True,
+            text=True,
+            timeout=command_timeout,
+        )
+        if result.returncode == 0:
+            return ref
+    return None
+
+
+def _check_pr_base_hygiene(base_branch: str, command_timeout: int) -> tuple[bool, str]:
+    """Require the run worktree to still be exactly on the configured PR base."""
+    base_ref = _resolve_pr_base_ref(base_branch, command_timeout)
+    if not base_ref:
+        return False, f"Refusing to create PR: could not resolve base ref for {base_branch}."
+
+    result = subprocess.run(
+        ["git", "rev-list", "--left-right", "--count", f"{base_ref}...HEAD"],
+        cwd=WORKDIR,
+        capture_output=True,
+        text=True,
+        timeout=command_timeout,
+    )
+    if result.returncode != 0:
+        return False, (
+            f"Refusing to create PR: could not compare HEAD against {base_ref}: "
+            f"{result.stderr.strip()}"
+        )
+
+    counts = result.stdout.strip().split()
+    if len(counts) != 2:
+        return False, (
+            f"Refusing to create PR: unexpected git ancestry output for {base_ref}: "
+            f"{result.stdout.strip()}"
+        )
+
+    behind, ahead = counts
+    if behind != "0" or ahead != "0":
+        return False, (
+            f"Refusing to create PR: current HEAD is not cleanly based on {base_ref} "
+            f"(behind={behind}, ahead={ahead}). Start from a clean worktree based on the PR base."
+        )
+
+    return True, base_ref
+
+
 def create_pr(messages: list, last_msg: dict, test_file: str, step: int) -> str | None:
     """Ask LLM for PR content, then create branch/commit/push/PR."""
     pr_cfg = _CONFIG.get("pr", {})
     pr_timeout = _CONFIG["timeouts"]["pr_create"]
+    base = pr_cfg.get("base_branch", "main")
+    prefix = pr_cfg.get("branch_prefix", "atm/fix-")
+
+    try:
+        clean_base, base_info = _check_pr_base_hygiene(base, pr_timeout)
+    except OSError as e:
+        emit(f"  [PR] Tool missing: {e}")
+        log("pr_error", {"error": str(e)})
+        return None
+    except subprocess.TimeoutExpired as e:
+        emit(f"  [PR] Command timed out: {e}")
+        log("pr_error", {"error": str(e)})
+        return None
+
+    if not clean_base:
+        emit(f"  [PR] {base_info}")
+        log("pr_error", {"error": base_info, "base_branch": base})
+        return None
 
     # Ask LLM for title and description — without tools to avoid tool_calls
     pr_messages = messages.copy()
@@ -1042,8 +1168,6 @@ def create_pr(messages: list, last_msg: dict, test_file: str, step: int) -> str 
     if not body:
         body = "Automated fix by ATM agent."
 
-    base = pr_cfg.get("base_branch", "main")
-    prefix = pr_cfg.get("branch_prefix", "atm/fix-")
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     branch_name = f"{prefix}{timestamp}"
 
@@ -1238,6 +1362,7 @@ def main():
     done_rejected = 0
     quality_rejected = 0
     max_rejections = _CONFIG["verification"]["max_rejections"]
+    recent_exploratory_signatures: list[str] = []
 
     # --- Completion pipeline: verify → quality → done ---
     # Extracted so both DONE and auto-trigger can use it.
@@ -1314,28 +1439,44 @@ def main():
         emit(f"\n{'='*60}")
         emit(f"AGENT DONE at step {step} — VERIFIED")
         emit(f"{'='*60}")
-        diff = subprocess.run(["git", "diff"], cwd=WORKDIR, capture_output=True, text=True)
-        emit(f"\n--- GIT DIFF ---\n{diff.stdout}")
-        untracked = subprocess.run(["git", "ls-files", "--others", "--exclude-standard"], cwd=WORKDIR, capture_output=True, text=True)
-        if untracked.stdout.strip():
-            emit("\n--- NEW FILES ---")
-            for f in untracked.stdout.strip().split("\n"):
-                emit(f"  {f}")
-                full = os.path.join(WORKDIR, f)
-                try:
-                    with open(full) as fh:
-                        emit(fh.read())
-                except OSError:
-                    pass
-        if _CONFIG.get("pr", {}).get("enabled", False):
-            emit("\n=== PR CREATION ===")
-            pr_url = create_pr(messages, msg, test_file, step)
-            if pr_url:
-                emit(f"  [PR] {pr_url}")
-            else:
-                emit("  [PR] Failed — diff printed above, create PR manually")
-
         log("done", {"step": step, "verified": True})
+        try:
+            command_timeout = _CONFIG.get("timeouts", {}).get("tool_execution", 10)
+            diff = subprocess.run(
+                ["git", "diff"],
+                cwd=WORKDIR,
+                capture_output=True,
+                text=True,
+                timeout=command_timeout,
+            )
+            emit(f"\n--- GIT DIFF ---\n{diff.stdout}")
+            untracked = subprocess.run(
+                ["git", "ls-files", "--others", "--exclude-standard"],
+                cwd=WORKDIR,
+                capture_output=True,
+                text=True,
+                timeout=command_timeout,
+            )
+            if untracked.stdout.strip():
+                emit("\n--- NEW FILES ---")
+                for f in untracked.stdout.strip().split("\n"):
+                    emit(f"  {f}")
+                    full = os.path.join(WORKDIR, f)
+                    try:
+                        with open(full) as fh:
+                            emit(fh.read())
+                    except OSError:
+                        pass
+            if _CONFIG.get("pr", {}).get("enabled", False):
+                emit("\n=== PR CREATION ===")
+                pr_url = create_pr(messages, msg, test_file, step)
+                if pr_url:
+                    emit(f"  [PR] {pr_url}")
+                else:
+                    emit("  [PR] Failed — diff printed above, create PR manually")
+        except Exception as e:
+            emit(f"  [POSTAMBLE] Failed: {e}")
+            log("postamble_error", {"step": step, "error": str(e)})
         return "done"
 
     for step in range(max_steps):
@@ -1407,6 +1548,12 @@ def main():
 
         if finish == "tool_calls" and msg.get("tool_calls"):
             test_passed = False
+            # OpenAI's tool_calls API requires every assistant(tool_calls) to be
+            # followed by a contiguous run of role=tool messages — one per call.
+            # If loop detection fires mid-iteration, buffer the warning here and
+            # append it AFTER the loop, so siblings stay contiguous instead of
+            # producing assistant→tool→user→tool (an invalid transcript).
+            loop_warning = None
             for tc in msg["tool_calls"]:
                 fn = tc["function"]
                 name = fn["name"]
@@ -1426,6 +1573,7 @@ def main():
                 tool_elapsed = time.time() - t1
                 result_truncated = truncate(result)
                 applied = _tool_applied_status(name, result)
+                loop_signature = _tool_loop_signature(name, args)
 
                 log("tool", {
                     "step": step,
@@ -1453,8 +1601,31 @@ def main():
                     "content": result_truncated,
                 })
 
+                if applied is True:
+                    recent_exploratory_signatures.clear()
+                elif loop_signature:
+                    recent_exploratory_signatures.append(loop_signature)
+                    recent_exploratory_signatures[:] = recent_exploratory_signatures[-3:]
+                    if (
+                        len(recent_exploratory_signatures) == 3
+                        and len(set(recent_exploratory_signatures)) == 1
+                    ):
+                        loop_warning = _tool_loop_warning_message(loop_signature)
+                        log("loop_detected", {
+                            "step": step,
+                            "signature": loop_signature,
+                            "count": 3,
+                        })
+                        recent_exploratory_signatures.clear()
+                # No else: failed edits and unrelated tools leave the streak
+                # intact. Only a successful edit (applied is True) breaks it,
+                # because only a successful edit represents actual progress.
+
                 if _is_test_pass(name, args):
                     test_passed = True
+
+            if loop_warning is not None:
+                messages.append({"role": "user", "content": loop_warning})
 
             # --- PHASE NUDGE: test file created → nudge to run + fix ---
             if episode:
