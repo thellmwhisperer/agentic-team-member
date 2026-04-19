@@ -2861,6 +2861,17 @@ class TestMain:
         assert _tool_loop_signature("run_command", {"command": "bun test"}) is None
         assert _tool_loop_signature("str_replace_editor", {}) is None
 
+    def test_tool_loop_signature_handles_non_string_command(self):
+        """CodeRabbit PR #13: models sometimes emit malformed tool_calls where
+        `command` is a dict/list/int instead of a string. shlex.split raises
+        AttributeError on non-strings, which the ValueError handler below does
+        not catch. That would break the main loop. Return None for garbage
+        shapes instead of exploding."""
+        assert _tool_loop_signature("run_command", {"command": 123}) is None
+        assert _tool_loop_signature("run_command", {"command": {"cmd": "git status"}}) is None
+        assert _tool_loop_signature("run_command", {"command": ["git", "status"]}) is None
+        assert _tool_loop_signature("run_command", {}) is None
+
     def test_tool_loop_warning_message_points_model_toward_progress(self):
         msg = _tool_loop_warning_message("read_file:src/foo.ts")
         assert "read_file:src/foo.ts" in msg
