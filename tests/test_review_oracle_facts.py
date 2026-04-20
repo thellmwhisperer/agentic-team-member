@@ -220,6 +220,7 @@ class TestExactFacts:
         assert fact.value["dispatch_branch"] == "server.py:3-4"
         assert fact.value["wrapper_success_shape"] is None
         assert fact.value["wrapper_error_shape"] is None
+        assert fact.value["unwrap_pattern"] is None
 
     def test_target_identity_handles_nested_defaults_and_type_annotations(self, tmp_path):
         _write_file(tmp_path, "server.py", """\
@@ -268,6 +269,33 @@ class TestExactFacts:
             '{"content": [{"type": "text", "text": json.dumps(result)}], "isError": False}'
         )
         assert fact.value["wrapper_error_shape"] is None
+        assert fact.value["unwrap_pattern"] == 'body = json.loads(result["content"][0]["text"])'
+
+    def test_invocation_surface_leaves_unwrap_pattern_unset_when_not_proven(self, tmp_path):
+        _write_file(tmp_path, "server.py", """\
+            class ToolHandler:
+                def call(self, name, args):
+                    result, _meta = self._dispatch(name, args)
+                    return {"content": [{"type": "text", "text": result}]}
+
+                def _dispatch(self, name, args):
+                    if name == "roca_query":
+                        return self._handle_query(args), None
+                    raise ValueError("unknown tool")
+
+                def _handle_query(self, args):
+                    return {"rows": []}
+        """)
+
+        fact = extract_invocation_surface(
+            str(tmp_path),
+            "server.py",
+            "ToolHandler",
+            "_handle_query",
+        )
+
+        assert fact.value["wrapper_success_shape"] == '{"content": [{"type": "text", "text": result}]}'
+        assert fact.value["unwrap_pattern"] is None
 
     def test_collect_exact_facts_returns_four_sections_for_python_query_target(self, tmp_path):
         _build_python_query_repo(tmp_path)
