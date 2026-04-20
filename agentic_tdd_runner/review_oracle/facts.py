@@ -1,4 +1,4 @@
-"""AST-exact fact extractors for review/oracle cookbook generation."""
+"""Deterministic fact extractors for review/oracle cookbook generation."""
 
 from __future__ import annotations
 
@@ -65,6 +65,13 @@ def _iter_methods(class_node: ast.ClassDef) -> list[ast.FunctionDef | ast.AsyncF
     ]
 
 
+def _iter_module_functions(tree: ast.Module) -> list[ast.FunctionDef | ast.AsyncFunctionDef]:
+    return [
+        node for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    ]
+
+
 def _find_target(
     tree: ast.Module,
     symbol: str,
@@ -92,6 +99,18 @@ def _find_method(class_node: ast.ClassDef, name: str) -> ast.FunctionDef | ast.A
         if method.name == name:
             return method
     raise ValueError(f"Could not find method: {class_node.name}.{name}")
+
+
+def _iter_non_nested_nodes(root: ast.AST) -> list[ast.AST]:
+    nodes: list[ast.AST] = []
+    stack = list(reversed(list(ast.iter_child_nodes(root))))
+    while stack:
+        node = stack.pop()
+        nodes.append(node)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+            continue
+        stack.extend(reversed(list(ast.iter_child_nodes(node))))
+    return nodes
 
 
 def _signature_from_node(source_text: str, node: ast.FunctionDef | ast.AsyncFunctionDef) -> tuple[str, str]:
@@ -357,6 +376,131 @@ def _collect_helper_methods(tree: ast.Module, source_path: str) -> list[dict[str
     return helpers
 
 
+def _collect_dict_return_key_sets(
+    node: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> list[list[str]]:
+    key_sets: list[list[str]] = []
+    local_dict_assignments: dict[str, list[str]] = {}
+    for child in _iter_non_nested_nodes(node):
+        if not isinstance(child, ast.Assign) or not isinstance(child.value, ast.Dict):
+            continue
+        keys = _dict_string_keys(child.value)
+        if not keys:
+            continue
+        for target in child.targets:
+            if isinstance(target, ast.Name):
+                local_dict_assignments[target.id] = keys
+
+    for child in _iter_non_nested_nodes(node):
+        if not isinstance(child, ast.Return) or child.value is None:
+            continue
+        keys: list[str] = []
+        if isinstance(child.value, ast.Dict):
+            keys = _dict_string_keys(child.value)
+        elif isinstance(child.value, ast.Name):
+            keys = local_dict_assignments.get(child.value.id, [])
+        if keys and keys not in key_sets:
+            key_sets.append(keys)
+    key_sets.sort(key=lambda keys: tuple(keys))
+    return key_sets
+
+
+def _collect_patch_imports(tree: ast.Module) -> tuple[set[str], set[str]]:
+    direct_patch_names: set[str] = set()
+    patch_module_aliases: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            for alias in node.names:
+                local_name = alias.asname or alias.name
+                if module in {"unittest.mock", "mock"} and alias.name == "patch":
+                    direct_patch_names.add(local_name)
+                if module == "unittest" and alias.name == "mock":
+                    patch_module_aliases.add(local_name)
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                local_name = alias.asname or alias.name.split(".")[-1]
+                if alias.name in {"unittest.mock", "mock"}:
+                    patch_module_aliases.add(local_name)
+                if alias.name == "unittest":
+                    patch_module_aliases.add(local_name)
+    return direct_patch_names, patch_module_aliases
+
+
+def _attribute_chain(node: ast.AST) -> list[str]:
+    parts: list[str] = []
+    current = node
+    while isinstance(current, ast.Attribute):
+        parts.append(current.attr)
+        current = current.value
+    if isinstance(current, ast.Name):
+        parts.append(current.id)
+    return list(reversed(parts))
+
+
+def _patch_target_for_call(
+    call: ast.Call,
+    direct_patch_names: set[str],
+    patch_module_aliases: set[str],
+) -> tuple[str, str] | None:
+    func = call.func
+    alias = None
+    if isinstance(func, ast.Name) and func.id in direct_patch_names:
+        alias = func.id
+    elif isinstance(func, ast.Attribute):
+        chain = _attribute_chain(func)
+        if len(chain) >= 2 and chain[-1] == "patch":
+            if chain[0] in patch_module_aliases:
+                alias = ".".join(chain)
+            if chain[:3] == ["unittest", "mock", "patch"]:
+                alias = ".".join(chain)
+    if alias is None or not call.args:
+        return None
+    first_arg = call.args[0]
+    if not isinstance(first_arg, ast.Constant) or not isinstance(first_arg.value, str):
+        return None
+    return alias, first_arg.value
+
+
+def _collect_patch_sites(
+    tree: ast.Module,
+    source_path: str,
+) -> tuple[list[dict[str, Any]], set[str]]:
+    direct_patch_names, patch_module_aliases = _collect_patch_imports(tree)
+    patch_sites: list[dict[str, Any]] = []
+    observed_aliases: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        patch_target = _patch_target_for_call(node, direct_patch_names, patch_module_aliases)
+        if patch_target is None:
+            continue
+        alias, target = patch_target
+        observed_aliases.add(alias)
+        patch_sites.append({
+            "target": target,
+            "alias": alias,
+            "range": _format_range(source_path, node.lineno, node.end_lineno),
+        })
+    patch_sites.sort(key=lambda site: (site["range"], site["target"], site["alias"]))
+    return patch_sites, observed_aliases
+
+
+def _table_columns(body: str) -> list[str]:
+    columns: list[str] = []
+    for raw_line in body.splitlines():
+        line = raw_line.strip().rstrip(",")
+        if not line:
+            continue
+        upper = line.upper()
+        if upper.startswith(("PRIMARY KEY", "FOREIGN KEY", "UNIQUE", "CONSTRAINT", "CHECK")):
+            continue
+        match = re.match(r'"?(?P<name>[A-Za-z_]\w*)"?', line)
+        if match:
+            columns.append(match.group("name"))
+    return columns
+
+
 def extract_target_identity(
     project_root: str,
     source_path: str,
@@ -515,6 +659,136 @@ def extract_pytest_surface(
     )
 
 
+def extract_patch_semantics(
+    project_root: str,
+    test_path: str,
+) -> Fact:
+    root = Path(project_root)
+    test_file = root / test_path
+    local_tree = _parse_module(test_file)
+    local_patch_targets, observed_aliases = _collect_patch_sites(local_tree, test_path)
+
+    repo_counts: dict[str, int] = {}
+    contributing_paths: set[str] = set()
+    for path in sorted(root.rglob("*.py")):
+        tree = _parse_module(path)
+        relative_path = path.relative_to(root).as_posix()
+        patch_sites, _aliases = _collect_patch_sites(tree, relative_path)
+        if not patch_sites:
+            continue
+        contributing_paths.add(relative_path)
+        for site in patch_sites:
+            repo_counts[site["target"]] = repo_counts.get(site["target"], 0) + 1
+
+    repo_patch_target_counts = [
+        {"target": target, "count": count}
+        for target, count in sorted(repo_counts.items())
+    ]
+    inputs_used = [site["range"] for site in local_patch_targets]
+    for relative_path in sorted(contributing_paths):
+        if relative_path != test_path:
+            inputs_used.append(relative_path)
+
+    return Fact(
+        name="patch_semantics",
+        value={
+            "module_test_file": PurePosixPath(test_path).as_posix(),
+            "observed_patch_aliases": sorted(observed_aliases),
+            "local_patch_targets": local_patch_targets,
+            "repo_patch_target_counts": repo_patch_target_counts,
+        },
+        derivation_rule=(
+            f"scan {test_path} for literal patch(...) calls using locally imported aliases, "
+            "then count literal patch targets across python files under the repo root"
+        ),
+        inputs_used=tuple(inputs_used),
+        confidence_class="repo_counted",
+    )
+
+
+def extract_schema_surface(
+    project_root: str,
+    schema_path: str,
+) -> Fact:
+    path = Path(project_root) / schema_path
+    source_text = _read_text(path)
+    tables: list[dict[str, Any]] = []
+    for match in re.finditer(
+        r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?P<name>[A-Za-z_]\w*)\s*\((?P<body>.*?)\)\s*;",
+        source_text,
+        flags=re.IGNORECASE | re.DOTALL,
+    ):
+        start = source_text.count("\n", 0, match.start()) + 1
+        end = source_text.count("\n", 0, match.end()) + 1
+        tables.append({
+            "name": match.group("name"),
+            "columns": _table_columns(match.group("body")),
+            "range": _format_range(schema_path, start, end),
+        })
+
+    seed_inserts: list[dict[str, Any]] = []
+    for match in re.finditer(
+        r"INSERT\s+INTO\s+(?P<table>[A-Za-z_]\w*)\s*\((?P<columns>.*?)\)\s*.*?;",
+        source_text,
+        flags=re.IGNORECASE | re.DOTALL,
+    ):
+        start = source_text.count("\n", 0, match.start()) + 1
+        end = source_text.count("\n", 0, match.end()) + 1
+        columns = [part.strip().strip('"') for part in match.group("columns").split(",") if part.strip()]
+        seed_inserts.append({
+            "table": match.group("table"),
+            "columns": columns,
+            "range": _format_range(schema_path, start, end),
+        })
+
+    inputs_used = [entry["range"] for entry in tables]
+    inputs_used.extend(entry["range"] for entry in seed_inserts)
+    if not inputs_used:
+        inputs_used = [schema_path]
+
+    return Fact(
+        name="schema_surface",
+        value={
+            "schema_file": PurePosixPath(schema_path).as_posix(),
+            "tables": tables,
+            "seed_inserts": seed_inserts,
+        },
+        derivation_rule="parse CREATE TABLE and INSERT INTO statements from the schema file to recover table and seed shapes",
+        inputs_used=tuple(inputs_used),
+        confidence_class="text_exact",
+    )
+
+
+def extract_upstream_return_surface(
+    project_root: str,
+    upstream_path: str,
+) -> Fact:
+    path = Path(project_root) / upstream_path
+    tree = _parse_module(path)
+    functions: list[dict[str, Any]] = []
+    for function_node in _iter_module_functions(tree):
+        return_key_sets = _collect_dict_return_key_sets(function_node)
+        if not return_key_sets:
+            continue
+        functions.append({
+            "name": function_node.name,
+            "range": _format_range(upstream_path, function_node.lineno, function_node.end_lineno),
+            "return_key_sets": return_key_sets,
+        })
+
+    inputs_used = [function["range"] for function in functions] or [upstream_path]
+    return Fact(
+        name="upstream_return_surface",
+        value={
+            "module_source_file": PurePosixPath(upstream_path).as_posix(),
+            "functions": functions,
+        },
+        derivation_rule="scan top-level upstream functions and recover literal dict return shapes from their AST",
+        inputs_used=tuple(inputs_used),
+        confidence_class="ast_exact",
+    )
+
+
 def collect_exact_facts(
     project_root: str,
     source_path: str,
@@ -539,5 +813,24 @@ def collect_exact_facts(
     candidate = Path(project_root) / resolved_test_path
     if candidate.is_file():
         facts.append(extract_pytest_surface(project_root, resolved_test_path))
+
+    return facts
+
+
+def collect_repo_facts(
+    project_root: str,
+    *,
+    test_path: str | None = None,
+    schema_path: str | None = "schema.sql",
+    upstream_path: str | None = "query.py",
+) -> list[Fact]:
+    facts: list[Fact] = []
+
+    if test_path is not None and (Path(project_root) / test_path).is_file():
+        facts.append(extract_patch_semantics(project_root, test_path))
+    if schema_path is not None and (Path(project_root) / schema_path).is_file():
+        facts.append(extract_schema_surface(project_root, schema_path))
+    if upstream_path is not None and (Path(project_root) / upstream_path).is_file():
+        facts.append(extract_upstream_return_surface(project_root, upstream_path))
 
     return facts
