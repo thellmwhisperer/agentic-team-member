@@ -555,6 +555,7 @@ def find_test_file(hint: str | None = None) -> str | None:
     )
     if status_result.returncode == 0:
         changed_test_files = []
+        exclude = _CONFIG["runner"].get("exclude_dirs", [])
         entries = [
             entry
             for entry in status_result.stdout.decode("utf-8", errors="surrogateescape").split("\0")
@@ -568,6 +569,10 @@ def find_test_file(hint: str | None = None) -> str | None:
                 continue
             status_code = raw_line[:2]
             rel = raw_line[3:]
+            rel_parts = PurePosixPath(rel).parts
+            if any(ex in rel_parts for ex in exclude):
+                idx += 2 if any(marker in status_code for marker in ("R", "C")) else 1
+                continue
             if not _is_test_file_path(rel):
                 idx += 2 if any(marker in status_code for marker in ("R", "C")) else 1
                 continue
@@ -747,7 +752,11 @@ def verify_red_green(test_file: str) -> tuple[bool, str]:
             f"and fails on behavior. Error: {red_output[:300]}"
         )
 
-    green_infra_error = _verification_infra_error(green_exec_error or green_output_full)
+    green_infra_error = (
+        _verification_infra_error(green_exec_error or green_output_full)
+        if not green_passed
+        else None
+    )
     if green_infra_error:
         return False, (
             f"REJECTED: Your green phase for {test_file} failed because the verification environment is broken. "
