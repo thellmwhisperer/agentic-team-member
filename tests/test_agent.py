@@ -22,6 +22,7 @@ from agentic_tdd_runner.agent import (
     _tool_loop_signature,
     _tool_loop_warning_message,
     _validate_command,
+    _verification_infra_error,
     create_pr,
     detect_quality_tools,
     execute_tool,
@@ -152,6 +153,53 @@ class TestValidateCommand:
     def test_allows_node_scripts(self):
         """node without -e must still work."""
         _validate_command("node build.js")
+
+
+class TestVerificationInfraError:
+    """Infra detection should match concrete runner failures, not broad substrings."""
+
+    @pytest.mark.parametrize(
+        "output",
+        [
+            "/usr/bin/python3: No module named pytest\n",
+            "/usr/bin/python3: No module named 'pytest'\n",
+            "ModuleNotFoundError: No module named \"pytest\"\n",
+        ],
+    )
+    def test_detects_missing_pytest_module(self, output):
+        assert _verification_infra_error(output) == "pytest is unavailable in the verification environment"
+
+    @pytest.mark.parametrize(
+        ("output", "expected"),
+        [
+            ("[Errno 2] No such file or directory: 'python3'", "pytest is unavailable in the verification environment"),
+            ("[Errno 2] No such file or directory: 'pytest'", "pytest is unavailable in the verification environment"),
+            ("[Errno 2] No such file or directory: 'bun'", "bun is unavailable in the verification environment"),
+            ("[Errno 2] No such file or directory: 'node'", "node is unavailable in the verification environment"),
+        ],
+    )
+    def test_detects_missing_runner_binary(self, output, expected):
+        assert _verification_infra_error(output) == expected
+
+    def test_ignores_project_module_missing_with_pytest_banner(self):
+        output = (
+            "============================= test session starts ==============================\n"
+            "platform darwin -- Python 3.12.0, pytest-8.4.2\n"
+            "collected 1 item\n\n"
+            "src/test_worker.py F                                                     [100%]\n\n"
+            "E   ModuleNotFoundError: No module named 'my_module'\n"
+        )
+        assert _verification_infra_error(output) is None
+
+    def test_ignores_regular_file_not_found_with_pytest_banner(self):
+        output = (
+            "============================= test session starts ==============================\n"
+            "platform darwin -- Python 3.12.0, pytest-8.4.2\n"
+            "collected 1 item\n\n"
+            "tests/test_worker.py F                                                   [100%]\n\n"
+            "E   FileNotFoundError: [Errno 2] No such file or directory: 'fixtures/missing.json'\n"
+        )
+        assert _verification_infra_error(output) is None
 
 
 class TestFindTestFile:
