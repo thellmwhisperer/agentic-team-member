@@ -49,6 +49,15 @@ def _dict_string_keys(node: ast.AST | None) -> list[str]:
     return sorted(dict.fromkeys(keys))
 
 
+def _dict_value(node: ast.AST | None, key_name: str) -> ast.AST | None:
+    if not isinstance(node, ast.Dict):
+        return None
+    for key, value in zip(node.keys, node.values):
+        if _string_key(key) == key_name:
+            return value
+    return None
+
+
 def _iter_methods(class_node: ast.ClassDef) -> list[ast.FunctionDef | ast.AsyncFunctionDef]:
     return [
         node for node in class_node.body
@@ -174,6 +183,35 @@ def _extract_wrapper_shapes(
             success_shape = shape
             success_keys = keys
     return success_shape, error_shape, success_keys, error_keys
+
+
+def _derive_unwrap_pattern(
+    method_node: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> str | None:
+    for node in ast.walk(method_node):
+        if not isinstance(node, ast.Return) or not isinstance(node.value, ast.Dict):
+            continue
+        is_error_value = _dict_value(node.value, "isError")
+        if isinstance(is_error_value, ast.Constant) and is_error_value.value is True:
+            continue
+
+        content_value = _dict_value(node.value, "content")
+        if not isinstance(content_value, ast.List) or not content_value.elts:
+            continue
+        first_item = content_value.elts[0]
+        text_value = _dict_value(first_item, "text")
+        if not isinstance(text_value, ast.Call):
+            return None
+        if len(text_value.args) != 1 or text_value.keywords:
+            return None
+        if not isinstance(text_value.func, ast.Attribute):
+            return None
+        if not isinstance(text_value.func.value, ast.Name):
+            return None
+        if text_value.func.value.id != "json" or text_value.func.attr != "dumps":
+            return None
+        return 'body = json.loads(result["content"][0]["text"])'
+    return None
 
 
 def _helper_added_keys(
@@ -369,11 +407,13 @@ def extract_invocation_surface(
         _call_signature, public_signature = _signature_from_node(source_text, call_node)
         public_entrypoint = f"{owner_class_name}.{public_signature}"
         success_shape, error_shape, _, _ = _extract_wrapper_shapes(call_node, source_text)
+        unwrap_pattern = _derive_unwrap_pattern(call_node)
         inputs_used = [_format_range(source_path, call_node.lineno, call_node.end_lineno)]
     else:
         public_entrypoint = None
         success_shape = None
         error_shape = None
+        unwrap_pattern = None
         inputs_used = []
 
     dispatch_key, dispatch_branch = _extract_dispatch_branch(class_node, target_symbol, source_path)
@@ -388,7 +428,7 @@ def extract_invocation_surface(
             "dispatch_branch": dispatch_branch,
             "wrapper_success_shape": success_shape,
             "wrapper_error_shape": error_shape,
-            "unwrap_pattern": 'body = json.loads(result["content"][0]["text"])',
+            "unwrap_pattern": unwrap_pattern,
         },
         derivation_rule=(
             f"locate {owner_class_name}.call plus the dispatch branch that returns "
