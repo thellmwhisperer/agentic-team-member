@@ -240,6 +240,13 @@ def _verification_infra_error(output: str) -> str | None:
     lowered = output.lower()
     if "no module named" in lowered and "pytest" in lowered:
         return "pytest is unavailable in the verification environment"
+    if "no such file or directory" in lowered:
+        if any(token in lowered for token in ("'python3'", "'python'", " pytest")):
+            return "pytest is unavailable in the verification environment"
+        if "'bun'" in lowered:
+            return "bun is unavailable in the verification environment"
+        if "'node'" in lowered:
+            return "node is unavailable in the verification environment"
 
     markers = [
         (
@@ -541,27 +548,37 @@ def find_test_file(hint: str | None = None) -> str | None:
         if hinted and hinted.is_file():
             return os.path.relpath(hinted, WORKDIR)
     status_result = subprocess.run(
-        ["git", "status", "--porcelain"],
+        ["git", "status", "--porcelain", "-z"],
         cwd=WORKDIR,
         capture_output=True,
-        text=True,
+        text=False,
     )
     if status_result.returncode == 0:
         changed_test_files = []
-        for raw_line in status_result.stdout.splitlines():
+        entries = [
+            entry
+            for entry in status_result.stdout.decode("utf-8", errors="surrogateescape").split("\0")
+            if entry
+        ]
+        idx = 0
+        while idx < len(entries):
+            raw_line = entries[idx]
             if len(raw_line) < 4:
+                idx += 1
                 continue
+            status_code = raw_line[:2]
             rel = raw_line[3:]
-            if " -> " in rel:
-                rel = rel.split(" -> ", 1)[1]
             if not _is_test_file_path(rel):
+                idx += 2 if any(marker in status_code for marker in ("R", "C")) else 1
                 continue
             try:
                 resolved = _resolve_repo_path(rel)
             except ValueError:
+                idx += 2 if any(marker in status_code for marker in ("R", "C")) else 1
                 continue
             if resolved.is_file():
                 changed_test_files.append(os.path.relpath(resolved, WORKDIR))
+            idx += 2 if any(marker in status_code for marker in ("R", "C")) else 1
         if changed_test_files:
             return sorted(dict.fromkeys(changed_test_files))[0]
     patterns = _CONFIG["runner"]["test_file_patterns"]
@@ -623,10 +640,12 @@ def verify_red_green(test_file: str) -> tuple[bool, str]:
     red_passed = False
     red_output = ""
     red_output_full = ""
+    red_exec_error = ""
     green_result = None
     green_passed = False
     green_output = ""
     green_output_full = ""
+    green_exec_error = ""
 
     try:
         # Restore the test file so the red phase can run it
@@ -650,6 +669,12 @@ def verify_red_green(test_file: str) -> tuple[bool, str]:
             red_passed = False
             red_output = f"TIMEOUT: test command exceeded {test_timeout}s without fix."
             emit(f"  [RED] TIMEOUT after {test_timeout}s")
+            emit(f"    {red_output}")
+        except (FileNotFoundError, OSError) as exc:
+            red_exec_error = str(exc)
+            red_output_full = red_exec_error
+            red_output = red_output_full[:500]
+            emit("  [RED] INFRA ERROR")
             emit(f"    {red_output}")
     finally:
         # Always clean up temp files and pop stash, even after exceptions
@@ -677,6 +702,12 @@ def verify_red_green(test_file: str) -> tuple[bool, str]:
         green_output = f"TIMEOUT: test command exceeded {test_timeout}s with fix."
         emit(f"  [GREEN] TIMEOUT after {test_timeout}s")
         emit(f"    {green_output}")
+    except (FileNotFoundError, OSError) as exc:
+        green_exec_error = str(exc)
+        green_output_full = green_exec_error
+        green_output = green_output_full[:500]
+        emit("  [GREEN] INFRA ERROR")
+        emit(f"    {green_output}")
 
     log("verify", {
         "test_file": test_file,
@@ -685,6 +716,14 @@ def verify_red_green(test_file: str) -> tuple[bool, str]:
         "red_output": red_output,
         "green_output": green_output,
     })
+
+    red_infra_error = _verification_infra_error(red_exec_error or red_output_full)
+    if red_infra_error:
+        return False, (
+            f"REJECTED: Your red phase for {test_file} failed because the verification environment is broken, "
+            f"not because the bug was reproduced. {red_infra_error}. "
+            f"Fix the runner environment and rerun verification. Error: {red_output[:300]}"
+        )
 
     if red_result is None:
         return False, (
@@ -708,26 +747,18 @@ def verify_red_green(test_file: str) -> tuple[bool, str]:
             f"and fails on behavior. Error: {red_output[:300]}"
         )
 
-    red_infra_error = _verification_infra_error(red_output_full)
-    if red_infra_error:
+    green_infra_error = _verification_infra_error(green_exec_error or green_output_full)
+    if green_infra_error:
         return False, (
-            f"REJECTED: Your red phase for {test_file} failed because the verification environment is broken, "
-            f"not because the bug was reproduced. {red_infra_error}. "
-            f"Fix the runner environment and rerun verification. Error: {red_output[:300]}"
+            f"REJECTED: Your green phase for {test_file} failed because the verification environment is broken. "
+            f"{green_infra_error}. Fix the runner environment and rerun verification. "
+            f"Error: {green_output[:300]}"
         )
 
     if green_result is None:
         return False, (
             f"REJECTED: Your test ({test_file}) timed out WITH your source fix. "
             f"Fix the timeout or make the test more targeted. Error: {green_output[:300]}"
-        )
-
-    green_infra_error = _verification_infra_error(green_output_full)
-    if green_infra_error:
-        return False, (
-            f"REJECTED: Your green phase for {test_file} failed because the verification environment is broken. "
-            f"{green_infra_error}. Fix the runner environment and rerun verification. "
-            f"Error: {green_output[:300]}"
         )
 
     if not green_passed:
