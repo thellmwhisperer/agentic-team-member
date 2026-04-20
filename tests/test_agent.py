@@ -242,6 +242,62 @@ class TestFindTestFile:
 
         assert find_test_file() == "src/test_server.py"
 
+    def test_returns_modified_tracked_python_test_file_with_spaces(self, tmp_path, monkeypatch):
+        from unittest.mock import patch as mock_patch
+
+        (tmp_path / "src").mkdir()
+        tracked = tmp_path / "src" / "test file.py"
+        tracked.write_text("def test_old():\n    assert True\n")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "runner": {"test_file_patterns": ["test*.py"], "exclude_dirs": []},
+        })
+
+        sp_run = subprocess.run
+
+        def fake_run(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            if cmd == ["git", "status", "--porcelain", "-z"]:
+                return subprocess.CompletedProcess(
+                    cmd,
+                    0,
+                    stdout=b"M  src/test file.py\x00",
+                    stderr=b"",
+                )
+            return sp_run(*args, **kwargs)
+
+        with mock_patch("subprocess.run", side_effect=fake_run):
+            assert find_test_file() == "src/test file.py"
+
+    def test_returns_renamed_python_test_file_from_porcelain_z(self, tmp_path, monkeypatch):
+        from unittest.mock import patch as mock_patch
+
+        (tmp_path / "src").mkdir()
+        tracked = tmp_path / "src" / "test renamed.py"
+        tracked.write_text("def test_old():\n    assert True\n")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "runner": {"test_file_patterns": ["test*.py"], "exclude_dirs": []},
+        })
+
+        sp_run = subprocess.run
+
+        def fake_run(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            if cmd == ["git", "status", "--porcelain", "-z"]:
+                return subprocess.CompletedProcess(
+                    cmd,
+                    0,
+                    stdout=b"R  src/test renamed.py\x00src/test old.py\x00",
+                    stderr=b"",
+                )
+            return sp_run(*args, **kwargs)
+
+        with mock_patch("subprocess.run", side_effect=fake_run):
+            assert find_test_file() == "src/test renamed.py"
+
     def test_verify_red_green_preserves_untracked_test(self, tmp_path, monkeypatch):
         """An untracked test file must survive the stash cycle in verify_red_green."""
         from agentic_tdd_runner.agent import verify_red_green
@@ -552,6 +608,48 @@ class TestFindTestFile:
         assert ok is False
         assert "verification environment is broken" in msg.lower()
         assert "pytest is unavailable" in msg.lower()
+
+    @pytest.mark.parametrize("phase", ["red", "green"])
+    def test_verify_red_green_rejects_missing_runner_binary(self, tmp_path, monkeypatch, phase):
+        """A missing runner binary must reject verification as infra failure,
+        not crash the agent."""
+        from unittest.mock import patch as mock_patch
+        from agentic_tdd_runner.agent import verify_red_green
+
+        sp_run = subprocess.run
+        sp_run([GIT, "init"], cwd=tmp_path, capture_output=True, check=True)
+        sp_run([GIT, "config", "user.email", "test@test.com"], cwd=tmp_path, capture_output=True)
+        sp_run([GIT, "config", "user.name", "test"], cwd=tmp_path, capture_output=True)
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "math.ts").write_text("fixed")
+        (src / "math.test.ts").write_text("test")
+        sp_run([GIT, "add", "-A"], cwd=tmp_path, capture_output=True, check=True)
+        sp_run([GIT, "commit", "-m", "base"], cwd=tmp_path, capture_output=True, check=True)
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "runner": {"command": "bun test", "test_file_patterns": ["*.test.ts"], "exclude_dirs": []},
+            "timeouts": {"test_run": 10},
+        })
+
+        calls = {"count": 0}
+
+        def fake_run(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            if isinstance(cmd, list) and cmd and cmd[0] == "bun" and any("math.test.ts" in str(c) for c in cmd):
+                calls["count"] += 1
+                if phase == "red" or calls["count"] > 1:
+                    raise FileNotFoundError(2, "No such file or directory", "bun")
+                return subprocess.CompletedProcess(cmd, 1, stdout="red failure\n", stderr="")
+            return sp_run(*args, **kwargs)
+
+        with mock_patch("subprocess.run", side_effect=fake_run):
+            ok, msg = verify_red_green("src/math.test.ts")
+
+        assert ok is False
+        assert "verification environment is broken" in msg.lower()
+        assert "bun is unavailable" in msg.lower()
 
     def test_finds_tsx_test_file(self, tmp_path, monkeypatch):
         self._setup_git_repo(tmp_path)
