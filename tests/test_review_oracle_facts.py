@@ -454,11 +454,33 @@ class TestRepoFacts:
             {"target": "pkg.logger", "alias": "patch", "range": "test_server.py:28"},
             {"target": "pkg.logger", "alias": "patch", "range": "test_server.py:30"},
         ]
-        assert fact.value["repo_patch_target_counts"] == [
+        assert fact.value["total_patch_target_counts"] == [
             {"target": "pkg.client", "count": 1},
             {"target": "pkg.logger", "count": 3},
         ]
         assert fact.confidence_class == "repo_counted"
+
+    def test_patch_semantics_skips_parse_errors_and_third_party_dirs(self, tmp_path):
+        _build_repo_scoped_fact_repo(tmp_path)
+        _write_file(tmp_path, "legacy_bad.py", """\
+            def broken(:
+                pass
+        """)
+        _write_file(tmp_path, ".venv/site-packages/vendor_patch.py", """\
+            from unittest.mock import patch
+
+            def test_vendor_patch():
+                with patch("pkg.vendor"):
+                    pass
+        """)
+
+        with pytest.warns(UserWarning, match="legacy_bad.py"):
+            fact = extract_patch_semantics(str(tmp_path), "test_server.py")
+
+        assert fact.value["total_patch_target_counts"] == [
+            {"target": "pkg.client", "count": 1},
+            {"target": "pkg.logger", "count": 3},
+        ]
 
     def test_schema_surface_collects_tables_and_seed_inserts(self, tmp_path):
         _build_repo_scoped_fact_repo(tmp_path)

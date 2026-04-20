@@ -3,12 +3,28 @@
 from __future__ import annotations
 
 import ast
+import os
 import re
+import warnings
 from copy import deepcopy
 from pathlib import Path, PurePosixPath
 from typing import Any
 
 from agentic_tdd_runner.review_oracle.types import Fact
+
+
+_REPO_SCAN_SKIP_DIRS = {
+    ".git",
+    ".tox",
+    ".venv",
+    "__pycache__",
+    "build",
+    "dist",
+    "env",
+    "node_modules",
+    "site-packages",
+    "venv",
+}
 
 
 def _read_text(path: Path) -> str:
@@ -102,6 +118,12 @@ def _find_method(class_node: ast.ClassDef, name: str) -> ast.FunctionDef | ast.A
 
 
 def _iter_non_nested_nodes(root: ast.AST) -> list[ast.AST]:
+    """Yield a function body without descending into nested defs/classes/lambdas.
+
+    This is intentionally narrower than the older method-level walkers below.
+    We only use it for repo-scoped upstream return facts, where nested local
+    definitions are not part of the top-level function's own return surface.
+    """
     nodes: list[ast.AST] = []
     stack = list(reversed(list(ast.iter_child_nodes(root))))
     while stack:
@@ -379,6 +401,8 @@ def _collect_helper_methods(tree: ast.Module, source_path: str) -> list[dict[str
 def _collect_dict_return_key_sets(
     node: ast.FunctionDef | ast.AsyncFunctionDef,
 ) -> list[list[str]]:
+    # Upstream return facts model the top-level function body only; nested
+    # defs/classes/lambdas are intentionally excluded from this surface.
     key_sets: list[list[str]] = []
     local_dict_assignments: dict[str, list[str]] = {}
     for child in _iter_non_nested_nodes(node):
@@ -460,6 +484,31 @@ def _patch_target_for_call(
     if not isinstance(first_arg, ast.Constant) or not isinstance(first_arg.value, str):
         return None
     return alias, first_arg.value
+
+
+def _iter_repo_python_files(root: Path) -> list[Path]:
+    python_files: list[Path] = []
+    for current_root, dirnames, filenames in os.walk(root):
+        dirnames[:] = [
+            dirname for dirname in dirnames
+            if dirname not in _REPO_SCAN_SKIP_DIRS
+        ]
+        current_path = Path(current_root)
+        for filename in filenames:
+            if filename.endswith(".py"):
+                python_files.append(current_path / filename)
+    return sorted(python_files)
+
+
+def _try_parse_module(path: Path, relative_path: str) -> ast.Module | None:
+    try:
+        return _parse_module(path)
+    except (OSError, SyntaxError, UnicodeDecodeError) as exc:
+        warnings.warn(
+            f"Skipping unreadable python file during review_oracle scan: {relative_path} ({exc})",
+            stacklevel=2,
+        )
+        return None
 
 
 def _collect_patch_sites(
@@ -665,14 +714,19 @@ def extract_patch_semantics(
 ) -> Fact:
     root = Path(project_root)
     test_file = root / test_path
-    local_tree = _parse_module(test_file)
-    local_patch_targets, observed_aliases = _collect_patch_sites(local_tree, test_path)
+    local_tree = _try_parse_module(test_file, test_path)
+    if local_tree is not None:
+        local_patch_targets, observed_aliases = _collect_patch_sites(local_tree, test_path)
+    else:
+        local_patch_targets, observed_aliases = [], set()
 
     repo_counts: dict[str, int] = {}
     contributing_paths: set[str] = set()
-    for path in sorted(root.rglob("*.py")):
-        tree = _parse_module(path)
+    for path in _iter_repo_python_files(root):
         relative_path = path.relative_to(root).as_posix()
+        tree = _try_parse_module(path, relative_path)
+        if tree is None:
+            continue
         patch_sites, _aliases = _collect_patch_sites(tree, relative_path)
         if not patch_sites:
             continue
@@ -680,11 +734,11 @@ def extract_patch_semantics(
         for site in patch_sites:
             repo_counts[site["target"]] = repo_counts.get(site["target"], 0) + 1
 
-    repo_patch_target_counts = [
+    total_patch_target_counts = [
         {"target": target, "count": count}
         for target, count in sorted(repo_counts.items())
     ]
-    inputs_used = [site["range"] for site in local_patch_targets]
+    inputs_used = [site["range"] for site in local_patch_targets] or [test_path]
     for relative_path in sorted(contributing_paths):
         if relative_path != test_path:
             inputs_used.append(relative_path)
@@ -695,11 +749,12 @@ def extract_patch_semantics(
             "module_test_file": PurePosixPath(test_path).as_posix(),
             "observed_patch_aliases": sorted(observed_aliases),
             "local_patch_targets": local_patch_targets,
-            "repo_patch_target_counts": repo_patch_target_counts,
+            "total_patch_target_counts": total_patch_target_counts,
         },
         derivation_rule=(
-            f"scan {test_path} for literal patch(...) calls using locally imported aliases, "
-            "then count literal patch targets across python files under the repo root"
+            f"scan {test_path} for literal string targets passed to patch(...), "
+            "then count those same patch(target, ...) forms across successfully "
+            "parsed python files under the repo root, including the local test file"
         ),
         inputs_used=tuple(inputs_used),
         confidence_class="repo_counted",
@@ -821,8 +876,8 @@ def collect_repo_facts(
     project_root: str,
     *,
     test_path: str | None = None,
-    schema_path: str | None = "schema.sql",
-    upstream_path: str | None = "query.py",
+    schema_path: str | None = None,
+    upstream_path: str | None = None,
 ) -> list[Fact]:
     facts: list[Fact] = []
 
