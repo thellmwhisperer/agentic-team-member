@@ -22,6 +22,7 @@ from agentic_tdd_runner.agent import (
     _tool_loop_signature,
     _tool_loop_warning_message,
     _validate_command,
+    _verification_infra_error,
     create_pr,
     detect_quality_tools,
     execute_tool,
@@ -154,6 +155,53 @@ class TestValidateCommand:
         _validate_command("node build.js")
 
 
+class TestVerificationInfraError:
+    """Infra detection should match concrete runner failures, not broad substrings."""
+
+    @pytest.mark.parametrize(
+        "output",
+        [
+            "/usr/bin/python3: No module named pytest\n",
+            "/usr/bin/python3: No module named 'pytest'\n",
+            "ModuleNotFoundError: No module named \"pytest\"\n",
+        ],
+    )
+    def test_detects_missing_pytest_module(self, output):
+        assert _verification_infra_error(output) == "pytest is unavailable in the verification environment"
+
+    @pytest.mark.parametrize(
+        ("output", "expected"),
+        [
+            ("[Errno 2] No such file or directory: 'python3'", "pytest is unavailable in the verification environment"),
+            ("[Errno 2] No such file or directory: 'pytest'", "pytest is unavailable in the verification environment"),
+            ("[Errno 2] No such file or directory: 'bun'", "bun is unavailable in the verification environment"),
+            ("[Errno 2] No such file or directory: 'node'", "node is unavailable in the verification environment"),
+        ],
+    )
+    def test_detects_missing_runner_binary(self, output, expected):
+        assert _verification_infra_error(output) == expected
+
+    def test_ignores_project_module_missing_with_pytest_banner(self):
+        output = (
+            "============================= test session starts ==============================\n"
+            "platform darwin -- Python 3.12.0, pytest-8.4.2\n"
+            "collected 1 item\n\n"
+            "src/test_worker.py F                                                     [100%]\n\n"
+            "E   ModuleNotFoundError: No module named 'my_module'\n"
+        )
+        assert _verification_infra_error(output) is None
+
+    def test_ignores_regular_file_not_found_with_pytest_banner(self):
+        output = (
+            "============================= test session starts ==============================\n"
+            "platform darwin -- Python 3.12.0, pytest-8.4.2\n"
+            "collected 1 item\n\n"
+            "tests/test_worker.py F                                                   [100%]\n\n"
+            "E   FileNotFoundError: [Errno 2] No such file or directory: 'fixtures/missing.json'\n"
+        )
+        assert _verification_infra_error(output) is None
+
+
 class TestFindTestFile:
     """find_test_file discovers new test files matching configured patterns."""
 
@@ -225,6 +273,134 @@ class TestFindTestFile:
             "runner": {"test_file_patterns": ["*.test.ts"], "exclude_dirs": []},
         })
         assert find_test_file(hint="../outside.test.ts") == "src/foo.test.ts"
+
+    def test_returns_modified_tracked_python_test_file(self, tmp_path, monkeypatch):
+        self._setup_git_repo(tmp_path)
+        (tmp_path / "src").mkdir()
+        tracked = tmp_path / "src" / "test_server.py"
+        tracked.write_text("def test_old():\n    assert True\n")
+        subprocess.run([GIT, "add", "src/test_server.py"], cwd=tmp_path, capture_output=True, check=True)
+        subprocess.run([GIT, "commit", "-m", "add tracked test"], cwd=tmp_path, capture_output=True, check=True)
+        tracked.write_text("def test_old():\n    assert True\n\ndef test_new():\n    assert True\n")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "runner": {"test_file_patterns": ["test_*.py"], "exclude_dirs": []},
+        })
+
+        assert find_test_file() == "src/test_server.py"
+
+    def test_returns_modified_tracked_python_test_file_with_spaces(self, tmp_path, monkeypatch):
+        from unittest.mock import patch as mock_patch
+
+        (tmp_path / "src").mkdir()
+        tracked = tmp_path / "src" / "test file.py"
+        tracked.write_text("def test_old():\n    assert True\n")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "runner": {"test_file_patterns": ["test*.py"], "exclude_dirs": []},
+        })
+
+        sp_run = subprocess.run
+
+        def fake_run(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            if cmd == ["git", "status", "--porcelain", "-z"]:
+                return subprocess.CompletedProcess(
+                    cmd,
+                    0,
+                    stdout=b"M  src/test file.py\x00",
+                    stderr=b"",
+                )
+            return sp_run(*args, **kwargs)
+
+        with mock_patch("subprocess.run", side_effect=fake_run):
+            assert find_test_file() == "src/test file.py"
+
+    def test_returns_renamed_python_test_file_from_porcelain_z(self, tmp_path, monkeypatch):
+        from unittest.mock import patch as mock_patch
+
+        (tmp_path / "src").mkdir()
+        tracked = tmp_path / "src" / "test renamed.py"
+        tracked.write_text("def test_old():\n    assert True\n")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "runner": {"test_file_patterns": ["test*.py"], "exclude_dirs": []},
+        })
+
+        sp_run = subprocess.run
+
+        def fake_run(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            if cmd == ["git", "status", "--porcelain", "-z"]:
+                return subprocess.CompletedProcess(
+                    cmd,
+                    0,
+                    stdout=b"R  src/test renamed.py\x00src/test old.py\x00",
+                    stderr=b"",
+                )
+            return sp_run(*args, **kwargs)
+
+        with mock_patch("subprocess.run", side_effect=fake_run):
+            assert find_test_file() == "src/test renamed.py"
+
+    def test_ignores_modified_test_file_inside_excluded_dir_in_fast_path(self, tmp_path, monkeypatch):
+        from unittest.mock import patch as mock_patch
+
+        (tmp_path / "node_modules").mkdir()
+        tracked = tmp_path / "node_modules" / "test ignored.py"
+        tracked.write_text("def test_old():\n    assert True\n")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "runner": {"test_file_patterns": ["test*.py"], "exclude_dirs": ["node_modules"]},
+        })
+
+        sp_run = subprocess.run
+
+        def fake_run(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            if cmd == ["git", "status", "--porcelain", "-z"]:
+                return subprocess.CompletedProcess(
+                    cmd,
+                    0,
+                    stdout=b"M  node_modules/test ignored.py\x00",
+                    stderr=b"",
+                )
+            return sp_run(*args, **kwargs)
+
+        with mock_patch("subprocess.run", side_effect=fake_run):
+            assert find_test_file() is None
+
+    def test_ignores_modified_test_file_inside_multisegment_excluded_dir_in_fast_path(self, tmp_path, monkeypatch):
+        from unittest.mock import patch as mock_patch
+
+        (tmp_path / "generated" / "tests").mkdir(parents=True)
+        tracked = tmp_path / "generated" / "tests" / "test ignored.py"
+        tracked.write_text("def test_old():\n    assert True\n")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "runner": {"test_file_patterns": ["test*.py"], "exclude_dirs": ["generated/tests"]},
+        })
+
+        sp_run = subprocess.run
+
+        def fake_run(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            if cmd == ["git", "status", "--porcelain", "-z"]:
+                return subprocess.CompletedProcess(
+                    cmd,
+                    0,
+                    stdout=b"M  generated/tests/test ignored.py\x00",
+                    stderr=b"",
+                )
+            return sp_run(*args, **kwargs)
+
+        with mock_patch("subprocess.run", side_effect=fake_run):
+            assert find_test_file() is None
 
     def test_verify_red_green_preserves_untracked_test(self, tmp_path, monkeypatch):
         """An untracked test file must survive the stash cycle in verify_red_green."""
@@ -483,6 +659,181 @@ class TestFindTestFile:
 
         assert ok is False, "red phase with 'is not defined' around __setXForTests must be rejected"
         assert "test scaffold is incomplete" in msg.lower()
+
+    @pytest.mark.parametrize(
+        "stderr_text",
+        [
+            "/Applications/Xcode.app/Contents/Developer/usr/bin/python3: No module named pytest\n",
+            "/Applications/Xcode.app/Contents/Developer/usr/bin/python3: No module named 'pytest'\n",
+        ],
+    )
+    def test_verify_red_green_rejects_red_phase_when_pytest_is_missing(self, tmp_path, monkeypatch, stderr_text):
+        """A red phase that fails because pytest is unavailable is infra failure,
+        not proof that the bug was reproduced."""
+        from unittest.mock import patch as mock_patch
+        from agentic_tdd_runner.agent import verify_red_green
+
+        sp_run = subprocess.run
+        sp_run([GIT, "init"], cwd=tmp_path, capture_output=True, check=True)
+        sp_run([GIT, "config", "user.email", "test@test.com"], cwd=tmp_path, capture_output=True)
+        sp_run([GIT, "config", "user.name", "test"], cwd=tmp_path, capture_output=True)
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "worker.py").write_text("def process(x):\n    return x\n")
+        (src / "test_worker.py").write_text("def test_process():\n    assert True\n")
+        sp_run([GIT, "add", "-A"], cwd=tmp_path, capture_output=True, check=True)
+        sp_run([GIT, "commit", "-m", "base"], cwd=tmp_path, capture_output=True, check=True)
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "runner": {"command": "bun test", "test_file_patterns": ["test_*.py"], "exclude_dirs": []},
+            "timeouts": {"test_run": 10},
+        })
+
+        calls = {"count": 0}
+
+        def fake_run(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            if isinstance(cmd, list) and any("test_worker.py" in str(c) for c in cmd):
+                calls["count"] += 1
+                if calls["count"] == 1:
+                    return subprocess.CompletedProcess(
+                        cmd,
+                        1,
+                        stdout="",
+                        stderr=stderr_text,
+                    )
+                return subprocess.CompletedProcess(cmd, 0, stdout="1 passed\n", stderr="")
+            return sp_run(*args, **kwargs)
+
+        with mock_patch("subprocess.run", side_effect=fake_run):
+            ok, msg = verify_red_green("src/test_worker.py")
+
+        assert ok is False
+        assert "verification environment is broken" in msg.lower()
+        assert "pytest is unavailable" in msg.lower()
+
+    @pytest.mark.parametrize("phase", ["red", "green"])
+    def test_verify_red_green_rejects_missing_runner_binary(self, tmp_path, monkeypatch, phase):
+        """A missing runner binary must reject verification as infra failure,
+        not crash the agent."""
+        from unittest.mock import patch as mock_patch
+        from agentic_tdd_runner.agent import verify_red_green
+
+        sp_run = subprocess.run
+        sp_run([GIT, "init"], cwd=tmp_path, capture_output=True, check=True)
+        sp_run([GIT, "config", "user.email", "test@test.com"], cwd=tmp_path, capture_output=True)
+        sp_run([GIT, "config", "user.name", "test"], cwd=tmp_path, capture_output=True)
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "math.ts").write_text("fixed")
+        (src / "math.test.ts").write_text("test")
+        sp_run([GIT, "add", "-A"], cwd=tmp_path, capture_output=True, check=True)
+        sp_run([GIT, "commit", "-m", "base"], cwd=tmp_path, capture_output=True, check=True)
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "runner": {"command": "bun test", "test_file_patterns": ["*.test.ts"], "exclude_dirs": []},
+            "timeouts": {"test_run": 10},
+        })
+
+        calls = {"count": 0}
+
+        def fake_run(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            if isinstance(cmd, list) and cmd and cmd[0] == "bun" and any("math.test.ts" in str(c) for c in cmd):
+                calls["count"] += 1
+                if phase == "red" or calls["count"] > 1:
+                    raise FileNotFoundError(2, "No such file or directory", "bun")
+                return subprocess.CompletedProcess(cmd, 1, stdout="red failure\n", stderr="")
+            return sp_run(*args, **kwargs)
+
+        with mock_patch("subprocess.run", side_effect=fake_run):
+            ok, msg = verify_red_green("src/math.test.ts")
+
+        assert ok is False
+        assert "verification environment is broken" in msg.lower()
+        assert "bun is unavailable" in msg.lower()
+
+    def test_verify_red_green_rejects_missing_pytest_binary(self, tmp_path, monkeypatch):
+        """A missing pytest binary should map to the same infra-failure path."""
+        from unittest.mock import patch as mock_patch
+        from agentic_tdd_runner.agent import verify_red_green
+
+        sp_run = subprocess.run
+        sp_run([GIT, "init"], cwd=tmp_path, capture_output=True, check=True)
+        sp_run([GIT, "config", "user.email", "test@test.com"], cwd=tmp_path, capture_output=True)
+        sp_run([GIT, "config", "user.name", "test"], cwd=tmp_path, capture_output=True)
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "math.ts").write_text("export const x = 1;\n")
+        (src / "math.test.ts").write_text("test('smoke', () => expect(true).toBe(true));\n")
+        sp_run([GIT, "add", "-A"], cwd=tmp_path, capture_output=True, check=True)
+        sp_run([GIT, "commit", "-m", "base"], cwd=tmp_path, capture_output=True, check=True)
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "runner": {"command": "pytest", "test_file_patterns": ["*.test.ts"], "exclude_dirs": []},
+            "timeouts": {"test_run": 10},
+        })
+
+        calls = {"count": 0}
+
+        def fake_run(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            if isinstance(cmd, list) and cmd and cmd[0] == "pytest" and any("math.test.ts" in str(c) for c in cmd):
+                calls["count"] += 1
+                if calls["count"] == 1:
+                    raise FileNotFoundError(2, "No such file or directory", "pytest")
+                return subprocess.CompletedProcess(cmd, 0, stdout="1 passed\n", stderr="")
+            return sp_run(*args, **kwargs)
+
+        with mock_patch("subprocess.run", side_effect=fake_run):
+            ok, msg = verify_red_green("src/math.test.ts")
+
+        assert ok is False
+        assert "verification environment is broken" in msg.lower()
+        assert "pytest is unavailable" in msg.lower()
+
+    def test_verify_red_green_does_not_flag_green_infra_markers_after_success(self, tmp_path, monkeypatch):
+        """A passing green phase should not be rejected just because the output
+        contains text that looks like an infra marker."""
+        from unittest.mock import patch as mock_patch
+        from agentic_tdd_runner.agent import verify_red_green
+
+        sp_run = subprocess.run
+        sp_run([GIT, "init"], cwd=tmp_path, capture_output=True, check=True)
+        sp_run([GIT, "config", "user.email", "test@test.com"], cwd=tmp_path, capture_output=True)
+        sp_run([GIT, "config", "user.name", "test"], cwd=tmp_path, capture_output=True)
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "math.ts").write_text("fixed")
+        (src / "math.test.ts").write_text("test")
+        sp_run([GIT, "add", "-A"], cwd=tmp_path, capture_output=True, check=True)
+        sp_run([GIT, "commit", "-m", "base"], cwd=tmp_path, capture_output=True, check=True)
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "runner": {"command": "bun test", "test_file_patterns": ["*.test.ts"], "exclude_dirs": []},
+            "timeouts": {"test_run": 10},
+        })
+
+        calls = {"count": 0}
+
+        def fake_run(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            if isinstance(cmd, list) and cmd and cmd[0] == "bun" and any("math.test.ts" in str(c) for c in cmd):
+                calls["count"] += 1
+                if calls["count"] == 1:
+                    return subprocess.CompletedProcess(cmd, 1, stdout="red failure\n", stderr="")
+                return subprocess.CompletedProcess(cmd, 0, stdout="note: previous log mentioned bun: command not found\n", stderr="")
+            return sp_run(*args, **kwargs)
+
+        with mock_patch("subprocess.run", side_effect=fake_run):
+            ok, msg = verify_red_green("src/math.test.ts")
+
+        assert ok is True
+        assert "verified" in msg.lower()
 
     def test_finds_tsx_test_file(self, tmp_path, monkeypatch):
         self._setup_git_repo(tmp_path)

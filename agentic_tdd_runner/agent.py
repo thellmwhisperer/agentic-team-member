@@ -236,6 +236,47 @@ def _is_invalid_red_phase_failure(output: str) -> bool:
     return any(marker in lowered for marker in invalid_markers)
 
 
+def _verification_infra_error(output: str) -> str | None:
+    lowered = output.lower()
+    if re.search(r"no module named\s+['\"]?pytest['\"]?(?=$|[^a-z0-9_])", lowered):
+        return "pytest is unavailable in the verification environment"
+    missing_binary = re.search(
+        r"no such file or directory:\s*['\"]?(python3|python|pytest|bun|node)['\"]?(?=$|[^a-z0-9_./-])",
+        lowered,
+    )
+    if missing_binary:
+        binary = missing_binary.group(1)
+        if binary in {"python3", "python", "pytest"}:
+            return "pytest is unavailable in the verification environment"
+        if binary == "bun":
+            return "bun is unavailable in the verification environment"
+        if binary == "node":
+            return "node is unavailable in the verification environment"
+
+    markers = [
+        (
+            "pytest: command not found",
+            "pytest is unavailable in the verification environment",
+        ),
+        (
+            "/bin/sh: pytest: command not found",
+            "pytest is unavailable in the verification environment",
+        ),
+        (
+            "bun: command not found",
+            "bun is unavailable in the verification environment",
+        ),
+        (
+            "node: command not found",
+            "node is unavailable in the verification environment",
+        ),
+    ]
+    for needle, message in markers:
+        if needle in lowered:
+            return message
+    return None
+
+
 def _resolve_repo_path(path: str, workdir: str = None) -> Path:
     """Resolve a relative path within the workdir. Raises if it escapes."""
     repo_root = Path(workdir or WORKDIR).resolve()
@@ -511,6 +552,48 @@ def find_test_file(hint: str | None = None) -> str | None:
             hinted = None
         if hinted and hinted.is_file():
             return os.path.relpath(hinted, WORKDIR)
+    status_result = subprocess.run(
+        ["git", "status", "--porcelain", "-z"],
+        cwd=WORKDIR,
+        capture_output=True,
+        text=False,
+    )
+    if status_result.returncode == 0:
+        changed_test_files = []
+        exclude_prefixes = [
+            PurePosixPath(ex).parts
+            for ex in _CONFIG["runner"].get("exclude_dirs", [])
+        ]
+        entries = [
+            entry
+            for entry in status_result.stdout.decode("utf-8", errors="surrogateescape").split("\0")
+            if entry
+        ]
+        idx = 0
+        while idx < len(entries):
+            raw_line = entries[idx]
+            if len(raw_line) < 4:
+                idx += 1
+                continue
+            status_code = raw_line[:2]
+            rel = raw_line[3:]
+            rel_parts = PurePosixPath(rel).parts
+            if any(rel_parts[:len(prefix)] == prefix for prefix in exclude_prefixes):
+                idx += 2 if any(marker in status_code for marker in ("R", "C")) else 1
+                continue
+            if not _is_test_file_path(rel):
+                idx += 2 if any(marker in status_code for marker in ("R", "C")) else 1
+                continue
+            try:
+                resolved = _resolve_repo_path(rel)
+            except ValueError:
+                idx += 2 if any(marker in status_code for marker in ("R", "C")) else 1
+                continue
+            if resolved.is_file():
+                changed_test_files.append(os.path.relpath(resolved, WORKDIR))
+            idx += 2 if any(marker in status_code for marker in ("R", "C")) else 1
+        if changed_test_files:
+            return sorted(dict.fromkeys(changed_test_files))[0]
     patterns = _CONFIG["runner"]["test_file_patterns"]
     exclude = _CONFIG["runner"].get("exclude_dirs", [])
     for root, _dirs, files in os.walk(WORKDIR):
@@ -570,9 +653,12 @@ def verify_red_green(test_file: str) -> tuple[bool, str]:
     red_passed = False
     red_output = ""
     red_output_full = ""
+    red_exec_error = ""
     green_result = None
     green_passed = False
     green_output = ""
+    green_output_full = ""
+    green_exec_error = ""
 
     try:
         # Restore the test file so the red phase can run it
@@ -597,6 +683,12 @@ def verify_red_green(test_file: str) -> tuple[bool, str]:
             red_output = f"TIMEOUT: test command exceeded {test_timeout}s without fix."
             emit(f"  [RED] TIMEOUT after {test_timeout}s")
             emit(f"    {red_output}")
+        except (FileNotFoundError, OSError) as exc:
+            red_exec_error = str(exc)
+            red_output_full = red_exec_error
+            red_output = red_output_full[:500]
+            emit("  [RED] INFRA ERROR")
+            emit(f"    {red_output}")
     finally:
         # Always clean up temp files and pop stash, even after exceptions
         if test_backup:
@@ -613,7 +705,8 @@ def verify_red_green(test_file: str) -> tuple[bool, str]:
             cwd=WORKDIR, capture_output=True, text=True, timeout=test_timeout,
         )
         green_passed = green_result.returncode == 0
-        green_output = (green_result.stdout + green_result.stderr)[:500]
+        green_output_full = green_result.stdout + green_result.stderr
+        green_output = green_output_full[:500]
         emit(f"  [GREEN] exit={green_result.returncode} {'PASS (good)' if green_passed else 'FAIL (BAD!)'}")
         for line in green_output.split("\n")[:10]:
             emit(f"    {line}")
@@ -621,6 +714,12 @@ def verify_red_green(test_file: str) -> tuple[bool, str]:
         green_passed = False
         green_output = f"TIMEOUT: test command exceeded {test_timeout}s with fix."
         emit(f"  [GREEN] TIMEOUT after {test_timeout}s")
+        emit(f"    {green_output}")
+    except (FileNotFoundError, OSError) as exc:
+        green_exec_error = str(exc)
+        green_output_full = green_exec_error
+        green_output = green_output_full[:500]
+        emit("  [GREEN] INFRA ERROR")
         emit(f"    {green_output}")
 
     log("verify", {
@@ -630,6 +729,14 @@ def verify_red_green(test_file: str) -> tuple[bool, str]:
         "red_output": red_output,
         "green_output": green_output,
     })
+
+    red_infra_error = _verification_infra_error(red_exec_error or red_output_full)
+    if red_infra_error:
+        return False, (
+            f"REJECTED: Your red phase for {test_file} failed because the verification environment is broken, "
+            f"not because the bug was reproduced. {red_infra_error}. "
+            f"Fix the runner environment and rerun verification. Error: {red_output[:300]}"
+        )
 
     if red_result is None:
         return False, (
@@ -651,6 +758,18 @@ def verify_red_green(test_file: str) -> tuple[bool, str]:
             "not because the bug was reproduced. The failure mentions missing test-only seams/exports "
             f"(for example __setXForTests). Rework the test so the pre-fix run executes the real code path "
             f"and fails on behavior. Error: {red_output[:300]}"
+        )
+
+    green_infra_error = (
+        _verification_infra_error(green_exec_error or green_output_full)
+        if not green_passed
+        else None
+    )
+    if green_infra_error:
+        return False, (
+            f"REJECTED: Your green phase for {test_file} failed because the verification environment is broken. "
+            f"{green_infra_error}. Fix the runner environment and rerun verification. "
+            f"Error: {green_output[:300]}"
         )
 
     if green_result is None:
