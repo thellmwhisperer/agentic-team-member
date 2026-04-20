@@ -238,14 +238,19 @@ def _is_invalid_red_phase_failure(output: str) -> bool:
 
 def _verification_infra_error(output: str) -> str | None:
     lowered = output.lower()
-    if "no module named" in lowered and "pytest" in lowered:
+    if re.search(r"no module named\s+['\"]?pytest['\"]?(?=$|[^a-z0-9_])", lowered):
         return "pytest is unavailable in the verification environment"
-    if "no such file or directory" in lowered:
-        if any(token in lowered for token in ("'python3'", "'python'", "'pytest'", " pytest")):
+    missing_binary = re.search(
+        r"no such file or directory:\s*['\"]?(python3|python|pytest|bun|node)['\"]?(?=$|[^a-z0-9_./-])",
+        lowered,
+    )
+    if missing_binary:
+        binary = missing_binary.group(1)
+        if binary in {"python3", "python", "pytest"}:
             return "pytest is unavailable in the verification environment"
-        if "'bun'" in lowered:
+        if binary == "bun":
             return "bun is unavailable in the verification environment"
-        if "'node'" in lowered:
+        if binary == "node":
             return "node is unavailable in the verification environment"
 
     markers = [
