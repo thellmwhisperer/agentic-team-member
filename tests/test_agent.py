@@ -718,14 +718,14 @@ class TestFindTestFile:
         sp_run([GIT, "config", "user.name", "test"], cwd=tmp_path, capture_output=True)
         src = tmp_path / "src"
         src.mkdir()
-        (src / "worker.py").write_text("def process(x):\n    return x\n")
-        (src / "test_worker.py").write_text("def test_process():\n    assert True\n")
+        (src / "math.ts").write_text("export const x = 1;\n")
+        (src / "math.test.ts").write_text("test('smoke', () => expect(true).toBe(true));\n")
         sp_run([GIT, "add", "-A"], cwd=tmp_path, capture_output=True, check=True)
         sp_run([GIT, "commit", "-m", "base"], cwd=tmp_path, capture_output=True, check=True)
 
         monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
         monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
-            "runner": {"command": "pytest", "test_file_patterns": ["test_*.py"], "exclude_dirs": []},
+            "runner": {"command": "pytest", "test_file_patterns": ["*.test.ts"], "exclude_dirs": []},
             "timeouts": {"test_run": 10},
         })
 
@@ -733,7 +733,7 @@ class TestFindTestFile:
 
         def fake_run(*args, **kwargs):
             cmd = args[0] if args else kwargs.get("args", [])
-            if isinstance(cmd, list) and cmd and cmd[0] == "pytest" and any("test_worker.py" in str(c) for c in cmd):
+            if isinstance(cmd, list) and cmd and cmd[0] == "pytest" and any("math.test.ts" in str(c) for c in cmd):
                 calls["count"] += 1
                 if calls["count"] == 1:
                     raise FileNotFoundError(2, "No such file or directory", "pytest")
@@ -741,7 +741,7 @@ class TestFindTestFile:
             return sp_run(*args, **kwargs)
 
         with mock_patch("subprocess.run", side_effect=fake_run):
-            ok, msg = verify_red_green("src/test_worker.py")
+            ok, msg = verify_red_green("src/math.test.ts")
 
         assert ok is False
         assert "verification environment is broken" in msg.lower()
