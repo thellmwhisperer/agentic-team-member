@@ -120,7 +120,7 @@ class TestFactType:
         assert fact.confidence_class == "ast_exact"
 
     def test_inputs_used_is_tuple(self):
-        """inputs_used must be a tuple so Fact stays hashable and frozen-safe."""
+        """inputs_used stays tuple-typed for stable fact metadata."""
         fact = Fact(
             name="x",
             value=None,
@@ -219,6 +219,54 @@ class TestExactFacts:
         assert fact.value["dispatch_key"] == "roca_query"
         assert fact.value["dispatch_branch"] == "server.py:3-4"
         assert fact.value["wrapper_success_shape"] is None
+        assert fact.value["wrapper_error_shape"] is None
+
+    def test_target_identity_handles_nested_defaults_and_type_annotations(self, tmp_path):
+        _write_file(tmp_path, "server.py", """\
+            from typing import Callable
+
+            def build_default():
+                return 1
+
+            class ToolHandler:
+                def _handle_query(self, callback: Callable[[int], int] = build_default()) -> dict:
+                    return {"rows": []}
+        """)
+
+        fact = extract_target_identity(str(tmp_path), "server.py", "_handle_query")
+
+        assert fact.value["signature"] == "_handle_query(self, callback: Callable[[int], int]=build_default())"
+
+    def test_invocation_surface_ignores_is_error_false_success_wrapper(self, tmp_path):
+        _write_file(tmp_path, "server.py", """\
+            import json
+
+            class ToolHandler:
+                def call(self, name, args) -> dict:
+                    result, _meta = self._dispatch(name, args)
+                    return {"content": [{"type": "text", "text": json.dumps(result)}], "isError": False}
+
+                def _dispatch(self, tool_name, args):
+                    if tool_name == "roca_query":
+                        return self._handle_query(args), None
+                    raise ValueError("unknown tool")
+
+                def _handle_query(self, args):
+                    return {"rows": []}
+        """)
+
+        fact = extract_invocation_surface(
+            str(tmp_path),
+            "server.py",
+            "ToolHandler",
+            "_handle_query",
+        )
+
+        assert fact.value["public_entrypoint"] == "ToolHandler.call(name, args)"
+        assert fact.value["dispatch_key"] == "roca_query"
+        assert fact.value["wrapper_success_shape"] == (
+            '{"content": [{"type": "text", "text": json.dumps(result)}], "isError": False}'
+        )
         assert fact.value["wrapper_error_shape"] is None
 
     def test_collect_exact_facts_returns_four_sections_for_python_query_target(self, tmp_path):

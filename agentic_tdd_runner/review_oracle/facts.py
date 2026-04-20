@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import re
+from copy import deepcopy
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -11,11 +12,12 @@ from agentic_tdd_runner.review_oracle.types import Fact
 
 
 def _read_text(path: Path) -> str:
-    return path.read_text()
+    return path.read_text(encoding="utf-8")
 
 
 def _parse_module(path: Path) -> ast.Module:
-    return ast.parse(_read_text(path))
+    source = _read_text(path)
+    return ast.parse(source, filename=str(path))
 
 
 def _format_range(path: str, start: int | None, end: int | None) -> str:
@@ -83,27 +85,16 @@ def _find_method(class_node: ast.ClassDef, name: str) -> ast.FunctionDef | ast.A
     raise ValueError(f"Could not find method: {class_node.name}.{name}")
 
 
-def _signature_from_node(source_text: str, node: ast.FunctionDef | ast.AsyncFunctionDef) -> str:
-    segment = ast.get_source_segment(source_text, node) or ""
-    match = re.search(
-        r"(?:async\s+def|def)\s+\w+\((?:.|\n)*?\)\s*(?:->\s*[^:]+)?",
-        segment,
-    )
-    if match:
-        header = match.group(0)
-        header = re.sub(r"^(?:async\s+def|def)\s+", "", header)
-        return _compact_source(header)
-    return f"{node.name}(...)"
-
-
-def _signature_without_self(signature: str) -> str:
-    match = re.match(r"^(?P<name>\w+)\((?P<params>.*)\)$", signature)
-    if not match:
-        return signature
-    params = [part.strip() for part in match.group("params").split(",") if part.strip()]
-    if params and params[0] == "self":
-        params = params[1:]
-    return f"{match.group('name')}({', '.join(params)})"
+def _signature_from_node(source_text: str, node: ast.FunctionDef | ast.AsyncFunctionDef) -> tuple[str, str]:
+    del source_text
+    args = deepcopy(node.args)
+    if args.args and args.args[0].arg == "self":
+        args.args = args.args[1:]
+    params = ast.unparse(args)
+    full_params = ast.unparse(node.args)
+    with_self = f"{node.name}({full_params})"
+    without_self = f"{node.name}({params})"
+    return _compact_source(with_self), _compact_source(without_self)
 
 
 def _returns_target_call(node: ast.AST, target_symbol: str) -> bool:
@@ -170,7 +161,12 @@ def _extract_wrapper_shapes(
             continue
         keys = _dict_string_keys(node.value)
         shape = _compact_source(ast.get_source_segment(source_text, node.value) or "")
-        if "isError" in keys and error_shape is None:
+        is_error_value = None
+        for key, value in zip(node.value.keys, node.value.values):
+            if _string_key(key) == "isError" and isinstance(value, ast.Constant):
+                is_error_value = value.value
+                break
+        if is_error_value is True and error_shape is None:
             error_shape = shape
             error_keys = keys
             continue
@@ -328,7 +324,7 @@ def extract_target_identity(
     source_text = _read_text(path)
     tree = _parse_module(path)
     owner_class, target_node = _find_target(tree, symbol)
-    signature = _signature_from_node(source_text, target_node)
+    signature, _public_signature = _signature_from_node(source_text, target_node)
     visibility_prefix = "private" if symbol.startswith("_") else "public"
     kind = "method" if owner_class else "function"
 
@@ -370,8 +366,8 @@ def extract_invocation_surface(
         call_node = None
 
     if call_node is not None:
-        call_signature = _signature_from_node(source_text, call_node)
-        public_entrypoint = f"{owner_class_name}.{_signature_without_self(call_signature)}"
+        _call_signature, public_signature = _signature_from_node(source_text, call_node)
+        public_entrypoint = f"{owner_class_name}.{public_signature}"
         success_shape, error_shape, _, _ = _extract_wrapper_shapes(call_node, source_text)
         inputs_used = [_format_range(source_path, call_node.lineno, call_node.end_lineno)]
     else:
