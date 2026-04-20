@@ -238,11 +238,10 @@ def _is_invalid_red_phase_failure(output: str) -> bool:
 
 def _verification_infra_error(output: str) -> str | None:
     lowered = output.lower()
+    if "no module named" in lowered and "pytest" in lowered:
+        return "pytest is unavailable in the verification environment"
+
     markers = [
-        (
-            "no module named pytest",
-            "pytest is unavailable in the verification environment",
-        ),
         (
             "pytest: command not found",
             "pytest is unavailable in the verification environment",
