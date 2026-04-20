@@ -297,6 +297,41 @@ class TestExactFacts:
         assert fact.value["wrapper_success_shape"] == '{"content": [{"type": "text", "text": result}]}'
         assert fact.value["unwrap_pattern"] is None
 
+    def test_invocation_surface_ignores_non_self_dispatch_candidates(self, tmp_path):
+        _write_file(tmp_path, "server.py", """\
+            import json
+
+            class Client:
+                def _handle_query(self, args):
+                    return {"rows": ["client"]}
+
+            class ToolHandler:
+                def call(self, name, args):
+                    result, _meta = self._dispatch(name, args)
+                    return {"content": [{"type": "text", "text": json.dumps(result)}]}
+
+                def _dispatch(self, name, args):
+                    client = Client()
+                    if name == "client_query":
+                        return client._handle_query(args), None
+                    if name == "roca_query":
+                        return self._handle_query(args), None
+                    raise ValueError("unknown tool")
+
+                def _handle_query(self, args):
+                    return {"rows": ["self"]}
+        """)
+
+        fact = extract_invocation_surface(
+            str(tmp_path),
+            "server.py",
+            "ToolHandler",
+            "_handle_query",
+        )
+
+        assert fact.value["dispatch_key"] == "roca_query"
+        assert fact.value["dispatch_branch"] == "server.py:16-17"
+
     def test_collect_exact_facts_returns_four_sections_for_python_query_target(self, tmp_path):
         _build_python_query_repo(tmp_path)
 

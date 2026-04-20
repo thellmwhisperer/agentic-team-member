@@ -117,7 +117,11 @@ def _returns_target_call(node: ast.AST, target_symbol: str) -> bool:
             elements = [value]
         for element in elements:
             if isinstance(element, ast.Call) and isinstance(element.func, ast.Attribute):
-                if element.func.attr == target_symbol:
+                if (
+                    isinstance(element.func.value, ast.Name)
+                    and element.func.value.id == "self"
+                    and element.func.attr == target_symbol
+                ):
                     return True
     return False
 
