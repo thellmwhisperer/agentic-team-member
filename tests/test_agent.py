@@ -500,7 +500,14 @@ class TestFindTestFile:
         assert ok is False, "red phase with 'is not defined' around __setXForTests must be rejected"
         assert "test scaffold is incomplete" in msg.lower()
 
-    def test_verify_red_green_rejects_red_phase_when_pytest_is_missing(self, tmp_path, monkeypatch):
+    @pytest.mark.parametrize(
+        "stderr_text",
+        [
+            "/Applications/Xcode.app/Contents/Developer/usr/bin/python3: No module named pytest\n",
+            "/Applications/Xcode.app/Contents/Developer/usr/bin/python3: No module named 'pytest'\n",
+        ],
+    )
+    def test_verify_red_green_rejects_red_phase_when_pytest_is_missing(self, tmp_path, monkeypatch, stderr_text):
         """A red phase that fails because pytest is unavailable is infra failure,
         not proof that the bug was reproduced."""
         from unittest.mock import patch as mock_patch
@@ -534,7 +541,7 @@ class TestFindTestFile:
                         cmd,
                         1,
                         stdout="",
-                        stderr="/Applications/Xcode.app/Contents/Developer/usr/bin/python3: No module named pytest\n",
+                        stderr=stderr_text,
                     )
                 return subprocess.CompletedProcess(cmd, 0, stdout="1 passed\n", stderr="")
             return sp_run(*args, **kwargs)
