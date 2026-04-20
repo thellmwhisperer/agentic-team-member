@@ -326,6 +326,34 @@ class TestFindTestFile:
         with mock_patch("subprocess.run", side_effect=fake_run):
             assert find_test_file() is None
 
+    def test_ignores_modified_test_file_inside_multisegment_excluded_dir_in_fast_path(self, tmp_path, monkeypatch):
+        from unittest.mock import patch as mock_patch
+
+        (tmp_path / "generated" / "tests").mkdir(parents=True)
+        tracked = tmp_path / "generated" / "tests" / "test ignored.py"
+        tracked.write_text("def test_old():\n    assert True\n")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "runner": {"test_file_patterns": ["test*.py"], "exclude_dirs": ["generated/tests"]},
+        })
+
+        sp_run = subprocess.run
+
+        def fake_run(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            if cmd == ["git", "status", "--porcelain", "-z"]:
+                return subprocess.CompletedProcess(
+                    cmd,
+                    0,
+                    stdout=b"M  generated/tests/test ignored.py\x00",
+                    stderr=b"",
+                )
+            return sp_run(*args, **kwargs)
+
+        with mock_patch("subprocess.run", side_effect=fake_run):
+            assert find_test_file() is None
+
     def test_verify_red_green_preserves_untracked_test(self, tmp_path, monkeypatch):
         """An untracked test file must survive the stash cycle in verify_red_green."""
         from agentic_tdd_runner.agent import verify_red_green
@@ -678,6 +706,46 @@ class TestFindTestFile:
         assert ok is False
         assert "verification environment is broken" in msg.lower()
         assert "bun is unavailable" in msg.lower()
+
+    def test_verify_red_green_rejects_missing_pytest_binary(self, tmp_path, monkeypatch):
+        """A missing pytest binary should map to the same infra-failure path."""
+        from unittest.mock import patch as mock_patch
+        from agentic_tdd_runner.agent import verify_red_green
+
+        sp_run = subprocess.run
+        sp_run([GIT, "init"], cwd=tmp_path, capture_output=True, check=True)
+        sp_run([GIT, "config", "user.email", "test@test.com"], cwd=tmp_path, capture_output=True)
+        sp_run([GIT, "config", "user.name", "test"], cwd=tmp_path, capture_output=True)
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "worker.py").write_text("def process(x):\n    return x\n")
+        (src / "test_worker.py").write_text("def test_process():\n    assert True\n")
+        sp_run([GIT, "add", "-A"], cwd=tmp_path, capture_output=True, check=True)
+        sp_run([GIT, "commit", "-m", "base"], cwd=tmp_path, capture_output=True, check=True)
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "runner": {"command": "pytest", "test_file_patterns": ["test_*.py"], "exclude_dirs": []},
+            "timeouts": {"test_run": 10},
+        })
+
+        calls = {"count": 0}
+
+        def fake_run(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            if isinstance(cmd, list) and cmd and cmd[0] == "pytest" and any("test_worker.py" in str(c) for c in cmd):
+                calls["count"] += 1
+                if calls["count"] == 1:
+                    raise FileNotFoundError(2, "No such file or directory", "pytest")
+                return subprocess.CompletedProcess(cmd, 0, stdout="1 passed\n", stderr="")
+            return sp_run(*args, **kwargs)
+
+        with mock_patch("subprocess.run", side_effect=fake_run):
+            ok, msg = verify_red_green("src/test_worker.py")
+
+        assert ok is False
+        assert "verification environment is broken" in msg.lower()
+        assert "pytest is unavailable" in msg.lower()
 
     def test_verify_red_green_does_not_flag_green_infra_markers_after_success(self, tmp_path, monkeypatch):
         """A passing green phase should not be rejected just because the output
