@@ -196,6 +196,31 @@ class TestExactFacts:
             {"class": "TestRocaQuery", "name": "_handler_with_llm", "range": "test_server.py:20-21"},
         ]
 
+    def test_invocation_surface_tolerates_missing_call_method(self, tmp_path):
+        _write_file(tmp_path, "server.py", """\
+            class ToolHandler:
+                def _dispatch(self, tool_name, args):
+                    if tool_name == "roca_query":
+                        return self._handle_query(args), None
+                    raise ValueError("unknown tool")
+
+                def _handle_query(self, args):
+                    return {"rows": [], "path": "compiler"}
+        """)
+
+        fact = extract_invocation_surface(
+            str(tmp_path),
+            "server.py",
+            "ToolHandler",
+            "_handle_query",
+        )
+
+        assert fact.value["public_entrypoint"] is None
+        assert fact.value["dispatch_key"] == "roca_query"
+        assert fact.value["dispatch_branch"] == "server.py:3-4"
+        assert fact.value["wrapper_success_shape"] is None
+        assert fact.value["wrapper_error_shape"] is None
+
     def test_collect_exact_facts_returns_four_sections_for_python_query_target(self, tmp_path):
         _build_python_query_repo(tmp_path)
 

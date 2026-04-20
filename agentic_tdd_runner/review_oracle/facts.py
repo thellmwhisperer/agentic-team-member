@@ -130,9 +130,9 @@ def _dispatch_key_from_if(node: ast.If) -> str | None:
         return None
 
     left, right = test.left, test.comparators[0]
-    if isinstance(left, ast.Name) and left.id == "name" and isinstance(right, ast.Constant) and isinstance(right.value, str):
+    if isinstance(left, ast.Name) and isinstance(right, ast.Constant) and isinstance(right.value, str):
         return right.value
-    if isinstance(right, ast.Name) and right.id == "name" and isinstance(left, ast.Constant) and isinstance(left.value, str):
+    if isinstance(right, ast.Name) and isinstance(left, ast.Constant) and isinstance(left.value, str):
         return left.value
     return None
 
@@ -364,15 +364,23 @@ def extract_invocation_surface(
     source_text = _read_text(path)
     tree = _parse_module(path)
     class_node = _find_class(tree, owner_class_name)
-    call_node = _find_method(class_node, "call")
-    call_signature = _signature_from_node(source_text, call_node)
-    public_entrypoint = f"{owner_class_name}.{_signature_without_self(call_signature)}"
-    dispatch_key, dispatch_branch = _extract_dispatch_branch(class_node, target_symbol, source_path)
-    success_shape, error_shape, _, _ = _extract_wrapper_shapes(call_node, source_text)
+    try:
+        call_node = _find_method(class_node, "call")
+    except ValueError:
+        call_node = None
 
-    inputs_used = [
-        _format_range(source_path, call_node.lineno, call_node.end_lineno),
-    ]
+    if call_node is not None:
+        call_signature = _signature_from_node(source_text, call_node)
+        public_entrypoint = f"{owner_class_name}.{_signature_without_self(call_signature)}"
+        success_shape, error_shape, _, _ = _extract_wrapper_shapes(call_node, source_text)
+        inputs_used = [_format_range(source_path, call_node.lineno, call_node.end_lineno)]
+    else:
+        public_entrypoint = None
+        success_shape = None
+        error_shape = None
+        inputs_used = []
+
+    dispatch_key, dispatch_branch = _extract_dispatch_branch(class_node, target_symbol, source_path)
     if dispatch_branch:
         inputs_used.append(dispatch_branch)
 
