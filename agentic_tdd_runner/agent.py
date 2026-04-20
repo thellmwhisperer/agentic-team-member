@@ -241,7 +241,7 @@ def _verification_infra_error(output: str) -> str | None:
     if "no module named" in lowered and "pytest" in lowered:
         return "pytest is unavailable in the verification environment"
     if "no such file or directory" in lowered:
-        if any(token in lowered for token in ("'python3'", "'python'", " pytest")):
+        if any(token in lowered for token in ("'python3'", "'python'", "'pytest'", " pytest")):
             return "pytest is unavailable in the verification environment"
         if "'bun'" in lowered:
             return "bun is unavailable in the verification environment"
@@ -555,7 +555,10 @@ def find_test_file(hint: str | None = None) -> str | None:
     )
     if status_result.returncode == 0:
         changed_test_files = []
-        exclude = _CONFIG["runner"].get("exclude_dirs", [])
+        exclude_prefixes = [
+            PurePosixPath(ex).parts
+            for ex in _CONFIG["runner"].get("exclude_dirs", [])
+        ]
         entries = [
             entry
             for entry in status_result.stdout.decode("utf-8", errors="surrogateescape").split("\0")
@@ -570,7 +573,7 @@ def find_test_file(hint: str | None = None) -> str | None:
             status_code = raw_line[:2]
             rel = raw_line[3:]
             rel_parts = PurePosixPath(rel).parts
-            if any(ex in rel_parts for ex in exclude):
+            if any(rel_parts[:len(prefix)] == prefix for prefix in exclude_prefixes):
                 idx += 2 if any(marker in status_code for marker in ("R", "C")) else 1
                 continue
             if not _is_test_file_path(rel):
