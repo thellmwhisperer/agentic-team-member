@@ -1,4 +1,4 @@
-"""Tests for agentic_tdd_runner.review_oracle.facts (§§1,2,3,5 AST-exact detectors)."""
+"""Tests for agentic_tdd_runner.review_oracle.facts local and repo-scoped detectors."""
 from __future__ import annotations
 
 import dataclasses
@@ -7,11 +7,15 @@ import textwrap
 import pytest
 
 from agentic_tdd_runner.review_oracle.facts import (
+    collect_repo_facts,
     collect_exact_facts,
     extract_invocation_surface,
+    extract_patch_semantics,
     extract_pytest_surface,
     extract_result_surface,
+    extract_schema_surface,
     extract_target_identity,
+    extract_upstream_return_surface,
 )
 from agentic_tdd_runner.review_oracle.types import Fact
 
@@ -90,6 +94,93 @@ def _build_python_query_repo(tmp_path):
         class TestRocaQuery:
             def _handler_with_llm(self, db, tmp_path, sql):
                 return object()
+    """)
+
+
+def _build_repo_scoped_fact_repo(tmp_path):
+    _write_file(tmp_path, "test_server.py", """\
+        import pytest
+
+
+        @pytest.fixture
+        def db(tmp_path):
+            return object()
+
+
+        @pytest.fixture
+        def handler(db, tmp_path):
+            return object()
+
+
+        class MockLlm:
+            def __call__(self, prompt):
+                return {"sql": "SELECT 1"}
+
+
+        class TestRocaQuery:
+            def _handler_with_llm(self, db, tmp_path, sql):
+                return object()
+
+
+        from unittest.mock import patch
+
+
+        def test_patch_examples():
+            with patch("pkg.logger"):
+                pass
+            with patch("pkg.logger"):
+                pass
+    """)
+    _write_file(tmp_path, "test_query.py", """\
+        from unittest.mock import patch as mock_patch
+
+
+        def test_more_patch_examples():
+            with mock_patch("pkg.logger"):
+                pass
+            with mock_patch("pkg.client"):
+                pass
+    """)
+    _write_file(tmp_path, "schema.sql", """\
+        CREATE TABLE query_cache (
+            id INTEGER PRIMARY KEY,
+            sql TEXT NOT NULL,
+            path TEXT NOT NULL,
+            fallback_reason TEXT
+        );
+
+        CREATE TABLE query_runs (
+            run_id INTEGER PRIMARY KEY,
+            query_cache_id INTEGER NOT NULL,
+            status TEXT NOT NULL
+        );
+
+        INSERT INTO query_cache (id, sql, path)
+        VALUES (1, 'SELECT 1', 'compiler');
+    """)
+    _write_file(tmp_path, "query.py", """\
+        def compiler_query():
+            payload = {
+                "rows": [],
+                "sql": "SELECT 1",
+                "path": "compiler",
+                "confidence": 0.95,
+            }
+            return payload
+
+
+        def fallback_query():
+            return {
+                "rows": [],
+                "sql": "SELECT 2",
+                "path": "llm_fallback",
+                "fallback_reason": "empty",
+                "retried": True,
+            }
+
+
+        def passthrough_query(result):
+            return result
     """)
 
 
@@ -347,4 +438,89 @@ class TestExactFacts:
             "invocation_surface",
             "result_surface",
             "pytest_surface",
+        ]
+
+
+class TestRepoFacts:
+    def test_patch_semantics_collects_local_targets_and_repo_counts(self, tmp_path):
+        _build_repo_scoped_fact_repo(tmp_path)
+
+        fact = extract_patch_semantics(str(tmp_path), "test_server.py")
+
+        assert fact.name == "patch_semantics"
+        assert fact.value["module_test_file"] == "test_server.py"
+        assert fact.value["observed_patch_aliases"] == ["patch"]
+        assert fact.value["local_patch_targets"] == [
+            {"target": "pkg.logger", "alias": "patch", "range": "test_server.py:28"},
+            {"target": "pkg.logger", "alias": "patch", "range": "test_server.py:30"},
+        ]
+        assert fact.value["repo_patch_target_counts"] == [
+            {"target": "pkg.client", "count": 1},
+            {"target": "pkg.logger", "count": 3},
+        ]
+        assert fact.confidence_class == "repo_counted"
+
+    def test_schema_surface_collects_tables_and_seed_inserts(self, tmp_path):
+        _build_repo_scoped_fact_repo(tmp_path)
+
+        fact = extract_schema_surface(str(tmp_path), "schema.sql")
+
+        assert fact.name == "schema_surface"
+        assert fact.value["schema_file"] == "schema.sql"
+        assert fact.value["tables"] == [
+            {
+                "name": "query_cache",
+                "columns": ["id", "sql", "path", "fallback_reason"],
+                "range": "schema.sql:1-6",
+            },
+            {
+                "name": "query_runs",
+                "columns": ["run_id", "query_cache_id", "status"],
+                "range": "schema.sql:8-12",
+            },
+        ]
+        assert fact.value["seed_inserts"] == [
+            {
+                "table": "query_cache",
+                "columns": ["id", "sql", "path"],
+                "range": "schema.sql:14-15",
+            },
+        ]
+        assert fact.confidence_class == "text_exact"
+
+    def test_upstream_return_surface_collects_function_return_shapes(self, tmp_path):
+        _build_repo_scoped_fact_repo(tmp_path)
+
+        fact = extract_upstream_return_surface(str(tmp_path), "query.py")
+
+        assert fact.name == "upstream_return_surface"
+        assert fact.value["module_source_file"] == "query.py"
+        assert fact.value["functions"] == [
+            {
+                "name": "compiler_query",
+                "range": "query.py:1-8",
+                "return_key_sets": [["confidence", "path", "rows", "sql"]],
+            },
+            {
+                "name": "fallback_query",
+                "range": "query.py:11-18",
+                "return_key_sets": [["fallback_reason", "path", "retried", "rows", "sql"]],
+            },
+        ]
+        assert fact.confidence_class == "ast_exact"
+
+    def test_collect_repo_facts_returns_repo_scoped_sections(self, tmp_path):
+        _build_repo_scoped_fact_repo(tmp_path)
+
+        facts = collect_repo_facts(
+            str(tmp_path),
+            test_path="test_server.py",
+            schema_path="schema.sql",
+            upstream_path="query.py",
+        )
+
+        assert [fact.name for fact in facts] == [
+            "patch_semantics",
+            "schema_surface",
+            "upstream_return_surface",
         ]
