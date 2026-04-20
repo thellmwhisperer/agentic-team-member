@@ -236,6 +236,36 @@ def _is_invalid_red_phase_failure(output: str) -> bool:
     return any(marker in lowered for marker in invalid_markers)
 
 
+def _verification_infra_error(output: str) -> str | None:
+    lowered = output.lower()
+    markers = [
+        (
+            "no module named pytest",
+            "pytest is unavailable in the verification environment",
+        ),
+        (
+            "pytest: command not found",
+            "pytest is unavailable in the verification environment",
+        ),
+        (
+            "/bin/sh: pytest: command not found",
+            "pytest is unavailable in the verification environment",
+        ),
+        (
+            "bun: command not found",
+            "bun is unavailable in the verification environment",
+        ),
+        (
+            "node: command not found",
+            "node is unavailable in the verification environment",
+        ),
+    ]
+    for needle, message in markers:
+        if needle in lowered:
+            return message
+    return None
+
+
 def _resolve_repo_path(path: str, workdir: str = None) -> Path:
     """Resolve a relative path within the workdir. Raises if it escapes."""
     repo_root = Path(workdir or WORKDIR).resolve()
@@ -511,6 +541,30 @@ def find_test_file(hint: str | None = None) -> str | None:
             hinted = None
         if hinted and hinted.is_file():
             return os.path.relpath(hinted, WORKDIR)
+    status_result = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=WORKDIR,
+        capture_output=True,
+        text=True,
+    )
+    if status_result.returncode == 0:
+        changed_test_files = []
+        for raw_line in status_result.stdout.splitlines():
+            if len(raw_line) < 4:
+                continue
+            rel = raw_line[3:]
+            if " -> " in rel:
+                rel = rel.split(" -> ", 1)[1]
+            if not _is_test_file_path(rel):
+                continue
+            try:
+                resolved = _resolve_repo_path(rel)
+            except ValueError:
+                continue
+            if resolved.is_file():
+                changed_test_files.append(os.path.relpath(resolved, WORKDIR))
+        if changed_test_files:
+            return sorted(dict.fromkeys(changed_test_files))[0]
     patterns = _CONFIG["runner"]["test_file_patterns"]
     exclude = _CONFIG["runner"].get("exclude_dirs", [])
     for root, _dirs, files in os.walk(WORKDIR):
@@ -573,6 +627,7 @@ def verify_red_green(test_file: str) -> tuple[bool, str]:
     green_result = None
     green_passed = False
     green_output = ""
+    green_output_full = ""
 
     try:
         # Restore the test file so the red phase can run it
@@ -613,7 +668,8 @@ def verify_red_green(test_file: str) -> tuple[bool, str]:
             cwd=WORKDIR, capture_output=True, text=True, timeout=test_timeout,
         )
         green_passed = green_result.returncode == 0
-        green_output = (green_result.stdout + green_result.stderr)[:500]
+        green_output_full = green_result.stdout + green_result.stderr
+        green_output = green_output_full[:500]
         emit(f"  [GREEN] exit={green_result.returncode} {'PASS (good)' if green_passed else 'FAIL (BAD!)'}")
         for line in green_output.split("\n")[:10]:
             emit(f"    {line}")
@@ -653,10 +709,26 @@ def verify_red_green(test_file: str) -> tuple[bool, str]:
             f"and fails on behavior. Error: {red_output[:300]}"
         )
 
+    red_infra_error = _verification_infra_error(red_output_full)
+    if red_infra_error:
+        return False, (
+            f"REJECTED: Your red phase for {test_file} failed because the verification environment is broken, "
+            f"not because the bug was reproduced. {red_infra_error}. "
+            f"Fix the runner environment and rerun verification. Error: {red_output[:300]}"
+        )
+
     if green_result is None:
         return False, (
             f"REJECTED: Your test ({test_file}) timed out WITH your source fix. "
             f"Fix the timeout or make the test more targeted. Error: {green_output[:300]}"
+        )
+
+    green_infra_error = _verification_infra_error(green_output_full)
+    if green_infra_error:
+        return False, (
+            f"REJECTED: Your green phase for {test_file} failed because the verification environment is broken. "
+            f"{green_infra_error}. Fix the runner environment and rerun verification. "
+            f"Error: {green_output[:300]}"
         )
 
     if not green_passed:

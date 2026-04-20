@@ -226,6 +226,22 @@ class TestFindTestFile:
         })
         assert find_test_file(hint="../outside.test.ts") == "src/foo.test.ts"
 
+    def test_returns_modified_tracked_python_test_file(self, tmp_path, monkeypatch):
+        self._setup_git_repo(tmp_path)
+        (tmp_path / "src").mkdir()
+        tracked = tmp_path / "src" / "test_server.py"
+        tracked.write_text("def test_old():\n    assert True\n")
+        subprocess.run([GIT, "add", "src/test_server.py"], cwd=tmp_path, capture_output=True, check=True)
+        subprocess.run([GIT, "commit", "-m", "add tracked test"], cwd=tmp_path, capture_output=True, check=True)
+        tracked.write_text("def test_old():\n    assert True\n\ndef test_new():\n    assert True\n")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "runner": {"test_file_patterns": ["test_*.py"], "exclude_dirs": []},
+        })
+
+        assert find_test_file() == "src/test_server.py"
+
     def test_verify_red_green_preserves_untracked_test(self, tmp_path, monkeypatch):
         """An untracked test file must survive the stash cycle in verify_red_green."""
         from agentic_tdd_runner.agent import verify_red_green
@@ -483,6 +499,52 @@ class TestFindTestFile:
 
         assert ok is False, "red phase with 'is not defined' around __setXForTests must be rejected"
         assert "test scaffold is incomplete" in msg.lower()
+
+    def test_verify_red_green_rejects_red_phase_when_pytest_is_missing(self, tmp_path, monkeypatch):
+        """A red phase that fails because pytest is unavailable is infra failure,
+        not proof that the bug was reproduced."""
+        from unittest.mock import patch as mock_patch
+        from agentic_tdd_runner.agent import verify_red_green
+
+        sp_run = subprocess.run
+        sp_run([GIT, "init"], cwd=tmp_path, capture_output=True, check=True)
+        sp_run([GIT, "config", "user.email", "test@test.com"], cwd=tmp_path, capture_output=True)
+        sp_run([GIT, "config", "user.name", "test"], cwd=tmp_path, capture_output=True)
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "worker.py").write_text("def process(x):\n    return x\n")
+        (src / "test_worker.py").write_text("def test_process():\n    assert True\n")
+        sp_run([GIT, "add", "-A"], cwd=tmp_path, capture_output=True, check=True)
+        sp_run([GIT, "commit", "-m", "base"], cwd=tmp_path, capture_output=True, check=True)
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "runner": {"command": "bun test", "test_file_patterns": ["test_*.py"], "exclude_dirs": []},
+            "timeouts": {"test_run": 10},
+        })
+
+        calls = {"count": 0}
+
+        def fake_run(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            if isinstance(cmd, list) and any("test_worker.py" in str(c) for c in cmd):
+                calls["count"] += 1
+                if calls["count"] == 1:
+                    return subprocess.CompletedProcess(
+                        cmd,
+                        1,
+                        stdout="",
+                        stderr="/Applications/Xcode.app/Contents/Developer/usr/bin/python3: No module named pytest\n",
+                    )
+                return subprocess.CompletedProcess(cmd, 0, stdout="1 passed\n", stderr="")
+            return sp_run(*args, **kwargs)
+
+        with mock_patch("subprocess.run", side_effect=fake_run):
+            ok, msg = verify_red_green("src/test_worker.py")
+
+        assert ok is False
+        assert "verification environment is broken" in msg.lower()
+        assert "pytest is unavailable" in msg.lower()
 
     def test_finds_tsx_test_file(self, tmp_path, monkeypatch):
         self._setup_git_repo(tmp_path)
