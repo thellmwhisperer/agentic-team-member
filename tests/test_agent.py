@@ -3723,6 +3723,153 @@ class TestPhasedRunner:
         assert "(lines " not in content
 
 
+class TestDiscoveryIntegration:
+    def _make_config(self):
+        return {
+            "agent": {"max_steps": 1, "max_tool_output": 8000},
+            "prompt": {
+                "system": "You are a senior software engineer fixing a bug.",
+                "nudge": "Continue.",
+                "no_test_found": "missing test",
+                "quality_failed": "quality failed",
+                "pr_prompt": "pr",
+            },
+            "verification": {"max_rejections": 1},
+            "quality": {"enabled": False},
+            "pr": {"enabled": False},
+            "runner": {
+                "command": "bun test",
+                "framework": "bun:test",
+                "test_file_patterns": ["*.test.ts"],
+                "exclude_dirs": ["node_modules"],
+            },
+        }
+
+    def test_main_uses_discovered_target_when_source_and_symbol_missing(self, tmp_path, monkeypatch):
+        captured = []
+        episode_calls = []
+        semantic_index = {
+            "version": 1,
+            "project_root": str(tmp_path),
+            "candidates": [
+                {
+                    "source_path": "src/twitch/client.ts",
+                    "symbol": "handleMessage",
+                    "kind": "function",
+                    "owner_class": None,
+                    "line_start": 10,
+                    "line_end": 30,
+                    "path_tokens": ["src", "twitch", "client"],
+                    "symbol_tokens": ["handle", "message"],
+                    "string_tokens": ["manolitozurrapa"],
+                    "strings": ["@manolitozurrapa"],
+                    "terms": ["client", "handle", "manolitozurrapa", "message", "src", "twitch"],
+                }
+            ],
+        }
+
+        def fake_chat(messages, include_tools=True):
+            captured.append([m.copy() for m in messages])
+            return {
+                "choices": [{"message": {"content": "still going"}, "finish_reason": "stop"}],
+                "usage": {},
+                "timings": {},
+            }
+
+        def fake_episode(**kwargs):
+            episode_calls.append(kwargs)
+            return {
+                "source_file": kwargs["source_path"],
+                "target_symbol": kwargs["symbol"],
+                "test_file": "src/client.test.ts",
+                "source_import_path": "./client",
+                "runner": "bun:test",
+                "mocks_text": "",
+                "pre_test_source_edits": [],
+                "conditional_source_edits": [],
+                "assertion_hint": "",
+                "function_line_range": {"start": 23, "end": 80, "source": "definition"},
+                "cookbook_text": "## Mock Cookbook\n",
+            }
+
+        args = SimpleNamespace(
+            issue="bug text",
+            source=None,
+            symbol=None,
+            workdir=str(tmp_path),
+            config="unused.toml",
+            log_dir=str(tmp_path),
+        )
+        monkeypatch.setattr("agentic_tdd_runner.config.load_config", lambda path: self._make_config())
+        monkeypatch.setattr("agentic_tdd_runner.agent.parse_args", lambda: args)
+        monkeypatch.setattr("agentic_tdd_runner.agent.init_log", lambda: str(tmp_path / "agent.jsonl"))
+        monkeypatch.setattr("agentic_tdd_runner.agent.emit", lambda msg: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.log", lambda *a, **kw: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.chat", fake_chat)
+        monkeypatch.setattr(
+            "agentic_tdd_runner.discovery.load_or_build_semantic_index",
+            lambda project_root: semantic_index,
+        )
+        monkeypatch.setattr(
+            "agentic_tdd_runner.discovery.discover_target",
+            lambda issue_text, project_root, index=None: (
+                {
+                    "source_path": "src/twitch/client.ts",
+                    "symbol": "handleMessage",
+                }
+                if index is semantic_index
+                else (_ for _ in ()).throw(AssertionError("discover_target should receive semantic_index"))
+            ),
+        )
+        monkeypatch.setattr(
+            "agentic_tdd_runner.cookbook.build_episode_context",
+            fake_episode,
+        )
+
+        main()
+
+        assert episode_calls == [
+            {
+                "source_path": "src/twitch/client.ts",
+                "symbol": "handleMessage",
+                "project_root": str(tmp_path),
+            }
+        ]
+        user_msg = next(m for m in captured[0] if m["role"] == "user")
+        assert "handleMessage" in user_msg["content"]
+        assert "src/twitch/client.ts" in user_msg["content"]
+
+    def test_main_exits_when_target_cannot_be_discovered(self, tmp_path, monkeypatch):
+        args = SimpleNamespace(
+            issue="bug text",
+            source=None,
+            symbol=None,
+            workdir=str(tmp_path),
+            config="unused.toml",
+            log_dir=str(tmp_path),
+        )
+        monkeypatch.setattr("agentic_tdd_runner.config.load_config", lambda path: self._make_config())
+        monkeypatch.setattr("agentic_tdd_runner.agent.parse_args", lambda: args)
+        monkeypatch.setattr("agentic_tdd_runner.agent.init_log", lambda: str(tmp_path / "agent.jsonl"))
+        monkeypatch.setattr("agentic_tdd_runner.agent.emit", lambda msg: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.log", lambda *a, **kw: None)
+        monkeypatch.setattr(
+            "agentic_tdd_runner.discovery.load_or_build_semantic_index",
+            lambda project_root: {"version": 1, "project_root": str(tmp_path), "candidates": []},
+        )
+        monkeypatch.setattr(
+            "agentic_tdd_runner.discovery.discover_target",
+            lambda issue_text, project_root, index=None: None,
+        )
+        monkeypatch.setattr(
+            "agentic_tdd_runner.agent.chat",
+            lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("chat should not run when discovery fails")),
+        )
+
+        with pytest.raises(SystemExit, match="Could not determine source/symbol from issue"):
+            main()
+
+
 class TestChatPayload:
     """Verify that chat() builds the correct request payload."""
 

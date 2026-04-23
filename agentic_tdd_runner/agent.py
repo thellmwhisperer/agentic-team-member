@@ -1426,21 +1426,40 @@ def main():
         with open(issue_text) as f:
             issue_text = f.read()
 
+    source_path = args.source
+    symbol = args.symbol
+    if not (source_path and symbol):
+        from agentic_tdd_runner.discovery import discover_target, load_or_build_semantic_index
+
+        semantic_index = load_or_build_semantic_index(project_root=WORKDIR)
+        discovered = discover_target(issue_text=issue_text, project_root=WORKDIR, index=semantic_index)
+        if not discovered:
+            emit("[DISCOVERY] Could not determine source/symbol from issue")
+            log("discovery_failed", {"reason": "no_target", "candidates": len(semantic_index.get("candidates", []))})
+            raise SystemExit(
+                "Could not determine source/symbol from issue. "
+                "Pass --source and --symbol or improve the semantic index."
+            )
+        source_path = discovered["source_path"]
+        symbol = discovered["symbol"]
+        emit(f"[DISCOVERY] Selected {symbol} in {source_path}")
+        log("discovery", {"source": source_path, "symbol": symbol, "score": discovered.get("score")})
+
     # Build system prompt — inject cookbook if source/symbol provided
     system_prompt = _CONFIG["prompt"]["system"].strip()
     episode = None
-    if args.source and args.symbol:
+    if source_path and symbol:
         from agentic_tdd_runner.cookbook import build_episode_context
         episode = build_episode_context(
-            source_path=args.source,
-            symbol=args.symbol,
+            source_path=source_path,
+            symbol=symbol,
             project_root=WORKDIR,
         )
         system_prompt = f"{system_prompt}\n\n{episode['cookbook_text']}"
-        emit(f"[EPISODE] Built episode context for {args.symbol} in {args.source}")
+        emit(f"[EPISODE] Built episode context for {symbol} in {source_path}")
         log("episode", {
-            "source": args.source,
-            "symbol": args.symbol,
+            "source": source_path,
+            "symbol": symbol,
             "test_file": episode["test_file"],
             "mechanical_edits": len(episode.get("pre_test_source_edits", [])),
             "function_line_range": episode.get("function_line_range"),
