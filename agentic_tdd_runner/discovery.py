@@ -1,0 +1,922 @@
+"""Deterministic target discovery and semantic indexing for issue-only runs."""
+from __future__ import annotations
+
+import json
+import re
+import unicodedata
+from pathlib import Path, PurePosixPath
+
+from agentic_tdd_runner.cookbook import _find_function_end
+from agentic_tdd_runner.languages import get_language
+
+_WORD_RE = re.compile(r"[@!\w-]+", re.UNICODE)
+_STRING_RE = re.compile(r"['\"`]([^'\"`\n]{1,200})['\"`]")
+_CALL_NAME_RE = re.compile(r"\b([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\s*\(")
+_GUARD_METHOD_RE = re.compile(r"\.\s*(startsWith|includes|endsWith)\(\s*(['\"`])([^'\"`\n]{1,200})\2")
+_GUARD_EQUALS_RE = re.compile(r"(?:===|==)\s*(['\"`])([^'\"`\n]{1,200})\1")
+_ROUTE_COMMENT_RE = re.compile(r"^\s*//\s*---\s*(.*?)\s*---\s*$")
+_ALIAS_ASSIGN_RE = re.compile(r"^\s*(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(.+?)\s*;\s*$")
+_IF_CONDITION_RE = re.compile(r"^\s*if\s*\((.+)\)\s*\{?\s*$")
+_IDENTIFIER_RE = re.compile(r"\b[A-Za-z_$][\w$]*\b")
+_TS_FUNCTION_RE = re.compile(
+    r"^\s*(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(",
+    re.MULTILINE,
+)
+_TS_ARROW_RE = re.compile(
+    r"^\s*(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>",
+    re.MULTILINE,
+)
+_PY_DEF_RE = re.compile(r"^\s*def\s+([A-Za-z_]\w*)\s*\(", re.MULTILINE)
+_PY_CLASS_RE = re.compile(r"^\s*class\s+([A-Za-z_]\w*)\b", re.MULTILINE)
+_TS_CLASS_RE = re.compile(r"^\s*(?:export\s+)?class\s+([A-Za-z_$][\w$]*)\b", re.MULTILINE)
+_TS_METHOD_RE = re.compile(
+    r"^\s*(?:(?:public|private|protected|static|readonly)\s+)*(?:async\s+)?([A-Za-z_$][\w$]*)\s*\(",
+)
+_DEFAULT_SEMANTIC_INDEX_RELATIVE_PATH = Path(".atm/semantic-index.generated.json")
+_STOPWORDS = {
+    "a",
+    "an",
+    "and",
+    "appears",
+    "as",
+    "at",
+    "bug",
+    "como",
+    "cuando",
+    "de",
+    "del",
+    "do",
+    "does",
+    "el",
+    "en",
+    "es",
+    "for",
+    "funciona",
+    "function",
+    "if",
+    "la",
+    "lo",
+    "los",
+    "no",
+    "only",
+    "or",
+    "para",
+    "por",
+    "que",
+    "respuesta",
+    "solo",
+    "the",
+    "to",
+    "un",
+    "una",
+    "when",
+    "word",
+    "y",
+}
+_NEARBY_TEST_COMMON_TOKENS = {
+    "all",
+    "any",
+    "async",
+    "await",
+    "be",
+    "boolean",
+    "can",
+    "case",
+    "client",
+    "const",
+    "create",
+    "defined",
+    "describe",
+    "error",
+    "expect",
+    "false",
+    "from",
+    "get",
+    "has",
+    "in",
+    "info",
+    "is",
+    "js",
+    "jsx",
+    "length",
+    "let",
+    "log",
+    "logger",
+    "message",
+    "messages",
+    "new",
+    "not",
+    "null",
+    "number",
+    "of",
+    "ok",
+    "old",
+    "on",
+    "out",
+    "process",
+    "promise",
+    "py",
+    "resolve",
+    "return",
+    "set",
+    "should",
+    "some",
+    "src",
+    "string",
+    "test",
+    "then",
+    "to",
+    "true",
+    "ts",
+    "tsx",
+    "twitch",
+    "undefined",
+    "user",
+    "users",
+    "username",
+    "value",
+    "var",
+    "with",
+    "without",
+}
+_LOW_VALUE_LOGGING_CALLS = {
+    "log.error",
+    "log.info",
+    "logger.error",
+    "logger.event",
+    "logger.response",
+}
+_LOW_VALUE_NEARBY_TEST_SEAMS = {
+    "client",
+    "log",
+    "logger",
+}
+_LOW_VALUE_SEAM_NAME_HINT_TOKENS = {
+    "client",
+    "log",
+    "logger",
+    "manager",
+    "service",
+    "this",
+}
+_LOW_VALUE_SEAM_MEMBER_HINT_TOKENS = {
+    "ask",
+    "create",
+    "event",
+    "get",
+    "has",
+    "info",
+    "on",
+    "response",
+    "say",
+    "send",
+    "set",
+    "track",
+    "values",
+    "with",
+}
+
+
+def build_semantic_index(project_root: str) -> dict:
+    """Build a deterministic semantic layer for supported source files."""
+    root = Path(project_root)
+    source_files: list[tuple[str, str, object]] = []
+    test_files: list[dict] = []
+    for path in sorted(root.rglob("*")):
+        if not path.is_file():
+            continue
+        if any(part in {"node_modules", ".git", "__pycache__", ".pytest_cache"} for part in path.parts):
+            continue
+        lang = get_language(path.as_posix())
+        if lang is None:
+            continue
+        rel_path = path.relative_to(root).as_posix()
+        source_text = path.read_text()
+        if _is_test_file(rel_path):
+            test_files.append({"path": rel_path, "text": source_text})
+            continue
+        source_files.append((rel_path, source_text, lang))
+
+    symbols: list[dict] = []
+    files: list[dict] = []
+    for rel_path, source_text, lang in source_files:
+        file_symbols = _candidates_for_file(rel_path, source_text, lang, test_files)
+        symbols.extend(file_symbols)
+        files.append(_build_file_fact(rel_path, lang.name, file_symbols, test_files))
+
+    symbols.sort(key=lambda item: (item["source_path"], item["line_start"], item["symbol"]))
+    files.sort(key=lambda item: item["path"])
+    return {
+        "version": 3,
+        "project_root": project_root,
+        "files": files,
+        "symbols": symbols,
+        "candidates": symbols,
+    }
+
+
+def write_semantic_index(project_root: str, *, output_path: str | Path) -> Path:
+    """Materialize the generated semantic layer to a deterministic JSON file."""
+    destination = Path(output_path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(
+        json.dumps(build_semantic_index(project_root), indent=2, sort_keys=True) + "\n"
+    )
+    return destination
+
+
+def load_semantic_index(index_path: str | Path) -> dict:
+    """Load a previously generated semantic index JSON file."""
+    return json.loads(Path(index_path).read_text())
+
+
+def load_or_build_semantic_index(project_root: str, *, output_path: str | Path | None = None) -> dict:
+    """Reuse the generated semantic layer when present, otherwise build it."""
+    destination = Path(output_path) if output_path is not None else Path(project_root) / _DEFAULT_SEMANTIC_INDEX_RELATIVE_PATH
+    if destination.exists():
+        return load_semantic_index(destination)
+    write_semantic_index(project_root, output_path=destination)
+    return load_semantic_index(destination)
+
+
+def rank_targets(
+    issue_text: str,
+    project_root: str,
+    *,
+    index: dict | None = None,
+    limit: int = 5,
+) -> list[dict]:
+    """Return ranked target candidates for an issue."""
+    semantic_index = index or build_semantic_index(project_root)
+    issue_tokens = set(_normalize_tokens(issue_text))
+    if not issue_tokens:
+        return []
+
+    scored = []
+    for candidate in semantic_index["candidates"]:
+        score = _score_candidate(candidate, issue_tokens)
+        if score <= 0:
+            continue
+        enriched = dict(candidate)
+        enriched["score"] = score
+        scored.append(enriched)
+
+    scored.sort(key=lambda item: (-item["score"], item["source_path"], item["line_start"], item["symbol"]))
+    return scored[: max(0, limit)]
+
+
+def discover_target(issue_text: str, project_root: str, *, index: dict | None = None) -> dict | None:
+    """Return the best candidate target for an issue, or None if no signal exists."""
+    ranked = rank_targets(issue_text=issue_text, project_root=project_root, index=index, limit=1)
+    return ranked[0] if ranked else None
+
+
+def _candidates_for_file(source_path: str, source_text: str, lang, test_files: list[dict]) -> list[dict]:
+    if lang.name == "typescript":
+        return _typescript_candidates(source_path, source_text, test_files)
+    if lang.name == "python":
+        return _python_candidates(source_path, source_text, test_files)
+    return []
+
+
+def _typescript_candidates(source_path: str, source_text: str, test_files: list[dict]) -> list[dict]:
+    candidates = []
+    for match in _TS_FUNCTION_RE.finditer(source_text):
+        line_start = source_text[: match.start()].count("\n") + 1
+        line_end = _find_function_end(source_text, line_start, lang=get_language(source_path)) or line_start
+        snippet = _slice_lines(source_text, line_start, line_end)
+        candidates.append(
+            _build_candidate(
+                source_path,
+                match.group(1),
+                "function",
+                line_start,
+                line_end,
+                snippet,
+                source_text=source_text,
+                test_files=test_files,
+            )
+        )
+
+    for match in _TS_ARROW_RE.finditer(source_text):
+        line_start = source_text[: match.start()].count("\n") + 1
+        line_end = _find_function_end(source_text, line_start, lang=get_language(source_path)) or line_start
+        snippet = _slice_lines(source_text, line_start, line_end)
+        candidates.append(
+            _build_candidate(
+                source_path,
+                match.group(1),
+                "function",
+                line_start,
+                line_end,
+                snippet,
+                source_text=source_text,
+                test_files=test_files,
+            )
+        )
+
+    lines = source_text.splitlines()
+    current_class = None
+    class_indent = 0
+    class_depth = 0
+    for idx, line in enumerate(lines, start=1):
+        class_match = _TS_CLASS_RE.match(line)
+        if class_match:
+            current_class = class_match.group(1)
+            class_indent = len(line) - len(line.lstrip())
+            class_depth = line.count("{") - line.count("}")
+            continue
+
+        if current_class:
+            class_depth += line.count("{") - line.count("}")
+            if class_depth < 0 or (class_depth == 0 and (len(line) - len(line.lstrip())) <= class_indent and line.strip() == "}"):
+                current_class = None
+                class_depth = 0
+                continue
+
+            method_match = _TS_METHOD_RE.match(line)
+            if not method_match:
+                continue
+            symbol = method_match.group(1)
+            if symbol in {"if", "for", "while", "switch", "catch", "constructor"}:
+                continue
+            if line.lstrip().startswith(("if ", "for ", "while ", "switch ", "catch ")):
+                continue
+            line_end = _find_function_end(source_text, idx, lang=get_language(source_path)) or idx
+            snippet = _slice_lines(source_text, idx, line_end)
+            candidates.append(
+                _build_candidate(
+                    source_path,
+                    symbol,
+                    "method",
+                    idx,
+                    line_end,
+                    snippet,
+                    source_text=source_text,
+                    test_files=test_files,
+                    owner_class=current_class,
+                )
+            )
+    return candidates
+
+
+def _python_candidates(source_path: str, source_text: str, test_files: list[dict]) -> list[dict]:
+    candidates = []
+    lines = source_text.splitlines()
+    current_class = None
+    class_indent = None
+    for idx, line in enumerate(lines, start=1):
+        class_match = _PY_CLASS_RE.match(line)
+        if class_match:
+            current_class = class_match.group(1)
+            class_indent = len(line) - len(line.lstrip())
+            continue
+
+        if current_class and line.strip():
+            indent = len(line) - len(line.lstrip())
+            if indent <= (class_indent or 0):
+                current_class = None
+                class_indent = None
+
+        def_match = _PY_DEF_RE.match(line)
+        if not def_match:
+            continue
+        symbol = def_match.group(1)
+        owner_class = current_class if current_class and (len(line) - len(line.lstrip())) > (class_indent or 0) else None
+        line_end = _find_function_end(source_text, idx, lang=get_language(source_path)) or idx
+        snippet = _slice_lines(source_text, idx, line_end)
+        candidates.append(
+            _build_candidate(
+                source_path,
+                symbol,
+                "method" if owner_class else "function",
+                idx,
+                line_end,
+                snippet,
+                source_text=source_text,
+                test_files=test_files,
+                owner_class=owner_class,
+            )
+        )
+    return candidates
+
+
+def _build_candidate(
+    source_path: str,
+    symbol: str,
+    kind: str,
+    line_start: int,
+    line_end: int,
+    snippet: str,
+    *,
+    source_text: str,
+    test_files: list[dict],
+    owner_class: str | None = None,
+) -> dict:
+    strings = sorted({match.group(1) for match in _STRING_RE.finditer(snippet)})
+    entrypoints = _extract_entrypoints(source_text, symbol)
+    routes = _extract_routes(snippet)
+    guard_patterns = sorted({pattern for route in routes for pattern in route["guard_patterns"]})
+    triggers = sorted({trigger for route in routes for trigger in route["triggers"]})
+    calls = _extract_semantic_calls(snippet)
+    telemetry = _extract_telemetry(calls)
+    observables = _extract_observables(calls)
+    test_seams = _extract_test_seams(calls, observables)
+    domains = _infer_domains(
+        source_path=source_path,
+        symbol=symbol,
+        entrypoints=entrypoints,
+        routes=routes,
+        triggers=triggers,
+        observables=observables,
+    )
+    path_tokens = _normalize_tokens(source_path)
+    symbol_tokens = _normalize_tokens(symbol)
+    owner_tokens = _normalize_tokens(owner_class or "")
+    string_tokens = _normalize_tokens(" ".join(strings))
+    semantic_tokens = _normalize_tokens(
+        " ".join(
+            domains
+            + triggers
+            + guard_patterns
+            + calls
+            + telemetry
+            + observables
+            + [item["name"] for item in entrypoints]
+        )
+    )
+    terms = sorted(set(path_tokens + symbol_tokens + owner_tokens + string_tokens + semantic_tokens))
+    nearby_test_signal_tokens = sorted(set(terms + _normalize_tokens(snippet)))
+    nearby_tests = _nearby_tests_for_source(
+        source_path,
+        symbol,
+        test_files,
+        signal_tokens=nearby_test_signal_tokens,
+        seam_names=[seam["name"] for seam in test_seams],
+        seam_members=[member for seam in test_seams for member in seam["members"]],
+    )
+    qualified_name = f"{owner_class}.{symbol}" if owner_class else symbol
+    return {
+        "source_path": source_path,
+        "symbol": symbol,
+        "qualified_name": qualified_name,
+        "kind": kind,
+        "owner_class": owner_class,
+        "line_start": line_start,
+        "line_end": line_end,
+        "domains": domains,
+        "entrypoints": entrypoints,
+        "triggers": triggers,
+        "guard_patterns": guard_patterns,
+        "routes": routes,
+        "calls": calls,
+        "telemetry": telemetry,
+        "observables": observables,
+        "test_seams": test_seams,
+        "nearby_tests": nearby_tests,
+        "path_tokens": path_tokens,
+        "symbol_tokens": symbol_tokens,
+        "string_tokens": string_tokens,
+        "strings": strings,
+        "terms": terms,
+    }
+
+
+def _slice_lines(source_text: str, line_start: int, line_end: int) -> str:
+    lines = source_text.splitlines()
+    return "\n".join(lines[line_start - 1:line_end])
+
+
+def _build_file_fact(source_path: str, language: str, symbols: list[dict], test_files: list[dict]) -> dict:
+    domains = sorted({domain for symbol in symbols for domain in symbol["domains"]})
+    return {
+        "path": source_path,
+        "language": language,
+        "domains": domains,
+        "symbols": sorted(symbol["symbol"] for symbol in symbols),
+        "nearby_tests": _nearby_tests_for_source(source_path, None, test_files),
+    }
+
+
+def _is_test_file(path: str) -> bool:
+    posix = PurePosixPath(path)
+    name = posix.name
+    return (
+        ".test." in name
+        or name.startswith("test_")
+        or "tests" in posix.parts
+    )
+
+
+def _nearby_tests_for_source(
+    source_path: str,
+    symbol: str | None,
+    test_files: list[dict],
+    *,
+    signal_tokens: list[str] | None = None,
+    seam_names: list[str] | None = None,
+    seam_members: list[str] | None = None,
+) -> list[str]:
+    source_parent = PurePosixPath(source_path).parent
+    source_stem = PurePosixPath(source_path).stem.lower()
+    signal_token_set = {
+        token for token in (signal_tokens or [])
+        if token not in _NEARBY_TEST_COMMON_TOKENS
+    }
+    normalized_seam_names = {
+        seam_name.lower()
+        for seam_name in (seam_names or [])
+        if seam_name.lower() not in _LOW_VALUE_NEARBY_TEST_SEAMS
+    }
+    normalized_seam_members = {
+        member.lower()
+        for member in (seam_members or [])
+        if member.lower() not in {"say", "event", "response", "error", "info", "on"}
+    }
+    tracking_seam_members = {
+        member for member in normalized_seam_members
+        if member.startswith("track")
+    }
+    seam_name_hint_tokens = {
+        token
+        for seam_name in (seam_names or [])
+        for token in _normalize_tokens(seam_name)
+        if token not in _NEARBY_TEST_COMMON_TOKENS and token not in _LOW_VALUE_SEAM_NAME_HINT_TOKENS
+    }
+    seam_member_hint_tokens = {
+        token
+        for seam_member in (seam_members or [])
+        for token in _normalize_tokens(seam_member)
+        if token not in _NEARBY_TEST_COMMON_TOKENS and token not in _LOW_VALUE_SEAM_MEMBER_HINT_TOKENS
+    }
+    scored: list[tuple[int, str]] = []
+    for test_file in test_files:
+        path = test_file["path"]
+        posix = PurePosixPath(path)
+        same_dir = posix.parent == source_parent
+        score = 0
+        name_lower = posix.name.lower()
+        text_lower = test_file["text"].lower()
+        path_tokens = {
+            token for token in _normalize_tokens(path)
+            if token not in _NEARBY_TEST_COMMON_TOKENS
+        }
+        test_tokens = {
+            token for token in _normalize_tokens(f"{path}\n{test_file['text']}")
+            if token not in _NEARBY_TEST_COMMON_TOKENS
+        }
+        cross_module_allowed = same_dir
+        if not same_dir:
+            if normalized_seam_names and any(seam_name in text_lower for seam_name in normalized_seam_names):
+                cross_module_allowed = True
+            elif normalized_seam_members and any(member.lower() in text_lower for member in normalized_seam_members):
+                cross_module_allowed = True
+            elif {"track", "resub"} <= signal_token_set and {"track", "resub"} <= test_tokens:
+                cross_module_allowed = True
+        if not cross_module_allowed:
+            continue
+        if same_dir:
+            score += 10
+        if symbol:
+            symbol_lower = symbol.lower()
+            if symbol_lower in name_lower:
+                score += 100
+            if re.search(rf"\b{re.escape(symbol_lower)}\b", text_lower):
+                score += 25
+        if source_stem and source_stem in name_lower:
+            score += 50
+        if signal_token_set:
+            score += len(signal_token_set & test_tokens) * 2
+            if {"track", "resub"} <= signal_token_set and {"track", "resub"} <= test_tokens:
+                score += 50
+        score += len(seam_name_hint_tokens & path_tokens) * 18
+        score += len(seam_member_hint_tokens & path_tokens) * 30
+        for seam_name in normalized_seam_names:
+            if seam_name and seam_name in text_lower:
+                score += 30
+        for seam_member in normalized_seam_members:
+            if seam_member and seam_member in text_lower:
+                score += 12
+        for tracking_member in tracking_seam_members:
+            if tracking_member and tracking_member in text_lower:
+                score += 100
+        score += 10
+        scored.append((score, path))
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    return [path for _, path in scored]
+
+
+def _extract_entrypoints(source_text: str, symbol: str) -> list[dict]:
+    pattern = re.compile(
+        rf"([A-Za-z_$][\w$]*)\s*\.\s*(on|once)\(\s*(['\"`])([^'\"`\n]{{1,200}})\3\s*,\s*{re.escape(symbol)}\b"
+    )
+    entrypoints = []
+    for match in pattern.finditer(source_text):
+        emitter, method, _, event_name = match.groups()
+        line = source_text[: match.start()].count("\n") + 1
+        entrypoints.append(
+            {
+                "kind": "event",
+                "emitter": f"{emitter}.{method}",
+                "name": event_name,
+                "line": line,
+            }
+        )
+    entrypoints.sort(key=lambda item: (item["emitter"], item["name"], item["line"]))
+    return entrypoints
+
+
+def _extract_guard_patterns(snippet: str) -> list[str]:
+    patterns = set()
+    for method, _, literal in _GUARD_METHOD_RE.findall(snippet):
+        patterns.add(f"{method}('{literal}')")
+    for _, literal in _GUARD_EQUALS_RE.findall(snippet):
+        patterns.add(f"== '{literal}'")
+    return sorted(patterns)
+
+
+def _extract_triggers(guard_patterns: list[str]) -> list[str]:
+    triggers = set()
+    for pattern in guard_patterns:
+        match = re.search(r"'([^']+)'", pattern)
+        if not match:
+            continue
+        literal = match.group(1)
+        if literal.startswith(("@", "!")):
+            triggers.add(literal)
+    return sorted(triggers)
+
+
+def _extract_routes(snippet: str) -> list[dict]:
+    routes = []
+    alias_patterns: dict[str, set[str]] = {}
+    pending_label: str | None = None
+    brace_depth = 0
+
+    for raw_line in snippet.splitlines():
+        line = raw_line.rstrip()
+        stripped = line.strip()
+        current_depth = brace_depth
+
+        if current_depth == 1:
+            comment_match = _ROUTE_COMMENT_RE.match(line)
+            if comment_match:
+                pending_label = comment_match.group(1)
+
+            alias_match = _ALIAS_ASSIGN_RE.match(line)
+            if alias_match:
+                alias_patterns[alias_match.group(1)] = set(_extract_guard_patterns(alias_match.group(2)))
+
+            if_match = _IF_CONDITION_RE.match(line)
+            if if_match:
+                condition = if_match.group(1).strip()
+                guard_patterns = _resolve_condition_guard_patterns(condition, alias_patterns)
+                triggers = _extract_triggers(guard_patterns)
+                if guard_patterns or pending_label:
+                    routes.append(
+                        {
+                            "condition": condition,
+                            "guard_patterns": sorted(guard_patterns),
+                            "label": pending_label,
+                            "triggers": triggers,
+                        }
+                    )
+                pending_label = None
+
+        brace_depth += line.count("{") - line.count("}")
+
+    return routes
+
+
+def _resolve_condition_guard_patterns(condition: str, alias_patterns: dict[str, set[str]]) -> set[str]:
+    patterns = set(_extract_guard_patterns(condition))
+    for identifier in _IDENTIFIER_RE.findall(condition):
+        patterns.update(alias_patterns.get(identifier, set()))
+    return patterns
+
+
+def _extract_semantic_calls(snippet: str) -> list[str]:
+    calls = set()
+    for line in snippet.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if _looks_like_definition_line(stripped):
+            continue
+        for name in _CALL_NAME_RE.findall(stripped):
+            if _is_semantic_call(name):
+                calls.add(name)
+    return sorted(calls)
+
+
+def _looks_like_definition_line(stripped_line: str) -> bool:
+    if _TS_FUNCTION_RE.match(stripped_line) or _TS_ARROW_RE.match(stripped_line) or _PY_DEF_RE.match(stripped_line):
+        return True
+    if stripped_line.startswith(("if ", "for ", "while ", "switch ", "catch ")):
+        return False
+    if _TS_METHOD_RE.match(stripped_line) and ("{" in stripped_line or stripped_line.endswith("(")):
+        return True
+    return False
+
+
+def _is_semantic_call(name: str) -> bool:
+    if name in {"setInterval", "clearInterval"}:
+        return True
+    if name in {"client.say", "logger.event", "logger.response", "logger.error", "log.error", "log.info"}:
+        return True
+    if name in {
+        "aiService.askWithSearch",
+        "searchService.search",
+        "twitchService.createClip",
+        "twitchService.getBroadcasterId",
+        "twitchService.getClipUrl",
+        "discordService.sendClip",
+    }:
+        return True
+    if name.startswith("streamSummaryManager.track"):
+        return True
+    if name in {"this.executeAction", "this.actionTimers.clear", "this.actionTimers.set", "this.actionTimers.values"}:
+        return True
+    return False
+
+
+def _extract_observables(calls: list[str]) -> list[str]:
+    return [
+        call
+        for call in calls
+        if call != "this.actionTimers.values" and call not in _LOW_VALUE_LOGGING_CALLS
+    ]
+
+
+def _extract_telemetry(calls: list[str]) -> list[str]:
+    return [call for call in calls if call in _LOW_VALUE_LOGGING_CALLS]
+
+
+def _extract_test_seams(calls: list[str], observables: list[str]) -> list[dict]:
+    grouped: dict[tuple[str, str], set[str]] = {}
+    standalone: dict[tuple[str, str], None] = {}
+
+    seam_candidates = _filter_test_seam_candidates(calls, observables)
+    for name in seam_candidates:
+        if "." not in name:
+            standalone[("function", name)] = None
+            continue
+
+        parts = name.split(".")
+        if parts[0] == "this":
+            if len(parts) == 2:
+                standalone[("instance_method", name)] = None
+                continue
+            seam_name = ".".join(parts[:2])
+            grouped.setdefault(("instance_object", seam_name), set()).add(parts[-1])
+            continue
+
+        seam_name = parts[0]
+        grouped.setdefault(("module_object", seam_name), set()).add(parts[-1])
+
+    seams = []
+    for (kind, name), members in grouped.items():
+        seams.append(
+            {
+                "kind": kind,
+                "name": name,
+                "members": sorted(members),
+            }
+        )
+    for kind, name in standalone:
+        seams.append(
+            {
+                "kind": kind,
+                "name": name,
+                "members": [],
+            }
+        )
+    seams.sort(key=lambda item: item["name"])
+    return seams
+
+
+def _filter_test_seam_candidates(calls: list[str], observables: list[str]) -> list[str]:
+    unique = sorted(set(calls + observables))
+    high_value = [name for name in unique if name not in _LOW_VALUE_LOGGING_CALLS]
+    return high_value or unique
+
+
+def _infer_domains(
+    *,
+    source_path: str,
+    symbol: str,
+    entrypoints: list[dict],
+    routes: list[dict],
+    triggers: list[str],
+    observables: list[str],
+) -> list[str]:
+    domains = set()
+    parts = set(PurePosixPath(source_path).parts)
+    if "twitch" in parts:
+        domains.add("twitch")
+    if "roles" in parts:
+        domains.add("roles")
+
+    event_names = {item["name"] for item in entrypoints}
+    if "message" in event_names or any(trigger.startswith(("@", "!")) for trigger in triggers):
+        domains.add("twitch.chat")
+    if event_names & {"sub", "resub", "subgift", "submysterygift", "subscription"}:
+        domains.add("twitch.subscriptions")
+    if (
+        "roles" in parts
+        and (
+            "setInterval" in observables
+            or "clearInterval" in observables
+            or symbol == "startActionTimers"
+        )
+    ):
+        domains.add("roles.actions")
+
+    if "twitch.chat" in domains:
+        route_triggers = {trigger for route in routes for trigger in route["triggers"]}
+        if any(trigger.startswith("@") for trigger in route_triggers):
+            domains.add("twitch.chat.mention-routing")
+        if any(trigger.startswith("!") for trigger in route_triggers):
+            domains.add("twitch.chat.command-routing")
+        if (
+            "searchService.search" in observables
+            or "aiService.askWithSearch" in observables
+            or "streamSummaryManager.trackSearch" in observables
+        ):
+            domains.add("twitch.chat.search")
+        if (
+            "twitchService.createClip" in observables
+            or "streamSummaryManager.trackClip" in observables
+            or "discordService.sendClip" in observables
+        ):
+            domains.add("twitch.chat.clip")
+
+    if "twitch.subscriptions" in domains:
+        if "resub" in event_names:
+            domains.add("twitch.subscriptions.resub")
+        if "sub" in event_names:
+            domains.add("twitch.subscriptions.sub")
+        if event_names & {"subgift", "submysterygift"}:
+            domains.add("twitch.subscriptions.gifts")
+
+    if "roles.actions" in domains:
+        if "setInterval" in observables or "clearInterval" in observables:
+            domains.add("roles.actions.timer-management")
+
+    if "twitch" in domains and "twitch.chat" not in domains:
+        if (
+            "searchService.search" in observables
+            or "aiService.askWithSearch" in observables
+            or "streamSummaryManager.trackSearch" in observables
+            or "twitchService.createClip" in observables
+            or "streamSummaryManager.trackClip" in observables
+            or "discordService.sendClip" in observables
+            or "client.say" in observables
+        ):
+            domains.add("twitch.chat")
+        if (
+            "searchService.search" in observables
+            or "aiService.askWithSearch" in observables
+            or "streamSummaryManager.trackSearch" in observables
+        ):
+            domains.add("twitch.chat.search")
+        if (
+            "twitchService.createClip" in observables
+            or "streamSummaryManager.trackClip" in observables
+            or "discordService.sendClip" in observables
+        ):
+            domains.add("twitch.chat.clip")
+
+    return sorted(domains)
+
+
+def _score_candidate(candidate: dict, issue_tokens: set[str]) -> int:
+    path_overlap = len(issue_tokens & set(candidate["path_tokens"]))
+    symbol_overlap = len(issue_tokens & set(candidate["symbol_tokens"]))
+    string_overlap = len(issue_tokens & set(candidate["string_tokens"]))
+    term_overlap = len(issue_tokens & set(candidate["terms"]))
+    return (path_overlap * 3) + (symbol_overlap * 5) + (string_overlap * 6) + term_overlap
+
+
+def _normalize_tokens(text: str) -> list[str]:
+    text = _split_camel_case(text)
+    text = _canonicalize_text(text)
+    raw_tokens = _WORD_RE.findall(text.lower())
+    tokens = []
+    for token in raw_tokens:
+        token = token.strip("@!-_")
+        if not token or token in _STOPWORDS:
+            continue
+        if len(token) == 1 and not token.isdigit():
+            continue
+        tokens.append(token)
+    return tokens
+
+
+def _split_camel_case(text: str) -> str:
+    return re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", text)
+
+
+def _canonicalize_text(text: str) -> str:
+    normalized = unicodedata.normalize("NFKD", text)
+    return "".join(ch for ch in normalized if not unicodedata.combining(ch))
