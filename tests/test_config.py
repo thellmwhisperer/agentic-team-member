@@ -52,6 +52,19 @@ class TestProductionConfig:
             "prompt must tell the agent to write a NARROW regression test, not a mini-suite"
         )
 
+    def test_system_prompt_bounds_extra_tests_to_grounded_evidence(self):
+        """Runs should start with the reported regression, then add more cases
+        only when the issue/code/types give evidence. This keeps useful edge
+        coverage without letting the model invent a broad suite."""
+        prod = CONFIG_DIR / "agent.toml"
+        cfg = load_config(prod)
+        system = cfg["prompt"]["system"].lower()
+        assert "one focused regression test first" in system
+        assert "contrastive fixtures" in system
+        assert "add up to two extra tests only when grounded" in system
+        assert "do not invent domain edge cases" in system
+        assert "do not invent the callback signature" in system
+
 
 class TestLoadConfig:
     """load_config reads agent.toml + tools.json into a unified config dict."""

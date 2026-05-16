@@ -2,6 +2,7 @@
 """Agentic TDD runner — local LLM fixes bugs with tests."""
 
 import argparse
+import difflib
 import json
 import os
 import re
@@ -31,7 +32,7 @@ sys.stderr.reconfigure(line_buffering=True)
 # --- Config (loaded from TOML, overridden by env vars / CLI args) ---
 _CONFIG = None  # populated by main()
 WORKDIR = os.environ.get("AGENT_WORKDIR", os.getcwd())
-LOG_DIR = os.environ.get("AGENT_LOG_DIR", os.getcwd())
+LOG_DIR = os.environ.get("AGENT_LOG_DIR") or os.environ.get("ATM_LOG_DIR") or os.getcwd()
 _last_run_exit_code: int | None = None
 _file_read_cache: dict[Path, int] = {}  # keyed by st_mtime_ns for deterministic invalidation
 
@@ -463,6 +464,9 @@ def _reactive_typecheck_feedback(path: str) -> str:
     sample = "\n".join(f"  {ln}" for ln in lines[:30])
     if not sample:
         sample = f"  {raw[:500]}"
+    ownership_hint = _typecheck_ownership_hint("typecheck", raw, [path])
+    if ownership_hint:
+        sample = f"{sample}\n  {ownership_hint}"
     return f"\n\n[Reactive typecheck] {n_errors} errors:\n{sample}"
 
 
@@ -612,12 +616,31 @@ def find_test_file(hint: str | None = None) -> str | None:
     return None
 
 
-def verify_red_green(test_file: str) -> tuple[bool, str]:
+def _mechanical_edit_paths(mechanical_edits: list[dict] | None, workdir: str) -> list[str]:
+    """Return unique repo-relative paths touched by mechanical edits."""
+    paths: list[str] = []
+    seen: set[str] = set()
+    for edit in mechanical_edits or []:
+        path = edit.get("path")
+        if not path:
+            continue
+        try:
+            resolved = _resolve_repo_path(path, workdir)
+        except ValueError:
+            continue
+        rel = os.path.relpath(resolved, workdir)
+        if rel not in seen:
+            seen.add(rel)
+            paths.append(rel)
+    return paths
+
+
+def verify_red_green(test_file: str, mechanical_edits: list[dict] | None = None) -> tuple[bool, str]:
     """Verify red-green: test fails without fix, passes with fix.
 
     1. Stash current changes (with fix)
-    2. Run test — should FAIL (red)
-    3. Restore fix from stash
+    2. Re-apply deterministic test seams, then run test — should FAIL (red)
+    3. Restore files touched by seams to HEAD, then restore fix from stash
     4. Run test — should PASS (green)
     """
     from agentic_tdd_runner.languages import get_language
@@ -646,6 +669,7 @@ def verify_red_green(test_file: str) -> tuple[bool, str]:
 
     # Stash all changes including untracked (reverts source fix + new files)
     subprocess.run(["git", "stash", "--include-untracked"], cwd=WORKDIR, capture_output=True)
+    mechanical_paths = _mechanical_edit_paths(mechanical_edits, WORKDIR)
 
     run_argv = shlex.split(run_cmd)
 
@@ -665,6 +689,10 @@ def verify_red_green(test_file: str) -> tuple[bool, str]:
         if test_backup:
             os.makedirs(os.path.dirname(test_full), exist_ok=True)
             shutil.copy2(test_backup, test_full)
+
+        if mechanical_edits:
+            applied = apply_mechanical_edits(mechanical_edits, WORKDIR)
+            emit(f"  [RED] Re-applied {applied} mechanical edit(s)")
 
         emit("  [RED] Running test WITHOUT fix...")
         try:
@@ -696,6 +724,12 @@ def verify_red_green(test_file: str) -> tuple[bool, str]:
                 os.remove(test_full)
             if os.path.isfile(test_backup):
                 os.remove(test_backup)
+        if mechanical_paths:
+            subprocess.run(
+                ["git", "checkout", "--", *mechanical_paths],
+                cwd=WORKDIR,
+                capture_output=True,
+            )
         subprocess.run(["git", "stash", "pop"], cwd=WORKDIR, capture_output=True)
 
     emit("  [GREEN] Running test WITH fix...")
@@ -955,6 +989,9 @@ def run_quality_checks(test_file: str) -> tuple[bool, str]:
                 sample = "\n".join(f"  {ln}" for ln in lines[:30])
                 if not sample:
                     sample = f"  {raw[:500]}"
+                ownership_hint = _typecheck_ownership_hint(check["name"], raw, changed)
+                if ownership_hint:
+                    sample = f"{sample}\n  {ownership_hint}"
                 failures.append(f"[{check['name']}] {n_errors} errors:\n{sample}")
         except subprocess.TimeoutExpired:
             failures.append(f"[{check['name']}] TIMEOUT: command timed out")
@@ -1010,6 +1047,9 @@ def run_quality_checks(test_file: str) -> tuple[bool, str]:
                 f"[Duplicated setup] {f}: {len(report_lines)} repeated lines. "
                 f"Move to beforeEach (TS) or fixture (Python): {id_list}"
             )
+
+    for finding in _detect_side_effect_shape_changes(changed):
+        failures.append(finding)
 
     if failures:
         details = "\n\n".join(failures)
@@ -1067,18 +1107,148 @@ def _partition_duplicated_test_lines(file_text: str) -> tuple[list[str], list[st
 
     lines = [ln.strip() for ln in file_text.splitlines() if ln.strip() and len(ln.strip()) > 20]
     counts = Counter(lines)
-    dupes = [line for line, n in counts.items() if n >= 3]
 
     setup_dupes: list[str] = []
     ambiguous_dupes: list[str] = []
-    for line in dupes:
+    for line, count in counts.items():
+        if count < 2:
+            continue
         if _is_obvious_assert_line(line) or _is_obvious_act_line(line):
             continue
         if _is_obvious_setup_line(line):
             setup_dupes.append(line)
-        else:
+        elif count >= 3:
             ambiguous_dupes.append(line)
     return setup_dupes, ambiguous_dupes
+
+
+def _typecheck_ownership_hint(check_name: str, raw_output: str, changed_files: list[str]) -> str | None:
+    if check_name != "typecheck" or not raw_output:
+        return None
+    changed_set = {PurePosixPath(path).as_posix() for path in changed_files}
+    changed_names = {PurePosixPath(path).name for path in changed_files}
+    for match in re.finditer(r"([^\s:(]+?\.(?:tsx?|jsx?|py))\((\d+),(\d+)\):\s*error\b", raw_output):
+        path = PurePosixPath(match.group(1)).as_posix()
+        if path in changed_set or PurePosixPath(path).name in changed_names:
+            return (
+                "Ownership: this typecheck error is in a changed file, so it belongs "
+                "to this fix. Do not classify it as unrelated."
+            )
+    return None
+
+
+_SIDE_EFFECT_CALLEE_MARKERS = (
+    "analytics",
+    "dispatch",
+    "emit",
+    "event",
+    "log",
+    "logger",
+    "metric",
+    "notify",
+    "publish",
+    "record",
+    "report",
+    "send",
+    "telemetry",
+    "track",
+)
+
+
+def _extract_side_effect_call(line: str) -> tuple[str, tuple[str, ...]] | None:
+    callee_matches = list(re.finditer(r"\b([A-Za-z_$]\w*(?:\.[A-Za-z_$]\w*)*)\s*\(", line))
+    if not callee_matches:
+        return None
+    object_match = re.search(r"\{([^{}]+)\}", line)
+    if not object_match:
+        return None
+    keys = _extract_object_literal_keys(object_match.group(1))
+    if not keys:
+        return None
+
+    for match in callee_matches:
+        callee = match.group(1)
+        lowered = callee.lower()
+        parts = re.split(r"[._]", lowered)
+        if any(marker in lowered or marker in parts for marker in _SIDE_EFFECT_CALLEE_MARKERS):
+            return callee, keys
+    return None
+
+
+def _extract_object_literal_keys(body: str) -> tuple[str, ...]:
+    keys: list[str] = []
+    for raw_part in body.split(","):
+        part = raw_part.strip()
+        if not part or part.startswith("..."):
+            continue
+        if ":" in part:
+            key = part.split(":", 1)[0].strip()
+        else:
+            match = re.match(r"([A-Za-z_$]\w*)\b", part)
+            if not match:
+                continue
+            key = match.group(1)
+        key = key.strip("'\"")
+        if re.match(r"^[A-Za-z_$]\w*$", key):
+            keys.append(key)
+    return tuple(dict.fromkeys(keys))
+
+
+def _detect_side_effect_shape_changes(changed_files: list[str]) -> list[str]:
+    findings: list[str] = []
+    for file_path in changed_files:
+        suffix = Path(file_path).suffix.lower()
+        if suffix not in {".ts", ".tsx", ".js", ".jsx"}:
+            continue
+        if _is_test_file_path(file_path):
+            continue
+
+        before_result = subprocess.run(
+            ["git", "show", f"HEAD:{file_path}"],
+            cwd=WORKDIR,
+            capture_output=True,
+            text=True,
+        )
+        if before_result.returncode != 0:
+            continue
+        full_path = Path(WORKDIR) / file_path
+        try:
+            after_text = full_path.read_text(errors="replace")
+        except OSError:
+            continue
+
+        before_lines = before_result.stdout.splitlines()
+        after_lines = after_text.splitlines()
+        matcher = difflib.SequenceMatcher(a=before_lines, b=after_lines, autojunk=False)
+        for tag, old_start, old_end, new_start, new_end in matcher.get_opcodes():
+            if tag == "equal":
+                continue
+            removed = before_lines[old_start:old_end]
+            added = after_lines[new_start:new_end]
+            for old_line in removed:
+                old_call = _extract_side_effect_call(old_line)
+                if not old_call:
+                    continue
+                old_callee, old_keys = old_call
+                for offset, new_line in enumerate(added):
+                    new_call = _extract_side_effect_call(new_line)
+                    if not new_call:
+                        continue
+                    new_callee, new_keys = new_call
+                    if old_callee != new_callee or set(old_keys) == set(new_keys):
+                        continue
+                    old_display = ", ".join(old_keys)
+                    new_display = ", ".join(new_keys)
+                    line_no = new_start + offset + 1
+                    findings.append(
+                        f"[Side-effect shape] {file_path}:{line_no} {old_callee} object keys "
+                        f"changed from {{{old_display}}} to {{{new_display}}}. Preserve existing "
+                        "payload keys for logging/tracking/events unless the issue explicitly "
+                        "requires a public contract change; use `oldKey: newValue` when only the "
+                        "value changed."
+                    )
+                    break
+    return findings
 
 
 def _build_duplicated_setup_judge_prompt(file_path: str, file_text: str, duplicated_lines: list[str]) -> str:
@@ -1192,6 +1362,34 @@ def _parse_pr_content(content: str) -> tuple[str | None, str | None]:
     return title, body
 
 
+def _build_pr_fallback(test_file: str, step: int) -> tuple[str, str]:
+    """Build deterministic PR content when LLM PR writing is unavailable."""
+    changed = _get_changed_files()
+    stem = Path(test_file).name
+    for suffix in (".test.ts", ".test.tsx", ".test.js", ".test.jsx", "_test.py", ".py"):
+        if stem.endswith(suffix):
+            stem = stem[: -len(suffix)]
+            break
+    title_subject = re.sub(r"[^A-Za-z0-9]+", " ", stem).strip().lower() or f"step {step}"
+    title = f"fix: update {title_subject} behavior"[:70]
+    changed_section = "\n".join(f"- `{path}`" for path in changed) or "- No changed files detected"
+    body = textwrap.dedent(
+        f"""\
+        ## Summary
+        - Fix the reported behavior with a focused regression test.
+        - Keep the change limited to the files touched by the agent run.
+
+        ## Changed files
+        {changed_section}
+
+        ## Verification
+        - Red/green verification passed.
+        - Harness quality checks passed.
+        """
+    ).strip()
+    return title, body
+
+
 def _resolve_pr_base_ref(base_branch: str, command_timeout: int) -> str | None:
     """Resolve the git ref the PR should be based on, preferring origin/<base>."""
     for ref in (f"origin/{base_branch}", base_branch):
@@ -1277,15 +1475,15 @@ def create_pr(messages: list, last_msg: dict, test_file: str, step: int) -> str 
     try:
         response = chat(pr_messages, include_tools=False)
         content = response["choices"][0]["message"].get("content", "")
+        title, body = _parse_pr_content(content)
     except Exception as e:
-        emit(f"  [PR] LLM failed to generate PR content: {e}")
-        return None
-
-    title, body = _parse_pr_content(content)
-    if not title:
-        title = f"fix: agent fix at step {step}"
-    if not body:
-        body = "Automated fix by ATM agent."
+        emit(f"  [PR] LLM failed to generate PR content, using deterministic fallback: {e}")
+        log("pr_content_fallback", {"reason": str(e)})
+        title, body = _build_pr_fallback(test_file, step)
+    if not title or not body:
+        emit("  [PR] LLM returned incomplete PR content, using deterministic fallback")
+        log("pr_content_fallback", {"reason": "incomplete_content"})
+        title, body = _build_pr_fallback(test_file, step)
 
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     branch_name = f"{prefix}{timestamp}"
@@ -1391,20 +1589,130 @@ def _is_test_pass(name: str, args: dict) -> bool:
 
 def _default_config_path():
     """Find config/agent.toml relative to the package."""
+    env_config = os.environ.get("AGENT_CONFIG") or os.environ.get("ATM_CONFIG")
+    if env_config:
+        return env_config
     pkg = Path(__file__).parent.parent / "config" / "agent.toml"
     if pkg.exists():
         return str(pkg)
     return None
 
 
+def _default_log_dir():
+    return os.environ.get("AGENT_LOG_DIR") or os.environ.get("ATM_LOG_DIR") or LOG_DIR
+
+
+def _github_repo_slug_from_remote_url(remote_url: str) -> str | None:
+    remote_url = remote_url.strip()
+    patterns = [
+        r"^https://github\.com/([^/\s]+/[^/\s]+?)(?:\.git)?/?$",
+        r"^git@github\.com:([^/\s]+/[^/\s]+?)(?:\.git)?$",
+        r"^ssh://git@github\.com/([^/\s]+/[^/\s]+?)(?:\.git)?/?$",
+    ]
+    for pattern in patterns:
+        match = re.match(pattern, remote_url)
+        if match:
+            return match.group(1)
+    return None
+
+
+def _github_repo_slug_from_worktree(repo_path: str) -> str:
+    result = subprocess.run(
+        ["git", "remote", "get-url", "origin"],
+        cwd=repo_path,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if result.returncode != 0:
+        raise SystemExit(f"Could not resolve origin remote for GitHub issue lookup: {result.stderr.strip()}")
+    slug = _github_repo_slug_from_remote_url(result.stdout)
+    if not slug:
+        raise SystemExit(f"Origin remote is not a supported GitHub URL: {result.stdout.strip()}")
+    return slug
+
+
+def _load_issue_text(args, repo_path: str) -> str:
+    issue_number = getattr(args, "issue_number", None)
+    if issue_number:
+        repo_slug = getattr(args, "github_repo", None) or _github_repo_slug_from_worktree(repo_path)
+        result = subprocess.run(
+            ["gh", "issue", "view", str(issue_number), "--repo", repo_slug, "--json", "title,body"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        if result.returncode != 0:
+            raise SystemExit(f"Could not load GitHub issue #{issue_number}: {result.stderr.strip()}")
+        try:
+            payload = json.loads(result.stdout)
+        except ValueError as exc:
+            raise SystemExit(f"Could not parse GitHub issue #{issue_number} JSON") from exc
+        title = str(payload.get("title") or "").strip()
+        body = str(payload.get("body") or "").strip()
+        return f"{title}\n\n{body}".strip()
+
+    issue_text = getattr(args, "issue", None)
+    if not issue_text:
+        raise SystemExit("Pass an issue path/text or --issue-number")
+    if os.path.isfile(issue_text):
+        with open(issue_text) as f:
+            return f.read()
+    return issue_text
+
+
+def _environment_prep_enabled() -> bool:
+    return bool(((_CONFIG or {}).get("environment", {}) or {}).get("enabled", False))
+
+
+def _discovery_enabled() -> bool:
+    return bool(((_CONFIG or {}).get("discovery", {}) or {}).get("enabled", False))
+
+
+def _format_environment_report(report) -> str:
+    parts = [f"project={report.project_type}"]
+    if report.package_manager:
+        parts.append(f"package_manager={report.package_manager}")
+    if report.install_command:
+        parts.append(f"install={' '.join(report.install_command)}")
+    if report.preflight_commands:
+        commands = [" ".join(command) for command in report.preflight_commands]
+        parts.append(f"preflight={commands}")
+    return ", ".join(parts)
+
+
+def prepare_target_environment() -> None:
+    """Run deterministic repo setup before discovery/cookbook/model calls."""
+    if not _environment_prep_enabled():
+        return
+
+    from agentic_tdd_runner.environment import EnvironmentPrepError, prepare_environment
+
+    emit("[ENV] Preparing target environment")
+    try:
+        report = prepare_environment(WORKDIR, _CONFIG)
+    except EnvironmentPrepError as exc:
+        emit(f"[ENV] FAILED: {exc}")
+        log("environment_failed", exc.report.to_log_dict())
+        raise SystemExit(f"Target environment is not ready: {exc}") from exc
+
+    emit(f"[ENV] Ready: {_format_environment_report(report)}")
+    log("environment_ready", report.to_log_dict())
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Agentic TDD runner — local LLM fixes bugs with tests")
-    parser.add_argument("issue", help="Issue text, or path to a file containing the issue description")
+    parser.add_argument("issue", nargs="?", help="Issue text, or path to a file containing the issue description")
+    parser.add_argument("--issue-number", type=int, help="GitHub issue number to load from the target repo")
+    parser.add_argument("--github-repo", type=str, help="GitHub repo slug for --issue-number, e.g. owner/repo")
+    parser.add_argument("--repo", type=str, help="Existing git repo to materialize into an isolated run worktree")
+    parser.add_argument("--base-ref", type=str, default="main", help="Git ref used when creating a run worktree")
+    parser.add_argument("--run-root", type=str, help="Directory for generated run worktrees (default: REPO/.worktree)")
     parser.add_argument("--source", type=str, help="Source file path relative to workdir (e.g. src/twitch/client.ts)")
     parser.add_argument("--symbol", type=str, help="Target function/method name (e.g. handleResub)")
-    parser.add_argument("--workdir", type=str, default=WORKDIR, help="Project root directory (default: cwd)")
+    parser.add_argument("--workdir", type=str, help="Project root directory, or destination when --repo is used")
     parser.add_argument("--config", type=str, default=_default_config_path(), help="Path to agent.toml config file")
-    parser.add_argument("--log-dir", type=str, default=LOG_DIR, help="Directory for JSONL logs (default: cwd)")
+    parser.add_argument("--log-dir", type=str, default=_default_log_dir(), help="Directory for JSONL logs (default: cwd)")
     return parser.parse_args()
 
 
@@ -1415,24 +1723,51 @@ def main():
     from agentic_tdd_runner.config import load_config
     _CONFIG = load_config(args.config)
 
-    WORKDIR = args.workdir
+    worktree_report = None
+    repo = getattr(args, "repo", None)
+    if repo:
+        from agentic_tdd_runner.environment import WorktreePrepError, prepare_run_worktree
+
+        try:
+            worktree_report = prepare_run_worktree(
+                repo,
+                workdir=getattr(args, "workdir", None),
+                base_ref=getattr(args, "base_ref", "main"),
+                run_root=getattr(args, "run_root", None),
+            )
+        except WorktreePrepError as exc:
+            raise SystemExit(f"Could not prepare run worktree: {exc}") from exc
+        WORKDIR = worktree_report.workdir
+    else:
+        WORKDIR = getattr(args, "workdir", None) or WORKDIR
     LOG_DIR = args.log_dir
 
     log_path = init_log()
+    if worktree_report:
+        emit(f"[WORKTREE] Ready: {worktree_report.workdir}")
+        log("worktree_ready", worktree_report.to_log_dict())
 
-    # Issue can be inline text or a path to a file
-    issue_text = args.issue
-    if os.path.isfile(issue_text):
-        with open(issue_text) as f:
-            issue_text = f.read()
+    issue_lookup_repo = repo or WORKDIR
+    issue_text = _load_issue_text(args, issue_lookup_repo)
 
-    source_path = args.source
-    symbol = args.symbol
-    if not (source_path and symbol):
+    from agentic_tdd_runner.issue_intake import parse_issue_contract
+    issue_contract = parse_issue_contract(issue_text)
+    if issue_contract.rejected:
+        emit(f"[ISSUE] REJECTED: {issue_contract.rejection_reason}")
+        log("issue_rejected", issue_contract.to_log_dict())
+        raise SystemExit(f"Issue rejected: {issue_contract.rejection_reason}")
+    log("issue_intake", issue_contract.to_log_dict())
+
+    prepare_target_environment()
+
+    issue_text_for_model = issue_contract.model_text
+    source_path = args.source or issue_contract.source_hint
+    symbol = args.symbol or issue_contract.symbol_hint
+    if not (source_path and symbol) and _discovery_enabled():
         from agentic_tdd_runner.discovery import discover_target, load_or_build_semantic_index
 
         semantic_index = load_or_build_semantic_index(project_root=WORKDIR)
-        discovered = discover_target(issue_text=issue_text, project_root=WORKDIR, index=semantic_index)
+        discovered = discover_target(issue_text=issue_text_for_model, project_root=WORKDIR, index=semantic_index)
         if not discovered:
             emit("[DISCOVERY] Could not determine source/symbol from issue")
             log("discovery_failed", {"reason": "no_target", "candidates": len(semantic_index.get("candidates", []))})
@@ -1487,7 +1822,7 @@ def main():
             f"Read {episode['source_file']} and understand the bug below. "
             f"Focus on the function `{episode['target_symbol']}`{line_hint}. "
             f"Then create a failing test in {episode['test_file']} that reproduces it.\n\n"
-            f"Bug:\n{issue_text}"
+            f"Bug:\n{issue_text_for_model}"
         )
         messages = [
             {"role": "system", "content": system_prompt},
@@ -1496,7 +1831,7 @@ def main():
     else:
         messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"Fix this bug:\n\n{issue_text}"},
+            {"role": "user", "content": f"Fix this bug:\n\n{issue_text_for_model}"},
         ]
 
     emit(f"{'='*60}")
@@ -1526,7 +1861,11 @@ def main():
             messages.append({"role": "user", "content": _CONFIG["prompt"]["no_test_found"]})
             return "no_test"
 
-        verified, verify_msg = verify_red_green(test_file)
+        mechanical_edits = episode.get("pre_test_source_edits", []) if episode else []
+        if mechanical_edits:
+            verified, verify_msg = verify_red_green(test_file, mechanical_edits)
+        else:
+            verified, verify_msg = verify_red_green(test_file)
         emit(f"\n  [VERIFY] {verify_msg}")
         log("verify_result", {"verified": verified, "message": verify_msg, "test_file": test_file})
 
@@ -1571,7 +1910,11 @@ def main():
 
         if _CONFIG.get("quality", {}).get("enabled", False):
             emit("\n=== POST-QUALITY VERIFICATION ===")
-            verified, verify_msg = verify_red_green(test_file)
+            mechanical_edits = episode.get("pre_test_source_edits", []) if episode else []
+            if mechanical_edits:
+                verified, verify_msg = verify_red_green(test_file, mechanical_edits)
+            else:
+                verified, verify_msg = verify_red_green(test_file)
             emit(f"  [RE-VERIFY] {verify_msg}")
             log("post_quality_verify_result", {
                 "verified": verified, "message": verify_msg, "test_file": test_file,
