@@ -6,19 +6,34 @@ Point a local LLM at a bug. Get back a fix with tests, a verified red-green, and
 
 Given a GitHub issue and a repository, ATM:
 
-1. **Generates a cookbook** — deterministic static analysis of the target function: imports, dependency graph, mock strategies, test scaffolds. No LLM involved.
-2. **Runs a phased agent loop** — a local model (Qwen 3.5 27B) follows a two-phase TDD cycle: first write a failing test, then fix the source. Tools: read, edit, create, run.
-3. **Verifies red-green** — reverts the fix and runs the test (must fail), restores and runs again (must pass). If both pass, the fix is real.
-4. **Runs quality checks** — typecheck, lint, format, and forbidden pattern checks. Autofixes what it can, feeds remaining issues back to the model.
-5. **Opens a PR** — when `[pr].enabled = true`, ATM commits the fix and test, pushes to a branch, and creates a pull request via `gh`.
+1. **Prepares the target environment** — checks the repo worktree, detects the project stack, installs missing dependencies, and runs deterministic preflight commands before any LLM call.
+2. **Discovers the target** — optional deterministic issue-only discovery chooses `source` + `symbol` when they are not supplied.
+3. **Generates a cookbook** — deterministic static analysis of the target function: imports, dependency graph, mock strategies, test scaffolds. No LLM involved.
+4. **Runs a phased agent loop** — a local model (Qwen 3.5 27B) follows a two-phase TDD cycle: first write a failing test, then fix the source. Tools: read, edit, create, run.
+5. **Verifies red-green** — reverts the fix and runs the test (must fail), restores and runs again (must pass). If both pass, the fix is real.
+6. **Runs quality checks** — typecheck, lint, format, and forbidden pattern checks. Autofixes what it can, feeds remaining issues back to the model.
+7. **Opens a PR** — when `[pr].enabled = true`, ATM commits the fix and test, pushes to a branch, and creates a pull request via `gh`.
 
 ## Architecture
 
 ```text
 ┌─────────────────────────────────────────────────────┐
 │              python -m agentic_tdd_runner.agent       │
-│   repo + issue + source + symbol + model endpoint    │
+│      repo + issue + optional target + model endpoint │
 └──────────────┬──────────────────────────────────────┘
+               │
+               ▼
+┌──────────────────────────┐
+│   Environment Prep       │  deterministic, no LLM
+│   git status + install   │  package manager detection,
+│   + preflight commands   │  fail before model if not ready
+└──────────────┬───────────┘
+               │
+               ▼
+┌──────────────────────────┐
+│   Target Discovery       │  optional, deterministic
+│   discovery.py           │  issue text → source + symbol
+└──────────────┬───────────┘
                │
                ▼
 ┌──────────────────────────┐
@@ -217,6 +232,16 @@ pr_create = 120  # timeout for git push + gh pr create when PR automation is ena
 command = "bun test"
 test_file_patterns = ["*.test.ts", "*.test.tsx", "test_*.py"]
 
+[environment]
+enabled = true
+install = "auto"      # auto | always | never
+require_clean = true
+run_typecheck = true
+timeout = 300
+
+[discovery]
+enabled = true
+
 [quality]
 enabled = true
 compact_threshold_ratio = 0.85  # only compact when context is near limit
@@ -250,12 +275,21 @@ llama-server \
 
 # Run the agent
 python3.14 -m agentic_tdd_runner.agent \
-  --source src/twitch/client.ts \
-  --symbol handleResub \
-  --workdir /path/to/repo \
-  --config config/agent-r35-27b-pill.toml \
-  --log-dir /tmp \
+  --repo /path/to/repo \
   /path/to/issue.md
+```
+
+When `--repo` is supplied, ATM creates a detached run worktree under
+`REPO/.worktree/` by default, then runs environment prep there. That keeps all
+run filesystem access inside the target project. You can still pass `--run-root`
+as an explicit override, and you can pass `--source` + `--symbol` to pin the
+target or omit them when `[discovery].enabled = true`.
+
+Runtime defaults can come from `.env` in the current directory:
+
+```bash
+AGENT_CONFIG=config/agent.toml
+AGENT_LOG_DIR=/tmp
 ```
 
 ## Status

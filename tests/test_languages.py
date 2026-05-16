@@ -57,6 +57,20 @@ class TestTypeScriptPlugin:
         assert "any" not in result
         assert "tmi.Client" in result
 
+    def test_seam_setter_uses_pick_for_observed_members(self):
+        lang = get_language("file.ts")
+        assignment = {
+            "kind": "let",
+            "type_annotation": "tmi.Client",
+            "observed_members": ["say"],
+            "rhs": "undefined",
+            "line": "let client: tmi.Client;",
+        }
+        result = lang.render_seam_setter("client", assignment)
+        assert "any" not in result
+        assert "value: Pick<tmi.Client, 'say'>" in result
+        assert "client = value as tmi.Client;" in result
+
     def test_seam_setter_without_annotation_uses_typeof(self):
         lang = get_language("file.ts")
         assignment = {"kind": "let", "type_annotation": None, "rhs": "undefined", "line": "let client;"}

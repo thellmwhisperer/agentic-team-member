@@ -11,7 +11,11 @@ import requests
 from agentic_tdd_runner.agent import (
     _compact_messages_after_quality_failure,
     _build_duplicated_setup_judge_prompt,
+    _default_config_path,
+    _default_log_dir,
     _get_changed_files,
+    _github_repo_slug_from_remote_url,
+    _load_issue_text,
     _is_obvious_act_line,
     _is_obvious_assert_line,
     _is_test_file_path,
@@ -153,6 +157,83 @@ class TestValidateCommand:
     def test_allows_node_scripts(self):
         """node without -e must still work."""
         _validate_command("node build.js")
+
+
+class TestCliDefaults:
+    def test_config_path_can_come_from_env(self, monkeypatch):
+        monkeypatch.setenv("AGENT_CONFIG", "/tmp/agent-from-env.toml")
+        monkeypatch.delenv("ATM_CONFIG", raising=False)
+
+        assert _default_config_path() == "/tmp/agent-from-env.toml"
+
+    def test_config_path_accepts_public_atm_env_alias(self, monkeypatch):
+        monkeypatch.delenv("AGENT_CONFIG", raising=False)
+        monkeypatch.setenv("ATM_CONFIG", "/tmp/atm-from-env.toml")
+
+        assert _default_config_path() == "/tmp/atm-from-env.toml"
+
+    def test_log_dir_can_come_from_env(self, monkeypatch):
+        monkeypatch.setenv("AGENT_LOG_DIR", "/tmp/agent-logs")
+        monkeypatch.delenv("ATM_LOG_DIR", raising=False)
+
+        assert _default_log_dir() == "/tmp/agent-logs"
+
+    def test_log_dir_accepts_public_atm_env_alias(self, monkeypatch):
+        monkeypatch.delenv("AGENT_LOG_DIR", raising=False)
+        monkeypatch.setenv("ATM_LOG_DIR", "/tmp/atm-logs")
+
+        assert _default_log_dir() == "/tmp/atm-logs"
+
+
+class TestIssueLoading:
+    def test_parses_github_repo_slug_from_common_remote_urls(self):
+        assert (
+            _github_repo_slug_from_remote_url("https://github.com/thellmwhisperer/manolito-zurrapa.git")
+            == "thellmwhisperer/manolito-zurrapa"
+        )
+        assert (
+            _github_repo_slug_from_remote_url("git@github.com:thellmwhisperer/manolito-zurrapa.git")
+            == "thellmwhisperer/manolito-zurrapa"
+        )
+        assert (
+            _github_repo_slug_from_remote_url("ssh://git@github.com/thellmwhisperer/manolito-zurrapa.git")
+            == "thellmwhisperer/manolito-zurrapa"
+        )
+
+    def test_loads_github_issue_body_from_issue_number(self, tmp_path, monkeypatch):
+        args = SimpleNamespace(issue=None, issue_number=41, github_repo=None)
+        calls = []
+
+        def fake_run(cmd, **kwargs):
+            calls.append(cmd)
+            if cmd[:3] == ["git", "remote", "get-url"]:
+                return subprocess.CompletedProcess(
+                    cmd,
+                    0,
+                    stdout="https://github.com/thellmwhisperer/manolito-zurrapa.git\n",
+                    stderr="",
+                )
+            if cmd[:3] == ["gh", "issue", "view"]:
+                return subprocess.CompletedProcess(
+                    cmd,
+                    0,
+                    stdout='{"title": "Resub months bug", "body": "## Symptom\\n0 meses"}',
+                    stderr="",
+                )
+            return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="unexpected")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.subprocess.run", fake_run)
+
+        issue_text = _load_issue_text(args, repo_path=str(tmp_path))
+
+        assert issue_text == "Resub months bug\n\n## Symptom\n0 meses"
+        assert ["gh", "issue", "view", "41", "--repo", "thellmwhisperer/manolito-zurrapa", "--json", "title,body"] in calls
+
+    def test_issue_argument_is_required_without_issue_number(self, tmp_path):
+        args = SimpleNamespace(issue=None, issue_number=None, github_repo=None)
+
+        with pytest.raises(SystemExit, match="Pass an issue path/text or --issue-number"):
+            _load_issue_text(args, repo_path=str(tmp_path))
 
 
 class TestVerificationInfraError:
@@ -562,6 +643,70 @@ class TestFindTestFile:
 
         assert ok is False
         assert "test scaffold is incomplete" in msg.lower()
+
+    def test_verify_red_green_reapplies_mechanical_edits_during_red_phase(self, tmp_path, monkeypatch):
+        """Red phase should keep deterministic seams while removing the behavior fix."""
+        from unittest.mock import patch as mock_patch
+        from agentic_tdd_runner.agent import verify_red_green
+
+        sp_run = subprocess.run
+        sp_run([GIT, "init"], cwd=tmp_path, capture_output=True, check=True)
+        sp_run([GIT, "config", "user.email", "test@test.com"], cwd=tmp_path, capture_output=True)
+        sp_run([GIT, "config", "user.name", "test"], cwd=tmp_path, capture_output=True)
+        src = tmp_path / "src"
+        src.mkdir()
+        source_path = src / "math.ts"
+        test_path = src / "math.test.ts"
+        source_path.write_text("const months = 0;\n")
+        sp_run([GIT, "add", "-A"], cwd=tmp_path, capture_output=True, check=True)
+        sp_run([GIT, "commit", "-m", "base"], cwd=tmp_path, capture_output=True, check=True)
+
+        mechanical_edits = [
+            {
+                "path": "src/math.ts",
+                "old": "const months = 0;\n",
+                "new": "export function __setClientForTests() {}\nconst months = 0;\n",
+            }
+        ]
+        source_path.write_text("export function __setClientForTests() {}\nconst months = 6;\n")
+        test_path.write_text("test")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "runner": {"command": "bun test", "test_file_patterns": ["*.test.ts"], "exclude_dirs": []},
+            "timeouts": {"test_run": 10},
+        })
+
+        snapshots: list[str] = []
+
+        def fake_run(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            if isinstance(cmd, list) and any("math.test.ts" in str(c) for c in cmd):
+                current_source = source_path.read_text()
+                snapshots.append(current_source)
+                if "__setClientForTests" not in current_source:
+                    return subprocess.CompletedProcess(
+                        cmd,
+                        1,
+                        stdout="TypeError: __setClientForTests is not a function\n",
+                        stderr="",
+                    )
+                if "const months = 0;" in current_source:
+                    return subprocess.CompletedProcess(cmd, 1, stdout="expected 6 received 0\n", stderr="")
+                return subprocess.CompletedProcess(cmd, 0, stdout="1 pass\n", stderr="")
+            return sp_run(*args, **kwargs)
+
+        with mock_patch("subprocess.run", side_effect=fake_run):
+            ok, msg = verify_red_green("src/math.test.ts", mechanical_edits=mechanical_edits)
+
+        assert ok is True
+        assert "verified" in msg.lower()
+        assert snapshots == [
+            "export function __setClientForTests() {}\nconst months = 0;\n",
+            "export function __setClientForTests() {}\nconst months = 6;\n",
+        ]
+        assert source_path.read_text() == "export function __setClientForTests() {}\nconst months = 6;\n"
+        assert test_path.exists()
 
     def test_verify_red_green_detects_scaffold_marker_past_500_chars(self, tmp_path, monkeypatch):
         """The scaffold-failure guard must inspect the FULL output, not the 500-char preview.
@@ -1160,6 +1305,37 @@ class TestRunQualityChecks:
         for i in range(1, 8):
             assert f"TS{2000+i}" in msg, f"error TS{2000+i} was truncated: {msg}"
 
+    def test_typecheck_failure_marks_changed_file_as_owned(self, tmp_path, monkeypatch):
+        self._setup_repo(tmp_path, monkeypatch)
+        (tmp_path / "src" / "file.ts").write_text("changed")
+        (tmp_path / "src" / "file.test.ts").write_text("clean")
+
+        script = tmp_path / "fake-tsc.sh"
+        script.write_text(
+            "#!/bin/sh\n"
+            "echo 'src/file.ts(1,1): error TS2322: Type mismatch'\n"
+            "exit 1\n"
+        )
+        script.chmod(0o755)
+
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "quality": {
+                "enabled": True, "max_fix_rounds": 3,
+                "typescript": {
+                    "checks": [{"name": "typecheck", "command": str(script)}],
+                    "forbidden": [],
+                },
+            },
+            "timeouts": {"tool_execution": 10},
+            "prompt": {"quality_failed": "FAIL: {details}"},
+        })
+
+        ok, msg = run_quality_checks("src/file.test.ts")
+
+        assert ok is False
+        assert "belongs to this fix" in msg
+        assert "Do not classify it as unrelated" in msg
+
     def test_runs_fix_before_check(self, tmp_path, monkeypatch):
         self._setup_repo(tmp_path, monkeypatch)
         bad_file = tmp_path / "src" / "file.test.ts"
@@ -1231,6 +1407,38 @@ class TestRunQualityChecks:
         ok, msg = run_quality_checks("src/file.test.ts")
         assert ok is False
         assert "duplicated" in msg.lower() or "beforeEach" in msg
+
+    def test_detects_duplicated_setup_across_two_tests(self, tmp_path, monkeypatch):
+        self._setup_repo(tmp_path, monkeypatch)
+        test_file = tmp_path / "src" / "file.test.ts"
+        test_file.write_text(
+            "describe('x', () => {\n"
+            "  test('a', () => {\n"
+            "    const client_say_spy = mock(() => undefined);\n"
+            "    __setClientForTests(client_say_spy);\n"
+            "    handleResub(channel, username, 0, message, userstate);\n"
+            "  });\n"
+            "  test('b', () => {\n"
+            "    const client_say_spy = mock(() => undefined);\n"
+            "    __setClientForTests(client_say_spy);\n"
+            "    handleResub(channel, username, 1, message, userstate);\n"
+            "  });\n"
+            "});\n"
+        )
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "quality": {
+                "enabled": True, "max_fix_rounds": 3,
+                "typescript": {"checks": [], "forbidden": []},
+            },
+            "timeouts": {"tool_execution": 10},
+            "prompt": {"quality_failed": "FAIL: {details}"},
+        })
+
+        ok, msg = run_quality_checks("src/file.test.ts")
+
+        assert ok is False
+        assert "Duplicated setup" in msg
+        assert "client_say_spy" in msg
 
     def test_filters_changed_files_by_language_extensions(self, tmp_path, monkeypatch):
         """Only files matching the active language's extensions are scanned."""
@@ -1649,6 +1857,70 @@ class TestRunQualityChecks:
         assert ok is False
         assert "Duplicated setup" in msg
 
+    def test_rejects_side_effect_payload_key_rename(self, tmp_path, monkeypatch):
+        self._setup_repo(tmp_path, monkeypatch)
+        source = tmp_path / "src" / "file.ts"
+        source.write_text(
+            "export function f(logger, username, months) {\n"
+            "  logger.event('resub', { username, months });\n"
+            "}\n"
+        )
+        subprocess.run([GIT, "add", "-A"], cwd=tmp_path, capture_output=True, check=True)
+        subprocess.run([GIT, "commit", "-m", "payload baseline"], cwd=tmp_path, capture_output=True, check=True)
+
+        source.write_text(
+            "export function f(logger, username, cumulativeMonths) {\n"
+            "  logger.event('resub', { username, cumulativeMonths });\n"
+            "}\n"
+        )
+        (tmp_path / "src" / "file.test.ts").write_text("const x: number = 1;")
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "quality": {
+                "enabled": True, "max_fix_rounds": 3,
+                "typescript": {"checks": [], "forbidden": []},
+            },
+            "timeouts": {"tool_execution": 10},
+            "prompt": {"quality_failed": "FAIL: {details}"},
+        })
+
+        ok, msg = run_quality_checks("src/file.test.ts")
+
+        assert ok is False
+        assert "Side-effect shape" in msg
+        assert "months" in msg
+        assert "cumulativeMonths" in msg
+
+    def test_allows_side_effect_payload_value_change_with_same_key(self, tmp_path, monkeypatch):
+        self._setup_repo(tmp_path, monkeypatch)
+        source = tmp_path / "src" / "file.ts"
+        source.write_text(
+            "export function f(logger, username, months) {\n"
+            "  logger.event('resub', { username, months });\n"
+            "}\n"
+        )
+        subprocess.run([GIT, "add", "-A"], cwd=tmp_path, capture_output=True, check=True)
+        subprocess.run([GIT, "commit", "-m", "payload baseline"], cwd=tmp_path, capture_output=True, check=True)
+
+        source.write_text(
+            "export function f(logger, username, cumulativeMonths) {\n"
+            "  logger.event('resub', { username, months: cumulativeMonths });\n"
+            "}\n"
+        )
+        (tmp_path / "src" / "file.test.ts").write_text("const x: number = 1;")
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "quality": {
+                "enabled": True, "max_fix_rounds": 3,
+                "typescript": {"checks": [], "forbidden": []},
+            },
+            "timeouts": {"tool_execution": 10},
+            "prompt": {"quality_failed": "FAIL: {details}"},
+        })
+
+        ok, msg = run_quality_checks("src/file.test.ts")
+
+        assert ok is True, msg
+        assert "Side-effect shape" not in msg
+
 
 class TestFileReadDedup:
     """read_file returns a stub when the file hasn't changed since last read."""
@@ -1845,6 +2117,8 @@ class TestExecuteToolReactiveChecks:
         assert result.startswith("OK: replaced in src/file.ts")
         assert "[Reactive typecheck]" in result
         assert "TS123" in result
+        assert "belongs to this fix" in result
+        assert "Do not classify it as unrelated" in result
 
     def test_reactive_typecheck_shows_multiline_error_context(self, tmp_path, monkeypatch):
         """tsc errors are multiline — the type name often appears on a continuation line.
@@ -2301,6 +2575,47 @@ class TestCreatePr:
         assert len(chat_kwargs) == 1, f"Expected 1 chat call, got {chat_kwargs}"
         assert chat_kwargs[0]["include_tools"] is False, \
             "create_pr should call chat with include_tools=False to prevent tool_calls"
+
+    def test_pr_uses_deterministic_fallback_when_chat_fails(self, tmp_path, monkeypatch):
+        from unittest.mock import patch as mock_patch
+
+        self._init_repo(tmp_path)
+        (tmp_path / "file.ts").write_text("code")
+        subprocess.run([GIT, "add", "-A"], cwd=tmp_path, capture_output=True, check=True)
+        subprocess.run([GIT, "commit", "-m", "init"], cwd=tmp_path, capture_output=True, check=True)
+        (tmp_path / "file.ts").write_text("fixed")
+        (tmp_path / "file.test.ts").write_text("test code")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "pr": {"enabled": True, "base_branch": "main", "branch_prefix": "atm/fix-"},
+            "prompt": {"pr_prompt": "Generate PR"},
+            "llm": {"model": "test", "url": "http://localhost:9999/v1/chat/completions"},
+            "timeouts": {"llm_request": 10, "pr_create": 10},
+        })
+
+        commands_run = []
+        original_run = subprocess.run
+
+        def track_run(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            if isinstance(cmd, list):
+                commands_run.append(cmd)
+                if cmd[0] == "gh" or (cmd[0] == "git" and "push" in cmd):
+                    return subprocess.CompletedProcess(cmd, 0, stdout="https://github.com/test/pr/1\n")
+                return original_run(*args, **kwargs)
+            return original_run(*args, **kwargs)
+
+        with mock_patch("agentic_tdd_runner.agent.chat", side_effect=Exception("timeout")):
+            with mock_patch("subprocess.run", side_effect=track_run):
+                result = create_pr([], {}, "file.test.ts", 10)
+
+        assert result == "https://github.com/test/pr/1"
+        commit_commands = [cmd for cmd in commands_run if cmd[:2] == ["git", "commit"]]
+        assert commit_commands
+        commit_text = " ".join(commit_commands[0])
+        assert "fix: update file behavior" in commit_text
+        assert "Harness quality checks passed" in commit_text
 
     def test_pr_subprocess_calls_use_text_and_timeout(self, tmp_path, monkeypatch):
         """Checked subprocess calls in create_pr should use text mode and bounded timeouts."""
@@ -3743,6 +4058,7 @@ class TestDiscoveryIntegration:
                 "test_file_patterns": ["*.test.ts"],
                 "exclude_dirs": ["node_modules"],
             },
+            "discovery": {"enabled": True},
         }
 
     def test_main_uses_discovered_target_when_source_and_symbol_missing(self, tmp_path, monkeypatch):
@@ -3867,6 +4183,107 @@ class TestDiscoveryIntegration:
         )
 
         with pytest.raises(SystemExit, match="Could not determine source/symbol from issue"):
+            main()
+
+    def test_main_uses_issue_target_hints_before_discovery(self, tmp_path, monkeypatch):
+        captured = []
+        episode_calls = []
+        issue = """Bug: handleResub reports 0 months
+
+## Where
+`src/twitch/client.ts` -> `handleResub()` (line 770, not exported)
+
+## Symptom
+The bot reports 0 months.
+
+## Fix approach
+1. Export handleResub so it can be tested
+2. Read cumulative months from the resub userstate
+"""
+        args = SimpleNamespace(
+            issue=issue,
+            source=None,
+            symbol=None,
+            workdir=str(tmp_path),
+            config="unused.toml",
+            log_dir=str(tmp_path),
+        )
+
+        def fake_episode(**kwargs):
+            episode_calls.append(kwargs)
+            return {
+                "source_file": kwargs["source_path"],
+                "target_symbol": kwargs["symbol"],
+                "test_file": "src/twitch/client.test.ts",
+                "source_import_path": "./client",
+                "runner": "bun:test",
+                "mocks_text": "",
+                "pre_test_source_edits": [],
+                "conditional_source_edits": [],
+                "assertion_hint": "",
+                "function_line_range": {"start": 770, "end": 790, "source": "definition"},
+                "cookbook_text": "## Mock Cookbook\n",
+            }
+
+        monkeypatch.setattr("agentic_tdd_runner.config.load_config", lambda path: self._make_config())
+        monkeypatch.setattr("agentic_tdd_runner.agent.parse_args", lambda: args)
+        monkeypatch.setattr("agentic_tdd_runner.agent.init_log", lambda: str(tmp_path / "agent.jsonl"))
+        monkeypatch.setattr("agentic_tdd_runner.agent.emit", lambda msg: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.log", lambda *a, **kw: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.chat", lambda messages, include_tools=True: (
+            captured.append([m.copy() for m in messages])
+            or {"choices": [{"message": {"content": "still going"}, "finish_reason": "stop"}], "usage": {}, "timings": {}}
+        ))
+        monkeypatch.setattr(
+            "agentic_tdd_runner.discovery.load_or_build_semantic_index",
+            lambda *a, **kw: (_ for _ in ()).throw(AssertionError("discovery should not run")),
+        )
+        monkeypatch.setattr("agentic_tdd_runner.cookbook.build_episode_context", fake_episode)
+
+        main()
+
+        assert episode_calls == [
+            {
+                "source_path": "src/twitch/client.ts",
+                "symbol": "handleResub",
+                "project_root": str(tmp_path),
+            }
+        ]
+        user_msg = next(m for m in captured[0] if m["role"] == "user")
+        assert "src/twitch/client.ts" in user_msg["content"]
+        assert "handleResub" in user_msg["content"]
+        assert "not exported" not in user_msg["content"]
+        assert "Fix approach" not in user_msg["content"]
+        assert "Export handleResub" not in user_msg["content"]
+
+    def test_main_rejects_model_facing_forbidden_issue_guidance_before_chat(self, tmp_path, monkeypatch):
+        args = SimpleNamespace(
+            issue="""Bug: handleResub reports 0 months
+
+## Expected behavior
+1. Add `userstate: any` to the signature
+""",
+            source=None,
+            symbol=None,
+            workdir=str(tmp_path),
+            config="unused.toml",
+            log_dir=str(tmp_path),
+        )
+        monkeypatch.setattr("agentic_tdd_runner.config.load_config", lambda path: self._make_config())
+        monkeypatch.setattr("agentic_tdd_runner.agent.parse_args", lambda: args)
+        monkeypatch.setattr("agentic_tdd_runner.agent.init_log", lambda: str(tmp_path / "agent.jsonl"))
+        monkeypatch.setattr("agentic_tdd_runner.agent.emit", lambda msg: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.log", lambda *a, **kw: None)
+        monkeypatch.setattr(
+            "agentic_tdd_runner.agent.prepare_target_environment",
+            lambda: (_ for _ in ()).throw(AssertionError("environment prep should not run")),
+        )
+        monkeypatch.setattr(
+            "agentic_tdd_runner.agent.chat",
+            lambda *a, **kw: (_ for _ in ()).throw(AssertionError("chat should not run")),
+        )
+
+        with pytest.raises(SystemExit, match="Issue rejected"):
             main()
 
 

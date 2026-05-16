@@ -166,6 +166,9 @@ def _build_contract_for_symbol(
         "execution_dependencies": execution_dependencies,
         "injection_plan": injection_plan,
         "assertion_surface": assertion_surface,
+        "callback_registrations": _discover_callback_registrations(
+            source_text, symbol,
+        ),
         "pattern_files": [],
         "gaps": assertion_gaps,
     }
@@ -323,6 +326,28 @@ def _discover_dependencies(snippet, imports, assignments, *, exclude_symbol=None
     return deps
 
 
+def _discover_callback_registrations(source_text: str, symbol: str) -> list[dict]:
+    """Find simple framework/listener registrations that pass the target symbol.
+
+    This is intentionally conservative: it records deterministic evidence for the
+    model to inspect, but it does not try to infer third-party callback types.
+    """
+    registrations = []
+    pattern = re.compile(
+        rf"(?P<call>[\w$.\]\)]+\.(?:on|once|addEventListener|subscribe|use)\("
+        rf"(?P<args>[^\n;]*\b{re.escape(symbol)}\b[^\n;]*)\))"
+    )
+    for line_number, line in enumerate(source_text.splitlines(), start=1):
+        match = pattern.search(line)
+        if not match:
+            continue
+        registrations.append({
+            "line": line_number,
+            "call": match.group("call").strip(),
+        })
+    return registrations
+
+
 def _render_cookbook_text(contract: dict, lang) -> str:
     """Render a contract as human-readable text for the agent's system prompt."""
     parts = []
@@ -342,7 +367,25 @@ def _render_cookbook_text(contract: dict, lang) -> str:
     parts.append("- Write the first failing test against the real callable contract from source.")
     parts.append("- Do not change the target's runtime signature just to fit the test scaffold.")
     parts.append("- For callbacks, handlers, and framework listeners, preserve the production contract.")
+    parts.append("- For callbacks, handlers, and framework listeners, find the registration/caller before writing the test.")
     parts.append("- Apply only mechanical export or test-seam edits before the first failing test.")
+    parts.append("- For module-load mocks, assert against the named `*_spy` variables emitted below; do not import and patch the mocked factory after importing the target.")
+    parts.append("")
+
+    callback_registrations = contract.get("callback_registrations", [])
+    if callback_registrations:
+        parts.append("### Callback Contract Evidence")
+        parts.append("- Before writing the test, derive the handler signature from these registrations and their public framework types; do not invent callback parameters.")
+        for registration in callback_registrations[:5]:
+            parts.append(f"- line {registration['line']}: `{registration['call']}`")
+        parts.append("")
+
+    parts.append("### Test Scope")
+    parts.append("- Write one focused regression test first: the exact reported bug or acceptance path.")
+    parts.append("- For value-selection bugs, use contrastive fixtures: set the wrong observed value and the correct expected value to different issue-grounded values.")
+    parts.append("- Add extra tests only when grounded in explicit acceptance criteria, a visible code branch, an existing test pattern, or a public type/framework contract.")
+    parts.append("- Limit optional extras to two tests; each extra test must protect a distinct branch or contract, not repeat the same behavior.")
+    parts.append("- Do not invent domain edge cases just to make a larger suite.")
     parts.append("")
 
     # Source edits
@@ -360,7 +403,7 @@ def _render_cookbook_text(contract: dict, lang) -> str:
     # Module mocks (bun:test only — pytest uses unittest.mock in the scaffold)
     runner = contract["test_file"]["runner"]
     mock_text = (
-        _render_module_mocks(contract.get("module_load_dependencies", []))
+        _render_module_mocks(contract.get("module_load_dependencies", []), declare_spies=True)
         if runner == "bun:test"
         else ""
     )
