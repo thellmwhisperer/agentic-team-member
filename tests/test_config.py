@@ -117,6 +117,8 @@ class TestLoadConfig:
         assert cfg["quality"]["enabled"] is True
         assert cfg["quality"]["max_fix_rounds"] == 3
         assert "as any" in cfg["quality"]["typescript"]["forbidden"]
+        assert "as never" in cfg["quality"]["typescript"]["forbidden"]
+        assert "{} as" in cfg["quality"]["typescript"]["forbidden"]
         assert ": any" in cfg["quality"]["typescript"]["forbidden"]
         assert "type: ignore" in cfg["quality"]["python"]["forbidden"]
 

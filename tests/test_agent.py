@@ -127,6 +127,11 @@ class TestValidateCommand:
     def test_allows_pipe_between_safe_commands(self):
         _validate_command("grep -r pattern src/ | head -20")
 
+    def test_allows_quoted_regex_alternation_without_treating_it_as_pipe(self):
+        _validate_command(
+            'grep -n "SubUserstate\\|SubMethods" node_modules/@types/tmi.js/index.d.ts'
+        )
+
     def test_allows_chained_safe_commands(self):
         _validate_command("git status && bun test")
 
@@ -1920,6 +1925,130 @@ class TestRunQualityChecks:
 
         assert ok is True, msg
         assert "Side-effect shape" not in msg
+
+    def test_rejects_parsed_metadata_without_original_fallback(self, tmp_path, monkeypatch):
+        self._setup_repo(tmp_path, monkeypatch)
+        source = tmp_path / "src" / "file.ts"
+        source.write_text(
+            "export function f(_streakMonths: number, userstate: Record<string, string>) {\n"
+            "  const months = parseInt(userstate['msg-param-cumulative-months'] || '0', 10);\n"
+            "  return months;\n"
+            "}\n"
+        )
+        (tmp_path / "src" / "file.test.ts").write_text("const x: number = 1;")
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "quality": {
+                "enabled": True, "max_fix_rounds": 3,
+                "typescript": {"checks": [], "forbidden": []},
+            },
+            "timeouts": {"tool_execution": 10},
+            "prompt": {"quality_failed": "FAIL: {details}"},
+        })
+
+        ok, msg = run_quality_checks("src/file.test.ts")
+
+        assert ok is False
+        assert "Metadata fallback" in msg
+        assert "_streakMonths" in msg
+
+    def test_allows_parsed_metadata_with_original_fallback(self, tmp_path, monkeypatch):
+        self._setup_repo(tmp_path, monkeypatch)
+        source = tmp_path / "src" / "file.ts"
+        source.write_text(
+            "export function f(_streakMonths: number, userstate: Record<string, string>) {\n"
+            "  const months = Number(userstate['msg-param-cumulative-months']) || _streakMonths;\n"
+            "  return months;\n"
+            "}\n"
+        )
+        (tmp_path / "src" / "file.test.ts").write_text("const x: number = 1;")
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "quality": {
+                "enabled": True, "max_fix_rounds": 3,
+                "typescript": {"checks": [], "forbidden": []},
+            },
+            "timeouts": {"tool_execution": 10},
+            "prompt": {"quality_failed": "FAIL: {details}"},
+        })
+
+        ok, msg = run_quality_checks("src/file.test.ts")
+
+        assert ok is True, msg
+
+    def test_rejects_parse_default_that_does_not_handle_invalid_metadata(self, tmp_path, monkeypatch):
+        self._setup_repo(tmp_path, monkeypatch)
+        source = tmp_path / "src" / "file.ts"
+        source.write_text(
+            "export function f(_streakMonths: number, userstate: Record<string, string>) {\n"
+            "  const months = parseInt(\n"
+            "    String(userstate['msg-param-cumulative-months'] ?? _streakMonths),\n"
+            "    10,\n"
+            "  );\n"
+            "  return months;\n"
+            "}\n"
+        )
+        (tmp_path / "src" / "file.test.ts").write_text("const x: number = 1;")
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "quality": {
+                "enabled": True, "max_fix_rounds": 3,
+                "typescript": {"checks": [], "forbidden": []},
+            },
+            "timeouts": {"tool_execution": 10},
+            "prompt": {"quality_failed": "FAIL: {details}"},
+        })
+
+        ok, msg = run_quality_checks("src/file.test.ts")
+
+        assert ok is False
+        assert "invalid parsed values" in msg
+        assert "_streakMonths" in msg
+
+    def test_allows_nan_guarded_metadata_fallback(self, tmp_path, monkeypatch):
+        self._setup_repo(tmp_path, monkeypatch)
+        source = tmp_path / "src" / "file.ts"
+        source.write_text(
+            "export function f(_streakMonths: number, userstate: Record<string, string>) {\n"
+            "  const parsed = Number(userstate['msg-param-cumulative-months']);\n"
+            "  const months = Number.isFinite(parsed) ? parsed : _streakMonths;\n"
+            "  return months;\n"
+            "}\n"
+        )
+        (tmp_path / "src" / "file.test.ts").write_text("const x: number = 1;")
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "quality": {
+                "enabled": True, "max_fix_rounds": 3,
+                "typescript": {"checks": [], "forbidden": []},
+            },
+            "timeouts": {"tool_execution": 10},
+            "prompt": {"quality_failed": "FAIL: {details}"},
+        })
+
+        ok, msg = run_quality_checks("src/file.test.ts")
+
+        assert ok is True, msg
+
+    def test_rejects_empty_object_type_assertion(self, tmp_path, monkeypatch):
+        self._setup_repo(tmp_path, monkeypatch)
+        source = tmp_path / "src" / "file.ts"
+        source.write_text("export function f() {}\n")
+        test_file = tmp_path / "src" / "file.test.ts"
+        test_file.write_text(
+            "import type { SubMethods } from 'tmi.js';\n"
+            "const methods = {} as SubMethods;\n"
+        )
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "quality": {
+                "enabled": True, "max_fix_rounds": 3,
+                "typescript": {"checks": [], "forbidden": []},
+            },
+            "timeouts": {"tool_execution": 10},
+            "prompt": {"quality_failed": "FAIL: {details}"},
+        })
+
+        ok, msg = run_quality_checks("src/file.test.ts")
+
+        assert ok is False
+        assert "Type assertion" in msg
+        assert "{} as SubMethods" in msg
 
 
 class TestFileReadDedup:
