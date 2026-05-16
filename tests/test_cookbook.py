@@ -648,3 +648,22 @@ class TestCallbackContractGuidance:
         assert "derive the handler signature" in result
         assert "do not invent callback parameters" in result
         assert "client.on('resub', handleResub)" in result
+
+    def test_callback_guidance_preserves_types_and_fallbacks(self, tmp_path):
+        _write_file(tmp_path, "src/client.ts", """\
+            const bus = { on(_event: string, _handler: unknown) {} };
+
+            function handleEvent(count: number): number {
+              return count;
+            }
+
+            bus.on('event', handleEvent);
+        """)
+        result = generate_cookbook("src/client.ts", "handleEvent", str(tmp_path))
+
+        assert "use exported framework types or overloads" in result
+        assert "Never use empty-object casts" in result
+        assert "preserve the original positional value as fallback" in result
+        assert "fallbacks after parsing/validation" in result
+        assert "rg SubUserstate node_modules/@types" in result
+        assert "missing-or-invalid metadata fallback" in result

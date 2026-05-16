@@ -307,16 +307,67 @@ _BLOCKED_FLAGS = {
 }
 
 
+def _split_shell_segments(command: str) -> list[str]:
+    """Split shell command chains on unquoted shell operators."""
+    segments: list[str] = []
+    buf: list[str] = []
+    quote: str | None = None
+    escaped = False
+    i = 0
+    while i < len(command):
+        ch = command[i]
+        if escaped:
+            buf.append(ch)
+            escaped = False
+            i += 1
+            continue
+        if ch == "\\" and quote != "'":
+            buf.append(ch)
+            escaped = True
+            i += 1
+            continue
+        if quote:
+            buf.append(ch)
+            if ch == quote:
+                quote = None
+            i += 1
+            continue
+        if ch in {"'", '"'}:
+            quote = ch
+            buf.append(ch)
+            i += 1
+            continue
+        if command.startswith("&&", i) or command.startswith("||", i):
+            segment = "".join(buf).strip()
+            if segment:
+                segments.append(segment)
+            buf = []
+            i += 2
+            continue
+        if ch in {"|", ";"}:
+            segment = "".join(buf).strip()
+            if segment:
+                segments.append(segment)
+            buf = []
+            i += 1
+            continue
+        buf.append(ch)
+        i += 1
+    segment = "".join(buf).strip()
+    if segment:
+        segments.append(segment)
+    return segments
+
+
 def _validate_command(command: str) -> None:
     """Validate that all commands in a pipeline/chain use allowed binaries."""
-    import shlex
     if not command or not command.strip():
         raise ValueError("empty command")
     # Reject newlines — they bypass shell operator splitting
     if "\n" in command:
         raise ValueError("newlines not allowed in commands")
     # Split on shell operators to validate each sub-command
-    parts = re.split(r"\s*(?:\|\||&&|[|;])\s*", command)
+    parts = _split_shell_segments(command)
     for part in parts:
         part = part.strip()
         if not part:
@@ -1051,6 +1102,12 @@ def run_quality_checks(test_file: str) -> tuple[bool, str]:
     for finding in _detect_side_effect_shape_changes(changed):
         failures.append(finding)
 
+    for finding in _detect_parsed_metadata_without_original_fallback(changed):
+        failures.append(finding)
+
+    for finding in _detect_empty_object_type_assertions(changed):
+        failures.append(finding)
+
     if failures:
         details = "\n\n".join(failures)
         template = _CONFIG.get("prompt", {}).get(
@@ -1248,6 +1305,181 @@ def _detect_side_effect_shape_changes(changed_files: list[str]) -> list[str]:
                         "value changed."
                     )
                     break
+    return findings
+
+
+_FALLBACK_VALUE_NAME_RE = re.compile(
+    r"(?:count|id|index|level|limit|month|number|price|qty|quantity|score|size|status|total|value)",
+    re.IGNORECASE,
+)
+
+
+def _find_matching_brace(text: str, open_index: int) -> int:
+    depth = 0
+    quote: str | None = None
+    escaped = False
+    for idx in range(open_index, len(text)):
+        ch = text[idx]
+        if escaped:
+            escaped = False
+            continue
+        if ch == "\\" and quote:
+            escaped = True
+            continue
+        if quote:
+            if ch == quote:
+                quote = None
+            continue
+        if ch in {"'", '"', "`"}:
+            quote = ch
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return idx
+    return -1
+
+
+def _extract_param_names(params_text: str) -> list[str]:
+    names: list[str] = []
+    for raw_param in params_text.split(","):
+        param = raw_param.strip()
+        if not param:
+            continue
+        if param.startswith("..."):
+            param = param[3:].strip()
+        name = param.split(":", 1)[0].split("=", 1)[0].strip()
+        if name and re.match(r"^_?[A-Za-z_$]\w*$", name):
+            names.append(name)
+    return names
+
+
+def _iter_function_bodies(text: str):
+    pattern = re.compile(
+        r"(?:export\s+)?function\s+[A-Za-z_$]\w*\s*\((?P<params>.*?)\)"
+        r"\s*(?::\s*[^{]+)?\{",
+        re.DOTALL,
+    )
+    for match in pattern.finditer(text):
+        open_index = match.end() - 1
+        close_index = _find_matching_brace(text, open_index)
+        if close_index == -1:
+            continue
+        yield (
+            match,
+            _extract_param_names(match.group("params")),
+            text[open_index + 1:close_index],
+        )
+
+
+def _body_parses_external_metadata(body: str) -> bool:
+    return bool(
+        re.search(
+            r"\b(?:Number|parseInt)\s*\([\s\S]{0,240}\[[^\]]*['\"][^'\"]+['\"][^\]]*\]",
+            body,
+        )
+    )
+
+
+def _body_has_invalid_metadata_fallback(body: str, original_param: str) -> bool:
+    escaped = re.escape(original_param)
+    metadata_parse = (
+        r"\b(?:Number|parseInt)\s*\("
+        r"[\s\S]{0,240}\[[^\]]*['\"][^'\"]+['\"][^\]]*\]"
+        r"[\s\S]{0,240}\)"
+    )
+    if re.search(rf"{metadata_parse}\s*\|\|\s*{escaped}\b", body):
+        return True
+    if re.search(rf"\b{escaped}\b\s*\|\|\s*{metadata_parse}", body):
+        return True
+
+    has_nan_or_finite_guard = re.search(
+        r"\b(?:Number\.isNaN|Number\.isFinite|isNaN)\s*\(",
+        body,
+    )
+    if has_nan_or_finite_guard and re.search(rf"\b{escaped}\b", body):
+        return True
+
+    return False
+
+
+def _detect_parsed_metadata_without_original_fallback(changed_files: list[str]) -> list[str]:
+    """Flag parsed bracket metadata that ignores the original value-like callback arg."""
+    findings: list[str] = []
+    for file_path in changed_files:
+        suffix = Path(file_path).suffix.lower()
+        if suffix not in {".ts", ".tsx", ".js", ".jsx"}:
+            continue
+        if _is_test_file_path(file_path):
+            continue
+        full_path = Path(WORKDIR) / file_path
+        try:
+            text = full_path.read_text(errors="replace")
+        except OSError:
+            continue
+        for match, params, body in _iter_function_bodies(text):
+            if not _body_parses_external_metadata(body):
+                continue
+            value_params = [
+                name for name in params
+                if name.startswith("_") and _FALLBACK_VALUE_NAME_RE.search(name.lstrip("_"))
+            ]
+            ignored_original = False
+            for name in value_params:
+                if re.search(rf"\b{re.escape(name)}\b", body):
+                    continue
+                line_no = text.count("\n", 0, match.start()) + 1
+                findings.append(
+                    f"[Metadata fallback] {file_path}:{line_no} parses external metadata "
+                    f"while ignoring original value-like parameter `{name}`. Preserve the "
+                    "original callback/input value as the fallback when parsed metadata is "
+                    "missing or invalid, unless the issue explicitly requires a new default."
+                )
+                ignored_original = True
+                break
+            if ignored_original:
+                continue
+            for name in value_params:
+                if not re.search(rf"\b{re.escape(name)}\b", body):
+                    continue
+                if _body_has_invalid_metadata_fallback(body, name):
+                    continue
+                line_no = text.count("\n", 0, match.start()) + 1
+                findings.append(
+                    f"[Metadata fallback] {file_path}:{line_no} parses external metadata "
+                    f"and mentions `{name}`, but does not prove that invalid parsed values "
+                    "fall back to the original callback/input value. Apply the fallback "
+                    "after parsing, for example with an explicit NaN/finite guard, unless "
+                    "the issue explicitly requires a new default."
+                )
+                break
+    return findings
+
+
+def _detect_empty_object_type_assertions(changed_files: list[str]) -> list[str]:
+    """Flag empty object casts that paper over missing test or callback payload fields."""
+    findings: list[str] = []
+    assertion_re = re.compile(r"\{\s*\}\s+as\s+([A-Z][A-Za-z0-9_$]*(?:<[^;\n]+>)?)")
+    for file_path in changed_files:
+        suffix = Path(file_path).suffix.lower()
+        if suffix not in {".ts", ".tsx"}:
+            continue
+        full_path = Path(WORKDIR) / file_path
+        try:
+            text = full_path.read_text(errors="replace")
+        except OSError:
+            continue
+        for match in assertion_re.finditer(text):
+            type_name = match.group(1).strip()
+            line_no = text.count("\n", 0, match.start()) + 1
+            findings.append(
+                f"[Type assertion] {file_path}:{line_no} uses an empty object cast "
+                f"`{{}} as {type_name}`. Build a structural test double or declare a "
+                f"typed value such as `const value: {type_name} = {{...}}` so TypeScript "
+                "checks the payload instead of hiding missing fields."
+            )
     return findings
 
 
