@@ -151,6 +151,10 @@ def _tool_loop_warning_message(signature: str) -> str:
     return _tools.tool_loop_warning_message(signature)
 
 
+def _non_apply_step_warning_message(count: int) -> str:
+    return _tools.non_apply_step_warning_message(count)
+
+
 def _resolve_repo_path(path: str, workdir: str = None) -> Path:
     return _resolve_repo_path_impl(path, workdir or WORKDIR)
 
@@ -678,6 +682,10 @@ def main():
     completion_state = _completion.CompletionState()
     max_rejections = _CONFIG["verification"]["max_rejections"]
     recent_exploratory_signatures: list[str] = []
+    consecutive_non_apply_steps = 0
+    non_apply_warning_threshold = int(
+        _CONFIG.get("agent", {}).get("non_apply_step_warning_threshold", 5) or 0
+    )
 
     # --- Completion pipeline: verify, quality, done ---
     # Returns: "done" | "quality_fail" | "verify_fail" | "give_up" | "no_test"
@@ -769,12 +777,13 @@ def main():
 
         if finish == "tool_calls" and msg.get("tool_calls"):
             test_passed = False
+            step_had_successful_edit = False
             # OpenAI's tool_calls API requires every assistant(tool_calls) to be
             # followed by a contiguous run of role=tool messages — one per call.
             # If loop detection fires mid-iteration, buffer the warning here and
             # append it AFTER the loop, so siblings stay contiguous instead of
             # producing assistant→tool→user→tool (an invalid transcript).
-            loop_warning = None
+            post_tool_warnings = []
             for tc in msg["tool_calls"]:
                 fn = tc["function"]
                 name = fn["name"]
@@ -823,6 +832,7 @@ def main():
                 })
 
                 if applied is True:
+                    step_had_successful_edit = True
                     recent_exploratory_signatures.clear()
                 elif loop_signature:
                     recent_exploratory_signatures.append(loop_signature)
@@ -832,6 +842,7 @@ def main():
                         and len(set(recent_exploratory_signatures)) == 1
                     ):
                         loop_warning = _tool_loop_warning_message(loop_signature)
+                        post_tool_warnings.append(loop_warning)
                         log("loop_detected", {
                             "step": step,
                             "signature": loop_signature,
@@ -845,8 +856,25 @@ def main():
                 if _is_test_pass(name, args):
                     test_passed = True
 
-            if loop_warning is not None:
-                messages.append({"role": "user", "content": loop_warning})
+            if step_had_successful_edit:
+                consecutive_non_apply_steps = 0
+            else:
+                consecutive_non_apply_steps += 1
+                if (
+                    non_apply_warning_threshold > 0
+                    and consecutive_non_apply_steps == non_apply_warning_threshold
+                ):
+                    post_tool_warnings.append(
+                        _non_apply_step_warning_message(consecutive_non_apply_steps)
+                    )
+                    log("non_apply_steps_detected", {
+                        "step": step,
+                        "count": consecutive_non_apply_steps,
+                        "threshold": non_apply_warning_threshold,
+                    })
+
+            for warning in post_tool_warnings:
+                messages.append({"role": "user", "content": warning})
 
             # --- PHASE NUDGE: test file created → nudge to run + fix ---
             if episode:

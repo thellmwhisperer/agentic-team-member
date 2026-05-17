@@ -20,6 +20,7 @@ from agentic_tdd_runner.agent import (
     _is_obvious_assert_line,
     _is_test_file_path,
     _is_test_pass,
+    _non_apply_step_warning_message,
     _parse_pr_content,
     _resolve_repo_path,
     _tool_applied_status,
@@ -3898,6 +3899,86 @@ class TestMain:
         assert snapshot[idx + 3].get("role") == "user"
         assert "repeated the same exploratory tool call" in snapshot[idx + 3].get("content", "")
 
+    def test_non_apply_step_warning_after_distinct_exploratory_steps(self, tmp_path, monkeypatch):
+        """Distinct read/search commands can still be unproductive if no step edits files."""
+        logged = []
+        chat_calls = []
+
+        config = {
+            "agent": {
+                "max_steps": 4,
+                "max_tool_output": 2000,
+                "non_apply_step_warning_threshold": 3,
+            },
+            "verification": {"max_rejections": 3},
+            "quality": {"enabled": False},
+            "prompt": {
+                "system": "system prompt",
+                "nudge": "Step {step}/{max_steps}. Continue.",
+                "no_test_found": "no test",
+                "quality_failed": "FAIL: {details}",
+            },
+            "llm": {"model": "test-model"},
+            "timeouts": {"tool_execution": 10, "llm_request": 10},
+            "runner": {"command": "bun test", "test_file_patterns": ["*.test.ts"], "exclude_dirs": []},
+            "tools": [],
+            "pr": {"enabled": False},
+        }
+        args = SimpleNamespace(
+            issue="bug text",
+            source=None,
+            symbol=None,
+            workdir=str(tmp_path),
+            config="unused.toml",
+            log_dir=str(tmp_path),
+        )
+
+        def fake_chat(messages, include_tools=True):
+            chat_calls.append([dict(msg) for msg in messages])
+            turn = len(chat_calls)
+            if turn <= 3:
+                return {"choices": [{"message": {"content": None, "tool_calls": [{
+                    "id": f"c{turn}",
+                    "function": {
+                        "name": "run_command",
+                        "arguments": '{"command": "rg needle%s src"}' % turn,
+                    },
+                }]}, "finish_reason": "tool_calls"}], "usage": {}, "timings": {}}
+            return {"choices": [{"message": {"content": "DONE"}, "finish_reason": "stop"}], "usage": {}, "timings": {}}
+
+        monkeypatch.setattr("agentic_tdd_runner.config.load_config", lambda path: config)
+        monkeypatch.setattr("agentic_tdd_runner.agent.parse_args", lambda: args)
+        monkeypatch.setattr("agentic_tdd_runner.agent.init_log", lambda: str(tmp_path / "agent.jsonl"))
+        monkeypatch.setattr("agentic_tdd_runner.agent.emit", lambda msg: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.log", lambda event, data: logged.append((event, data)))
+        monkeypatch.setattr("agentic_tdd_runner.agent.chat", fake_chat)
+        monkeypatch.setattr("agentic_tdd_runner.agent.execute_tool", lambda name, args: "search result")
+        monkeypatch.setattr("agentic_tdd_runner.agent.find_test_file", lambda hint=None: "src/file.test.ts")
+        monkeypatch.setattr("agentic_tdd_runner.agent.verify_red_green", lambda tf: (True, "verified"))
+        monkeypatch.setattr(
+            "agentic_tdd_runner.agent.subprocess.run",
+            lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, stdout="", stderr=""),
+        )
+
+        result = main()
+
+        assert result == 0
+        assert ("non_apply_steps_detected", {
+            "step": 2,
+            "count": 3,
+            "threshold": 3,
+        }) in logged
+
+        snapshot = chat_calls[3]
+        warning = next(
+            msg["content"]
+            for msg in snapshot
+            if msg.get("role") == "user" and "Progress warning" in msg.get("content", "")
+        )
+        assert "3 consecutive" in warning
+        assert "focused edit" in warning
+        assert "failing test" in warning
+
     def test_tool_loop_signature_only_tracks_exploratory_reads(self):
         assert _tool_loop_signature("read_file", {"path": "src/foo.ts"}) == "read_file:src/foo.ts"
         assert _tool_loop_signature("run_command", {"command": "grep -n foo src/"}) == "run_command:grep -n foo src/"
@@ -3920,6 +4001,12 @@ class TestMain:
         assert "read_file:src/foo.ts" in msg
         assert "three times" in msg
         assert "edit" in msg.lower() or "DONE" in msg
+
+    def test_non_apply_step_warning_message_points_model_toward_progress(self):
+        msg = _non_apply_step_warning_message(5)
+        assert "5 consecutive" in msg
+        assert "successful edit" in msg.lower()
+        assert "failing test" in msg.lower()
 
 
 class TestApplyMechanicalEdits:
