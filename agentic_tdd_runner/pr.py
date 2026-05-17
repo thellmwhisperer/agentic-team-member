@@ -196,17 +196,26 @@ def create_pr(
 
     emit("  [PR] Generating title/body")
     log("pr_content_start", {"step": step})
+    content = ""
     try:
         response = chat(pr_messages, include_tools=False)
         content = response["choices"][0]["message"].get("content", "")
         title, body = parse_pr_content(content)
     except Exception as e:
         emit(f"  [PR] LLM failed to generate PR content, using deterministic fallback: {e}")
-        log("pr_content_fallback", {"reason": str(e)})
+        log("pr_content_fallback", {
+            "reason": str(e),
+            "raw_response": content[:500],
+        })
         title, body = build_pr_fallback(test_file, step, sorted(allowed_changed_files))
     if not title or not body:
         emit("  [PR] LLM returned incomplete PR content, using deterministic fallback")
-        log("pr_content_fallback", {"reason": "incomplete_content"})
+        log("pr_content_fallback", {
+            "reason": "incomplete_content",
+            "raw_response": content[:500],
+            "got_title": bool(title),
+            "got_body": bool(body),
+        })
         title, body = build_pr_fallback(test_file, step, sorted(allowed_changed_files))
 
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")

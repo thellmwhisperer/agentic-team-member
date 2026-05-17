@@ -171,5 +171,14 @@ def test_create_pr_logs_content_fallback_when_llm_returns_incomplete_body(tmp_pa
     )
 
     assert result == "https://github.com/test/pr/2"
-    assert ("pr_content_fallback", {"reason": "incomplete_content"}) in logged
+    fallback_events = [
+        data for event, data in logged
+        if event == "pr_content_fallback"
+    ]
+    assert fallback_events == [{
+        "reason": "incomplete_content",
+        "raw_response": "PR_TITLE: fix",
+        "got_title": True,
+        "got_body": False,
+    }]
     assert logged[-1][0] == "pr_done"
