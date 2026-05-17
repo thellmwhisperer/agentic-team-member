@@ -27,10 +27,12 @@ def compact_messages_after_quality_failure(
         clear_file_read_cache()
 
     compacted: list[dict] = []
+    start_idx = 0
     if messages and messages[0].get("role") == "system":
         compacted.append(messages[0])
+        start_idx = 1
 
-    issue_msg = next((msg for msg in messages[1:] if msg.get("role") == "user"), None)
+    issue_msg = next((msg for msg in messages[start_idx:] if msg.get("role") == "user"), None)
     if issue_msg:
         compacted.append(issue_msg)
 
@@ -83,8 +85,14 @@ def should_compact_after_quality_failure(config: dict, last_usage: dict | None) 
     """Decide whether quality retry feedback should compact the transcript."""
     quality_cfg = config.get("quality", {})
     context_window = llm_context_window_tokens(config)
-    threshold_ratio = float(quality_cfg.get("compact_threshold_ratio", 0.85))
-    min_headroom_tokens = int(quality_cfg.get("compact_min_headroom_tokens", 2048))
+    try:
+        threshold_ratio = float(quality_cfg.get("compact_threshold_ratio", 0.85))
+    except (TypeError, ValueError):
+        threshold_ratio = 0.85
+    try:
+        min_headroom_tokens = int(quality_cfg.get("compact_min_headroom_tokens", 2048))
+    except (TypeError, ValueError):
+        min_headroom_tokens = 2048
     prompt_tokens = coerce_int((last_usage or {}).get("prompt_tokens"))
 
     info = {
