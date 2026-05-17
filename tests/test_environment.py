@@ -174,6 +174,13 @@ class TestPrepareEnvironment:
         with pytest.raises(WorktreePrepError, match="not a directory"):
             prepare_run_worktree(str(repo), workdir=str(destination))
 
+    def test_prepare_run_worktree_rejects_file_repo(self, tmp_path):
+        repo = tmp_path / "repo-file"
+        repo.write_text("not a directory")
+
+        with pytest.raises(WorktreePrepError, match="repo is not a directory"):
+            prepare_run_worktree(str(repo))
+
     def test_dirty_worktree_fails_before_install(self, tmp_path, monkeypatch):
         _write_js_project(tmp_path)
         calls = []

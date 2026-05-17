@@ -264,6 +264,8 @@ def _resolve_git_repo(repo: str) -> Path:
     root = Path(repo).expanduser().resolve()
     if not root.exists():
         raise WorktreePrepError(f"repo does not exist: {root}")
+    if not root.is_dir():
+        raise WorktreePrepError(f"repo is not a directory: {root}")
     try:
         result = _run(root, ["git", "rev-parse", "--show-toplevel"], timeout=30)
     except FileNotFoundError as exc:
