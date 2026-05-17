@@ -251,7 +251,7 @@ def try_complete(
                 emit(f"  {path}")
                 full = os.path.join(workdir, path)
                 try:
-                    with open(full) as fh:
+                    with open(full, encoding="utf-8", errors="replace") as fh:
                         emit(fh.read())
                 except OSError:
                     pass
