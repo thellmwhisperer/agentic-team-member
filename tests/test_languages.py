@@ -45,6 +45,10 @@ class TestTypeScriptPlugin:
             "count",
         ]
 
+    def test_parses_rest_signature_param_name(self):
+        lang = get_language("file.ts")
+        assert lang.parse_signature_params("collect(...items: string[])") == ["items"]
+
     def test_runner_is_bun(self):
         lang = get_language("file.ts")
         assert lang.runner == "bun:test"

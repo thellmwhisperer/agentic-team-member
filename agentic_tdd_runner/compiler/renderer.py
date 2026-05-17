@@ -6,7 +6,7 @@ from pathlib import PurePosixPath
 
 from agentic_tdd_runner.compiler.analyzer import _merge_module_mock_dependencies
 from agentic_tdd_runner.languages import get_language
-from agentic_tdd_runner.languages.signature import parse_signature_params as _fallback_parse_signature_params
+from agentic_tdd_runner.languages.signature import parse_signature_params
 
 
 def _build_scaffold(contract):
@@ -271,16 +271,12 @@ def _build_pytest_scaffold(contract):
 
 
 
-def _parse_signature_params(signature):
-    return _fallback_parse_signature_params(signature)
-
-
 def _signature_params_for_target(target):
     lang = get_language(target.get("source_path", ""))
     parser = getattr(lang, "parse_signature_params", None) if lang else None
     if callable(parser):
         return parser(target.get("signature", ""))
-    return _parse_signature_params(target.get("signature", ""))
+    return parse_signature_params(target.get("signature", ""))
 
 
 

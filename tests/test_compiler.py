@@ -1,6 +1,6 @@
 """Tests for the compiler — contract building from analysis facts."""
 from agentic_tdd_runner.compiler import build_contract
-from agentic_tdd_runner.compiler.renderer import _parse_signature_params
+from agentic_tdd_runner.languages.signature import parse_signature_params as _parse_signature_params
 
 
 def _handle_resub_facts():
@@ -367,3 +367,12 @@ class TestParseSignatureParams:
     def test_double_quote_string_default(self):
         result = _parse_signature_params('process(sep: str = ",", count: int = 1)')
         assert result == ["sep", "count"]
+
+    def test_return_function_type_does_not_overcapture(self):
+        assert _parse_signature_params("foo(): (x: number) => void") == []
+
+    def test_rest_params_strip_ellipsis(self):
+        assert _parse_signature_params("foo(...args: string[])") == ["args"]
+
+    def test_parenthesis_inside_string_default(self):
+        assert _parse_signature_params('foo(pattern: str = ")")') == ["pattern"]
