@@ -154,3 +154,4 @@ branch_prefix = "atm/fix-"
 
 [tools]
 file = "tools.json"
+recommended = ["rg"]

@@ -18,8 +18,13 @@ def load_config(toml_path: str | Path) -> dict:
     with open(toml_path, "rb") as f:
         config = tomllib.load(f)
 
-    # Load tools from JSON, constrained to config directory
-    tools_ref = config.get("tools", {}).get("file", "tools.json")
+    # Load tools from JSON, constrained to config directory. Non-file [tools]
+    # settings are preserved separately because config["tools"] is the LLM tool list.
+    tools_config = config.get("tools", {}) or {}
+    if not isinstance(tools_config, dict):
+        tools_config = {}
+    config["tooling"] = {key: value for key, value in tools_config.items() if key != "file"}
+    tools_ref = tools_config.get("file", "tools.json")
     tools_path = (config_dir / tools_ref).resolve()
     try:
         tools_path.relative_to(config_dir)
