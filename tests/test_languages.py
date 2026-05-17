@@ -38,6 +38,17 @@ class TestTypeScriptPlugin:
         assert "logger" in assigns
         assert assigns["logger"]["called_symbol"] == "getLogger"
 
+    def test_parses_optional_signature_param_name(self):
+        lang = get_language("file.ts")
+        assert lang.parse_signature_params("update(name?: string, count = 1)") == [
+            "name",
+            "count",
+        ]
+
+    def test_parses_rest_signature_param_name(self):
+        lang = get_language("file.ts")
+        assert lang.parse_signature_params("collect(...items: string[])") == ["items"]
+
     def test_runner_is_bun(self):
         lang = get_language("file.ts")
         assert lang.runner == "bun:test"
@@ -143,6 +154,13 @@ class TestPythonPlugin:
         assigns = lang.parse_assignments("name: str = 'hello'")
         assert "name" in assigns
         assert assigns["name"]["called_symbol"] is None
+
+    def test_parses_python_signature_params(self):
+        lang = get_language("file.py")
+        assert lang.parse_signature_params("process(self, item, /, *, verbose=False)") == [
+            "item",
+            "verbose",
+        ]
 
     def test_aliased_module_import_preserves_original_name(self):
         lang = get_language("file.py")
