@@ -33,6 +33,7 @@ _TS_METHOD_RE = re.compile(
     r"^\s*(?:(?:public|private|protected|static|readonly)\s+)*(?:async\s+)?([A-Za-z_$][\w$]*)\s*\(",
 )
 _DEFAULT_SEMANTIC_INDEX_RELATIVE_PATH = Path(".atm/semantic-index.generated.json")
+_SEMANTIC_INDEX_VERSION = 3
 _EXCLUDED_DIRS = {
     ".cache",
     ".git",
@@ -272,7 +273,7 @@ def build_semantic_index(project_root: str) -> dict:
     symbols.sort(key=lambda item: (item["source_path"], item["line_start"], item["symbol"]))
     files.sort(key=lambda item: item["path"])
     return {
-        "version": 3,
+        "version": _SEMANTIC_INDEX_VERSION,
         "project_root": project_root,
         "files": files,
         "symbols": symbols,
@@ -303,7 +304,9 @@ def load_or_build_semantic_index(project_root: str, *, output_path: str | Path |
     """Reuse the generated semantic layer when present, otherwise build it."""
     destination = Path(output_path) if output_path is not None else Path(project_root) / _DEFAULT_SEMANTIC_INDEX_RELATIVE_PATH
     if destination.exists():
-        return load_semantic_index(destination)
+        payload = load_semantic_index(destination)
+        if payload.get("version") == _SEMANTIC_INDEX_VERSION:
+            return payload
     write_semantic_index(project_root, output_path=destination)
     return load_semantic_index(destination)
 

@@ -306,7 +306,7 @@ class TestSemanticIndexPersistence:
         output_path.write_text(
             json.dumps(
                 {
-                    "version": 1,
+                    "version": 3,
                     "project_root": str(tmp_path),
                     "candidates": [
                         {
@@ -335,3 +335,32 @@ class TestSemanticIndexPersistence:
         payload = load_or_build_semantic_index(str(tmp_path))
 
         assert payload["candidates"][0]["symbol"] == "handleMessage"
+
+    def test_load_or_build_semantic_index_rebuilds_stale_version(self, tmp_path, monkeypatch):
+        output_path = tmp_path / ".atm" / "semantic-index.generated.json"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "project_root": str(tmp_path),
+                    "candidates": [{"symbol": "staleTarget"}],
+                }
+            )
+        )
+
+        def fake_build(project_root):
+            return {
+                "version": 3,
+                "project_root": project_root,
+                "files": [],
+                "symbols": [],
+                "candidates": [{"symbol": "freshTarget"}],
+            }
+
+        monkeypatch.setattr("agentic_tdd_runner.discovery.build_semantic_index", fake_build)
+
+        payload = load_or_build_semantic_index(str(tmp_path))
+
+        assert payload["version"] == 3
+        assert payload["candidates"] == [{"symbol": "freshTarget"}]

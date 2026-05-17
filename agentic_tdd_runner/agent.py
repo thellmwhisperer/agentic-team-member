@@ -1421,16 +1421,6 @@ def _body_parses_external_metadata(body: str) -> bool:
 
 def _body_has_invalid_metadata_fallback(body: str, original_param: str) -> bool:
     escaped = re.escape(original_param)
-    metadata_parse = (
-        r"\b(?:Number|parseInt)\s*\("
-        r"[\s\S]{0,240}\[[^\]]*['\"][^'\"]+['\"][^\]]*\]"
-        r"[\s\S]{0,240}\)"
-    )
-    if re.search(rf"{metadata_parse}\s*\|\|\s*{escaped}\b", body):
-        return True
-    if re.search(rf"\b{escaped}\b\s*\|\|\s*{metadata_parse}", body):
-        return True
-
     has_nan_or_finite_guard = re.search(
         r"\b(?:Number\.isNaN|Number\.isFinite|isNaN)\s*\(",
         body,

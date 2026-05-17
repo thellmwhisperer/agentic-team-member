@@ -1993,7 +1993,8 @@ class TestRunQualityChecks:
         source = tmp_path / "src" / "file.ts"
         source.write_text(
             "export function f(_streakMonths: number, userstate: Record<string, string>) {\n"
-            "  const months = Number(userstate['msg-param-cumulative-months']) || _streakMonths;\n"
+            "  const parsed = Number(userstate['msg-param-cumulative-months']);\n"
+            "  const months = Number.isNaN(parsed) ? _streakMonths : parsed;\n"
             "  return months;\n"
             "}\n"
         )
@@ -2010,6 +2011,31 @@ class TestRunQualityChecks:
         ok, msg = run_quality_checks("src/file.test.ts")
 
         assert ok is True, msg
+
+    def test_rejects_truthy_metadata_fallback_that_drops_zero(self, tmp_path, monkeypatch):
+        self._setup_repo(tmp_path, monkeypatch)
+        source = tmp_path / "src" / "file.ts"
+        source.write_text(
+            "export function f(_streakMonths: number, userstate: Record<string, string>) {\n"
+            "  const months = Number(userstate['msg-param-cumulative-months']) || _streakMonths;\n"
+            "  return months;\n"
+            "}\n"
+        )
+        (tmp_path / "src" / "file.test.ts").write_text("const x: number = 1;")
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "quality": {
+                "enabled": True, "max_fix_rounds": 3,
+                "typescript": {"checks": [], "forbidden": []},
+            },
+            "timeouts": {"tool_execution": 10},
+            "prompt": {"quality_failed": "FAIL: {details}"},
+        })
+
+        ok, msg = run_quality_checks("src/file.test.ts")
+
+        assert ok is False
+        assert "invalid parsed values" in msg
+        assert "_streakMonths" in msg
 
     def test_rejects_parse_default_that_does_not_handle_invalid_metadata(self, tmp_path, monkeypatch):
         self._setup_repo(tmp_path, monkeypatch)
