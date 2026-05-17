@@ -7,6 +7,7 @@ import pytest
 from agentic_tdd_runner.bootstrap import (
     build_episode_for_target,
     capture_run_baseline,
+    discover_target_from_issue,
     prepare_run_context,
     prepare_workdir,
 )
@@ -147,6 +148,30 @@ The bot reports 0 months.
     ]
 
 
+def test_prepare_run_context_handles_missing_source_symbol_attrs(tmp_path):
+    args = SimpleNamespace(issue="unused")
+
+    context = prepare_run_context(
+        args,
+        repo=None,
+        workdir=str(tmp_path),
+        config={"prompt": {"system": "system"}, "timeouts": {"tool_execution": 10}},
+        load_issue_text=lambda _args, _repo: "Bug: the command reports the wrong total",
+        prepare_target_environment=lambda: None,
+        apply_mechanical_edits=lambda _edits, _workdir: 0,
+        collect_pr_changed_files=lambda _workdir, _timeout: set(),
+        discovery_enabled=False,
+        emit=lambda _msg: None,
+        log=lambda _event, _data: None,
+    )
+
+    assert context.source_path is None
+    assert context.symbol is None
+    assert context.episode is None
+    assert context.messages[0]["content"] == "system"
+    assert "Bug: the command reports the wrong total" in context.messages[1]["content"]
+
+
 def test_capture_run_baseline_logs_preexisting_dirty_files(tmp_path):
     logged = []
 
@@ -159,6 +184,38 @@ def test_capture_run_baseline_logs_preexisting_dirty_files(tmp_path):
 
     assert baseline == {"a.ts", "b.ts"}
     assert logged == [("run_baseline_dirty_files", {"files": ["a.ts", "b.ts"]})]
+
+
+@pytest.mark.parametrize(
+    ("payload", "keys"),
+    [
+        ({"source_path": "src/app.ts"}, ["source_path"]),
+        (["src/app.ts", "handle"], []),
+    ],
+)
+def test_discover_target_from_issue_rejects_invalid_payload(tmp_path, monkeypatch, payload, keys):
+    emitted = []
+    logged = []
+
+    monkeypatch.setattr(
+        "agentic_tdd_runner.discovery.load_or_build_semantic_index",
+        lambda project_root: {"candidates": [{}, {}]},
+    )
+    monkeypatch.setattr(
+        "agentic_tdd_runner.discovery.discover_target",
+        lambda **_kwargs: payload,
+    )
+
+    with pytest.raises(SystemExit, match="Could not determine source/symbol"):
+        discover_target_from_issue(
+            "Bug: totals are wrong",
+            workdir=str(tmp_path),
+            emit=emitted.append,
+            log=lambda event, data: logged.append((event, data)),
+        )
+
+    assert emitted == ["[DISCOVERY] Discovery result missing source/symbol"]
+    assert logged == [("discovery_failed", {"reason": "invalid_payload", "keys": keys})]
 
 
 def test_build_episode_for_target_returns_none_without_target(tmp_path):

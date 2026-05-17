@@ -18,7 +18,10 @@ class WorkdirContext:
 
 @dataclass
 class RunBootstrapContext:
-    """Inputs prepared for the runtime loop."""
+    """Inputs prepared for the runtime loop.
+
+    source_path and symbol are retained as resolved-target observability fields.
+    """
 
     issue_text: str
     issue_text_for_model: str
@@ -92,8 +95,8 @@ def prepare_run_context(
     )
 
     issue_text_for_model = issue_contract.model_text
-    source_path = args.source or issue_contract.source_hint
-    symbol = args.symbol or issue_contract.symbol_hint
+    source_path = getattr(args, "source", None) or issue_contract.source_hint
+    symbol = getattr(args, "symbol", None) or issue_contract.symbol_hint
     if not (source_path and symbol) and discovery_enabled:
         source_path, symbol = discover_target_from_issue(
             issue_text_for_model,
@@ -171,8 +174,16 @@ def discover_target_from_issue(
             "Could not determine source/symbol from issue. "
             "Pass --source and --symbol or improve the semantic index."
         )
-    source_path = discovered["source_path"]
-    symbol = discovered["symbol"]
+    payload_keys = sorted(discovered.keys()) if isinstance(discovered, dict) else []
+    source_path = discovered.get("source_path") if isinstance(discovered, dict) else None
+    symbol = discovered.get("symbol") if isinstance(discovered, dict) else None
+    if not (source_path and symbol):
+        emit("[DISCOVERY] Discovery result missing source/symbol")
+        log("discovery_failed", {"reason": "invalid_payload", "keys": payload_keys})
+        raise SystemExit(
+            "Could not determine source/symbol from issue. "
+            "Pass --source and --symbol or improve the semantic index."
+        )
     emit(f"[DISCOVERY] Selected {symbol} in {source_path}")
     log("discovery", {"source": source_path, "symbol": symbol, "score": discovered.get("score")})
     return source_path, symbol
