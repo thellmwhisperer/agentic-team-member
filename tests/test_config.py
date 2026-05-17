@@ -92,6 +92,11 @@ class TestLoadConfig:
         assert cfg["agent"]["max_steps"] == 30
         assert cfg["agent"]["max_tool_output"] == 4000
 
+    def test_production_agent_non_apply_warning_threshold(self):
+        prod = CONFIG_DIR / "agent.toml"
+        cfg = load_config(prod)
+        assert cfg["agent"]["non_apply_step_warning_threshold"] == 5
+
     def test_loads_nudge_and_messages(self, tmp_path):
         _write_config(tmp_path)
         cfg = load_config(tmp_path / "agent.toml")

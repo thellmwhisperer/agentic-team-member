@@ -1,6 +1,7 @@
 [agent]
 max_steps = 50
 max_tool_output = 8000
+non_apply_step_warning_threshold = 5
 
 [llm]
 url = "http://127.0.0.1:11435/v1/chat/completions"
