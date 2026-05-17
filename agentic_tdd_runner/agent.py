@@ -8,7 +8,6 @@ import re
 import shlex
 import subprocess
 import sys
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -16,6 +15,7 @@ from agentic_tdd_runner import completion as _completion
 from agentic_tdd_runner import llm as _llm
 from agentic_tdd_runner import pr as _pr
 from agentic_tdd_runner import quality as _quality
+from agentic_tdd_runner import runtime as _runtime
 from agentic_tdd_runner import tools as _tools
 from agentic_tdd_runner.paths import (
     find_test_file as _find_test_file_impl,
@@ -670,260 +670,31 @@ def main():
             {"role": "user", "content": f"Fix this bug:\n\n{issue_text_for_model}"},
         ]
 
-    emit(f"{'='*60}")
-    max_steps = _CONFIG["agent"]["max_steps"]
-    emit(f"AGENT START — max {max_steps} steps")
-    emit(f"Workdir: {WORKDIR}")
-    emit(f"Log: {log_path}")
-    emit(f"{'='*60}")
-
-    log("start", {"issue": issue_text})
-
-    completion_state = _completion.CompletionState()
-    max_rejections = _CONFIG["verification"]["max_rejections"]
-    recent_exploratory_signatures: list[str] = []
-    consecutive_non_apply_steps = 0
-    non_apply_warning_threshold = int(
-        _CONFIG.get("agent", {}).get("non_apply_step_warning_threshold", 5) or 0
+    return _runtime.run_agent_loop(
+        messages=messages,
+        episode=episode,
+        issue_text=issue_text,
+        config=_CONFIG,
+        workdir=WORKDIR,
+        log_path=log_path,
+        emit=emit,
+        log=log,
+        chat=chat,
+        execute_tool=execute_tool,
+        truncate=truncate,
+        is_llm_timeout_error=_is_llm_timeout_error,
+        tool_applied_status=_tool_applied_status,
+        tool_loop_signature=_tool_loop_signature,
+        tool_loop_warning_message=_tool_loop_warning_message,
+        non_apply_step_warning_message=_non_apply_step_warning_message,
+        is_test_pass=_is_test_pass,
+        is_test_file_path=_is_test_file_path,
+        find_test_file=find_test_file,
+        verify_red_green=verify_red_green,
+        run_quality_checks=run_quality_checks,
+        create_pr=create_pr,
+        clear_file_read_cache=_file_read_cache.clear,
     )
-
-    # --- Completion pipeline: verify, quality, done ---
-    # Returns: "done" | "quality_fail" | "verify_fail" | "give_up" | "no_test"
-    def try_complete(step, msg: dict):
-        return _completion.try_complete(
-            step,
-            msg,
-            messages=messages,
-            episode=episode,
-            state=completion_state,
-            max_rejections=max_rejections,
-            config=_CONFIG,
-            workdir=WORKDIR,
-            emit=emit,
-            log=log,
-            find_test_file=find_test_file,
-            verify_red_green=verify_red_green,
-            run_quality_checks=run_quality_checks,
-            create_pr=create_pr,
-            clear_file_read_cache=_file_read_cache.clear,
-        )
-
-    for step in range(max_steps):
-        emit(f"\n>>> Step {step}/{max_steps} — requesting LLM...")
-        t0 = time.time()
-
-        try:
-            response = chat(messages)
-        except Exception as e:
-            if _is_llm_timeout_error(e):
-                emit(f"  LLM TIMEOUT: {e}")
-                log("llm_timeout", {"step": step, "error": str(e)})
-                return 1
-            emit(f"  ERROR: {e}")
-            log("error", {"step": step, "error": str(e)})
-            break
-
-        elapsed = time.time() - t0
-
-        choice = response["choices"][0]
-        msg = choice["message"]
-        finish = choice["finish_reason"]
-        usage = response.get("usage", {})
-        completion_state.last_usage = usage
-        timings = response.get("timings", {})
-        thinking = msg.get("reasoning_content", "")
-
-        log("step", {
-            "step": step,
-            "elapsed_s": round(elapsed, 1),
-            "finish_reason": finish,
-            "thinking": thinking,
-            "content": msg.get("content", ""),
-            "tool_calls": [
-                {"name": tc["function"]["name"], "args": tc["function"]["arguments"]}
-                for tc in msg.get("tool_calls", [])
-            ],
-            "usage": usage,
-            "timings": {
-                "prompt_ms": timings.get("prompt_ms"),
-                "predicted_ms": timings.get("predicted_ms"),
-                "prompt_per_second": timings.get("prompt_per_second"),
-                "predicted_per_second": timings.get("predicted_per_second"),
-            },
-        })
-
-        prompt_tok = usage.get("prompt_tokens", "?")
-        comp_tok = usage.get("completion_tokens", "?")
-        tok_s = timings.get("predicted_per_second", 0)
-        emit(f"--- Step {step} | {elapsed:.1f}s | {prompt_tok}→{comp_tok} tok | {tok_s:.1f} tok/s | finish={finish} ---")
-
-        if thinking:
-            emit(f"  [THINK] ({len(thinking)} chars)")
-            for line in thinking.strip().split("\n"):
-                emit(f"    {line}")
-
-        if msg.get("content"):
-            emit(f"  [SAY] {msg['content']}")
-            if "DONE" in msg["content"].upper():
-                completion = try_complete(step, msg)
-                if completion == "done":
-                    return 0
-                if completion == "give_up":
-                    return 1
-                continue
-
-        # Append assistant message to history
-        messages.append(msg)
-
-        if finish == "tool_calls" and msg.get("tool_calls"):
-            test_passed = False
-            step_had_successful_edit = False
-            # OpenAI's tool_calls API requires every assistant(tool_calls) to be
-            # followed by a contiguous run of role=tool messages — one per call.
-            # If loop detection fires mid-iteration, buffer the warning here and
-            # append it AFTER the loop, so siblings stay contiguous instead of
-            # producing assistant→tool→user→tool (an invalid transcript).
-            post_tool_warnings = []
-            for tc in msg["tool_calls"]:
-                fn = tc["function"]
-                name = fn["name"]
-                try:
-                    args = json.loads(fn["arguments"])
-                except json.JSONDecodeError:
-                    args = {}
-                    emit(f"  WARNING: failed to parse args: {fn['arguments'][:200]}")
-
-                args_preview = json.dumps(args, ensure_ascii=False)
-                if len(args_preview) > 300:
-                    args_preview = args_preview[:300] + "..."
-                emit(f"  [TOOL] {name}({args_preview})")
-
-                t1 = time.time()
-                result = execute_tool(name, args)
-                tool_elapsed = time.time() - t1
-                result_truncated = truncate(result)
-                applied = _tool_applied_status(name, result)
-                loop_signature = _tool_loop_signature(name, args)
-
-                log("tool", {
-                    "step": step,
-                    "name": name,
-                    "args": args,
-                    "applied": applied,
-                    "result_chars": len(result),
-                    "result_truncated": len(result) != len(result_truncated),
-                    "elapsed_s": round(tool_elapsed, 3),
-                    "result": result_truncated,
-                })
-
-                display = result_truncated
-                if len(display) > 500:
-                    display = display[:250] + f"\n  ... ({len(result)} chars total) ...\n" + display[-250:]
-                emit(f"  [RESULT] ({len(result)} chars, {tool_elapsed:.2f}s)")
-                for line in display.split("\n")[:20]:
-                    emit(f"    {line}")
-                if display.count("\n") > 20:
-                    emit(f"    ... ({display.count(chr(10))} lines total)")
-
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tc["id"],
-                    "content": result_truncated,
-                })
-
-                if applied is True:
-                    step_had_successful_edit = True
-                    recent_exploratory_signatures.clear()
-                elif loop_signature:
-                    recent_exploratory_signatures.append(loop_signature)
-                    recent_exploratory_signatures[:] = recent_exploratory_signatures[-3:]
-                    if (
-                        len(recent_exploratory_signatures) == 3
-                        and len(set(recent_exploratory_signatures)) == 1
-                    ):
-                        loop_warning = _tool_loop_warning_message(loop_signature)
-                        post_tool_warnings.append(loop_warning)
-                        log("loop_detected", {
-                            "step": step,
-                            "signature": loop_signature,
-                            "count": 3,
-                        })
-                        recent_exploratory_signatures.clear()
-                # No else: failed edits and unrelated tools leave the streak
-                # intact. Only a successful edit (applied is True) breaks it,
-                # because only a successful edit represents actual progress.
-
-                if _is_test_pass(name, args):
-                    test_passed = True
-
-            if step_had_successful_edit:
-                consecutive_non_apply_steps = 0
-            else:
-                consecutive_non_apply_steps += 1
-                if (
-                    non_apply_warning_threshold > 0
-                    and consecutive_non_apply_steps == non_apply_warning_threshold
-                ):
-                    post_tool_warnings.append(
-                        _non_apply_step_warning_message(consecutive_non_apply_steps)
-                    )
-                    log("non_apply_steps_detected", {
-                        "step": step,
-                        "count": consecutive_non_apply_steps,
-                        "threshold": non_apply_warning_threshold,
-                    })
-
-            for warning in post_tool_warnings:
-                messages.append({"role": "user", "content": warning})
-
-            # --- PHASE NUDGE: test file created → nudge to run + fix ---
-            if episode:
-                created_test = False
-                for tc in msg.get("tool_calls", []):
-                    try:
-                        fn = tc["function"]
-                        if fn["name"] != "create_file":
-                            continue
-                        tc_args = json.loads(fn["arguments"])
-                    except (json.JSONDecodeError, KeyError, TypeError):
-                        continue
-                    if _is_test_file_path(str(tc_args.get("path", ""))):
-                        created_test = True
-                        break
-                if created_test:
-                    nudge = (
-                        f"Good. Now run the test to confirm it fails, then fix "
-                        f"{episode['source_file']} to make it pass. Say DONE when green."
-                    )
-                    messages.append({"role": "user", "content": nudge})
-                    emit("  [PHASE] Test created → injected run+fix nudge")
-                    log("phase_nudge", {"phase": "fix", "test_file": episode["test_file"]})
-
-            # --- AUTO-TRIGGER: test passed → verify → quality → done ---
-            if test_passed:
-                emit("\n  [AUTO] Test pass detected — triggering verification pipeline")
-                completion = try_complete(step, msg)
-                if completion == "done":
-                    return 0
-                if completion == "give_up":
-                    return 1
-                # quality_fail, verify_fail, no_test → continue loop
-
-        elif finish == "stop":
-            if step > 3:
-                messages.append({
-                    "role": "user",
-                    "content": _CONFIG["prompt"]["nudge"].replace("{step}", str(step)).replace("{max_steps}", str(max_steps))
-                })
-                emit("  [NUDGE] Continue prompt injected")
-        else:
-            emit(f"  [FINISH] {finish}")
-
-    emit(f"\n{'='*60}")
-    emit(f"AGENT EXHAUSTED — {max_steps} steps without DONE")
-    emit(f"{'='*60}")
-    log("exhausted", {"steps": max_steps})
-    return 1
 
 
 if __name__ == "__main__":
