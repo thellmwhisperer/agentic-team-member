@@ -60,6 +60,41 @@ def test_detects_vitest_from_dependencies_without_test_script(tmp_path):
     assert report.test_command is None
 
 
+def test_ignores_peer_runner_dependencies_without_test_script(tmp_path):
+    _write_package(tmp_path, {
+        "peerDependencies": {"vitest": "^4.0.0"},
+        "optionalDependencies": {"jest": "^30.0.0"},
+    })
+
+    report = inspect_runner_bootstrap(tmp_path)
+
+    assert report.test_runner is None
+    assert report.test_runner_source == ""
+
+
+def test_does_not_guess_when_dependency_fallback_is_ambiguous(tmp_path):
+    _write_package(tmp_path, {
+        "devDependencies": {"jest": "^30.0.0", "vitest": "^4.0.0"},
+    })
+
+    report = inspect_runner_bootstrap(tmp_path)
+
+    assert report.test_runner is None
+    assert report.test_runner_source == "ambiguous:vitest,jest"
+
+
+def test_detects_bun_test_from_package_manager_without_bun_types(tmp_path):
+    (tmp_path / "bun.lock").write_text("")
+    _write_package(tmp_path, {
+        "packageManager": "bun@1.2.0",
+    })
+
+    report = inspect_runner_bootstrap(tmp_path)
+
+    assert report.test_runner == "bun:test"
+    assert report.test_runner_source == "package_manager:bun"
+
+
 def test_detects_node_test_from_script(tmp_path):
     _write_package(tmp_path, {
         "scripts": {"test": "node --test test/*.test.js"},
@@ -114,6 +149,20 @@ def test_detects_npx_runner_with_flags(tmp_path):
 
     assert report.test_runner == "jest"
     assert report.test_command == "npx --yes jest --runInBand"
+
+
+def test_detects_runner_behind_npm_run_script_reference(tmp_path):
+    _write_package(tmp_path, {
+        "scripts": {
+            "test": "npm run test:unit",
+            "test:unit": "vitest run",
+        },
+    })
+
+    report = inspect_runner_bootstrap(tmp_path)
+
+    assert report.test_runner == "vitest"
+    assert report.test_command == "npm run test:unit"
 
 
 def test_returns_empty_report_for_non_javascript_project(tmp_path):

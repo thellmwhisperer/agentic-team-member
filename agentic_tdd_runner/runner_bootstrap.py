@@ -53,7 +53,7 @@ def inspect_runner_bootstrap(workdir: str | Path) -> RunnerBootstrapReport:
         lockfile,
         lockfile_package_manager,
     )
-    test_runner, test_runner_source, test_command = _detect_test_runner(pkg)
+    test_runner, test_runner_source, test_command = _detect_test_runner(pkg, package_manager)
 
     return RunnerBootstrapReport(
         workdir=str(root),
@@ -121,24 +121,36 @@ def _detect_package_manager(
     return None, ""
 
 
-def _detect_test_runner(pkg: dict) -> tuple[str | None, str, str | None]:
+def _detect_test_runner(pkg: dict, package_manager: str | None) -> tuple[str | None, str, str | None]:
     scripts = pkg.get("scripts", {})
     test_command = scripts.get("test") if isinstance(scripts, dict) else None
     if isinstance(test_command, str) and test_command.strip():
-        runner = _classify_test_command(test_command)
+        runner = _classify_test_command(test_command, scripts=scripts)
         return runner or "custom", "package.json:scripts.test", test_command
 
-    deps = _all_dependencies(pkg)
+    deps = _runner_dependencies(pkg)
+    detected = []
     if "vitest" in deps:
-        return "vitest", "package.json:dependencies", None
+        detected.append("vitest")
     if "jest" in deps or "@jest/globals" in deps:
-        return "jest", "package.json:dependencies", None
+        detected.append("jest")
+    if len(detected) == 1:
+        return detected[0], "package.json:dependencies", None
+    if len(detected) > 1:
+        return None, f"ambiguous:{','.join(detected)}", None
     if "bun-types" in deps or "@types/bun" in deps:
         return "bun:test", "package.json:dependencies", None
+    if package_manager == "bun":
+        return "bun:test", "package_manager:bun", None
     return None, "", None
 
 
-def _classify_test_command(command: str) -> str | None:
+def _classify_test_command(
+    command: str,
+    *,
+    scripts: dict | None = None,
+    seen_scripts: set[str] | None = None,
+) -> str | None:
     try:
         tokens = shlex.split(command)
     except ValueError:
@@ -158,7 +170,12 @@ def _classify_test_command(command: str) -> str | None:
     if binary == "npx" and len(tokens) > 1:
         return _classify_npx_command(tokens[1:])
     if binary in PACKAGE_MANAGERS and len(tokens) > 1:
-        return _classify_package_manager_command(binary, tokens[1:])
+        return _classify_package_manager_command(
+            binary,
+            tokens[1:],
+            scripts=scripts,
+            seen_scripts=seen_scripts,
+        )
     return None
 
 
@@ -199,16 +216,50 @@ def _classify_npx_command(args: list[str]) -> str | None:
     return None
 
 
-def _classify_package_manager_command(binary: str, args: list[str]) -> str | None:
+def _classify_package_manager_command(
+    binary: str,
+    args: list[str],
+    *,
+    scripts: dict | None = None,
+    seen_scripts: set[str] | None = None,
+) -> str | None:
     if binary == "bun" and args and args[0] == "test":
         return "bun:test"
+    if args and args[0] == "run":
+        return _classify_script_reference(_run_script_name(args[1:]), scripts, seen_scripts)
+    if binary == "npm" and args and args[0] == "test":
+        return _classify_script_reference("test", scripts, seen_scripts)
     if args and args[0] == "exec" and len(args) > 1:
         return _classify_runner_binary(args[1])
     if args and args[0] == "x" and len(args) > 1:
         return _classify_runner_binary(args[1])
     if binary in {"pnpm", "yarn"} and args:
-        return _classify_runner_binary(args[0])
+        return _classify_runner_binary(args[0]) or _classify_script_reference(args[0], scripts, seen_scripts)
     return None
+
+
+def _run_script_name(args: list[str]) -> str | None:
+    for arg in args:
+        if not arg.startswith("-"):
+            return arg
+    return None
+
+
+def _classify_script_reference(
+    script_name: str | None,
+    scripts: dict | None,
+    seen_scripts: set[str] | None,
+) -> str | None:
+    if not script_name or not isinstance(scripts, dict):
+        return None
+    if seen_scripts and script_name in seen_scripts:
+        return None
+    command = scripts.get(script_name)
+    if not isinstance(command, str) or not command.strip():
+        return None
+    seen = set(seen_scripts or set())
+    seen.add(script_name)
+    return _classify_test_command(command, scripts=scripts, seen_scripts=seen)
 
 
 def _classify_runner_binary(binary: str) -> str | None:
@@ -225,9 +276,9 @@ def _is_env_assignment(token: str) -> bool:
     return bool(name) and all(ch.isalnum() or ch == "_" for ch in name)
 
 
-def _all_dependencies(pkg: dict) -> set[str]:
+def _runner_dependencies(pkg: dict) -> set[str]:
     deps: set[str] = set()
-    for key in ("dependencies", "devDependencies", "peerDependencies", "optionalDependencies"):
+    for key in ("dependencies", "devDependencies"):
         value = pkg.get(key, {})
         if isinstance(value, dict):
             deps.update(str(name) for name in value)
