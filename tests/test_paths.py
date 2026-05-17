@@ -186,6 +186,33 @@ def test_find_test_file_excludes_walk_paths_by_path_component(tmp_path, monkeypa
     assert find_test_file(None, str(tmp_path), _config(["dist"])) == "distribution/walk.test.ts"
 
 
+def test_find_test_file_prunes_excluded_walk_subtrees(tmp_path, monkeypatch):
+    visited_after_prune = []
+
+    def fake_walk(workdir):
+        dirs = ["node_modules", "src"]
+        yield str(tmp_path), dirs, []
+        visited_after_prune.extend(dirs)
+        if "node_modules" in dirs:
+            yield str(tmp_path / "node_modules"), [], ["ignored.test.ts"]
+        if "src" in dirs:
+            yield str(tmp_path / "src"), [], ["walk.test.ts"]
+
+    def fake_run(cmd, **kwargs):
+        if cmd == ["git", "status", "--porcelain", "-z"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout=b"", stderr=b"")
+        if cmd == ["git", "ls-files", "--", "src/walk.test.ts"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        raise AssertionError(f"unexpected command: {cmd}")
+
+    _pretend_git(monkeypatch)
+    monkeypatch.setattr("agentic_tdd_runner.paths.os.walk", fake_walk)
+    monkeypatch.setattr("agentic_tdd_runner.paths.subprocess.run", fake_run)
+
+    assert find_test_file(None, str(tmp_path), _config(["node_modules"])) == "src/walk.test.ts"
+    assert visited_after_prune == ["src"]
+
+
 def test_find_test_file_uses_default_patterns_without_runner_config(tmp_path, monkeypatch):
     test_file = tmp_path / "src" / "walk.test.ts"
     test_file.parent.mkdir()

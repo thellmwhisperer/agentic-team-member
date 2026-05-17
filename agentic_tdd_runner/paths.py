@@ -117,10 +117,16 @@ def find_test_file(hint: str | None, workdir: str, config: dict) -> str | None:
         PurePosixPath(ex).parts
         for ex in runner_config.get("exclude_dirs", [])
     ]
-    for root, _dirs, files in os.walk(workdir):
+    for root, dirs, files in os.walk(workdir):
         rel_root = os.path.relpath(root, workdir)
         if _is_excluded_path(rel_root, exclude_prefixes):
+            dirs[:] = []
             continue
+        dirs[:] = [
+            dirname
+            for dirname in dirs
+            if not _is_excluded_path(str(PurePosixPath(rel_root) / dirname), exclude_prefixes)
+        ]
         for filename in files:
             full = os.path.join(root, filename)
             rel = os.path.relpath(full, workdir)
