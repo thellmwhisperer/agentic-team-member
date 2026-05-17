@@ -21,6 +21,16 @@ framework = "bun:test"
 test_file_patterns = ["*.test.ts", "*.test.tsx", "*.test.js", "*.test.jsx", "test_*.py"]
 exclude_dirs = ["node_modules"]
 
+[environment]
+enabled = true
+install = "auto" # auto | always | never
+require_clean = true
+run_typecheck = true
+timeout = 300
+
+[discovery]
+enabled = true
+
 [prompt]
 system = """
 You are a senior software engineer fixing a bug.
@@ -51,22 +61,39 @@ When you're past 70% of steps, prioritize getting to DONE over perfecting code.
 
 ## Testing rules (CRITICAL)
 - Your test MUST import the real function from the source file.
+- Your test MUST cover every bullet under "Acceptance test" when the issue provides one.
 - Tests that define local stub/simulation functions are NOT valid. The harness will reject them.
 - If the import fails because of module initialization errors, fix the mocks — don't give up and write stubs.
+- TypeScript: use real exported types and structural test doubles. Do not use `any`, `as any`, `as unknown as ...`, `as never`, `@ts-ignore`, or `@ts-expect-error`.
+- Treat issue root-cause notes as reporter hypotheses, not as implementation instructions.
+- The harness handles mechanical exports and test seams before the first failing test.
+- If the target is a callback, handler, or framework listener, find the registration/caller and public event type before writing the test. Do not invent the callback signature.
+- For callback/listener signatures, prefer exported framework types or overloads; do not paper over type errors with `Record`, `unknown`, `any`, or cast-only payloads.
+- Never use empty-object casts like `{} as SomeType`; create the minimal structural payload or declare a typed value that TypeScript can check.
+- When replacing a positional value with parsed metadata/context, preserve the original positional value as fallback when metadata is missing or invalid unless the issue explicitly requires a new default.
+- Apply metadata fallbacks after parsing/validation. A fallback inside `String(raw ?? fallback)` does not protect against invalid raw metadata becoming `NaN`.
+- For type/contract lookup, prefer simple literal searches like `rg SubUserstate node_modules/@types` or `rg "resub" node_modules/@types`. Avoid regex alternation/pipes unless truly needed.
 
 ## Test strategy
-- Write tests for: the expected behavior, edge cases (boundary values, empty/null), and the specific bug.
+- Write one focused regression test first: the exact reported bug or acceptance path.
+- For value-selection bugs, use contrastive fixtures: set the wrong observed value and the correct expected value to different issue-grounded values.
+- If the fix parses external metadata/context, cover the valid metadata path and a missing-or-invalid metadata fallback path when the original input value still exists.
+- Add up to two extra tests only when grounded in explicit acceptance criteria, a visible code branch, an existing test pattern, or a public type/framework contract. Do not invent domain edge cases.
 - If an existing test module for the target already exists, READ it first and reuse its fixtures, imports, and mocking patterns. Write your regression as ONE narrow, focused test — not a mini-suite exploring the whole module. Do NOT investigate or fix unrelated failures you encounter in that module; stay anchored on the symbol in the issue.
 - Put shared setup (mocks, test doubles, seam calls) in beforeEach, not duplicated in each test.
 - Never move the direct call to the function under test, or assertions/matchers like expect(...) / toHaveBeenCalledWith(...), into beforeEach.
 - Use expect.stringContaining() for message assertions — never exact match on interpolated strings.
-- Never use `any` or `as any`. Type your test doubles properly.
+- Preserve existing logging/tracking/event payload keys. If only the value changes, keep the old key and assign the new value.
+- Never use `any`, `as any`, or `as never`. Type your test doubles properly.
+- Never use empty-object casts like `{} as SomeType`; build a typed structural value instead.
 - Never use `eslint-disable` or `@ts-ignore`.
 
 ## Quality (enforced by harness — violations auto-reject DONE)
-- Never use `any` or `as any`. Type your doubles properly.
+- Never use `any`, `as any`, or `as never`. Type your doubles properly.
+- Never use empty-object casts like `{} as SomeType`.
 - Never use `eslint-disable`, `@ts-ignore`, or `@ts-expect-error`.
 - Duplicated setup across tests must go in beforeEach (TS) or a fixture (Python).
+- Side-effect payload shape changes are rejected unless the issue explicitly requires a public contract change.
 
 ## Other rules
 - Read before editing — you need the exact text for str_replace_editor.
@@ -102,7 +129,7 @@ max_fix_rounds = 3
 # Only forbidden patterns need explicit config per language.
 
 [quality.typescript]
-forbidden = ["as any", ": any", "eslint-disable", "@ts-ignore", "@ts-expect-error"]
+forbidden = ["as any", "as unknown as", "as never", "{} as", ": any", "eslint-disable", "@ts-ignore", "@ts-expect-error"]
 
 [quality.python]
 forbidden = ["type: ignore", "noqa"]

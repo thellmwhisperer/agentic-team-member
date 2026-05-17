@@ -29,27 +29,7 @@ def _build_bun_scaffold(contract):
 
     imports_block = "import { describe, expect, mock, test } from 'bun:test';"
 
-    # If assertion targets a module_load dep, extract spy as named variable
-    spy_extractions = {}  # {(binding, member): spy_var_name}
-    spy_decl_lines = []
-    if assertion_surface.get("kind") == "outbound_call_arguments":
-        a_binding = assertion_surface["binding"]
-        a_member = assertion_surface["member"]
-        # Check if assertion binding is in module_load (not execution)
-        module_bindings = set()
-        for dep in module_load_dependencies:
-            module_bindings.add(dep["binding"])
-            # Also check if a factory produces the binding
-            shape = dep.get("required_shape", {})
-            for export_name, members in shape.items():
-                if isinstance(members, list) and a_member in members:
-                    spy_name = f"{a_binding}_{a_member}_spy"
-                    spy_extractions[(export_name, a_member)] = spy_name
-                    spy_decl_lines.append(f"const {spy_name} = mock(() => {{}});")
-
-    module_mocks_block = _render_module_mocks(module_load_dependencies, spy_extractions=spy_extractions)
-    if spy_decl_lines:
-        module_mocks_block = "\n".join(spy_decl_lines) + "\n\n" + module_mocks_block
+    module_mocks_block = _render_module_mocks(module_load_dependencies, declare_spies=True)
 
     import_names = [target_name]
     for binding, plan in injection_plan.items():
@@ -78,7 +58,7 @@ def _build_bun_scaffold(contract):
                 shape_lines = []
                 for member in observed:
                     spy_name = f"{binding}_{member}_spy"
-                    arrange_lines.append(f"const {spy_name} = mock(() => undefined);")
+                    arrange_lines.append(f"const {spy_name} = {_render_ts_mock()};")
                     shape_lines.append(f"  {member}: {spy_name},")
                 if shape_lines:
                     arrange_lines.append(
@@ -91,7 +71,7 @@ def _build_bun_scaffold(contract):
             else:
                 member = observed[0] if observed else "value"
                 spy_name = f"{binding}_{member}_spy"
-                arrange_lines.append(f"const {spy_name} = mock(() => undefined);")
+                arrange_lines.append(f"const {spy_name} = {_render_ts_mock()};")
                 arrange_lines.append(
                     f"// TODO: inject {spy_name} through the framework seam for {binding}"
                 )
@@ -335,7 +315,48 @@ def _parse_signature_params(signature):
 
 
 
-def _render_module_mocks(dependencies, *, spy_extractions=None):
+def _safe_identifier(value):
+    return re.sub(r"\W+", "_", str(value)).strip("_") or "value"
+
+
+def _render_ts_mock():
+    return "mock(() => undefined as never)"
+
+
+def _module_spy_extractions(dependencies):
+    spy_extractions = {}
+    spy_decl_lines = []
+    seen = set()
+    for dep in _merge_module_mock_dependencies(dependencies):
+        if dep.get("strategy") != "mock_module":
+            continue
+        binding = _safe_identifier(dep.get("binding", "module"))
+        dep_scope = dep.get("source_module") or binding
+        required_shape = dep.get("required_shape", {})
+        for export_name, members in required_shape.items():
+            if not isinstance(members, list):
+                continue
+            for member in members:
+                key = (dep_scope, export_name, member)
+                if key in spy_extractions:
+                    continue
+                spy_name = f"{binding}_{_safe_identifier(member)}_spy"
+                if spy_name not in seen:
+                    spy_decl_lines.append(f"const {spy_name} = {_render_ts_mock()};")
+                    seen.add(spy_name)
+                spy_extractions[key] = spy_name
+    return spy_decl_lines, spy_extractions
+
+
+def _render_module_mocks(dependencies, *, spy_extractions=None, declare_spies=False):
+    spy_decl_lines = []
+    if declare_spies:
+        spy_decl_lines, discovered = _module_spy_extractions(dependencies)
+        merged_spies = dict(discovered)
+        if spy_extractions:
+            merged_spies.update(spy_extractions)
+        spy_extractions = merged_spies
+
     blocks = []
     for dep in _merge_module_mock_dependencies(dependencies):
         if dep.get("strategy") != "mock_module":
@@ -345,46 +366,52 @@ def _render_module_mocks(dependencies, *, spy_extractions=None):
         render_hint = dep.get("render_hint")
         body = _render_module_shape(
             required_shape, render_hint=render_hint, depth=2,
-            spy_extractions=spy_extractions,
+            spy_extractions=spy_extractions, dep_scope=module_path,
         )
         blocks.append(
             f"mock.module('{module_path}', () => (\n"
             f"{{\n{body}\n}}\n"
             f"));"
         )
-    return "\n\n".join(blocks)
+    rendered = "\n\n".join(blocks)
+    if spy_decl_lines and rendered:
+        return "\n".join(spy_decl_lines) + "\n\n" + rendered
+    return rendered
 
 
 
-def _render_module_shape(shape, *, render_hint=None, depth=0, spy_extractions=None):
+def _render_module_shape(shape, *, render_hint=None, depth=0, spy_extractions=None, dep_scope=None):
     lines = []
     indent = " " * depth
     for key, value in shape.items():
         rendered = _render_binding_value(
             key, value, render_hint=render_hint, depth=depth,
-            spy_extractions=spy_extractions, parent_key=key,
+            spy_extractions=spy_extractions, parent_key=key, dep_scope=dep_scope,
         )
         lines.append(f"{indent}{key}: {rendered},")
     return "\n".join(lines)
 
 
 
-def _render_binding_value(key, value, *, render_hint=None, depth=0, spy_extractions=None, parent_key=None):
+def _render_binding_value(
+    key, value, *, render_hint=None, depth=0, spy_extractions=None, parent_key=None, dep_scope=None,
+):
     indent = " " * depth
     inner_indent = " " * (depth + 2)
     if isinstance(value, dict):
         inner = _render_module_shape(
             value, render_hint=render_hint, depth=depth + 2,
-            spy_extractions=spy_extractions,
+            spy_extractions=spy_extractions, dep_scope=dep_scope,
         )
         return f"{{\n{inner}\n{indent}}}"
     if isinstance(value, list):
         def _member_value(member):
             # Check if this member has a named spy extraction
             lookup_key = parent_key or key
-            if spy_extractions and (lookup_key, member) in spy_extractions:
-                return spy_extractions[(lookup_key, member)]
-            return "mock(() => {})"
+            scoped_key = (dep_scope, lookup_key, member)
+            if spy_extractions and scoped_key in spy_extractions:
+                return spy_extractions[scoped_key]
+            return _render_ts_mock()
 
         if render_hint == "module_object":
             members = "\n".join(
@@ -407,7 +434,7 @@ def _render_binding_value(key, value, *, render_hint=None, depth=0, spy_extracti
         )
         return f"{{\n{members}\n{indent}}}"
     if value == "function":
-        return "mock(() => {})"
+        return _render_ts_mock()
     if value == "value":
         return "undefined"
     return repr(value)
@@ -524,5 +551,3 @@ def _render_full_test(
 def _indent_block(text, spaces):
     indent = " " * spaces
     return "\n".join(f"{indent}{line}" if line else "" for line in text.splitlines())
-
-

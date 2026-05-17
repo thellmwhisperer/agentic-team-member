@@ -121,17 +121,50 @@ def test_renders_module_mocks_and_source_import():
     contract = build_contract(_handle_resub_facts())
     block = contract["scaffold"]["module_mocks_block"]
     assert "mock.module('../logger'" in block
+    assert "const logger_event_spy = mock(() => undefined as never);" in block
+    assert "const streamSummaryManager_trackResub_spy = mock(() => undefined as never);" in block
     assert "getLogger: () => ({" in block
     assert "log: {" in block
-    assert "event: mock(() => {})" in block
-    assert "info: mock(() => {})" in block
+    assert "event: logger_event_spy" in block
+    assert "info: logger_info_spy" in block
+    assert "trackResub: streamSummaryManager_trackResub_spy" in block
     assert "const { handleResub } = await import('./client');" in block
+
+
+def test_module_mock_spies_are_scoped_per_dependency():
+    facts = _handle_resub_facts()
+    facts["module_load_dependencies"] = [
+        {
+            "binding": "primaryLogger",
+            "origin_kind": "factory_result",
+            "source_module": "../primary-logger",
+            "required_shape": {"getLogger": ["info"]},
+            "strategy": "mock_module",
+        },
+        {
+            "binding": "secondaryLogger",
+            "origin_kind": "factory_result",
+            "source_module": "../secondary-logger",
+            "required_shape": {"getLogger": ["info"]},
+            "strategy": "mock_module",
+        },
+    ]
+
+    block = build_contract(facts)["scaffold"]["module_mocks_block"]
+
+    assert "const primaryLogger_info_spy = mock(() => undefined as never);" in block
+    assert "const secondaryLogger_info_spy = mock(() => undefined as never);" in block
+    primary_block = block.split("mock.module('../primary-logger'", 1)[1].split("mock.module('../secondary-logger'", 1)[0]
+    secondary_block = block.split("mock.module('../secondary-logger'", 1)[1]
+    assert "info: primaryLogger_info_spy" in primary_block
+    assert "info: secondaryLogger_info_spy" in secondary_block
+    assert "info: primaryLogger_info_spy" not in secondary_block
 
 
 def test_renders_arrange_act_and_assert_blocks():
     contract = build_contract(_handle_resub_facts())
     scaffold = contract["scaffold"]
-    assert "const client_say_spy = mock(() => undefined);" in scaffold["arrange_block"]
+    assert "const client_say_spy = mock(() => undefined as never);" in scaffold["arrange_block"]
     assert "const channel = /* TODO */;" in scaffold["arrange_block"]
     assert scaffold["act_block"] == "handleResub(channel, username, months);"
     assert (

@@ -518,6 +518,24 @@ class TestBuildEpisodeContext:
         assert len(edits) >= 1
         assert any("export" in e["new"] for e in edits)
 
+    def test_typescript_seams_accept_minimal_test_double_shape(self, tmp_path):
+        from agentic_tdd_runner.cookbook import build_episode_context
+
+        _write_file(tmp_path, "src/handler.ts", """\
+            import tmi from 'tmi.js';
+
+            let client: tmi.Client;
+
+            function handle(channel: string): void {
+              client.say(channel, 'ok');
+            }
+        """)
+        ctx = build_episode_context("src/handler.ts", "handle", str(tmp_path))
+        seam_text = "\n".join(edit["new"] for edit in ctx["pre_test_source_edits"])
+        assert "value: Pick<tmi.Client, 'say'>" in seam_text
+        assert "client = value as tmi.Client;" in seam_text
+        assert "any" not in seam_text
+
     def test_includes_assertion_hint(self, tmp_path):
         from agentic_tdd_runner.cookbook import build_episode_context
 
@@ -578,3 +596,74 @@ class TestBuildEpisodeContext:
         """)
         ctx = build_episode_context("src/client.ts", "handleResub", str(tmp_path))
         assert ctx["function_line_range"]["source"] == "fallback"
+
+
+class TestRegressionScopeGuidance:
+    """Cookbook should bound test count without making the agent myopic."""
+
+    def test_includes_grounded_extra_test_policy(self, tmp_path):
+        _write_file(tmp_path, "src/math.ts", """\
+            export function chooseMonths(streak: number, cumulative: number): number {
+              return streak;
+            }
+        """)
+        result = generate_cookbook("src/math.ts", "chooseMonths", str(tmp_path))
+
+        assert "Write one focused regression test first" in result
+        assert "Add extra tests only when grounded" in result
+        assert "Limit optional extras to two tests" in result
+        assert "Do not invent domain edge cases" in result
+
+    def test_includes_contrastive_fixture_policy(self, tmp_path):
+        _write_file(tmp_path, "src/math.ts", """\
+            export function chooseMonths(streak: number, cumulative: number): number {
+              return streak;
+            }
+        """)
+        result = generate_cookbook("src/math.ts", "chooseMonths", str(tmp_path))
+
+        assert "contrastive fixtures" in result
+        assert "wrong observed value" in result
+        assert "correct expected value" in result
+
+
+class TestCallbackContractGuidance:
+    """Callback targets should carry deterministic registration evidence."""
+
+    def test_includes_callback_registration_evidence(self, tmp_path):
+        _write_file(tmp_path, "src/twitch/client.ts", """\
+            import tmi from 'tmi.js';
+
+            const client = new tmi.Client({});
+
+            function handleResub(channel: string, username: string, months: number): void {
+              client.say(channel, `${username}:${months}`);
+            }
+
+            client.on('resub', handleResub);
+        """)
+        result = generate_cookbook("src/twitch/client.ts", "handleResub", str(tmp_path))
+
+        assert "### Callback Contract Evidence" in result
+        assert "derive the handler signature" in result
+        assert "do not invent callback parameters" in result
+        assert "client.on('resub', handleResub)" in result
+
+    def test_callback_guidance_preserves_types_and_fallbacks(self, tmp_path):
+        _write_file(tmp_path, "src/client.ts", """\
+            const bus = { on(_event: string, _handler: unknown) {} };
+
+            function handleEvent(count: number): number {
+              return count;
+            }
+
+            bus.on('event', handleEvent);
+        """)
+        result = generate_cookbook("src/client.ts", "handleEvent", str(tmp_path))
+
+        assert "use exported framework types or overloads" in result
+        assert "Never use empty-object casts" in result
+        assert "preserve the original positional value as fallback" in result
+        assert "fallbacks after parsing/validation" in result
+        assert "rg SubUserstate node_modules/@types" in result
+        assert "missing-or-invalid metadata fallback" in result
