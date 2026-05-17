@@ -31,6 +31,16 @@ def detect_package_manager(workdir: str, pkg: dict | None = None) -> str:
     return "npm"
 
 
+def package_exec_prefix(package_manager: str) -> str:
+    """Return the package-manager command prefix for direct binary execution."""
+    return {
+        "npm": "npx",
+        "pnpm": "pnpm exec",
+        "yarn": "yarn",
+        "bun": "bunx",
+    }.get(package_manager, "npx")
+
+
 def detect_quality_tools(lang_name: str, workdir: str) -> list[dict]:
     """Detect quality tools from the target project's config files.
 
@@ -53,26 +63,27 @@ def detect_quality_tools(lang_name: str, workdir: str) -> list[dict]:
             dev_deps = pkg.get("devDependencies", {})
             deps = pkg.get("dependencies", {})
             all_deps = {**deps, **dev_deps}
+            pm = detect_package_manager(workdir, pkg)
+            exec_prefix = package_exec_prefix(pm)
 
             # Typecheck: use scripts.typecheck if defined, else tsc
             if "typecheck" in scripts:
-                pm = detect_package_manager(workdir, pkg)
                 checks.append({"name": "typecheck", "command": f"{pm} run typecheck"})
             elif "typescript" in all_deps:
-                checks.append({"name": "typecheck", "command": "npx tsc --noEmit"})
+                checks.append({"name": "typecheck", "command": f"{exec_prefix} tsc --noEmit"})
 
             # Lint: biome vs eslint
             if any(k.startswith("@biomejs/biome") for k in all_deps):
                 checks.append({
                     "name": "lint",
-                    "command": "npx biome check {changed_files}",
-                    "fix": "npx biome check {changed_files} --fix",
+                    "command": f"{exec_prefix} biome check {{changed_files}}",
+                    "fix": f"{exec_prefix} biome check {{changed_files}} --fix",
                 })
             elif "eslint" in all_deps:
                 checks.append({
                     "name": "lint",
-                    "command": "npx eslint {changed_files}",
-                    "fix": "npx eslint {changed_files} --fix",
+                    "command": f"{exec_prefix} eslint {{changed_files}}",
+                    "fix": f"{exec_prefix} eslint {{changed_files}} --fix",
                 })
 
             # Format: biome already covers format, else prettier
@@ -80,8 +91,8 @@ def detect_quality_tools(lang_name: str, workdir: str) -> list[dict]:
             if not has_biome and "prettier" in all_deps:
                 checks.append({
                     "name": "format",
-                    "command": "npx prettier --check {changed_files}",
-                    "fix": "npx prettier --write {changed_files}",
+                    "command": f"{exec_prefix} prettier --check {{changed_files}}",
+                    "fix": f"{exec_prefix} prettier --write {{changed_files}}",
                 })
 
     elif lang_name == "python":
@@ -340,10 +351,19 @@ def typecheck_ownership_hint(check_name: str, raw_output: str, changed_files: li
     if check_name != "typecheck" or not raw_output:
         return None
     changed_set = {PurePosixPath(path).as_posix() for path in changed_files}
-    changed_names = {PurePosixPath(path).name for path in changed_files}
+    changed_name_counts: dict[str, int] = {}
+    for changed_file in changed_files:
+        name = PurePosixPath(changed_file).name
+        changed_name_counts[name] = changed_name_counts.get(name, 0) + 1
     for match in re.finditer(r"([^\s:(]+?\.(?:tsx?|jsx?|py))\((\d+),(\d+)\):\s*error\b", raw_output):
-        path = PurePosixPath(match.group(1)).as_posix()
-        if path in changed_set or PurePosixPath(path).name in changed_names:
+        emitted = PurePosixPath(match.group(1))
+        path = emitted.as_posix()
+        if path in changed_set:
+            return (
+                "Ownership: this typecheck error is in a changed file, so it belongs "
+                "to this fix. Do not classify it as unrelated."
+            )
+        if emitted.parent == PurePosixPath(".") and changed_name_counts.get(emitted.name) == 1:
             return (
                 "Ownership: this typecheck error is in a changed file, so it belongs "
                 "to this fix. Do not classify it as unrelated."

@@ -25,6 +25,7 @@ from agentic_tdd_runner.agent import (
     _tool_applied_status,
     _tool_loop_signature,
     _tool_loop_warning_message,
+    _typecheck_ownership_hint,
     _validate_command,
     _verification_infra_error,
     create_pr,
@@ -1189,6 +1190,95 @@ class TestDetectQualityTools:
         tc = next((c for c in checks if c["name"] == "typecheck"), None)
         assert tc is not None
         assert tc["command"] == f"{expected_pm} run typecheck"
+
+    @pytest.mark.parametrize("lockfile,expected_prefix", [
+        ("pnpm-lock.yaml", "pnpm exec"),
+        ("yarn.lock", "yarn"),
+        ("bun.lock", "bunx"),
+        (None, "npx"),
+    ])
+    def test_fallback_tools_use_detected_package_manager(
+        self, tmp_path, monkeypatch, lockfile, expected_prefix,
+    ):
+        """Fallback binaries should use the detected package manager, not hardcoded npx."""
+        import json
+        (tmp_path / "package.json").write_text(json.dumps({
+            "devDependencies": {
+                "typescript": "^5.0",
+                "eslint": "^9.0",
+                "prettier": "^3.0",
+            },
+        }))
+        if lockfile:
+            (tmp_path / lockfile).touch()
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+
+        checks = detect_quality_tools("typescript")
+
+        by_name = {check["name"]: check for check in checks}
+        assert by_name["typecheck"]["command"] == f"{expected_prefix} tsc --noEmit"
+        assert by_name["lint"]["command"] == f"{expected_prefix} eslint {{changed_files}}"
+        assert by_name["lint"]["fix"] == f"{expected_prefix} eslint {{changed_files}} --fix"
+        assert by_name["format"]["command"] == (
+            f"{expected_prefix} prettier --check {{changed_files}}"
+        )
+        assert by_name["format"]["fix"] == f"{expected_prefix} prettier --write {{changed_files}}"
+
+    def test_biome_fallback_uses_detected_package_manager(self, tmp_path, monkeypatch):
+        import json
+        (tmp_path / "package.json").write_text(json.dumps({
+            "packageManager": "pnpm@8.6.0",
+            "devDependencies": {
+                "@biomejs/biome": "^2.0",
+                "typescript": "^5.0",
+            },
+        }))
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+
+        checks = detect_quality_tools("typescript")
+
+        by_name = {check["name"]: check for check in checks}
+        assert by_name["typecheck"]["command"] == "pnpm exec tsc --noEmit"
+        assert by_name["lint"]["command"] == "pnpm exec biome check {changed_files}"
+        assert by_name["lint"]["fix"] == "pnpm exec biome check {changed_files} --fix"
+
+
+class TestTypecheckOwnershipHint:
+    """Typecheck ownership should not misattribute common basenames."""
+
+    def test_matches_exact_changed_path(self):
+        msg = _typecheck_ownership_hint(
+            "typecheck",
+            "src/file.ts(1,1): error TS2322: broken\n",
+            ["src/file.ts"],
+        )
+        assert msg is not None
+        assert "belongs to this fix" in msg
+
+    def test_matches_unique_basename_when_output_omits_directory(self):
+        msg = _typecheck_ownership_hint(
+            "typecheck",
+            "file.ts(1,1): error TS2322: broken\n",
+            ["src/file.ts"],
+        )
+        assert msg is not None
+        assert "belongs to this fix" in msg
+
+    def test_rejects_ambiguous_basename_when_output_omits_directory(self):
+        msg = _typecheck_ownership_hint(
+            "typecheck",
+            "file.ts(1,1): error TS2322: broken\n",
+            ["src/file.ts", "tests/file.ts"],
+        )
+        assert msg is None
+
+    def test_rejects_directory_path_when_only_basename_matches(self):
+        msg = _typecheck_ownership_hint(
+            "typecheck",
+            "other/file.ts(1,1): error TS2322: broken\n",
+            ["src/file.ts"],
+        )
+        assert msg is None
 
 
 class TestGetChangedFiles:
