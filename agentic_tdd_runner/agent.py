@@ -8,13 +8,13 @@ import re
 import shlex
 import subprocess
 import sys
-import textwrap
 import time
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
 import requests
 
+from agentic_tdd_runner import pr as _pr
 from agentic_tdd_runner import quality as _quality
 from agentic_tdd_runner.paths import (
     is_test_file_path as _is_test_file_path_impl,
@@ -52,6 +52,7 @@ WORKDIR = os.environ.get("AGENT_WORKDIR", os.getcwd())
 LOG_DIR = os.environ.get("AGENT_LOG_DIR") or os.environ.get("ATM_LOG_DIR") or os.getcwd()
 _last_run_exit_code: int | None = None
 _file_read_cache: dict[Path, int] = {}  # keyed by st_mtime_ns for deterministic invalidation
+_RUN_BASELINE_CHANGED_FILES: set[str] | None = None
 
 # --- Logging ---
 _log_file = None
@@ -602,209 +603,35 @@ def _judge_duplicated_setup(file_path: str, file_text: str, duplicated_lines: li
 
 
 def _parse_pr_content(content: str) -> tuple[str | None, str | None]:
-    """Parse PR_TITLE and PR_BODY from LLM response."""
-    title = None
-    body = None
-    title_match = re.search(r"PR_TITLE:\s*(.+?)(?:\n|$)", content)
-    if title_match:
-        title = title_match.group(1).strip()[:70]
-    body_match = re.search(r"PR_BODY:\s*(.+)", content, re.DOTALL)
-    if body_match:
-        body = body_match.group(1).strip()
-    return title, body
+    return _pr.parse_pr_content(content)
 
 
 def _build_pr_fallback(test_file: str, step: int) -> tuple[str, str]:
-    """Build deterministic PR content when LLM PR writing is unavailable."""
-    changed = _get_changed_files()
-    stem = Path(test_file).name
-    for suffix in (".test.ts", ".test.tsx", ".test.js", ".test.jsx", "_test.py", ".py"):
-        if stem.endswith(suffix):
-            stem = stem[: -len(suffix)]
-            break
-    title_subject = re.sub(r"[^A-Za-z0-9]+", " ", stem).strip().lower() or f"step {step}"
-    title = f"fix: update {title_subject} behavior"[:70]
-    changed_section = "\n".join(f"- `{path}`" for path in changed) or "- No changed files detected"
-    body = textwrap.dedent(
-        f"""\
-        ## Summary
-        - Fix the reported behavior with a focused regression test.
-        - Keep the change limited to the files touched by the agent run.
-
-        ## Changed files
-        {changed_section}
-
-        ## Verification
-        - Red/green verification passed.
-        - Harness quality checks passed.
-        """
-    ).strip()
-    return title, body
+    return _pr.build_pr_fallback(test_file, step, _get_changed_files())
 
 
 def _resolve_pr_base_ref(base_branch: str, command_timeout: int) -> str | None:
-    """Resolve the git ref the PR should be based on, preferring origin/<base>."""
-    for ref in (f"origin/{base_branch}", base_branch):
-        result = subprocess.run(
-            ["git", "rev-parse", "--verify", ref],
-            cwd=WORKDIR,
-            capture_output=True,
-            text=True,
-            timeout=command_timeout,
-        )
-        if result.returncode == 0:
-            return ref
-    return None
+    return _pr.resolve_pr_base_ref(base_branch, command_timeout, WORKDIR)
 
 
 def _check_pr_base_hygiene(base_branch: str, command_timeout: int) -> tuple[bool, str]:
-    """Require the run worktree to still be exactly on the configured PR base."""
-    base_ref = _resolve_pr_base_ref(base_branch, command_timeout)
-    if not base_ref:
-        return False, f"Refusing to create PR: could not resolve base ref for {base_branch}."
-
-    result = subprocess.run(
-        ["git", "rev-list", "--left-right", "--count", f"{base_ref}...HEAD"],
-        cwd=WORKDIR,
-        capture_output=True,
-        text=True,
-        timeout=command_timeout,
-    )
-    if result.returncode != 0:
-        return False, (
-            f"Refusing to create PR: could not compare HEAD against {base_ref}: "
-            f"{result.stderr.strip()}"
-        )
-
-    counts = result.stdout.strip().split()
-    if len(counts) != 2:
-        return False, (
-            f"Refusing to create PR: unexpected git ancestry output for {base_ref}: "
-            f"{result.stdout.strip()}"
-        )
-
-    behind, ahead = counts
-    if behind != "0" or ahead != "0":
-        return False, (
-            f"Refusing to create PR: current HEAD is not cleanly based on {base_ref} "
-            f"(behind={behind}, ahead={ahead}). Start from a clean worktree based on the PR base."
-        )
-
-    return True, base_ref
+    return _pr.check_pr_base_hygiene(base_branch, command_timeout, WORKDIR)
 
 
 def create_pr(messages: list, last_msg: dict, test_file: str, step: int) -> str | None:
-    """Ask LLM for PR content, then create branch/commit/push/PR."""
-    pr_cfg = _CONFIG.get("pr", {})
-    pr_timeout = _CONFIG["timeouts"]["pr_create"]
-    base = pr_cfg.get("base_branch", "main")
-    prefix = pr_cfg.get("branch_prefix", "atm/fix-")
-
-    try:
-        clean_base, base_info = _check_pr_base_hygiene(base, pr_timeout)
-    except OSError as e:
-        emit(f"  [PR] Tool missing: {e}")
-        log("pr_error", {"error": str(e)})
-        return None
-    except subprocess.TimeoutExpired as e:
-        emit(f"  [PR] Command timed out: {e}")
-        log("pr_error", {"error": str(e)})
-        return None
-
-    if not clean_base:
-        emit(f"  [PR] {base_info}")
-        log("pr_error", {"error": base_info, "base_branch": base})
-        return None
-
-    # Ask LLM for title and description — without tools to avoid tool_calls
-    pr_messages = messages.copy()
-    pr_messages.append(last_msg)
-    pr_messages.append({
-        "role": "user",
-        "content": _CONFIG["prompt"]["pr_prompt"],
-    })
-
-    try:
-        response = chat(pr_messages, include_tools=False)
-        content = response["choices"][0]["message"].get("content", "")
-        title, body = _parse_pr_content(content)
-    except Exception as e:
-        emit(f"  [PR] LLM failed to generate PR content, using deterministic fallback: {e}")
-        log("pr_content_fallback", {"reason": str(e)})
-        title, body = _build_pr_fallback(test_file, step)
-    if not title or not body:
-        emit("  [PR] LLM returned incomplete PR content, using deterministic fallback")
-        log("pr_content_fallback", {"reason": "incomplete_content"})
-        title, body = _build_pr_fallback(test_file, step)
-
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    branch_name = f"{prefix}{timestamp}"
-
-    try:
-        subprocess.run(
-            ["git", "checkout", "-b", branch_name],
-            cwd=WORKDIR, capture_output=True, text=True, check=True, timeout=pr_timeout,
-        )
-        # Tracked modified/staged: always part of the fix (includes config files)
-        tracked = subprocess.run(
-            ["git", "diff", "--name-only"],
-            cwd=WORKDIR, capture_output=True, text=True, timeout=pr_timeout,
-        )
-        staged = subprocess.run(
-            ["git", "diff", "--cached", "--name-only"],
-            cwd=WORKDIR, capture_output=True, text=True, timeout=pr_timeout,
-        )
-        tracked_files = {
-            f.strip() for f in (tracked.stdout + staged.stdout).splitlines()
-            if f.strip()
-        }
-        # Untracked: only include if they match the active language (new source/test files)
-        from agentic_tdd_runner.languages import get_language
-        lang = get_language(test_file)
-        extensions = lang.extensions if lang else [".ts", ".tsx", ".js", ".jsx"]
-        untracked = subprocess.run(
-            ["git", "ls-files", "--others", "--exclude-standard"],
-            cwd=WORKDIR, capture_output=True, text=True, timeout=pr_timeout,
-        )
-        untracked_files = {
-            f.strip() for f in untracked.stdout.splitlines()
-            if f.strip() and os.path.exists(os.path.join(WORKDIR, f.strip()))
-            and os.path.splitext(f.strip())[1] in extensions
-        }
-        changed = sorted(tracked_files | untracked_files)
-        if changed:
-            subprocess.run(
-                ["git", "add", "--", *changed],
-                cwd=WORKDIR, capture_output=True, text=True, check=True, timeout=pr_timeout,
-            )
-        subprocess.run(
-            ["git", "commit", "-m", title, "-m", body],
-            cwd=WORKDIR, capture_output=True, text=True, check=True, timeout=pr_timeout,
-        )
-        subprocess.run(
-            ["git", "push", "-u", "origin", branch_name],
-            cwd=WORKDIR, capture_output=True, text=True, check=True, timeout=pr_timeout,
-        )
-        result = subprocess.run(
-            ["gh", "pr", "create", "--title", title, "--body", body, "--base", base],
-            cwd=WORKDIR, capture_output=True, text=True, check=True, timeout=pr_timeout,
-        )
-        pr_url = result.stdout.strip()
-        log("pr", {"url": pr_url, "branch": branch_name, "title": title})
-        return pr_url
-
-    except subprocess.TimeoutExpired as e:
-        emit(f"  [PR] Command timed out: {e.cmd}")
-        log("pr_error", {"error": f"timeout: {e.cmd}"})
-        return None
-    except subprocess.CalledProcessError as e:
-        emit(f"  [PR] Command failed: {e.stderr}")
-        log("pr_error", {"error": str(e)})
-        return None
-    except OSError as e:
-        emit(f"  [PR] Tool missing: {e}")
-        log("pr_error", {"error": str(e)})
-        return None
+    return _pr.create_pr(
+        messages,
+        last_msg,
+        test_file,
+        step,
+        workdir=WORKDIR,
+        config=_CONFIG,
+        emit=emit,
+        log=log,
+        chat=chat,
+        get_changed_files_fn=_get_changed_files,
+        baseline_changed_files=_RUN_BASELINE_CHANGED_FILES,
+    )
 
 
 def _is_test_pass(name: str, args: dict) -> bool:
@@ -979,7 +806,7 @@ def parse_args():
 
 
 def main():
-    global _CONFIG, WORKDIR, LOG_DIR
+    global _CONFIG, WORKDIR, LOG_DIR, _RUN_BASELINE_CHANGED_FILES
     args = parse_args()
 
     from agentic_tdd_runner.config import load_config
@@ -1021,6 +848,13 @@ def main():
     log("issue_intake", issue_contract.to_log_dict())
 
     prepare_target_environment()
+    try:
+        command_timeout = _CONFIG.get("timeouts", {}).get("tool_execution", 10)
+        _RUN_BASELINE_CHANGED_FILES = _pr.collect_pr_changed_files(WORKDIR, command_timeout)
+        if _RUN_BASELINE_CHANGED_FILES:
+            log("run_baseline_dirty_files", {"files": sorted(_RUN_BASELINE_CHANGED_FILES)})
+    except subprocess.TimeoutExpired as exc:
+        raise SystemExit(f"Could not capture run dirty baseline: {exc}") from exc
 
     issue_text_for_model = issue_contract.model_text
     source_path = args.source or issue_contract.source_hint
