@@ -7,10 +7,10 @@ from pathlib import PurePosixPath
 from agentic_tdd_runner.languages import register
 
 _PY_FROM_IMPORT_PAREN_RE = re.compile(
-    r"^\s*from\s+([.\w]+)\s+import\s+\(([^)]+)\)", re.MULTILINE | re.DOTALL,
+    r"^from\s+([.\w]+)\s+import\s+\(([^)]+)\)", re.MULTILINE | re.DOTALL,
 )
-_PY_FROM_IMPORT_RE = re.compile(r"^\s*from\s+([.\w]+)\s+import\s+(.+)$", re.MULTILINE)
-_PY_IMPORT_RE = re.compile(r"^\s*import\s+(.+)$", re.MULTILINE)
+_PY_FROM_IMPORT_RE = re.compile(r"^from\s+([.\w]+)\s+import\s+(.+)$", re.MULTILINE)
+_PY_IMPORT_RE = re.compile(r"^import\s+(.+)$", re.MULTILINE)
 _TOP_LEVEL_PY_ASSIGN_RE = re.compile(r"^([A-Za-z_]\w*)(?:\s*:\s*[^=]+)?\s*=\s*(.+)\s*$")
 
 
