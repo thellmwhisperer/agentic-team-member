@@ -127,6 +127,6 @@ def find_test_file(hint: str | None, workdir: str, config: dict) -> str | None:
             if not is_test_file_path(rel, config):
                 continue
             result = _run_git(["ls-files", "--", rel], workdir, text=True)
-            if result and not result.stdout.strip():
+            if result and result.returncode == 0 and not result.stdout.strip():
                 return rel
     return None

@@ -150,6 +150,24 @@ def test_find_test_file_skips_walk_candidate_when_git_ls_files_times_out(tmp_pat
     assert find_test_file(None, str(tmp_path), _config()) is None
 
 
+def test_find_test_file_skips_walk_candidate_when_git_ls_files_fails(tmp_path, monkeypatch):
+    test_file = tmp_path / "src" / "walk.test.ts"
+    test_file.parent.mkdir()
+    test_file.write_text("test('walk', () => {});\n")
+
+    def fake_run(cmd, **kwargs):
+        if cmd == ["git", "status", "--porcelain", "-z"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout=b"", stderr=b"")
+        if cmd == ["git", "ls-files", "--", "src/walk.test.ts"]:
+            return subprocess.CompletedProcess(cmd, 128, stdout="", stderr="fatal: not a git repository")
+        raise AssertionError(f"unexpected command: {cmd}")
+
+    _pretend_git(monkeypatch)
+    monkeypatch.setattr("agentic_tdd_runner.paths.subprocess.run", fake_run)
+
+    assert find_test_file(None, str(tmp_path), _config()) is None
+
+
 def test_find_test_file_excludes_walk_paths_by_path_component(tmp_path, monkeypatch):
     test_file = tmp_path / "distribution" / "walk.test.ts"
     test_file.parent.mkdir()
