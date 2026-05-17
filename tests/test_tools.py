@@ -7,6 +7,7 @@ import subprocess
 from agentic_tdd_runner.paths import resolve_repo_path
 from agentic_tdd_runner.tools import (
     execute_tool,
+    non_apply_step_warning_message,
     reactive_forbidden_feedback,
     reactive_test_feedback,
     tool_applied_status,
@@ -222,3 +223,13 @@ def test_tool_status_and_loop_signature_helpers():
     assert tool_loop_signature("read_file", {"path": "src/file.ts"}) == "read_file:src/file.ts"
     assert tool_loop_signature("run_command", {"command": "rg foo src"}) == "run_command:rg foo src"
     assert tool_loop_signature("run_command", {"command": "bun test"}) is None
+
+
+def test_non_apply_step_warning_message_points_model_toward_progress():
+    msg = non_apply_step_warning_message(5)
+    lowered = msg.lower()
+    assert "5 consecutive" in msg
+    assert "successful edit" in lowered
+    assert "focused edit" in lowered
+    assert "create the failing test" in lowered
+    assert "done" in lowered

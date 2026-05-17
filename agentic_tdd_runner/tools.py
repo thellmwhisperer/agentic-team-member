@@ -50,6 +50,17 @@ def tool_loop_warning_message(signature: str) -> str:
     )
 
 
+def non_apply_step_warning_message(count: int) -> str:
+    """Build feedback for tool-call turns that do not make code changes."""
+    return (
+        "Progress warning: you have spent "
+        f"{count} consecutive tool-calling steps without a successful edit. "
+        "Stop broad exploration. Use the issue, the files you already read, and "
+        "the latest tool output to either make a focused edit, create the failing "
+        "test, or say DONE if the bug is already fixed and tested."
+    )
+
+
 def execute_tool(
     name: str,
     args: dict,
