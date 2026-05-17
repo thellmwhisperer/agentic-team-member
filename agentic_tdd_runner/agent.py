@@ -14,6 +14,7 @@ from pathlib import Path
 from agentic_tdd_runner import completion as _completion
 from agentic_tdd_runner import llm as _llm
 from agentic_tdd_runner import pr as _pr
+from agentic_tdd_runner import prompts as _prompts
 from agentic_tdd_runner import quality as _quality
 from agentic_tdd_runner import runtime as _runtime
 from agentic_tdd_runner import tools as _tools
@@ -616,8 +617,6 @@ def main():
         emit(f"[DISCOVERY] Selected {symbol} in {source_path}")
         log("discovery", {"source": source_path, "symbol": symbol, "score": discovered.get("score")})
 
-    # Build system prompt — inject cookbook if source/symbol provided
-    system_prompt = _CONFIG["prompt"]["system"].strip()
     episode = None
     if source_path and symbol:
         from agentic_tdd_runner.cookbook import build_episode_context
@@ -626,7 +625,6 @@ def main():
             symbol=symbol,
             project_root=WORKDIR,
         )
-        system_prompt = f"{system_prompt}\n\n{episode['cookbook_text']}"
         emit(f"[EPISODE] Built episode context for {symbol} in {source_path}")
         log("episode", {
             "source": source_path,
@@ -643,32 +641,11 @@ def main():
             emit(f"[PREP] Applied {n}/{len(edits)} mechanical source edits")
             log("mechanical_edits", {"applied": n, "total": len(edits)})
 
-    if episode:
-        rng = episode.get("function_line_range") or {}
-        # Only emit the line hint when the parser matched a real definition
-        # pattern (def / function / const|let|var). A 'fallback' match means we
-        # only located the symbol as a bare word — could be a comment or call
-        # site — so the number would misdirect the agent.
-        line_hint = (
-            f" (lines {rng['start']}-{rng['end']})"
-            if rng.get("source") == "definition" and rng.get("start") and rng.get("end")
-            else ""
-        )
-        phase1_msg = (
-            f"Read {episode['source_file']} and understand the bug below. "
-            f"Focus on the function `{episode['target_symbol']}`{line_hint}. "
-            f"Then create a failing test in {episode['test_file']} that reproduces it.\n\n"
-            f"Bug:\n{issue_text_for_model}"
-        )
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": phase1_msg},
-        ]
-    else:
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"Fix this bug:\n\n{issue_text_for_model}"},
-        ]
+    messages = _prompts.build_initial_messages(
+        base_system_prompt=_CONFIG["prompt"]["system"],
+        issue_text_for_model=issue_text_for_model,
+        episode=episode,
+    )
 
     return _runtime.run_agent_loop(
         messages=messages,
