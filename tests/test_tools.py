@@ -171,6 +171,43 @@ def test_create_file_includes_reactive_forbidden_feedback(tmp_path, monkeypatch)
     assert "as never" in result
 
 
+def test_str_replace_editor_includes_reactive_forbidden_feedback(tmp_path, monkeypatch):
+    def fake_run(command, **kwargs):
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("agentic_tdd_runner.tools.subprocess.run", fake_run)
+
+    target = tmp_path / "src" / "file.test.ts"
+    target.parent.mkdir()
+    target.write_text("const ok = 1;\n")
+    repeated_setup = "const client_say_spy = mock(() => undefined as never);"
+
+    result, _ = _execute_tool(
+        "str_replace_editor",
+        {
+            "path": "src/file.test.ts",
+            "old_str": "const ok = 1;\n",
+            "new_str": "\n".join([
+                repeated_setup,
+                repeated_setup,
+                "expect(client_say_spy).toHaveBeenCalled();",
+            ]),
+        },
+        tmp_path,
+        config={
+            "timeouts": {"tool_execution": 10, "test_run": 10},
+            "quality": {
+                "enabled": True,
+                "typescript": {"forbidden": ["as never"]},
+            },
+        },
+    )
+
+    assert result.startswith("OK: replaced in src/file.test.ts")
+    assert "[Reactive forbidden]" in result
+    assert "as never" in result
+
+
 def test_tool_status_and_loop_signature_helpers():
     assert tool_applied_status("str_replace_editor", "OK: replaced in src/file.ts") is True
     assert tool_applied_status("str_replace_editor", "ERROR: old_str not found") is False

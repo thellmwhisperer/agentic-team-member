@@ -1,7 +1,6 @@
 """Tool execution helpers for the agent runner."""
 
 import os
-import re
 import shlex
 import subprocess
 from collections.abc import Callable, MutableMapping
@@ -268,7 +267,10 @@ def reactive_forbidden_feedback(
         return ""
 
     from agentic_tdd_runner.languages import get_language
-    from agentic_tdd_runner.quality import partition_duplicated_test_lines
+    from agentic_tdd_runner.quality import (
+        format_duplicated_setup_finding,
+        partition_duplicated_test_lines,
+    )
 
     lang = get_language(path)
     lang_name = lang.name if lang else "typescript"
@@ -294,14 +296,7 @@ def reactive_forbidden_feedback(
 
     setup_dupes, _ambiguous_dupes = partition_duplicated_test_lines(file_text)
     if setup_dupes:
-        identifiers: list[str] = []
-        for line in setup_dupes:
-            identifiers.extend(re.findall(r"\b([a-zA-Z_]\w+)\s*[=(]", line))
-        id_list = ", ".join(dict.fromkeys(identifiers)) if identifiers else "shared setup"
-        failures.append(
-            f"[Duplicated setup] {path}: {len(setup_dupes)} repeated lines. "
-            f"Move to beforeEach (TS) or fixture (Python): {id_list}"
-        )
+        failures.append(format_duplicated_setup_finding(path, setup_dupes))
 
     if not failures:
         return ""

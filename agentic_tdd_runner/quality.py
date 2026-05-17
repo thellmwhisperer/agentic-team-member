@@ -142,6 +142,18 @@ def get_changed_files(workdir: str) -> list[str]:
     return sorted(files)
 
 
+def format_duplicated_setup_finding(path: str, report_lines: list[str]) -> str:
+    """Format duplicated setup lines without echoing full test setup content."""
+    identifiers: list[str] = []
+    for line in report_lines:
+        identifiers.extend(re.findall(r"\b([a-zA-Z_]\w+)\s*[=(]", line))
+    id_list = ", ".join(dict.fromkeys(identifiers)) if identifiers else "shared setup"
+    return (
+        f"[Duplicated setup] {path}: {len(report_lines)} repeated lines. "
+        f"Move to beforeEach (TS) or fixture (Python): {id_list}"
+    )
+
+
 def run_quality_checks(
     test_file: str,
     *,
@@ -254,16 +266,7 @@ def run_quality_checks(
             if judge_result is True:
                 report_lines = list(ambiguous_dupes)
         if report_lines:
-            # Extract identifiers from duplicated lines
-            identifiers = []
-            for line in report_lines:
-                ids = re.findall(r'\b([a-zA-Z_]\w+)\s*[=(]', line)
-                identifiers.extend(ids)
-            id_list = ", ".join(dict.fromkeys(identifiers)) if identifiers else "shared setup"
-            failures.append(
-                f"[Duplicated setup] {f}: {len(report_lines)} repeated lines. "
-                f"Move to beforeEach (TS) or fixture (Python): {id_list}"
-            )
+            failures.append(format_duplicated_setup_finding(f, report_lines))
 
     for finding in detect_side_effect_shape_changes(changed, workdir, is_test_file_path):
         failures.append(finding)
