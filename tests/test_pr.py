@@ -88,6 +88,7 @@ def test_create_pr_stages_only_delta_after_baseline(tmp_path, monkeypatch):
         return original_run(*args, **kwargs)
 
     monkeypatch.setattr(subprocess, "run", track_run)
+    logged = []
 
     result = create_pr(
         [],
@@ -101,7 +102,7 @@ def test_create_pr_stages_only_delta_after_baseline(tmp_path, monkeypatch):
             "timeouts": {"pr_create": 10},
         },
         emit=lambda _msg: None,
-        log=lambda _event, _data: None,
+        log=lambda event, data: logged.append((event, data)),
         chat=lambda _messages, include_tools=True: {
             "choices": [{"message": {"content": "PR_TITLE: fix\nPR_BODY: done"}}],
         },
@@ -115,3 +116,60 @@ def test_create_pr_stages_only_delta_after_baseline(tmp_path, monkeypatch):
     assert "file.ts" in staged_files
     assert "file.test.ts" in staged_files
     assert "preexisting.ts" not in staged_files
+    pr_events = [event for event, _data in logged if event.startswith("pr")]
+    assert "pr_excluded_preexisting_changes" in pr_events
+    assert [event for event in pr_events if event != "pr_excluded_preexisting_changes"] == [
+        "pr_start",
+        "pr_content_start",
+        "pr_git_start",
+        "pr",
+        "pr_done",
+    ]
+    assert logged[-1][1]["url"] == "https://github.com/test/pr/1"
+
+
+def test_create_pr_logs_content_fallback_when_llm_returns_incomplete_body(tmp_path, monkeypatch):
+    subprocess.run(["git", "init", "-b", "main"], cwd=tmp_path, capture_output=True, check=True)
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=tmp_path, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=tmp_path, capture_output=True)
+    (tmp_path / "file.ts").write_text("original")
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, capture_output=True, check=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=tmp_path, capture_output=True, check=True)
+    subprocess.run(["git", "update-ref", "refs/remotes/origin/main", "HEAD"], cwd=tmp_path, check=True)
+
+    (tmp_path / "file.ts").write_text("agent fix")
+    (tmp_path / "file.test.ts").write_text("agent test")
+
+    original_run = subprocess.run
+
+    def fake_remote_run(*args, **kwargs):
+        cmd = args[0] if args else kwargs.get("args", [])
+        if isinstance(cmd, list) and (cmd[0] == "gh" or (cmd[0] == "git" and "push" in cmd)):
+            return subprocess.CompletedProcess(cmd, 0, stdout="https://github.com/test/pr/2\n")
+        return original_run(*args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", fake_remote_run)
+    logged = []
+
+    result = create_pr(
+        [],
+        {},
+        "file.test.ts",
+        4,
+        workdir=str(tmp_path),
+        config={
+            "pr": {"base_branch": "main", "branch_prefix": "atm/fix-"},
+            "prompt": {"pr_prompt": "Generate PR"},
+            "timeouts": {"pr_create": 10},
+        },
+        emit=lambda _msg: None,
+        log=lambda event, data: logged.append((event, data)),
+        chat=lambda _messages, include_tools=True: {
+            "choices": [{"message": {"content": "PR_TITLE: fix"}}],
+        },
+        get_changed_files_fn=lambda: [],
+    )
+
+    assert result == "https://github.com/test/pr/2"
+    assert ("pr_content_fallback", {"reason": "incomplete_content"}) in logged
+    assert logged[-1][0] == "pr_done"

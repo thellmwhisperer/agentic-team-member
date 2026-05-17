@@ -8,6 +8,8 @@ from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
+from agentic_tdd_runner.shell import build_command_env
+
 
 def parse_pr_content(content: str) -> tuple[str | None, str | None]:
     """Parse PR_TITLE and PR_BODY from an LLM response."""
@@ -55,6 +57,7 @@ def resolve_pr_base_ref(base_branch: str, command_timeout: int, workdir: str) ->
         result = subprocess.run(
             ["git", "rev-parse", "--verify", ref],
             cwd=workdir,
+            env=build_command_env(),
             capture_output=True,
             text=True,
             timeout=command_timeout,
@@ -73,6 +76,7 @@ def check_pr_base_hygiene(base_branch: str, command_timeout: int, workdir: str) 
     result = subprocess.run(
         ["git", "rev-list", "--left-right", "--count", f"{base_ref}...HEAD"],
         cwd=workdir,
+        env=build_command_env(),
         capture_output=True,
         text=True,
         timeout=command_timeout,
@@ -105,6 +109,7 @@ def collect_pr_changed_files(workdir: str, command_timeout: int) -> set[str]:
     diff = subprocess.run(
         ["git", "diff", "--name-only"],
         cwd=workdir,
+        env=build_command_env(),
         capture_output=True,
         text=True,
         timeout=command_timeout,
@@ -112,6 +117,7 @@ def collect_pr_changed_files(workdir: str, command_timeout: int) -> set[str]:
     staged = subprocess.run(
         ["git", "diff", "--cached", "--name-only"],
         cwd=workdir,
+        env=build_command_env(),
         capture_output=True,
         text=True,
         timeout=command_timeout,
@@ -119,6 +125,7 @@ def collect_pr_changed_files(workdir: str, command_timeout: int) -> set[str]:
     untracked = subprocess.run(
         ["git", "ls-files", "--others", "--exclude-standard"],
         cwd=workdir,
+        env=build_command_env(),
         capture_output=True,
         text=True,
         timeout=command_timeout,
@@ -149,28 +156,31 @@ def create_pr(
     pr_timeout = config["timeouts"]["pr_create"]
     base = pr_cfg.get("base_branch", "main")
     prefix = pr_cfg.get("branch_prefix", "atm/fix-")
+    command_env = build_command_env(config)
+
+    log("pr_start", {"step": step, "base_branch": base})
 
     try:
         clean_base, base_info = check_pr_base_hygiene(base, pr_timeout, workdir)
     except OSError as e:
         emit(f"  [PR] Tool missing: {e}")
-        log("pr_error", {"error": str(e)})
+        log("pr_error", {"stage": "base_hygiene", "error": str(e)})
         return None
     except subprocess.TimeoutExpired as e:
         emit(f"  [PR] Command timed out: {e}")
-        log("pr_error", {"error": str(e)})
+        log("pr_error", {"stage": "base_hygiene", "error": str(e)})
         return None
 
     if not clean_base:
         emit(f"  [PR] {base_info}")
-        log("pr_error", {"error": base_info, "base_branch": base})
+        log("pr_error", {"stage": "base_hygiene", "error": base_info, "base_branch": base})
         return None
 
     try:
         current_changed_files = collect_pr_changed_files(workdir, pr_timeout)
     except subprocess.TimeoutExpired as e:
         emit(f"  [PR] Command timed out: {e}")
-        log("pr_error", {"error": str(e)})
+        log("pr_error", {"stage": "changed_files", "error": str(e)})
         return None
     allowed_changed_files = current_changed_files - (baseline_changed_files or set())
     excluded_files = sorted(current_changed_files - allowed_changed_files)
@@ -184,6 +194,8 @@ def create_pr(
         "content": config["prompt"]["pr_prompt"],
     })
 
+    emit("  [PR] Generating title/body")
+    log("pr_content_start", {"step": step})
     try:
         response = chat(pr_messages, include_tools=False)
         content = response["choices"][0]["message"].get("content", "")
@@ -199,19 +211,26 @@ def create_pr(
 
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     branch_name = f"{prefix}{timestamp}"
+    log("pr_git_start", {
+        "step": step,
+        "branch": branch_name,
+        "base_branch": base,
+        "files": sorted(allowed_changed_files),
+    })
 
     try:
         subprocess.run(
             ["git", "checkout", "-b", branch_name],
-            cwd=workdir, capture_output=True, text=True, check=True, timeout=pr_timeout,
+            cwd=workdir, env=command_env, capture_output=True, text=True,
+            check=True, timeout=pr_timeout,
         )
         tracked = subprocess.run(
             ["git", "diff", "--name-only"],
-            cwd=workdir, capture_output=True, text=True, timeout=pr_timeout,
+            cwd=workdir, env=command_env, capture_output=True, text=True, timeout=pr_timeout,
         )
         staged = subprocess.run(
             ["git", "diff", "--cached", "--name-only"],
-            cwd=workdir, capture_output=True, text=True, timeout=pr_timeout,
+            cwd=workdir, env=command_env, capture_output=True, text=True, timeout=pr_timeout,
         )
         tracked_files = {
             f.strip() for f in (tracked.stdout + staged.stdout).splitlines()
@@ -223,7 +242,7 @@ def create_pr(
         extensions = lang.extensions if lang else [".ts", ".tsx", ".js", ".jsx"]
         untracked = subprocess.run(
             ["git", "ls-files", "--others", "--exclude-standard"],
-            cwd=workdir, capture_output=True, text=True, timeout=pr_timeout,
+            cwd=workdir, env=command_env, capture_output=True, text=True, timeout=pr_timeout,
         )
         untracked_files = {
             f.strip() for f in untracked.stdout.splitlines()
@@ -235,33 +254,38 @@ def create_pr(
         if changed:
             subprocess.run(
                 ["git", "add", "--", *changed],
-                cwd=workdir, capture_output=True, text=True, check=True, timeout=pr_timeout,
+                cwd=workdir, env=command_env, capture_output=True, text=True,
+                check=True, timeout=pr_timeout,
             )
         subprocess.run(
             ["git", "commit", "-m", title, "-m", body],
-            cwd=workdir, capture_output=True, text=True, check=True, timeout=pr_timeout,
+            cwd=workdir, env=command_env, capture_output=True, text=True,
+            check=True, timeout=pr_timeout,
         )
         subprocess.run(
             ["git", "push", "-u", "origin", branch_name],
-            cwd=workdir, capture_output=True, text=True, check=True, timeout=pr_timeout,
+            cwd=workdir, env=command_env, capture_output=True, text=True,
+            check=True, timeout=pr_timeout,
         )
         result = subprocess.run(
             ["gh", "pr", "create", "--title", title, "--body", body, "--base", base],
-            cwd=workdir, capture_output=True, text=True, check=True, timeout=pr_timeout,
+            cwd=workdir, env=command_env, capture_output=True, text=True,
+            check=True, timeout=pr_timeout,
         )
         pr_url = result.stdout.strip()
         log("pr", {"url": pr_url, "branch": branch_name, "title": title})
+        log("pr_done", {"url": pr_url, "branch": branch_name, "title": title})
         return pr_url
 
     except subprocess.TimeoutExpired as e:
         emit(f"  [PR] Command timed out: {e.cmd}")
-        log("pr_error", {"error": f"timeout: {e.cmd}"})
+        log("pr_error", {"stage": "git_or_gh", "error": f"timeout: {e.cmd}"})
         return None
     except subprocess.CalledProcessError as e:
         emit(f"  [PR] Command failed: {e.stderr}")
-        log("pr_error", {"error": str(e)})
+        log("pr_error", {"stage": "git_or_gh", "error": str(e)})
         return None
     except OSError as e:
         emit(f"  [PR] Tool missing: {e}")
-        log("pr_error", {"error": str(e)})
+        log("pr_error", {"stage": "git_or_gh", "error": str(e)})
         return None
