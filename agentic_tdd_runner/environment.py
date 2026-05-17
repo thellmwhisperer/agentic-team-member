@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import shlex
 import subprocess
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+
+from agentic_tdd_runner.shell import build_command_env
 
 
 @dataclass
@@ -31,6 +34,10 @@ class EnvironmentReport:
     package_manager: str | None = None
     install_command: list[str] | None = None
     preflight_commands: list[list[str]] = field(default_factory=list)
+    tool_path_dirs: list[str] = field(default_factory=list)
+    recommended_tools: list[str] = field(default_factory=list)
+    resolved_tools: dict[str, str] = field(default_factory=dict)
+    missing_tools: list[str] = field(default_factory=list)
     steps: list[PrepStep] = field(default_factory=list)
     ready: bool = True
     reason: str = ""
@@ -115,6 +122,7 @@ def prepare_environment(workdir: str, config: dict) -> EnvironmentReport:
     if not root.is_dir():
         _fail(report, f"workdir is not a directory: {root}")
 
+    _preflight_recommended_tools(report, config)
     _require_git_worktree(root, report, timeout=timeout)
 
     if bool(env_cfg.get("require_clean", True)):
@@ -238,6 +246,30 @@ def javascript_preflight_commands(root: Path, pkg: dict, env_cfg: dict) -> list[
     return commands
 
 
+def recommended_tools_from_config(config: dict) -> list[str]:
+    tools_cfg = config.get("tooling")
+    if not isinstance(tools_cfg, dict):
+        tools_cfg = config.get("tools", {}) or {}
+    if not isinstance(tools_cfg, dict):
+        return []
+    configured = tools_cfg.get("recommended", [])
+    if isinstance(configured, str):
+        configured = [configured]
+    if not isinstance(configured, list):
+        return []
+
+    tools = []
+    seen = set()
+    for tool in configured:
+        if not isinstance(tool, str):
+            continue
+        name = os.path.basename(tool.strip())
+        if name and name not in seen:
+            tools.append(name)
+            seen.add(name)
+    return tools
+
+
 def _read_package_json(root: Path) -> dict:
     try:
         return json.loads((root / "package.json").read_text())
@@ -258,6 +290,35 @@ def _should_install_javascript(root: Path, install_mode: str) -> bool:
     if install_mode == "always":
         return True
     return not (root / "node_modules").is_dir()
+
+
+def _preflight_recommended_tools(report: EnvironmentReport, config: dict) -> None:
+    env = build_command_env(config)
+    report.tool_path_dirs = [path for path in env.get("PATH", "").split(os.pathsep) if path]
+    tools = recommended_tools_from_config(config)
+    report.recommended_tools = tools
+    if not tools:
+        return
+
+    resolved = {}
+    missing = []
+    for tool in tools:
+        path = shutil.which(tool, path=env["PATH"])
+        if path:
+            resolved[tool] = path
+        else:
+            missing.append(tool)
+    report.resolved_tools = resolved
+    report.missing_tools = missing
+    report.steps.append(PrepStep(
+        name="recommended_tools",
+        command=["which", *tools],
+        returncode=1 if missing else 0,
+        stdout=json.dumps(resolved, sort_keys=True),
+        stderr=f"missing: {', '.join(missing)}" if missing else "",
+    ))
+    if missing:
+        _fail(report, f"recommended tools unavailable: {', '.join(missing)}")
 
 
 def _resolve_git_repo(repo: str) -> Path:
@@ -357,7 +418,7 @@ def _run_step(root: Path, report: EnvironmentReport, name: str, command: list[st
 
 
 def _run(root: Path, command: list[str], *, timeout: int) -> subprocess.CompletedProcess:
-    env = os.environ.copy()
+    env = build_command_env()
     env.setdefault("CI", "1")
     return subprocess.run(
         command,

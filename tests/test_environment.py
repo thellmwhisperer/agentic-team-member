@@ -1,6 +1,7 @@
 """Tests for deterministic target environment preparation."""
 
 import json
+import os
 from pathlib import Path
 import subprocess
 from types import SimpleNamespace
@@ -8,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from agentic_tdd_runner import agent
+from agentic_tdd_runner import environment
 from agentic_tdd_runner.environment import (
     EnvironmentPrepError,
     EnvironmentReport,
@@ -15,6 +17,7 @@ from agentic_tdd_runner.environment import (
     WorktreeReport,
     prepare_run_worktree,
     prepare_environment,
+    recommended_tools_from_config,
 )
 
 
@@ -57,6 +60,71 @@ class TestPrepareEnvironment:
         assert report.package_manager == "bun"
         assert ["bun", "install", "--frozen-lockfile"] in calls
         assert ["bun", "run", "typecheck"] in calls
+
+    def test_preflights_recommended_tools_with_command_env(self, tmp_path, monkeypatch):
+        _write_js_project(tmp_path)
+        calls = []
+
+        def fake_run(root, command, timeout):
+            calls.append(command)
+            if command[:2] == ["git", "rev-parse"]:
+                return _completed(command, stdout="true\n")
+            if command[:2] == ["git", "status"]:
+                return _completed(command)
+            return _completed(command, stdout="ok")
+
+        def fake_which(tool, path):
+            path_dirs = path.split(os.pathsep)
+            assert "/opt/homebrew/bin" in path_dirs
+            if tool == "rg":
+                return "/opt/homebrew/bin/rg"
+            return None
+
+        monkeypatch.setenv("PATH", "/usr/bin")
+        monkeypatch.setattr("agentic_tdd_runner.environment._run", fake_run)
+        monkeypatch.setattr("agentic_tdd_runner.environment.shutil.which", fake_which)
+
+        report = prepare_environment(str(tmp_path), {
+            "environment": {"install": "never", "run_typecheck": False},
+            "timeouts": {"tool_execution": 60},
+            "tools": {"recommended": ["rg"]},
+        })
+
+        assert report.ready is True
+        assert report.recommended_tools == ["rg"]
+        assert report.resolved_tools == {"rg": "/opt/homebrew/bin/rg"}
+        assert report.missing_tools == []
+        assert "/opt/homebrew/bin" in report.tool_path_dirs
+        tool_step = next(step for step in report.steps if step.name == "recommended_tools")
+        assert tool_step.returncode == 0
+        assert ["bun", "install", "--frozen-lockfile"] not in calls
+
+    def test_missing_recommended_tool_fails_before_install(self, tmp_path, monkeypatch):
+        _write_js_project(tmp_path)
+        calls = []
+
+        def fake_run(root, command, timeout):
+            calls.append(command)
+            return _completed(command, stdout="ok")
+
+        monkeypatch.setattr("agentic_tdd_runner.environment._run", fake_run)
+        monkeypatch.setattr("agentic_tdd_runner.environment.shutil.which", lambda tool, path: None)
+
+        with pytest.raises(EnvironmentPrepError, match="recommended tools unavailable: rg") as exc:
+            prepare_environment(str(tmp_path), {
+                "environment": {"install": "auto", "run_typecheck": True},
+                "timeouts": {"tool_execution": 60},
+                "tools": {"recommended": ["rg"]},
+            })
+
+        assert exc.value.report.ready is False
+        assert exc.value.report.missing_tools == ["rg"]
+        assert calls == []
+
+    def test_recommended_tools_from_config_normalizes_and_dedupes(self):
+        assert recommended_tools_from_config({
+            "tooling": {"recommended": ["rg", "/opt/homebrew/bin/rg", "", 123]},
+        }) == ["rg"]
 
     def test_javascript_project_skips_install_when_node_modules_exists(self, tmp_path, monkeypatch):
         _write_js_project(tmp_path)
@@ -246,6 +314,20 @@ class TestPrepareEnvironment:
         assert exc.value.report.reason == "git status check timed out"
         assert exc.value.report.steps[-1].name == "clean_worktree"
         assert exc.value.report.steps[-1].returncode is None
+
+    def test_run_uses_shared_command_env(self, tmp_path, monkeypatch):
+        def fake_subprocess_run(command, **kwargs):
+            path_dirs = kwargs["env"]["PATH"].split(os.pathsep)
+            assert "/opt/homebrew/bin" in path_dirs
+            assert kwargs["env"]["CI"] == "1"
+            return _completed(command, stdout="rg 1.0\n")
+
+        monkeypatch.setenv("PATH", "/usr/bin")
+        monkeypatch.setattr("agentic_tdd_runner.environment.subprocess.run", fake_subprocess_run)
+
+        result = environment._run(tmp_path, ["rg", "--version"], timeout=3)
+
+        assert result.returncode == 0
 
 
 class TestMainEnvironmentPrep:

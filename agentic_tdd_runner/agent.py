@@ -508,6 +508,8 @@ def _format_environment_report(report) -> str:
     if report.preflight_commands:
         commands = [" ".join(command) for command in report.preflight_commands]
         parts.append(f"preflight={commands}")
+    if report.recommended_tools:
+        parts.append(f"tools={','.join(report.recommended_tools)}")
     return ", ".join(parts)
 
 

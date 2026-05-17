@@ -25,3 +25,14 @@ def test_build_command_env_accepts_configured_tool_dirs(monkeypatch):
     path_dirs = env["PATH"].split(os.pathsep)
     assert os.path.expanduser("~/tools") in path_dirs
     assert "/custom/bin" in path_dirs
+
+
+def test_build_command_env_accepts_loaded_tooling_config(monkeypatch):
+    monkeypatch.setenv("PATH", "/usr/bin")
+
+    env = build_command_env({
+        "tools": [{"type": "function", "function": {"name": "run_command"}}],
+        "tooling": {"path_dirs": ["/configured/bin"]},
+    })
+
+    assert "/configured/bin" in env["PATH"].split(os.pathsep)

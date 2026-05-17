@@ -85,6 +85,12 @@ class TestLoadConfig:
         cfg = load_config(tmp_path / "agent.toml")
         assert len(cfg["tools"]) == 2
         assert cfg["tools"][0]["function"]["name"] == "read_file"
+        assert cfg["tooling"]["recommended"] == ["rg"]
+
+    def test_production_preserves_tooling_settings(self):
+        prod = CONFIG_DIR / "agent.toml"
+        cfg = load_config(prod)
+        assert cfg["tooling"]["recommended"] == ["rg"]
 
     def test_loads_agent_settings(self, tmp_path):
         _write_config(tmp_path)
@@ -187,6 +193,7 @@ max_rejections = 3
 
 [tools]
 file = "tools.json"
+recommended = ["rg"]
 """)
 
     tools = directory / "tools.json"
