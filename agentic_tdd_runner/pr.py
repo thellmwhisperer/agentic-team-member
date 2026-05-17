@@ -51,13 +51,20 @@ def build_pr_fallback(test_file: str, step: int, changed_files: list[str]) -> tu
     return title, body
 
 
-def resolve_pr_base_ref(base_branch: str, command_timeout: int, workdir: str) -> str | None:
+def resolve_pr_base_ref(
+    base_branch: str,
+    command_timeout: int,
+    workdir: str,
+    *,
+    command_env: dict[str, str] | None = None,
+) -> str | None:
     """Resolve the git ref the PR should be based on, preferring origin/<base>."""
+    env = command_env or build_command_env()
     for ref in (f"origin/{base_branch}", base_branch):
         result = subprocess.run(
             ["git", "rev-parse", "--verify", ref],
             cwd=workdir,
-            env=build_command_env(),
+            env=env,
             capture_output=True,
             text=True,
             timeout=command_timeout,
@@ -67,16 +74,28 @@ def resolve_pr_base_ref(base_branch: str, command_timeout: int, workdir: str) ->
     return None
 
 
-def check_pr_base_hygiene(base_branch: str, command_timeout: int, workdir: str) -> tuple[bool, str]:
+def check_pr_base_hygiene(
+    base_branch: str,
+    command_timeout: int,
+    workdir: str,
+    *,
+    command_env: dict[str, str] | None = None,
+) -> tuple[bool, str]:
     """Require the run worktree to still be exactly on the configured PR base."""
-    base_ref = resolve_pr_base_ref(base_branch, command_timeout, workdir)
+    env = command_env or build_command_env()
+    base_ref = resolve_pr_base_ref(
+        base_branch,
+        command_timeout,
+        workdir,
+        command_env=env,
+    )
     if not base_ref:
         return False, f"Refusing to create PR: could not resolve base ref for {base_branch}."
 
     result = subprocess.run(
         ["git", "rev-list", "--left-right", "--count", f"{base_ref}...HEAD"],
         cwd=workdir,
-        env=build_command_env(),
+        env=env,
         capture_output=True,
         text=True,
         timeout=command_timeout,
@@ -104,12 +123,18 @@ def check_pr_base_hygiene(base_branch: str, command_timeout: int, workdir: str) 
     return True, base_ref
 
 
-def collect_pr_changed_files(workdir: str, command_timeout: int) -> set[str]:
+def collect_pr_changed_files(
+    workdir: str,
+    command_timeout: int,
+    *,
+    command_env: dict[str, str] | None = None,
+) -> set[str]:
     """Return dirty tracked/staged/untracked paths, including deleted files."""
+    env = command_env or build_command_env()
     diff = subprocess.run(
         ["git", "diff", "--name-only"],
         cwd=workdir,
-        env=build_command_env(),
+        env=env,
         capture_output=True,
         text=True,
         timeout=command_timeout,
@@ -117,7 +142,7 @@ def collect_pr_changed_files(workdir: str, command_timeout: int) -> set[str]:
     staged = subprocess.run(
         ["git", "diff", "--cached", "--name-only"],
         cwd=workdir,
-        env=build_command_env(),
+        env=env,
         capture_output=True,
         text=True,
         timeout=command_timeout,
@@ -125,7 +150,7 @@ def collect_pr_changed_files(workdir: str, command_timeout: int) -> set[str]:
     untracked = subprocess.run(
         ["git", "ls-files", "--others", "--exclude-standard"],
         cwd=workdir,
-        env=build_command_env(),
+        env=env,
         capture_output=True,
         text=True,
         timeout=command_timeout,
@@ -161,7 +186,12 @@ def create_pr(
     log("pr_start", {"step": step, "base_branch": base})
 
     try:
-        clean_base, base_info = check_pr_base_hygiene(base, pr_timeout, workdir)
+        clean_base, base_info = check_pr_base_hygiene(
+            base,
+            pr_timeout,
+            workdir,
+            command_env=command_env,
+        )
     except OSError as e:
         emit(f"  [PR] Tool missing: {e}")
         log("pr_error", {"stage": "base_hygiene", "error": str(e)})
@@ -177,9 +207,17 @@ def create_pr(
         return None
 
     try:
-        current_changed_files = collect_pr_changed_files(workdir, pr_timeout)
+        current_changed_files = collect_pr_changed_files(
+            workdir,
+            pr_timeout,
+            command_env=command_env,
+        )
     except subprocess.TimeoutExpired as e:
         emit(f"  [PR] Command timed out: {e}")
+        log("pr_error", {"stage": "changed_files", "error": str(e)})
+        return None
+    except OSError as e:
+        emit(f"  [PR] Tool missing: {e}")
         log("pr_error", {"stage": "changed_files", "error": str(e)})
         return None
     allowed_changed_files = current_changed_files - (baseline_changed_files or set())
