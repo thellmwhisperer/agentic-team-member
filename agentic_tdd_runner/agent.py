@@ -52,6 +52,7 @@ WORKDIR = os.environ.get("AGENT_WORKDIR", os.getcwd())
 LOG_DIR = os.environ.get("AGENT_LOG_DIR") or os.environ.get("ATM_LOG_DIR") or os.getcwd()
 _last_run_exit_code: int | None = None
 _file_read_cache: dict[Path, int] = {}  # keyed by st_mtime_ns for deterministic invalidation
+_RUN_BASELINE_CHANGED_FILES: set[str] | None = None
 
 # --- Logging ---
 _log_file = None
@@ -629,6 +630,7 @@ def create_pr(messages: list, last_msg: dict, test_file: str, step: int) -> str 
         log=log,
         chat=chat,
         get_changed_files_fn=_get_changed_files,
+        baseline_changed_files=_RUN_BASELINE_CHANGED_FILES,
     )
 
 
@@ -804,7 +806,7 @@ def parse_args():
 
 
 def main():
-    global _CONFIG, WORKDIR, LOG_DIR
+    global _CONFIG, WORKDIR, LOG_DIR, _RUN_BASELINE_CHANGED_FILES
     args = parse_args()
 
     from agentic_tdd_runner.config import load_config
@@ -846,6 +848,13 @@ def main():
     log("issue_intake", issue_contract.to_log_dict())
 
     prepare_target_environment()
+    try:
+        command_timeout = _CONFIG.get("timeouts", {}).get("tool_execution", 10)
+        _RUN_BASELINE_CHANGED_FILES = _pr.collect_pr_changed_files(WORKDIR, command_timeout)
+        if _RUN_BASELINE_CHANGED_FILES:
+            log("run_baseline_dirty_files", {"files": sorted(_RUN_BASELINE_CHANGED_FILES)})
+    except subprocess.TimeoutExpired as exc:
+        raise SystemExit(f"Could not capture run dirty baseline: {exc}") from exc
 
     issue_text_for_model = issue_contract.model_text
     source_path = args.source or issue_contract.source_hint
