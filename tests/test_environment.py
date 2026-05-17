@@ -19,6 +19,7 @@ from agentic_tdd_runner.environment import (
     prepare_environment,
     recommended_tools_from_config,
 )
+from agentic_tdd_runner.runner_bootstrap import RunnerBootstrapReport
 
 
 def _completed(command, returncode=0, stdout="", stderr=""):
@@ -60,6 +61,41 @@ class TestPrepareEnvironment:
         assert report.package_manager == "bun"
         assert ["bun", "install", "--frozen-lockfile"] in calls
         assert ["bun", "run", "typecheck"] in calls
+
+    def test_records_runner_bootstrap_and_uses_detected_package_manager(self, tmp_path, monkeypatch):
+        (tmp_path / "pnpm-lock.yaml").write_text("")
+        package_dir = tmp_path / "apps" / "web"
+        package_dir.mkdir(parents=True)
+        (package_dir / "package.json").write_text(json.dumps({
+            "scripts": {"test": "vitest run", "typecheck": "tsc --noEmit"},
+            "devDependencies": {"vitest": "^4.0.0"},
+        }))
+        calls = []
+
+        def fake_run(root, command, timeout, config=None):
+            calls.append(command)
+            if command[:2] == ["git", "rev-parse"]:
+                return _completed(command, stdout="true\n")
+            if command[:2] == ["git", "status"]:
+                return _completed(command)
+            return _completed(command, stdout="ok")
+
+        monkeypatch.setattr("agentic_tdd_runner.environment._run", fake_run)
+
+        report = prepare_environment(str(package_dir), {
+            "environment": {"install": "auto", "run_typecheck": True},
+            "timeouts": {"tool_execution": 60},
+        })
+
+        assert report.runner_bootstrap is not None
+        assert report.runner_bootstrap.package_dir == str(package_dir)
+        assert report.runner_bootstrap.monorepo_root == str(tmp_path)
+        assert report.runner_bootstrap.package_manager == "pnpm"
+        assert report.runner_bootstrap.test_runner == "vitest"
+        assert report.package_manager == "pnpm"
+        assert ["pnpm", "install", "--frozen-lockfile"] in calls
+        assert ["pnpm", "run", "typecheck"] in calls
+        assert "runner_bootstrap" not in report.to_log_dict()
 
     def test_preflights_recommended_tools_with_command_env(self, tmp_path, monkeypatch):
         _write_js_project(tmp_path)
@@ -355,6 +391,57 @@ class TestMainEnvironmentPrep:
             "quality": {"enabled": False},
             "tools": [],
         }
+
+    def test_prepare_target_environment_logs_runner_bootstrap(self, tmp_path, monkeypatch):
+        logged = []
+        report = EnvironmentReport(
+            workdir=str(tmp_path),
+            project_type="javascript",
+            package_manager="pnpm",
+            runner_bootstrap=RunnerBootstrapReport(
+                workdir=str(tmp_path),
+                package_dir=str(tmp_path),
+                package_json=str(tmp_path / "package.json"),
+                monorepo_root=str(tmp_path),
+                lockfile=str(tmp_path / "pnpm-lock.yaml"),
+                package_manager="pnpm",
+                package_manager_source="lockfile:pnpm-lock.yaml",
+                test_runner="vitest",
+                test_runner_source="package.json:scripts.test",
+                test_command="vitest run",
+            ),
+        )
+
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", self._make_config())
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent.emit", lambda _msg: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.log", lambda event, data: logged.append((event, data)))
+        monkeypatch.setattr("agentic_tdd_runner.environment.prepare_environment", lambda _workdir, _config: report)
+
+        agent.prepare_target_environment()
+
+        assert [event for event, _data in logged] == ["runner_bootstrap", "environment_ready"]
+        assert logged[0][1]["test_runner"] == "vitest"
+        assert "runner_bootstrap" not in logged[1][1]
+
+    def test_format_environment_report_omits_custom_runner(self, tmp_path):
+        report = EnvironmentReport(
+            workdir=str(tmp_path),
+            project_type="javascript",
+            package_manager="npm",
+            runner_bootstrap=RunnerBootstrapReport(
+                workdir=str(tmp_path),
+                package_dir=str(tmp_path),
+                package_json=str(tmp_path / "package.json"),
+                package_manager="npm",
+                package_manager_source="default",
+                test_runner="custom",
+                test_runner_source="package.json:scripts.test",
+                test_command="turbo run test",
+            ),
+        )
+
+        assert agent._format_environment_report(report) == "project=javascript, package_manager=npm"
 
     def test_main_exits_before_discovery_and_chat_when_environment_is_not_ready(self, tmp_path, monkeypatch):
         args = SimpleNamespace(
