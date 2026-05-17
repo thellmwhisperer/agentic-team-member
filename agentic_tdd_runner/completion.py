@@ -1,9 +1,12 @@
 """Completion pipeline helpers for the agent runner."""
 
 import os
+import shutil
 import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
+
+MAX_UNTRACKED_PREVIEW_BYTES = 64 * 1024
 
 
 @dataclass
@@ -128,6 +131,16 @@ def _verify_with_mechanical_edits(
     return verify_red_green(test_file)
 
 
+def _read_file_preview(path: str, max_bytes: int = MAX_UNTRACKED_PREVIEW_BYTES) -> tuple[str, bool, bool]:
+    with open(path, "rb") as fh:
+        data = fh.read(max_bytes + 1)
+    truncated = len(data) > max_bytes
+    chunk = data[:max_bytes]
+    binary = b"\x00" in chunk
+    text = chunk.decode("utf-8", errors="replace").replace("\x00", "\\0")
+    return text, truncated, binary
+
+
 def try_complete(
     step: int,
     msg: dict,
@@ -238,8 +251,11 @@ def try_complete(
     log("done", {"step": step, "verified": True})
     try:
         command_timeout = config.get("timeouts", {}).get("tool_execution", 10)
+        git_path = shutil.which("git")
+        if git_path is None:
+            raise OSError("git executable not found")
         diff = subprocess.run(
-            ["git", "diff"],
+            [git_path, "diff"],
             cwd=workdir,
             capture_output=True,
             text=True,
@@ -247,7 +263,7 @@ def try_complete(
         )
         emit(f"\n--- GIT DIFF ---\n{diff.stdout}")
         untracked = subprocess.run(
-            ["git", "ls-files", "--others", "--exclude-standard"],
+            [git_path, "ls-files", "--others", "--exclude-standard"],
             cwd=workdir,
             capture_output=True,
             text=True,
@@ -259,8 +275,12 @@ def try_complete(
                 emit(f"  {path}")
                 full = os.path.join(workdir, path)
                 try:
-                    with open(full, encoding="utf-8", errors="replace") as fh:
-                        emit(fh.read())
+                    preview, truncated, binary = _read_file_preview(full)
+                    if binary:
+                        emit("  [binary preview]")
+                    emit(preview)
+                    if truncated:
+                        emit(f"  ...[truncated after {MAX_UNTRACKED_PREVIEW_BYTES} bytes]")
                 except OSError:
                     pass
         if config.get("pr", {}).get("enabled", False):
