@@ -16,6 +16,23 @@ from pathlib import Path, PurePosixPath
 
 import requests
 
+from agentic_tdd_runner.paths import (
+    is_test_file_path as _is_test_file_path_impl,
+    resolve_repo_path as _resolve_repo_path_impl,
+    test_runner_command_for_file as _test_runner_command_for_file_impl,
+)
+from agentic_tdd_runner.shell import (
+    has_shell_command_substitution as _has_shell_command_substitution,
+    split_shell_segments as _split_shell_segments,
+    validate_command as _validate_command,
+)
+from agentic_tdd_runner.verification import (
+    is_invalid_red_phase_failure as _is_invalid_red_phase_failure,
+    mechanical_edit_paths as _mechanical_edit_paths_impl,
+    verification_infra_error as _verification_infra_error,
+    verify_red_green as _verify_red_green_impl,
+)
+
 # --- Load .env if present ---
 _env_path = Path.cwd() / ".env"
 if _env_path.exists():
@@ -222,233 +239,8 @@ def _tool_loop_warning_message(signature: str) -> str:
     )
 
 
-def _is_invalid_red_phase_failure(output: str) -> bool:
-    lowered = output.lower()
-    if "__set" not in lowered and "fortests" not in lowered:
-        return False
-    invalid_markers = (
-        "not a function",
-        "is undefined",
-        "is not defined",
-        "cannot import",
-        "does not provide an export",
-        "has no exported member",
-    )
-    return any(marker in lowered for marker in invalid_markers)
-
-
-def _verification_infra_error(output: str) -> str | None:
-    lowered = output.lower()
-    if re.search(r"no module named\s+['\"]?pytest['\"]?(?=$|[^a-z0-9_])", lowered):
-        return "pytest is unavailable in the verification environment"
-    missing_binary = re.search(
-        r"no such file or directory:\s*['\"]?(python3|python|pytest|bun|node)['\"]?(?=$|[^a-z0-9_./-])",
-        lowered,
-    )
-    if missing_binary:
-        binary = missing_binary.group(1)
-        if binary in {"python3", "python", "pytest"}:
-            return "pytest is unavailable in the verification environment"
-        if binary == "bun":
-            return "bun is unavailable in the verification environment"
-        if binary == "node":
-            return "node is unavailable in the verification environment"
-
-    markers = [
-        (
-            "pytest: command not found",
-            "pytest is unavailable in the verification environment",
-        ),
-        (
-            "/bin/sh: pytest: command not found",
-            "pytest is unavailable in the verification environment",
-        ),
-        (
-            "bun: command not found",
-            "bun is unavailable in the verification environment",
-        ),
-        (
-            "node: command not found",
-            "node is unavailable in the verification environment",
-        ),
-    ]
-    for needle, message in markers:
-        if needle in lowered:
-            return message
-    return None
-
-
 def _resolve_repo_path(path: str, workdir: str = None) -> Path:
-    """Resolve a relative path within the workdir. Raises if it escapes."""
-    repo_root = Path(workdir or WORKDIR).resolve()
-    candidate = (repo_root / path).resolve()
-    try:
-        candidate.relative_to(repo_root)
-    except ValueError as exc:
-        raise ValueError(f"path escapes workdir: {path}") from exc
-    return candidate
-
-
-_ALLOWED_COMMANDS = frozenset({
-    "git", "grep", "rg", "find", "ls", "cat", "head", "tail", "wc",
-    "bun", "node", "npm", "npx", "pnpm", "yarn", "deno",
-    "python", "python3", "pip", "pip3", "pytest",
-    "echo", "sort", "uniq", "diff", "tr", "cut", "tee",
-    "sed", "awk", "xargs", "dirname", "basename",
-    "tree", "file", "which", "true", "false", "test",
-})
-
-# Flags that allow arbitrary code execution on otherwise safe binaries
-_BLOCKED_FLAGS = {
-    "python": {"-c"},
-    "python3": {"-c"},
-    "node": {"-e", "--eval"},
-    "deno": {"eval"},
-}
-
-
-def _split_shell_segments(command: str) -> list[str]:
-    """Split shell command chains on unquoted shell operators."""
-    segments: list[str] = []
-    buf: list[str] = []
-    quote: str | None = None
-    escaped = False
-    i = 0
-    while i < len(command):
-        ch = command[i]
-        if escaped:
-            buf.append(ch)
-            escaped = False
-            i += 1
-            continue
-        if ch == "\\" and quote != "'":
-            buf.append(ch)
-            escaped = True
-            i += 1
-            continue
-        if quote:
-            buf.append(ch)
-            if ch == quote:
-                quote = None
-            i += 1
-            continue
-        if ch in {"'", '"'}:
-            quote = ch
-            buf.append(ch)
-            i += 1
-            continue
-        if command.startswith("&&", i) or command.startswith("||", i):
-            segment = "".join(buf).strip()
-            if segment:
-                segments.append(segment)
-            buf = []
-            i += 2
-            continue
-        if ch in {"|", ";"}:
-            segment = "".join(buf).strip()
-            if segment:
-                segments.append(segment)
-            buf = []
-            i += 1
-            continue
-        buf.append(ch)
-        i += 1
-    segment = "".join(buf).strip()
-    if segment:
-        segments.append(segment)
-    return segments
-
-
-def _has_shell_command_substitution(command: str) -> bool:
-    """Return true when shell command substitution can execute."""
-    quote: str | None = None
-    escaped = False
-    i = 0
-    while i < len(command):
-        ch = command[i]
-        if escaped:
-            escaped = False
-            i += 1
-            continue
-        if ch == "\\" and quote != "'":
-            escaped = True
-            i += 1
-            continue
-        if quote:
-            if ch == quote:
-                quote = None
-            elif quote != "'" and ch == "`":
-                return True
-            elif quote != "'" and command.startswith("$(", i):
-                return True
-            i += 1
-            continue
-        if ch in {"'", '"'}:
-            quote = ch
-            i += 1
-            continue
-        if ch == "`" or command.startswith("$(", i):
-            return True
-        i += 1
-    return False
-
-
-def _validate_command(command: str) -> None:
-    """Validate that all commands in a pipeline/chain use allowed binaries."""
-    if not command or not command.strip():
-        raise ValueError("empty command")
-    # Reject newlines — they bypass shell operator splitting
-    if "\n" in command:
-        raise ValueError("newlines not allowed in commands")
-    if _has_shell_command_substitution(command):
-        raise ValueError("command substitution is not allowed")
-    # Split on shell operators to validate each sub-command
-    parts = _split_shell_segments(command)
-    for part in parts:
-        part = part.strip()
-        if not part:
-            continue
-        try:
-            tokens = shlex.split(part)
-        except ValueError:
-            tokens = part.split()
-        if not tokens:
-            continue
-        binary = os.path.basename(tokens[0])
-        if binary not in _ALLOWED_COMMANDS:
-            raise ValueError(
-                f"command '{binary}' is not allowed. "
-                f"Allowed: {', '.join(sorted(_ALLOWED_COMMANDS))}"
-            )
-        # Block dangerous flag combinations
-        blocked = _BLOCKED_FLAGS.get(binary, set())
-        if blocked:
-            for token in tokens[1:]:
-                if token in blocked:
-                    raise ValueError(
-                        f"flag '{token}' not allowed with '{binary}'"
-                    )
-        # Block env as a wrapper to run arbitrary binaries
-        if binary == "env":
-            # env VAR=val cmd or env cmd — validate the actual command too
-            for token in tokens[1:]:
-                if "=" in token:
-                    continue  # env var assignment
-                # This is the actual binary being wrapped
-                wrapped = os.path.basename(token)
-                if wrapped not in _ALLOWED_COMMANDS:
-                    raise ValueError(
-                        f"command '{wrapped}' (via env) is not allowed"
-                    )
-                # Check blocked flags for the wrapped binary too
-                wrapped_blocked = _BLOCKED_FLAGS.get(wrapped, set())
-                remaining = tokens[tokens.index(token) + 1:]
-                for flag in remaining:
-                    if flag in wrapped_blocked:
-                        raise ValueError(
-                            f"flag '{flag}' not allowed with '{wrapped}' (via env)"
-                        )
-                break
+    return _resolve_repo_path_impl(path, workdir or WORKDIR)
 
 
 def execute_tool(name: str, args: dict) -> str:
@@ -588,21 +380,11 @@ def _reactive_test_feedback(path: str) -> str:
 
 
 def _is_test_file_path(path: str) -> bool:
-    patterns = (_CONFIG or {}).get("runner", {}).get("test_file_patterns", [])
-    import fnmatch
-    name = PurePosixPath(path).name
-    if not patterns:
-        lower_name = name.lower()
-        return bool(re.search(r"(^test(?:[_\.-]|$)|(?:[_\.-]test)(?:[_\.-]|$))", lower_name))
-    return any(fnmatch.fnmatch(name, pattern) for pattern in patterns)
+    return _is_test_file_path_impl(path, _CONFIG)
 
 
 def _test_runner_command_for_file(path: str) -> str:
-    from agentic_tdd_runner.languages import get_language
-    lang = get_language(path)
-    if lang and lang.runner == "pytest":
-        return "python3 -m pytest"
-    return (_CONFIG or {}).get("runner", {}).get("command", "bun test")
+    return _test_runner_command_for_file_impl(path, _CONFIG)
 
 
 def truncate(text: str, max_chars: int = 0) -> str:
@@ -704,209 +486,19 @@ def find_test_file(hint: str | None = None) -> str | None:
 
 
 def _mechanical_edit_paths(mechanical_edits: list[dict] | None, workdir: str) -> list[str]:
-    """Return unique repo-relative paths touched by mechanical edits."""
-    paths: list[str] = []
-    seen: set[str] = set()
-    for edit in mechanical_edits or []:
-        path = edit.get("path")
-        if not path:
-            continue
-        try:
-            resolved = _resolve_repo_path(path, workdir)
-        except ValueError:
-            continue
-        rel = os.path.relpath(resolved, workdir)
-        if rel not in seen:
-            seen.add(rel)
-            paths.append(rel)
-    return paths
+    return _mechanical_edit_paths_impl(mechanical_edits, workdir)
 
 
 def verify_red_green(test_file: str, mechanical_edits: list[dict] | None = None) -> tuple[bool, str]:
-    """Verify red-green: test fails without fix, passes with fix.
-
-    1. Stash current changes (with fix)
-    2. Re-apply deterministic test seams, then run test — should FAIL (red)
-    3. Restore files touched by seams to HEAD, then restore fix from stash
-    4. Run test — should PASS (green)
-    """
-    from agentic_tdd_runner.languages import get_language
-    lang = get_language(test_file)
-    if lang and lang.runner == "pytest":
-        run_cmd = "python3 -m pytest"
-    else:
-        run_cmd = _CONFIG["runner"]["command"]
-    test_timeout = _CONFIG["timeouts"]["test_run"]
-
-    emit("\n=== RED-GREEN VERIFICATION ===")
-
-    # Preserve the test file (may be untracked) before stashing
-    import shutil
-    import tempfile
-    test_full = os.path.join(WORKDIR, test_file)
-    test_backup = None
-    if os.path.isfile(test_full):
-        tmp = tempfile.NamedTemporaryFile(
-            suffix=os.path.basename(test_file),
-            delete=False,
-        )
-        test_backup = tmp.name
-        tmp.close()
-        shutil.copy2(test_full, test_backup)
-
-    # Stash all changes including untracked (reverts source fix + new files)
-    subprocess.run(["git", "stash", "--include-untracked"], cwd=WORKDIR, capture_output=True)
-    mechanical_paths = _mechanical_edit_paths(mechanical_edits, WORKDIR)
-
-    run_argv = shlex.split(run_cmd)
-
-    red_result = None
-    red_passed = False
-    red_output = ""
-    red_output_full = ""
-    red_exec_error = ""
-    green_result = None
-    green_passed = False
-    green_output = ""
-    green_output_full = ""
-    green_exec_error = ""
-
-    try:
-        # Restore the test file so the red phase can run it
-        if test_backup:
-            os.makedirs(os.path.dirname(test_full), exist_ok=True)
-            shutil.copy2(test_backup, test_full)
-
-        if mechanical_edits:
-            applied = apply_mechanical_edits(mechanical_edits, WORKDIR)
-            emit(f"  [RED] Re-applied {applied} mechanical edit(s)")
-
-        emit("  [RED] Running test WITHOUT fix...")
-        try:
-            red_result = subprocess.run(
-                [*run_argv, test_file],
-                cwd=WORKDIR, capture_output=True, text=True, timeout=test_timeout,
-            )
-            red_passed = red_result.returncode == 0
-            red_output_full = red_result.stdout + red_result.stderr
-            red_output = red_output_full[:500]
-            emit(f"  [RED] exit={red_result.returncode} {'PASS (BAD!)' if red_passed else 'FAIL (good)'}")
-            for line in red_output.split("\n")[:10]:
-                emit(f"    {line}")
-        except subprocess.TimeoutExpired:
-            red_passed = False
-            red_output = f"TIMEOUT: test command exceeded {test_timeout}s without fix."
-            emit(f"  [RED] TIMEOUT after {test_timeout}s")
-            emit(f"    {red_output}")
-        except (FileNotFoundError, OSError) as exc:
-            red_exec_error = str(exc)
-            red_output_full = red_exec_error
-            red_output = red_output_full[:500]
-            emit("  [RED] INFRA ERROR")
-            emit(f"    {red_output}")
-    finally:
-        # Always clean up temp files and pop stash, even after exceptions
-        if test_backup:
-            if os.path.isfile(test_full):
-                os.remove(test_full)
-            if os.path.isfile(test_backup):
-                os.remove(test_backup)
-        if mechanical_paths:
-            subprocess.run(
-                ["git", "checkout", "--", *mechanical_paths],
-                cwd=WORKDIR,
-                capture_output=True,
-            )
-        subprocess.run(["git", "stash", "pop"], cwd=WORKDIR, capture_output=True)
-
-    emit("  [GREEN] Running test WITH fix...")
-    try:
-        green_result = subprocess.run(
-            [*run_argv, test_file],
-            cwd=WORKDIR, capture_output=True, text=True, timeout=test_timeout,
-        )
-        green_passed = green_result.returncode == 0
-        green_output_full = green_result.stdout + green_result.stderr
-        green_output = green_output_full[:500]
-        emit(f"  [GREEN] exit={green_result.returncode} {'PASS (good)' if green_passed else 'FAIL (BAD!)'}")
-        for line in green_output.split("\n")[:10]:
-            emit(f"    {line}")
-    except subprocess.TimeoutExpired:
-        green_passed = False
-        green_output = f"TIMEOUT: test command exceeded {test_timeout}s with fix."
-        emit(f"  [GREEN] TIMEOUT after {test_timeout}s")
-        emit(f"    {green_output}")
-    except (FileNotFoundError, OSError) as exc:
-        green_exec_error = str(exc)
-        green_output_full = green_exec_error
-        green_output = green_output_full[:500]
-        emit("  [GREEN] INFRA ERROR")
-        emit(f"    {green_output}")
-
-    log("verify", {
-        "test_file": test_file,
-        "red_passed": red_passed,
-        "green_passed": green_passed,
-        "red_output": red_output,
-        "green_output": green_output,
-    })
-
-    red_infra_error = _verification_infra_error(red_exec_error or red_output_full)
-    if red_infra_error:
-        return False, (
-            f"REJECTED: Your red phase for {test_file} failed because the verification environment is broken, "
-            f"not because the bug was reproduced. {red_infra_error}. "
-            f"Fix the runner environment and rerun verification. Error: {red_output[:300]}"
-        )
-
-    if red_result is None:
-        return False, (
-            f"REJECTED: Your test ({test_file}) timed out WITHOUT your source fix. "
-            f"Fix the timeout or make the test more targeted. Error: {red_output[:300]}"
-        )
-
-    if red_passed:
-        return False, (
-            f"REJECTED: Your test ({test_file}) passes even WITHOUT your source fix. "
-            f"This means it doesn't test the real code — it probably uses local stub functions "
-            f"instead of importing from the source. Rewrite the test to import the real "
-            f"function and mock its dependencies properly."
-        )
-
-    if _is_invalid_red_phase_failure(red_output_full):
-        return False, (
-            f"REJECTED: Your red phase for {test_file} failed because the test scaffold is incomplete, "
-            "not because the bug was reproduced. The failure mentions missing test-only seams/exports "
-            f"(for example __setXForTests). Rework the test so the pre-fix run executes the real code path "
-            f"and fails on behavior. Error: {red_output[:300]}"
-        )
-
-    green_infra_error = (
-        _verification_infra_error(green_exec_error or green_output_full)
-        if not green_passed
-        else None
+    return _verify_red_green_impl(
+        test_file,
+        workdir=WORKDIR,
+        config=_CONFIG,
+        emit=emit,
+        log=log,
+        apply_mechanical_edits=apply_mechanical_edits,
+        mechanical_edits=mechanical_edits,
     )
-    if green_infra_error:
-        return False, (
-            f"REJECTED: Your green phase for {test_file} failed because the verification environment is broken. "
-            f"{green_infra_error}. Fix the runner environment and rerun verification. "
-            f"Error: {green_output[:300]}"
-        )
-
-    if green_result is None:
-        return False, (
-            f"REJECTED: Your test ({test_file}) timed out WITH your source fix. "
-            f"Fix the timeout or make the test more targeted. Error: {green_output[:300]}"
-        )
-
-    if not green_passed:
-        return False, (
-            f"REJECTED: Your test ({test_file}) fails even WITH your source fix. "
-            f"The test has errors. Fix them. Error: {green_output[:300]}"
-        )
-
-    return True, "VERIFIED: Test fails without fix, passes with fix. Real red-green."
-
 
 def _detect_package_manager(pkg: dict | None = None) -> str:
     """Detect the package manager. Checks packageManager field first, then lockfiles."""
