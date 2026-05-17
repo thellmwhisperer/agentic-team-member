@@ -323,6 +323,7 @@ class TestPrepareEnvironment:
             return _completed(command, stdout="rg 1.0\n")
 
         monkeypatch.setenv("PATH", "/usr/bin")
+        monkeypatch.delenv("CI", raising=False)
         monkeypatch.setattr("agentic_tdd_runner.environment.subprocess.run", fake_subprocess_run)
 
         result = environment._run(tmp_path, ["rg", "--version"], timeout=3)
