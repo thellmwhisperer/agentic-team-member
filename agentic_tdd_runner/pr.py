@@ -100,6 +100,36 @@ def check_pr_base_hygiene(base_branch: str, command_timeout: int, workdir: str) 
     return True, base_ref
 
 
+def collect_pr_changed_files(workdir: str, command_timeout: int) -> set[str]:
+    """Return dirty tracked/staged/untracked paths, including deleted files."""
+    diff = subprocess.run(
+        ["git", "diff", "--name-only"],
+        cwd=workdir,
+        capture_output=True,
+        text=True,
+        timeout=command_timeout,
+    )
+    staged = subprocess.run(
+        ["git", "diff", "--cached", "--name-only"],
+        cwd=workdir,
+        capture_output=True,
+        text=True,
+        timeout=command_timeout,
+    )
+    untracked = subprocess.run(
+        ["git", "ls-files", "--others", "--exclude-standard"],
+        cwd=workdir,
+        capture_output=True,
+        text=True,
+        timeout=command_timeout,
+    )
+    return {
+        path.strip()
+        for path in (diff.stdout + staged.stdout + untracked.stdout).splitlines()
+        if path.strip()
+    }
+
+
 def create_pr(
     messages: list,
     last_msg: dict,
@@ -112,6 +142,7 @@ def create_pr(
     log: Callable[[str, dict], None],
     chat: Callable[..., dict],
     get_changed_files_fn: Callable[[], list[str]],
+    baseline_changed_files: set[str] | None = None,
 ) -> str | None:
     """Ask LLM for PR content, then create branch/commit/push/PR."""
     pr_cfg = config.get("pr", {})
@@ -135,6 +166,17 @@ def create_pr(
         log("pr_error", {"error": base_info, "base_branch": base})
         return None
 
+    try:
+        current_changed_files = collect_pr_changed_files(workdir, pr_timeout)
+    except subprocess.TimeoutExpired as e:
+        emit(f"  [PR] Command timed out: {e}")
+        log("pr_error", {"error": str(e)})
+        return None
+    allowed_changed_files = current_changed_files - (baseline_changed_files or set())
+    excluded_files = sorted(current_changed_files - allowed_changed_files)
+    if excluded_files:
+        log("pr_excluded_preexisting_changes", {"files": excluded_files})
+
     pr_messages = messages.copy()
     pr_messages.append(last_msg)
     pr_messages.append({
@@ -149,11 +191,11 @@ def create_pr(
     except Exception as e:
         emit(f"  [PR] LLM failed to generate PR content, using deterministic fallback: {e}")
         log("pr_content_fallback", {"reason": str(e)})
-        title, body = build_pr_fallback(test_file, step, get_changed_files_fn())
+        title, body = build_pr_fallback(test_file, step, sorted(allowed_changed_files))
     if not title or not body:
         emit("  [PR] LLM returned incomplete PR content, using deterministic fallback")
         log("pr_content_fallback", {"reason": "incomplete_content"})
-        title, body = build_pr_fallback(test_file, step, get_changed_files_fn())
+        title, body = build_pr_fallback(test_file, step, sorted(allowed_changed_files))
 
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     branch_name = f"{prefix}{timestamp}"
@@ -173,7 +215,7 @@ def create_pr(
         )
         tracked_files = {
             f.strip() for f in (tracked.stdout + staged.stdout).splitlines()
-            if f.strip()
+            if f.strip() and f.strip() in allowed_changed_files
         }
 
         from agentic_tdd_runner.languages import get_language
@@ -186,6 +228,7 @@ def create_pr(
         untracked_files = {
             f.strip() for f in untracked.stdout.splitlines()
             if f.strip() and os.path.exists(os.path.join(workdir, f.strip()))
+            and f.strip() in allowed_changed_files
             and os.path.splitext(f.strip())[1] in extensions
         }
         changed = sorted(tracked_files | untracked_files)
