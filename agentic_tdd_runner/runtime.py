@@ -85,7 +85,7 @@ def run_agent_loop(
                 return 1
             emit(f"  ERROR: {e}")
             log("error", {"step": step, "error": str(e)})
-            break
+            return 1
 
         elapsed = time.time() - t0
 
@@ -131,6 +131,7 @@ def run_agent_loop(
 
         if msg.get("content"):
             emit(f"  [SAY] {msg['content']}")
+            messages.append(msg)
             if "DONE" in msg["content"].upper():
                 completion = try_complete(step, msg)
                 if completion == "done":
@@ -140,7 +141,8 @@ def run_agent_loop(
                 continue
 
         # Append assistant message to history
-        messages.append(msg)
+        if not msg.get("content"):
+            messages.append(msg)
 
         if finish == "tool_calls" and msg.get("tool_calls"):
             test_passed = False
