@@ -10,6 +10,7 @@ import subprocess
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+from agentic_tdd_runner.runner_bootstrap import RunnerBootstrapReport, inspect_runner_bootstrap
 from agentic_tdd_runner.shell import build_command_env
 
 
@@ -32,6 +33,7 @@ class EnvironmentReport:
     workdir: str
     project_type: str = "unknown"
     package_manager: str | None = None
+    runner_bootstrap: RunnerBootstrapReport | None = None
     install_command: list[str] | None = None
     preflight_commands: list[list[str]] = field(default_factory=list)
     tool_path_dirs: list[str] = field(default_factory=list)
@@ -122,6 +124,7 @@ def prepare_environment(workdir: str, config: dict) -> EnvironmentReport:
     if not root.is_dir():
         _fail(report, f"workdir is not a directory: {root}")
 
+    report.runner_bootstrap = inspect_runner_bootstrap(root)
     _preflight_recommended_tools(report, config)
     _require_git_worktree(root, report, timeout=timeout, config=config)
 
@@ -133,7 +136,7 @@ def prepare_environment(workdir: str, config: dict) -> EnvironmentReport:
 
     if project_type == "javascript":
         pkg = _read_package_json(root)
-        package_manager = detect_package_manager(root, pkg)
+        package_manager = report.runner_bootstrap.package_manager or detect_package_manager(root, pkg)
         report.package_manager = package_manager
 
         install_mode = str(env_cfg.get("install", "auto"))
@@ -151,7 +154,7 @@ def prepare_environment(workdir: str, config: dict) -> EnvironmentReport:
                 reason="dependencies already present" if install_mode != "never" else "disabled",
             ))
 
-        preflight_commands = javascript_preflight_commands(root, pkg, env_cfg)
+        preflight_commands = javascript_preflight_commands(root, pkg, env_cfg, package_manager=package_manager)
         report.preflight_commands = preflight_commands
         for index, command in enumerate(preflight_commands, start=1):
             _run_step(root, report, f"preflight_{index}", command, timeout=timeout, config=config)
@@ -224,9 +227,15 @@ def install_command_for_javascript(root: Path, package_manager: str) -> list[str
     return ["npm", "install"]
 
 
-def javascript_preflight_commands(root: Path, pkg: dict, env_cfg: dict) -> list[list[str]]:
+def javascript_preflight_commands(
+    root: Path,
+    pkg: dict,
+    env_cfg: dict,
+    *,
+    package_manager: str | None = None,
+) -> list[list[str]]:
     commands: list[list[str]] = []
-    package_manager = detect_package_manager(root, pkg)
+    package_manager = package_manager or detect_package_manager(root, pkg)
     scripts = pkg.get("scripts", {}) if isinstance(pkg.get("scripts", {}), dict) else {}
     deps = _all_javascript_dependencies(pkg)
 
