@@ -11,10 +11,10 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+from agentic_tdd_runner import bootstrap as _bootstrap
 from agentic_tdd_runner import completion as _completion
 from agentic_tdd_runner import llm as _llm
 from agentic_tdd_runner import pr as _pr
-from agentic_tdd_runner import prompts as _prompts
 from agentic_tdd_runner import quality as _quality
 from agentic_tdd_runner import runtime as _runtime
 from agentic_tdd_runner import tools as _tools
@@ -553,104 +553,35 @@ def main():
     from agentic_tdd_runner.config import load_config
     _CONFIG = load_config(args.config)
 
-    worktree_report = None
-    repo = getattr(args, "repo", None)
-    if repo:
-        from agentic_tdd_runner.environment import WorktreePrepError, prepare_run_worktree
-
-        try:
-            worktree_report = prepare_run_worktree(
-                repo,
-                workdir=getattr(args, "workdir", None),
-                base_ref=getattr(args, "base_ref", "main"),
-                run_root=getattr(args, "run_root", None),
-            )
-        except WorktreePrepError as exc:
-            raise SystemExit(f"Could not prepare run worktree: {exc}") from exc
-        WORKDIR = worktree_report.workdir
-    else:
-        WORKDIR = getattr(args, "workdir", None) or WORKDIR
+    workdir_context = _bootstrap.prepare_workdir(args, WORKDIR)
+    repo = workdir_context.repo
+    WORKDIR = workdir_context.workdir
     LOG_DIR = args.log_dir
 
     log_path = init_log()
-    if worktree_report:
-        emit(f"[WORKTREE] Ready: {worktree_report.workdir}")
-        log("worktree_ready", worktree_report.to_log_dict())
+    if workdir_context.worktree_report:
+        emit(f"[WORKTREE] Ready: {workdir_context.worktree_report.workdir}")
+        log("worktree_ready", workdir_context.worktree_report.to_log_dict())
 
-    issue_lookup_repo = repo or WORKDIR
-    issue_text = _load_issue_text(args, issue_lookup_repo)
-
-    from agentic_tdd_runner.issue_intake import parse_issue_contract
-    issue_contract = parse_issue_contract(issue_text)
-    if issue_contract.rejected:
-        emit(f"[ISSUE] REJECTED: {issue_contract.rejection_reason}")
-        log("issue_rejected", issue_contract.to_log_dict())
-        raise SystemExit(f"Issue rejected: {issue_contract.rejection_reason}")
-    log("issue_intake", issue_contract.to_log_dict())
-
-    prepare_target_environment()
-    try:
-        command_timeout = _CONFIG.get("timeouts", {}).get("tool_execution", 10)
-        _RUN_BASELINE_CHANGED_FILES = _pr.collect_pr_changed_files(WORKDIR, command_timeout)
-        if _RUN_BASELINE_CHANGED_FILES:
-            log("run_baseline_dirty_files", {"files": sorted(_RUN_BASELINE_CHANGED_FILES)})
-    except subprocess.TimeoutExpired as exc:
-        raise SystemExit(f"Could not capture run dirty baseline: {exc}") from exc
-
-    issue_text_for_model = issue_contract.model_text
-    source_path = args.source or issue_contract.source_hint
-    symbol = args.symbol or issue_contract.symbol_hint
-    if not (source_path and symbol) and _discovery_enabled():
-        from agentic_tdd_runner.discovery import discover_target, load_or_build_semantic_index
-
-        semantic_index = load_or_build_semantic_index(project_root=WORKDIR)
-        discovered = discover_target(issue_text=issue_text_for_model, project_root=WORKDIR, index=semantic_index)
-        if not discovered:
-            emit("[DISCOVERY] Could not determine source/symbol from issue")
-            log("discovery_failed", {"reason": "no_target", "candidates": len(semantic_index.get("candidates", []))})
-            raise SystemExit(
-                "Could not determine source/symbol from issue. "
-                "Pass --source and --symbol or improve the semantic index."
-            )
-        source_path = discovered["source_path"]
-        symbol = discovered["symbol"]
-        emit(f"[DISCOVERY] Selected {symbol} in {source_path}")
-        log("discovery", {"source": source_path, "symbol": symbol, "score": discovered.get("score")})
-
-    episode = None
-    if source_path and symbol:
-        from agentic_tdd_runner.cookbook import build_episode_context
-        episode = build_episode_context(
-            source_path=source_path,
-            symbol=symbol,
-            project_root=WORKDIR,
-        )
-        emit(f"[EPISODE] Built episode context for {symbol} in {source_path}")
-        log("episode", {
-            "source": source_path,
-            "symbol": symbol,
-            "test_file": episode["test_file"],
-            "mechanical_edits": len(episode.get("pre_test_source_edits", [])),
-            "function_line_range": episode.get("function_line_range"),
-        })
-
-        # Apply mechanical edits (export, seams) before the agent loop
-        edits = episode.get("pre_test_source_edits", [])
-        if edits:
-            n = apply_mechanical_edits(edits, WORKDIR)
-            emit(f"[PREP] Applied {n}/{len(edits)} mechanical source edits")
-            log("mechanical_edits", {"applied": n, "total": len(edits)})
-
-    messages = _prompts.build_initial_messages(
-        base_system_prompt=_CONFIG["prompt"]["system"],
-        issue_text_for_model=issue_text_for_model,
-        episode=episode,
+    run_context = _bootstrap.prepare_run_context(
+        args,
+        repo=repo,
+        workdir=WORKDIR,
+        config=_CONFIG,
+        load_issue_text=_load_issue_text,
+        prepare_target_environment=prepare_target_environment,
+        apply_mechanical_edits=apply_mechanical_edits,
+        collect_pr_changed_files=_pr.collect_pr_changed_files,
+        discovery_enabled=_discovery_enabled(),
+        emit=emit,
+        log=log,
     )
+    _RUN_BASELINE_CHANGED_FILES = run_context.baseline_changed_files
 
     return _runtime.run_agent_loop(
-        messages=messages,
-        episode=episode,
-        issue_text=issue_text,
+        messages=run_context.messages,
+        episode=run_context.episode,
+        issue_text=run_context.issue_text,
         config=_CONFIG,
         workdir=WORKDIR,
         log_path=log_path,
