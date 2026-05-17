@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import shlex
 import subprocess
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+
+from agentic_tdd_runner.shell import build_command_env
 
 
 @dataclass
@@ -31,6 +34,10 @@ class EnvironmentReport:
     package_manager: str | None = None
     install_command: list[str] | None = None
     preflight_commands: list[list[str]] = field(default_factory=list)
+    tool_path_dirs: list[str] = field(default_factory=list)
+    recommended_tools: list[str] = field(default_factory=list)
+    resolved_tools: dict[str, str] = field(default_factory=dict)
+    missing_tools: list[str] = field(default_factory=list)
     steps: list[PrepStep] = field(default_factory=list)
     ready: bool = True
     reason: str = ""
@@ -115,10 +122,11 @@ def prepare_environment(workdir: str, config: dict) -> EnvironmentReport:
     if not root.is_dir():
         _fail(report, f"workdir is not a directory: {root}")
 
-    _require_git_worktree(root, report, timeout=timeout)
+    _preflight_recommended_tools(report, config)
+    _require_git_worktree(root, report, timeout=timeout, config=config)
 
     if bool(env_cfg.get("require_clean", True)):
-        _require_clean_worktree(root, report, timeout=timeout)
+        _require_clean_worktree(root, report, timeout=timeout, config=config)
 
     project_type = detect_project_type(root)
     report.project_type = project_type
@@ -135,7 +143,7 @@ def prepare_environment(workdir: str, config: dict) -> EnvironmentReport:
         if install_mode != "never" and _should_install_javascript(root, install_mode):
             install_cmd = install_command_for_javascript(root, package_manager)
             report.install_command = install_cmd
-            _run_step(root, report, "install_dependencies", install_cmd, timeout=timeout)
+            _run_step(root, report, "install_dependencies", install_cmd, timeout=timeout, config=config)
         else:
             report.steps.append(PrepStep(
                 name="install_dependencies",
@@ -146,7 +154,7 @@ def prepare_environment(workdir: str, config: dict) -> EnvironmentReport:
         preflight_commands = javascript_preflight_commands(root, pkg, env_cfg)
         report.preflight_commands = preflight_commands
         for index, command in enumerate(preflight_commands, start=1):
-            _run_step(root, report, f"preflight_{index}", command, timeout=timeout)
+            _run_step(root, report, f"preflight_{index}", command, timeout=timeout, config=config)
 
     elif project_type == "python":
         report.steps.append(PrepStep(
@@ -238,6 +246,30 @@ def javascript_preflight_commands(root: Path, pkg: dict, env_cfg: dict) -> list[
     return commands
 
 
+def recommended_tools_from_config(config: dict) -> list[str]:
+    tools_cfg = config.get("tooling")
+    if not isinstance(tools_cfg, dict):
+        tools_cfg = config.get("tools", {}) or {}
+    if not isinstance(tools_cfg, dict):
+        return []
+    configured = tools_cfg.get("recommended", [])
+    if isinstance(configured, str):
+        configured = [configured]
+    if not isinstance(configured, list):
+        return []
+
+    tools = []
+    seen = set()
+    for tool in configured:
+        if not isinstance(tool, str):
+            continue
+        name = os.path.basename(tool.strip())
+        if name and name not in seen:
+            tools.append(name)
+            seen.add(name)
+    return tools
+
+
 def _read_package_json(root: Path) -> dict:
     try:
         return json.loads((root / "package.json").read_text())
@@ -258,6 +290,35 @@ def _should_install_javascript(root: Path, install_mode: str) -> bool:
     if install_mode == "always":
         return True
     return not (root / "node_modules").is_dir()
+
+
+def _preflight_recommended_tools(report: EnvironmentReport, config: dict) -> None:
+    env = build_command_env(config)
+    report.tool_path_dirs = [path for path in env.get("PATH", "").split(os.pathsep) if path]
+    tools = recommended_tools_from_config(config)
+    report.recommended_tools = tools
+    if not tools:
+        return
+
+    resolved = {}
+    missing = []
+    for tool in tools:
+        path = shutil.which(tool, path=env["PATH"])
+        if path:
+            resolved[tool] = path
+        else:
+            missing.append(tool)
+    report.resolved_tools = resolved
+    report.missing_tools = missing
+    report.steps.append(PrepStep(
+        name="recommended_tools",
+        command=["which", *tools],
+        returncode=1 if missing else 0,
+        stdout=json.dumps(resolved, sort_keys=True),
+        stderr=f"missing: {', '.join(missing)}" if missing else "",
+    ))
+    if missing:
+        _fail(report, f"recommended tools unavailable: {', '.join(missing)}")
 
 
 def _resolve_git_repo(repo: str) -> Path:
@@ -286,10 +347,16 @@ def _default_run_worktree_path(repo_root: Path, run_root: str | None) -> Path:
     return root / f"atm-run-{stamp}"
 
 
-def _require_git_worktree(root: Path, report: EnvironmentReport, *, timeout: int) -> None:
+def _require_git_worktree(
+    root: Path,
+    report: EnvironmentReport,
+    *,
+    timeout: int,
+    config: dict | None = None,
+) -> None:
     command = ["git", "rev-parse", "--is-inside-work-tree"]
     try:
-        result = _run(root, command, timeout=timeout)
+        result = _run(root, command, timeout=timeout, config=config)
     except FileNotFoundError as exc:
         report.steps.append(PrepStep(name="git_worktree", command=command, returncode=None, stderr=str(exc)))
         _fail(report, "git is unavailable")
@@ -308,10 +375,16 @@ def _require_git_worktree(root: Path, report: EnvironmentReport, *, timeout: int
         _fail(report, "workdir is not a git worktree")
 
 
-def _require_clean_worktree(root: Path, report: EnvironmentReport, *, timeout: int) -> None:
+def _require_clean_worktree(
+    root: Path,
+    report: EnvironmentReport,
+    *,
+    timeout: int,
+    config: dict | None = None,
+) -> None:
     command = ["git", "status", "--porcelain"]
     try:
-        result = _run(root, command, timeout=timeout)
+        result = _run(root, command, timeout=timeout, config=config)
     except FileNotFoundError as exc:
         report.steps.append(PrepStep(name="clean_worktree", command=command, returncode=None, stderr=str(exc)))
         _fail(report, "git is unavailable")
@@ -332,9 +405,17 @@ def _require_clean_worktree(root: Path, report: EnvironmentReport, *, timeout: i
         _fail(report, "workdir has uncommitted changes before the run")
 
 
-def _run_step(root: Path, report: EnvironmentReport, name: str, command: list[str], *, timeout: int) -> None:
+def _run_step(
+    root: Path,
+    report: EnvironmentReport,
+    name: str,
+    command: list[str],
+    *,
+    timeout: int,
+    config: dict | None = None,
+) -> None:
     try:
-        result = _run(root, command, timeout=timeout)
+        result = _run(root, command, timeout=timeout, config=config)
     except FileNotFoundError as exc:
         step = PrepStep(name=name, command=command, returncode=None, stderr=str(exc))
         report.steps.append(step)
@@ -356,8 +437,14 @@ def _run_step(root: Path, report: EnvironmentReport, name: str, command: list[st
         _fail(report, f"environment step failed: {' '.join(command)}")
 
 
-def _run(root: Path, command: list[str], *, timeout: int) -> subprocess.CompletedProcess:
-    env = os.environ.copy()
+def _run(
+    root: Path,
+    command: list[str],
+    *,
+    timeout: int,
+    config: dict | None = None,
+) -> subprocess.CompletedProcess:
+    env = build_command_env(config)
     env.setdefault("CI", "1")
     return subprocess.run(
         command,
