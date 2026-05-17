@@ -46,6 +46,7 @@ class EnvironmentReport:
 
     def to_log_dict(self) -> dict:
         data = asdict(self)
+        data.pop("runner_bootstrap", None)
         data["steps"] = [step.to_log_dict() for step in self.steps]
         return data
 
@@ -144,7 +145,11 @@ def prepare_environment(workdir: str, config: dict) -> EnvironmentReport:
             _fail(report, f"invalid environment.install value: {install_mode}")
 
         if install_mode != "never" and _should_install_javascript(root, install_mode):
-            install_cmd = install_command_for_javascript(root, package_manager)
+            install_cmd = install_command_for_javascript(
+                root,
+                package_manager,
+                lockfile=report.runner_bootstrap.lockfile if report.runner_bootstrap else None,
+            )
             report.install_command = install_cmd
             _run_step(root, report, "install_dependencies", install_cmd, timeout=timeout, config=config)
         else:
@@ -206,25 +211,38 @@ def detect_package_manager(root: Path, pkg: dict | None = None) -> str:
     return "npm"
 
 
-def install_command_for_javascript(root: Path, package_manager: str) -> list[str]:
+def install_command_for_javascript(
+    root: Path,
+    package_manager: str,
+    *,
+    lockfile: str | None = None,
+) -> list[str]:
     if package_manager == "bun":
         command = ["bun", "install"]
-        if (root / "bun.lock").is_file() or (root / "bun.lockb").is_file():
+        if _has_lockfile(root, lockfile, "bun.lock", "bun.lockb"):
             command.append("--frozen-lockfile")
         return command
     if package_manager == "pnpm":
         command = ["pnpm", "install"]
-        if (root / "pnpm-lock.yaml").is_file():
+        if _has_lockfile(root, lockfile, "pnpm-lock.yaml"):
             command.append("--frozen-lockfile")
         return command
     if package_manager == "yarn":
         command = ["yarn", "install"]
-        if (root / "yarn.lock").is_file():
+        if _has_lockfile(root, lockfile, "yarn.lock"):
             command.append("--frozen-lockfile")
         return command
-    if (root / "package-lock.json").is_file() or (root / "npm-shrinkwrap.json").is_file():
+    if _has_lockfile(root, lockfile, "package-lock.json", "npm-shrinkwrap.json"):
         return ["npm", "ci"]
     return ["npm", "install"]
+
+
+def _has_lockfile(root: Path, lockfile: str | None, *filenames: str) -> bool:
+    if any((root / filename).is_file() for filename in filenames):
+        return True
+    if not lockfile:
+        return False
+    return Path(lockfile).name in filenames
 
 
 def javascript_preflight_commands(

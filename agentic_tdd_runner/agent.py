@@ -503,9 +503,9 @@ def _format_environment_report(report) -> str:
     parts = [f"project={report.project_type}"]
     if report.package_manager:
         parts.append(f"package_manager={report.package_manager}")
-    if getattr(report, "runner_bootstrap", None):
+    if report.runner_bootstrap:
         bootstrap = report.runner_bootstrap
-        if bootstrap.test_runner:
+        if bootstrap.test_runner and bootstrap.test_runner != "custom":
             parts.append(f"test_runner={bootstrap.test_runner}")
     if report.install_command:
         parts.append(f"install={' '.join(report.install_command)}")
@@ -529,13 +529,13 @@ def prepare_target_environment() -> None:
         report = prepare_environment(WORKDIR, _CONFIG)
     except EnvironmentPrepError as exc:
         emit(f"[ENV] FAILED: {exc}")
-        if getattr(exc.report, "runner_bootstrap", None):
+        if exc.report.runner_bootstrap:
             log("runner_bootstrap", exc.report.runner_bootstrap.to_log_dict())
         log("environment_failed", exc.report.to_log_dict())
         raise SystemExit(f"Target environment is not ready: {exc}") from exc
 
     emit(f"[ENV] Ready: {_format_environment_report(report)}")
-    if getattr(report, "runner_bootstrap", None):
+    if report.runner_bootstrap:
         log("runner_bootstrap", report.runner_bootstrap.to_log_dict())
     log("environment_ready", report.to_log_dict())
 

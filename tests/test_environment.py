@@ -93,9 +93,9 @@ class TestPrepareEnvironment:
         assert report.runner_bootstrap.package_manager == "pnpm"
         assert report.runner_bootstrap.test_runner == "vitest"
         assert report.package_manager == "pnpm"
-        assert ["pnpm", "install"] in calls
+        assert ["pnpm", "install", "--frozen-lockfile"] in calls
         assert ["pnpm", "run", "typecheck"] in calls
-        assert report.to_log_dict()["runner_bootstrap"]["test_runner"] == "vitest"
+        assert "runner_bootstrap" not in report.to_log_dict()
 
     def test_preflights_recommended_tools_with_command_env(self, tmp_path, monkeypatch):
         _write_js_project(tmp_path)
@@ -422,7 +422,26 @@ class TestMainEnvironmentPrep:
 
         assert [event for event, _data in logged] == ["runner_bootstrap", "environment_ready"]
         assert logged[0][1]["test_runner"] == "vitest"
-        assert logged[1][1]["runner_bootstrap"]["package_manager"] == "pnpm"
+        assert "runner_bootstrap" not in logged[1][1]
+
+    def test_format_environment_report_omits_custom_runner(self, tmp_path):
+        report = EnvironmentReport(
+            workdir=str(tmp_path),
+            project_type="javascript",
+            package_manager="npm",
+            runner_bootstrap=RunnerBootstrapReport(
+                workdir=str(tmp_path),
+                package_dir=str(tmp_path),
+                package_json=str(tmp_path / "package.json"),
+                package_manager="npm",
+                package_manager_source="default",
+                test_runner="custom",
+                test_runner_source="package.json:scripts.test",
+                test_command="turbo run test",
+            ),
+        )
+
+        assert agent._format_environment_report(report) == "project=javascript, package_manager=npm"
 
     def test_main_exits_before_discovery_and_chat_when_environment_is_not_ready(self, tmp_path, monkeypatch):
         args = SimpleNamespace(
