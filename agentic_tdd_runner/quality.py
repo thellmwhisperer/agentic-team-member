@@ -244,10 +244,9 @@ def run_quality_checks(
                 report_lines = list(ambiguous_dupes)
         if report_lines:
             # Extract identifiers from duplicated lines
-            import re as _re
             identifiers = []
             for line in report_lines:
-                ids = _re.findall(r'\b([a-zA-Z_]\w+)\s*[=(]', line)
+                ids = re.findall(r'\b([a-zA-Z_]\w+)\s*[=(]', line)
                 identifiers.extend(ids)
             id_list = ", ".join(dict.fromkeys(identifiers)) if identifiers else "shared setup"
             failures.append(
