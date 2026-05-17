@@ -162,9 +162,17 @@ class TestValidateCommand:
         with pytest.raises(ValueError, match="not allowed"):
             _validate_command("node -e 'require(\"child_process\").exec(\"evil\")'")
 
+    def test_allows_env_wrapper_for_allowed_command(self):
+        _validate_command("env CI=1 bun test")
+
     def test_blocks_env_wrapper(self):
         with pytest.raises(ValueError, match="not allowed"):
             _validate_command("env python3 -c 'evil'")
+
+    @pytest.mark.parametrize("flag", ["-e", "--eval", "-p", "--print"])
+    def test_blocks_bun_code_execution_flags(self, flag):
+        with pytest.raises(ValueError, match="not allowed"):
+            _validate_command(f"bun {flag} 'console.log(1)'")
 
     def test_blocks_newline_injection(self):
         with pytest.raises(ValueError, match="not allowed"):
@@ -593,6 +601,34 @@ class TestFindTestFile:
         assert "timed out without your source fix" in message.lower()
         stash_list = subprocess.run([GIT, "stash", "list"], cwd=tmp_path, capture_output=True, text=True)
         assert stash_list.stdout.strip() == "", f"Stash not popped: {stash_list.stdout}"
+
+    def test_verify_red_green_does_not_pop_existing_stash_when_nothing_is_stashed(self, tmp_path, monkeypatch):
+        """A clean worktree red phase must not pop an unrelated pre-existing stash."""
+        from agentic_tdd_runner.agent import verify_red_green
+
+        sp_run = subprocess.run
+        sp_run([GIT, "init"], cwd=tmp_path, capture_output=True, check=True)
+        sp_run([GIT, "config", "user.email", "t@t"], cwd=tmp_path, capture_output=True)
+        sp_run([GIT, "config", "user.name", "t"], cwd=tmp_path, capture_output=True)
+        (tmp_path / "tracked.txt").write_text("base")
+        sp_run([GIT, "add", "-A"], cwd=tmp_path, capture_output=True, check=True)
+        sp_run([GIT, "commit", "-m", "base"], cwd=tmp_path, capture_output=True, check=True)
+
+        (tmp_path / "tracked.txt").write_text("stashed")
+        sp_run([GIT, "stash", "push", "-m", "keep-existing"], cwd=tmp_path, capture_output=True, check=True)
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "runner": {"command": "false", "test_file_patterns": ["*.test.ts"], "exclude_dirs": []},
+            "timeouts": {"test_run": 10},
+        })
+
+        verified, _message = verify_red_green("src/math.test.ts")
+
+        assert verified is False
+        assert (tmp_path / "tracked.txt").read_text() == "base"
+        stash_list = subprocess.run([GIT, "stash", "list"], cwd=tmp_path, capture_output=True, text=True)
+        assert "keep-existing" in stash_list.stdout
 
     def test_returns_rejection_when_green_phase_times_out(self, tmp_path, monkeypatch):
         """Green-phase timeouts should reject verification instead of propagating."""

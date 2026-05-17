@@ -119,7 +119,14 @@ def verify_red_green(
         tmp.close()
         shutil.copy2(test_full, test_backup)
 
-    subprocess.run(["git", "stash", "--include-untracked"], cwd=workdir, capture_output=True)
+    stash_result = subprocess.run(
+        ["git", "stash", "--include-untracked"],
+        cwd=workdir,
+        capture_output=True,
+        text=True,
+    )
+    stash_output = (stash_result.stdout or "") + (stash_result.stderr or "")
+    did_stash = stash_result.returncode == 0 and "No local changes to save" not in stash_output
     mechanical_paths = mechanical_edit_paths(mechanical_edits, workdir)
 
     run_argv = shlex.split(run_cmd)
@@ -179,7 +186,8 @@ def verify_red_green(
                 cwd=workdir,
                 capture_output=True,
             )
-        subprocess.run(["git", "stash", "pop"], cwd=workdir, capture_output=True)
+        if did_stash:
+            subprocess.run(["git", "stash", "pop"], cwd=workdir, capture_output=True)
 
     emit("  [GREEN] Running test WITH fix...")
     try:
