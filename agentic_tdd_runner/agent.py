@@ -16,6 +16,7 @@ import requests
 
 from agentic_tdd_runner import pr as _pr
 from agentic_tdd_runner import quality as _quality
+from agentic_tdd_runner import tools as _tools
 from agentic_tdd_runner.paths import (
     is_test_file_path as _is_test_file_path_impl,
     resolve_repo_path as _resolve_repo_path_impl,
@@ -203,181 +204,61 @@ def _should_compact_after_quality_failure(last_usage: dict | None) -> tuple[bool
 
 
 def _tool_applied_status(name: str, result: str) -> bool | None:
-    if name not in {"str_replace_editor", "create_file"}:
-        return None
-    return result.startswith("OK:")
+    return _tools.tool_applied_status(name, result)
 
 
 def _tool_loop_signature(name: str, args: dict) -> str | None:
-    if name == "read_file":
-        return f"read_file:{args.get('path', '')}"
-    if name != "run_command":
-        return None
-    command = args.get("command", "")
-    if not isinstance(command, str):
-        return None
-    try:
-        parts = shlex.split(command)
-    except ValueError:
-        return None
-    if not parts:
-        return None
-    exploratory = {
-        "grep", "rg", "find", "ls", "cat", "head", "tail", "sed", "awk",
-        "wc", "sort", "uniq", "cut", "tr", "dirname", "basename", "tree",
-        "file", "which", "test",
-    }
-    if parts[0] not in exploratory:
-        return None
-    return f"run_command:{command}"
+    return _tools.tool_loop_signature(name, args)
 
 
 def _tool_loop_warning_message(signature: str) -> str:
-    return (
-        "Loop warning: you have repeated the same exploratory tool call "
-        f"({signature}) three times without editing files. Stop rereading and "
-        "either make an edit, explain the blocker, or say DONE if the test already passes."
-    )
+    return _tools.tool_loop_warning_message(signature)
 
 
 def _resolve_repo_path(path: str, workdir: str = None) -> Path:
     return _resolve_repo_path_impl(path, workdir or WORKDIR)
 
 
+def _set_last_run_exit_code(value: int | None) -> None:
+    global _last_run_exit_code
+    _last_run_exit_code = value
+
+
 def execute_tool(name: str, args: dict) -> str:
-    try:
-        if name == "read_file":
-            full_path = _resolve_repo_path(args["path"])
-            if os.path.isdir(full_path):
-                entries = os.listdir(full_path)
-                return "\n".join(sorted(entries))
-            mtime_ns = full_path.stat().st_mtime_ns
-            if _file_read_cache.get(full_path) == mtime_ns:
-                return "File unchanged since last read. The content from the earlier read_file result in this conversation is still current — refer to that instead of re-reading."
-            with open(full_path, "r") as f:
-                content = f.read()
-            _file_read_cache[full_path] = mtime_ns
-            return content
-
-        elif name == "run_command":
-            global _last_run_exit_code
-            _validate_command(args["command"])
-            _last_run_exit_code = None
-            result = subprocess.run(
-                args["command"],
-                shell=True,
-                cwd=WORKDIR,
-                capture_output=True,
-                text=True,
-                timeout=_CONFIG["timeouts"]["tool_execution"],
-            )
-            _last_run_exit_code = result.returncode
-            output = result.stdout + result.stderr
-            return output if output.strip() else "(no output)"
-
-        elif name == "str_replace_editor":
-            full_path = _resolve_repo_path(args["path"])
-            with open(full_path, "r") as f:
-                content = f.read()
-            old_str = args["old_str"]
-            if old_str not in content:
-                return f"ERROR: old_str not found in {args['path']}. Read the file first to get the exact text."
-            if content.count(old_str) > 1:
-                return f"ERROR: old_str appears {content.count(old_str)} times. Make it more specific."
-            new_content = content.replace(old_str, args["new_str"], 1)
-            with open(full_path, "w") as f:
-                f.write(new_content)
-            _file_read_cache.pop(full_path, None)
-            result = f"OK: replaced in {args['path']}"
-            return result + _reactive_typecheck_feedback(args["path"])
-
-        elif name == "create_file":
-            full_path = _resolve_repo_path(args["path"])
-            if os.path.exists(full_path):
-                return f"ERROR: {args['path']} already exists. Use str_replace_editor to modify it."
-            os.makedirs(os.path.dirname(full_path), exist_ok=True)
-            with open(full_path, "w") as f:
-                f.write(args["content"])
-            _file_read_cache.pop(full_path, None)
-            result = f"OK: created {args['path']}"
-            return result + _reactive_typecheck_feedback(args["path"]) + _reactive_test_feedback(args["path"])
-
-        else:
-            return f"ERROR: unknown tool {name}"
-
-    except Exception as e:
-        return f"ERROR: {type(e).__name__}: {e}"
+    return _tools.execute_tool(
+        name,
+        args,
+        workdir=WORKDIR,
+        config=_CONFIG,
+        file_read_cache=_file_read_cache,
+        resolve_repo_path=_resolve_repo_path,
+        validate_command=_validate_command,
+        set_last_run_exit_code=_set_last_run_exit_code,
+        detect_quality_tools=detect_quality_tools,
+        typecheck_ownership_hint=_typecheck_ownership_hint,
+        is_test_file_path=_is_test_file_path,
+        test_runner_command_for_file=_test_runner_command_for_file,
+    )
 
 
 def _reactive_typecheck_feedback(path: str) -> str:
-    from agentic_tdd_runner.languages import get_language
-    lang = get_language(path)
-    if not lang:
-        return ""
-
-    checks = detect_quality_tools(lang.name)
-    typecheck = next((check for check in checks if check.get("name") == "typecheck"), None)
-    if not typecheck:
-        return ""
-    timeout_s = (_CONFIG or {}).get("timeouts", {}).get("tool_execution", 10)
-
-    try:
-        result = subprocess.run(
-            typecheck["command"],
-            shell=True,
-            cwd=WORKDIR,
-            capture_output=True,
-            text=True,
-            timeout=timeout_s,
-        )
-    except subprocess.TimeoutExpired:
-        return "\n\n[Reactive typecheck] TIMEOUT: command timed out"
-    except (OSError, UnicodeDecodeError) as e:
-        return f"\n\n[Reactive typecheck] ERROR: {e}"
-
-    if result.returncode == 0:
-        return ""
-
-    raw = (result.stdout or "") + (result.stderr or "")
-    lines = [ln for ln in raw.splitlines() if ln.strip()]
-    n_errors = sum(1 for ln in lines if "error" in ln.lower())
-    sample = "\n".join(f"  {ln}" for ln in lines[:30])
-    if not sample:
-        sample = f"  {raw[:500]}"
-    ownership_hint = _typecheck_ownership_hint("typecheck", raw, [path])
-    if ownership_hint:
-        sample = f"{sample}\n  {ownership_hint}"
-    return f"\n\n[Reactive typecheck] {n_errors} errors:\n{sample}"
+    return _tools.reactive_typecheck_feedback(
+        path,
+        workdir=WORKDIR,
+        config=_CONFIG,
+        detect_quality_tools=detect_quality_tools,
+        typecheck_ownership_hint=_typecheck_ownership_hint,
+    )
 
 
 def _reactive_test_feedback(path: str) -> str:
-    if not _is_test_file_path(path):
-        return ""
-
-    run_cmd = _test_runner_command_for_file(path)
-    timeout_s = (_CONFIG or {}).get("timeouts", {}).get("test_run", 30)
-    run_argv = shlex.split(run_cmd) + [path]
-
-    try:
-        result = subprocess.run(
-            run_argv,
-            cwd=WORKDIR,
-            capture_output=True,
-            text=True,
-            timeout=timeout_s,
-        )
-    except subprocess.TimeoutExpired:
-        return "\n\n[Reactive test] TIMEOUT: command timed out"
-    except (OSError, UnicodeDecodeError) as e:
-        return f"\n\n[Reactive test] ERROR: {e}"
-
-    if result.returncode == 0:
-        return ""
-
-    raw = (result.stdout or "") + (result.stderr or "")
-    sample_lines = [ln for ln in raw.splitlines() if ln.strip()][:5]
-    sample = "\n".join(f"  {ln}" for ln in sample_lines) if sample_lines else f"  {raw[:200]}"
-    return f"\n\n[Reactive test] failed:\n{sample}"
+    return _tools.reactive_test_feedback(
+        path,
+        workdir=WORKDIR,
+        config=_CONFIG,
+        is_test_file_path=_is_test_file_path,
+        test_runner_command_for_file=_test_runner_command_for_file,
+    )
 
 
 def _is_test_file_path(path: str) -> bool:
