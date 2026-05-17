@@ -14,6 +14,7 @@ from pathlib import Path, PurePosixPath
 
 import requests
 
+from agentic_tdd_runner import completion as _completion
 from agentic_tdd_runner import pr as _pr
 from agentic_tdd_runner import quality as _quality
 from agentic_tdd_runner import tools as _tools
@@ -116,91 +117,28 @@ def _is_llm_timeout_error(exc: Exception) -> bool:
 
 
 def _compact_messages_after_quality_failure(messages: list[dict], quality_msg: str, test_file: str) -> list[dict]:
-    _file_read_cache.clear()
-    compacted: list[dict] = []
-    if messages and messages[0].get("role") == "system":
-        compacted.append(messages[0])
-
-    issue_msg = next((msg for msg in messages[1:] if msg.get("role") == "user"), None)
-    if issue_msg:
-        compacted.append(issue_msg)
-
-    compacted.append({
-        "role": "user",
-        "content": (
-            f"Verification already passed for {test_file}. Preserve the current fix behavior and "
-            f"only address the residual quality issues below.\n\n{quality_msg}"
-        ),
-    })
-    return compacted
+    return _completion.compact_messages_after_quality_failure(
+        messages,
+        quality_msg,
+        test_file,
+        clear_file_read_cache=_file_read_cache.clear,
+    )
 
 
 def _quality_retry_feedback_message(quality_msg: str, test_file: str) -> dict:
-    return {
-        "role": "user",
-        "content": (
-            f"Verification already passed for {test_file}. Preserve the current fix behavior and "
-            f"only address the residual quality issues below.\n\n{quality_msg}"
-        ),
-    }
+    return _completion.quality_retry_feedback_message(quality_msg, test_file)
 
 
 def _llm_context_window_tokens() -> int:
-    llm_cfg = _CONFIG.get("llm", {})
-    raw_value = (
-        llm_cfg.get("context_window_tokens")
-        or llm_cfg.get("context_window")
-        or llm_cfg.get("num_ctx")
-        or 32768
-    )
-    try:
-        return int(raw_value)
-    except (TypeError, ValueError):
-        return 32768
+    return _completion.llm_context_window_tokens(_CONFIG or {})
 
 
 def _coerce_int(value) -> int | None:
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        return value
-    if isinstance(value, float):
-        return int(value)
-    if isinstance(value, str):
-        value = value.strip()
-        if value.isdigit():
-            return int(value)
-    return None
+    return _completion.coerce_int(value)
 
 
 def _should_compact_after_quality_failure(last_usage: dict | None) -> tuple[bool, dict]:
-    quality_cfg = _CONFIG.get("quality", {})
-    context_window = _llm_context_window_tokens()
-    threshold_ratio = float(quality_cfg.get("compact_threshold_ratio", 0.85))
-    min_headroom_tokens = int(quality_cfg.get("compact_min_headroom_tokens", 2048))
-    prompt_tokens = _coerce_int((last_usage or {}).get("prompt_tokens"))
-
-    info = {
-        "context_window_tokens": context_window,
-        "threshold_ratio": threshold_ratio,
-        "min_headroom_tokens": min_headroom_tokens,
-        "prompt_tokens": prompt_tokens,
-    }
-
-    if prompt_tokens is None:
-        info["reason"] = "missing_prompt_tokens"
-        return False, info
-
-    headroom_tokens = context_window - prompt_tokens
-    info["headroom_tokens"] = headroom_tokens
-    info["prompt_ratio"] = round(prompt_tokens / context_window, 4) if context_window else None
-
-    should_compact = (
-        prompt_tokens >= int(context_window * threshold_ratio)
-        or headroom_tokens <= min_headroom_tokens
-    )
-    info["reason"] = "near_context_limit" if should_compact else "enough_headroom"
-    return should_compact, info
+    return _completion.should_compact_after_quality_failure(_CONFIG or {}, last_usage)
 
 
 def _tool_applied_status(name: str, result: str) -> bool | None:
@@ -820,133 +758,30 @@ def main():
 
     log("start", {"issue": issue_text})
 
-    done_rejected = 0
-    quality_rejected = 0
+    completion_state = _completion.CompletionState()
     max_rejections = _CONFIG["verification"]["max_rejections"]
     recent_exploratory_signatures: list[str] = []
 
-    # --- Completion pipeline: verify → quality → done ---
-    # Extracted so both DONE and auto-trigger can use it.
+    # --- Completion pipeline: verify, quality, done ---
     # Returns: "done" | "quality_fail" | "verify_fail" | "give_up" | "no_test"
-    last_usage: dict | None = None
-
     def try_complete(step, msg: dict):
-        nonlocal done_rejected, quality_rejected, last_usage
-        test_file = find_test_file(episode.get("test_file") if episode else None)
-        if not test_file:
-            emit("  [WARN] No test file found — cannot verify")
-            messages.append({"role": "user", "content": _CONFIG["prompt"]["no_test_found"]})
-            return "no_test"
-
-        mechanical_edits = episode.get("pre_test_source_edits", []) if episode else []
-        if mechanical_edits:
-            verified, verify_msg = verify_red_green(test_file, mechanical_edits)
-        else:
-            verified, verify_msg = verify_red_green(test_file)
-        emit(f"\n  [VERIFY] {verify_msg}")
-        log("verify_result", {"verified": verified, "message": verify_msg, "test_file": test_file})
-
-        if not verified:
-            done_rejected += 1
-            if done_rejected >= max_rejections:
-                emit(f"\n  [GIVE UP] Rejected {done_rejected} times. Stopping.")
-                log("give_up", {"step": step, "done_rejected": done_rejected})
-                return "give_up"
-            messages.append({"role": "user", "content": verify_msg})
-            return "verify_fail"
-
-        if _CONFIG.get("quality", {}).get("enabled", False):
-            emit("\n=== QUALITY CHECKS ===")
-            quality_ok, quality_msg = run_quality_checks(test_file)
-            emit(f"  [QUALITY] {quality_msg[:200]}")
-            log("quality", {"passed": quality_ok, "message": quality_msg[:500]})
-
-            if not quality_ok:
-                quality_rejected += 1
-                emit(f"  [QUALITY] Round {quality_rejected} — feeding back to model")
-                should_compact, compact_info = _should_compact_after_quality_failure(last_usage)
-                if should_compact:
-                    before_count = len(messages)
-                    messages[:] = _compact_messages_after_quality_failure(messages, quality_msg, test_file)
-                    log("context_compacted", {
-                        "reason": "quality_fail",
-                        "before_messages": before_count,
-                        "after_messages": len(messages),
-                        "test_file": test_file,
-                        **compact_info,
-                    })
-                else:
-                    messages.append(_quality_retry_feedback_message(quality_msg, test_file))
-                    log("context_preserved", {
-                        "reason": "quality_fail",
-                        "message_count": len(messages),
-                        "test_file": test_file,
-                        **compact_info,
-                    })
-                return "quality_fail"
-
-        if _CONFIG.get("quality", {}).get("enabled", False):
-            emit("\n=== POST-QUALITY VERIFICATION ===")
-            mechanical_edits = episode.get("pre_test_source_edits", []) if episode else []
-            if mechanical_edits:
-                verified, verify_msg = verify_red_green(test_file, mechanical_edits)
-            else:
-                verified, verify_msg = verify_red_green(test_file)
-            emit(f"  [RE-VERIFY] {verify_msg}")
-            log("post_quality_verify_result", {
-                "verified": verified, "message": verify_msg, "test_file": test_file,
-            })
-            if not verified:
-                done_rejected += 1
-                if done_rejected >= max_rejections:
-                    emit(f"\n  [GIVE UP] Rejected {done_rejected} times. Stopping.")
-                    log("give_up", {"step": step, "done_rejected": done_rejected})
-                    return "give_up"
-                messages.append({"role": "user", "content": verify_msg})
-                return "verify_fail"
-
-        emit(f"\n{'='*60}")
-        emit(f"AGENT DONE at step {step} — VERIFIED")
-        emit(f"{'='*60}")
-        log("done", {"step": step, "verified": True})
-        try:
-            command_timeout = _CONFIG.get("timeouts", {}).get("tool_execution", 10)
-            diff = subprocess.run(
-                ["git", "diff"],
-                cwd=WORKDIR,
-                capture_output=True,
-                text=True,
-                timeout=command_timeout,
-            )
-            emit(f"\n--- GIT DIFF ---\n{diff.stdout}")
-            untracked = subprocess.run(
-                ["git", "ls-files", "--others", "--exclude-standard"],
-                cwd=WORKDIR,
-                capture_output=True,
-                text=True,
-                timeout=command_timeout,
-            )
-            if untracked.stdout.strip():
-                emit("\n--- NEW FILES ---")
-                for f in untracked.stdout.strip().split("\n"):
-                    emit(f"  {f}")
-                    full = os.path.join(WORKDIR, f)
-                    try:
-                        with open(full) as fh:
-                            emit(fh.read())
-                    except OSError:
-                        pass
-            if _CONFIG.get("pr", {}).get("enabled", False):
-                emit("\n=== PR CREATION ===")
-                pr_url = create_pr(messages, msg, test_file, step)
-                if pr_url:
-                    emit(f"  [PR] {pr_url}")
-                else:
-                    emit("  [PR] Failed — diff printed above, create PR manually")
-        except Exception as e:
-            emit(f"  [POSTAMBLE] Failed: {e}")
-            log("postamble_error", {"step": step, "error": str(e)})
-        return "done"
+        return _completion.try_complete(
+            step,
+            msg,
+            messages=messages,
+            episode=episode,
+            state=completion_state,
+            max_rejections=max_rejections,
+            config=_CONFIG,
+            workdir=WORKDIR,
+            emit=emit,
+            log=log,
+            find_test_file=find_test_file,
+            verify_red_green=verify_red_green,
+            run_quality_checks=run_quality_checks,
+            create_pr=create_pr,
+            clear_file_read_cache=_file_read_cache.clear,
+        )
 
     for step in range(max_steps):
         emit(f"\n>>> Step {step}/{max_steps} — requesting LLM...")
@@ -969,7 +804,7 @@ def main():
         msg = choice["message"]
         finish = choice["finish_reason"]
         usage = response.get("usage", {})
-        last_usage = usage
+        completion_state.last_usage = usage
         timings = response.get("timings", {})
         thinking = msg.get("reasoning_content", "")
 
