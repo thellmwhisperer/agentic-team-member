@@ -366,6 +366,8 @@ def _validate_command(command: str) -> None:
     # Reject newlines — they bypass shell operator splitting
     if "\n" in command:
         raise ValueError("newlines not allowed in commands")
+    if "$(" in command or "`" in command:
+        raise ValueError("command substitution is not allowed")
     # Split on shell operators to validate each sub-command
     parts = _split_shell_segments(command)
     for part in parts:

@@ -76,8 +76,11 @@ def prepare_run_worktree(
     ref = base_ref or "main"
     destination = Path(workdir).resolve() if workdir else _default_run_worktree_path(repo_root, run_root)
 
-    if destination.exists() and any(destination.iterdir()):
-        raise WorktreePrepError(f"worktree destination is not empty: {destination}")
+    if destination.exists():
+        if not destination.is_dir():
+            raise WorktreePrepError(f"worktree destination is not a directory: {destination}")
+        if any(destination.iterdir()):
+            raise WorktreePrepError(f"worktree destination is not empty: {destination}")
 
     destination.parent.mkdir(parents=True, exist_ok=True)
 
@@ -282,10 +285,18 @@ def _default_run_worktree_path(repo_root: Path, run_root: str | None) -> Path:
 
 
 def _require_git_worktree(root: Path, report: EnvironmentReport, *, timeout: int) -> None:
-    result = _run(root, ["git", "rev-parse", "--is-inside-work-tree"], timeout=timeout)
+    command = ["git", "rev-parse", "--is-inside-work-tree"]
+    try:
+        result = _run(root, command, timeout=timeout)
+    except FileNotFoundError as exc:
+        report.steps.append(PrepStep(name="git_worktree", command=command, returncode=None, stderr=str(exc)))
+        _fail(report, "git is unavailable")
+    except subprocess.TimeoutExpired as exc:
+        report.steps.append(PrepStep(name="git_worktree", command=command, returncode=None, stderr=f"timeout: {exc}"))
+        _fail(report, "git worktree check timed out")
     step = PrepStep(
         name="git_worktree",
-        command=["git", "rev-parse", "--is-inside-work-tree"],
+        command=command,
         returncode=result.returncode,
         stdout=result.stdout,
         stderr=result.stderr,
@@ -296,10 +307,18 @@ def _require_git_worktree(root: Path, report: EnvironmentReport, *, timeout: int
 
 
 def _require_clean_worktree(root: Path, report: EnvironmentReport, *, timeout: int) -> None:
-    result = _run(root, ["git", "status", "--porcelain"], timeout=timeout)
+    command = ["git", "status", "--porcelain"]
+    try:
+        result = _run(root, command, timeout=timeout)
+    except FileNotFoundError as exc:
+        report.steps.append(PrepStep(name="clean_worktree", command=command, returncode=None, stderr=str(exc)))
+        _fail(report, "git is unavailable")
+    except subprocess.TimeoutExpired as exc:
+        report.steps.append(PrepStep(name="clean_worktree", command=command, returncode=None, stderr=f"timeout: {exc}"))
+        _fail(report, "git status check timed out")
     step = PrepStep(
         name="clean_worktree",
-        command=["git", "status", "--porcelain"],
+        command=command,
         returncode=result.returncode,
         stdout=result.stdout,
         stderr=result.stderr,

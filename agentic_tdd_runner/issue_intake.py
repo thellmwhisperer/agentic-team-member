@@ -160,7 +160,7 @@ def _build_model_text(sections: list[tuple[str, str]], *, fallback: str) -> tupl
 
     model_text = "\n\n".join(part.strip() for part in parts if part.strip()).strip()
     if not model_text:
-        return fallback.strip(), warnings
+        return "", warnings
     if not saw_structured_section and len(parts) == 1:
         return model_text, warnings
     return model_text, warnings

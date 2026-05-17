@@ -84,3 +84,18 @@ The bot reports 0 months.
     assert "Verify the response message contains" in contract.model_text
     assert "Verify streamSummaryManager.trackResub receives 6" in contract.model_text
     assert "dropped Fix approach before prompting" in contract.warnings
+
+
+def test_only_dropped_sections_do_not_fall_back_to_raw_issue_text():
+    issue = """## Fix approach
+1. Export handleResub so it can be tested
+2. Add `userstate: any` to the signature
+"""
+
+    contract = parse_issue_contract(issue)
+
+    assert contract.rejected is False
+    assert contract.model_text == ""
+    assert "Fix approach" not in contract.model_text
+    assert "userstate: any" not in contract.model_text
+    assert "dropped Fix approach before prompting" in contract.warnings[0]
