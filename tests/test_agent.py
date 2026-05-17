@@ -1801,7 +1801,7 @@ class TestRunQualityChecks:
             def json(self):
                 return {"message": {"content": "NO"}}
 
-        monkeypatch.setattr("agentic_tdd_runner.agent.requests.post", lambda *a, **kw: FakeResponse())
+        monkeypatch.setattr("agentic_tdd_runner.quality.requests.post", lambda *a, **kw: FakeResponse())
         monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
             "quality": {
                 "enabled": True, "max_fix_rounds": 3,
@@ -1976,7 +1976,7 @@ class TestRunQualityChecks:
             def json(self):
                 return {"message": {"content": "YES"}}
 
-        monkeypatch.setattr("agentic_tdd_runner.agent.requests.post", lambda *a, **kw: FakeResponse())
+        monkeypatch.setattr("agentic_tdd_runner.quality.requests.post", lambda *a, **kw: FakeResponse())
         monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
             "quality": {
                 "enabled": True, "max_fix_rounds": 3,
@@ -2019,7 +2019,7 @@ class TestRunQualityChecks:
         def raise_error(*_args, **_kwargs):
             raise RuntimeError("ollama unavailable")
 
-        monkeypatch.setattr("agentic_tdd_runner.agent.requests.post", raise_error)
+        monkeypatch.setattr("agentic_tdd_runner.quality.requests.post", raise_error)
         monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
             "quality": {
                 "enabled": True, "max_fix_rounds": 3,
@@ -4636,7 +4636,7 @@ class TestChatPayload:
             captured.update(json)
             return FakeResponse()
 
-        monkeypatch.setattr("agentic_tdd_runner.agent.requests.post", capture_post)
+        monkeypatch.setattr("agentic_tdd_runner.llm.requests.post", capture_post)
         monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
             "llm": {
                 "model": "test-model",
@@ -4668,7 +4668,7 @@ class TestChatPayload:
             captured.update(json)
             return FakeResponse()
 
-        monkeypatch.setattr("agentic_tdd_runner.agent.requests.post", capture_post)
+        monkeypatch.setattr("agentic_tdd_runner.llm.requests.post", capture_post)
         monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
             "llm": {
                 "model": "test-model",
