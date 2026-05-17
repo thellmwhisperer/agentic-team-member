@@ -272,7 +272,7 @@ class TestSemanticIndexPersistence:
 
         assert written == output_path
         payload = json.loads(output_path.read_text())
-        assert payload["version"] == 3
+        assert payload["version"] == 4
         assert "files" in payload
         assert "symbols" in payload
         assert any(c["symbol"] == "handleMessage" for c in payload["candidates"])
@@ -295,7 +295,7 @@ class TestSemanticIndexPersistence:
 
         output_path = tmp_path / ".atm" / "semantic-index.generated.json"
         assert output_path.exists()
-        assert payload["version"] == 3
+        assert payload["version"] == 4
         assert "files" in payload
         assert "symbols" in payload
         assert any(c["symbol"] == "handleMessage" for c in payload["candidates"])
@@ -306,7 +306,7 @@ class TestSemanticIndexPersistence:
         output_path.write_text(
             json.dumps(
                 {
-                    "version": 3,
+                    "version": 4,
                     "project_root": str(tmp_path),
                     "candidates": [
                         {
@@ -351,7 +351,7 @@ class TestSemanticIndexPersistence:
 
         def fake_build(project_root):
             return {
-                "version": 3,
+                "version": 4,
                 "project_root": project_root,
                 "files": [],
                 "symbols": [],
@@ -362,5 +362,5 @@ class TestSemanticIndexPersistence:
 
         payload = load_or_build_semantic_index(str(tmp_path))
 
-        assert payload["version"] == 3
+        assert payload["version"] == 4
         assert payload["candidates"] == [{"symbol": "freshTarget"}]

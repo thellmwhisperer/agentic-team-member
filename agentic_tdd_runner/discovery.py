@@ -33,7 +33,7 @@ _TS_METHOD_RE = re.compile(
     r"^\s*(?:(?:public|private|protected|static|readonly)\s+)*(?:async\s+)?([A-Za-z_$][\w$]*)\s*\(",
 )
 _DEFAULT_SEMANTIC_INDEX_RELATIVE_PATH = Path(".atm/semantic-index.generated.json")
-_SEMANTIC_INDEX_VERSION = 3
+_SEMANTIC_INDEX_VERSION = 4
 _EXCLUDED_DIRS = {
     ".cache",
     ".git",
@@ -65,6 +65,43 @@ _PATH_DOMAIN_EXCLUDES = {
     "test",
     "tests",
     "ts",
+}
+_DOMAIN_FEATURE_EXCLUDES = {
+    "ask",
+    "clear",
+    "client",
+    "create",
+    "emit",
+    "error",
+    "event",
+    "execute",
+    "fetch",
+    "get",
+    "handle",
+    "handler",
+    "info",
+    "logger",
+    "manager",
+    "notify",
+    "publish",
+    "record",
+    "response",
+    "save",
+    "say",
+    "searches",
+    "send",
+    "service",
+    "set",
+    "start",
+    "stop",
+    "summary",
+    "timer",
+    "timers",
+    "track",
+    "update",
+    "warn",
+    "with",
+    "write",
 }
 _STOPWORDS = {
     "a",
@@ -162,7 +199,6 @@ _NEARBY_TEST_COMMON_TOKENS = {
     "true",
     "ts",
     "tsx",
-    "twitch",
     "undefined",
     "user",
     "users",
@@ -889,59 +925,59 @@ def _infer_domains(
     domains.update(path_parts)
 
     event_names = {item["name"] for item in entrypoints}
-    feature_tokens = set(_normalize_tokens(" ".join([symbol, *observables, *triggers, *event_names])))
-    if "message" in event_names or any(trigger.startswith(("@", "!")) for trigger in triggers):
-        if "twitch" in domains:
-            domains.add("twitch.chat")
-        else:
-            domains.add("chat")
-    if event_names & {"sub", "resub", "subgift", "submysterygift", "subscription"}:
-        if "twitch" in domains:
-            domains.add("twitch.subscriptions")
-        else:
-            domains.add("subscriptions")
-    if (
-        "roles" in domains
-        and (
-            "setInterval" in observables
-            or "clearInterval" in observables
-            or symbol == "startActionTimers"
-        )
+    for event_name in event_names:
+        event_domain = _event_domain(event_name)
+        if event_domain:
+            domains.add(event_domain)
+
+    route_triggers = {trigger for route in routes for trigger in route["triggers"]}
+    if route_triggers:
+        domains.add("routing")
+    if any(trigger.startswith("@") for trigger in route_triggers):
+        domains.add("routing.mention")
+    if any(trigger.startswith("!") for trigger in route_triggers):
+        domains.add("routing.command")
+
+    domains.update(_feature_domains(symbol=symbol, observables=observables))
+
+    timer_tokens = set(_normalize_tokens(" ".join([symbol, *observables])))
+    has_timer_signal = (
+        "timer" in timer_tokens
+        or "timers" in timer_tokens
+        or "setInterval" in observables
+        or "clearInterval" in observables
+    )
+    if has_timer_signal:
+        domains.add("timer")
+    if has_timer_signal and (
+        "setInterval" in observables
+        or "clearInterval" in observables
+        or any(observable.endswith((".clear", ".set")) for observable in observables)
     ):
-        domains.add("roles.actions")
-
-    if "twitch.chat" in domains:
-        route_triggers = {trigger for route in routes for trigger in route["triggers"]}
-        if any(trigger.startswith("@") for trigger in route_triggers):
-            domains.add("twitch.chat.mention-routing")
-        if any(trigger.startswith("!") for trigger in route_triggers):
-            domains.add("twitch.chat.command-routing")
-        if "search" in feature_tokens:
-            domains.add("twitch.chat.search")
-        if "clip" in feature_tokens:
-            domains.add("twitch.chat.clip")
-
-    if "twitch.subscriptions" in domains:
-        if "resub" in event_names:
-            domains.add("twitch.subscriptions.resub")
-        if "sub" in event_names:
-            domains.add("twitch.subscriptions.sub")
-        if event_names & {"subgift", "submysterygift"}:
-            domains.add("twitch.subscriptions.gifts")
-
-    if "roles.actions" in domains:
-        if "setInterval" in observables or "clearInterval" in observables:
-            domains.add("roles.actions.timer-management")
-
-    if "twitch" in domains and "twitch.chat" not in domains:
-        if "search" in feature_tokens or "clip" in feature_tokens or "say" in feature_tokens:
-            domains.add("twitch.chat")
-        if "search" in feature_tokens:
-            domains.add("twitch.chat.search")
-        if "clip" in feature_tokens:
-            domains.add("twitch.chat.clip")
+        domains.add("timer.management")
 
     return sorted(domains)
+
+
+def _event_domain(event_name: str) -> str | None:
+    tokens = _normalize_tokens(event_name)
+    if not tokens:
+        return None
+    return "event." + ".".join(tokens)
+
+
+def _feature_domains(*, symbol: str, observables: list[str]) -> set[str]:
+    domains = set()
+    candidates = [symbol]
+    candidates.extend(observable.split(".")[-1] for observable in observables)
+    for candidate in candidates:
+        for token in _normalize_tokens(candidate):
+            if token in _STOPWORDS or token in _DOMAIN_FEATURE_EXCLUDES:
+                continue
+            if token.isdigit():
+                continue
+            domains.add(f"feature.{token}")
+    return domains
 
 
 def _score_candidate(candidate: dict, issue_tokens: set[str]) -> int:
