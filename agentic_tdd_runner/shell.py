@@ -10,7 +10,7 @@ ALLOWED_COMMANDS = frozenset({
     "python", "python3", "pip", "pip3", "pytest",
     "echo", "sort", "uniq", "diff", "tr", "cut", "tee",
     "sed", "awk", "xargs", "dirname", "basename",
-    "tree", "file", "which", "true", "false", "test",
+    "tree", "file", "which", "true", "false", "test", "env",
 })
 
 # Flags that allow arbitrary code execution on otherwise safe binaries.
@@ -19,6 +19,7 @@ BLOCKED_FLAGS = {
     "python3": {"-c"},
     "node": {"-e", "--eval"},
     "deno": {"eval"},
+    "bun": {"-e", "--eval", "-p", "--print"},
 }
 
 
