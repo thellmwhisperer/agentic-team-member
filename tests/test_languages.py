@@ -150,6 +150,36 @@ class TestPythonPlugin:
         assert imports["np"]["source_module"] == "numpy"
         assert imports["np"]["export_name"] == "numpy"
 
+    def test_ignores_indented_imports_inside_function_body(self):
+        lang = get_language("file.py")
+        source = """import top_level
+
+def work():
+    import local_only
+    from hidden.module import helper
+"""
+        imports = lang.parse_imports(source)
+
+        assert "top_level" in imports
+        assert "local_only" not in imports
+        assert "helper" not in imports
+
+    def test_ignores_indented_parenthesized_from_import(self):
+        lang = get_language("file.py")
+        source = """from visible import (
+    first,
+)
+
+class Worker:
+    from hidden import (
+        second,
+    )
+"""
+        imports = lang.parse_imports(source)
+
+        assert "first" in imports
+        assert "second" not in imports
+
     def test_runner_is_pytest(self):
         lang = get_language("file.py")
         assert lang.runner == "pytest"
