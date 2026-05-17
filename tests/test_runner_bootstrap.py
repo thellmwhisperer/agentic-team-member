@@ -1,0 +1,105 @@
+"""Tests for repo-aware test runner bootstrap discovery."""
+
+import json
+
+from agentic_tdd_runner.runner_bootstrap import inspect_runner_bootstrap
+
+
+def _write_package(path, payload):
+    path.mkdir(parents=True, exist_ok=True)
+    (path / "package.json").write_text(json.dumps(payload))
+
+
+def test_detects_pnpm_monorepo_and_leaf_jest_runner(tmp_path):
+    (tmp_path / "pnpm-lock.yaml").write_text("")
+    package_dir = tmp_path / "apps" / "web"
+    _write_package(package_dir, {
+        "scripts": {"test": "jest --runInBand"},
+        "devDependencies": {"jest": "^30.0.0"},
+    })
+
+    report = inspect_runner_bootstrap(package_dir / "src")
+
+    assert report.package_dir == str(package_dir)
+    assert report.package_json == str(package_dir / "package.json")
+    assert report.monorepo_root == str(tmp_path)
+    assert report.lockfile == str(tmp_path / "pnpm-lock.yaml")
+    assert report.package_manager == "pnpm"
+    assert report.package_manager_source == "lockfile:pnpm-lock.yaml"
+    assert report.test_runner == "jest"
+    assert report.test_runner_source == "package.json:scripts.test"
+    assert report.test_command == "jest --runInBand"
+
+
+def test_detects_bun_test_from_script_and_lockfile(tmp_path):
+    (tmp_path / "bun.lockb").write_text("")
+    _write_package(tmp_path, {
+        "packageManager": "bun@1.2.0",
+        "scripts": {"test": "bun test src/foo.test.ts"},
+    })
+
+    report = inspect_runner_bootstrap(tmp_path)
+
+    assert report.package_manager == "bun"
+    assert report.package_manager_source == "lockfile:bun.lockb"
+    assert report.test_runner == "bun:test"
+    assert report.test_command == "bun test src/foo.test.ts"
+
+
+def test_detects_vitest_from_dependencies_without_test_script(tmp_path):
+    _write_package(tmp_path, {
+        "devDependencies": {"vitest": "^4.0.0"},
+    })
+
+    report = inspect_runner_bootstrap(tmp_path)
+
+    assert report.package_manager == "npm"
+    assert report.package_manager_source == "default"
+    assert report.test_runner == "vitest"
+    assert report.test_runner_source == "package.json:dependencies"
+    assert report.test_command is None
+
+
+def test_detects_node_test_from_script(tmp_path):
+    _write_package(tmp_path, {
+        "scripts": {"test": "node --test test/*.test.js"},
+    })
+
+    report = inspect_runner_bootstrap(tmp_path)
+
+    assert report.test_runner == "node:test"
+    assert report.test_command == "node --test test/*.test.js"
+
+
+def test_keeps_custom_test_script_when_runner_is_unknown(tmp_path):
+    _write_package(tmp_path, {
+        "scripts": {"test": "turbo run test --filter web"},
+    })
+
+    report = inspect_runner_bootstrap(tmp_path)
+
+    assert report.test_runner == "custom"
+    assert report.test_runner_source == "package.json:scripts.test"
+    assert report.test_command == "turbo run test --filter web"
+
+
+def test_detects_wrapped_runner_commands(tmp_path):
+    _write_package(tmp_path, {
+        "scripts": {"test": "cross-env CI=1 pnpm exec vitest run"},
+    })
+
+    report = inspect_runner_bootstrap(tmp_path)
+
+    assert report.test_runner == "vitest"
+    assert report.test_command == "cross-env CI=1 pnpm exec vitest run"
+
+
+def test_returns_empty_report_for_non_javascript_project(tmp_path):
+    (tmp_path / "pyproject.toml").write_text("[project]\nname = 'demo'\n")
+
+    report = inspect_runner_bootstrap(tmp_path)
+
+    assert report.package_dir is None
+    assert report.package_manager is None
+    assert report.test_runner is None
+    assert report.to_log_dict()["workdir"] == str(tmp_path)
