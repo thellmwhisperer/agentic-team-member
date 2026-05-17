@@ -7,6 +7,7 @@ import subprocess
 from agentic_tdd_runner.paths import resolve_repo_path
 from agentic_tdd_runner.tools import (
     execute_tool,
+    reactive_forbidden_feedback,
     reactive_test_feedback,
     tool_applied_status,
     tool_loop_signature,
@@ -110,6 +111,108 @@ def test_reactive_test_feedback_returns_compact_failure(tmp_path, monkeypatch):
 
     assert "[Reactive test]" in result
     assert "expect(true).toBe(false)" in result
+
+
+def test_reactive_forbidden_feedback_reports_test_quality_issues(tmp_path):
+    target = tmp_path / "src" / "file.test.ts"
+    target.parent.mkdir()
+    repeated_setup = "const client_say_spy = mock(() => undefined as never);"
+    target.write_text(
+        "\n".join([
+            "import { mock } from 'bun:test';",
+            repeated_setup,
+            repeated_setup,
+            "expect(client_say_spy).toHaveBeenCalled();",
+        ])
+    )
+
+    result = reactive_forbidden_feedback(
+        "src/file.test.ts",
+        workdir=str(tmp_path),
+        config={
+            "quality": {
+                "enabled": True,
+                "typescript": {"forbidden": ["as never"]},
+            },
+        },
+        is_test_file_path=lambda path: path.endswith(".test.ts"),
+    )
+
+    assert "[Reactive forbidden]" in result
+    assert "2 forbidden patterns" in result
+    assert "as never" in result
+    assert "Duplicated setup" in result
+    assert "client_say_spy" in result
+    assert "beforeEach" in result
+
+
+def test_create_file_includes_reactive_forbidden_feedback(tmp_path, monkeypatch):
+    def fake_run(command, **kwargs):
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("agentic_tdd_runner.tools.subprocess.run", fake_run)
+    repeated_setup = "const client_say_spy = mock(() => undefined as never);"
+
+    result, _ = _execute_tool(
+        "create_file",
+        {
+            "path": "src/file.test.ts",
+            "content": "\n".join([
+                repeated_setup,
+                repeated_setup,
+                "expect(client_say_spy).toHaveBeenCalled();",
+            ]),
+        },
+        tmp_path,
+        config={
+            "timeouts": {"tool_execution": 10, "test_run": 10},
+            "quality": {
+                "enabled": True,
+                "typescript": {"forbidden": ["as never"]},
+            },
+        },
+    )
+
+    assert result.startswith("OK: created src/file.test.ts")
+    assert "[Reactive forbidden]" in result
+    assert "as never" in result
+
+
+def test_str_replace_editor_includes_reactive_forbidden_feedback(tmp_path, monkeypatch):
+    def fake_run(command, **kwargs):
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("agentic_tdd_runner.tools.subprocess.run", fake_run)
+
+    target = tmp_path / "src" / "file.test.ts"
+    target.parent.mkdir()
+    target.write_text("const ok = 1;\n")
+    repeated_setup = "const client_say_spy = mock(() => undefined as never);"
+
+    result, _ = _execute_tool(
+        "str_replace_editor",
+        {
+            "path": "src/file.test.ts",
+            "old_str": "const ok = 1;\n",
+            "new_str": "\n".join([
+                repeated_setup,
+                repeated_setup,
+                "expect(client_say_spy).toHaveBeenCalled();",
+            ]),
+        },
+        tmp_path,
+        config={
+            "timeouts": {"tool_execution": 10, "test_run": 10},
+            "quality": {
+                "enabled": True,
+                "typescript": {"forbidden": ["as never"]},
+            },
+        },
+    )
+
+    assert result.startswith("OK: replaced in src/file.test.ts")
+    assert "[Reactive forbidden]" in result
+    assert "as never" in result
 
 
 def test_tool_status_and_loop_signature_helpers():
