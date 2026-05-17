@@ -3178,6 +3178,46 @@ class TestMain:
         assert "llm_timeout" in events
         assert "exhausted" not in events
 
+    def test_chat_error_logs_error_not_exhausted(self, tmp_path, monkeypatch):
+        logged = []
+        args = SimpleNamespace(
+            issue="bug text", source=None, symbol=None,
+            workdir=str(tmp_path), config="unused.toml", log_dir=str(tmp_path),
+        )
+        config = {
+            "agent": {"max_steps": 3, "max_tool_output": 2000},
+            "verification": {"max_rejections": 3},
+            "quality": {"enabled": False},
+            "prompt": {
+                "system": "system prompt",
+                "nudge": "Step {step}/{max_steps}. Continue.",
+                "no_test_found": "no test",
+                "quality_failed": "FAIL: {details}",
+            },
+            "llm": {"model": "test-model"},
+            "timeouts": {"llm_request": 10, "tool_execution": 10, "test_run": 10},
+            "runner": {"command": "bun test", "test_file_patterns": ["*.test.ts"], "exclude_dirs": []},
+            "tools": [],
+            "pr": {"enabled": False},
+        }
+
+        monkeypatch.setattr("agentic_tdd_runner.config.load_config", lambda path: config)
+        monkeypatch.setattr("agentic_tdd_runner.agent.parse_args", lambda: args)
+        monkeypatch.setattr("agentic_tdd_runner.agent.init_log", lambda: str(tmp_path / "agent.jsonl"))
+        monkeypatch.setattr("agentic_tdd_runner.agent.emit", lambda msg: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.log", lambda event, data: logged.append((event, data)))
+        monkeypatch.setattr(
+            "agentic_tdd_runner.agent.chat",
+            lambda messages, include_tools=True: (_ for _ in ()).throw(RuntimeError("boom")),
+        )
+
+        result = main()
+
+        assert result == 1
+        events = [event for event, _data in logged]
+        assert "error" in events
+        assert "exhausted" not in events
+
     def test_logs_done_even_if_postamble_fails(self, tmp_path, monkeypatch):
         logged = []
         args = SimpleNamespace(
@@ -3229,6 +3269,65 @@ class TestMain:
         assert "done" in events
         assert "postamble_error" in events
         assert "exhausted" not in events
+
+    def test_done_retry_preserves_assistant_message(self, tmp_path, monkeypatch):
+        chat_calls = []
+        verify_calls = []
+        args = SimpleNamespace(
+            issue="bug text", source=None, symbol=None,
+            workdir=str(tmp_path), config="unused.toml", log_dir=str(tmp_path),
+        )
+        config = {
+            "agent": {"max_steps": 2, "max_tool_output": 2000},
+            "verification": {"max_rejections": 3},
+            "quality": {"enabled": False},
+            "prompt": {
+                "system": "system prompt",
+                "nudge": "Step {step}/{max_steps}. Continue.",
+                "no_test_found": "no test",
+                "quality_failed": "FAIL: {details}",
+            },
+            "llm": {"model": "test-model"},
+            "timeouts": {"llm_request": 10, "tool_execution": 10, "test_run": 10},
+            "runner": {"command": "bun test", "test_file_patterns": ["*.test.ts"], "exclude_dirs": []},
+            "tools": [],
+            "pr": {"enabled": False},
+        }
+
+        def fake_chat(messages, include_tools=True):
+            chat_calls.append([dict(msg) for msg in messages])
+            return {
+                "choices": [{"message": {"content": "DONE"}, "finish_reason": "stop"}],
+                "usage": {},
+                "timings": {},
+            }
+
+        def fake_verify(test_file):
+            verify_calls.append(test_file)
+            if len(verify_calls) == 1:
+                return False, "verification failed"
+            return True, "verified"
+
+        monkeypatch.setattr("agentic_tdd_runner.config.load_config", lambda path: config)
+        monkeypatch.setattr("agentic_tdd_runner.agent.parse_args", lambda: args)
+        monkeypatch.setattr("agentic_tdd_runner.agent.init_log", lambda: str(tmp_path / "agent.jsonl"))
+        monkeypatch.setattr("agentic_tdd_runner.agent.emit", lambda msg: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.log", lambda *a, **kw: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.chat", fake_chat)
+        monkeypatch.setattr("agentic_tdd_runner.agent.find_test_file", lambda hint=None: "src/file.test.ts")
+        monkeypatch.setattr("agentic_tdd_runner.agent.verify_red_green", fake_verify)
+        monkeypatch.setattr(
+            "agentic_tdd_runner.agent.subprocess.run",
+            lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, stdout="", stderr=""),
+        )
+
+        result = main()
+
+        assert result == 0
+        assert len(chat_calls) == 2
+        retry_messages = chat_calls[1]
+        assert any(msg.get("content") == "DONE" for msg in retry_messages)
+        assert retry_messages[-1]["content"] == "verification failed"
 
     def test_logs_full_issue_text_on_start(self, tmp_path, monkeypatch):
         logged = []
