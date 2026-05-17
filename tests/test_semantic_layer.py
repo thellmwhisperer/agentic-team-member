@@ -55,22 +55,25 @@ class TestSemanticLayerSchema:
 
         index = build_semantic_index(str(tmp_path))
 
-        assert index["version"] == 3
+        assert index["version"] == 4
         assert "files" in index
         assert "symbols" in index
         assert "candidates" in index
 
         file_fact = _get_file(index, "src/twitch/client.ts")
         assert file_fact["language"] == "typescript"
-        assert "twitch.chat" in file_fact["domains"]
-        assert "twitch.chat.mention-routing" in file_fact["domains"]
+        assert "twitch" in file_fact["domains"]
+        assert "event.message" in file_fact["domains"]
+        assert "routing.mention" in file_fact["domains"]
         assert file_fact["symbols"] == ["handleMessage", "initTwitch"]
         assert file_fact["nearby_tests"] == ["src/twitch/mentions.test.ts"]
 
         symbol_fact = _get_symbol(index, "src/twitch/client.ts", "handleMessage")
         assert symbol_fact["qualified_name"] == "handleMessage"
-        assert "twitch.chat" in symbol_fact["domains"]
-        assert "twitch.chat.mention-routing" in symbol_fact["domains"]
+        assert "twitch" in symbol_fact["domains"]
+        assert "event.message" in symbol_fact["domains"]
+        assert "routing.mention" in symbol_fact["domains"]
+        assert all(not domain.startswith("twitch.") for domain in symbol_fact["domains"])
         assert symbol_fact["nearby_tests"] == ["src/twitch/mentions.test.ts"]
         assert symbol_fact["calls"] == ["client.say"]
         assert symbol_fact["telemetry"] == []
@@ -349,9 +352,9 @@ class TestSemanticLayerGoldens:
         index = build_semantic_index(str(tmp_path))
         symbol_fact = _get_symbol(index, "src/twitch/client.ts", "handleMessage")
 
-        assert "twitch.chat" in symbol_fact["domains"]
-        assert "twitch.chat.mention-routing" in symbol_fact["domains"]
-        assert "twitch.chat.command-routing" in symbol_fact["domains"]
+        assert "event.message" in symbol_fact["domains"]
+        assert "routing.mention" in symbol_fact["domains"]
+        assert "routing.command" in symbol_fact["domains"]
         assert symbol_fact["entrypoints"] == [
             {
                 "kind": "event",
@@ -414,8 +417,8 @@ class TestSemanticLayerGoldens:
         index = build_semantic_index(str(tmp_path))
         symbol_fact = _get_symbol(index, "src/twitch/client.ts", "handleMessage")
 
-        assert "twitch.chat.mention-routing" in symbol_fact["domains"]
-        assert "twitch.chat.command-routing" in symbol_fact["domains"]
+        assert "routing.mention" in symbol_fact["domains"]
+        assert "routing.command" in symbol_fact["domains"]
         assert symbol_fact["triggers"] == ["!mismensajes", "!oyemanolito", "@manolitozurrapa"]
         assert symbol_fact["guard_patterns"] == [
             "== '!mismensajes'",
@@ -444,8 +447,8 @@ class TestSemanticLayerGoldens:
         index = build_semantic_index(str(tmp_path))
         symbol_fact = _get_symbol(index, "src/twitch/client.ts", "handleResub")
 
-        assert "twitch.subscriptions" in symbol_fact["domains"]
-        assert "twitch.subscriptions.resub" in symbol_fact["domains"]
+        assert "event.resub" in symbol_fact["domains"]
+        assert "feature.resub" in symbol_fact["domains"]
         assert symbol_fact["entrypoints"] == [
             {
                 "kind": "event",
@@ -512,8 +515,8 @@ class TestSemanticLayerGoldens:
         index = build_semantic_index(str(tmp_path))
         symbol_fact = _get_symbol(index, "src/roles/RoleManager.ts", "startActionTimers")
 
-        assert "roles.actions" in symbol_fact["domains"]
-        assert "roles.actions.timer-management" in symbol_fact["domains"]
+        assert "roles" in symbol_fact["domains"]
+        assert "timer.management" in symbol_fact["domains"]
         assert symbol_fact["entrypoints"] == []
         assert symbol_fact["triggers"] == []
         assert symbol_fact["calls"] == [
@@ -640,7 +643,7 @@ class TestSemanticLayerGoldens:
         index = build_semantic_index(str(tmp_path))
         symbol_fact = _get_symbol(index, "src/twitch/client.ts", "handleSearch")
 
-        assert "twitch.chat.search" in symbol_fact["domains"]
+        assert "feature.search" in symbol_fact["domains"]
         assert symbol_fact["observables"] == [
             "aiService.askWithSearch",
             "client.say",
@@ -717,7 +720,7 @@ class TestSemanticLayerGoldens:
         index = build_semantic_index(str(tmp_path))
         symbol_fact = _get_symbol(index, "src/twitch/client.ts", "handleClip")
 
-        assert "twitch.chat.clip" in symbol_fact["domains"]
+        assert "feature.clip" in symbol_fact["domains"]
         assert symbol_fact["observables"] == [
             "client.say",
             "discordService.sendClip",
