@@ -66,6 +66,7 @@ def _is_excluded_path(path: str, exclude_prefixes: list[tuple[str, ...]]) -> boo
 
 def find_test_file(hint: str | None, workdir: str, config: dict) -> str | None:
     """Find the test file the agent created. Uses hint from cookbook if available."""
+    runner_config = (config or {}).get("runner", {})
     if hint:
         try:
             hinted = resolve_repo_path(hint, workdir)
@@ -79,7 +80,7 @@ def find_test_file(hint: str | None, workdir: str, config: dict) -> str | None:
         changed_test_files = []
         exclude_prefixes = [
             PurePosixPath(ex).parts
-            for ex in config["runner"].get("exclude_dirs", [])
+            for ex in runner_config.get("exclude_dirs", [])
         ]
         entries = [
             entry
@@ -112,20 +113,20 @@ def find_test_file(hint: str | None, workdir: str, config: dict) -> str | None:
         if changed_test_files:
             return sorted(dict.fromkeys(changed_test_files))[0]
 
-    patterns = config["runner"]["test_file_patterns"]
     exclude_prefixes = [
         PurePosixPath(ex).parts
-        for ex in config["runner"].get("exclude_dirs", [])
+        for ex in runner_config.get("exclude_dirs", [])
     ]
     for root, _dirs, files in os.walk(workdir):
         rel_root = os.path.relpath(root, workdir)
         if _is_excluded_path(rel_root, exclude_prefixes):
             continue
         for filename in files:
-            if any(fnmatch.fnmatch(filename, pattern) for pattern in patterns):
-                full = os.path.join(root, filename)
-                rel = os.path.relpath(full, workdir)
-                result = _run_git(["ls-files", "--", rel], workdir, text=True)
-                if result and not result.stdout.strip():
-                    return rel
+            full = os.path.join(root, filename)
+            rel = os.path.relpath(full, workdir)
+            if not is_test_file_path(rel, config):
+                continue
+            result = _run_git(["ls-files", "--", rel], workdir, text=True)
+            if result and not result.stdout.strip():
+                return rel
     return None
