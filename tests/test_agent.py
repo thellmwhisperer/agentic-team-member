@@ -343,6 +343,12 @@ class TestFindTestFile:
         subprocess.run([GIT, "config", "user.name", "t"], cwd=tmp_path, capture_output=True)
         subprocess.run([GIT, "commit", "--allow-empty", "-m", "init"], cwd=tmp_path, capture_output=True, check=True)
 
+    def _pretend_git(self, monkeypatch):
+        monkeypatch.setattr(
+            "agentic_tdd_runner.paths.shutil.which",
+            lambda binary: "git" if binary == "git" else None,
+        )
+
     def test_finds_ts_test_file(self, tmp_path, monkeypatch):
         self._setup_git_repo(tmp_path)
         (tmp_path / "src").mkdir()
@@ -447,6 +453,7 @@ class TestFindTestFile:
                 )
             return sp_run(*args, **kwargs)
 
+        self._pretend_git(monkeypatch)
         with mock_patch("subprocess.run", side_effect=fake_run):
             assert find_test_file() == "src/test file.py"
 
@@ -475,6 +482,7 @@ class TestFindTestFile:
                 )
             return sp_run(*args, **kwargs)
 
+        self._pretend_git(monkeypatch)
         with mock_patch("subprocess.run", side_effect=fake_run):
             assert find_test_file() == "src/test renamed.py"
 
@@ -503,6 +511,7 @@ class TestFindTestFile:
                 )
             return sp_run(*args, **kwargs)
 
+        self._pretend_git(monkeypatch)
         with mock_patch("subprocess.run", side_effect=fake_run):
             assert find_test_file() is None
 
@@ -531,6 +540,7 @@ class TestFindTestFile:
                 )
             return sp_run(*args, **kwargs)
 
+        self._pretend_git(monkeypatch)
         with mock_patch("subprocess.run", side_effect=fake_run):
             assert find_test_file() is None
 
