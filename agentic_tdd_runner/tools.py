@@ -1,6 +1,7 @@
 """Tool execution helpers for the agent runner."""
 
 import os
+import re
 import shlex
 import subprocess
 from collections.abc import Callable, MutableMapping
@@ -107,12 +108,21 @@ def execute_tool(
                 f.write(new_content)
             file_read_cache.pop(full_path, None)
             result = f"OK: replaced in {args['path']}"
-            return result + reactive_typecheck_feedback(
-                args["path"],
-                workdir=workdir,
-                config=config,
-                detect_quality_tools=detect_quality_tools,
-                typecheck_ownership_hint=typecheck_ownership_hint,
+            return (
+                result
+                + reactive_typecheck_feedback(
+                    args["path"],
+                    workdir=workdir,
+                    config=config,
+                    detect_quality_tools=detect_quality_tools,
+                    typecheck_ownership_hint=typecheck_ownership_hint,
+                )
+                + reactive_forbidden_feedback(
+                    args["path"],
+                    workdir=workdir,
+                    config=config,
+                    is_test_file_path=is_test_file_path,
+                )
             )
 
         if name == "create_file":
@@ -139,6 +149,12 @@ def execute_tool(
                     config=config,
                     is_test_file_path=is_test_file_path,
                     test_runner_command_for_file=test_runner_command_for_file,
+                )
+                + reactive_forbidden_feedback(
+                    args["path"],
+                    workdir=workdir,
+                    config=config,
+                    is_test_file_path=is_test_file_path,
                 )
             )
 
@@ -234,3 +250,64 @@ def reactive_test_feedback(
     sample_lines = [ln for ln in raw.splitlines() if ln.strip()][:5]
     sample = "\n".join(f"  {ln}" for ln in sample_lines) if sample_lines else f"  {raw[:200]}"
     return f"\n\n[Reactive test] failed:\n{sample}"
+
+
+def reactive_forbidden_feedback(
+    path: str,
+    *,
+    workdir: str,
+    config: dict,
+    is_test_file_path: Callable[[str], bool],
+) -> str:
+    """Return fast feedback for deterministic test quality violations."""
+    if not is_test_file_path(path):
+        return ""
+
+    quality_cfg = (config or {}).get("quality", {})
+    if not quality_cfg.get("enabled", False):
+        return ""
+
+    from agentic_tdd_runner.languages import get_language
+    from agentic_tdd_runner.quality import partition_duplicated_test_lines
+
+    lang = get_language(path)
+    lang_name = lang.name if lang else "typescript"
+    forbidden = quality_cfg.get(lang_name, {}).get("forbidden", [])
+
+    full_path = Path(workdir) / path
+    try:
+        file_text = full_path.read_text(errors="replace")
+    except OSError as e:
+        return f"\n\n[Reactive forbidden] ERROR: {e}"
+
+    failures: list[str] = []
+    forbidden_hits: list[str] = []
+    for pattern in forbidden:
+        for line_no, line in enumerate(file_text.splitlines(), 1):
+            if pattern in line:
+                forbidden_hits.append(f"  {path}:{line_no} '{pattern}'")
+    if forbidden_hits:
+        sample = "\n".join(forbidden_hits[:5])
+        failures.append(
+            f"[Forbidden] {path}: {len(forbidden_hits)} forbidden patterns\n{sample}"
+        )
+
+    setup_dupes, _ambiguous_dupes = partition_duplicated_test_lines(file_text)
+    if setup_dupes:
+        identifiers: list[str] = []
+        for line in setup_dupes:
+            identifiers.extend(re.findall(r"\b([a-zA-Z_]\w+)\s*[=(]", line))
+        id_list = ", ".join(dict.fromkeys(identifiers)) if identifiers else "shared setup"
+        failures.append(
+            f"[Duplicated setup] {path}: {len(setup_dupes)} repeated lines. "
+            f"Move to beforeEach (TS) or fixture (Python): {id_list}"
+        )
+
+    if not failures:
+        return ""
+
+    details = "\n\n".join(failures)
+    return (
+        "\n\n[Reactive forbidden] Potential quality issues detected before DONE:\n"
+        f"{details}"
+    )
