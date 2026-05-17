@@ -11,6 +11,7 @@ from agentic_tdd_runner import agent
 from agentic_tdd_runner.environment import (
     EnvironmentPrepError,
     EnvironmentReport,
+    WorktreePrepError,
     WorktreeReport,
     prepare_run_worktree,
     prepare_environment,
@@ -157,6 +158,22 @@ class TestPrepareEnvironment:
             command for _root, command in calls
         ]
 
+    def test_prepare_run_worktree_rejects_file_destination(self, tmp_path, monkeypatch):
+        repo = tmp_path / "repo"
+        destination = tmp_path / "run"
+        repo.mkdir()
+        destination.write_text("not a directory")
+
+        def fake_run(root, command, timeout):
+            if command[:2] == ["git", "rev-parse"]:
+                return _completed(command, stdout=str(repo) + "\n")
+            raise AssertionError(f"Unexpected command: {command!r}")
+
+        monkeypatch.setattr("agentic_tdd_runner.environment._run", fake_run)
+
+        with pytest.raises(WorktreePrepError, match="not a directory"):
+            prepare_run_worktree(str(repo), workdir=str(destination))
+
     def test_dirty_worktree_fails_before_install(self, tmp_path, monkeypatch):
         _write_js_project(tmp_path)
         calls = []
@@ -178,6 +195,50 @@ class TestPrepareEnvironment:
             })
 
         assert ["bun", "install", "--frozen-lockfile"] not in calls
+
+    def test_git_probe_missing_binary_reports_context(self, tmp_path, monkeypatch):
+        _write_js_project(tmp_path)
+
+        def fake_run(root, command, timeout):
+            if command[:2] == ["git", "rev-parse"]:
+                raise FileNotFoundError("git")
+            return _completed(command)
+
+        monkeypatch.setattr("agentic_tdd_runner.environment._run", fake_run)
+
+        with pytest.raises(EnvironmentPrepError) as exc:
+            prepare_environment(str(tmp_path), {
+                "environment": {"install": "auto", "run_typecheck": True},
+                "timeouts": {"tool_execution": 60},
+            })
+
+        assert exc.value.report.ready is False
+        assert exc.value.report.reason == "git is unavailable"
+        assert exc.value.report.steps[-1].name == "git_worktree"
+        assert exc.value.report.steps[-1].returncode is None
+
+    def test_git_status_timeout_reports_context(self, tmp_path, monkeypatch):
+        _write_js_project(tmp_path)
+
+        def fake_run(root, command, timeout):
+            if command[:2] == ["git", "rev-parse"]:
+                return _completed(command, stdout="true\n")
+            if command[:2] == ["git", "status"]:
+                raise subprocess.TimeoutExpired(command, timeout)
+            return _completed(command)
+
+        monkeypatch.setattr("agentic_tdd_runner.environment._run", fake_run)
+
+        with pytest.raises(EnvironmentPrepError) as exc:
+            prepare_environment(str(tmp_path), {
+                "environment": {"install": "auto", "run_typecheck": True},
+                "timeouts": {"tool_execution": 60},
+            })
+
+        assert exc.value.report.ready is False
+        assert exc.value.report.reason == "git status check timed out"
+        assert exc.value.report.steps[-1].name == "clean_worktree"
+        assert exc.value.report.steps[-1].returncode is None
 
 
 class TestMainEnvironmentPrep:

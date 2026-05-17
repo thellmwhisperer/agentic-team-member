@@ -132,6 +132,13 @@ class TestValidateCommand:
             'grep -n "SubUserstate\\|SubMethods" node_modules/@types/tmi.js/index.d.ts'
         )
 
+    def test_blocks_command_substitution(self):
+        with pytest.raises(ValueError, match="command substitution"):
+            _validate_command("echo $(cat /etc/passwd)")
+
+        with pytest.raises(ValueError, match="command substitution"):
+            _validate_command("echo `cat /etc/passwd`")
+
     def test_allows_chained_safe_commands(self):
         _validate_command("git status && bun test")
 
@@ -225,7 +232,7 @@ class TestIssueLoading:
                     stdout='{"title": "Resub months bug", "body": "## Symptom\\n0 meses"}',
                     stderr="",
                 )
-            return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="unexpected")
+            raise AssertionError(f"Unexpected subprocess call: {cmd!r}")
 
         monkeypatch.setattr("agentic_tdd_runner.agent.subprocess.run", fake_run)
 
@@ -2561,8 +2568,10 @@ class TestCreatePr:
             cmd = args[0] if args else kwargs.get("args", [])
             if isinstance(cmd, list):
                 commands_run.append(cmd)
-                if cmd[0] == "gh" or (cmd[0] == "git" and "push" in cmd):
+                if cmd[:3] == ["gh", "pr", "create"]:
                     return subprocess.CompletedProcess(cmd, 0, stdout="https://github.com/test/pr/1\n")
+                if cmd[:2] == ["git", "push"]:
+                    return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
                 return original_run(*args, **kwargs)
             return original_run(*args, **kwargs)
 
@@ -2740,6 +2749,7 @@ class TestCreatePr:
                 result = create_pr([], {}, "file.test.ts", 10)
 
         assert result == "https://github.com/test/pr/1"
+        assert any(cmd[:3] == ["gh", "pr", "create"] for cmd in commands_run)
         commit_commands = [cmd for cmd in commands_run if cmd[:2] == ["git", "commit"]]
         assert commit_commands
         commit_text = " ".join(commit_commands[0])

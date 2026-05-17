@@ -331,12 +331,13 @@ def _module_spy_extractions(dependencies):
         if dep.get("strategy") != "mock_module":
             continue
         binding = _safe_identifier(dep.get("binding", "module"))
+        dep_scope = dep.get("source_module") or binding
         required_shape = dep.get("required_shape", {})
         for export_name, members in required_shape.items():
             if not isinstance(members, list):
                 continue
             for member in members:
-                key = (export_name, member)
+                key = (dep_scope, export_name, member)
                 if key in spy_extractions:
                     continue
                 spy_name = f"{binding}_{_safe_identifier(member)}_spy"
@@ -365,7 +366,7 @@ def _render_module_mocks(dependencies, *, spy_extractions=None, declare_spies=Fa
         render_hint = dep.get("render_hint")
         body = _render_module_shape(
             required_shape, render_hint=render_hint, depth=2,
-            spy_extractions=spy_extractions,
+            spy_extractions=spy_extractions, dep_scope=module_path,
         )
         blocks.append(
             f"mock.module('{module_path}', () => (\n"
@@ -379,34 +380,37 @@ def _render_module_mocks(dependencies, *, spy_extractions=None, declare_spies=Fa
 
 
 
-def _render_module_shape(shape, *, render_hint=None, depth=0, spy_extractions=None):
+def _render_module_shape(shape, *, render_hint=None, depth=0, spy_extractions=None, dep_scope=None):
     lines = []
     indent = " " * depth
     for key, value in shape.items():
         rendered = _render_binding_value(
             key, value, render_hint=render_hint, depth=depth,
-            spy_extractions=spy_extractions, parent_key=key,
+            spy_extractions=spy_extractions, parent_key=key, dep_scope=dep_scope,
         )
         lines.append(f"{indent}{key}: {rendered},")
     return "\n".join(lines)
 
 
 
-def _render_binding_value(key, value, *, render_hint=None, depth=0, spy_extractions=None, parent_key=None):
+def _render_binding_value(
+    key, value, *, render_hint=None, depth=0, spy_extractions=None, parent_key=None, dep_scope=None,
+):
     indent = " " * depth
     inner_indent = " " * (depth + 2)
     if isinstance(value, dict):
         inner = _render_module_shape(
             value, render_hint=render_hint, depth=depth + 2,
-            spy_extractions=spy_extractions,
+            spy_extractions=spy_extractions, dep_scope=dep_scope,
         )
         return f"{{\n{inner}\n{indent}}}"
     if isinstance(value, list):
         def _member_value(member):
             # Check if this member has a named spy extraction
             lookup_key = parent_key or key
-            if spy_extractions and (lookup_key, member) in spy_extractions:
-                return spy_extractions[(lookup_key, member)]
+            scoped_key = (dep_scope, lookup_key, member)
+            if spy_extractions and scoped_key in spy_extractions:
+                return spy_extractions[scoped_key]
             return _render_ts_mock()
 
         if render_hint == "module_object":
@@ -547,4 +551,3 @@ def _render_full_test(
 def _indent_block(text, spaces):
     indent = " " * spaces
     return "\n".join(f"{indent}{line}" if line else "" for line in text.splitlines())
-
