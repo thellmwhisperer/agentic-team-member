@@ -99,9 +99,14 @@ class TypeScriptLanguage:
     def render_seam_setter(self, binding: str, assignment: dict) -> str:
         name = self.setter_name(binding)
         type_hint = assignment.get("type_annotation") or f"typeof {binding}"
+        observed_members = assignment.get("observed_members") or []
+        value_type = type_hint
+        if assignment.get("type_annotation") and observed_members:
+            members = " | ".join(f"'{member}'" for member in observed_members)
+            value_type = f"Pick<{type_hint}, {members}>"
         return (
-            f"export function {name}(value: {type_hint}): void {{\n"
-            f"  {binding} = value;\n"
+            f"export function {name}(value: {value_type}): void {{\n"
+            f"  {binding} = value as {type_hint};\n"
             f"}}"
         )
 

@@ -64,6 +64,9 @@ def _realize_generated_test_seams(
             execution_entry["setter_name"] = name
         if name in source_text:
             continue
+        seam_assignment = dict(assignment)
+        if execution_entry is not None:
+            seam_assignment["observed_members"] = execution_entry.get("observed_members", [])
         edits.append({
             "kind": "mechanical_test_seam",
             "path": source_path,
@@ -72,7 +75,7 @@ def _realize_generated_test_seams(
             "old": assignment["line"],
             "new": assignment["line"]
             + ("\n\n" if not assignment["line"].endswith("\n") else "\n")
-            + lang.render_seam_setter(binding, assignment),
+            + lang.render_seam_setter(binding, seam_assignment),
         })
     return edits
 

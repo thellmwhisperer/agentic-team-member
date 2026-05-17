@@ -41,6 +41,7 @@ def build_contract(facts):
     execution_dependencies = deepcopy(facts.get("execution_dependencies", []))
     injection_plan = deepcopy(facts.get("injection_plan", []))
     assertion_surface = deepcopy(facts["assertion_surface"])
+    callback_registrations = deepcopy(facts.get("callback_registrations", []))
     pattern_files = deepcopy(facts.get("pattern_files", []))
     gaps = deepcopy(facts.get("gaps", []))
 
@@ -61,6 +62,7 @@ def build_contract(facts):
         "execution_dependencies": execution_dependencies,
         "injection_plan": injection_plan,
         "assertion_surface": assertion_surface,
+        "callback_registrations": callback_registrations,
         "pattern_files": pattern_files,
         "gaps": gaps,
     }
