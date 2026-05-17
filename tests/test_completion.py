@@ -16,6 +16,9 @@ def _base_config(quality_enabled=False):
 
 
 def test_try_complete_appends_no_test_feedback_when_test_is_missing():
+    def should_not_be_called(*_args, **_kwargs):
+        raise AssertionError("should not be called when test file is missing")
+
     messages = [
         {"role": "system", "content": "system"},
         {"role": "user", "content": "bug"},
@@ -34,8 +37,8 @@ def test_try_complete_appends_no_test_feedback_when_test_is_missing():
         emit=lambda msg: None,
         log=lambda event, data: None,
         find_test_file=lambda hint=None: None,
-        verify_red_green=lambda test_file: (True, "verified"),
-        run_quality_checks=lambda test_file: (True, "ok"),
+        verify_red_green=should_not_be_called,
+        run_quality_checks=should_not_be_called,
         create_pr=lambda messages, msg, test_file, step: None,
     )
 
@@ -120,4 +123,37 @@ def test_try_complete_reads_untracked_files_with_replacement_encoding(tmp_path, 
     assert result == "done"
     assert any("bad.bin" in msg for msg in emitted)
     assert any("valid" in msg for msg in emitted)
+    assert any("\ufffd" in msg for msg in emitted)
     assert "postamble_error" not in [event for event, _data in logged]
+
+
+def test_compaction_preserves_issue_without_system_message():
+    compacted = completion.compact_messages_after_quality_failure(
+        [
+            {"role": "user", "content": "Fix this bug"},
+            {"role": "assistant", "content": "working"},
+        ],
+        "QUALITY FAIL",
+        "src/file.test.ts",
+    )
+
+    assert [msg["role"] for msg in compacted] == ["user", "user"]
+    assert compacted[0]["content"] == "Fix this bug"
+    assert "QUALITY FAIL" in compacted[1]["content"]
+
+
+def test_should_compact_uses_defaults_for_malformed_quality_thresholds():
+    should_compact, info = completion.should_compact_after_quality_failure(
+        {
+            "llm": {"context_window_tokens": 32768},
+            "quality": {
+                "compact_threshold_ratio": "not-a-number",
+                "compact_min_headroom_tokens": "nope",
+            },
+        },
+        {"prompt_tokens": 30000},
+    )
+
+    assert should_compact is True
+    assert info["threshold_ratio"] == 0.85
+    assert info["min_headroom_tokens"] == 2048
