@@ -182,6 +182,18 @@ def test_rendered_test_contains_minimal_template():
     assert "handleResub(channel, username, months);" in rendered
 
 
+def test_renderer_uses_typescript_signature_parser_for_optional_params():
+    facts = _handle_resub_facts()
+    facts["target"]["signature"] = "handleResub(channel?: string, months: number): void"
+
+    contract = build_contract(facts)
+    scaffold = contract["scaffold"]
+
+    assert "const channel = /* TODO */;" in scaffold["arrange_block"]
+    assert "const channel? = /* TODO */;" not in scaffold["arrange_block"]
+    assert scaffold["act_block"] == "handleResub(channel, months);"
+
+
 class TestPytestScaffoldModuleLoadDeps:
     """pytest scaffold must patch module_load dependencies."""
 

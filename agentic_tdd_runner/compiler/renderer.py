@@ -5,6 +5,8 @@ from copy import deepcopy
 from pathlib import PurePosixPath
 
 from agentic_tdd_runner.compiler.analyzer import _merge_module_mock_dependencies
+from agentic_tdd_runner.languages import get_language
+from agentic_tdd_runner.languages.signature import parse_signature_params as _fallback_parse_signature_params
 
 
 def _build_scaffold(contract):
@@ -25,7 +27,7 @@ def _build_bun_scaffold(contract):
     execution_dependencies = contract["execution_dependencies"]
     injection_plan = {entry["binding"]: entry for entry in contract["injection_plan"]}
     assertion_surface = contract["assertion_surface"]
-    params = _parse_signature_params(target.get("signature", ""))
+    params = _signature_params_for_target(target)
 
     imports_block = "import { describe, expect, mock, test } from 'bun:test';"
 
@@ -124,7 +126,7 @@ def _build_pytest_scaffold(contract):
     execution_dependencies = contract["execution_dependencies"]
     injection_plan = {entry["binding"]: entry for entry in contract["injection_plan"]}
     assertion_surface = contract["assertion_surface"]
-    params = _parse_signature_params(target.get("signature", ""))
+    params = _signature_params_for_target(target)
 
     import_names = [target_name]
     for binding, plan in injection_plan.items():
@@ -270,48 +272,15 @@ def _build_pytest_scaffold(contract):
 
 
 def _parse_signature_params(signature):
-    match = re.search(r"\((.*)\)", signature)
-    if not match:
-        return []
-    raw = match.group(1).strip()
-    if not raw:
-        return []
-    # Split on commas that are not inside brackets/parens/strings
-    params = []
-    depth = 0
-    in_string = None
-    current = []
-    for ch in raw:
-        if in_string:
-            current.append(ch)
-            if ch == in_string:
-                in_string = None
-            continue
-        if ch in ("'", '"'):
-            in_string = ch
-            current.append(ch)
-        elif ch in "([{<":
-            depth += 1
-            current.append(ch)
-        elif ch in ")]}>":
-            depth -= 1
-            current.append(ch)
-        elif ch == "," and depth == 0:
-            piece = "".join(current).strip()
-            if piece:
-                name = piece.split(":")[0].split("=")[0].strip()
-                if name:
-                    params.append(name.lstrip("*"))
-            current = []
-        else:
-            current.append(ch)
-    # Last piece
-    piece = "".join(current).strip()
-    if piece:
-        name = piece.split(":")[0].split("=")[0].strip()
-        if name:
-            params.append(name.lstrip("*"))
-    return params
+    return _fallback_parse_signature_params(signature)
+
+
+def _signature_params_for_target(target):
+    lang = get_language(target.get("source_path", ""))
+    parser = getattr(lang, "parse_signature_params", None) if lang else None
+    if callable(parser):
+        return parser(target.get("signature", ""))
+    return _parse_signature_params(target.get("signature", ""))
 
 
 
