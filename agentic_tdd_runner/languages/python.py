@@ -5,6 +5,7 @@ import re
 from pathlib import PurePosixPath
 
 from agentic_tdd_runner.languages import register
+from agentic_tdd_runner.languages.signature import parse_signature_params
 
 _PY_FROM_IMPORT_PAREN_RE = re.compile(
     r"^from\s+([.\w]+)\s+import\s+\(([^)]+)\)", re.MULTILINE | re.DOTALL,
@@ -81,6 +82,13 @@ class PythonLanguage:
                     "line": line,
                 }
         return assignments
+
+    def parse_signature_params(self, signature: str) -> list[str]:
+        return parse_signature_params(
+            signature,
+            skip_markers=True,
+            skip_names={"self", "cls"},
+        )
 
     def test_path(self, source_path: str, symbol: str) -> str:
         source = PurePosixPath(source_path)

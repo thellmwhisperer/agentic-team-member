@@ -5,6 +5,7 @@ import re
 from pathlib import PurePosixPath
 
 from agentic_tdd_runner.languages import register
+from agentic_tdd_runner.languages.signature import parse_signature_params
 
 _TS_NAMED_IMPORT_RE = re.compile(
     r"^\s*import\s*{([^}]+)}\s*from\s*['\"]([^'\"]+)['\"]\s*;?",
@@ -80,6 +81,9 @@ class TypeScriptLanguage:
                     "line": line,
                 }
         return assignments
+
+    def parse_signature_params(self, signature: str) -> list[str]:
+        return parse_signature_params(signature, strip_optional_marker=True)
 
     def test_path(self, source_path: str, symbol: str) -> str:
         source = PurePosixPath(source_path)
