@@ -3205,7 +3205,7 @@ class TestMain:
 
         def fake_run(*args, **kwargs):
             cmd = args[0] if args else kwargs.get("args", [])
-            if cmd == ["git", "diff"]:
+            if len(cmd) >= 2 and cmd[-1] == "diff":
                 raise subprocess.TimeoutExpired(cmd, 10)
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 

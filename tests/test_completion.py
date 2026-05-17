@@ -101,6 +101,7 @@ def test_try_complete_reads_untracked_files_with_replacement_encoding(tmp_path, 
             return subprocess.CompletedProcess(cmd, 0, stdout="bad.bin\n", stderr="")
         raise AssertionError(f"unexpected command: {cmd}")
 
+    monkeypatch.setattr(completion.shutil, "which", lambda name: "git")
     monkeypatch.setattr(completion.subprocess, "run", fake_run)
 
     result = completion.try_complete(
@@ -125,6 +126,17 @@ def test_try_complete_reads_untracked_files_with_replacement_encoding(tmp_path, 
     assert any("valid" in msg for msg in emitted)
     assert any("\ufffd" in msg for msg in emitted)
     assert "postamble_error" not in [event for event, _data in logged]
+
+
+def test_read_file_preview_bounds_large_binary_content(tmp_path):
+    binary_file = tmp_path / "large.bin"
+    binary_file.write_bytes(b"ab\x00cd")
+
+    text, truncated, binary = completion._read_file_preview(str(binary_file), max_bytes=4)
+
+    assert text == "ab\\0c"
+    assert truncated is True
+    assert binary is True
 
 
 def test_compaction_preserves_issue_without_system_message():
