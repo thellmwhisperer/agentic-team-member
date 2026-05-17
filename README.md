@@ -1,240 +1,223 @@
-# ATM — Agentic Team Member
+# ATM - Agentic Team Member
 
-Point a local LLM at a bug. Get back a fix with tests, a verified red-green, and a PR.
+Turn a real issue into a verified pull request using local coding agents.
 
-## What it does
+ATM is a skill-driven harness for local models. It prepares the repository,
+builds deterministic context, lets the model edit code with tools, verifies the
+result, and opens a PR.
 
-Given a GitHub issue and a repository, ATM:
+## What ATM Does
 
-1. **Prepares the target environment** — checks the repo worktree, detects the project stack, installs missing dependencies, and runs deterministic preflight commands before any LLM call.
-2. **Discovers the target** — optional deterministic issue-only discovery chooses `source` + `symbol` when they are not supplied.
-3. **Generates a cookbook** — deterministic static analysis of the target function: imports, dependency graph, mock strategies, test scaffolds. No LLM involved.
-4. **Runs a phased agent loop** — a local model (Qwen 3.5 27B) follows a two-phase TDD cycle: first write a failing test, then fix the source. Tools: read, edit, create, run.
-5. **Verifies red-green** — reverts the fix and runs the test (must fail), restores and runs again (must pass). If both pass, the fix is real.
-6. **Runs quality checks** — typecheck, lint, format, and forbidden pattern checks. Autofixes what it can, feeds remaining issues back to the model.
-7. **Opens a PR** — when `[pr].enabled = true`, ATM commits the fix and test, pushes to a branch, and creates a pull request via `gh`.
+Given a repository and an issue, ATM:
 
-## Architecture
+1. Prepares an isolated run worktree under the target repo.
+2. Installs and validates the project before the first model call.
+3. Reads the issue and discovers the target surface when possible.
+4. Builds a deterministic cookbook for mocks, seams, tests, and assertions.
+5. Lets a local coding model write a regression test and fix the source.
+6. Verifies red-green deterministically.
+7. Runs quality and safety gates.
+8. Commits, pushes, and opens a pull request when PR automation is enabled.
 
-```text
-┌─────────────────────────────────────────────────────┐
-│              python -m agentic_tdd_runner.agent       │
-│      repo + issue + optional target + model endpoint │
-└──────────────┬──────────────────────────────────────┘
-               │
-               ▼
-┌──────────────────────────┐
-│   Environment Prep       │  deterministic, no LLM
-│   git status + install   │  package manager detection,
-│   + preflight commands   │  fail before model if not ready
-└──────────────┬───────────┘
-               │
-               ▼
-┌──────────────────────────┐
-│   Target Discovery       │  optional, deterministic
-│   discovery.py           │  issue text → source + symbol
-└──────────────┬───────────┘
-               │
-               ▼
-┌──────────────────────────┐
-│     Cookbook Generator    │  deterministic, no LLM
-│  compiler/ + cookbook.py  │  parse imports, trace deps,
-│                          │  generate mock blocks + scaffold
-└──────────────┬───────────┘
-               │ mechanical edits applied to disk
-               │ episode context injected into prompt
-               ▼
-┌──────────────────────────┐
-│   Phase 1: Test First    │  LLM writes a failing test
-│   Phase 2: Fix + Green   │  LLM fixes source, runs test
-│   agent.py               │  tools: read, edit, create, run
-└──────────────┬───────────┘
-               │ DONE
-               ▼
-┌──────────────────────────┐
-│   Red-Green Verifier     │  deterministic, no LLM
-│   stash fix → test FAIL  │
-│   restore  → test PASS   │
-└──────────────┬───────────┘
-               │ verified
-               ▼
-┌──────────────────────────┐
-│   Quality Gate           │  typecheck + lint + format +
-│                          │  forbidden patterns
-└──────────────┬───────────┘
-               │ all green
-               ▼
-┌──────────────────────────┐
-│   PR Creation            │  git commit + push + gh pr
-└──────────────────────────┘
-```
-
-## The cookbook
-
-Local models (4B–27B) can fix source code but cannot resolve complex mocking graphs. A 27B will spend 15+ steps trying to figure out what to mock, often getting stuck in loops.
-
-The cookbook solves this deterministically before the agent starts:
-
-- **Import tracing** — parses TypeScript and Python imports
-- **Dependency classification** — factory results (`const logger = getLogger()`) vs module singletons vs mutable locals (`let client`)
-- **Mock strategy** — `mock.module()` for imports, setter injection for module-level mutables
-- **Module-level factory detection** — includes deps that execute on import even if the target function doesn't use them directly
-- **Assertion surface scoring** — ranks outbound calls (`say` > `emit` > `info` > `get`), skips calls on parameters
-- **Class method detection** — identifies methods vs top-level functions, generates correct import/instantiation
-
-## Language plugins
-
-Languages are plugins. Adding a new language requires zero changes to existing code:
+## Product Flow
 
 ```text
-languages/
-  typescript.py   # TS/JS: bun:test, mock.module(), export detection
-  python.py       # Python: pytest, unittest.mock, class method support
-  go.py           # Future: go test, interfaces
+Repo + Issue
+    |
+    v
+Isolated Worktree
+    |
+    v
+Environment Prep
+    |
+    v
+Reconnaissance
+    |
+    v
+Cookbook
+    |
+    v
+Local Coding Agent
+    |
+    v
+Deterministic Gates
+    |
+    v
+Pull Request
 ```
 
-Each plugin provides: `parse_imports`, `parse_assignments`, `test_path`, `setter_name`, `is_exported`, `import_path`, `render_seam_setter`.
+The model is only one part of the system. ATM keeps deterministic work outside
+the model wherever possible: repo setup, target analysis, test scaffolding,
+red-green verification, quality checks, and PR creation.
 
-## How the runtime works
+## Cookbook
 
-The agent loop is a harness around a local LLM. Every design decision optimizes for fewer steps and higher KV cache hit rates.
+The cookbook is the semantic layer between a generic coding model and a real
+project. It turns repository facts into concrete instructions the agent can
+execute:
 
-### Phased prompting
+- Import tracing
+- Dependency classification
+- Mock strategy
+- Test file placement
+- Mechanical seams and exports
+- Assertion surfaces
+- Framework and language conventions
 
-The agent runs in two phases with distinct prompts:
-
-1. **Phase 1 (test-first)**: the model receives the bug description, the cookbook output (mocks, seams, assertion hints), and a prompt that says "write a failing test, then fix the source." This eliminates source-first drift — the model goes straight to TDD.
-2. **Phase 2 (quality fix)**: after red-green verification, quality issues (`: any`, missing types, lint) are fed back. The model fixes only what's listed.
-
-A step-counter nudge ("Step N/M") is appended as the last user message on each turn. This placement is deliberate — appending at the tail preserves the KV cache prefix for all preceding messages.
-
-### Context management
-
-The system prompt is built once before the loop and never mutated. This makes it byte-identical across turns, so the LLM server (llama-server) reuses 100% of the KV cache for the system prompt on every step.
-
-After a quality failure, the runner decides whether to compact based on actual token usage:
-
-- **Below 85% of context window**: preserve all messages, append quality feedback. The model keeps full context and doesn't need to re-read files.
-- **Above 85%**: compact to 3 messages (system prompt, issue, quality feedback) as a safety net.
-
-In practice, most runs never compact. The handleResub benchmark uses ~9k of 32k tokens at the quality boundary — compacting there destroyed useful context and added 2-3 steps of re-reading.
-
-### File read dedup
-
-The runner tracks the last `st_mtime_ns` seen for every `read_file` path. If the model re-reads an unchanged file, it gets a stub: "File unchanged since last read. Refer to the earlier content."
-
-The cache is invalidated when `str_replace_editor` or `create_file` modifies the file (explicit `pop`) and cleared entirely on compaction (the model loses the original tool result, so the cache must reset).
-
-### Reactive feedback
-
-After every `str_replace_editor` or `create_file`, the runner runs the project's typecheck and feeds errors back inline in the tool result. The model sees the tsc error immediately, not on the next test run. This cuts a full round-trip per type error.
-
-### TypeScript pill
-
-An optional ~250-token block of standard TypeScript handbook material in the system prompt:
-
-- How to read structured tsc errors (the target type appears in continuation lines)
-- Type narrowing techniques (`typeof`, truthiness, equality, `in`, `String()`)
-- Type import syntax (`import type { T }`)
-
-This isn't model-specific instruction — it's reference material. It reduces quality-phase steps by teaching the model to read tsc output instead of searching for types.
+The goal is to make the agent spend its context on the actual code change, not
+on rediscovering the same project mechanics every run.
 
 ## Skills
 
-ATM is one agent with multiple skills. Each skill is a different cookbook — the agent loop, verifier, and language plugins are shared. Teaching ATM a new skill means writing a new cookbook, not a new agent.
+ATM is one runtime with multiple skills. Each skill has its own cookbook; the
+worktree setup, tools, verifier, quality gates, language plugins, and PR
+workflow are shared.
 
-```bash
-atm fix --issue 41              # TDD fix (current)
-atm migrate --pr 123            # Dependency migration (planned)
-atm refactor --symbol X         # Codemod (planned)
+### fix
+
+`fix` is the first supported skill. It receives a bug report, prepares the repo,
+generates a test strategy, writes a failing regression test, fixes the code,
+verifies red-green, and opens a PR.
+
+### migrate
+
+`migrate` is planned. It will read a dependency migration guide, extract
+transformation rules, apply the changes file by file, run project checks, and
+push back to the dependency-update PR.
+
+### refactor
+
+`refactor` is planned. It will apply verified code transformations across a
+repo using the same cookbook, agent, and verifier pattern.
+
+## Language Plugins
+
+Languages are plugins. Adding a language means teaching ATM how to parse, test,
+mock, and patch that language without changing the rest of the flow:
+
+```text
+languages/
+  typescript.py   # TS/JS: test runners, module mocks, export detection
+  python.py       # Python: pytest, unittest.mock, class method support
+  go.py           # Planned: go test, interfaces
 ```
 
-### fix (current)
+Each plugin provides the language-specific pieces used by the cookbook:
+imports, assignments, test paths, export detection, import rendering, and seam
+generation.
 
-Receives a bug report, analyzes the target function, generates mock recipes, writes a failing test, fixes the code, verifies red-green, outputs the diff. The full TDD cycle.
+## Current Status
 
-### migrate (planned)
+The `fix` flow works end to end:
 
-The Dependabot problem: Dependabot opens a PR bumping a dependency from v3 to v4, but doesn't fix the breaking changes. You have to read the migration guide, understand what broke, and fix it file by file.
+- repo worktree preparation
+- issue loading from a file or GitHub issue
+- deterministic environment prep
+- deterministic cookbook generation
+- tool-based local model loop
+- red-green verification
+- quality gates
+- PR automation
 
-ATM can do this. The migration cookbook reads the upgrade guide (a URL or markdown file), extracts transformation rules (class renames, API changes, config changes), and generates a deterministic artefact. The agent applies the rules file by file, runs the build and tests after each batch, and pushes to the same Dependabot PR.
+TypeScript and JavaScript are the most exercised path today. Python support is
+available through the plugin interface and pytest-oriented generation, and needs
+more real-project coverage before it should be considered equally mature.
 
-Renovate can't do this either. No tool in the ecosystem closes this gap today.
+## Road to OSS
 
-### refactor (planned)
+The public roadmap is organized around making the product contract portable
+across real projects:
 
-Large-scale codemods guided by rules — not regex replacement, but an agent that understands the code. Same pattern: a cookbook generates the transformation rules, the agent applies them with verification.
+1. **Runner bootstrap**: build exact test commands for Bun, Jest, Vitest,
+   `node:test`, and pytest from repo facts, including minimal config shims when
+   isolated regression tests need them.
+2. **Reconnaissance**: turn issue and repo inspection into a deterministic
+   per-episode cookbook, so normal bug reports do not require `--source` and
+   `--symbol`.
+3. **Installable CLI**: publish package metadata, dependencies, and an `atm`
+   command with a documented local-first install path.
+4. **Smoke matrix**: maintain small fresh-repo checks for Bun, Jest/Vitest, and
+   pytest through the same `--repo` workflow.
+5. **Project polish**: add public contribution docs, issue templates, license
+   file, and a concise first-run guide.
 
-### The pattern
+## Requirements
 
-Every skill follows the same architecture:
+- Python 3.12+
+- `requests`
+- A local OpenAI-compatible model server, such as
+  [llama-server](https://github.com/ggml-org/llama.cpp)
+- A tool-calling local model
+- `gh` CLI for GitHub issue loading and PR creation
 
-1. **Cookbook** (deterministic) — analyze the problem, generate an artefact
-2. **Agent** (LLM) — execute the plan with tools
-3. **Verifier** (deterministic) — confirm the work is correct
+## Usage
 
-What changes between skills is step 1. The cookbook is the semantic layer — it's what turns a generic model into a specialist.
+Start a local model server:
 
-## Benchmark
+```bash
+llama-server \
+  --model /path/to/model.gguf \
+  --host 127.0.0.1 --port 11435 \
+  --ctx-size 32768 --n-gpu-layers 999 \
+  --jinja --no-webui
+```
 
-Same bug (handleResub cumulative months), same issue text, clean worktree each run.
+Run from an issue file:
 
-### Current results (phased runner + quality gate)
+```bash
+python3 -m agentic_tdd_runner.agent \
+  --repo /path/to/repo \
+  /path/to/issue.md
+```
 
-| Run | Config | Thinking | Green | Done | Notes |
-|---|---|---|---|---|---|
-| r32 | base | on | 4 | 15 | baseline with quality gate |
-| r34 | pill, 4B | on | 5 | 21 | 4B model, TypeScript pill validated |
-| r36 | pill | on | 4 | 11 | best pre-optimization |
-| r38 | base | off | ~5 | 19 | thinking_budget_tokens=0 |
-| r39 | pill+nothink | off | 7 | 16 | pill compensates for no thinking |
-| r41 | pill+think | on | 4 | 10 | with threshold compact + read dedup |
+Or load the issue directly from GitHub:
 
-Green = step where test passes. Done = total steps including quality fixes and PR.
+```bash
+python3 -m agentic_tdd_runner.agent \
+  --repo /path/to/repo \
+  --github-repo owner/repo \
+  --issue-number 41 \
+  --base-ref main
+```
 
-### Key findings
+When `--repo` is supplied, ATM creates a detached run worktree under
+`REPO/.worktree/` by default, then runs environment prep there. That keeps run
+filesystem access inside the target project. You can still pass `--run-root` as
+an explicit override.
 
-- **27B is deterministic**: green at step 4 in every 27B run. Variance is only in quality phase.
-- **TypeScript pill matters**: ~250 tokens of TS handbook reference (narrowing, reading tsc errors, type imports) reduces quality-phase steps significantly.
-- **Thinking matters in quality phase**: the model uses extended reasoning to resolve type narrowing (`string | true` → `String()`). Without thinking, it takes more steps.
-- **Context preservation beats compaction**: compacting at 9k/32k (28% usage) destroyed useful context and forced re-reads. Threshold-based compaction (85%) preserves context when there's headroom.
-- **File read dedup**: `st_mtime_ns`-keyed cache avoids re-reading unchanged files. Invalidated on edit/write, cleared on compaction.
+You can pass `--source` and `--symbol` to pin the target, or omit them when
+discovery is enabled.
 
-### Earlier results (pre-phased runner)
+Runtime defaults can come from `.env` in the current directory:
 
-| Run | Model | Steps | Result |
-|---|---|---|---|
-| R1 | 27B distilled | 23 | VERIFIED |
-| R2 | 27B distilled | 18 | VERIFIED |
-| R3 | 27B base | 15 | VERIFIED |
-| R4 | 4B | 44+ | FAIL |
-
-Without the cookbook, the 27B ran 33+ steps (~90 min) and never finished.
+```bash
+AGENT_CONFIG=config/agent.toml
+AGENT_LOG_DIR=/tmp
+```
 
 ## Configuration
 
-Per-run configuration in TOML. Multiple configs for different models/strategies:
+Runtime configuration lives in TOML:
 
 ```toml
 [llm]
-model = "qwen3.5-27b"
+model = "local-coder"
 url = "http://127.0.0.1:11435/v1/chat/completions"
 temperature = 0.6
-thinking_budget_tokens = 0  # optional: disable thinking per-request
 
 [timeouts]
 tool_execution = 60
 llm_request = 600
 test_run = 30
-pr_create = 120  # timeout for git push + gh pr create when PR automation is enabled
+pr_create = 120
 
 [runner]
 command = "bun test"
-test_file_patterns = ["*.test.ts", "*.test.tsx", "test_*.py"]
+test_file_patterns = ["*.test.ts", "*.test.tsx", "*.test.js", "*.test.jsx", "test_*.py"]
 
 [environment]
 enabled = true
-install = "auto"      # auto | always | never
+install = "auto"
 require_clean = true
 run_typecheck = true
 timeout = 300
@@ -244,7 +227,6 @@ enabled = true
 
 [quality]
 enabled = true
-compact_threshold_ratio = 0.85  # only compact when context is near limit
 
 [quality.typescript]
 forbidden = ["as any", ": any", "eslint-disable", "@ts-ignore"]
@@ -254,47 +236,6 @@ enabled = true
 base_branch = "main"
 branch_prefix = "atm/fix-"
 ```
-
-## Requirements
-
-- Python 3.12+
-- `requests`
-- A local LLM server: [llama-server](https://github.com/ggml-org/llama.cpp) or [Ollama](https://ollama.ai)
-- A GGUF model with tool-calling support (tested with Qwen 3.5 27B and 4B)
-- `gh` CLI for PR creation
-
-## Usage
-
-```bash
-# Start the model server (no --reasoning-budget for per-request control)
-llama-server \
-  --model Qwen3.5-27B.Q4_K_M.gguf \
-  --host 127.0.0.1 --port 11435 \
-  --ctx-size 32768 --n-gpu-layers 999 \
-  --jinja --no-webui
-
-# Run the agent
-python3.14 -m agentic_tdd_runner.agent \
-  --repo /path/to/repo \
-  /path/to/issue.md
-```
-
-When `--repo` is supplied, ATM creates a detached run worktree under
-`REPO/.worktree/` by default, then runs environment prep there. That keeps all
-run filesystem access inside the target project. You can still pass `--run-root`
-as an explicit override, and you can pass `--source` + `--symbol` to pin the
-target or omit them when `[discovery].enabled = true`.
-
-Runtime defaults can come from `.env` in the current directory:
-
-```bash
-AGENT_CONFIG=config/agent.toml
-AGENT_LOG_DIR=/tmp
-```
-
-## Status
-
-The TDD fix skill works end-to-end: cookbook → phased agent loop → verified red-green → quality gate → PR. Migration and refactor skills are planned.
 
 ## License
 
