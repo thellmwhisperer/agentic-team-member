@@ -12,9 +12,8 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-import requests
-
 from agentic_tdd_runner import completion as _completion
+from agentic_tdd_runner import llm as _llm
 from agentic_tdd_runner import pr as _pr
 from agentic_tdd_runner import quality as _quality
 from agentic_tdd_runner import tools as _tools
@@ -112,9 +111,7 @@ def apply_mechanical_edits(edits: list[dict], workdir: str) -> int:
 
 
 def _is_llm_timeout_error(exc: Exception) -> bool:
-    if isinstance(exc, requests.exceptions.Timeout):
-        return True
-    return "timed out" in str(exc).lower()
+    return _llm.is_llm_timeout_error(exc)
 
 
 def _compact_messages_after_quality_failure(messages: list[dict], quality_msg: str, test_file: str) -> list[dict]:
@@ -218,22 +215,7 @@ def truncate(text: str, max_chars: int = 0) -> str:
 
 
 def chat(messages: list, include_tools: bool = True) -> dict:
-    llm = _CONFIG["llm"]
-    payload = {
-        "model": llm["model"],
-        "messages": messages,
-        "temperature": llm.get("temperature", 0.6),
-        "top_p": llm.get("top_p", 0.95),
-        "top_k": llm.get("top_k", 20),
-        "cache_prompt": True,
-    }
-    if "thinking_budget_tokens" in llm:
-        payload["thinking_budget_tokens"] = llm["thinking_budget_tokens"]
-    if include_tools:
-        payload["tools"] = _CONFIG["tools"]
-    resp = requests.post(llm["url"], json=payload, timeout=_CONFIG["timeouts"]["llm_request"])
-    resp.raise_for_status()
-    return resp.json()
+    return _llm.chat_completion(messages, _CONFIG, include_tools=include_tools)
 
 
 def find_test_file(hint: str | None = None) -> str | None:
