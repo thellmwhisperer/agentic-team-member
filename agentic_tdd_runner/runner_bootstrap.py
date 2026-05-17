@@ -144,6 +144,7 @@ def _classify_test_command(command: str) -> str | None:
     except ValueError:
         return None
     tokens = _skip_command_wrappers(tokens)
+    tokens = _split_nested_shell_payload(tokens)
     if not tokens:
         return None
 
@@ -155,10 +156,20 @@ def _classify_test_command(command: str) -> str | None:
     if binary in RUNNER_BINS:
         return binary
     if binary == "npx" and len(tokens) > 1:
-        return _classify_runner_binary(tokens[1])
+        return _classify_npx_command(tokens[1:])
     if binary in PACKAGE_MANAGERS and len(tokens) > 1:
         return _classify_package_manager_command(binary, tokens[1:])
     return None
+
+
+def _split_nested_shell_payload(tokens: list[str]) -> list[str]:
+    if len(tokens) != 1 or " " not in tokens[0]:
+        return tokens
+    try:
+        nested = shlex.split(tokens[0])
+    except ValueError:
+        return tokens
+    return nested or tokens
 
 
 def _skip_command_wrappers(tokens: list[str]) -> list[str]:
@@ -178,6 +189,14 @@ def _skip_command_wrappers(tokens: list[str]) -> list[str]:
             continue
         break
     return remaining
+
+
+def _classify_npx_command(args: list[str]) -> str | None:
+    for arg in args:
+        if arg.startswith("-"):
+            continue
+        return _classify_runner_binary(arg)
+    return None
 
 
 def _classify_package_manager_command(binary: str, args: list[str]) -> str | None:

@@ -94,6 +94,28 @@ def test_detects_wrapped_runner_commands(tmp_path):
     assert report.test_command == "cross-env CI=1 pnpm exec vitest run"
 
 
+def test_detects_cross_env_shell_quoted_runner_payload(tmp_path):
+    _write_package(tmp_path, {
+        "scripts": {"test": 'cross-env-shell NODE_ENV=test "vitest run"'},
+    })
+
+    report = inspect_runner_bootstrap(tmp_path)
+
+    assert report.test_runner == "vitest"
+    assert report.test_command == 'cross-env-shell NODE_ENV=test "vitest run"'
+
+
+def test_detects_npx_runner_with_flags(tmp_path):
+    _write_package(tmp_path, {
+        "scripts": {"test": "npx --yes jest --runInBand"},
+    })
+
+    report = inspect_runner_bootstrap(tmp_path)
+
+    assert report.test_runner == "jest"
+    assert report.test_command == "npx --yes jest --runInBand"
+
+
 def test_returns_empty_report_for_non_javascript_project(tmp_path):
     (tmp_path / "pyproject.toml").write_text("[project]\nname = 'demo'\n")
 
