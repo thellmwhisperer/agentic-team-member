@@ -359,6 +359,40 @@ def _split_shell_segments(command: str) -> list[str]:
     return segments
 
 
+def _has_shell_command_substitution(command: str) -> bool:
+    """Return true when shell command substitution can execute."""
+    quote: str | None = None
+    escaped = False
+    i = 0
+    while i < len(command):
+        ch = command[i]
+        if escaped:
+            escaped = False
+            i += 1
+            continue
+        if ch == "\\" and quote != "'":
+            escaped = True
+            i += 1
+            continue
+        if quote:
+            if ch == quote:
+                quote = None
+            elif quote != "'" and ch == "`":
+                return True
+            elif quote != "'" and command.startswith("$(", i):
+                return True
+            i += 1
+            continue
+        if ch in {"'", '"'}:
+            quote = ch
+            i += 1
+            continue
+        if ch == "`" or command.startswith("$(", i):
+            return True
+        i += 1
+    return False
+
+
 def _validate_command(command: str) -> None:
     """Validate that all commands in a pipeline/chain use allowed binaries."""
     if not command or not command.strip():
@@ -366,7 +400,7 @@ def _validate_command(command: str) -> None:
     # Reject newlines — they bypass shell operator splitting
     if "\n" in command:
         raise ValueError("newlines not allowed in commands")
-    if "$(" in command or "`" in command:
+    if _has_shell_command_substitution(command):
         raise ValueError("command substitution is not allowed")
     # Split on shell operators to validate each sub-command
     parts = _split_shell_segments(command)
@@ -1851,13 +1885,18 @@ def _github_repo_slug_from_remote_url(remote_url: str) -> str | None:
 
 
 def _github_repo_slug_from_worktree(repo_path: str) -> str:
-    result = subprocess.run(
-        ["git", "remote", "get-url", "origin"],
-        cwd=repo_path,
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
+    try:
+        result = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            cwd=repo_path,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except FileNotFoundError as exc:
+        raise SystemExit("git is required for GitHub issue lookup") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise SystemExit("git remote lookup timed out during GitHub issue lookup") from exc
     if result.returncode != 0:
         raise SystemExit(f"Could not resolve origin remote for GitHub issue lookup: {result.stderr.strip()}")
     slug = _github_repo_slug_from_remote_url(result.stdout)
@@ -1870,12 +1909,17 @@ def _load_issue_text(args, repo_path: str) -> str:
     issue_number = getattr(args, "issue_number", None)
     if issue_number:
         repo_slug = getattr(args, "github_repo", None) or _github_repo_slug_from_worktree(repo_path)
-        result = subprocess.run(
-            ["gh", "issue", "view", str(issue_number), "--repo", repo_slug, "--json", "title,body"],
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
+        try:
+            result = subprocess.run(
+                ["gh", "issue", "view", str(issue_number), "--repo", repo_slug, "--json", "title,body"],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+        except FileNotFoundError as exc:
+            raise SystemExit("GitHub CLI 'gh' is required for --issue-number") from exc
+        except subprocess.TimeoutExpired as exc:
+            raise SystemExit(f"GitHub issue lookup timed out for #{issue_number}") from exc
         if result.returncode != 0:
             raise SystemExit(f"Could not load GitHub issue #{issue_number}: {result.stderr.strip()}")
         try:

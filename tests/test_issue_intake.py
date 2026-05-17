@@ -94,8 +94,42 @@ def test_only_dropped_sections_do_not_fall_back_to_raw_issue_text():
 
     contract = parse_issue_contract(issue)
 
-    assert contract.rejected is False
+    assert contract.rejected is True
     assert contract.model_text == ""
     assert "Fix approach" not in contract.model_text
     assert "userstate: any" not in contract.model_text
+    assert contract.rejection_reason == "issue has no model-facing content after sanitization"
     assert "dropped Fix approach before prompting" in contract.warnings[0]
+
+
+def test_numbered_test_approach_steps_become_acceptance_checks():
+    issue = """Bug: handleResub reports 0 months
+
+## Symptom
+The bot reports 0 months.
+
+## Test approach
+1. Verify the response message contains "6 meses"
+2) Ensure streamSummaryManager.trackResub receives 6
+3. Mock logger and client
+"""
+
+    contract = parse_issue_contract(issue)
+
+    assert contract.rejected is False
+    assert "Verify the response message contains" in contract.model_text
+    assert "Ensure streamSummaryManager.trackResub receives 6" in contract.model_text
+    assert "Mock logger" not in contract.model_text
+
+
+def test_unheaded_issue_body_strips_mechanical_testing_details():
+    issue = """Bug: handleResub reports 0 months.
+Export handleResub so it can be tested.
+Expected behavior: report 6 months.
+"""
+
+    contract = parse_issue_contract(issue)
+
+    assert contract.rejected is False
+    assert "Expected behavior" in contract.model_text
+    assert "Export handleResub" not in contract.model_text

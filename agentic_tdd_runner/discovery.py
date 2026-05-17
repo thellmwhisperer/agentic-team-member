@@ -33,6 +33,38 @@ _TS_METHOD_RE = re.compile(
     r"^\s*(?:(?:public|private|protected|static|readonly)\s+)*(?:async\s+)?([A-Za-z_$][\w$]*)\s*\(",
 )
 _DEFAULT_SEMANTIC_INDEX_RELATIVE_PATH = Path(".atm/semantic-index.generated.json")
+_EXCLUDED_DIRS = {
+    ".cache",
+    ".git",
+    ".mypy_cache",
+    ".next",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".turbo",
+    ".venv",
+    "__pycache__",
+    "build",
+    "coverage",
+    "dist",
+    "env",
+    "node_modules",
+    "out",
+    "target",
+    "venv",
+}
+_PATH_DOMAIN_EXCLUDES = {
+    "app",
+    "apps",
+    "lib",
+    "libs",
+    "packages",
+    "py",
+    "python",
+    "src",
+    "test",
+    "tests",
+    "ts",
+}
 _STOPWORDS = {
     "a",
     "an",
@@ -142,9 +174,39 @@ _NEARBY_TEST_COMMON_TOKENS = {
 _LOW_VALUE_LOGGING_CALLS = {
     "log.error",
     "log.info",
+    "log.warn",
     "logger.error",
     "logger.event",
+    "logger.info",
     "logger.response",
+    "logger.warn",
+}
+_SEMANTIC_CALL_MEMBER_PREFIXES = (
+    "ask",
+    "create",
+    "emit",
+    "execute",
+    "fetch",
+    "notify",
+    "publish",
+    "record",
+    "save",
+    "search",
+    "send",
+    "track",
+    "update",
+    "write",
+)
+_SEMANTIC_CALL_MEMBERS = {
+    "clear",
+    "error",
+    "event",
+    "info",
+    "response",
+    "say",
+    "set",
+    "values",
+    "warn",
 }
 _LOW_VALUE_NEARBY_TEST_SEAMS = {
     "client",
@@ -185,13 +247,16 @@ def build_semantic_index(project_root: str) -> dict:
     for path in sorted(root.rglob("*")):
         if not path.is_file():
             continue
-        if any(part in {"node_modules", ".git", "__pycache__", ".pytest_cache"} for part in path.parts):
+        rel_path = path.relative_to(root).as_posix()
+        if _is_excluded_path(rel_path):
             continue
         lang = get_language(path.as_posix())
         if lang is None:
             continue
-        rel_path = path.relative_to(root).as_posix()
-        source_text = path.read_text()
+        try:
+            source_text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
         if _is_test_file(rel_path):
             test_files.append({"path": rel_path, "text": source_text})
             continue
@@ -213,6 +278,10 @@ def build_semantic_index(project_root: str) -> dict:
         "symbols": symbols,
         "candidates": symbols,
     }
+
+
+def _is_excluded_path(path: str) -> bool:
+    return any(part in _EXCLUDED_DIRS for part in PurePosixPath(path).parts)
 
 
 def write_semantic_index(project_root: str, *, output_path: str | Path) -> Path:
@@ -571,8 +640,6 @@ def _nearby_tests_for_source(
                 cross_module_allowed = True
             elif normalized_seam_members and any(member.lower() in text_lower for member in normalized_seam_members):
                 cross_module_allowed = True
-            elif {"track", "resub"} <= signal_token_set and {"track", "resub"} <= test_tokens:
-                cross_module_allowed = True
         if not cross_module_allowed:
             continue
         if same_dir:
@@ -587,8 +654,6 @@ def _nearby_tests_for_source(
             score += 50
         if signal_token_set:
             score += len(signal_token_set & test_tokens) * 2
-            if {"track", "resub"} <= signal_token_set and {"track", "resub"} <= test_tokens:
-                score += 50
         score += len(seam_name_hint_tokens & path_tokens) * 18
         score += len(seam_member_hint_tokens & path_tokens) * 30
         for seam_name in normalized_seam_names:
@@ -722,20 +787,22 @@ def _looks_like_definition_line(stripped_line: str) -> bool:
 def _is_semantic_call(name: str) -> bool:
     if name in {"setInterval", "clearInterval"}:
         return True
-    if name in {"client.say", "logger.event", "logger.response", "logger.error", "log.error", "log.info"}:
+    if "." not in name:
+        return False
+    parts = name.split(".")
+    member = parts[-1]
+    member_lower = member.lower()
+    owner_lower = parts[-2].lower() if len(parts) > 1 else ""
+    root_lower = parts[0].lower()
+    if name in _LOW_VALUE_LOGGING_CALLS:
         return True
-    if name in {
-        "aiService.askWithSearch",
-        "searchService.search",
-        "twitchService.createClip",
-        "twitchService.getBroadcasterId",
-        "twitchService.getClipUrl",
-        "discordService.sendClip",
-    }:
+    if member_lower in _SEMANTIC_CALL_MEMBERS:
         return True
-    if name.startswith("streamSummaryManager.track"):
+    if member.startswith(_SEMANTIC_CALL_MEMBER_PREFIXES):
         return True
-    if name in {"this.executeAction", "this.actionTimers.clear", "this.actionTimers.set", "this.actionTimers.values"}:
+    if root_lower.endswith(("service", "manager")) and member.startswith("get"):
+        return True
+    if owner_lower.endswith(("service", "manager", "timers")) and member.startswith("get"):
         return True
     return False
 
@@ -744,7 +811,7 @@ def _extract_observables(calls: list[str]) -> list[str]:
     return [
         call
         for call in calls
-        if call != "this.actionTimers.values" and call not in _LOW_VALUE_LOGGING_CALLS
+        if not call.endswith(".values") and call not in _LOW_VALUE_LOGGING_CALLS
     ]
 
 
@@ -811,19 +878,27 @@ def _infer_domains(
     observables: list[str],
 ) -> list[str]:
     domains = set()
-    parts = set(PurePosixPath(source_path).parts)
-    if "twitch" in parts:
-        domains.add("twitch")
-    if "roles" in parts:
-        domains.add("roles")
+    path_parts = {
+        part.lower()
+        for part in PurePosixPath(source_path).parts[:-1]
+        if part and part.lower() not in _PATH_DOMAIN_EXCLUDES
+    }
+    domains.update(path_parts)
 
     event_names = {item["name"] for item in entrypoints}
+    feature_tokens = set(_normalize_tokens(" ".join([symbol, *observables, *triggers, *event_names])))
     if "message" in event_names or any(trigger.startswith(("@", "!")) for trigger in triggers):
-        domains.add("twitch.chat")
+        if "twitch" in domains:
+            domains.add("twitch.chat")
+        else:
+            domains.add("chat")
     if event_names & {"sub", "resub", "subgift", "submysterygift", "subscription"}:
-        domains.add("twitch.subscriptions")
+        if "twitch" in domains:
+            domains.add("twitch.subscriptions")
+        else:
+            domains.add("subscriptions")
     if (
-        "roles" in parts
+        "roles" in domains
         and (
             "setInterval" in observables
             or "clearInterval" in observables
@@ -838,17 +913,9 @@ def _infer_domains(
             domains.add("twitch.chat.mention-routing")
         if any(trigger.startswith("!") for trigger in route_triggers):
             domains.add("twitch.chat.command-routing")
-        if (
-            "searchService.search" in observables
-            or "aiService.askWithSearch" in observables
-            or "streamSummaryManager.trackSearch" in observables
-        ):
+        if "search" in feature_tokens:
             domains.add("twitch.chat.search")
-        if (
-            "twitchService.createClip" in observables
-            or "streamSummaryManager.trackClip" in observables
-            or "discordService.sendClip" in observables
-        ):
+        if "clip" in feature_tokens:
             domains.add("twitch.chat.clip")
 
     if "twitch.subscriptions" in domains:
@@ -864,27 +931,11 @@ def _infer_domains(
             domains.add("roles.actions.timer-management")
 
     if "twitch" in domains and "twitch.chat" not in domains:
-        if (
-            "searchService.search" in observables
-            or "aiService.askWithSearch" in observables
-            or "streamSummaryManager.trackSearch" in observables
-            or "twitchService.createClip" in observables
-            or "streamSummaryManager.trackClip" in observables
-            or "discordService.sendClip" in observables
-            or "client.say" in observables
-        ):
+        if "search" in feature_tokens or "clip" in feature_tokens or "say" in feature_tokens:
             domains.add("twitch.chat")
-        if (
-            "searchService.search" in observables
-            or "aiService.askWithSearch" in observables
-            or "streamSummaryManager.trackSearch" in observables
-        ):
+        if "search" in feature_tokens:
             domains.add("twitch.chat.search")
-        if (
-            "twitchService.createClip" in observables
-            or "streamSummaryManager.trackClip" in observables
-            or "discordService.sendClip" in observables
-        ):
+        if "clip" in feature_tokens:
             domains.add("twitch.chat.clip")
 
     return sorted(domains)

@@ -139,6 +139,14 @@ class TestValidateCommand:
         with pytest.raises(ValueError, match="command substitution"):
             _validate_command("echo `cat /etc/passwd`")
 
+    def test_allows_single_quoted_command_substitution_literals(self):
+        _validate_command("echo 'literal $(not executed)'")
+        _validate_command("echo 'literal `not executed`'")
+
+    def test_blocks_double_quoted_command_substitution(self):
+        with pytest.raises(ValueError, match="command substitution"):
+            _validate_command('echo "still executes $(cat /etc/passwd)"')
+
     def test_allows_chained_safe_commands(self):
         _validate_command("git status && bun test")
 
@@ -240,6 +248,28 @@ class TestIssueLoading:
 
         assert issue_text == "Resub months bug\n\n## Symptom\n0 meses"
         assert ["gh", "issue", "view", "41", "--repo", "thellmwhisperer/manolito-zurrapa", "--json", "title,body"] in calls
+
+    def test_github_issue_fetch_reports_missing_git(self, tmp_path, monkeypatch):
+        args = SimpleNamespace(issue=None, issue_number=41, github_repo=None)
+
+        def fake_run(cmd, **kwargs):
+            raise FileNotFoundError("git")
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.subprocess.run", fake_run)
+
+        with pytest.raises(SystemExit, match="git is required"):
+            _load_issue_text(args, repo_path=str(tmp_path))
+
+    def test_github_issue_fetch_reports_gh_timeout(self, tmp_path, monkeypatch):
+        args = SimpleNamespace(issue=None, issue_number=41, github_repo="owner/repo")
+
+        def fake_run(cmd, **kwargs):
+            raise subprocess.TimeoutExpired(cmd, kwargs.get("timeout", 60))
+
+        monkeypatch.setattr("agentic_tdd_runner.agent.subprocess.run", fake_run)
+
+        with pytest.raises(SystemExit, match="GitHub issue lookup timed out"):
+            _load_issue_text(args, repo_path=str(tmp_path))
 
     def test_issue_argument_is_required_without_issue_number(self, tmp_path):
         args = SimpleNamespace(issue=None, issue_number=None, github_repo=None)

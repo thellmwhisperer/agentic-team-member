@@ -48,6 +48,59 @@ class TestSemanticIndex:
         assert "message" in candidate["terms"]
         assert "twitch" in candidate["path_tokens"]
 
+    def test_skips_generated_and_environment_directories(self, tmp_path):
+        _write_file(
+            tmp_path,
+            "src/client.ts",
+            """\
+            export function realTarget(): void {
+              console.log('real');
+            }
+            """,
+        )
+        _write_file(
+            tmp_path,
+            "dist/generated.ts",
+            """\
+            export function generatedTarget(): void {
+              console.log('generated');
+            }
+            """,
+        )
+        _write_file(
+            tmp_path,
+            ".venv/ignored.py",
+            """\
+            def ignored_target():
+                return 'ignored'
+            """,
+        )
+
+        index = build_semantic_index(str(tmp_path))
+        symbols = {candidate["symbol"] for candidate in index["candidates"]}
+
+        assert "realTarget" in symbols
+        assert "generatedTarget" not in symbols
+        assert "ignored_target" not in symbols
+
+    def test_skips_source_files_with_decode_errors(self, tmp_path):
+        _write_file(
+            tmp_path,
+            "src/client.ts",
+            """\
+            export function realTarget(): void {
+              console.log('real');
+            }
+            """,
+        )
+        bad = tmp_path / "src" / "bad.ts"
+        bad.write_bytes(b"\xff\xfe\x00not utf8")
+
+        index = build_semantic_index(str(tmp_path))
+        symbols = {candidate["symbol"] for candidate in index["candidates"]}
+
+        assert symbols == {"realTarget"}
+
     def test_indexes_typescript_class_method(self, tmp_path):
         _write_file(
             tmp_path,

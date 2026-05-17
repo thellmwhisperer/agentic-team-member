@@ -72,6 +72,16 @@ def parse_issue_contract(issue_text: str) -> IssueContract:
 
     source_hint, symbol_hint = _extract_target_hint(issue_text)
     model_text, warnings = _build_model_text(sections, fallback=issue_text)
+    if not model_text.strip():
+        return IssueContract(
+            raw_text=issue_text,
+            model_text="",
+            source_hint=source_hint,
+            symbol_hint=symbol_hint,
+            rejected=True,
+            rejection_reason="issue has no model-facing content after sanitization",
+            warnings=warnings,
+        )
 
     return IssueContract(
         raw_text=issue_text,
@@ -123,7 +133,11 @@ def _build_model_text(sections: list[tuple[str, str]], *, fallback: str) -> tupl
             continue
 
         if not title:
-            parts.append(body)
+            body = _strip_mechanical_testing_details(body)
+            if body:
+                parts.append(body)
+            else:
+                warnings.append("dropped issue body before prompting because it only contained mechanical testing details")
             continue
 
         if normalized == "fix approach":
@@ -172,7 +186,7 @@ def _test_approach_to_acceptance(body: str) -> str:
         line = raw_line.strip()
         if not line:
             continue
-        text = re.sub(r"^[-*]\s*", "", line).strip()
+        text = re.sub(r"^(?:[-*]|\d+[.)])\s*", "", line).strip()
         lowered = text.lower()
         if not text:
             continue
