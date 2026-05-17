@@ -40,7 +40,7 @@ class TestPrepareEnvironment:
         _write_js_project(tmp_path)
         calls = []
 
-        def fake_run(root, command, timeout):
+        def fake_run(root, command, timeout, config=None):
             calls.append(command)
             if command[:2] == ["git", "rev-parse"]:
                 return _completed(command, stdout="true\n")
@@ -64,9 +64,11 @@ class TestPrepareEnvironment:
     def test_preflights_recommended_tools_with_command_env(self, tmp_path, monkeypatch):
         _write_js_project(tmp_path)
         calls = []
+        seen_run_configs = []
 
-        def fake_run(root, command, timeout):
+        def fake_run(root, command, timeout, config=None):
             calls.append(command)
+            seen_run_configs.append(config)
             if command[:2] == ["git", "rev-parse"]:
                 return _completed(command, stdout="true\n")
             if command[:2] == ["git", "status"]:
@@ -84,17 +86,21 @@ class TestPrepareEnvironment:
         monkeypatch.setattr("agentic_tdd_runner.environment._run", fake_run)
         monkeypatch.setattr("agentic_tdd_runner.environment.shutil.which", fake_which)
 
-        report = prepare_environment(str(tmp_path), {
+        run_config = {
             "environment": {"install": "never", "run_typecheck": False},
             "timeouts": {"tool_execution": 60},
-            "tools": {"recommended": ["rg"]},
-        })
+            "tooling": {"recommended": ["rg"], "path_dirs": ["/opt/homebrew/bin"]},
+        }
+
+        report = prepare_environment(str(tmp_path), run_config)
 
         assert report.ready is True
         assert report.recommended_tools == ["rg"]
         assert report.resolved_tools == {"rg": "/opt/homebrew/bin/rg"}
         assert report.missing_tools == []
         assert "/opt/homebrew/bin" in report.tool_path_dirs
+        assert seen_run_configs
+        assert all(config is run_config for config in seen_run_configs)
         tool_step = next(step for step in report.steps if step.name == "recommended_tools")
         assert tool_step.returncode == 0
         assert ["bun", "install", "--frozen-lockfile"] not in calls
@@ -103,7 +109,7 @@ class TestPrepareEnvironment:
         _write_js_project(tmp_path)
         calls = []
 
-        def fake_run(root, command, timeout):
+        def fake_run(root, command, timeout, config=None):
             calls.append(command)
             return _completed(command, stdout="ok")
 
@@ -131,7 +137,7 @@ class TestPrepareEnvironment:
         (tmp_path / "node_modules").mkdir()
         calls = []
 
-        def fake_run(root, command, timeout):
+        def fake_run(root, command, timeout, config=None):
             calls.append(command)
             if command[:2] == ["git", "rev-parse"]:
                 return _completed(command, stdout="true\n")
@@ -157,7 +163,7 @@ class TestPrepareEnvironment:
         repo.mkdir()
         calls = []
 
-        def fake_run(root, command, timeout):
+        def fake_run(root, command, timeout, config=None):
             calls.append((root, command))
             if command[:2] == ["git", "rev-parse"]:
                 return _completed(command, stdout=str(repo) + "\n")
@@ -185,7 +191,7 @@ class TestPrepareEnvironment:
         repo.mkdir()
         calls = []
 
-        def fake_run(root, command, timeout):
+        def fake_run(root, command, timeout, config=None):
             calls.append((root, command))
             if command[:2] == ["git", "rev-parse"]:
                 return _completed(command, stdout=str(repo) + "\n")
@@ -209,7 +215,7 @@ class TestPrepareEnvironment:
         repo.mkdir()
         calls = []
 
-        def fake_run(root, command, timeout):
+        def fake_run(root, command, timeout, config=None):
             calls.append((root, command))
             if command[:2] == ["git", "rev-parse"]:
                 return _completed(command, stdout=str(repo) + "\n")
@@ -232,7 +238,7 @@ class TestPrepareEnvironment:
         repo.mkdir()
         destination.write_text("not a directory")
 
-        def fake_run(root, command, timeout):
+        def fake_run(root, command, timeout, config=None):
             if command[:2] == ["git", "rev-parse"]:
                 return _completed(command, stdout=str(repo) + "\n")
             raise AssertionError(f"Unexpected command: {command!r}")
@@ -253,7 +259,7 @@ class TestPrepareEnvironment:
         _write_js_project(tmp_path)
         calls = []
 
-        def fake_run(root, command, timeout):
+        def fake_run(root, command, timeout, config=None):
             calls.append(command)
             if command[:2] == ["git", "rev-parse"]:
                 return _completed(command, stdout="true\n")
@@ -274,7 +280,7 @@ class TestPrepareEnvironment:
     def test_git_probe_missing_binary_reports_context(self, tmp_path, monkeypatch):
         _write_js_project(tmp_path)
 
-        def fake_run(root, command, timeout):
+        def fake_run(root, command, timeout, config=None):
             if command[:2] == ["git", "rev-parse"]:
                 raise FileNotFoundError("git")
             return _completed(command)
@@ -295,7 +301,7 @@ class TestPrepareEnvironment:
     def test_git_status_timeout_reports_context(self, tmp_path, monkeypatch):
         _write_js_project(tmp_path)
 
-        def fake_run(root, command, timeout):
+        def fake_run(root, command, timeout, config=None):
             if command[:2] == ["git", "rev-parse"]:
                 return _completed(command, stdout="true\n")
             if command[:2] == ["git", "status"]:
@@ -326,7 +332,12 @@ class TestPrepareEnvironment:
         monkeypatch.delenv("CI", raising=False)
         monkeypatch.setattr("agentic_tdd_runner.environment.subprocess.run", fake_subprocess_run)
 
-        result = environment._run(tmp_path, ["rg", "--version"], timeout=3)
+        result = environment._run(
+            tmp_path,
+            ["rg", "--version"],
+            timeout=3,
+            config={"tooling": {"path_dirs": ["/opt/homebrew/bin"]}},
+        )
 
         assert result.returncode == 0
 

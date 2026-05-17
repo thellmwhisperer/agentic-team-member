@@ -123,10 +123,10 @@ def prepare_environment(workdir: str, config: dict) -> EnvironmentReport:
         _fail(report, f"workdir is not a directory: {root}")
 
     _preflight_recommended_tools(report, config)
-    _require_git_worktree(root, report, timeout=timeout)
+    _require_git_worktree(root, report, timeout=timeout, config=config)
 
     if bool(env_cfg.get("require_clean", True)):
-        _require_clean_worktree(root, report, timeout=timeout)
+        _require_clean_worktree(root, report, timeout=timeout, config=config)
 
     project_type = detect_project_type(root)
     report.project_type = project_type
@@ -143,7 +143,7 @@ def prepare_environment(workdir: str, config: dict) -> EnvironmentReport:
         if install_mode != "never" and _should_install_javascript(root, install_mode):
             install_cmd = install_command_for_javascript(root, package_manager)
             report.install_command = install_cmd
-            _run_step(root, report, "install_dependencies", install_cmd, timeout=timeout)
+            _run_step(root, report, "install_dependencies", install_cmd, timeout=timeout, config=config)
         else:
             report.steps.append(PrepStep(
                 name="install_dependencies",
@@ -154,7 +154,7 @@ def prepare_environment(workdir: str, config: dict) -> EnvironmentReport:
         preflight_commands = javascript_preflight_commands(root, pkg, env_cfg)
         report.preflight_commands = preflight_commands
         for index, command in enumerate(preflight_commands, start=1):
-            _run_step(root, report, f"preflight_{index}", command, timeout=timeout)
+            _run_step(root, report, f"preflight_{index}", command, timeout=timeout, config=config)
 
     elif project_type == "python":
         report.steps.append(PrepStep(
@@ -347,10 +347,16 @@ def _default_run_worktree_path(repo_root: Path, run_root: str | None) -> Path:
     return root / f"atm-run-{stamp}"
 
 
-def _require_git_worktree(root: Path, report: EnvironmentReport, *, timeout: int) -> None:
+def _require_git_worktree(
+    root: Path,
+    report: EnvironmentReport,
+    *,
+    timeout: int,
+    config: dict | None = None,
+) -> None:
     command = ["git", "rev-parse", "--is-inside-work-tree"]
     try:
-        result = _run(root, command, timeout=timeout)
+        result = _run(root, command, timeout=timeout, config=config)
     except FileNotFoundError as exc:
         report.steps.append(PrepStep(name="git_worktree", command=command, returncode=None, stderr=str(exc)))
         _fail(report, "git is unavailable")
@@ -369,10 +375,16 @@ def _require_git_worktree(root: Path, report: EnvironmentReport, *, timeout: int
         _fail(report, "workdir is not a git worktree")
 
 
-def _require_clean_worktree(root: Path, report: EnvironmentReport, *, timeout: int) -> None:
+def _require_clean_worktree(
+    root: Path,
+    report: EnvironmentReport,
+    *,
+    timeout: int,
+    config: dict | None = None,
+) -> None:
     command = ["git", "status", "--porcelain"]
     try:
-        result = _run(root, command, timeout=timeout)
+        result = _run(root, command, timeout=timeout, config=config)
     except FileNotFoundError as exc:
         report.steps.append(PrepStep(name="clean_worktree", command=command, returncode=None, stderr=str(exc)))
         _fail(report, "git is unavailable")
@@ -393,9 +405,17 @@ def _require_clean_worktree(root: Path, report: EnvironmentReport, *, timeout: i
         _fail(report, "workdir has uncommitted changes before the run")
 
 
-def _run_step(root: Path, report: EnvironmentReport, name: str, command: list[str], *, timeout: int) -> None:
+def _run_step(
+    root: Path,
+    report: EnvironmentReport,
+    name: str,
+    command: list[str],
+    *,
+    timeout: int,
+    config: dict | None = None,
+) -> None:
     try:
-        result = _run(root, command, timeout=timeout)
+        result = _run(root, command, timeout=timeout, config=config)
     except FileNotFoundError as exc:
         step = PrepStep(name=name, command=command, returncode=None, stderr=str(exc))
         report.steps.append(step)
@@ -417,8 +437,14 @@ def _run_step(root: Path, report: EnvironmentReport, name: str, command: list[st
         _fail(report, f"environment step failed: {' '.join(command)}")
 
 
-def _run(root: Path, command: list[str], *, timeout: int) -> subprocess.CompletedProcess:
-    env = build_command_env()
+def _run(
+    root: Path,
+    command: list[str],
+    *,
+    timeout: int,
+    config: dict | None = None,
+) -> subprocess.CompletedProcess:
+    env = build_command_env(config)
     env.setdefault("CI", "1")
     return subprocess.run(
         command,
