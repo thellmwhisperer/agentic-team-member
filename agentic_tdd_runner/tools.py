@@ -6,6 +6,8 @@ import subprocess
 from collections.abc import Callable, MutableMapping
 from pathlib import Path
 
+from agentic_tdd_runner.shell import build_command_env
+
 
 def tool_applied_status(name: str, result: str) -> bool | None:
     """Return whether a mutating tool call actually changed files."""
@@ -85,6 +87,7 @@ def execute_tool(
                 args["command"],
                 shell=True,
                 cwd=workdir,
+                env=build_command_env(config),
                 capture_output=True,
                 text=True,
                 timeout=config["timeouts"]["tool_execution"],
@@ -174,6 +177,7 @@ def reactive_typecheck_feedback(
             typecheck["command"],
             shell=True,
             cwd=workdir,
+            env=build_command_env(config),
             capture_output=True,
             text=True,
             timeout=timeout_s,
@@ -218,6 +222,7 @@ def reactive_test_feedback(
         result = subprocess.run(
             run_argv,
             cwd=workdir,
+            env=build_command_env(config),
             capture_output=True,
             text=True,
             timeout=timeout_s,

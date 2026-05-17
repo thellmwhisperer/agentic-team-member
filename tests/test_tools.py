@@ -1,5 +1,6 @@
 """Tests for agent tool execution helpers."""
 
+import os
 from pathlib import Path
 import subprocess
 
@@ -69,8 +70,11 @@ def test_str_replace_invalidates_read_cache(tmp_path):
 
 
 def test_run_command_updates_last_exit_code(tmp_path, monkeypatch):
+    monkeypatch.setenv("PATH", "/usr/bin")
+
     def fake_run(command, **kwargs):
         assert command == "git status"
+        assert "/opt/homebrew/bin" in kwargs["env"]["PATH"].split(os.pathsep)
         return subprocess.CompletedProcess(command, 7, stdout="", stderr="boom")
 
     monkeypatch.setattr("agentic_tdd_runner.tools.subprocess.run", fake_run)
@@ -82,8 +86,11 @@ def test_run_command_updates_last_exit_code(tmp_path, monkeypatch):
 
 
 def test_reactive_test_feedback_returns_compact_failure(tmp_path, monkeypatch):
+    monkeypatch.setenv("PATH", "/usr/bin")
+
     def fake_run(command, **kwargs):
         assert command == ["bun", "test", "src/file.test.ts"]
+        assert "/opt/homebrew/bin" in kwargs["env"]["PATH"].split(os.pathsep)
         return subprocess.CompletedProcess(
             command,
             1,
