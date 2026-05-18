@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -20,6 +21,31 @@ LOCKFILES = (
 
 PACKAGE_MANAGERS = {"bun", "npm", "pnpm", "yarn"}
 RUNNER_BINS = {"jest", "vitest"}
+JEST_CONFIG_FILENAMES = (
+    "jest.config.ts",
+    "jest.config.mts",
+    "jest.config.cts",
+    "jest.config.js",
+    "jest.config.mjs",
+    "jest.config.cjs",
+    "jest.config.json",
+)
+JEST_SHIM_FILENAME = ".atm-jest.config.cjs"
+NODE_BUILTIN_MODULES = {
+    "assert",
+    "buffer",
+    "child_process",
+    "crypto",
+    "events",
+    "fs",
+    "module",
+    "os",
+    "path",
+    "process",
+    "stream",
+    "url",
+    "util",
+}
 
 
 @dataclass(frozen=True)
@@ -36,6 +62,9 @@ class RunnerBootstrapReport:
     test_runner: str | None = None
     test_runner_source: str = ""
     test_command: str | None = None
+    test_config_path: str | None = None
+    test_config_source: str = ""
+    original_test_config_path: str | None = None
 
     def to_log_dict(self) -> dict:
         return asdict(self)
@@ -54,6 +83,11 @@ def inspect_runner_bootstrap(workdir: str | Path) -> RunnerBootstrapReport:
         lockfile_package_manager,
     )
     test_runner, test_runner_source, test_command = _detect_test_runner(pkg, package_manager)
+    test_config_path, test_config_source, original_test_config_path = _detect_test_config(
+        package_dir,
+        pkg,
+        test_runner,
+    )
 
     return RunnerBootstrapReport(
         workdir=str(root),
@@ -66,7 +100,28 @@ def inspect_runner_bootstrap(workdir: str | Path) -> RunnerBootstrapReport:
         test_runner=test_runner,
         test_runner_source=test_runner_source,
         test_command=test_command,
+        test_config_path=str(test_config_path) if test_config_path else None,
+        test_config_source=test_config_source,
+        original_test_config_path=str(original_test_config_path) if original_test_config_path else None,
     )
+
+
+def ensure_generated_test_config(report: RunnerBootstrapReport) -> Path | None:
+    """Write a generated runner config shim when bootstrap selected one."""
+    if report.test_runner != "jest" or report.test_config_source != "generated:next/jest":
+        return None
+    if not report.package_dir or not report.test_config_path:
+        return None
+
+    package_dir = Path(report.package_dir)
+    shim_path = Path(report.test_config_path)
+    if not shim_path.is_absolute():
+        shim_path = package_dir / shim_path
+    content = _render_next_jest_shim(package_dir)
+    existing = shim_path.read_text() if shim_path.is_file() else None
+    if existing != content:
+        shim_path.write_text(content)
+    return shim_path
 
 
 def _nearest_package_dir(root: Path) -> Path | None:
@@ -274,6 +329,118 @@ def _is_env_assignment(token: str) -> bool:
         return False
     name, _value = token.split("=", 1)
     return bool(name) and all(ch.isalnum() or ch == "_" for ch in name)
+
+
+def _detect_test_config(
+    package_dir: Path | None,
+    pkg: dict,
+    test_runner: str | None,
+) -> tuple[Path | None, str, Path | None]:
+    if test_runner != "jest" or not package_dir:
+        return None, "", None
+
+    config_path = _find_jest_config(package_dir, pkg)
+    if not config_path:
+        return None, "", None
+
+    if _needs_next_jest_shim(config_path, pkg):
+        return package_dir / JEST_SHIM_FILENAME, "generated:next/jest", config_path
+    return config_path, f"file:{config_path.name}", None
+
+
+def _find_jest_config(package_dir: Path, pkg: dict) -> Path | None:
+    jest_cfg = pkg.get("jest")
+    if isinstance(jest_cfg, str) and jest_cfg.strip():
+        path = package_dir / jest_cfg.strip()
+        if path.is_file():
+            return path
+
+    for filename in JEST_CONFIG_FILENAMES:
+        path = package_dir / filename
+        if path.is_file():
+            return path
+    return None
+
+
+def _needs_next_jest_shim(config_path: Path, pkg: dict) -> bool:
+    imports = _config_imports(config_path)
+    if not _package_depends_on(pkg, "next") and "next/jest" not in imports:
+        return False
+    if any(_is_unresolved_config_import(spec, pkg) for spec in imports):
+        return True
+    return config_path.suffix in {".ts", ".mts", ".cts"} and "next/jest" in imports
+
+
+def _config_imports(config_path: Path) -> set[str]:
+    try:
+        text = config_path.read_text()
+    except OSError:
+        return set()
+    imports = set()
+    patterns = (
+        r"\bimport\s+(?:[^'\"]+\s+from\s+)?['\"]([^'\"]+)['\"]",
+        r"\bexport\s+[^'\"]+\s+from\s+['\"]([^'\"]+)['\"]",
+        r"\brequire\(\s*['\"]([^'\"]+)['\"]\s*\)",
+    )
+    for pattern in patterns:
+        imports.update(re.findall(pattern, text))
+    return imports
+
+
+def _is_unresolved_config_import(specifier: str, pkg: dict) -> bool:
+    if specifier.startswith(".") or specifier.startswith("/"):
+        return False
+    if specifier.startswith("node:"):
+        return False
+    package_name = _package_name_from_specifier(specifier)
+    if package_name in NODE_BUILTIN_MODULES or package_name == "next":
+        return False
+    version = _dependency_version(pkg, package_name)
+    return version is None or version.startswith("workspace:")
+
+
+def _package_name_from_specifier(specifier: str) -> str:
+    if specifier.startswith("@"):
+        parts = specifier.split("/", 2)
+        return "/".join(parts[:2])
+    return specifier.split("/", 1)[0]
+
+
+def _package_depends_on(pkg: dict, package_name: str) -> bool:
+    return _dependency_version(pkg, package_name) is not None
+
+
+def _dependency_version(pkg: dict, package_name: str) -> str | None:
+    for key in ("dependencies", "devDependencies", "peerDependencies", "optionalDependencies"):
+        value = pkg.get(key, {})
+        if isinstance(value, dict) and package_name in value:
+            version = value[package_name]
+            return str(version) if isinstance(version, str) else ""
+    return None
+
+
+def _render_next_jest_shim(package_dir: Path) -> str:
+    setup_files = [
+        f"./{name}"
+        for name in ("jest.setup.js", "jest.setup.ts", "setupTests.js", "setupTests.ts")
+        if (package_dir / name).is_file()
+    ]
+    setup_line = ""
+    if setup_files:
+        setup_values = ", ".join(json.dumps(path) for path in setup_files)
+        setup_line = f"  setupFilesAfterEnv: [{setup_values}],\n"
+    return (
+        "const nextJest = require('next/jest');\n"
+        "\n"
+        "const createJestConfig = nextJest({ dir: './' });\n"
+        "\n"
+        "const customJestConfig = {\n"
+        "  testEnvironment: 'jest-environment-jsdom',\n"
+        f"{setup_line}"
+        "};\n"
+        "\n"
+        "module.exports = createJestConfig(customJestConfig);\n"
+    )
 
 
 def _runner_dependencies(pkg: dict) -> set[str]:

@@ -269,7 +269,7 @@ runner when it is one of the supported families:
 | --------------- | ---------------------- |
 | `bun:test`      | `bun test`             |
 | `vitest`        | package-manager wrapper + `vitest run` |
-| `jest`          | package-manager wrapper + `jest` |
+| `jest`          | package-manager wrapper + `jest --runInBand --watchman=false --coverage=false` |
 | `node:test`     | `node --test`          |
 
 Unknown, custom, or ambiguous runner facts fall back to `[runner].command`.
@@ -277,6 +277,9 @@ For detected JS runners, environment prep also runs a lightweight version
 preflight (`bun --version`, `node --version`, or package-manager wrapper +
 `runner --version`) before the first model tool call. That catches missing local
 runner installs while the failure is still deterministic setup, not agent work.
+When a Next.js Jest project has a TypeScript/workspace-coupled Jest config,
+environment prep writes a local `.atm-jest.config.cjs` shim and focused Jest
+runs pass it via `--config` instead of editing the original project config.
 
 ---
 
