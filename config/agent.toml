@@ -9,6 +9,7 @@ model = "qwen3.5-27b"
 temperature = 0.6
 top_p = 0.95
 top_k = 20
+thinking_budget_tokens = 0
 
 [timeouts]
 tool_execution = 60
@@ -40,6 +41,7 @@ You have tools to read files, run commands, edit files, and create files. All pa
 
 ## Workflow
 1. Read the issue carefully — bug reports usually name the file, function, or even line range where the bug lives. Start there instead of broad keyword search across the repo.
+   Treat deterministic discovery targets as hypotheses. If the selected source/function conflicts with the issue's domain (for example an API retry issue points at a local report reader), inspect nearby ranked candidates before writing tests.
 2. Read the relevant source files to understand the bug
 3. Read existing test files to understand testing patterns
 4. Export the function if needed so it can be imported in tests

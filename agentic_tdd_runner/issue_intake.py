@@ -22,12 +22,17 @@ _MODEL_SECTION_TITLES = {
     "acceptance criteria": "Acceptance criteria",
     "acceptance test": "Acceptance test",
     "context": "Context",
+    "description": "Description",
     "expected behavior": "Expected behavior",
+    "notes": "Notes",
     "observed examples": "Observed examples",
+    "problem": "Problem",
+    "requirements": "Requirements",
     "root cause": "Reporter hypothesis",
     "suspected area": "Suspected area",
     "suspected root cause": "Reporter hypothesis",
     "symptom": "Symptom",
+    "tasks": "Tasks",
     "where": "Suspected area",
 }
 

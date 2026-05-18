@@ -75,6 +75,24 @@ class TestSemanticIndex:
                 return 'ignored'
             """,
         )
+        _write_file(
+            tmp_path,
+            ".worktrees/old-run/src/contaminated.ts",
+            """\
+            export function contaminatedTarget(): void {
+              console.log('contaminated');
+            }
+            """,
+        )
+        _write_file(
+            tmp_path,
+            ".atm/generated.ts",
+            """\
+            export function atmGeneratedTarget(): void {
+              console.log('generated');
+            }
+            """,
+        )
 
         index = build_semantic_index(str(tmp_path))
         symbols = {candidate["symbol"] for candidate in index["candidates"]}
@@ -82,6 +100,8 @@ class TestSemanticIndex:
         assert "realTarget" in symbols
         assert "generatedTarget" not in symbols
         assert "ignored_target" not in symbols
+        assert "contaminatedTarget" not in symbols
+        assert "atmGeneratedTarget" not in symbols
 
     def test_skips_source_files_with_decode_errors(self, tmp_path):
         _write_file(
@@ -251,6 +271,47 @@ class TestDiscoverTarget:
         assert target["source_path"] == "src/roles/RoleManager.ts"
         assert target["symbol"] == "startActionTimers"
 
+    def test_api_retry_issue_prefers_api_boundary_over_report_reader(self, tmp_path):
+        _write_file(
+            tmp_path,
+            "src/report.ts",
+            """\
+            import { existsSync, readdirSync, readFileSync } from 'node:fs';
+
+            export function loadLatestYouTube(dir: string): unknown {
+              if (!existsSync(dir)) return undefined;
+              const latest = readdirSync(dir).filter((file) => file.endsWith('.json'))[0];
+              return latest ? JSON.parse(readFileSync(`${dir}/${latest}`, 'utf-8')) : undefined;
+            }
+            """,
+        )
+        _write_file(
+            tmp_path,
+            "src/providers/youtube.ts",
+            """\
+            export async function fetchYouTubeData(client: any, analytics: any): Promise<unknown> {
+              const report = await analytics.reports.query({ ids: 'channel==MINE' });
+              const videos = await client.videos.update({ part: ['snippet'] });
+              return { report, videos };
+            }
+            """,
+        )
+
+        ranked = rank_targets(
+            issue_text=(
+                "Add retry logic with exponential backoff for external API calls. "
+                "Apply retry logic to YouTube Analytics API calls and YouTube Data API uploads/updates. "
+                "Retry 429, 500 and 503 transient failures."
+            ),
+            project_root=str(tmp_path),
+            limit=2,
+        )
+
+        assert ranked[0]["source_path"] == "src/providers/youtube.ts"
+        assert ranked[0]["symbol"] == "fetchYouTubeData"
+        assert ranked[0]["issue_shape"] == "api_retry"
+        assert all(candidate["symbol"] != "loadLatestYouTube" or candidate["score"] < ranked[0]["score"] for candidate in ranked)
+
 
 class TestSemanticIndexPersistence:
     def test_writes_generated_semantic_layer_json(self, tmp_path):
@@ -272,7 +333,7 @@ class TestSemanticIndexPersistence:
 
         assert written == output_path
         payload = json.loads(output_path.read_text())
-        assert payload["version"] == 4
+        assert payload["version"] == 6
         assert "files" in payload
         assert "symbols" in payload
         assert any(c["symbol"] == "handleMessage" for c in payload["candidates"])
@@ -295,7 +356,7 @@ class TestSemanticIndexPersistence:
 
         output_path = tmp_path / ".atm" / "semantic-index.generated.json"
         assert output_path.exists()
-        assert payload["version"] == 4
+        assert payload["version"] == 6
         assert "files" in payload
         assert "symbols" in payload
         assert any(c["symbol"] == "handleMessage" for c in payload["candidates"])
@@ -306,7 +367,7 @@ class TestSemanticIndexPersistence:
         output_path.write_text(
             json.dumps(
                 {
-                    "version": 4,
+                    "version": 6,
                     "project_root": str(tmp_path),
                     "candidates": [
                         {
@@ -351,7 +412,7 @@ class TestSemanticIndexPersistence:
 
         def fake_build(project_root):
             return {
-                "version": 4,
+                "version": 6,
                 "project_root": project_root,
                 "files": [],
                 "symbols": [],
@@ -362,5 +423,5 @@ class TestSemanticIndexPersistence:
 
         payload = load_or_build_semantic_index(str(tmp_path))
 
-        assert payload["version"] == 4
+        assert payload["version"] == 6
         assert payload["candidates"] == [{"symbol": "freshTarget"}]
