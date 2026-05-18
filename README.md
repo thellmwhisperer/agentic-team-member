@@ -202,7 +202,7 @@ real issues.
 | Persistence, config, filesystem         |    12% | partial | Env / config / schema facts exist, no unified fix strategy                                |
 | Pure functions and helpers              |     8% | partial | Generator-with-persistent-state shape: function found, but module-state ownership weak    |
 
-Weighted view: **25% strong / 20% partial / 55% weak**.
+Weighted view: **25% strong / 40% partial / 35% weak**.
 
 Full ontology, signals per shape, test strategies, and the verify v2
 contract live in [`docs/code-shape-coverage.md`](docs/code-shape-coverage.md).
@@ -473,9 +473,10 @@ production-grade:
 Alpha. The TDD `fix` skill works end-to-end (cookbook → phased agent
 loop → verified red-green → quality gate → PR) on the code shapes
 listed in [Coverage](#coverage). One row is strong (handlers / event
-listeners). One is partial (API/SDK integrations — foundation shipped,
-callsite integration pending). Four are weak. The `migrate` and
-`refactor` skills are designed but not implemented.
+listeners). Three are partial (API/SDK integrations — foundation
+shipped, callsite integration pending; persistence/config; pure
+functions). Two are weak (services and classes; CLI and scripts).
+The `migrate` and `refactor` skills are designed but not implemented.
 
 Expect the public surface (CLI flags, config schema) to shift before 1.0.
 
