@@ -312,6 +312,31 @@ class TestDiscoverTarget:
         assert ranked[0]["issue_shape"] == "api_retry"
         assert all(candidate["symbol"] != "loadLatestYouTube" or candidate["score"] < ranked[0]["score"] for candidate in ranked)
 
+    def test_generic_api_issue_does_not_trigger_api_retry_shape(self, tmp_path):
+        _write_file(
+            tmp_path,
+            "src/providers/youtube.ts",
+            """\
+            export async function fetchYouTubeData(client: any, analytics: any): Promise<unknown> {
+              const report = await analytics.reports.query({ ids: 'channel==MINE' });
+              const videos = await client.videos.update({ part: ['snippet'] });
+              return { report, videos };
+            }
+            """,
+        )
+
+        ranked = rank_targets(
+            issue_text=(
+                "External API analytics responses map video totals incorrectly. "
+                "The server returns data, but the provider builds the wrong report rows."
+            ),
+            project_root=str(tmp_path),
+            limit=1,
+        )
+
+        assert ranked[0]["source_path"] == "src/providers/youtube.ts"
+        assert "issue_shape" not in ranked[0]
+
 
 class TestSemanticIndexPersistence:
     def test_writes_generated_semantic_layer_json(self, tmp_path):

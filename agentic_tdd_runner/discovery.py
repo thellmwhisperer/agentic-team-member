@@ -277,19 +277,22 @@ _LOW_VALUE_SEAM_MEMBER_HINT_TOKENS = {
     "values",
     "with",
 }
-_API_RETRY_ISSUE_TOKENS = {
+_API_RETRY_CORE_TOKENS = {
     "429",
     "500",
     "503",
-    "api",
-    "apis",
     "backoff",
-    "external",
     "rate",
     "retry",
     "retries",
-    "server",
     "transient",
+}
+_API_RETRY_STATUS_TOKENS = {"429", "500", "503"}
+_API_RETRY_CONTEXT_TOKENS = {
+    "api",
+    "apis",
+    "external",
+    "server",
 }
 _API_BOUNDARY_TOKENS = {
     "analytics",
@@ -1030,7 +1033,10 @@ def _feature_domains(*, symbol: str, observables: list[str]) -> set[str]:
 
 
 def _classify_issue_shape(issue_tokens: set[str]) -> str | None:
-    if issue_tokens & _API_RETRY_ISSUE_TOKENS:
+    has_retry_signal = bool(issue_tokens & _API_RETRY_CORE_TOKENS)
+    has_api_context = bool(issue_tokens & _API_RETRY_CONTEXT_TOKENS)
+    has_retry_status = bool(issue_tokens & _API_RETRY_STATUS_TOKENS)
+    if has_retry_signal and (has_api_context or has_retry_status):
         return "api_retry"
     return None
 
