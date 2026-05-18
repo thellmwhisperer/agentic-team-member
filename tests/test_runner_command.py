@@ -3,7 +3,10 @@
 import json
 
 from agentic_tdd_runner.runner_bootstrap import inspect_runner_bootstrap
-from agentic_tdd_runner.runner_command import effective_test_command_template
+from agentic_tdd_runner.runner_command import (
+    effective_test_command_template,
+    runner_version_command,
+)
 
 
 def _write_package(path, payload):
@@ -21,6 +24,7 @@ def test_builds_bun_test_template_from_bootstrap_report(tmp_path):
     report = inspect_runner_bootstrap(tmp_path)
 
     assert effective_test_command_template(report, "npm test") == "bun test"
+    assert runner_version_command(report) == ["bun", "--version"]
 
 
 def test_builds_npm_vitest_template_from_dependency_detected_report(tmp_path):
@@ -31,6 +35,7 @@ def test_builds_npm_vitest_template_from_dependency_detected_report(tmp_path):
     report = inspect_runner_bootstrap(tmp_path)
 
     assert effective_test_command_template(report, "bun test") == "npm exec -- vitest run"
+    assert runner_version_command(report) == ["npm", "exec", "--", "vitest", "--version"]
 
 
 def test_falls_back_for_ambiguous_bootstrap_report(tmp_path):
@@ -41,6 +46,7 @@ def test_falls_back_for_ambiguous_bootstrap_report(tmp_path):
     report = inspect_runner_bootstrap(tmp_path)
 
     assert effective_test_command_template(report, "bun test") == "bun test"
+    assert runner_version_command(report) is None
 
 
 def test_builds_node_test_template_from_bootstrap_report(tmp_path):
@@ -51,6 +57,7 @@ def test_builds_node_test_template_from_bootstrap_report(tmp_path):
     report = inspect_runner_bootstrap(tmp_path)
 
     assert effective_test_command_template(report, "bun test") == "node --test"
+    assert runner_version_command(report) == ["node", "--version"]
 
 
 def test_falls_back_for_custom_bootstrap_report(tmp_path):
@@ -61,6 +68,7 @@ def test_falls_back_for_custom_bootstrap_report(tmp_path):
     report = inspect_runner_bootstrap(tmp_path)
 
     assert effective_test_command_template(report, "bun test") == "bun test"
+    assert runner_version_command(report) is None
 
 
 def test_builds_package_manager_specific_runner_templates(tmp_path):
@@ -73,6 +81,7 @@ def test_builds_package_manager_specific_runner_templates(tmp_path):
     report = inspect_runner_bootstrap(tmp_path)
 
     assert effective_test_command_template(report, "bun test") == "pnpm exec vitest run"
+    assert runner_version_command(report) == ["pnpm", "exec", "vitest", "--version"]
 
 
 def test_builds_runner_template_from_serialized_bootstrap_report():
@@ -82,3 +91,4 @@ def test_builds_runner_template_from_serialized_bootstrap_report():
     }
 
     assert effective_test_command_template(report, "bun test") == "yarn jest"
+    assert runner_version_command(report) == ["yarn", "jest", "--version"]

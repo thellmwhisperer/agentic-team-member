@@ -60,6 +60,7 @@ class TestPrepareEnvironment:
         assert report.project_type == "javascript"
         assert report.package_manager == "bun"
         assert ["bun", "install", "--frozen-lockfile"] in calls
+        assert ["bun", "--version"] in calls
         assert ["bun", "run", "typecheck"] in calls
 
     def test_records_runner_bootstrap_and_uses_detected_package_manager(self, tmp_path, monkeypatch):
@@ -94,8 +95,35 @@ class TestPrepareEnvironment:
         assert report.runner_bootstrap.test_runner == "vitest"
         assert report.package_manager == "pnpm"
         assert ["pnpm", "install", "--frozen-lockfile"] in calls
+        assert ["pnpm", "exec", "vitest", "--version"] in calls
         assert ["pnpm", "run", "typecheck"] in calls
+        assert calls.index(["pnpm", "exec", "vitest", "--version"]) < calls.index(["pnpm", "run", "typecheck"])
         assert "runner_bootstrap" not in report.to_log_dict()
+
+    def test_runner_version_preflight_failure_stops_environment_prep(self, tmp_path, monkeypatch):
+        _write_js_project(tmp_path)
+        calls = []
+
+        def fake_run(root, command, timeout, config=None):
+            calls.append(command)
+            if command[:2] == ["git", "rev-parse"]:
+                return _completed(command, stdout="true\n")
+            if command[:2] == ["git", "status"]:
+                return _completed(command)
+            if command == ["bun", "--version"]:
+                return _completed(command, returncode=1, stderr="bun unavailable\n")
+            return _completed(command, stdout="ok")
+
+        monkeypatch.setattr("agentic_tdd_runner.environment._run", fake_run)
+
+        with pytest.raises(EnvironmentPrepError, match="environment step failed: bun --version") as exc:
+            prepare_environment(str(tmp_path), {
+                "environment": {"install": "never", "run_typecheck": True},
+                "timeouts": {"tool_execution": 60},
+            })
+
+        assert exc.value.report.steps[-1].name == "preflight_1"
+        assert ["bun", "run", "typecheck"] not in calls
 
     def test_preflights_recommended_tools_with_command_env(self, tmp_path, monkeypatch):
         _write_js_project(tmp_path)
