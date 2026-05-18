@@ -37,7 +37,7 @@ def effective_test_command_template(
         return _package_runner_command(
             _report_value(report, "package_manager"),
             "jest",
-            [],
+            _jest_runner_args(report),
         )
     return fallback
 
@@ -87,6 +87,14 @@ def _package_runner_command(
     runner_args: list[str],
 ) -> str:
     return shlex.join(_package_runner_argv(package_manager, runner, runner_args))
+
+
+def _jest_runner_args(report: Any) -> list[str]:
+    args = ["--runInBand", "--watchman=false", "--coverage=false"]
+    test_config_path = _report_value(report, "test_config_path")
+    if test_config_path:
+        args.extend(["--config", test_config_path])
+    return args
 
 
 def _package_runner_argv(

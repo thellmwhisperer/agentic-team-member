@@ -125,6 +125,49 @@ class TestPrepareEnvironment:
         assert exc.value.report.steps[-1].name == "preflight_1"
         assert ["bun", "run", "typecheck"] not in calls
 
+    def test_generates_next_jest_config_shim_before_preflight(self, tmp_path, monkeypatch):
+        (tmp_path / "package-lock.json").write_text("")
+        (tmp_path / "jest.config.ts").write_text(
+            "import workspacePreset from '@repo/jest-preset';\n"
+            "export default workspacePreset;\n"
+        )
+        (tmp_path / "jest.setup.ts").write_text("import '@testing-library/jest-dom';\n")
+        (tmp_path / "package.json").write_text(json.dumps({
+            "packageManager": "npm@10.0.0",
+            "scripts": {"test": "jest"},
+            "devDependencies": {
+                "jest": "^30.0.0",
+                "next": "^16.0.0",
+            },
+        }))
+        calls = []
+
+        def fake_run(root, command, timeout, config=None):
+            calls.append(command)
+            if command[:2] == ["git", "rev-parse"]:
+                return _completed(command, stdout="true\n")
+            if command[:2] == ["git", "status"]:
+                assert not (tmp_path / ".atm-jest.config.cjs").exists()
+                return _completed(command)
+            return _completed(command, stdout="ok")
+
+        monkeypatch.setattr("agentic_tdd_runner.environment._run", fake_run)
+
+        report = prepare_environment(str(tmp_path), {
+            "environment": {"install": "never", "run_typecheck": False},
+            "timeouts": {"tool_execution": 60},
+        })
+
+        shim = tmp_path / ".atm-jest.config.cjs"
+        assert report.ready is True
+        assert report.runner_bootstrap.test_config_path == str(shim)
+        assert report.runner_bootstrap.original_test_config_path == str(tmp_path / "jest.config.ts")
+        assert "require('next/jest')" in shim.read_text()
+        assert "setupFilesAfterEnv: [\"./jest.setup.ts\"]" in shim.read_text()
+        assert ["npm", "exec", "--", "jest", "--version"] in calls
+        shim_step = next(step for step in report.steps if step.name == "test_config_shim")
+        assert shim_step.stdout == ".atm-jest.config.cjs"
+
     def test_preflights_recommended_tools_with_command_env(self, tmp_path, monkeypatch):
         _write_js_project(tmp_path)
         calls = []
