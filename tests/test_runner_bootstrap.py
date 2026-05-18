@@ -151,6 +151,29 @@ def test_detects_npx_runner_with_flags(tmp_path):
     assert report.test_command == "npx --yes jest --runInBand"
 
 
+def test_jest_config_detection_ignores_comments_and_node_builtins(tmp_path):
+    config = tmp_path / "jest.config.js"
+    config.write_text(
+        "const http = require('http');\n"
+        "// import workspacePreset from '@repo/jest-preset';\n"
+        "/*\n"
+        "import hiddenPreset from '@repo/hidden';\n"
+        "*/\n"
+        "module.exports = { testEnvironment: 'node' };\n"
+    )
+    _write_package(tmp_path, {
+        "scripts": {"test": "jest"},
+        "dependencies": {"next": "^16.0.0"},
+        "devDependencies": {"jest": "^30.0.0"},
+    })
+
+    report = inspect_runner_bootstrap(tmp_path)
+
+    assert report.test_config_path == str(config)
+    assert report.test_config_source == "file:jest.config.js"
+    assert report.original_test_config_path is None
+
+
 def test_detects_runner_behind_npm_run_script_reference(tmp_path):
     _write_package(tmp_path, {
         "scripts": {
