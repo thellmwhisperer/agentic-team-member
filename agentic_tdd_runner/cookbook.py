@@ -375,6 +375,8 @@ def _render_cookbook_text(contract: dict, lang) -> str:
     parts.append("- Use simple literal searches such as `rg SubUserstate node_modules/@types` for type/contracts; avoid shell-pipe regex tricks when a direct `rg` search works.")
     parts.append("- Apply only mechanical export or test-seam edits before the first failing test.")
     parts.append("- For module-load mocks, assert against the named `*_spy` variables emitted below; do not import and patch the mocked factory after importing the target.")
+    if contract["test_file"]["runner"] == "bun:test":
+        parts.append("- For Bun spies/mocks, use `mock(() => undefined)` for void placeholders; do not silence mock typing with cast-only returns.")
     parts.append("")
 
     callback_registrations = contract.get("callback_registrations", [])

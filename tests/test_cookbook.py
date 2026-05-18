@@ -101,6 +101,27 @@ class TestFactoryDependency:
         assert "response" in result
 
 
+class TestBunMockHygiene:
+    """Bun cookbook examples should not teach cast-only mock returns."""
+
+    def test_uses_void_spies_without_cast_returns(self, tmp_path):
+        _write_file(tmp_path, "src/service.ts", """\
+            import { getLogger } from '../logger';
+
+            const logger = getLogger();
+
+            export function process(): void {
+              logger.info('start');
+            }
+        """)
+        result = generate_cookbook("src/service.ts", "process", str(tmp_path))
+
+        assert "mock(() => undefined)" in result
+        assert "undefined as" not in result
+        assert "as never" not in result
+        assert "cast-only returns" in result
+
+
 class TestModuleLocalMutable:
     """Module-local mutable binding (let client) → test seam setter."""
 
