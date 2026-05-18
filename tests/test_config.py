@@ -35,6 +35,29 @@ class TestProductionConfig:
             "and toward the location described in the issue"
         )
 
+    def test_system_prompt_tells_agent_not_to_cd_inside_run_command(self):
+        """The harness already controls cwd. Chaining `cd x && y` wastes a tool
+        call because the shell validator rejects `cd` as an executable."""
+        prod = CONFIG_DIR / "agent.toml"
+        cfg = load_config(prod)
+        system = cfg["prompt"]["system"].lower()
+        assert "cwd" in system
+        assert "never use `cd ... && ...`" in system
+        assert "put directory/file paths directly in the command" in system
+
+    def test_run_command_tool_description_explains_cwd_and_cd_rejection(self):
+        prod = CONFIG_DIR / "agent.toml"
+        cfg = load_config(prod)
+        run_command = next(
+            tool["function"]
+            for tool in cfg["tools"]
+            if tool["function"]["name"] == "run_command"
+        )
+        description = run_command["description"].lower()
+        assert "cwd already set" in description
+        assert "do not prefix commands with `cd ... &&`" in description
+        assert "paths relative to that cwd" in description
+
     def test_system_prompt_tells_agent_to_reuse_fixtures_and_write_narrow_regression(self):
         """Observed on the Python run (agent-20260419-000440.jsonl): after
         opening an existing test module, the agent expanded into a broad
