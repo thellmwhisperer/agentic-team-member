@@ -261,6 +261,19 @@ The `[prompt]` and `[verification]` sections (system prompt template, max
 rejection rounds) are also configurable — see `config/agent.toml` for the full
 reference.
 
+With environment prep enabled, ATM inspects the nearest `package.json` and
+lockfile before the model starts. For focused JS test runs it uses the detected
+runner when it is one of the supported families:
+
+| Detected runner | Focused command prefix |
+| --------------- | ---------------------- |
+| `bun:test`      | `bun test`             |
+| `vitest`        | package-manager wrapper + `vitest run` |
+| `jest`          | package-manager wrapper + `jest` |
+| `node:test`     | `node --test`          |
+
+Unknown, custom, or ambiguous runner facts fall back to `[runner].command`.
+
 ---
 
 ## Installation

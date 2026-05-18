@@ -7,6 +7,8 @@ import shutil
 import subprocess
 from pathlib import Path, PurePosixPath
 
+from agentic_tdd_runner.runner_command import effective_test_command_template
+
 GIT_COMMAND_TIMEOUT_SECONDS = 10
 
 
@@ -36,7 +38,11 @@ def test_runner_command_for_file(path: str, config: dict | None = None) -> str:
     lang = get_language(path)
     if lang and lang.runner == "pytest":
         return "python3 -m pytest"
-    return (config or {}).get("runner", {}).get("command", "bun test")
+    runner_config = (config or {}).get("runner", {}) or {}
+    return effective_test_command_template(
+        runner_config.get("bootstrap"),
+        runner_config.get("command"),
+    )
 
 
 def _git_status_entry_step(status_code: str) -> int:

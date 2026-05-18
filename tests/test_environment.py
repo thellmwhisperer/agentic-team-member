@@ -412,7 +412,8 @@ class TestMainEnvironmentPrep:
             ),
         )
 
-        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", self._make_config())
+        config = self._make_config()
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", config)
         monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
         monkeypatch.setattr("agentic_tdd_runner.agent.emit", lambda _msg: None)
         monkeypatch.setattr("agentic_tdd_runner.agent.log", lambda event, data: logged.append((event, data)))
@@ -422,6 +423,7 @@ class TestMainEnvironmentPrep:
 
         assert [event for event, _data in logged] == ["runner_bootstrap", "environment_ready"]
         assert logged[0][1]["test_runner"] == "vitest"
+        assert config["runner"]["bootstrap"]["test_runner"] == "vitest"
         assert "runner_bootstrap" not in logged[1][1]
 
     def test_format_environment_report_omits_custom_runner(self, tmp_path):

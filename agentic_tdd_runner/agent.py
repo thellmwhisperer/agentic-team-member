@@ -517,6 +517,11 @@ def _format_environment_report(report) -> str:
     return ", ".join(parts)
 
 
+def _apply_runner_bootstrap_to_config(bootstrap) -> None:
+    runner_config = _CONFIG.setdefault("runner", {})
+    runner_config["bootstrap"] = bootstrap.to_log_dict()
+
+
 def prepare_target_environment() -> None:
     """Run deterministic repo setup before discovery/cookbook/model calls."""
     if not _environment_prep_enabled():
@@ -536,6 +541,7 @@ def prepare_target_environment() -> None:
 
     emit(f"[ENV] Ready: {_format_environment_report(report)}")
     if report.runner_bootstrap:
+        _apply_runner_bootstrap_to_config(report.runner_bootstrap)
         log("runner_bootstrap", report.runner_bootstrap.to_log_dict())
     log("environment_ready", report.to_log_dict())
 
