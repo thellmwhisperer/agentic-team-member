@@ -2,7 +2,9 @@
 
 import os
 
-from agentic_tdd_runner.shell import build_command_env
+import pytest
+
+from agentic_tdd_runner.shell import build_command_env, validate_command
 
 
 def test_build_command_env_preserves_path_and_adds_common_tool_dirs(monkeypatch):
@@ -36,3 +38,8 @@ def test_build_command_env_accepts_loaded_tooling_config(monkeypatch):
     })
 
     assert "/configured/bin" in env["PATH"].split(os.pathsep)
+
+
+def test_validate_command_rejects_cd_chains():
+    with pytest.raises(ValueError, match="command 'cd' is not allowed"):
+        validate_command("cd apps/web && bun test src/client.test.ts")
