@@ -86,6 +86,80 @@ def test_prepare_run_context_rejects_issue_before_environment_prep(tmp_path):
     assert [event for event, _data in logged] == ["issue_rejected"]
 
 
+def test_prepare_run_context_rejects_partial_deprecated_target_override_before_environment(tmp_path):
+    def fail_if_called():
+        raise AssertionError("environment prep should not run")
+
+    args = SimpleNamespace(issue="unused", source="src/client.ts", symbol=None)
+
+    with pytest.raises(SystemExit, match="deprecated debug overrides"):
+        prepare_run_context(
+            args,
+            repo=None,
+            workdir=str(tmp_path),
+            config={"prompt": {"system": "system"}, "timeouts": {"tool_execution": 10}},
+            load_issue_text=lambda _args, _repo: "Bug: the command reports the wrong total",
+            prepare_target_environment=fail_if_called,
+            apply_mechanical_edits=lambda _edits, _workdir: 0,
+            collect_pr_changed_files=lambda _workdir, _timeout: set(),
+            discovery_enabled=True,
+            emit=lambda _msg: None,
+            log=lambda _event, _data: None,
+        )
+
+
+def test_prepare_run_context_logs_deprecated_manual_target_override(tmp_path, monkeypatch):
+    episode_calls = []
+    emitted = []
+    logged = []
+    issue = """Bug: handleSearch replies with stale data
+
+## Where
+`src/twitch/client.ts` -> `handleSearch()`
+
+## Symptom
+The bot replies with stale data.
+"""
+
+    def fake_episode(**kwargs):
+        episode_calls.append(kwargs)
+        return {
+            "source_file": kwargs["source_path"],
+            "target_symbol": kwargs["symbol"],
+            "test_file": "src/manual.test.ts",
+            "pre_test_source_edits": [],
+            "function_line_range": {"start": 7, "end": 12, "source": "definition"},
+            "cookbook_text": "## Cookbook\n",
+        }
+
+    monkeypatch.setattr("agentic_tdd_runner.cookbook.build_episode_context", fake_episode)
+    args = SimpleNamespace(issue="unused", source="src/manual.ts", symbol="manualTarget")
+
+    context = prepare_run_context(
+        args,
+        repo=None,
+        workdir=str(tmp_path),
+        config={"prompt": {"system": "system"}, "timeouts": {"tool_execution": 10}},
+        load_issue_text=lambda _args, _repo: issue,
+        prepare_target_environment=lambda: None,
+        apply_mechanical_edits=lambda _edits, _workdir: 0,
+        collect_pr_changed_files=lambda _workdir, _timeout: set(),
+        discovery_enabled=True,
+        emit=emitted.append,
+        log=lambda event, data: logged.append((event, data)),
+    )
+
+    assert context.source_path == "src/manual.ts"
+    assert context.symbol == "manualTarget"
+    assert episode_calls == [{
+        "source_path": "src/manual.ts",
+        "symbol": "manualTarget",
+        "project_root": str(tmp_path),
+    }]
+    assert "[TARGET] Deprecated --source/--symbol override in use; prefer issue-only discovery" in emitted
+    assert ("target_override_deprecated", {"source": "src/manual.ts", "symbol": "manualTarget"}) in logged
+
+
 def test_prepare_run_context_uses_issue_hints_and_builds_messages(tmp_path, monkeypatch):
     episode_calls = []
     mechanical_calls = []
@@ -139,7 +213,7 @@ The bot reports 0 months.
     }]
     assert mechanical_calls[0][1] == str(tmp_path)
     assert context.messages[0]["content"] == "system\n\n## Cookbook\n"
-    assert "Focus on the function `handleResub` (lines 7-12)" in context.messages[1]["content"]
+    assert "Start with `handleResub` (lines 7-12) as a discovery hypothesis" in context.messages[1]["content"]
     assert [event for event, _data in logged] == [
         "issue_intake",
         "run_baseline_dirty_files",
@@ -202,11 +276,11 @@ def test_discover_target_from_issue_rejects_invalid_payload(tmp_path, monkeypatc
         lambda project_root: {"candidates": [{}, {}]},
     )
     monkeypatch.setattr(
-        "agentic_tdd_runner.discovery.discover_target",
-        lambda **_kwargs: payload,
+        "agentic_tdd_runner.discovery.rank_targets",
+        lambda **_kwargs: [payload],
     )
 
-    with pytest.raises(SystemExit, match="Could not determine source/symbol"):
+    with pytest.raises(SystemExit, match="Could not determine target from issue"):
         discover_target_from_issue(
             "Bug: totals are wrong",
             workdir=str(tmp_path),
@@ -214,8 +288,64 @@ def test_discover_target_from_issue_rejects_invalid_payload(tmp_path, monkeypatc
             log=lambda event, data: logged.append((event, data)),
         )
 
-    assert emitted == ["[DISCOVERY] Discovery result missing source/symbol"]
+    assert emitted == ["[DISCOVERY] Discovery result missing target fields"]
     assert logged == [("discovery_failed", {"reason": "invalid_payload", "keys": keys})]
+
+
+def test_discover_target_from_issue_logs_ranked_candidates(tmp_path, monkeypatch):
+    emitted = []
+    logged = []
+    ranked = [
+        {
+            "source_path": "src/providers/youtube.ts",
+            "symbol": "fetchYouTubeData",
+            "score": 62,
+            "issue_shape": "api_retry",
+        },
+        {
+            "source_path": "src/report.ts",
+            "symbol": "loadLatestYouTube",
+            "score": 12,
+            "issue_shape": "api_retry",
+        },
+    ]
+
+    monkeypatch.setattr(
+        "agentic_tdd_runner.discovery.load_or_build_semantic_index",
+        lambda project_root: {"candidates": [{}, {}]},
+    )
+    monkeypatch.setattr(
+        "agentic_tdd_runner.discovery.rank_targets",
+        lambda **_kwargs: ranked,
+    )
+
+    selection = discover_target_from_issue(
+        "Bug: retry API calls",
+        workdir=str(tmp_path),
+        emit=emitted.append,
+        log=lambda event, data: logged.append((event, data)),
+    )
+
+    assert selection.source_path == "src/providers/youtube.ts"
+    assert selection.symbol == "fetchYouTubeData"
+    assert selection.candidates == ranked
+    assert emitted == ["[DISCOVERY] Selected fetchYouTubeData in src/providers/youtube.ts"]
+    assert ("discovery_candidates", {
+        "candidates": [
+            {
+                "source": "src/providers/youtube.ts",
+                "symbol": "fetchYouTubeData",
+                "score": 62,
+                "issue_shape": "api_retry",
+            },
+            {
+                "source": "src/report.ts",
+                "symbol": "loadLatestYouTube",
+                "score": 12,
+                "issue_shape": "api_retry",
+            },
+        ],
+    }) in logged
 
 
 def test_build_episode_for_target_returns_none_without_target(tmp_path):

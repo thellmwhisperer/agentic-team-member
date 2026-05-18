@@ -4193,7 +4193,7 @@ class TestApplyMechanicalEdits:
 
 
 class TestPhasedRunner:
-    """When --source/--symbol are provided, main() uses phased prompts."""
+    """Legacy --source/--symbol overrides still use phased prompts."""
 
     def _make_config(self):
         return {
@@ -4650,14 +4650,15 @@ class TestDiscoveryIntegration:
             lambda project_root: semantic_index,
         )
         monkeypatch.setattr(
-            "agentic_tdd_runner.discovery.discover_target",
-            lambda issue_text, project_root, index=None: (
-                {
+            "agentic_tdd_runner.discovery.rank_targets",
+            lambda issue_text, project_root, index=None, limit=5: (
+                [{
                     "source_path": "src/twitch/client.ts",
                     "symbol": "handleMessage",
-                }
+                    "score": 22,
+                }]
                 if index is semantic_index
-                else (_ for _ in ()).throw(AssertionError("discover_target should receive semantic_index"))
+                else (_ for _ in ()).throw(AssertionError("rank_targets should receive semantic_index"))
             ),
         )
         monkeypatch.setattr(
@@ -4697,15 +4698,15 @@ class TestDiscoveryIntegration:
             lambda project_root: {"version": 1, "project_root": str(tmp_path), "candidates": []},
         )
         monkeypatch.setattr(
-            "agentic_tdd_runner.discovery.discover_target",
-            lambda issue_text, project_root, index=None: None,
+            "agentic_tdd_runner.discovery.rank_targets",
+            lambda issue_text, project_root, index=None, limit=5: [],
         )
         monkeypatch.setattr(
             "agentic_tdd_runner.agent.chat",
             lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("chat should not run when discovery fails")),
         )
 
-        with pytest.raises(SystemExit, match="Could not determine source/symbol from issue"):
+        with pytest.raises(SystemExit, match="Could not determine target from issue"):
             main()
 
     def test_main_uses_issue_target_hints_before_discovery(self, tmp_path, monkeypatch):

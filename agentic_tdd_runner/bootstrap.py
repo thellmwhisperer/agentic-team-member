@@ -32,6 +32,15 @@ class RunBootstrapContext:
     baseline_changed_files: set[str]
 
 
+@dataclass
+class DiscoverySelection:
+    """Selected target plus ranked alternatives for observability and prompting."""
+
+    source_path: str
+    symbol: str
+    candidates: list[dict]
+
+
 def prepare_workdir(args, default_workdir: str) -> WorkdirContext:
     """Resolve the run workdir, materializing an isolated worktree when requested."""
     repo = getattr(args, "repo", None)
@@ -86,6 +95,17 @@ def prepare_run_context(
         raise SystemExit(f"Issue rejected: {issue_contract.rejection_reason}")
     log("issue_intake", issue_contract.to_log_dict())
 
+    manual_source = getattr(args, "source", None)
+    manual_symbol = getattr(args, "symbol", None)
+    if manual_source or manual_symbol:
+        if not (manual_source and manual_symbol):
+            raise SystemExit(
+                "--source/--symbol are deprecated debug overrides and must be provided together. "
+                "Prefer issue-only target discovery."
+            )
+        emit("[TARGET] Deprecated --source/--symbol override in use; prefer issue-only discovery")
+        log("target_override_deprecated", {"source": manual_source, "symbol": manual_symbol})
+
     prepare_target_environment()
     baseline_changed_files = capture_run_baseline(
         workdir,
@@ -95,15 +115,19 @@ def prepare_run_context(
     )
 
     issue_text_for_model = issue_contract.model_text
-    source_path = getattr(args, "source", None) or issue_contract.source_hint
-    symbol = getattr(args, "symbol", None) or issue_contract.symbol_hint
+    source_path = manual_source or issue_contract.source_hint
+    symbol = manual_symbol or issue_contract.symbol_hint
+    discovery_candidates: list[dict] = []
     if not (source_path and symbol) and discovery_enabled:
-        source_path, symbol = discover_target_from_issue(
+        discovery = discover_target_from_issue(
             issue_text_for_model,
             workdir=workdir,
             emit=emit,
             log=log,
         )
+        source_path = discovery.source_path
+        symbol = discovery.symbol
+        discovery_candidates = discovery.candidates
 
     episode = build_episode_for_target(
         source_path,
@@ -112,6 +136,7 @@ def prepare_run_context(
         apply_mechanical_edits=apply_mechanical_edits,
         emit=emit,
         log=log,
+        discovery_candidates=discovery_candidates,
     )
 
     messages = prompts.build_initial_messages(
@@ -154,39 +179,51 @@ def discover_target_from_issue(
     workdir: str,
     emit: Callable[[str], None],
     log: Callable[[str, dict], None],
-) -> tuple[str, str]:
+) -> DiscoverySelection:
     """Use semantic discovery to resolve source path and symbol."""
-    from agentic_tdd_runner.discovery import discover_target, load_or_build_semantic_index
+    from agentic_tdd_runner.discovery import load_or_build_semantic_index, rank_targets
 
     semantic_index = load_or_build_semantic_index(project_root=workdir)
-    discovered = discover_target(
+    ranked = rank_targets(
         issue_text=issue_text_for_model,
         project_root=workdir,
         index=semantic_index,
+        limit=5,
     )
+    discovered = ranked[0] if ranked else None
     if not discovered:
-        emit("[DISCOVERY] Could not determine source/symbol from issue")
+        emit("[DISCOVERY] Could not determine target from issue")
         log(
             "discovery_failed",
             {"reason": "no_target", "candidates": len(semantic_index.get("candidates", []))},
         )
         raise SystemExit(
-            "Could not determine source/symbol from issue. "
-            "Pass --source and --symbol or improve the semantic index."
+            "Could not determine target from issue. Improve the issue text or semantic index. "
+            "--source/--symbol are deprecated debug overrides."
         )
     payload_keys = sorted(discovered.keys()) if isinstance(discovered, dict) else []
     source_path = discovered.get("source_path") if isinstance(discovered, dict) else None
     symbol = discovered.get("symbol") if isinstance(discovered, dict) else None
     if not (source_path and symbol):
-        emit("[DISCOVERY] Discovery result missing source/symbol")
+        emit("[DISCOVERY] Discovery result missing target fields")
         log("discovery_failed", {"reason": "invalid_payload", "keys": payload_keys})
         raise SystemExit(
-            "Could not determine source/symbol from issue. "
-            "Pass --source and --symbol or improve the semantic index."
+            "Could not determine target from issue. Improve the issue text or semantic index. "
+            "--source/--symbol are deprecated debug overrides."
         )
     emit(f"[DISCOVERY] Selected {symbol} in {source_path}")
+    candidate_log = [
+        {
+            "source": candidate.get("source_path"),
+            "symbol": candidate.get("symbol"),
+            "score": candidate.get("score"),
+            "issue_shape": candidate.get("issue_shape"),
+        }
+        for candidate in ranked
+    ]
+    log("discovery_candidates", {"candidates": candidate_log})
     log("discovery", {"source": source_path, "symbol": symbol, "score": discovered.get("score")})
-    return source_path, symbol
+    return DiscoverySelection(source_path=source_path, symbol=symbol, candidates=ranked)
 
 
 def build_episode_for_target(
@@ -197,6 +234,7 @@ def build_episode_for_target(
     apply_mechanical_edits: Callable[[list[dict], str], int],
     emit: Callable[[str], None],
     log: Callable[[str, dict], None],
+    discovery_candidates: list[dict] | None = None,
 ) -> dict | None:
     """Build episode context and apply deterministic mechanical edits."""
     if not (source_path and symbol):
@@ -209,6 +247,16 @@ def build_episode_for_target(
         symbol=symbol,
         project_root=workdir,
     )
+    if discovery_candidates:
+        episode["discovery_candidates"] = [
+            {
+                "source_path": candidate.get("source_path"),
+                "symbol": candidate.get("symbol"),
+                "score": candidate.get("score"),
+                "issue_shape": candidate.get("issue_shape"),
+            }
+            for candidate in discovery_candidates
+        ]
     emit(f"[EPISODE] Built episode context for {symbol} in {source_path}")
     log("episode", {
         "source": source_path,

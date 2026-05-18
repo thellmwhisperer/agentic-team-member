@@ -30,6 +30,7 @@ class TestProductionConfig:
         cfg = load_config(prod)
         system = cfg["prompt"]["system"].lower()
         assert "issue" in system, "prompt must reference the issue as a source"
+        assert "discovery targets as hypotheses" in system
         assert "broad keyword search" in system, (
             "prompt must explicitly steer the agent away from broad keyword search "
             "and toward the location described in the issue"
@@ -99,6 +100,11 @@ class TestLoadConfig:
         cfg = load_config(tmp_path / "agent.toml")
         assert cfg["llm"]["model"] == "test-model"
         assert cfg["llm"]["temperature"] == 0.6
+
+    def test_production_disables_unbounded_thinking(self):
+        prod = CONFIG_DIR / "agent.toml"
+        cfg = load_config(prod)
+        assert cfg["llm"]["thinking_budget_tokens"] == 0
 
     def test_loads_system_prompt(self, tmp_path):
         _write_config(tmp_path)

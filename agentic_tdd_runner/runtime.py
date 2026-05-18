@@ -81,7 +81,12 @@ def run_agent_loop(
         except Exception as e:
             if is_llm_timeout_error(e):
                 emit(f"  LLM TIMEOUT: {e}")
-                log("llm_timeout", {"step": step, "error": str(e)})
+                log("llm_timeout", {
+                    "step": step,
+                    "error": str(e),
+                    "consecutive_non_apply_steps": consecutive_non_apply_steps,
+                    "non_apply_warning_threshold": non_apply_warning_threshold,
+                })
                 return 1
             emit(f"  ERROR: {e}")
             log("error", {"step": step, "error": str(e)})

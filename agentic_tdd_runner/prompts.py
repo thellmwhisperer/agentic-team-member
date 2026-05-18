@@ -20,11 +20,28 @@ def function_line_hint(episode: dict) -> str:
 def build_phase1_message(episode: dict, issue_text_for_model: str) -> str:
     """Build the first user message for phased source/symbol runs."""
     line_hint = function_line_hint(episode)
+    candidates = episode.get("discovery_candidates") or []
+    if candidates:
+        candidate_lines = [
+            f"- {candidate.get('source_path')}::{candidate.get('symbol')} score={candidate.get('score')}"
+            for candidate in candidates[:5]
+        ]
+        candidate_hint = (
+            "\n\nDiscovery candidates (ranked hypotheses, not ground truth):\n"
+            + "\n".join(candidate_lines)
+            + "\nBefore writing a test, verify that the selected function is the real bug boundary. "
+            "If the issue describes API calls, retries, or external-service behavior and the selected "
+            "function only reads local files or formats data, inspect the next candidate instead."
+        )
+    else:
+        candidate_hint = ""
     return (
         f"Read {episode['source_file']} and understand the bug below. "
-        f"Focus on the function `{episode['target_symbol']}`{line_hint}. "
+        f"Start with `{episode['target_symbol']}`{line_hint} as a discovery hypothesis, "
+        f"but treat the issue text as authoritative if the hypothesis conflicts with it. "
         f"Then create a failing test in {episode['test_file']} that reproduces it.\n\n"
         f"Bug:\n{issue_text_for_model}"
+        f"{candidate_hint}"
     )
 
 

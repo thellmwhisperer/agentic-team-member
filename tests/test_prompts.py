@@ -41,7 +41,7 @@ def test_build_initial_messages_with_episode_injects_cookbook_and_phase1_prompt(
 
     assert messages[0]["content"] == "system prompt\n\n## Cookbook\nUse real imports.\n"
     assert "Read src/client.ts" in messages[1]["content"]
-    assert "Focus on the function `handleResub` (lines 12-34)" in messages[1]["content"]
+    assert "Start with `handleResub` (lines 12-34) as a discovery hypothesis" in messages[1]["content"]
     assert "src/client.test.ts" in messages[1]["content"]
     assert "Bug:\nbug text" in messages[1]["content"]
 
@@ -60,7 +60,22 @@ def test_build_phase1_message_omits_fallback_line_hint():
     )
 
     assert "lines 1-2" not in msg
-    assert "Focus on the function `handleResub`." in msg
+    assert "Start with `handleResub` as a discovery hypothesis" in msg
+
+
+def test_build_phase1_message_includes_ranked_candidates_when_available():
+    msg = build_phase1_message(
+        _episode(discovery_candidates=[
+            {"source_path": "src/report.ts", "symbol": "loadLatestYouTube", "score": 31},
+            {"source_path": "src/providers/youtube.ts", "symbol": "fetchYouTubeData", "score": 28},
+        ]),
+        "retry API calls",
+    )
+
+    assert "ranked hypotheses, not ground truth" in msg
+    assert "src/report.ts::loadLatestYouTube score=31" in msg
+    assert "src/providers/youtube.ts::fetchYouTubeData score=28" in msg
+    assert "only reads local files" in msg
 
 
 def test_build_system_prompt_without_episode_strips_base_prompt():
