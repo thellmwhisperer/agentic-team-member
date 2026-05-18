@@ -24,7 +24,7 @@ def test_builds_bun_test_template_from_bootstrap_report(tmp_path):
     report = inspect_runner_bootstrap(tmp_path)
 
     assert effective_test_command_template(report, "npm test") == "bun test"
-    assert runner_version_command(report) == ["bun", "test", "--version"]
+    assert runner_version_command(report) == ["bun", "--version"]
 
 
 def test_builds_npm_vitest_template_from_dependency_detected_report(tmp_path):

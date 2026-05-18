@@ -60,7 +60,7 @@ class TestPrepareEnvironment:
         assert report.project_type == "javascript"
         assert report.package_manager == "bun"
         assert ["bun", "install", "--frozen-lockfile"] in calls
-        assert ["bun", "test", "--version"] in calls
+        assert ["bun", "--version"] in calls
         assert ["bun", "run", "typecheck"] in calls
 
     def test_records_runner_bootstrap_and_uses_detected_package_manager(self, tmp_path, monkeypatch):
@@ -110,13 +110,13 @@ class TestPrepareEnvironment:
                 return _completed(command, stdout="true\n")
             if command[:2] == ["git", "status"]:
                 return _completed(command)
-            if command == ["bun", "test", "--version"]:
-                return _completed(command, returncode=1, stderr="bun test unavailable\n")
+            if command == ["bun", "--version"]:
+                return _completed(command, returncode=1, stderr="bun unavailable\n")
             return _completed(command, stdout="ok")
 
         monkeypatch.setattr("agentic_tdd_runner.environment._run", fake_run)
 
-        with pytest.raises(EnvironmentPrepError, match="environment step failed: bun test --version") as exc:
+        with pytest.raises(EnvironmentPrepError, match="environment step failed: bun --version") as exc:
             prepare_environment(str(tmp_path), {
                 "environment": {"install": "never", "run_typecheck": True},
                 "timeouts": {"tool_execution": 60},
