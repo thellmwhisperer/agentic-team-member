@@ -19,7 +19,7 @@ the code, write a failing test, fix the bug, verify red-green, and open a PR.
 > **Status: alpha.** ATM is a research-grade harness. APIs, config
 > schema, prompt templates, and the verify contract can change without
 > notice. Empirical coverage is uneven across code shapes — see
-> [Coverage](#coverage) (25% strong / 20% partial / 55% weak). Not
+> [Coverage](#coverage) (25% strong / 40% partial / 35% weak). Not
 > production-ready. Use on disposable branches and review every PR
 > before merging.
 
@@ -447,7 +447,7 @@ in the TOML config.
 Capabilities the project is moving toward before it can call itself
 production-grade:
 
-- **Lift the weak coverage rows.** Four of the six code shapes in the
+- **Lift the weak coverage rows.** Five of the six code shapes in the
   [Coverage](#coverage) matrix are weak or partial. The highest-leverage
   contribution right now is a failing real-world issue against one of
   those rows.
@@ -455,16 +455,14 @@ production-grade:
   the named external callsite now flows through the new retry / fallback
   / validation mechanism, not just that any discovery candidate was
   touched.
-- **Installable distribution** — `pyproject.toml`, an `atm` CLI entry point,
-  and a published version on PyPI.
+- **Distribution-grade packaging** — `pyproject.toml`, an `atm` CLI entry
+  point, a published version on PyPI, versioned releases, and a public
+  benchmark harness anyone can reproduce.
 - **Generalized discovery** — discovery heuristics that work across any repo
   shape, not just the reference fixtures.
 - **More language plugins** — Go and Rust are the obvious next targets.
 - **The `migrate` and `refactor` skills** — both are designed but not
   implemented.
-- **Distribution-grade packaging** — `pyproject.toml`, an `atm` CLI
-  entry point, a published version on PyPI, versioned releases, and a
-  public benchmark harness anyone can reproduce.
 
 ---
 

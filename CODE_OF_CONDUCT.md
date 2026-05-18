@@ -7,10 +7,14 @@ you agree to abide by its terms.
 ## Reporting
 
 If you experience or witness behavior that violates the Contributor
-Covenant, please report it privately to the project maintainer by
-opening a confidential GitHub Security Advisory on this repository,
-or by email if a contact address is published. Reports are reviewed
-in good faith and kept confidential.
+Covenant, reports can be sent privately to the project maintainer.
+A dedicated private contact address will be published here before the
+project starts accepting conduct reports; until then, this section is
+a placeholder and the project is not yet ready to receive them.
+
+Security Advisories are reserved for vulnerability reports (see
+[SECURITY.md](SECURITY.md)) and should not be used for conduct
+reports.
 
 ## Enforcement
 
