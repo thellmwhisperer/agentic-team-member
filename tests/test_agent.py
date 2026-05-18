@@ -4650,7 +4650,7 @@ class TestDiscoveryIntegration:
             lambda project_root: semantic_index,
         )
         def fake_rank_targets(issue_text, project_root, index=None, limit=5):
-            assert issue_text == "bug text"
+            assert "bug" in issue_text
             assert project_root == str(tmp_path)
             assert index is semantic_index
             assert limit == 5

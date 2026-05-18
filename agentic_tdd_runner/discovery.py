@@ -33,7 +33,7 @@ _TS_METHOD_RE = re.compile(
     r"^\s*(?:(?:public|private|protected|static|readonly)\s+)*(?:async\s+)?([A-Za-z_$][\w$]*)\s*\(",
 )
 _DEFAULT_SEMANTIC_INDEX_RELATIVE_PATH = Path(".atm/semantic-index.generated.json")
-_SEMANTIC_INDEX_VERSION = 6
+_SEMANTIC_INDEX_VERSION = 5
 _EXCLUDED_DIRS = {
     ".atm",
     ".cache",
@@ -277,45 +277,85 @@ _LOW_VALUE_SEAM_MEMBER_HINT_TOKENS = {
     "values",
     "with",
 }
-_API_RETRY_CORE_TOKENS = {
-    "429",
-    "500",
-    "503",
+_API_RETRY_WORD_TOKENS = {
     "backoff",
-    "rate",
     "retry",
+    "retried",
     "retries",
+    "retrying",
     "transient",
 }
 _API_RETRY_STATUS_TOKENS = {"429", "500", "503"}
 _API_RETRY_CONTEXT_TOKENS = {
     "api",
     "apis",
-    "external",
-    "server",
-}
-_API_BOUNDARY_TOKENS = {
-    "analytics",
-    "api",
-    "apis",
-    "auth",
     "client",
-    "fetch",
-    "googleapis",
-    "oauth",
+    "clients",
+    "endpoint",
+    "endpoints",
+    "external",
+    "http",
+    "https",
     "provider",
     "providers",
-    "query",
+    "sdk",
+    "service",
+    "services",
+}
+_API_RETRY_STATUS_CONTEXT_TOKENS = {
+    "error",
+    "errors",
+    "fail",
+    "failed",
+    "failing",
+    "fails",
+    "failure",
+    "failures",
+    "http",
+    "status",
+    "statuses",
+    "transient",
+}
+_API_RATE_LIMIT_TOKENS = {
+    "limit",
+    "limited",
+    "limits",
+    "quota",
+    "rate",
+    "throttle",
+    "throttled",
+}
+_API_BOUNDARY_TOKENS = {
+    "api",
+    "apis",
+    "client",
+    "clients",
+    "endpoint",
+    "endpoints",
+    "fetch",
+    "http",
+    "https",
+    "provider",
+    "providers",
     "request",
     "requests",
-    "reports",
-    "upload",
-    "uploads",
-    "update",
-    "updates",
-    "videos",
+    "response",
+    "responses",
+    "sdk",
+    "service",
+    "services",
 }
-_LOCAL_FILE_READER_TOKENS = {
+_LOCAL_FILE_READER_IO_TOKENS = {
+    "exists",
+    "file",
+    "files",
+    "fs",
+    "open",
+    "path",
+    "read",
+    "readdir",
+}
+_LOCAL_FILE_READER_DATA_TOKENS = {
     "json",
     "latest",
     "load",
@@ -323,6 +363,11 @@ _LOCAL_FILE_READER_TOKENS = {
     "reader",
     "report",
 }
+_API_BOUNDARY_BONUS_BASE = 8
+_API_BOUNDARY_BONUS_PER_TOKEN = 3
+_API_BOUNDARY_BONUS_CAP = 24
+_API_NON_BOUNDARY_PENALTY = 8
+_LOCAL_FILE_READER_PENALTY = 8
 
 
 def build_semantic_index(project_root: str) -> dict:
@@ -606,6 +651,7 @@ def _build_candidate(
         )
     )
     terms = sorted(set(path_tokens + symbol_tokens + owner_tokens + string_tokens + semantic_tokens))
+    rank_tokens = sorted(set(terms + _normalize_tokens(" ".join(calls + observables))))
     nearby_test_signal_tokens = sorted(set(terms + _normalize_tokens(snippet)))
     nearby_tests = _nearby_tests_for_source(
         source_path,
@@ -639,6 +685,7 @@ def _build_candidate(
         "string_tokens": string_tokens,
         "strings": strings,
         "terms": terms,
+        "rank_tokens": rank_tokens,
     }
 
 
@@ -1033,12 +1080,25 @@ def _feature_domains(*, symbol: str, observables: list[str]) -> set[str]:
 
 
 def _classify_issue_shape(issue_tokens: set[str]) -> str | None:
-    has_retry_signal = bool(issue_tokens & _API_RETRY_CORE_TOKENS)
+    has_retry_signal = bool(issue_tokens & _API_RETRY_WORD_TOKENS)
     has_api_context = bool(issue_tokens & _API_RETRY_CONTEXT_TOKENS)
-    has_retry_status = bool(issue_tokens & _API_RETRY_STATUS_TOKENS)
-    if has_retry_signal and (has_api_context or has_retry_status):
+    has_rate_limit_signal = "rate" in issue_tokens and bool(
+        issue_tokens & (_API_RATE_LIMIT_TOKENS - {"rate"})
+    )
+    has_status_retry_signal = bool(issue_tokens & _API_RETRY_STATUS_TOKENS) and bool(
+        issue_tokens & _API_RETRY_STATUS_CONTEXT_TOKENS
+    )
+    if has_retry_signal and (has_api_context or has_status_retry_signal):
+        return "api_retry"
+    if has_api_context and (has_rate_limit_signal or has_status_retry_signal):
         return "api_retry"
     return None
+
+
+def _has_local_file_reader_signal(candidate_tokens: set[str]) -> bool:
+    return bool(candidate_tokens & _LOCAL_FILE_READER_IO_TOKENS) and bool(
+        candidate_tokens & _LOCAL_FILE_READER_DATA_TOKENS
+    )
 
 
 def _candidate_token_set(candidate: dict) -> set[str]:
@@ -1065,15 +1125,17 @@ def _score_candidate(candidate: dict, issue_tokens: set[str], *, issue_shape: st
     score = (path_overlap * 3) + (symbol_overlap * 5) + (string_overlap * 6) + term_overlap
 
     if issue_shape == "api_retry":
-        candidate_tokens = _candidate_token_set(candidate)
+        candidate_tokens = set(candidate.get("rank_tokens") or _candidate_token_set(candidate))
         api_boundary_signal = candidate_tokens & _API_BOUNDARY_TOKENS
-        local_file_reader_signal = candidate_tokens & _LOCAL_FILE_READER_TOKENS
         if api_boundary_signal:
-            score += 20 + (len(api_boundary_signal) * 5)
+            score += min(
+                _API_BOUNDARY_BONUS_CAP,
+                _API_BOUNDARY_BONUS_BASE + (len(api_boundary_signal) * _API_BOUNDARY_BONUS_PER_TOKEN),
+            )
         else:
-            score -= 15
-        if local_file_reader_signal and not api_boundary_signal:
-            score -= 20
+            score -= _API_NON_BOUNDARY_PENALTY
+        if _has_local_file_reader_signal(candidate_tokens) and not api_boundary_signal:
+            score -= _LOCAL_FILE_READER_PENALTY
 
     return score
 
