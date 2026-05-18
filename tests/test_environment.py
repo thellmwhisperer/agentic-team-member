@@ -125,6 +125,140 @@ class TestPrepareEnvironment:
         assert exc.value.report.steps[-1].name == "preflight_1"
         assert ["bun", "run", "typecheck"] not in calls
 
+    def test_generates_next_jest_config_shim_before_preflight(self, tmp_path, monkeypatch):
+        (tmp_path / "package-lock.json").write_text("")
+        (tmp_path / "jest.config.ts").write_text(
+            "import workspacePreset from '@repo/jest-preset';\n"
+            "export default workspacePreset;\n"
+        )
+        (tmp_path / "jest.setup.ts").write_text("import '@testing-library/jest-dom';\n")
+        (tmp_path / "package.json").write_text(json.dumps({
+            "packageManager": "npm@10.0.0",
+            "scripts": {"test": "jest"},
+            "devDependencies": {
+                "jest": "^30.0.0",
+                "next": "^16.0.0",
+            },
+        }))
+        calls = []
+
+        def fake_run(root, command, timeout, config=None):
+            calls.append(command)
+            if command[:2] == ["git", "rev-parse"]:
+                return _completed(command, stdout="true\n")
+            if command[:2] == ["git", "status"]:
+                assert not (tmp_path / ".atm-jest.config.cjs").exists()
+                return _completed(command)
+            return _completed(command, stdout="ok")
+
+        monkeypatch.setattr("agentic_tdd_runner.environment._run", fake_run)
+
+        report = prepare_environment(str(tmp_path), {
+            "environment": {"install": "never", "run_typecheck": False},
+            "timeouts": {"tool_execution": 60},
+        })
+
+        shim = tmp_path / ".atm-jest.config.cjs"
+        assert report.ready is True
+        assert report.runner_bootstrap.test_config_path == str(shim)
+        assert report.runner_bootstrap.original_test_config_path == str(tmp_path / "jest.config.ts")
+        assert "require('next/jest')" in shim.read_text()
+        assert 'testEnvironment: "jest-environment-jsdom"' in shim.read_text()
+        assert "setupFilesAfterEnv: [\"./jest.setup.ts\"]" in shim.read_text()
+        assert ["npm", "exec", "--", "jest", "--version"] in calls
+        shim_step = next(step for step in report.steps if step.name == "test_config_shim")
+        assert shim_step.stdout == ".atm-jest.config.cjs"
+
+    def test_generated_next_jest_config_preserves_static_test_environment(self, tmp_path, monkeypatch):
+        (tmp_path / "package-lock.json").write_text("")
+        (tmp_path / "jest.config.ts").write_text(
+            "import nextJest from 'next/jest';\n"
+            "const customJestConfig = { testEnvironment: 'node' };\n"
+            "export default nextJest({ dir: './' })(customJestConfig);\n"
+        )
+        (tmp_path / "package.json").write_text(json.dumps({
+            "packageManager": "npm@10.0.0",
+            "scripts": {"test": "jest"},
+            "devDependencies": {
+                "jest": "^30.0.0",
+                "next": "^16.0.0",
+            },
+        }))
+
+        def fake_run(root, command, timeout, config=None):
+            if command[:2] == ["git", "rev-parse"]:
+                return _completed(command, stdout="true\n")
+            if command[:2] == ["git", "status"]:
+                return _completed(command)
+            return _completed(command, stdout="ok")
+
+        monkeypatch.setattr("agentic_tdd_runner.environment._run", fake_run)
+
+        prepare_environment(str(tmp_path), {
+            "environment": {"install": "never", "run_typecheck": False},
+            "timeouts": {"tool_execution": 60},
+        })
+
+        assert 'testEnvironment: "node"' in (tmp_path / ".atm-jest.config.cjs").read_text()
+
+    def test_generated_next_jest_config_uses_node_environment_for_route_handlers(self, tmp_path, monkeypatch):
+        route_dir = tmp_path / "app" / "api" / "ping"
+        route_dir.mkdir(parents=True)
+        (route_dir / "route.ts").write_text("export function GET() {}\n")
+        (tmp_path / "package-lock.json").write_text("")
+        (tmp_path / "jest.config.ts").write_text(
+            "import nextJest from 'next/jest';\n"
+            "export default nextJest({ dir: './' })({});\n"
+        )
+        (tmp_path / "package.json").write_text(json.dumps({
+            "packageManager": "npm@10.0.0",
+            "scripts": {"test": "jest"},
+            "devDependencies": {
+                "jest": "^30.0.0",
+                "next": "^16.0.0",
+            },
+        }))
+
+        def fake_run(root, command, timeout, config=None):
+            if command[:2] == ["git", "rev-parse"]:
+                return _completed(command, stdout="true\n")
+            if command[:2] == ["git", "status"]:
+                return _completed(command)
+            return _completed(command, stdout="ok")
+
+        monkeypatch.setattr("agentic_tdd_runner.environment._run", fake_run)
+
+        prepare_environment(str(tmp_path), {
+            "environment": {"install": "never", "run_typecheck": False},
+            "timeouts": {"tool_execution": 60},
+        })
+
+        assert 'testEnvironment: "node"' in (tmp_path / ".atm-jest.config.cjs").read_text()
+
+    def test_generated_config_write_failure_stops_environment_prep(self, tmp_path, monkeypatch):
+        _write_js_project(tmp_path)
+
+        def fake_run(root, command, timeout, config=None):
+            if command[:2] == ["git", "rev-parse"]:
+                return _completed(command, stdout="true\n")
+            if command[:2] == ["git", "status"]:
+                return _completed(command)
+            return _completed(command, stdout="ok")
+
+        def fail_config_write(report):
+            raise OSError("disk full")
+
+        monkeypatch.setattr("agentic_tdd_runner.environment._run", fake_run)
+        monkeypatch.setattr("agentic_tdd_runner.environment.ensure_generated_test_config", fail_config_write)
+
+        with pytest.raises(EnvironmentPrepError, match="could not generate test config shim: disk full") as exc:
+            prepare_environment(str(tmp_path), {
+                "environment": {"install": "never", "run_typecheck": False},
+                "timeouts": {"tool_execution": 60},
+            })
+
+        assert exc.value.report.steps[-1].name == "test_config_shim"
+
     def test_preflights_recommended_tools_with_command_env(self, tmp_path, monkeypatch):
         _write_js_project(tmp_path)
         calls = []

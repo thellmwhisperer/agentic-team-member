@@ -10,7 +10,11 @@ import subprocess
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from agentic_tdd_runner.runner_bootstrap import RunnerBootstrapReport, inspect_runner_bootstrap
+from agentic_tdd_runner.runner_bootstrap import (
+    RunnerBootstrapReport,
+    ensure_generated_test_config,
+    inspect_runner_bootstrap,
+)
 from agentic_tdd_runner.runner_command import runner_version_command
 from agentic_tdd_runner.shell import build_command_env
 
@@ -159,6 +163,8 @@ def prepare_environment(workdir: str, config: dict) -> EnvironmentReport:
                 skipped=True,
                 reason="dependencies already present" if install_mode != "never" else "disabled",
             ))
+
+        _ensure_generated_test_config(root, report)
 
         preflight_commands = javascript_preflight_commands(root, pkg, env_cfg, package_manager=package_manager)
         version_command = runner_version_command(report.runner_bootstrap)
@@ -466,6 +472,23 @@ def _run_step(
     report.steps.append(step)
     if result.returncode != 0:
         _fail(report, f"environment step failed: {' '.join(command)}")
+
+
+def _ensure_generated_test_config(root: Path, report: EnvironmentReport) -> None:
+    if not report.runner_bootstrap:
+        return
+    try:
+        shim_path = ensure_generated_test_config(report.runner_bootstrap)
+    except OSError as exc:
+        report.steps.append(PrepStep(name="test_config_shim", returncode=None, stderr=str(exc)))
+        _fail(report, f"could not generate test config shim: {exc}")
+    if shim_path:
+        report.steps.append(PrepStep(
+            name="test_config_shim",
+            command=["write", str(shim_path)],
+            returncode=0,
+            stdout=os.path.relpath(shim_path, root),
+        ))
 
 
 def _run(
