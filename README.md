@@ -273,6 +273,10 @@ runner when it is one of the supported families:
 | `node:test`     | `node --test`          |
 
 Unknown, custom, or ambiguous runner facts fall back to `[runner].command`.
+For detected JS runners, environment prep also runs a lightweight version
+preflight (`bun --version`, `node --version`, or package-manager wrapper +
+`runner --version`) before the first model tool call. That catches missing local
+runner installs while the failure is still deterministic setup, not agent work.
 
 ---
 

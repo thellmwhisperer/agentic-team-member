@@ -11,6 +11,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from agentic_tdd_runner.runner_bootstrap import RunnerBootstrapReport, inspect_runner_bootstrap
+from agentic_tdd_runner.runner_command import runner_version_command
 from agentic_tdd_runner.shell import build_command_env
 
 
@@ -160,6 +161,9 @@ def prepare_environment(workdir: str, config: dict) -> EnvironmentReport:
             ))
 
         preflight_commands = javascript_preflight_commands(root, pkg, env_cfg, package_manager=package_manager)
+        version_command = runner_version_command(report.runner_bootstrap)
+        if version_command:
+            preflight_commands.insert(0, version_command)
         report.preflight_commands = preflight_commands
         for index, command in enumerate(preflight_commands, start=1):
             _run_step(root, report, f"preflight_{index}", command, timeout=timeout, config=config)
