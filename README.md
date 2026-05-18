@@ -4,6 +4,7 @@
 
 [![tests](https://img.shields.io/badge/tests-passing-brightgreen)](#status)
 [![python](https://img.shields.io/badge/python-3.12%2B-blue)](#requirements)
+[![license](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 [![status](https://img.shields.io/badge/status-alpha-orange)](#status)
 
 ATM is a small Python harness that turns a local code model (Qwen 3.5 27B / 4B on
@@ -24,6 +25,7 @@ the code, write a failing test, fix the bug, verify red-green, and open a PR.
 - [How it works](#how-it-works)
 - [The cookbook](#the-cookbook)
 - [Skills](#skills)
+- [Coverage](#coverage)
 - [Language plugins](#language-plugins)
 - [Configuration](#configuration)
 - [Installation](#installation)
@@ -174,6 +176,61 @@ Every skill follows the same three-step architecture:
 
 What changes between skills is step 1. The cookbook is the semantic layer —
 it's what turns a generic model into a specialist.
+
+---
+
+## Coverage
+
+ATM works on the *shape* of code it has been proven against — not on
+"any TypeScript or Python bug." The matrix below tracks empirical
+coverage by code shape, weighted by how often that shape shows up in
+real issues.
+
+| Code shape                              | Weight | Status  | Evidence                                                                                  |
+| --------------------------------------- | -----: | ------- | ----------------------------------------------------------------------------------------- |
+| Handlers, callbacks, event listeners    |    25% | strong  | End-to-end fix on an event-handler function: incoming event → outbound client call        |
+| Services and classes with dependencies  |    20% | weak    | Multi-provider service class with constructor deps: invalid import shape, weak modeling   |
+| API and SDK integrations                |    20% | partial | Observed run shipped a retry utility but left the API callsites identified by discovery untouched |
+| CLI, scripts, and pipelines             |    15% | weak    | Discovery ranks `main()` entrypoints without classifying them as glue vs target           |
+| Persistence, config, filesystem         |    12% | partial | Env / config / schema facts exist, no unified fix strategy                                |
+| Pure functions and helpers              |     8% | partial | Generator-with-persistent-state shape: function found, but module-state ownership weak    |
+
+Weighted view: **25% strong / 20% partial / 55% weak**.
+
+Full ontology, signals per shape, test strategies, and the verify v2
+contract live in [`docs/code-shape-coverage.md`](docs/code-shape-coverage.md).
+
+### Verify v1.0 gate
+
+`verified=True` is **not** "a new test fails, a new file is added, and
+the test passes." It is:
+
+- If discovery produced candidates, the diff must touch at least one of
+  those paths.
+- If discovery produced nothing, the diff must touch at least one
+  pre-existing source path in the target repo — not only newly created
+  helper or test files.
+
+Issue-obligation-aware gating (v2.1, callsite-aware) is on the roadmap.
+
+### Known fail modes
+
+- **`body-identifies-but-fix-doesnt-address`** — observed in an
+  `api_sdk_integration` run. The PR body correctly identified that two
+  external API call families were missing retry logic, but the diff only
+  added a standalone retry utility and its unit tests. The v1.0 gate
+  rejects this run because the diff touches zero `discovery_candidates`
+  paths.
+
+### Defaults
+
+- **Partial PRs are off by default.** When obligations are missing, the
+  runner halts before PR creation unless partial mode is explicitly
+  enabled. A partial PR cannot be titled as a complete `fix`.
+- **Real `sleep()` in retry/backoff tests is a hard reject** for the
+  `api_sdk_integration` shape when the issue text contains retry or
+  backoff language. Other shapes start with a soft warning until more
+  empirical evidence accumulates.
 
 ---
 
@@ -383,6 +440,14 @@ in the TOML config.
 Capabilities the project is moving toward before it can call itself
 production-grade:
 
+- **Lift the weak coverage rows.** Four of the six code shapes in the
+  [Coverage](#coverage) matrix are weak or partial. The highest-leverage
+  contribution right now is a failing real-world issue against one of
+  those rows.
+- **Verify v2.1 — callsite-aware gate.** Diff or callgraph evidence that
+  the named external callsite now flows through the new retry / fallback
+  / validation mechanism, not just that any discovery candidate was
+  touched.
 - **Installable distribution** — `pyproject.toml`, an `atm` CLI entry point,
   and a published version on PyPI.
 - **Generalized discovery** — discovery heuristics that work across any repo
@@ -390,17 +455,20 @@ production-grade:
 - **More language plugins** — Go and Rust are the obvious next targets.
 - **The `migrate` and `refactor` skills** — both are designed but not
   implemented.
-- **Distribution-grade licensing and packaging** — a committed `LICENSE`
-  file, versioned releases, and a public benchmark harness anyone can
-  reproduce.
+- **Distribution-grade packaging** — `pyproject.toml`, an `atm` CLI
+  entry point, a published version on PyPI, versioned releases, and a
+  public benchmark harness anyone can reproduce.
 
 ---
 
 ## Status
 
-Alpha. The TDD `fix` skill works end-to-end: cookbook → phased agent loop →
-verified red-green → quality gate → PR. The `migrate` and `refactor` skills
-are designed but not implemented.
+Alpha. The TDD `fix` skill works end-to-end (cookbook → phased agent
+loop → verified red-green → quality gate → PR) on the code shapes
+listed in [Coverage](#coverage). One row is strong (handlers / event
+listeners). One is partial (API/SDK integrations — foundation shipped,
+callsite integration pending). Four are weak. The `migrate` and
+`refactor` skills are designed but not implemented.
 
 Expect the public surface (CLI flags, config schema) to shift before 1.0.
 
@@ -408,6 +476,8 @@ Expect the public surface (CLI flags, config schema) to shift before 1.0.
 
 ## License
 
-Not yet licensed. A `LICENSE` file is on the [Roadmap](#roadmap); until it
-lands, no specific license is asserted. Treat the source as "all rights
-reserved" pending that decision.
+Apache License 2.0 — see [LICENSE](LICENSE) for the full text and
+[NOTICE](NOTICE) for attribution. Contributions are accepted under the
+same terms; see [CONTRIBUTING.md](CONTRIBUTING.md) and
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). For security reports, see
+[SECURITY.md](SECURITY.md).
