@@ -337,6 +337,26 @@ class TestDiscoverTarget:
         assert ranked[0]["source_path"] == "src/providers/youtube.ts"
         assert "issue_shape" not in ranked[0]
 
+    def test_api_rate_limit_issue_can_use_quota_or_throttle_signal(self, tmp_path):
+        _write_file(
+            tmp_path,
+            "src/providers/youtube.ts",
+            """\
+            export async function fetchYouTubeData(client: any): Promise<unknown> {
+              return client.videos.list({ part: ['snippet'] });
+            }
+            """,
+        )
+
+        ranked = rank_targets(
+            issue_text="The external API is throttled when hitting quota limits",
+            project_root=str(tmp_path),
+            limit=1,
+        )
+
+        assert ranked[0]["source_path"] == "src/providers/youtube.ts"
+        assert ranked[0]["issue_shape"] == "api_retry"
+
     def test_status_like_numbers_do_not_trigger_api_retry_shape(self, tmp_path):
         _write_file(
             tmp_path,
