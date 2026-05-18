@@ -12,7 +12,7 @@ into a **TDD bug-fix agent** for your repository. No model API key — your code
 is never sent to a hosted inference provider. (GitHub auth via `gh` is still
 required for issue ingestion and PR creation.)
 
-It does the work a junior engineer would do on a single, well-scoped issue: read
+It does the work an engineer would do on a single, well-scoped issue: read
 the code, write a failing test, fix the bug, verify red-green, and open a PR.
 
 ---

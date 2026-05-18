@@ -337,6 +337,42 @@ class TestDiscoverTarget:
         assert ranked[0]["source_path"] == "src/providers/youtube.ts"
         assert "issue_shape" not in ranked[0]
 
+    def test_status_like_numbers_do_not_trigger_api_retry_shape(self, tmp_path):
+        _write_file(
+            tmp_path,
+            "src/report.ts",
+            """\
+            export function summarizeRows(rows: unknown[]): number {
+              return rows.length;
+            }
+            """,
+        )
+        _write_file(
+            tmp_path,
+            "src/pricing-api.ts",
+            """\
+            export function formatPricingApiAmount(value: number): string {
+              return `$${value}`;
+            }
+            """,
+        )
+
+        rows_ranked = rank_targets(
+            issue_text="The report returns 500 rows but should cap the table at 100 rows",
+            project_root=str(tmp_path),
+            limit=1,
+        )
+        price_ranked = rank_targets(
+            issue_text="The external pricing API displays $500 in the wrong field",
+            project_root=str(tmp_path),
+            limit=1,
+        )
+
+        assert rows_ranked[0]["source_path"] == "src/report.ts"
+        assert "issue_shape" not in rows_ranked[0]
+        assert price_ranked[0]["source_path"] == "src/pricing-api.ts"
+        assert "issue_shape" not in price_ranked[0]
+
 
 class TestSemanticIndexPersistence:
     def test_writes_generated_semantic_layer_json(self, tmp_path):
@@ -358,7 +394,7 @@ class TestSemanticIndexPersistence:
 
         assert written == output_path
         payload = json.loads(output_path.read_text())
-        assert payload["version"] == 6
+        assert payload["version"] == 5
         assert "files" in payload
         assert "symbols" in payload
         assert any(c["symbol"] == "handleMessage" for c in payload["candidates"])
@@ -381,7 +417,7 @@ class TestSemanticIndexPersistence:
 
         output_path = tmp_path / ".atm" / "semantic-index.generated.json"
         assert output_path.exists()
-        assert payload["version"] == 6
+        assert payload["version"] == 5
         assert "files" in payload
         assert "symbols" in payload
         assert any(c["symbol"] == "handleMessage" for c in payload["candidates"])
@@ -392,7 +428,7 @@ class TestSemanticIndexPersistence:
         output_path.write_text(
             json.dumps(
                 {
-                    "version": 6,
+                    "version": 5,
                     "project_root": str(tmp_path),
                     "candidates": [
                         {
@@ -437,7 +473,7 @@ class TestSemanticIndexPersistence:
 
         def fake_build(project_root):
             return {
-                "version": 6,
+                "version": 5,
                 "project_root": project_root,
                 "files": [],
                 "symbols": [],
@@ -448,5 +484,5 @@ class TestSemanticIndexPersistence:
 
         payload = load_or_build_semantic_index(str(tmp_path))
 
-        assert payload["version"] == 6
+        assert payload["version"] == 5
         assert payload["candidates"] == [{"symbol": "freshTarget"}]

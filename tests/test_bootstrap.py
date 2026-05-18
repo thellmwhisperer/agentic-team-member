@@ -92,7 +92,7 @@ def test_prepare_run_context_rejects_partial_deprecated_target_override_before_e
 
     args = SimpleNamespace(issue="unused", source="src/client.ts", symbol=None)
 
-    with pytest.raises(SystemExit, match="deprecated debug overrides"):
+    with pytest.raises(SystemExit, match="Partial --source/--symbol overrides"):
         prepare_run_context(
             args,
             repo=None,
