@@ -33,8 +33,9 @@ _TS_METHOD_RE = re.compile(
     r"^\s*(?:(?:public|private|protected|static|readonly)\s+)*(?:async\s+)?([A-Za-z_$][\w$]*)\s*\(",
 )
 _DEFAULT_SEMANTIC_INDEX_RELATIVE_PATH = Path(".atm/semantic-index.generated.json")
-_SEMANTIC_INDEX_VERSION = 4
+_SEMANTIC_INDEX_VERSION = 6
 _EXCLUDED_DIRS = {
+    ".atm",
     ".cache",
     ".git",
     ".mypy_cache",
@@ -43,6 +44,8 @@ _EXCLUDED_DIRS = {
     ".ruff_cache",
     ".turbo",
     ".venv",
+    ".worktree",
+    ".worktrees",
     "__pycache__",
     "build",
     "coverage",
@@ -274,6 +277,49 @@ _LOW_VALUE_SEAM_MEMBER_HINT_TOKENS = {
     "values",
     "with",
 }
+_API_RETRY_ISSUE_TOKENS = {
+    "429",
+    "500",
+    "503",
+    "api",
+    "apis",
+    "backoff",
+    "external",
+    "rate",
+    "retry",
+    "retries",
+    "server",
+    "transient",
+}
+_API_BOUNDARY_TOKENS = {
+    "analytics",
+    "api",
+    "apis",
+    "auth",
+    "client",
+    "fetch",
+    "googleapis",
+    "oauth",
+    "provider",
+    "providers",
+    "query",
+    "request",
+    "requests",
+    "reports",
+    "upload",
+    "uploads",
+    "update",
+    "updates",
+    "videos",
+}
+_LOCAL_FILE_READER_TOKENS = {
+    "json",
+    "latest",
+    "load",
+    "read",
+    "reader",
+    "report",
+}
 
 
 def build_semantic_index(project_root: str) -> dict:
@@ -359,14 +405,17 @@ def rank_targets(
     issue_tokens = set(_normalize_tokens(issue_text))
     if not issue_tokens:
         return []
+    issue_shape = _classify_issue_shape(issue_tokens)
 
     scored = []
     for candidate in semantic_index["candidates"]:
-        score = _score_candidate(candidate, issue_tokens)
+        score = _score_candidate(candidate, issue_tokens, issue_shape=issue_shape)
         if score <= 0:
             continue
         enriched = dict(candidate)
         enriched["score"] = score
+        if issue_shape:
+            enriched["issue_shape"] = issue_shape
         scored.append(enriched)
 
     scored.sort(key=lambda item: (-item["score"], item["source_path"], item["line_start"], item["symbol"]))
@@ -980,12 +1029,47 @@ def _feature_domains(*, symbol: str, observables: list[str]) -> set[str]:
     return domains
 
 
-def _score_candidate(candidate: dict, issue_tokens: set[str]) -> int:
+def _classify_issue_shape(issue_tokens: set[str]) -> str | None:
+    if issue_tokens & _API_RETRY_ISSUE_TOKENS:
+        return "api_retry"
+    return None
+
+
+def _candidate_token_set(candidate: dict) -> set[str]:
+    tokens: set[str] = set()
+    for key in (
+        "path_tokens",
+        "symbol_tokens",
+        "string_tokens",
+        "terms",
+        "domains",
+        "calls",
+        "observables",
+    ):
+        for item in candidate.get(key, []):
+            tokens.update(_normalize_tokens(str(item)))
+    return tokens
+
+
+def _score_candidate(candidate: dict, issue_tokens: set[str], *, issue_shape: str | None = None) -> int:
     path_overlap = len(issue_tokens & set(candidate["path_tokens"]))
     symbol_overlap = len(issue_tokens & set(candidate["symbol_tokens"]))
     string_overlap = len(issue_tokens & set(candidate["string_tokens"]))
     term_overlap = len(issue_tokens & set(candidate["terms"]))
-    return (path_overlap * 3) + (symbol_overlap * 5) + (string_overlap * 6) + term_overlap
+    score = (path_overlap * 3) + (symbol_overlap * 5) + (string_overlap * 6) + term_overlap
+
+    if issue_shape == "api_retry":
+        candidate_tokens = _candidate_token_set(candidate)
+        api_boundary_signal = candidate_tokens & _API_BOUNDARY_TOKENS
+        local_file_reader_signal = candidate_tokens & _LOCAL_FILE_READER_TOKENS
+        if api_boundary_signal:
+            score += 20 + (len(api_boundary_signal) * 5)
+        else:
+            score -= 15
+        if local_file_reader_signal and not api_boundary_signal:
+            score -= 20
+
+    return score
 
 
 def _normalize_tokens(text: str) -> list[str]:

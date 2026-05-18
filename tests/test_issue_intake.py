@@ -86,6 +86,34 @@ The bot reports 0 months.
     assert "dropped Fix approach before prompting" in contract.warnings
 
 
+def test_preserves_common_github_issue_sections_for_issue_first_discovery():
+    issue = """fix: API retry logic and error resilience
+
+## Description
+Add retry logic with exponential backoff for all external API calls.
+
+## Tasks
+- Apply retry logic to YouTube Analytics API calls
+- Apply retry logic to YouTube Data API calls
+- Log retry attempts for debugging
+
+## Notes
+- Only retry transient errors like 429, 500, and 503.
+- Do not retry auth failures like 401.
+"""
+
+    contract = parse_issue_contract(issue)
+
+    assert contract.rejected is False
+    assert "## Description" in contract.model_text
+    assert "exponential backoff" in contract.model_text
+    assert "## Tasks" in contract.model_text
+    assert "YouTube Analytics API calls" in contract.model_text
+    assert "## Notes" in contract.model_text
+    assert "429, 500, and 503" in contract.model_text
+    assert "dropped unsupported issue section" not in "\n".join(contract.warnings)
+
+
 def test_only_dropped_sections_do_not_fall_back_to_raw_issue_text():
     issue = """## Fix approach
 1. Export handleResub so it can be tested

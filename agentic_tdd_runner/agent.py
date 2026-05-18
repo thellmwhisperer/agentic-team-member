@@ -554,8 +554,16 @@ def parse_args():
     parser.add_argument("--repo", type=str, help="Existing git repo to materialize into an isolated run worktree")
     parser.add_argument("--base-ref", type=str, default="main", help="Git ref used when creating a run worktree")
     parser.add_argument("--run-root", type=str, help="Directory for generated run worktrees (default: REPO/.worktree)")
-    parser.add_argument("--source", type=str, help="Source file path relative to workdir (e.g. src/twitch/client.ts)")
-    parser.add_argument("--symbol", type=str, help="Target function/method name (e.g. handleResub)")
+    parser.add_argument(
+        "--source",
+        type=str,
+        help="[deprecated/debug] Source file override relative to workdir; prefer issue-only discovery",
+    )
+    parser.add_argument(
+        "--symbol",
+        type=str,
+        help="[deprecated/debug] Target function/method override; prefer issue-only discovery",
+    )
     parser.add_argument("--workdir", type=str, help="Project root directory, or destination when --repo is used")
     parser.add_argument("--config", type=str, default=_default_config_path(), help="Path to agent.toml config file")
     parser.add_argument("--log-dir", type=str, default=_default_log_dir(), help="Directory for JSONL logs (default: cwd)")

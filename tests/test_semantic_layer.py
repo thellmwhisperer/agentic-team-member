@@ -55,7 +55,7 @@ class TestSemanticLayerSchema:
 
         index = build_semantic_index(str(tmp_path))
 
-        assert index["version"] == 4
+        assert index["version"] == 6
         assert "files" in index
         assert "symbols" in index
         assert "candidates" in index
