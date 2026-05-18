@@ -4649,18 +4649,18 @@ class TestDiscoveryIntegration:
             "agentic_tdd_runner.discovery.load_or_build_semantic_index",
             lambda project_root: semantic_index,
         )
-        monkeypatch.setattr(
-            "agentic_tdd_runner.discovery.rank_targets",
-            lambda issue_text, project_root, index=None, limit=5: (
-                [{
-                    "source_path": "src/twitch/client.ts",
-                    "symbol": "handleMessage",
-                    "score": 22,
-                }]
-                if index is semantic_index
-                else (_ for _ in ()).throw(AssertionError("rank_targets should receive semantic_index"))
-            ),
-        )
+        def fake_rank_targets(issue_text, project_root, index=None, limit=5):
+            assert issue_text == "bug text"
+            assert project_root == str(tmp_path)
+            assert index is semantic_index
+            assert limit == 5
+            return [{
+                "source_path": "src/twitch/client.ts",
+                "symbol": "handleMessage",
+                "score": 22,
+            }]
+
+        monkeypatch.setattr("agentic_tdd_runner.discovery.rank_targets", fake_rank_targets)
         monkeypatch.setattr(
             "agentic_tdd_runner.cookbook.build_episode_context",
             fake_episode,
