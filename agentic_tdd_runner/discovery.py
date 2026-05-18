@@ -1082,9 +1082,7 @@ def _feature_domains(*, symbol: str, observables: list[str]) -> set[str]:
 def _classify_issue_shape(issue_tokens: set[str]) -> str | None:
     has_retry_signal = bool(issue_tokens & _API_RETRY_WORD_TOKENS)
     has_api_context = bool(issue_tokens & _API_RETRY_CONTEXT_TOKENS)
-    has_rate_limit_signal = "rate" in issue_tokens and bool(
-        issue_tokens & (_API_RATE_LIMIT_TOKENS - {"rate"})
-    )
+    has_rate_limit_signal = bool(issue_tokens & _API_RATE_LIMIT_TOKENS)
     has_status_retry_signal = bool(issue_tokens & _API_RETRY_STATUS_TOKENS) and bool(
         issue_tokens & _API_RETRY_STATUS_CONTEXT_TOKENS
     )
