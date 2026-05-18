@@ -27,7 +27,7 @@ before it asks the model to write tests or fixes.
 | --- | ---: | --- | --- |
 | Handlers, callbacks, event listeners | 25% | strong | Renderer hygiene and type-safe scaffolds still lag the semantic facts. |
 | Services and classes with dependencies | 20% | weak | Class methods, construction, dependency ownership, and fallback effects are under-modeled. |
-| API and SDK integrations | 20% | weak | External callsites, provider error shapes, retry semantics, and issue coverage are not verified. |
+| API and SDK integrations | 20% | partial | A retry utility scaffold shipped in an observed run, but external callsites, provider error shapes, retry semantics, and issue coverage are still not verified. |
 | CLI, scripts, and pipelines | 15% | weak | The runner often ranks entrypoint glue without knowing whether it is the real business target. |
 | Persistence, config, and filesystem | 12% | partial | Facts exist for env, schema, worktrees, and files, but no unified fix strategy exists. |
 | Pure functions and helpers | 8% | partial | The runner finds functions, but can confuse native globals, module state, and semantic state. |
@@ -35,10 +35,10 @@ before it asks the model to write tests or fixes.
 Weighted view:
 
 - Strong: 25%
-- Partial: 20%
-- Weak: 55%
-- Untested: 0% as a named bucket, but CLI and API coverage are close to this
-  in practice.
+- Partial: 40%
+- Weak: 35%
+- Untested: 0% as a named bucket, but CLI and services coverage are close to
+  this in practice.
 
 ## Detailed Matrix
 
