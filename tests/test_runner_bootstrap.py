@@ -2,10 +2,7 @@
 
 import json
 
-from agentic_tdd_runner.runner_bootstrap import (
-    effective_test_command_template,
-    inspect_runner_bootstrap,
-)
+from agentic_tdd_runner.runner_bootstrap import inspect_runner_bootstrap
 
 
 def _write_package(path, payload):
@@ -47,7 +44,6 @@ def test_detects_bun_test_from_script_and_lockfile(tmp_path):
     assert report.package_manager_source == "lockfile:bun.lockb"
     assert report.test_runner == "bun:test"
     assert report.test_command == "bun test src/foo.test.ts"
-    assert effective_test_command_template(report, "npm test") == "bun test"
 
 
 def test_detects_vitest_from_dependencies_without_test_script(tmp_path):
@@ -62,7 +58,6 @@ def test_detects_vitest_from_dependencies_without_test_script(tmp_path):
     assert report.test_runner == "vitest"
     assert report.test_runner_source == "package.json:dependencies"
     assert report.test_command is None
-    assert effective_test_command_template(report, "bun test") == "npm exec -- vitest run"
 
 
 def test_ignores_peer_runner_dependencies_without_test_script(tmp_path):
@@ -86,7 +81,6 @@ def test_does_not_guess_when_dependency_fallback_is_ambiguous(tmp_path):
 
     assert report.test_runner is None
     assert report.test_runner_source == "ambiguous:vitest,jest"
-    assert effective_test_command_template(report, "bun test") == "bun test"
 
 
 def test_detects_bun_test_from_package_manager_without_bun_types(tmp_path):
@@ -110,7 +104,6 @@ def test_detects_node_test_from_script(tmp_path):
 
     assert report.test_runner == "node:test"
     assert report.test_command == "node --test test/*.test.js"
-    assert effective_test_command_template(report, "bun test") == "node --test"
 
 
 def test_keeps_custom_test_script_when_runner_is_unknown(tmp_path):
@@ -123,28 +116,6 @@ def test_keeps_custom_test_script_when_runner_is_unknown(tmp_path):
     assert report.test_runner == "custom"
     assert report.test_runner_source == "package.json:scripts.test"
     assert report.test_command == "turbo run test --filter web"
-    assert effective_test_command_template(report, "bun test") == "bun test"
-
-
-def test_builds_package_manager_specific_runner_templates(tmp_path):
-    (tmp_path / "pnpm-lock.yaml").write_text("")
-    _write_package(tmp_path, {
-        "scripts": {"test": "vitest run"},
-        "devDependencies": {"vitest": "^4.0.0"},
-    })
-
-    report = inspect_runner_bootstrap(tmp_path)
-
-    assert effective_test_command_template(report, "bun test") == "pnpm exec vitest run"
-
-
-def test_builds_runner_template_from_serialized_bootstrap_report():
-    report = {
-        "package_manager": "yarn",
-        "test_runner": "jest",
-    }
-
-    assert effective_test_command_template(report, "bun test") == "yarn jest"
 
 
 def test_detects_wrapped_runner_commands(tmp_path):

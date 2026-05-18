@@ -7,7 +7,7 @@ import shutil
 import subprocess
 from pathlib import Path, PurePosixPath
 
-from agentic_tdd_runner.runner_bootstrap import effective_test_command_template
+from agentic_tdd_runner.runner_command import effective_test_command_template
 
 GIT_COMMAND_TIMEOUT_SECONDS = 10
 
