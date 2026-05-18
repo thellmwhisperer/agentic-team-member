@@ -3,6 +3,7 @@
 import subprocess
 
 from agentic_tdd_runner.paths import find_test_file
+from agentic_tdd_runner.paths import test_runner_command_for_file as command_for_file
 
 
 def _config(exclude_dirs=None):
@@ -12,6 +13,48 @@ def _config(exclude_dirs=None):
             "exclude_dirs": exclude_dirs or [],
         },
     }
+
+
+def test_runner_command_for_file_uses_bootstrap_for_javascript_tests():
+    config = {
+        "runner": {
+            "command": "bun test",
+            "bootstrap": {
+                "package_manager": "pnpm",
+                "test_runner": "vitest",
+            },
+        },
+    }
+
+    assert command_for_file("src/math.test.ts", config) == "pnpm exec vitest run"
+
+
+def test_runner_command_for_file_preserves_configured_fallback_for_custom_runner():
+    config = {
+        "runner": {
+            "command": "turbo run test --filter web",
+            "bootstrap": {
+                "package_manager": "npm",
+                "test_runner": "custom",
+            },
+        },
+    }
+
+    assert command_for_file("src/math.test.ts", config) == "turbo run test --filter web"
+
+
+def test_runner_command_for_file_keeps_pytest_for_python_tests():
+    config = {
+        "runner": {
+            "command": "bun test",
+            "bootstrap": {
+                "package_manager": "pnpm",
+                "test_runner": "vitest",
+            },
+        },
+    }
+
+    assert command_for_file("tests/test_math.py", config) == "python3 -m pytest"
 
 
 def _pretend_git(monkeypatch):

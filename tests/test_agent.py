@@ -1086,6 +1086,12 @@ class TestIsTestPass:
 
     def test_matches_tokenized_test_runner_prefix(self, monkeypatch):
         monkeypatch.setattr("agentic_tdd_runner.agent._last_run_exit_code", 0)
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "runner": {
+                "command": "bun test",
+                "test_file_patterns": ["test_*.py"],
+            },
+        })
         assert _is_test_pass("run_command", {"command": "python3 -m pytest tests/test_agent.py"}) is True
 
     def test_matches_configured_runner_prefix(self, monkeypatch):
