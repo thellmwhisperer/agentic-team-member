@@ -43,14 +43,15 @@ def effective_test_command_template(
 
 
 def runner_version_command(report: Any) -> list[str] | None:
-    """Return a dry-run command that proves the detected JS runner is invocable."""
+    """Return a presence-check command that proves the detected JS runner is invocable."""
     test_runner = _report_value(report, "test_runner")
     if not test_runner or test_runner == "custom":
         return None
 
     if test_runner == "bun:test":
-        return ["bun", "test", "--version"]
+        return ["bun", "--version"]
     if test_runner == "node:test":
+        # node:test ships with node itself; --version validates both.
         return ["node", "--version"]
     if test_runner == "vitest":
         return _package_runner_argv(
