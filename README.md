@@ -277,6 +277,9 @@ For detected JS runners, environment prep also runs a lightweight version
 preflight (`bun --version`, `node --version`, or package-manager wrapper +
 `runner --version`) before the first model tool call. That catches missing local
 runner installs while the failure is still deterministic setup, not agent work.
+Tool execution already runs inside the selected workdir, so generated commands
+should use relative paths directly (`bun test src/foo.test.ts`) instead of
+shelling through `cd path && ...`.
 When a Next.js Jest project has a TypeScript/workspace-coupled Jest config,
 environment prep writes a local `.atm-jest.config.cjs` shim and focused Jest
 runs pass it via `--config` instead of editing the original project config.

@@ -17,7 +17,7 @@
     "type": "function",
     "function": {
       "name": "run_command",
-      "description": "Run a shell command in the repo root and return stdout+stderr. Use for: grep, find, running tests (bun test <file>), git diff, etc.",
+      "description": "Run a shell command with cwd already set to the current run workdir and return stdout+stderr. Use paths relative to that cwd. Do not prefix commands with `cd ... &&`; put the directory or file path in the command itself, e.g. `rg term src` or `bun test src/file.test.ts`.",
       "parameters": {
         "type": "object",
         "required": ["command"],
