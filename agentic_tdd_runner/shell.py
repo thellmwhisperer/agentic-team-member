@@ -180,6 +180,11 @@ def validate_command(command: str) -> None:
         if not tokens:
             continue
         binary = os.path.basename(tokens[0])
+        if binary == "cd":
+            raise ValueError(
+                "`cd` is not allowed; commands run with cwd already set. "
+                "Put the path directly in the command, e.g. `bun test src/file.test.ts`."
+            )
         if binary not in ALLOWED_COMMANDS:
             raise ValueError(
                 f"command '{binary}' is not allowed. "

@@ -41,5 +41,5 @@ def test_build_command_env_accepts_loaded_tooling_config(monkeypatch):
 
 
 def test_validate_command_rejects_cd_chains():
-    with pytest.raises(ValueError, match="command 'cd' is not allowed"):
+    with pytest.raises(ValueError, match="cwd already set"):
         validate_command("cd apps/web && bun test src/client.test.ts")
