@@ -16,6 +16,13 @@ required for issue ingestion and PR creation.)
 It does the work a junior engineer would do on a single, well-scoped issue: read
 the code, write a failing test, fix the bug, verify red-green, and open a PR.
 
+> **Status: alpha.** ATM is a research-grade harness. APIs, config
+> schema, prompt templates, and the verify contract can change without
+> notice. Empirical coverage is uneven across code shapes — see
+> [Coverage](#coverage) (25% strong / 20% partial / 55% weak). Not
+> production-ready. Use on disposable branches and review every PR
+> before merging.
+
 ---
 
 ## Table of contents
