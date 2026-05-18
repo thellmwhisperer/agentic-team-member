@@ -8,7 +8,7 @@ import subprocess
 import tempfile
 from collections.abc import Callable
 
-from agentic_tdd_runner.paths import resolve_repo_path
+from agentic_tdd_runner.paths import resolve_repo_path, test_runner_command_for_file
 
 
 def is_invalid_red_phase_failure(output: str) -> bool:
@@ -97,13 +97,7 @@ def verify_red_green(
     mechanical_edits: list[dict] | None = None,
 ) -> tuple[bool, str]:
     """Verify red-green: test fails without fix, passes with fix."""
-    from agentic_tdd_runner.languages import get_language
-
-    lang = get_language(test_file)
-    if lang and lang.runner == "pytest":
-        run_cmd = "python3 -m pytest"
-    else:
-        run_cmd = config["runner"]["command"]
+    run_cmd = test_runner_command_for_file(test_file, config)
     test_timeout = config["timeouts"]["test_run"]
 
     emit("\n=== RED-GREEN VERIFICATION ===")
