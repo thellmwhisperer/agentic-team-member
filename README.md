@@ -329,8 +329,8 @@ discovery).
 | `--repo`            | Existing git repo to materialize into an isolated run worktree    |
 | `--base-ref`        | Git ref used when creating a run worktree (default `main`)        |
 | `--run-root`        | Directory for generated run worktrees (default `REPO/.worktree`)  |
-| `--source`          | Source file path relative to workdir (e.g. `src/twitch/client.ts`) |
-| `--symbol`          | Target function/method name (e.g. `handleResub`)                  |
+| `--source`          | Source file path relative to workdir (e.g. `src/payments/processor.ts`) |
+| `--symbol`          | Target function/method name (e.g. `processPayment`)                |
 | `--workdir`         | Project root, or destination when `--repo` is used                |
 | `--config`          | Path to agent.toml config file                                    |
 | `--log-dir`         | Directory for JSONL logs (default `cwd`)                          |
