@@ -280,6 +280,11 @@ runner installs while the failure is still deterministic setup, not agent work.
 When a Next.js Jest project has a TypeScript/workspace-coupled Jest config,
 environment prep writes a local `.atm-jest.config.cjs` shim and focused Jest
 runs pass it via `--config` instead of editing the original project config.
+That shim is a bootstrap fallback, not a pass-through clone of the original
+config: it does not preserve custom keys such as `moduleNameMapper`, custom
+`transform`, reporters, or coverage thresholds. For non-trivial Next.js Jest
+configs, set `[runner].command` explicitly until ATM can safely preserve those
+project-specific settings.
 
 ---
 

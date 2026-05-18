@@ -33,18 +33,38 @@ JEST_CONFIG_FILENAMES = (
 JEST_SHIM_FILENAME = ".atm-jest.config.cjs"
 NODE_BUILTIN_MODULES = {
     "assert",
+    "async_hooks",
     "buffer",
     "child_process",
+    "cluster",
+    "console",
     "crypto",
+    "dgram",
+    "dns",
     "events",
     "fs",
+    "http",
+    "https",
+    "inspector",
     "module",
+    "net",
     "os",
+    "perf_hooks",
     "path",
     "process",
+    "querystring",
+    "readline",
+    "repl",
     "stream",
+    "string_decoder",
+    "timers",
+    "tls",
+    "tty",
     "url",
     "util",
+    "vm",
+    "worker_threads",
+    "zlib",
 }
 
 
@@ -117,7 +137,8 @@ def ensure_generated_test_config(report: RunnerBootstrapReport) -> Path | None:
     shim_path = Path(report.test_config_path)
     if not shim_path.is_absolute():
         shim_path = package_dir / shim_path
-    content = _render_next_jest_shim(package_dir)
+    original_path = Path(report.original_test_config_path) if report.original_test_config_path else None
+    content = _render_next_jest_shim(package_dir, original_path)
     existing = shim_path.read_text() if shim_path.is_file() else None
     if existing != content:
         shim_path.write_text(content)
@@ -373,7 +394,7 @@ def _needs_next_jest_shim(config_path: Path, pkg: dict) -> bool:
 
 def _config_imports(config_path: Path) -> set[str]:
     try:
-        text = config_path.read_text()
+        text = _strip_javascript_comments(config_path.read_text())
     except OSError:
         return set()
     imports = set()
@@ -385,6 +406,11 @@ def _config_imports(config_path: Path) -> set[str]:
     for pattern in patterns:
         imports.update(re.findall(pattern, text))
     return imports
+
+
+def _strip_javascript_comments(text: str) -> str:
+    text = re.sub(r"/\*.*?\*/", "", text, flags=re.DOTALL)
+    return "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("//"))
 
 
 def _is_unresolved_config_import(specifier: str, pkg: dict) -> bool:
@@ -419,7 +445,10 @@ def _dependency_version(pkg: dict, package_name: str) -> str | None:
     return None
 
 
-def _render_next_jest_shim(package_dir: Path) -> str:
+def _render_next_jest_shim(package_dir: Path, original_config_path: Path | None) -> str:
+    test_environment = _detect_jest_test_environment(original_config_path) or _infer_next_jest_test_environment(
+        package_dir,
+    )
     setup_files = [
         f"./{name}"
         for name in ("jest.setup.js", "jest.setup.ts", "setupTests.js", "setupTests.ts")
@@ -435,12 +464,43 @@ def _render_next_jest_shim(package_dir: Path) -> str:
         "const createJestConfig = nextJest({ dir: './' });\n"
         "\n"
         "const customJestConfig = {\n"
-        "  testEnvironment: 'jest-environment-jsdom',\n"
+        f"  testEnvironment: {json.dumps(test_environment)},\n"
         f"{setup_line}"
         "};\n"
         "\n"
         "module.exports = createJestConfig(customJestConfig);\n"
     )
+
+
+def _detect_jest_test_environment(config_path: Path | None) -> str | None:
+    if not config_path:
+        return None
+    try:
+        text = _strip_javascript_comments(config_path.read_text())
+    except OSError:
+        return None
+    match = re.search(r"\btestEnvironment\s*:\s*['\"]([^'\"]+)['\"]", text)
+    if match:
+        return match.group(1)
+    match = re.search(r"['\"]testEnvironment['\"]\s*:\s*['\"]([^'\"]+)['\"]", text)
+    if match:
+        return match.group(1)
+    return None
+
+
+def _infer_next_jest_test_environment(package_dir: Path) -> str:
+    server_globs = (
+        "pages/api/**/*.[jt]s",
+        "pages/api/**/*.[jt]sx",
+        "app/**/route.[jt]s",
+        "app/**/route.[jt]sx",
+        "app/**/actions.[jt]s",
+        "app/**/actions.[jt]sx",
+    )
+    for pattern in server_globs:
+        if any(package_dir.glob(pattern)):
+            return "node"
+    return "jest-environment-jsdom"
 
 
 def _runner_dependencies(pkg: dict) -> set[str]:
