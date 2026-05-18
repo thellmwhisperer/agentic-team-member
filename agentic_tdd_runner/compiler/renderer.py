@@ -29,9 +29,12 @@ def _build_bun_scaffold(contract):
     assertion_surface = contract["assertion_surface"]
     params = _signature_params_for_target(target)
 
-    imports_block = "import { describe, expect, mock, test } from 'bun:test';"
-
     module_mocks_block = _render_module_mocks(module_load_dependencies, declare_spies=True)
+    imports_block = _render_bun_imports(
+        needs_mock=_bun_scaffold_needs_mock(
+            module_mocks_block, execution_dependencies, injection_plan,
+        ),
+    )
 
     import_names = [target_name]
     for binding, plan in injection_plan.items():
@@ -46,7 +49,7 @@ def _build_bun_scaffold(contract):
     else:
         module_mocks_block = f"import {{ {', '.join(import_names)} }} from '{source_import_path}';"
 
-    arrange_lines = []
+    arrange_lines = [_render_ts_todo_helper()]
     todo_slots = []
     for dep in execution_dependencies:
         binding = dep["binding"]
@@ -80,13 +83,13 @@ def _build_bun_scaffold(contract):
                 todo_slots.append(f"inject_{binding}_seam")
 
     for param in params:
-        arrange_lines.append(f"const {param} = /* TODO */;")
+        arrange_lines.append(f"const {param} = __todoValue('value_for_{param}');")
         todo_slots.append(f"value_for_{param}")
 
-    expected_name = "expected_message"
-    if assertion_surface["kind"] != "outbound_call_arguments":
-        expected_name = "expected_value"
-    arrange_lines.append(f"const {expected_name} = /* TODO */;")
+    expected_name = "expected_value"
+    arrange_lines.append(
+        f"const {expected_name} = __todoValue('expected_assertion_value');"
+    )
     todo_slots.append("expected_assertion_value")
 
     act_args = ", ".join(params)
@@ -94,7 +97,9 @@ def _build_bun_scaffold(contract):
         act_block = f"const result = {target_name}({act_args});"
     else:
         act_block = f"{target_name}({act_args});"
-    assert_block = _render_assertion(assertion_surface, runner="bun:test")
+    assert_block = _render_assertion(
+        assertion_surface, runner="bun:test", call_params=params,
+    )
     if "TODO" in assert_block:
         todo_slots.append("assertion_surface_binding")
 
@@ -284,6 +289,35 @@ def _safe_identifier(value):
     return re.sub(r"\W+", "_", str(value)).strip("_") or "value"
 
 
+def _render_bun_imports(*, needs_mock):
+    imports = ["describe", "expect", "test"]
+    if needs_mock:
+        imports.insert(2, "mock")
+    return f"import {{ {', '.join(imports)} }} from 'bun:test';"
+
+
+def _bun_scaffold_needs_mock(module_mocks_block, execution_dependencies, injection_plan):
+    if module_mocks_block:
+        return True
+    for dep in execution_dependencies:
+        if dep.get("strategy") != "set_test_seam":
+            continue
+        binding = dep["binding"]
+        observed = dep.get("observed_members") or []
+        plan = injection_plan.get(binding, {})
+        if observed or not plan.get("setter_name"):
+            return True
+    return False
+
+
+def _render_ts_todo_helper():
+    return (
+        "const __todoValue = (slot: string) => {\n"
+        "  throw new Error(`TODO: ${slot}`);\n"
+        "};"
+    )
+
+
 def _render_ts_mock():
     return "mock(() => undefined)"
 
@@ -406,10 +440,11 @@ def _render_binding_value(
 
 
 
-def _render_assertion(assertion_surface, *, runner):
+def _render_assertion(assertion_surface, *, runner, call_params=None):
     kind = assertion_surface["kind"]
     binding = assertion_surface["binding"]
     member = assertion_surface["member"]
+    call_params = call_params or []
     if kind == "outbound_call_arguments":
         spy_name = f"{binding}_{member}_spy"
         if runner == "pytest":
@@ -417,15 +452,16 @@ def _render_assertion(assertion_surface, *, runner):
                 f"{spy_name}.assert_called_with("
                 "..., expected_value)"
             )
+        first_arg = call_params[0] if call_params else "__todoValue('assertion_arg_1')"
         return (
             f"expect({spy_name}).toHaveBeenCalledWith("
-            "/* TODO: channel */, expected_message);"
+            f"{first_arg}, expected_value);"
         )
     if kind == "outbound_call":
         spy_name = f"{binding}_spy"
         if runner == "pytest":
             return f"{spy_name}.assert_called_with(expected_value)"
-        return f"expect({spy_name}).toHaveBeenCalledWith(expected_message);"
+        return f"expect({spy_name}).toHaveBeenCalledWith(expected_value);"
     if kind == "return_value":
         if runner == "pytest":
             return "assert result == expected_value"

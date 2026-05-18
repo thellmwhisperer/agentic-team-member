@@ -409,7 +409,7 @@ class TestCookbookGuardrails:
         result = generate_cookbook("src/handler.ts", "handleResub", str(tmp_path))
         assert "Do not change the target's runtime signature just to fit the test scaffold." in result
         assert "Write the first failing test against the real callable contract from source." in result
-        assert "For callbacks, handlers, and framework listeners, preserve the production contract." in result
+        assert "For callbacks, handlers, and framework listeners: preserve the production contract" in result
 
 
 class TestSingleParamArrowFunction:
@@ -644,8 +644,8 @@ class TestRegressionScopeGuidance:
         result = generate_cookbook("src/math.ts", "chooseMonths", str(tmp_path))
 
         assert "contrastive fixtures" in result
-        assert "wrong observed value" in result
-        assert "correct expected value" in result
+        assert "issue or source shows competing inputs" in result
+        assert "issue-grounded competing values" in result
 
 
 class TestCallbackContractGuidance:
@@ -683,8 +683,7 @@ class TestCallbackContractGuidance:
         result = generate_cookbook("src/client.ts", "handleEvent", str(tmp_path))
 
         assert "use exported framework types or overloads" in result
-        assert "Never use empty-object casts" in result
-        assert "preserve the original positional value as fallback" in result
-        assert "fallbacks after parsing/validation" in result
-        assert "rg SubUserstate node_modules/@types" in result
-        assert "missing-or-invalid metadata fallback" in result
+        assert "empty-object casts" in result
+        assert "preserve fallback values only when the real contract requires them" in result
+        assert "rg SomeType node_modules/@types" in result
+        assert "metadata fallback" not in result
