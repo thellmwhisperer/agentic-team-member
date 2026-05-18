@@ -101,6 +101,27 @@ class TestFactoryDependency:
         assert "response" in result
 
 
+class TestBunMockHygiene:
+    """Bun cookbook examples should not teach cast-only mock returns."""
+
+    def test_uses_void_spies_without_cast_returns(self, tmp_path):
+        _write_file(tmp_path, "src/service.ts", """\
+            import { getLogger } from '../logger';
+
+            const logger = getLogger();
+
+            export function process(): void {
+              logger.info('start');
+            }
+        """)
+        result = generate_cookbook("src/service.ts", "process", str(tmp_path))
+
+        assert "mock(() => undefined)" in result
+        assert "undefined as" not in result
+        assert "as never" not in result
+        assert "cast-only returns" in result
+
+
 class TestModuleLocalMutable:
     """Module-local mutable binding (let client) → test seam setter."""
 
@@ -388,7 +409,7 @@ class TestCookbookGuardrails:
         result = generate_cookbook("src/handler.ts", "handleResub", str(tmp_path))
         assert "Do not change the target's runtime signature just to fit the test scaffold." in result
         assert "Write the first failing test against the real callable contract from source." in result
-        assert "For callbacks, handlers, and framework listeners, preserve the production contract." in result
+        assert "For callbacks, handlers, and framework listeners: preserve the production contract" in result
 
 
 class TestSingleParamArrowFunction:
@@ -623,8 +644,8 @@ class TestRegressionScopeGuidance:
         result = generate_cookbook("src/math.ts", "chooseMonths", str(tmp_path))
 
         assert "contrastive fixtures" in result
-        assert "wrong observed value" in result
-        assert "correct expected value" in result
+        assert "issue or source shows competing inputs" in result
+        assert "issue-grounded competing values" in result
 
 
 class TestCallbackContractGuidance:
@@ -662,8 +683,7 @@ class TestCallbackContractGuidance:
         result = generate_cookbook("src/client.ts", "handleEvent", str(tmp_path))
 
         assert "use exported framework types or overloads" in result
-        assert "Never use empty-object casts" in result
-        assert "preserve the original positional value as fallback" in result
-        assert "fallbacks after parsing/validation" in result
-        assert "rg SubUserstate node_modules/@types" in result
-        assert "missing-or-invalid metadata fallback" in result
+        assert "empty-object casts" in result
+        assert "preserve fallback values only when the real contract requires them" in result
+        assert "rg SomeType node_modules/@types" in result
+        assert "metadata fallback" not in result

@@ -121,8 +121,8 @@ def test_renders_module_mocks_and_source_import():
     contract = build_contract(_handle_resub_facts())
     block = contract["scaffold"]["module_mocks_block"]
     assert "mock.module('../logger'" in block
-    assert "const logger_event_spy = mock(() => undefined as never);" in block
-    assert "const streamSummaryManager_trackResub_spy = mock(() => undefined as never);" in block
+    assert "const logger_event_spy = mock(() => undefined);" in block
+    assert "const streamSummaryManager_trackResub_spy = mock(() => undefined);" in block
     assert "getLogger: () => ({" in block
     assert "log: {" in block
     assert "event: logger_event_spy" in block
@@ -152,8 +152,8 @@ def test_module_mock_spies_are_scoped_per_dependency():
 
     block = build_contract(facts)["scaffold"]["module_mocks_block"]
 
-    assert "const primaryLogger_info_spy = mock(() => undefined as never);" in block
-    assert "const secondaryLogger_info_spy = mock(() => undefined as never);" in block
+    assert "const primaryLogger_info_spy = mock(() => undefined);" in block
+    assert "const secondaryLogger_info_spy = mock(() => undefined);" in block
     primary_block = block.split("mock.module('../primary-logger'", 1)[1].split("mock.module('../secondary-logger'", 1)[0]
     secondary_block = block.split("mock.module('../secondary-logger'", 1)[1]
     assert "info: primaryLogger_info_spy" in primary_block
@@ -164,12 +164,13 @@ def test_module_mock_spies_are_scoped_per_dependency():
 def test_renders_arrange_act_and_assert_blocks():
     contract = build_contract(_handle_resub_facts())
     scaffold = contract["scaffold"]
-    assert "const client_say_spy = mock(() => undefined as never);" in scaffold["arrange_block"]
-    assert "const channel = /* TODO */;" in scaffold["arrange_block"]
+    assert "const client_say_spy = mock(() => undefined);" in scaffold["arrange_block"]
+    assert "const channel = __todoValue('value_for_channel');" in scaffold["arrange_block"]
+    assert "const expected_value = __todoValue('expected_assertion_value');" in scaffold["arrange_block"]
     assert scaffold["act_block"] == "handleResub(channel, username, months);"
     assert (
         scaffold["assert_block"]
-        == "expect(client_say_spy).toHaveBeenCalledWith(/* TODO: channel */, expected_message);"
+        == "expect(client_say_spy).toHaveBeenCalledWith(channel, expected_value);"
     )
 
 
@@ -182,6 +183,49 @@ def test_rendered_test_contains_minimal_template():
     assert "handleResub(channel, username, months);" in rendered
 
 
+def test_bun_scaffold_does_not_emit_cast_only_mock_returns():
+    contract = build_contract(_handle_resub_facts())
+    rendered = contract["scaffold"]["rendered_test"]
+    assert "mock(() => undefined)" in rendered
+    assert "undefined as" not in rendered
+    assert "as never" not in rendered
+
+
+def test_bun_scaffold_uses_valid_todo_values():
+    contract = build_contract(_handle_resub_facts())
+    rendered = contract["scaffold"]["rendered_test"]
+    assert "const __todoValue = (slot: string) =>" in rendered
+    assert "/* TODO */" not in rendered
+    assert "/* TODO: channel */" not in rendered
+
+
+def test_bun_scaffold_uses_first_param_not_hardcoded_channel_for_assertion():
+    facts = _handle_resub_facts()
+    facts["target"]["signature"] = "sendAlert(roomId: string, message: string): void"
+    contract = build_contract(facts)
+    assert (
+        contract["scaffold"]["assert_block"]
+        == "expect(client_say_spy).toHaveBeenCalledWith(roomId, expected_value);"
+    )
+
+
+def test_bun_scaffold_omits_mock_import_when_unused():
+    facts = _handle_resub_facts()
+    facts["module_load_dependencies"] = []
+    facts["execution_dependencies"] = []
+    facts["injection_plan"] = []
+    facts["assertion_surface"] = {
+        "kind": "return_value",
+        "binding": "handleResub",
+        "member": "return",
+    }
+
+    rendered = build_contract(facts)["scaffold"]["rendered_test"]
+
+    assert "import { describe, expect, test } from 'bun:test';" in rendered
+    assert "import { describe, expect, mock, test } from 'bun:test';" not in rendered
+
+
 def test_renderer_uses_typescript_signature_parser_for_optional_params():
     facts = _handle_resub_facts()
     facts["target"]["signature"] = "handleResub(channel?: string, months: number): void"
@@ -189,8 +233,8 @@ def test_renderer_uses_typescript_signature_parser_for_optional_params():
     contract = build_contract(facts)
     scaffold = contract["scaffold"]
 
-    assert "const channel = /* TODO */;" in scaffold["arrange_block"]
-    assert "const channel? = /* TODO */;" not in scaffold["arrange_block"]
+    assert "const channel = __todoValue('value_for_channel');" in scaffold["arrange_block"]
+    assert "const channel? = __todoValue('value_for_channel?');" not in scaffold["arrange_block"]
     assert scaffold["act_block"] == "handleResub(channel, months);"
 
 

@@ -704,7 +704,7 @@ def build_duplicated_setup_judge_prompt(file_path: str, file_text: str, duplicat
         Example 2
         Repeated lines:
         - handleResub(channel, username, streakMonths, message, userstate);
-        - expect(client_say_spy).toHaveBeenCalledWith(channel, expected_message);
+        - expect(client_say_spy).toHaveBeenCalledWith(channel, expected_value);
         Answer: NO
 
         Test file:
