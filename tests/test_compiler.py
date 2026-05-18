@@ -121,8 +121,8 @@ def test_renders_module_mocks_and_source_import():
     contract = build_contract(_handle_resub_facts())
     block = contract["scaffold"]["module_mocks_block"]
     assert "mock.module('../logger'" in block
-    assert "const logger_event_spy = mock(() => undefined as never);" in block
-    assert "const streamSummaryManager_trackResub_spy = mock(() => undefined as never);" in block
+    assert "const logger_event_spy = mock(() => undefined);" in block
+    assert "const streamSummaryManager_trackResub_spy = mock(() => undefined);" in block
     assert "getLogger: () => ({" in block
     assert "log: {" in block
     assert "event: logger_event_spy" in block
@@ -152,8 +152,8 @@ def test_module_mock_spies_are_scoped_per_dependency():
 
     block = build_contract(facts)["scaffold"]["module_mocks_block"]
 
-    assert "const primaryLogger_info_spy = mock(() => undefined as never);" in block
-    assert "const secondaryLogger_info_spy = mock(() => undefined as never);" in block
+    assert "const primaryLogger_info_spy = mock(() => undefined);" in block
+    assert "const secondaryLogger_info_spy = mock(() => undefined);" in block
     primary_block = block.split("mock.module('../primary-logger'", 1)[1].split("mock.module('../secondary-logger'", 1)[0]
     secondary_block = block.split("mock.module('../secondary-logger'", 1)[1]
     assert "info: primaryLogger_info_spy" in primary_block
@@ -164,7 +164,7 @@ def test_module_mock_spies_are_scoped_per_dependency():
 def test_renders_arrange_act_and_assert_blocks():
     contract = build_contract(_handle_resub_facts())
     scaffold = contract["scaffold"]
-    assert "const client_say_spy = mock(() => undefined as never);" in scaffold["arrange_block"]
+    assert "const client_say_spy = mock(() => undefined);" in scaffold["arrange_block"]
     assert "const channel = /* TODO */;" in scaffold["arrange_block"]
     assert scaffold["act_block"] == "handleResub(channel, username, months);"
     assert (
@@ -180,6 +180,14 @@ def test_rendered_test_contains_minimal_template():
     assert "describe('handleResub'" in rendered
     assert "test('TODO behavior'" in rendered
     assert "handleResub(channel, username, months);" in rendered
+
+
+def test_bun_scaffold_does_not_emit_cast_only_mock_returns():
+    contract = build_contract(_handle_resub_facts())
+    rendered = contract["scaffold"]["rendered_test"]
+    assert "mock(() => undefined)" in rendered
+    assert "undefined as" not in rendered
+    assert "as never" not in rendered
 
 
 def test_renderer_uses_typescript_signature_parser_for_optional_params():

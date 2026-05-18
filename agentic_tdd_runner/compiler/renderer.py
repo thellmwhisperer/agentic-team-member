@@ -285,7 +285,7 @@ def _safe_identifier(value):
 
 
 def _render_ts_mock():
-    return "mock(() => undefined as never)"
+    return "mock(() => undefined)"
 
 
 def _module_spy_extractions(dependencies):
