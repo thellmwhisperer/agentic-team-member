@@ -5,7 +5,6 @@
 [![tests](https://img.shields.io/badge/tests-passing-brightgreen)](#status)
 [![python](https://img.shields.io/badge/python-3.12%2B-blue)](#requirements)
 [![status](https://img.shields.io/badge/status-alpha-orange)](#status)
-[![license](https://img.shields.io/badge/license-MIT-lightgrey)](#license)
 
 ATM is a small Python harness that turns a local code model (Qwen 3.5 27B / 4B on
 [llama-server](https://github.com/ggml-org/llama.cpp) or [Ollama](https://ollama.ai))
@@ -24,13 +23,10 @@ the code, write a failing test, fix the bug, verify red-green, and open a PR.
 - [The cookbook](#the-cookbook)
 - [Skills](#skills)
 - [Language plugins](#language-plugins)
-- [Architecture deep dive](#architecture-deep-dive)
-- [Benchmark](#benchmark)
 - [Configuration](#configuration)
 - [Installation](#installation)
 - [Usage](#usage)
-- [Road to OSS](#road-to-oss)
-- [Contributing](#contributing)
+- [Roadmap](#roadmap)
 - [Status](#status)
 - [License](#license)
 
@@ -44,17 +40,16 @@ context window and no network egress.
 
 That constraint shaped every design decision:
 
-- **The cookbook does the thinking the model can't.** Local models can write
-  code, but they get lost in dependency graphs. ATM parses imports, traces
-  factory calls, classifies module-level mutables, and hands the model a ready
-  mock recipe before the first turn.
+- **Deterministic prep does the thinking the model can't.** Local models can
+  write code, but they get lost in dependency graphs. ATM parses imports,
+  traces factory calls, classifies module-level mutables, and hands the model
+  a ready mock recipe before the first turn.
 - **Phased prompting beats clever planning.** Two short, focused phases
   (test-first, then quality-fix) outperform open-ended ReAct loops on a small
   model.
-- **KV cache is a budget.** The system prompt is built once and never mutated.
-  File reads are deduped by `st_mtime_ns`. Compaction only fires above 85% of
-  the context window. A 27B model reaches green in 4 steps because we never
-  burn its attention on re-reading the same file.
+- **The contract is explicit.** Red-green verification and a deterministic
+  quality gate sit between the model and your branch. The model can't ship a
+  fix that doesn't reproduce and resolve the failure.
 
 ---
 
@@ -100,61 +95,28 @@ flowchart TB
 ```
 
 Blue blocks are deterministic Python. The single yellow block is where the
-local model runs. Putting as much as possible into deterministic blocks is the
-whole game — every step that doesn't need an LLM is one less round-trip, one
-less chance for the model to drift, and one less cache miss.
-
-### Inside the agent loop
-
-```mermaid
-sequenceDiagram
-    autonumber
-    participant H as Harness
-    participant M as Local Model
-    participant T as Test Runner
-
-    H->>M: System prompt + issue + cookbook
-    Note over H,M: KV cache built once, never mutated
-    M->>H: tool_call(read_file)
-    H-->>M: file content (or "unchanged" stub)
-    M->>H: tool_call(create_file: test)
-    H->>T: run test (must FAIL)
-    T-->>H: red ✗
-    H-->>M: failure output + "Step N/M"
-    M->>H: tool_call(str_replace_editor: source fix)
-    H->>T: run test (must PASS)
-    T-->>H: green ✓
-    M->>H: DONE
-    H->>H: Red-green verify (revert + rerun)
-    H->>H: Quality gate (typecheck/lint/format)
-    opt quality issues
-        H-->>M: compact feedback
-        M->>H: fixes
-    end
-```
-
-The harness never asks the model to plan, summarize, or reflect. Every turn is
-either a tool call or `DONE`. The model is fast because we ask it to do one
-small thing at a time.
+local model runs. Each deterministic block in front of the model is one less
+round-trip, one less chance for the model to drift, and one less surface for
+unverified output to slip through.
 
 ---
 
 ## The cookbook
 
-Local models (4B–27B) can fix source code but cannot resolve complex mocking
-graphs. Without help, a 27B will spend 15+ steps figuring out what to mock,
-often getting stuck in loops. The cookbook is the semantic prep that closes
-that gap.
+Local models can fix source code but cannot resolve complex mocking graphs.
+The cookbook is the semantic prep that closes that gap — deterministic static
+analysis of the target function, emitted as ready-to-use context for the
+model.
 
-| Cookbook output       | What it solves                                                                                  |
-| --------------------- | ----------------------------------------------------------------------------------------------- |
-| Import map            | Resolves `from x import y` and `import { y } from "x"` across TS/Python                         |
-| Dependency graph      | Factory results (`const log = getLogger()`) vs singletons vs mutable locals (`let client`)      |
-| Mock recipes          | `mock.module()` for imports, setter injection for module-level mutables                         |
+| Cookbook output        | What it solves                                                                                  |
+| ---------------------- | ----------------------------------------------------------------------------------------------- |
+| Import map             | Resolves `from x import y` and `import { y } from "x"` across TS/Python                         |
+| Dependency graph       | Factory results (`const log = getLogger()`) vs singletons vs mutable locals (`let client`)      |
+| Mock recipes           | `mock.module()` for imports, setter injection for module-level mutables                         |
 | Module-level factories | Includes deps that execute on import even if the target function doesn't use them directly     |
-| Assertion ranking     | Outbound calls scored (`say` > `emit` > `info` > `get`); calls on parameters skipped           |
-| Class vs function     | Detects methods vs top-level functions; emits correct import + instantiation in the scaffold    |
-| Test scaffold         | A ready-to-fill test file with imports, mocks, seams, and a single `it()` block                 |
+| Assertion ranking      | Outbound calls scored (`say` > `emit` > `info` > `get`); calls on parameters skipped           |
+| Class vs function      | Detects methods vs top-level functions; emits correct import + instantiation in the scaffold    |
+| Test scaffold          | A ready-to-fill test file with imports, mocks, seams, and a single test block                   |
 
 Everything in the cookbook is deterministic Python — no LLM is involved in its
 generation. The model only sees the result.
@@ -196,9 +158,9 @@ flowchart LR
 
 Dependabot opens a PR bumping a dependency from v3 to v4, but it doesn't fix
 the breaking changes. You read the migration guide, understand what broke, and
-fix it file by file. Renovate doesn't fix this either. No tool in the
-ecosystem closes this gap today — and a local-first agent with a cookbook
-that ingests the upgrade guide is exactly the right shape for it.
+fix it file by file. Renovate doesn't fix this either. A local-first agent
+with a cookbook that ingests the upgrade guide is the right shape for that
+gap.
 
 ### The skill pattern
 
@@ -225,7 +187,6 @@ agentic_tdd_runner/languages/
   typescript.py   # TS/JS: bun:test/jest/vitest, mock.module(), export detection
   python.py       # Python: pytest, unittest.mock, class method support
   signature.py    # Shared helpers for parsing parameter lists
-  # go.py         # Future: go test, interfaces
 ```
 
 Each plugin implements: `parse_imports`, `parse_assignments`,
@@ -234,132 +195,10 @@ Each plugin implements: `parse_imports`, `parse_assignments`,
 
 ---
 
-## Architecture deep dive
-
-The agent loop is a harness around a local LLM. Every design decision
-optimizes for fewer steps and higher KV cache hit rates.
-
-### Phased prompting
-
-The agent runs in two phases with distinct prompts:
-
-1. **Phase 1 (test-first)** — the model receives the bug description, the
-   cookbook output (mocks, seams, assertion hints), and a prompt that says
-   "write a failing test, then fix the source." This eliminates source-first
-   drift; the model goes straight to TDD.
-2. **Phase 2 (quality fix)** — after red-green verification, quality issues
-   (`: any`, missing types, lint) are fed back. The model fixes only what's
-   listed.
-
-A step-counter nudge (`Step N/M`) is appended as the last user message on each
-turn. The placement is deliberate — appending at the tail preserves the KV
-cache prefix for every preceding message.
-
-### Context management
-
-The system prompt is built once before the loop and never mutated. This makes
-it byte-identical across turns, so llama-server reuses 100% of the KV cache
-for the system prompt on every step.
-
-After a quality failure, the runner decides whether to compact based on actual
-token usage:
-
-- **Below 85% of context window** — preserve all messages, append quality
-  feedback. The model keeps full context and doesn't re-read files.
-- **Above 85%** — compact to three messages (system prompt, issue, quality
-  feedback) as a safety net.
-
-In practice, most runs never compact. The handleResub benchmark uses ~9k of
-32k tokens at the quality boundary; compacting there destroyed useful context
-and added 2–3 steps of re-reading.
-
-### File read dedup
-
-The runner tracks the last `st_mtime_ns` seen for every `read_file` path. If
-the model re-reads an unchanged file, it gets a stub: *"File unchanged since
-last read. Refer to the earlier content."*
-
-The cache is invalidated when `str_replace_editor` or `create_file` modifies
-the file (explicit `pop`) and cleared entirely on compaction (the model loses
-the original tool result, so the cache must reset).
-
-### Reactive feedback
-
-After every `str_replace_editor` or `create_file`, the runner runs the
-project's typecheck and feeds errors back inline in the tool result. The model
-sees the tsc error immediately, not on the next test run. This cuts a full
-round-trip per type error.
-
-### TypeScript pill
-
-An optional ~250-token block of standard TypeScript handbook material in the
-system prompt:
-
-- How to read structured tsc errors (the target type appears in continuation
-  lines)
-- Type narrowing techniques (`typeof`, truthiness, equality, `in`, `String()`)
-- Type import syntax (`import type { T }`)
-
-This isn't model-specific instruction — it's reference material. It reduces
-quality-phase steps by teaching the model to read tsc output instead of
-searching for types.
-
----
-
-## Benchmark
-
-Same bug (handleResub cumulative months), same issue text, clean worktree each
-run.
-
-### Current results (phased runner + quality gate)
-
-| Run | Config         | Thinking | Green | Done | Notes                                       |
-| --- | -------------- | -------- | ----- | ---- | ------------------------------------------- |
-| r32 | base           | on       | 4     | 15   | baseline with quality gate                  |
-| r34 | pill, 4B       | on       | 5     | 21   | 4B model, TypeScript pill validated         |
-| r36 | pill           | on       | 4     | 11   | best pre-optimization                       |
-| r38 | base           | off      | ~5    | 19   | `thinking_budget_tokens=0`                  |
-| r39 | pill+nothink   | off      | 7     | 16   | pill compensates for no thinking            |
-| r41 | pill+think     | on       | 4     | **10** | threshold compact + read dedup            |
-
-*Green* = step where the test passes. *Done* = total steps including quality
-fixes and PR.
-
-### Key findings
-
-- **27B is deterministic** — green at step 4 in every 27B run. Variance is
-  only in the quality phase.
-- **TypeScript pill matters** — ~250 tokens of TS handbook reference
-  (narrowing, reading tsc errors, type imports) reduces quality-phase steps
-  significantly.
-- **Thinking matters in the quality phase** — the model uses extended
-  reasoning to resolve type narrowing (`string | true` → `String()`). Without
-  thinking, it takes more steps.
-- **Context preservation beats compaction** — compacting at 9k/32k (28%
-  usage) destroyed useful context and forced re-reads. Threshold-based
-  compaction (85%) preserves context when there's headroom.
-- **File read dedup pays for itself** — `st_mtime_ns`-keyed cache avoids
-  re-reading unchanged files. Invalidated on edit/write, cleared on
-  compaction.
-
-### Earlier results (pre-phased runner)
-
-| Run | Model         | Steps | Result    |
-| --- | ------------- | ----- | --------- |
-| R1  | 27B distilled | 23    | VERIFIED  |
-| R2  | 27B distilled | 18    | VERIFIED  |
-| R3  | 27B base      | 15    | VERIFIED  |
-| R4  | 4B            | 44+   | FAIL      |
-
-Without the cookbook, the 27B ran 33+ steps (~90 min) and never finished.
-
----
-
 ## Configuration
 
 Per-run configuration in TOML. Multiple presets live in `config/` for
-different models and strategies (`agent.toml`, `agent-r33-4b.toml`,
-`agent-r39-27b-pill-nothink.toml`, etc.).
+different models and strategies.
 
 ```toml
 [agent]
@@ -373,7 +212,6 @@ model = "qwen3.5-27b"
 temperature = 0.6
 top_p = 0.95
 top_k = 20
-# thinking_budget_tokens = 0   # optional: disable thinking per-request
 
 [timeouts]
 tool_execution = 60
@@ -428,10 +266,10 @@ reference.
 ```bash
 git clone https://github.com/thellmwhisperer/agentic-team-member.git
 cd agentic-team-member
-pip install requests
+pip install 'requests>=2.31,<3'
 ```
 
-There's no published package yet — clone and run from source.
+There is no published package yet — clone and run from source.
 
 ---
 
@@ -459,9 +297,6 @@ llama-server \
   --ctx-size 32768 --n-gpu-layers 999 \
   --jinja --no-webui
 ```
-
-Don't pass `--reasoning-budget` to the server — ATM controls it per-request
-via `thinking_budget_tokens` in the config.
 
 ### Run the agent
 
@@ -502,78 +337,47 @@ discovery).
 
 ### Environment variables
 
-Runtime defaults can come from `.env` in the current directory:
+| Variable                       | Effect                                                |
+| ------------------------------ | ----------------------------------------------------- |
+| `AGENT_CONFIG` / `ATM_CONFIG`  | Default config path when `--config` is not passed     |
+| `AGENT_LOG_DIR` / `ATM_LOG_DIR` | Default log directory when `--log-dir` is not passed |
+| `AGENT_WORKDIR`                | Default project root                                  |
 
-```bash
-AGENT_LLM_URL=http://127.0.0.1:11435/v1/chat/completions
-AGENT_MODEL=qwen3.5-27b
-# AGENT_WORKDIR=/path/to/project
-AGENT_MAX_STEPS=50
-AGENT_MAX_TOOL_OUTPUT=8000
-# AGENT_LOG_DIR=/tmp/agent-logs
-```
+Everything else (model URL, model name, step budgets, tool output cap) lives
+in the TOML config.
 
 ---
 
-## Road to OSS
+## Roadmap
 
-Things the project is moving toward before it can call itself production-grade:
+Capabilities the project is moving toward before it can call itself
+production-grade:
 
-1. **Modular runner** — `agent.py` is being split into cohesive modules
-   (environment prep, runner bootstrap, target discovery, agent loop). See
-   merged PRs
-   [#38](https://github.com/thellmwhisperer/agentic-team-member/pull/38) and
-   [#39](https://github.com/thellmwhisperer/agentic-team-member/pull/39).
-2. **A real package** — `pyproject.toml`, an installable `atm` CLI entry
-   point, and a published version on PyPI.
-3. **Generalized discovery** — the discovery heuristics still carry vestiges
-   of the original Twitch-bot exercise; they need to be generalized or
-   renamed.
-4. **More language plugins** — Go and Rust are the obvious next targets.
-5. **The `migrate` and `refactor` skills** — both have a clear design but
-   no implementation yet.
-6. **A LICENSE file** — the README says MIT; the repo needs the actual
-   `LICENSE`.
-
----
-
-## Contributing
-
-The codebase is small enough to read in an afternoon. The high-leverage areas
-are:
-
-- **Language plugins** — add a new language by implementing nine hooks in
-  `agentic_tdd_runner/languages/`. No changes to the core loop required.
-- **Cookbook heuristics** — assertion ranking, dependency classification,
-  and seam detection all live in `agentic_tdd_runner/compiler/`. Bug reports
-  with a reproducible fixture are especially welcome.
-- **New skills** — a new cookbook turns ATM into a different agent. The
-  `migrate` skill is the most-wanted next one.
-
-Run the tests:
-
-```bash
-python -m pytest
-```
-
-Benchmarks for the phased runner live in `bench/` and are runnable
-end-to-end against a local model.
+- **Installable distribution** — `pyproject.toml`, an `atm` CLI entry point,
+  and a published version on PyPI.
+- **Generalized discovery** — discovery heuristics that work across any repo
+  shape, not just the reference fixtures.
+- **More language plugins** — Go and Rust are the obvious next targets.
+- **The `migrate` and `refactor` skills** — both are designed but not
+  implemented.
+- **Distribution-grade licensing and packaging** — a committed `LICENSE`
+  file, versioned releases, and a public benchmark harness anyone can
+  reproduce.
 
 ---
 
 ## Status
 
-Alpha. The TDD `fix` skill works end-to-end on the benchmark and on real
-issues in the Twitch-bot reference repo: cookbook → phased agent loop →
+Alpha. The TDD `fix` skill works end-to-end: cookbook → phased agent loop →
 verified red-green → quality gate → PR. The `migrate` and `refactor` skills
 are designed but not implemented.
 
-The runner is being modularized; expect the public API surface (CLI flags,
-config schema) to shift before 1.0.
+Expect the public surface (CLI flags, config schema) to shift before 1.0.
 
 ---
 
 ## License
 
-MIT. A `LICENSE` file is on the [Road to OSS](#road-to-oss) list — until it
-lands, treat the repo as MIT-intent.
+Not yet licensed. A `LICENSE` file is on the [Roadmap](#roadmap); until it
+lands, no specific license is asserted. Treat the source as "all rights
+reserved" pending that decision.
