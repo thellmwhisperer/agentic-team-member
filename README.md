@@ -8,7 +8,9 @@
 
 ATM is a small Python harness that turns a local code model (Qwen 3.5 27B / 4B on
 [llama-server](https://github.com/ggml-org/llama.cpp) or [Ollama](https://ollama.ai))
-into a **TDD bug-fix agent** for your repository. No API keys. No data leaves the box.
+into a **TDD bug-fix agent** for your repository. No model API key — your code
+is never sent to a hosted inference provider. (GitHub auth via `gh` is still
+required for issue ingestion and PR creation.)
 
 It does the work a junior engineer would do on a single, well-scoped issue: read
 the code, write a failing test, fix the bug, verify red-green, and open a PR.
