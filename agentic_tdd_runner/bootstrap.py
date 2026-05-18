@@ -100,7 +100,8 @@ def prepare_run_context(
     if manual_source or manual_symbol:
         if not (manual_source and manual_symbol):
             raise SystemExit(
-                "--source/--symbol are deprecated debug overrides and must be provided together. "
+                "Partial --source/--symbol overrides are no longer supported. "
+                "Deprecated debug overrides must provide both values. "
                 "Prefer issue-only target discovery."
             )
         emit("[TARGET] Deprecated --source/--symbol override in use; prefer issue-only discovery")
