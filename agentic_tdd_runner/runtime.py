@@ -5,6 +5,54 @@ import time
 from collections.abc import Callable
 
 from agentic_tdd_runner import completion as _completion
+from agentic_tdd_runner import llm as _llm
+
+
+def has_contract_evidence(issue_text: str, episode: dict | None) -> bool:
+    """Return whether the prompt already carries concrete contract evidence."""
+    text = (issue_text or "").lower()
+    issue_has_contract = any(
+        token in text
+        for token in (
+            "callback contract",
+            "signature",
+            "acceptance test",
+            "userstate[",
+            "when present",
+        )
+    )
+    if issue_has_contract:
+        return True
+    if not episode:
+        return False
+    if episode.get("callback_registrations"):
+        return True
+    cookbook_text = str(episode.get("cookbook_text") or "").lower()
+    return any(
+        token in cookbook_text
+        for token in (
+            "callback contract evidence",
+            "source edits",
+            "test seams",
+            "assertion",
+        )
+    )
+
+
+def thinking_phase(
+    *,
+    step: int,
+    test_file_created: bool,
+    completion_state: _completion.CompletionState,
+) -> str:
+    """Map runner state to a small set of budget phases."""
+    if completion_state.done_rejected or completion_state.quality_rejected:
+        return "recover"
+    if test_file_created:
+        return "fix"
+    if step == 0:
+        return "initial"
+    return "test"
 
 
 def run_agent_loop(
@@ -47,6 +95,9 @@ def run_agent_loop(
     max_rejections = config["verification"]["max_rejections"]
     recent_exploratory_signatures: list[str] = []
     consecutive_non_apply_steps = 0
+    test_file_created = False
+    allow_dependency_contract_lookup = False
+    block_dependency_contract_lookup = has_contract_evidence(issue_text, episode)
     non_apply_warning_threshold = int(
         config.get("agent", {}).get("non_apply_step_warning_threshold", 5) or 0
     )
@@ -73,6 +124,23 @@ def run_agent_loop(
         )
 
     for step in range(max_steps):
+        phase = thinking_phase(
+            step=step,
+            test_file_created=test_file_created,
+            completion_state=completion_state,
+        )
+        config["_runtime"] = {
+            "step": step,
+            "max_steps": max_steps,
+            "thinking_phase": phase,
+            "completion_rejected": bool(
+                completion_state.done_rejected or completion_state.quality_rejected
+            ),
+            "block_dependency_contract_lookup": block_dependency_contract_lookup,
+            "allow_dependency_contract_lookup": allow_dependency_contract_lookup,
+        }
+        thinking_budget_tokens = _llm.resolve_thinking_budget_tokens(config)
+
         emit(f"\n>>> Step {step}/{max_steps} — requesting LLM...")
         t0 = time.time()
 
@@ -119,6 +187,8 @@ def run_agent_loop(
                 "prompt_per_second": timings.get("prompt_per_second"),
                 "predicted_per_second": timings.get("predicted_per_second"),
             },
+            "thinking_phase": phase,
+            "thinking_budget_tokens": thinking_budget_tokens,
         })
 
         prompt_tok = usage.get("prompt_tokens", "?")
@@ -203,6 +273,9 @@ def run_agent_loop(
                 if display.count("\n") > 20:
                     emit(f"    ... ({display.count(chr(10))} lines total)")
 
+                if "[Reactive typecheck]" in result or "error TS" in result:
+                    allow_dependency_contract_lookup = True
+
                 messages.append({
                     "role": "tool",
                     "tool_call_id": tc["id"],
@@ -269,6 +342,7 @@ def run_agent_loop(
                         created_test = True
                         break
                 if created_test:
+                    test_file_created = True
                     nudge = (
                         f"Good. Now run the test to confirm it fails, then fix "
                         f"{episode['source_file']} to make it pass. Say DONE when green."

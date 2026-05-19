@@ -61,6 +61,25 @@ def non_apply_step_warning_message(count: int) -> str:
     )
 
 
+def is_blocked_dependency_contract_lookup(command: str, config: dict) -> bool:
+    """Block stale dependency spelunking when concrete contract evidence exists."""
+    runtime = (config or {}).get("_runtime", {})
+    if not runtime.get("block_dependency_contract_lookup", False):
+        return False
+    if runtime.get("allow_dependency_contract_lookup", False):
+        return False
+    if "node_modules" not in command:
+        return False
+    try:
+        parts = shlex.split(command)
+    except ValueError:
+        parts = command.split()
+    if not parts:
+        return False
+    lookup_tools = {"rg", "grep", "find", "cat", "head", "tail", "sed", "awk", "ls"}
+    return parts[0] in lookup_tools or "node_modules/@types" in command
+
+
 def execute_tool(
     name: str,
     args: dict,
@@ -92,8 +111,16 @@ def execute_tool(
             return content
 
         if name == "run_command":
-            validate_command(args["command"])
             set_last_run_exit_code(None)
+            if is_blocked_dependency_contract_lookup(args["command"], config):
+                return (
+                    "BLOCKED: dependency contract lookup is disabled for this step "
+                    "because the issue/cookbook already provided concrete contract "
+                    "evidence. Use that evidence plus source and reactive compiler/test "
+                    "feedback. Dependency lookup is allowed again after reactive "
+                    "feedback contradicts the known contract."
+                )
+            validate_command(args["command"])
             result = subprocess.run(
                 args["command"],
                 shell=True,
