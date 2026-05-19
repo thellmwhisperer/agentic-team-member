@@ -369,7 +369,7 @@ def _render_cookbook_text(contract: dict, lang) -> str:
     parts.append("- For callbacks, handlers, and framework listeners: preserve the production contract, find the registration/caller before writing the test, and use exported framework types or overloads for the real signature.")
     parts.append("- Do not use loose `Record`, `unknown`, `any`, empty-object casts like `{} as SomeType`, or cast-only test payloads; create the minimal structural payload or declare a typed value that TypeScript can check.")
     parts.append("- For value-selection bugs, use contrastive fixtures only when the issue or source shows competing inputs; preserve fallback values only when the real contract requires them.")
-    parts.append("- Use simple literal searches such as `rg SomeType node_modules/@types` for type/contracts; avoid shell-pipe regex tricks when a direct `rg` search works.")
+    parts.append("- Use the issue text, source registration, and reactive compiler/test feedback before dependency lookup. Only inspect dependency type files after those sources leave a concrete gap or contradict each other.")
     parts.append("- Before the first failing test, apply only the mechanical edits listed below, such as exports or generated test-seam setters.")
     parts.append("- For module-load mocks, assert against the named `*_spy` variables emitted below; do not import and patch the mocked factory after importing the target.")
     if contract["test_file"]["runner"] == "bun:test":
@@ -381,7 +381,7 @@ def _render_cookbook_text(contract: dict, lang) -> str:
     callback_registrations = contract.get("callback_registrations", [])
     if callback_registrations:
         parts.append("### Callback Contract Evidence")
-        parts.append("- Before writing the test, derive the handler signature from these registrations and their public framework types; do not invent callback parameters.")
+        parts.append("- Before writing the test, use these registrations plus any issue-provided callback contract. Do not invent callback parameters or re-derive a contract that the issue/cookbook already states.")
         for registration in callback_registrations[:5]:
             parts.append(f"- line {registration['line']}: `{registration['call']}`")
         parts.append("")
@@ -472,6 +472,12 @@ def _render_cookbook_text(contract: dict, lang) -> str:
             f"    result = obj.{target['symbol']}({param_args})\n\n"
             f"    assert result == ...\n"
         )
+    if rendered:
+        if callback_registrations and "__todoValue" in rendered:
+            parts.append("### Test Construction")
+            parts.append("- Build the regression test from the issue acceptance criteria and callback contract evidence above. No placeholder scaffold is emitted for callback targets because copied fake argument values can mislead the model.")
+            parts.append("")
+            rendered = ""
     if rendered:
         code_lang = "python" if runner == "pytest" else "ts"
         parts.append(f"### Test Scaffold ({contract['test_file']['path']})")

@@ -7,6 +7,7 @@ import subprocess
 from agentic_tdd_runner.paths import resolve_repo_path
 from agentic_tdd_runner.tools import (
     execute_tool,
+    is_blocked_dependency_contract_lookup,
     non_apply_step_warning_message,
     reactive_forbidden_feedback,
     reactive_test_feedback,
@@ -85,6 +86,68 @@ def test_run_command_updates_last_exit_code(tmp_path, monkeypatch):
 
     assert result == "boom"
     assert exit_codes == [None, 7]
+
+
+def test_blocks_node_modules_contract_lookup_when_contract_evidence_exists(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "agentic_tdd_runner.tools.subprocess.run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("should not run")),
+    )
+    config = {
+        "timeouts": {"tool_execution": 10, "test_run": 10},
+        "_runtime": {
+            "block_dependency_contract_lookup": True,
+            "allow_dependency_contract_lookup": False,
+        },
+    }
+
+    result, exit_codes = _execute_tool(
+        "run_command",
+        {"command": 'rg "resub" node_modules/@types/tmi.js/index.d.ts'},
+        tmp_path,
+        config=config,
+    )
+
+    assert result.startswith("BLOCKED:")
+    assert "already provided concrete contract evidence" in result
+    assert exit_codes == [None]
+
+
+def test_allows_node_modules_contract_lookup_after_reactive_feedback(tmp_path, monkeypatch):
+    def fake_run(command, **kwargs):
+        assert command == 'rg "resub" node_modules/@types/tmi.js/index.d.ts'
+        return subprocess.CompletedProcess(command, 0, stdout="resub(...)\n", stderr="")
+
+    monkeypatch.setattr("agentic_tdd_runner.tools.subprocess.run", fake_run)
+    config = {
+        "timeouts": {"tool_execution": 10, "test_run": 10},
+        "_runtime": {
+            "block_dependency_contract_lookup": True,
+            "allow_dependency_contract_lookup": True,
+        },
+    }
+
+    result, exit_codes = _execute_tool(
+        "run_command",
+        {"command": 'rg "resub" node_modules/@types/tmi.js/index.d.ts'},
+        tmp_path,
+        config=config,
+    )
+
+    assert result == "resub(...)\n"
+    assert exit_codes == [None, 0]
+
+
+def test_dependency_contract_lookup_guard_ignores_non_dependency_commands():
+    config = {
+        "_runtime": {
+            "block_dependency_contract_lookup": True,
+            "allow_dependency_contract_lookup": False,
+        }
+    }
+
+    assert is_blocked_dependency_contract_lookup("bun test src/file.test.ts", config) is False
+    assert is_blocked_dependency_contract_lookup("rg handleResub src", config) is False
 
 
 def test_reactive_test_feedback_returns_compact_failure(tmp_path, monkeypatch):
