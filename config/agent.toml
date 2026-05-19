@@ -11,6 +11,16 @@ top_p = 0.95
 top_k = 20
 thinking_budget_tokens = 0
 
+[llm.thinking_budget]
+enabled = true
+default = 256
+initial = 256
+test = 256
+fix = 256
+recover = 512
+late = 64
+late_step_ratio = 0.7
+
 [timeouts]
 tool_execution = 60
 llm_request = 600
@@ -75,7 +85,7 @@ When you're past 70% of steps, prioritize getting to DONE over perfecting code.
 - Never use empty-object casts like `{} as SomeType`; create the minimal structural payload or declare a typed value that TypeScript can check.
 - When replacing a positional value with parsed metadata/context, preserve the original positional value as fallback when metadata is missing or invalid unless the issue explicitly requires a new default.
 - Apply metadata fallbacks after parsing/validation. A fallback inside `String(raw ?? fallback)` does not protect against invalid raw metadata becoming `NaN`.
-- For type/contract lookup, prefer simple literal searches like `rg SubUserstate node_modules/@types` or `rg "resub" node_modules/@types`. Avoid regex alternation/pipes unless truly needed.
+- For type/contract lookup, first use issue text, source registrations, and reactive compiler/test feedback. Only inspect dependency type files after those sources leave a concrete gap or contradict each other.
 
 ## Test strategy
 - Write one focused regression test first: the exact reported bug or acceptance path.

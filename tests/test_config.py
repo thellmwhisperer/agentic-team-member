@@ -101,10 +101,15 @@ class TestLoadConfig:
         assert cfg["llm"]["model"] == "test-model"
         assert cfg["llm"]["temperature"] == 0.6
 
-    def test_production_disables_unbounded_thinking(self):
+    def test_production_configures_bounded_dynamic_thinking(self):
         prod = CONFIG_DIR / "agent.toml"
         cfg = load_config(prod)
         assert cfg["llm"]["thinking_budget_tokens"] == 0
+        budget = cfg["llm"]["thinking_budget"]
+        assert budget["enabled"] is True
+        assert budget["default"] == 256
+        assert budget["recover"] > budget["default"]
+        assert budget["late"] < budget["default"]
 
     def test_loads_system_prompt(self, tmp_path):
         _write_config(tmp_path)

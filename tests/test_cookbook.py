@@ -666,9 +666,11 @@ class TestCallbackContractGuidance:
         result = generate_cookbook("src/twitch/client.ts", "handleResub", str(tmp_path))
 
         assert "### Callback Contract Evidence" in result
-        assert "derive the handler signature" in result
-        assert "do not invent callback parameters" in result
+        assert "issue-provided callback contract" in result
+        assert "Do not invent callback parameters" in result
         assert "client.on('resub', handleResub)" in result
+        assert "TODO behavior" not in result
+        assert "__todoValue" not in result
 
     def test_callback_guidance_preserves_types_and_fallbacks(self, tmp_path):
         _write_file(tmp_path, "src/client.ts", """\
@@ -685,5 +687,6 @@ class TestCallbackContractGuidance:
         assert "use exported framework types or overloads" in result
         assert "empty-object casts" in result
         assert "preserve fallback values only when the real contract requires them" in result
-        assert "rg SomeType node_modules/@types" in result
+        assert "Only inspect dependency type files" in result
+        assert "node_modules/@types" not in result
         assert "metadata fallback" not in result

@@ -50,6 +50,66 @@ def test_chat_completion_includes_thinking_budget_tokens_when_configured(monkeyp
     assert captured["payload"]["tools"] == [{"type": "function", "function": {"name": "test_tool"}}]
 
 
+def test_chat_completion_uses_dynamic_thinking_budget_for_runtime_phase(monkeypatch):
+    captured = {}
+
+    def capture_post(url, json=None, timeout=None):
+        captured["payload"] = json
+        return FakeResponse()
+
+    monkeypatch.setattr("agentic_tdd_runner.llm.requests.post", capture_post)
+    config = _config({
+        "thinking_budget_tokens": 0,
+        "thinking_budget": {
+            "enabled": True,
+            "default": 256,
+            "initial": 128,
+            "fix": 512,
+        },
+    })
+    config["_runtime"] = {"thinking_phase": "fix", "step": 3, "max_steps": 50}
+
+    llm.chat_completion([{"role": "user", "content": "hello"}], config)
+
+    assert captured["payload"]["thinking_budget_tokens"] == 512
+
+
+def test_dynamic_thinking_budget_late_step_overrides_phase():
+    config = _config({
+        "thinking_budget_tokens": 0,
+        "thinking_budget": {
+            "enabled": True,
+            "default": 256,
+            "fix": 512,
+            "late": 64,
+            "late_step_ratio": 0.7,
+        },
+    })
+    config["_runtime"] = {"thinking_phase": "fix", "step": 35, "max_steps": 50}
+
+    assert llm.resolve_thinking_budget_tokens(config) == 64
+
+
+def test_dynamic_thinking_budget_recover_overrides_phase_before_late_steps():
+    config = _config({
+        "thinking_budget": {
+            "enabled": True,
+            "default": 256,
+            "fix": 256,
+            "recover": 512,
+            "late": 64,
+        },
+    })
+    config["_runtime"] = {
+        "thinking_phase": "fix",
+        "completion_rejected": True,
+        "step": 5,
+        "max_steps": 50,
+    }
+
+    assert llm.resolve_thinking_budget_tokens(config) == 512
+
+
 def test_chat_completion_omits_thinking_budget_tokens_when_not_configured(monkeypatch):
     captured = {}
 
