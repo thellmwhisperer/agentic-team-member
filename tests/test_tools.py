@@ -6,6 +6,7 @@ import subprocess
 
 from agentic_tdd_runner.paths import resolve_repo_path
 from agentic_tdd_runner.tools import (
+    build_rg_command,
     execute_tool,
     non_apply_step_warning_message,
     reactive_forbidden_feedback,
@@ -85,6 +86,45 @@ def test_run_command_updates_last_exit_code(tmp_path, monkeypatch):
 
     assert result == "boom"
     assert exit_codes == [None, 7]
+
+
+def test_rg_tool_runs_ripgrep_with_safe_quoting(tmp_path, monkeypatch):
+    monkeypatch.setenv("PATH", "/usr/bin")
+
+    def fake_run(command, **kwargs):
+        assert command == "rg --line-number --no-heading --ignore-case --glob '*.ts' 'handle resub' src"
+        assert kwargs["cwd"] == str(tmp_path)
+        return subprocess.CompletedProcess(command, 0, stdout="src/file.ts:1:handle resub", stderr="")
+
+    monkeypatch.setattr("agentic_tdd_runner.tools.subprocess.run", fake_run)
+
+    result, exit_codes = _execute_tool(
+        "rg",
+        {
+            "pattern": "handle resub",
+            "path": "src",
+            "glob": "*.ts",
+            "case_sensitive": False,
+        },
+        tmp_path,
+    )
+
+    assert result == "src/file.ts:1:handle resub"
+    assert exit_codes == [None, 0]
+
+
+def test_rg_tool_rejects_empty_pattern(tmp_path):
+    result, exit_codes = _execute_tool("rg", {"pattern": ""}, tmp_path)
+
+    assert result == "ERROR: ValueError: rg requires a non-empty pattern"
+    assert exit_codes == []
+
+
+def test_build_rg_command_accepts_query_alias_and_multiple_paths():
+    assert (
+        build_rg_command({"query": "foo", "path": ["src", "tests"]})
+        == "rg --line-number --no-heading foo src tests"
+    )
 
 
 def test_reactive_test_feedback_returns_compact_failure(tmp_path, monkeypatch):
@@ -221,6 +261,7 @@ def test_tool_status_and_loop_signature_helpers():
     assert tool_applied_status("str_replace_editor", "ERROR: old_str not found") is False
     assert tool_applied_status("read_file", "contents") is None
     assert tool_loop_signature("read_file", {"path": "src/file.ts"}) == "read_file:src/file.ts"
+    assert tool_loop_signature("rg", {"pattern": "foo", "path": "src"}) == "rg:foo:src:"
     assert tool_loop_signature("run_command", {"command": "rg foo src"}) == "run_command:rg foo src"
     assert tool_loop_signature("run_command", {"command": "bun test"}) is None
 

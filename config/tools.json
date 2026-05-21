@@ -16,6 +16,23 @@
   {
     "type": "function",
     "function": {
+      "name": "rg",
+      "description": "Search code with ripgrep. Use this for quick symbol/text lookup before editing. It runs `rg --line-number --no-heading <pattern> <path>` in the current run workdir.",
+      "parameters": {
+        "type": "object",
+        "required": ["pattern"],
+        "properties": {
+          "pattern": { "type": "string", "description": "Literal or regex pattern to search for" },
+          "path": { "type": "string", "description": "File or directory to search, relative to repo root. Defaults to `.`." },
+          "glob": { "type": "string", "description": "Optional ripgrep glob, for example `*.ts` or `!node_modules`." },
+          "case_sensitive": { "type": "boolean", "description": "Set false to search case-insensitively." }
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
       "name": "run_command",
       "description": "Run a shell command with cwd already set to the current run workdir and return stdout+stderr. Use paths relative to that cwd. Do not prefix commands with `cd ... &&`; put the directory or file path in the command itself, e.g. `rg term src` or `bun test src/file.test.ts`.",
       "parameters": {

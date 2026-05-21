@@ -20,6 +20,11 @@ def tool_loop_signature(name: str, args: dict) -> str | None:
     """Return a stable signature for exploratory calls that can loop."""
     if name == "read_file":
         return f"read_file:{args.get('path', '')}"
+    if name == "rg":
+        pattern = args.get("pattern") or args.get("query") or args.get("term") or ""
+        path = args.get("path") or "."
+        glob = args.get("glob") or ""
+        return f"rg:{pattern}:{path}:{glob}"
     if name != "run_command":
         return None
     command = args.get("command", "")
@@ -90,6 +95,23 @@ def execute_tool(
                 content = f.read()
             file_read_cache[full_path] = mtime_ns
             return content
+
+        if name == "rg":
+            command = build_rg_command(args)
+            validate_command(command)
+            set_last_run_exit_code(None)
+            result = subprocess.run(
+                command,
+                shell=True,
+                cwd=workdir,
+                env=build_command_env(config),
+                capture_output=True,
+                text=True,
+                timeout=config["timeouts"]["tool_execution"],
+            )
+            set_last_run_exit_code(result.returncode)
+            output = result.stdout + result.stderr
+            return output if output.strip() else "(no output)"
 
         if name == "run_command":
             validate_command(args["command"])
@@ -175,6 +197,31 @@ def execute_tool(
 
     except Exception as e:
         return f"ERROR: {type(e).__name__}: {e}"
+
+
+def build_rg_command(args: dict) -> str:
+    """Build a shell-safe ripgrep command from model-supplied args."""
+    pattern = args.get("pattern") or args.get("query") or args.get("term")
+    if not isinstance(pattern, str) or not pattern.strip():
+        raise ValueError("rg requires a non-empty pattern")
+
+    path = args.get("path") or "."
+    if isinstance(path, list):
+        paths = [str(item) for item in path if str(item).strip()]
+    else:
+        paths = [str(path)]
+    if not paths:
+        paths = ["."]
+
+    command = ["rg", "--line-number", "--no-heading"]
+    if args.get("case_sensitive") is False:
+        command.append("--ignore-case")
+    glob = args.get("glob")
+    if isinstance(glob, str) and glob.strip():
+        command.extend(["--glob", glob])
+    command.append(pattern)
+    command.extend(paths)
+    return " ".join(shlex.quote(part) for part in command)
 
 
 def reactive_typecheck_feedback(
