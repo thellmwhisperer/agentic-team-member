@@ -1,5 +1,7 @@
 """Shell command validation for agent tool execution."""
 
+from __future__ import annotations
+
 import os
 import shlex
 
