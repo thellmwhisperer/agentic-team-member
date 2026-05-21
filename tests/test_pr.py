@@ -4,6 +4,7 @@ import os
 import subprocess
 
 from agentic_tdd_runner.pr import (
+    build_pr_content_messages,
     build_pr_fallback,
     check_pr_base_hygiene,
     collect_pr_changed_files,
@@ -29,6 +30,43 @@ def test_build_pr_fallback_lists_changed_files():
     assert title == "fix: update file behavior"
     assert "- `src/file.ts`" in body
     assert "Harness quality checks passed" in body
+    assert body.startswith("## Summary\n\n- Fix")
+    assert "\n## Changed files\n\n- `src/file.ts`" in body
+    for line in body.splitlines():
+        assert not line.startswith("        ")
+
+
+def test_build_pr_content_messages_removes_tool_blocks_for_text_only_request():
+    messages = [
+        {"role": "system", "content": "You are ATM."},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{"id": "call_1", "type": "function"}],
+        },
+        {"role": "tool", "tool_call_id": "call_1", "content": "file contents"},
+    ]
+
+    result = build_pr_content_messages(
+        messages,
+        {"role": "assistant", "content": "DONE"},
+        pr_prompt="Generate PR",
+        changed_files=["src/file.ts"],
+    )
+
+    assert result == [
+        {"role": "system", "content": "You are ATM."},
+        {
+            "role": "user",
+            "content": (
+                "Generate PR\n\n"
+                "Changed files:\n"
+                "- src/file.ts\n\n"
+                "Final agent message:\n"
+                "DONE"
+            ),
+        },
+    ]
 
 
 def test_resolve_pr_base_ref_prefers_origin_ref(tmp_path):

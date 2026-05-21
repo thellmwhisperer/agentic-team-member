@@ -1,9 +1,10 @@
 """Pull request creation helpers for the agent runner."""
 
+from __future__ import annotations
+
 import os
 import re
 import subprocess
-import textwrap
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
@@ -34,21 +35,62 @@ def build_pr_fallback(test_file: str, step: int, changed_files: list[str]) -> tu
     title_subject = re.sub(r"[^A-Za-z0-9]+", " ", stem).strip().lower() or f"step {step}"
     title = f"fix: update {title_subject} behavior"[:70]
     changed_section = "\n".join(f"- `{path}`" for path in changed_files) or "- No changed files detected"
-    body = textwrap.dedent(
-        f"""\
-        ## Summary
-        - Fix the reported behavior with a focused regression test.
-        - Keep the change limited to the files touched by the agent run.
-
-        ## Changed files
-        {changed_section}
-
-        ## Verification
-        - Red/green verification passed.
-        - Harness quality checks passed.
-        """
-    ).strip()
+    body = (
+        "## Summary\n\n"
+        "- Fix the reported behavior with a focused regression test.\n"
+        "- Keep the change limited to the files touched by the agent run.\n\n"
+        "## Changed files\n\n"
+        f"{changed_section}\n\n"
+        "## Verification\n\n"
+        "- Red/green verification passed.\n"
+        "- Harness quality checks passed."
+    )
     return title, body
+
+
+def build_pr_content_messages(
+    messages: list,
+    last_msg: dict,
+    *,
+    pr_prompt: str,
+    changed_files: list[str],
+) -> list[dict]:
+    """Build a text-only prompt for PR copy generation.
+
+    The main agent conversation contains tool-call and tool-result blocks. Bedrock
+    Converse rejects those blocks when the request omits ``tools=``; PR copy
+    generation does not need tool use, so keep only plain text context here.
+    """
+    pr_messages: list[dict] = []
+    for message in messages:
+        if message.get("role") == "system" and isinstance(message.get("content"), str):
+            pr_messages.append({"role": "system", "content": message["content"]})
+            break
+
+    changed_section = "\n".join(f"- {path}" for path in changed_files) or "- No changed files detected"
+    final_context = _plain_message_content(last_msg)
+    prompt = (
+        f"{pr_prompt}\n\n"
+        "Changed files:\n"
+        f"{changed_section}\n\n"
+        "Final agent message:\n"
+        f"{final_context[:4000] if final_context else 'DONE'}"
+    )
+    pr_messages.append({"role": "user", "content": prompt})
+    return pr_messages
+
+
+def _plain_message_content(message: dict) -> str:
+    content = message.get("content")
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, dict) and isinstance(item.get("text"), str):
+                parts.append(item["text"])
+        return "\n".join(parts).strip()
+    return ""
 
 
 def resolve_pr_base_ref(
@@ -225,12 +267,13 @@ def create_pr(
     if excluded_files:
         log("pr_excluded_preexisting_changes", {"files": excluded_files})
 
-    pr_messages = messages.copy()
-    pr_messages.append(last_msg)
-    pr_messages.append({
-        "role": "user",
-        "content": config["prompt"]["pr_prompt"],
-    })
+    sorted_allowed_changed_files = sorted(allowed_changed_files)
+    pr_messages = build_pr_content_messages(
+        messages,
+        last_msg,
+        pr_prompt=config["prompt"]["pr_prompt"],
+        changed_files=sorted_allowed_changed_files,
+    )
 
     emit("  [PR] Generating title/body")
     log("pr_content_start", {"step": step})
@@ -245,7 +288,7 @@ def create_pr(
             "reason": str(e),
             "raw_response": content[:500],
         })
-        title, body = build_pr_fallback(test_file, step, sorted(allowed_changed_files))
+        title, body = build_pr_fallback(test_file, step, sorted_allowed_changed_files)
     if not title or not body:
         emit("  [PR] LLM returned incomplete PR content, using deterministic fallback")
         log("pr_content_fallback", {
@@ -254,7 +297,7 @@ def create_pr(
             "got_title": bool(title),
             "got_body": bool(body),
         })
-        title, body = build_pr_fallback(test_file, step, sorted(allowed_changed_files))
+        title, body = build_pr_fallback(test_file, step, sorted_allowed_changed_files)
 
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     branch_name = f"{prefix}{timestamp}"
