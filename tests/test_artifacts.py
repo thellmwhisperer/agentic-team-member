@@ -104,6 +104,7 @@ def test_export_manifest_uses_refs_instead_of_repeating_payloads(tmp_path):
     assert "function handleResub(channel: string): void {" not in manifest_text
     assert "canonical/episode.json" in manifest_text
     assert "rendered/cookbook.md" in manifest_text
+    assert "rendered/mocks.md" in manifest_text
 
 
 def test_canonical_episode_replaces_rendered_payloads_with_file_refs(tmp_path):

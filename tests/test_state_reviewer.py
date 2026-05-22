@@ -275,3 +275,120 @@ def test_blocks_dependency_lookup_after_repair_budget_is_spent():
     assert "CONTRACT_REPAIR" in review.message
     assert review.data["lookup_count"] == 1
     assert review.data["lookup_budget"] == 1
+
+
+def test_blocks_repeated_target_source_reads_after_source_context_was_observed():
+    reviewer = BugStateReviewer(
+        {
+            "state_reviewer": {"enabled": True},
+        },
+        contract_evidence_available=False,
+        runner_facts=RunnerFacts(
+            test_runner="bun:test",
+            test_command="bun test",
+            typecheck_command="bun run typecheck",
+            test_api_import='import { beforeEach, describe, expect, mock, test } from "bun:test";',
+            recommended_test_file="src/twitch/handleResub.test.ts",
+            source_file="src/twitch/client.ts",
+            target_symbol="handleResub",
+            nearby_tests=[],
+            symbol_tests=[],
+        ),
+    )
+    reviewer.observe_tool_result(
+        "read_file",
+        {"path": "src/twitch/client.ts"},
+        "export function handleResub() {}\n",
+        applied=None,
+    )
+
+    reread = reviewer.review_tool_call(
+        "run_command",
+        {"command": "sed -n '120,170p' src/twitch/client.ts"},
+        allow_dependency_contract_lookup=False,
+    )
+
+    assert reread is not None
+    assert reread.event == "state_review_blocked"
+    assert "SOURCE_CONTEXT" in reread.message
+    assert "already been read `src/twitch/client.ts`" in reread.message
+
+
+def test_allows_target_source_reread_after_source_edit():
+    reviewer = BugStateReviewer(
+        {
+            "state_reviewer": {"enabled": True},
+        },
+        contract_evidence_available=False,
+        runner_facts=RunnerFacts(
+            test_runner="bun:test",
+            test_command="bun test",
+            typecheck_command="bun run typecheck",
+            test_api_import='import { beforeEach, describe, expect, mock, test } from "bun:test";',
+            recommended_test_file="src/twitch/handleResub.test.ts",
+            source_file="src/twitch/client.ts",
+            target_symbol="handleResub",
+            nearby_tests=[],
+            symbol_tests=[],
+        ),
+    )
+    reviewer.observe_tool_result(
+        "read_file",
+        {"path": "src/twitch/client.ts"},
+        "export function handleResub() {}\n",
+        applied=None,
+    )
+    reviewer.observe_tool_result(
+        "str_replace_editor",
+        {"path": "src/twitch/client.ts"},
+        "OK: replaced in src/twitch/client.ts",
+        applied=True,
+    )
+
+    reread = reviewer.review_tool_call(
+        "read_file",
+        {"path": "./src/twitch/client.ts"},
+        allow_dependency_contract_lookup=False,
+    )
+
+    assert reread is None
+
+
+def test_allows_target_source_reread_after_reactive_feedback_points_at_source():
+    reviewer = BugStateReviewer(
+        {
+            "state_reviewer": {"enabled": True},
+        },
+        contract_evidence_available=False,
+        runner_facts=RunnerFacts(
+            test_runner="bun:test",
+            test_command="bun test",
+            typecheck_command="bun run typecheck",
+            test_api_import='import { beforeEach, describe, expect, mock, test } from "bun:test";',
+            recommended_test_file="src/twitch/handleResub.test.ts",
+            source_file="src/twitch/client.ts",
+            target_symbol="handleResub",
+            nearby_tests=[],
+            symbol_tests=[],
+        ),
+    )
+    reviewer.observe_tool_result(
+        "read_file",
+        {"path": "src/twitch/client.ts"},
+        "export function handleResub() {}\n",
+        applied=None,
+    )
+    reviewer.observe_tool_result(
+        "run_command",
+        {"command": "bun test src/twitch/handleResub.test.ts"},
+        "[Reactive test] failed:\n  at src/twitch/client.ts:42:7",
+        applied=None,
+    )
+
+    reread = reviewer.review_tool_call(
+        "run_command",
+        {"command": "sed -n '38,46p' src/twitch/client.ts"},
+        allow_dependency_contract_lookup=False,
+    )
+
+    assert reread is None

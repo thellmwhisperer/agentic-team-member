@@ -36,6 +36,7 @@ def _episode():
         "target_symbol": "handleResub",
         "test_file": "src/twitch/handleResub.test.ts",
         "runner": "bun:test",
+        "function_line_range": {"start": 10, "end": 20, "source": "definition"},
     }
 
 
@@ -50,6 +51,9 @@ def test_build_runner_facts_reports_bun_test_import_and_commands(tmp_path):
     assert facts.typecheck_command == "bun run typecheck"
     assert facts.test_api_import == 'import { beforeEach, describe, expect, mock, test } from "bun:test";'
     assert facts.recommended_test_file == "src/twitch/handleResub.test.ts"
+    assert facts.source_line_range == {"start": 10, "end": 20, "source": "definition"}
+    assert "mockFn.mockClear()" in facts.to_prompt_section()
+    assert "src/twitch/client.ts:10-20" in facts.to_prompt_section()
     assert facts.nearby_tests == []
     assert facts.symbol_tests == []
 

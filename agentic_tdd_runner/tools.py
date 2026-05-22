@@ -1,6 +1,7 @@
 """Tool execution helpers for the agent runner."""
 
 import os
+import re
 import shlex
 import subprocess
 from collections.abc import Callable, MutableMapping
@@ -389,9 +390,35 @@ def reactive_test_feedback(
         return ""
 
     raw = (result.stdout or "") + (result.stderr or "")
-    sample_lines = [ln for ln in raw.splitlines() if ln.strip()][:5]
+    sample_lines = _compact_test_failure_lines(raw)
     sample = "\n".join(f"  {ln}" for ln in sample_lines) if sample_lines else f"  {raw[:200]}"
     return f"\n\n[Reactive test] failed:\n{sample}"
+
+
+def _compact_test_failure_lines(raw: str, *, max_lines: int = 16) -> list[str]:
+    lines = [ln for ln in raw.splitlines() if ln.strip()]
+    if len(lines) <= max_lines:
+        return lines
+
+    error_index = next(
+        (
+            index
+            for index, line in enumerate(lines)
+            if re.search(r"\b(error|fail|exception|expected|received)\b", line, flags=re.IGNORECASE)
+        ),
+        None,
+    )
+    if error_index is None:
+        return lines[:max_lines]
+
+    start = max(0, error_index - 2)
+    end = min(len(lines), error_index + max_lines - 2)
+    sample = lines[start:end]
+    if start > 0:
+        sample.insert(0, "... earlier output omitted ...")
+    if end < len(lines):
+        sample.append("... later output omitted ...")
+    return sample[:max_lines]
 
 
 def reactive_forbidden_feedback(

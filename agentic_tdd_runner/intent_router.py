@@ -17,6 +17,17 @@ _MISSING_NAME_RE = re.compile(
     r"(?:\(\d+,\d+\)|:\d+:\d+)?(?:\s*-\s*|:\s*)error TS\d+:\s*"
     r"Cannot find name ['\"](?P<name>[A-Za-z_]\w*)['\"]"
 )
+_BUN_MOCK_RESET_RE = re.compile(
+    r"(?P<file>[^\s:(]+\.test\.[tj]sx?)"
+    r"(?:\(\d+,\d+\)|:\d+:\d+)?(?:\s*-\s*|:\s*)error TS\d+:\s*"
+    r"Property ['\"]reset['\"] does not exist on type ['\"]?MockFunctionState",
+)
+_TYPED_TUPLE_MOCK_RE = re.compile(
+    r"(?P<file>[^\s:(]+\.test\.[tj]sx?).*?"
+    r"Mock<\(\) => Promise<string\[\]>>.*?"
+    r"Promise<\[string\]>",
+    flags=re.DOTALL,
+)
 
 
 @dataclass(frozen=True)
@@ -35,8 +46,65 @@ class IntentRouter:
         self.runner_facts = runner_facts
         self.pending_test_file: str | None = None
         self.pending_missing_globals: set[str] = set()
+        self.pending_mock_api_file: str | None = None
+        self.pending_typed_mock_file: str | None = None
 
     def review_tool_call(self, name: str, args: dict) -> RouterDecision | None:
+        if self.pending_mock_api_file:
+            if _is_edit_to_path(name, args, self.pending_mock_api_file):
+                return None
+            if _is_framework_lookup_or_premature_run(name, args) or _is_source_or_test_lookup(name, args):
+                required_next = (
+                    f"Edit `{self.pending_mock_api_file}` and replace `.mock.reset()` "
+                    "with `.mockClear()`, then rerun the focused test."
+                )
+                message = (
+                    "RUNNER FACT ANSWER\n"
+                    "intent: fix_bun_mock_api\n"
+                    "reason: Bun mock call history is reset on the mock function, not through `.mock.reset()`.\n"
+                    "answer: use `mockFn.mockClear()`.\n"
+                    f"required_next: {required_next}"
+                )
+                return RouterDecision(
+                    event="intent_router_answered",
+                    message=message,
+                    data={
+                        "intent": "fix_bun_mock_api",
+                        "pending_test_file": self.pending_mock_api_file,
+                        "required_next": required_next,
+                        "tool": name,
+                        "args": args,
+                    },
+                )
+
+        if self.pending_typed_mock_file:
+            if _is_edit_to_path(name, args, self.pending_typed_mock_file):
+                return None
+            if _is_framework_lookup_or_premature_run(name, args) or _is_source_or_test_lookup(name, args):
+                required_next = (
+                    f"Edit `{self.pending_typed_mock_file}` so the mock returns "
+                    "a one-element tuple typed as `[string]`, then rerun typecheck."
+                )
+                message = (
+                    "RUNNER FACT ANSWER\n"
+                    "intent: fix_typed_mock_contract\n"
+                    "reason: the mocked method contract requires a tuple `Promise<[string]>`, not `Promise<string[]>`.\n"
+                    "answer: preserve the semantic value the test needs, but return it as "
+                    "`Promise.resolve([value] as [string])` from that mock.\n"
+                    f"required_next: {required_next}"
+                )
+                return RouterDecision(
+                    event="intent_router_answered",
+                    message=message,
+                    data={
+                        "intent": "fix_typed_mock_contract",
+                        "pending_test_file": self.pending_typed_mock_file,
+                        "required_next": required_next,
+                        "tool": name,
+                        "args": args,
+                    },
+                )
+
         if not (self.runner_facts and self.pending_test_file and self.pending_missing_globals):
             return None
         if _is_edit_to_path(name, args, self.pending_test_file):
@@ -84,12 +152,23 @@ class IntentRouter:
         if applied is True and _is_edit_to_path(name, args, self.pending_test_file):
             self.pending_test_file = None
             self.pending_missing_globals.clear()
-            return
+        if applied is True and _is_edit_to_path(name, args, self.pending_mock_api_file):
+            self.pending_mock_api_file = None
+        if applied is True and _is_edit_to_path(name, args, self.pending_typed_mock_file):
+            self.pending_typed_mock_file = None
 
         test_file, missing = _parse_missing_test_globals(result)
         if test_file and missing:
             self.pending_test_file = test_file
             self.pending_missing_globals = missing
+
+        mock_api_file = _parse_bun_mock_reset_file(result)
+        if mock_api_file:
+            self.pending_mock_api_file = mock_api_file
+
+        typed_mock_file = _parse_typed_tuple_mock_file(result)
+        if typed_mock_file:
+            self.pending_typed_mock_file = typed_mock_file
 
 
 def _parse_missing_test_globals(result: str) -> tuple[str | None, set[str]]:
@@ -104,6 +183,16 @@ def _parse_missing_test_globals(result: str) -> tuple[str | None, set[str]]:
         return None, set()
     test_file = sorted(hits, key=lambda path: (-len(hits[path]), path))[0]
     return test_file, hits[test_file]
+
+
+def _parse_bun_mock_reset_file(result: str) -> str | None:
+    match = _BUN_MOCK_RESET_RE.search(result or "")
+    return _normalize_path(match.group("file")) if match else None
+
+
+def _parse_typed_tuple_mock_file(result: str) -> str | None:
+    match = _TYPED_TUPLE_MOCK_RE.search(result or "")
+    return _normalize_path(match.group("file")) if match else None
 
 
 def _is_edit_to_path(name: str, args: dict, target_path: str | None) -> bool:
@@ -152,6 +241,23 @@ def _is_framework_lookup_or_premature_run(name: str, args: dict) -> bool:
     if any(PurePosixPath(part).name.startswith("tsconfig") for part in parts[1:]):
         return True
     return False
+
+
+def _is_source_or_test_lookup(name: str, args: dict) -> bool:
+    if name in {"read_file", "rg"}:
+        return True
+    if name != "run_command":
+        return False
+    command = args.get("command", "")
+    if not isinstance(command, str):
+        return False
+    try:
+        parts = shlex.split(command)
+    except ValueError:
+        parts = command.split()
+    if not parts:
+        return False
+    return PurePosixPath(parts[0]).name in {"grep", "rg", "cat", "head", "tail", "sed", "awk"}
 
 
 def _normalize_path(path: str | None) -> str:
