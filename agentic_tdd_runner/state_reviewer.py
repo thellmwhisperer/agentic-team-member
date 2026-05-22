@@ -45,6 +45,8 @@ class BugStateReviewer:
         self.dependency_contract_lookup_count = 0
         self.pending_forbidden_file: str | None = None
         self.pending_forbidden_patterns: list[str] = []
+        self.runner_facts = runner_facts
+        self.target_source_read = False
         self.intent_router = IntentRouter(runner_facts)
 
     def review_tool_call(
@@ -89,6 +91,23 @@ class BugStateReviewer:
                     "pending_file": self.pending_forbidden_file,
                     "patterns": list(self.pending_forbidden_patterns),
                 },
+            )
+
+        if self.target_source_read and is_target_source_lookup(name, args, self.runner_facts):
+            source_file = self.runner_facts.source_file if self.runner_facts else ""
+            return self._blocked(
+                phase="SOURCE_CONTEXT",
+                reason=(
+                    f"The target source file has already been read `{source_file}`. "
+                    "Repeating the same context lookup grows the transcript without "
+                    "advancing the fix."
+                ),
+                required_next=(
+                    "Use the source context already observed to write or repair the "
+                    "regression test/patch. Re-read the source only after an edit "
+                    "changes it or reactive feedback points at a new exact line."
+                ),
+                data={"tool": name, "args": args, "source_file": source_file},
             )
 
         if is_dependency_contract_lookup(name, args):
@@ -146,6 +165,11 @@ class BugStateReviewer:
         if not self.enabled:
             return
 
+        if is_target_source_lookup(name, args, self.runner_facts):
+            self.target_source_read = True
+        elif result_points_at_source(result, self.runner_facts):
+            self.target_source_read = False
+
         if is_dependency_contract_lookup(name, args):
             self.dependency_contract_lookup_count += 1
 
@@ -167,6 +191,14 @@ class BugStateReviewer:
         ):
             self.pending_forbidden_file = None
             self.pending_forbidden_patterns = []
+
+        if (
+            applied is True
+            and normalize_review_path(edited_path)
+            and self.runner_facts
+            and normalize_review_path(edited_path) == normalize_review_path(self.runner_facts.source_file)
+        ):
+            self.target_source_read = False
 
     def _blocked(
         self,
@@ -250,6 +282,47 @@ def is_pending_forbidden_file_lookup(name: str, args: dict, pending_file: str) -
     if PurePosixPath(parts[0]).name not in focused_tools:
         return False
     return any(normalize_review_path(part) == pending_norm for part in parts[1:])
+
+
+def is_target_source_lookup(name: str, args: dict, runner_facts: RunnerFacts | None) -> bool:
+    source_file = normalize_review_path(runner_facts.source_file if runner_facts else None)
+    if not source_file:
+        return False
+
+    if name == "read_file":
+        return normalize_review_path(args.get("path")) == source_file
+
+    if name == "rg":
+        paths = args.get("path") or "."
+        if isinstance(paths, str):
+            paths = [paths]
+        return any(normalize_review_path(str(path)) == source_file for path in paths)
+
+    if name != "run_command":
+        return False
+    command = args.get("command", "")
+    if not isinstance(command, str):
+        return False
+    try:
+        parts = shlex.split(command)
+    except ValueError:
+        parts = command.split()
+    if not parts:
+        return False
+    focused_tools = {"grep", "rg", "cat", "head", "tail", "sed", "awk"}
+    if PurePosixPath(parts[0]).name not in focused_tools:
+        return False
+    return any(normalize_review_path(part) == source_file for part in parts[1:])
+
+
+def result_points_at_source(result: str, runner_facts: RunnerFacts | None) -> bool:
+    source_file = normalize_review_path(runner_facts.source_file if runner_facts else None)
+    if not source_file or "[Reactive" not in (result or ""):
+        return False
+    source_re = re.escape(source_file)
+    return bool(
+        re.search(rf"{source_re}(?::\d+(?::\d+)?|\(\d+,\d+\))", result)
+    )
 
 
 def is_dependency_contract_lookup(name: str, args: dict) -> bool:
