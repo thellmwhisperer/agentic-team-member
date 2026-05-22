@@ -7,6 +7,7 @@ from agentic_tdd_runner.pr import (
     build_pr_content_messages,
     build_pr_fallback,
     check_pr_base_hygiene,
+    collect_pr_diff_context,
     collect_pr_changed_files,
     create_pr,
     parse_pr_content,
@@ -52,6 +53,7 @@ def test_build_pr_content_messages_removes_tool_blocks_for_text_only_request():
         {"role": "assistant", "content": "DONE"},
         pr_prompt="Generate PR",
         changed_files=["src/file.ts"],
+        diff_context="diff --git a/src/file.ts b/src/file.ts",
     )
 
     assert result == [
@@ -62,11 +64,47 @@ def test_build_pr_content_messages_removes_tool_blocks_for_text_only_request():
                 "Generate PR\n\n"
                 "Changed files:\n"
                 "- src/file.ts\n\n"
+                "Git diff:\n"
+                "diff --git a/src/file.ts b/src/file.ts\n\n"
                 "Final agent message:\n"
                 "DONE"
             ),
         },
     ]
+
+
+def test_build_pr_content_messages_normalizes_structured_system_content():
+    result = build_pr_content_messages(
+        [{"role": "system", "content": [{"type": "text", "text": "You are ATM."}]}],
+        {"role": "assistant", "content": "DONE"},
+        pr_prompt="Generate PR",
+        changed_files=[],
+    )
+
+    assert result[0] == {"role": "system", "content": "You are ATM."}
+
+
+def test_collect_pr_diff_context_includes_unstaged_and_untracked_files(tmp_path):
+    subprocess.run(["git", "init", "-b", "main"], cwd=tmp_path, capture_output=True, check=True)
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=tmp_path, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=tmp_path, capture_output=True)
+    (tmp_path / "file.ts").write_text("before\n")
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, capture_output=True, check=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=tmp_path, capture_output=True, check=True)
+
+    (tmp_path / "file.ts").write_text("after\n")
+    (tmp_path / "file.test.ts").write_text("test\n")
+
+    diff_context = collect_pr_diff_context(
+        str(tmp_path),
+        ["file.ts", "file.test.ts"],
+        10,
+    )
+
+    assert "-before" in diff_context
+    assert "+after" in diff_context
+    assert "file.test.ts" in diff_context
+    assert "+test" in diff_context
 
 
 def test_resolve_pr_base_ref_prefers_origin_ref(tmp_path):
