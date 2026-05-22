@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import posixpath
 import re
 import shlex
 from dataclasses import dataclass
@@ -47,17 +48,22 @@ class BugStateReviewer:
         if not self.enabled:
             return None
 
-        if self.pending_forbidden_file and is_exploratory_tool(name, args):
+        if (
+            self.pending_forbidden_file
+            and is_exploratory_tool(name, args)
+            and not is_pending_forbidden_file_lookup(name, args, self.pending_forbidden_file)
+        ):
             return self._blocked(
                 phase="QUALITY_REPAIR",
                 reason=(
                     "A reactive forbidden-pattern finding is still open. "
                     f"The next valid move is an edit to `{self.pending_forbidden_file}`, "
-                    "not more exploration."
+                    "or a focused read of that same file for edit context."
                 ),
                 required_next=(
-                    f"Use `str_replace_editor` on `{self.pending_forbidden_file}` "
-                    "to remove the forbidden pattern, then rerun the focused test or say DONE."
+                    f"Read `{self.pending_forbidden_file}` only if you need exact old_str "
+                    "context; otherwise use `str_replace_editor` on that file to remove "
+                    "the forbidden pattern, then rerun the focused test or say DONE."
                 ),
                 data={
                     "tool": name,
@@ -108,7 +114,14 @@ class BugStateReviewer:
 
         return None
 
-    def observe_tool_result(self, name: str, args: dict, result: str, *, applied: bool | None) -> None:
+    def observe_tool_result(
+        self,
+        name: str,
+        args: dict,
+        result: str,
+        *,
+        applied: bool | None,
+    ) -> None:
         """Update reviewer state after an executed tool call."""
         if not self.enabled:
             return
@@ -122,8 +135,16 @@ class BugStateReviewer:
             self.pending_forbidden_patterns = patterns
             return
 
-        edited_path = str(args.get("path") or "") if name in {"create_file", "str_replace_editor"} else ""
-        if applied is True and edited_path and edited_path == self.pending_forbidden_file:
+        edited_path = (
+            str(args.get("path") or "")
+            if name in {"create_file", "str_replace_editor"}
+            else ""
+        )
+        if (
+            applied is True
+            and normalize_review_path(edited_path)
+            and normalize_review_path(edited_path) == normalize_review_path(self.pending_forbidden_file)
+        ):
             self.pending_forbidden_file = None
             self.pending_forbidden_patterns = []
 
@@ -167,6 +188,48 @@ def is_exploratory_tool(name: str, args: dict) -> bool:
         "wc", "sort", "uniq", "cut", "tr", "dirname", "basename", "tree",
         "file", "which", "test",
     }
+
+
+def normalize_review_path(path: str | None) -> str:
+    raw = str(path or "").strip()
+    if not raw:
+        return ""
+    normalized = posixpath.normpath(PurePosixPath(raw).as_posix())
+    if normalized == ".":
+        return ""
+    return normalized.removeprefix("./")
+
+
+def is_pending_forbidden_file_lookup(name: str, args: dict, pending_file: str) -> bool:
+    """Allow focused context reads for the file that must be repaired."""
+    pending_norm = normalize_review_path(pending_file)
+    if not pending_norm:
+        return False
+
+    if name == "read_file":
+        return normalize_review_path(args.get("path")) == pending_norm
+
+    if name == "rg":
+        paths = args.get("path") or "."
+        if isinstance(paths, str):
+            paths = [paths]
+        return any(normalize_review_path(str(path)) == pending_norm for path in paths)
+
+    if name != "run_command":
+        return False
+    command = args.get("command", "")
+    if not isinstance(command, str):
+        return False
+    try:
+        parts = shlex.split(command)
+    except ValueError:
+        parts = command.split()
+    if not parts:
+        return False
+    focused_tools = {"grep", "rg", "cat", "head", "tail", "sed", "awk"}
+    if PurePosixPath(parts[0]).name not in focused_tools:
+        return False
+    return any(normalize_review_path(part) == pending_norm for part in parts[1:])
 
 
 def is_dependency_contract_lookup(name: str, args: dict) -> bool:
