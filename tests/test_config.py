@@ -87,7 +87,7 @@ class TestProductionConfig:
         system = cfg["prompt"]["system"].lower()
         assert "one focused regression test first" in system
         assert "contrastive fixtures" in system
-        assert "add up to two extra tests only when grounded" in system
+        assert "add up to two evidence-backed extra tests" in system
         assert "do not invent domain edge cases" in system
         assert "do not invent the callback signature" in system
 

@@ -91,7 +91,7 @@ When you're past 70% of steps, prioritize getting to DONE over perfecting code.
 - Write one focused regression test first: the exact reported bug or acceptance path.
 - For value-selection bugs, use contrastive fixtures: set the wrong observed value and the correct expected value to different issue-grounded values.
 - If the fix parses external metadata/context, cover the valid metadata path and a missing-or-invalid metadata fallback path when the original input value still exists.
-- Add up to two extra tests only when grounded in explicit acceptance criteria, a visible code branch, an existing test pattern, or a public type/framework contract. Do not invent domain edge cases.
+- After the first regression is red/green, add up to two evidence-backed extra tests when grounded in explicit acceptance criteria, a visible code branch, an existing test pattern, a fallback path, or a public type/framework contract. Do not invent domain edge cases.
 - If an existing test module for the target already exists, READ it first and reuse its fixtures, imports, and mocking patterns. Write your regression as ONE narrow, focused test — not a mini-suite exploring the whole module. Do NOT investigate or fix unrelated failures you encounter in that module; stay anchored on the symbol in the issue.
 - Put shared setup (mocks, test doubles, seam calls) in beforeEach, not duplicated in each test.
 - Never move the direct call to the function under test, or assertions/matchers like expect(...) / toHaveBeenCalledWith(...), into beforeEach.

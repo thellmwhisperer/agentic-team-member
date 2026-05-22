@@ -24,6 +24,7 @@ class RunBootstrapContext:
     """
 
     issue_text: str
+    issue_contract: Any
     issue_text_for_model: str
     source_path: str | None
     symbol: str | None
@@ -81,6 +82,7 @@ def prepare_run_context(
     discovery_enabled: bool,
     emit: Callable[[str], None],
     log: Callable[[str, dict], None],
+    apply_pre_test_edits: bool = True,
 ) -> RunBootstrapContext:
     """Prepare issue, target, episode, and initial messages for a run."""
     issue_lookup_repo = repo or workdir
@@ -138,6 +140,7 @@ def prepare_run_context(
         emit=emit,
         log=log,
         discovery_candidates=discovery_candidates,
+        apply_pre_test_edits=apply_pre_test_edits,
     )
     if episode and config.get("runner"):
         from agentic_tdd_runner.runner_facts import build_runner_facts
@@ -154,6 +157,7 @@ def prepare_run_context(
     )
     return RunBootstrapContext(
         issue_text=issue_text,
+        issue_contract=issue_contract,
         issue_text_for_model=issue_text_for_model,
         source_path=source_path,
         symbol=symbol,
@@ -243,6 +247,7 @@ def build_episode_for_target(
     emit: Callable[[str], None],
     log: Callable[[str, dict], None],
     discovery_candidates: list[dict] | None = None,
+    apply_pre_test_edits: bool = True,
 ) -> dict | None:
     """Build episode context and apply deterministic mechanical edits."""
     if not (source_path and symbol):
@@ -275,8 +280,11 @@ def build_episode_for_target(
     })
 
     edits = episode.get("pre_test_source_edits", [])
-    if edits:
+    if edits and apply_pre_test_edits:
         n = apply_mechanical_edits(edits, workdir)
         emit(f"[PREP] Applied {n}/{len(edits)} mechanical source edits")
         log("mechanical_edits", {"applied": n, "total": len(edits)})
+    elif edits:
+        emit(f"[PREP] Preview only: {len(edits)} mechanical source edits not applied")
+        log("mechanical_edits_preview", {"total": len(edits)})
     return episode
