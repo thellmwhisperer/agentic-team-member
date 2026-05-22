@@ -2131,6 +2131,32 @@ class TestRunQualityChecks:
         assert "Metadata fallback" in msg
         assert "_streakMonths" in msg
 
+    def test_rejects_plain_callback_value_metadata_fallback_without_invalid_guard(self, tmp_path, monkeypatch):
+        self._setup_repo(tmp_path, monkeypatch)
+        source = tmp_path / "src" / "file.ts"
+        source.write_text(
+            "export function f(streakMonths: number, userstate: Record<string, string>) {\n"
+            "  const raw = userstate['msg-param-cumulative-months'];\n"
+            "  const months = typeof raw === 'string' ? parseInt(raw, 10) : streakMonths;\n"
+            "  return months;\n"
+            "}\n"
+        )
+        (tmp_path / "src" / "file.test.ts").write_text("const x: number = 1;")
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "quality": {
+                "enabled": True, "max_fix_rounds": 3,
+                "typescript": {"checks": [], "forbidden": []},
+            },
+            "timeouts": {"tool_execution": 10},
+            "prompt": {"quality_failed": "FAIL: {details}"},
+        })
+
+        ok, msg = run_quality_checks("src/file.test.ts")
+
+        assert ok is False
+        assert "Metadata fallback" in msg
+        assert "streakMonths" in msg
+
     def test_allows_parsed_metadata_with_original_fallback(self, tmp_path, monkeypatch):
         self._setup_repo(tmp_path, monkeypatch)
         source = tmp_path / "src" / "file.ts"

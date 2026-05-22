@@ -498,6 +498,11 @@ _FALLBACK_VALUE_NAME_RE = re.compile(
 )
 
 
+def is_value_like_callback_param(name: str) -> bool:
+    """Return true for callback params that look like original scalar values."""
+    return bool(_FALLBACK_VALUE_NAME_RE.search(name.lstrip("_")))
+
+
 def find_matching_brace(text: str, open_index: int) -> int:
     depth = 0
     quote: str | None = None
@@ -559,11 +564,21 @@ def iter_function_bodies(text: str):
 
 
 def body_parses_external_metadata(body: str) -> bool:
-    return bool(
-        re.search(
-            r"\b(?:Number|parseInt)\s*\([\s\S]{0,240}\[[^\]]*['\"][^'\"]+['\"][^\]]*\]",
-            body,
-        )
+    direct_parse = re.search(
+        r"\b(?:Number|parseInt)\s*\([\s\S]{0,240}\[[^\]]*['\"][^'\"]+['\"][^\]]*\]",
+        body,
+    )
+    if direct_parse:
+        return True
+
+    metadata_vars = re.findall(
+        r"\b(?:const|let|var)\s+([A-Za-z_$]\w*)\s*=\s*[\w.$]+\s*"
+        r"\[[^\]]*['\"][^'\"]+['\"][^\]]*\]",
+        body,
+    )
+    return any(
+        re.search(rf"\b(?:Number|parseInt)\s*\(\s*{re.escape(name)}\b", body)
+        for name in metadata_vars
     )
 
 
@@ -602,7 +617,7 @@ def detect_parsed_metadata_without_original_fallback(
                 continue
             value_params = [
                 name for name in params
-                if name.startswith("_") and _FALLBACK_VALUE_NAME_RE.search(name.lstrip("_"))
+                if is_value_like_callback_param(name)
             ]
             ignored_original = False
             for name in value_params:

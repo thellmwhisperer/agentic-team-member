@@ -20,6 +20,11 @@ def tool_loop_signature(name: str, args: dict) -> str | None:
     """Return a stable signature for exploratory calls that can loop."""
     if name == "read_file":
         return f"read_file:{args.get('path', '')}"
+    if name == "rg":
+        pattern = args.get("pattern") or args.get("query") or args.get("term") or ""
+        path = args.get("path") or "."
+        glob = args.get("glob") or ""
+        return f"rg:{pattern}:{path}:{glob}"
     if name != "run_command":
         return None
     command = args.get("command", "")
@@ -110,6 +115,44 @@ def execute_tool(
                 content = f.read()
             file_read_cache[full_path] = mtime_ns
             return content
+
+        if name == "rg":
+            paths = rg_paths_from_args(args)
+            for path in paths:
+                resolve_repo_path(path)
+            command = build_rg_command(args)
+            command_text = shlex.join(command)
+            set_last_run_exit_code(None)
+            if is_blocked_dependency_contract_lookup(command_text, config):
+                if log:
+                    log("dependency_contract_lookup_blocked", {
+                        "command": command_text,
+                        "runtime": dict((config or {}).get("_runtime", {})),
+                    })
+                return (
+                    "BLOCKED: dependency contract lookup is disabled for this step "
+                    "because the issue/cookbook already provided concrete contract "
+                    "evidence. Use that evidence plus source and reactive compiler/test "
+                    "feedback. Dependency lookup is allowed again after reactive "
+                    "feedback contradicts the known contract."
+                )
+            validate_command(command_text)
+            result = subprocess.run(
+                command,
+                shell=False,
+                cwd=workdir,
+                env=build_command_env(config),
+                capture_output=True,
+                text=True,
+                timeout=config["timeouts"]["tool_execution"],
+            )
+            set_last_run_exit_code(result.returncode)
+            output = (result.stdout or "") + (result.stderr or "")
+            if output.strip():
+                return output
+            if result.returncode == 1:
+                return "(no matches)"
+            return "(no output)"
 
         if name == "run_command":
             set_last_run_exit_code(None)
@@ -208,6 +251,57 @@ def execute_tool(
 
     except Exception as e:
         return f"ERROR: {type(e).__name__}: {e}"
+
+
+def rg_paths_from_args(args: dict) -> list[str]:
+    """Return normalized repo-relative paths for an rg invocation."""
+    path = args.get("path") or "."
+    if isinstance(path, list):
+        paths = [str(item) for item in path if str(item).strip()]
+    else:
+        paths = [str(path)]
+    return paths or ["."]
+
+
+def rg_needs_no_ignore(paths: list[str]) -> bool:
+    """Return true when the caller explicitly targets commonly ignored paths."""
+    ignored_parts = {
+        ".git",
+        ".next",
+        ".turbo",
+        "build",
+        "coverage",
+        "dist",
+        "node_modules",
+        "vendor",
+    }
+    for path in paths:
+        if path == ".":
+            continue
+        parts = Path(path).parts
+        if any(part in ignored_parts for part in parts):
+            return True
+    return False
+
+
+def build_rg_command(args: dict) -> list[str]:
+    """Build a safe ripgrep argv from model-supplied args."""
+    pattern = args.get("pattern") or args.get("query") or args.get("term")
+    if not isinstance(pattern, str) or not pattern.strip():
+        raise ValueError("rg requires a non-empty pattern")
+
+    paths = rg_paths_from_args(args)
+    command = ["rg", "--line-number", "--no-heading"]
+    if args.get("case_sensitive") is False:
+        command.append("--ignore-case")
+    if rg_needs_no_ignore(paths):
+        command.append("--no-ignore")
+    glob = args.get("glob")
+    if isinstance(glob, str) and glob.strip():
+        command.extend(["--glob", glob])
+    command.append(pattern)
+    command.extend(paths)
+    return command
 
 
 def reactive_typecheck_feedback(
