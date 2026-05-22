@@ -25,6 +25,8 @@ class RunnerFacts:
     target_symbol: str | None
     nearby_tests: list[str]
     symbol_tests: list[str]
+    source_line_range: dict | None = None
+    test_api_facts: list[str] | None = None
 
     def to_prompt_section(self) -> str:
         source_dir = (
@@ -47,6 +49,14 @@ class RunnerFacts:
             lines.append(f"- test API import: `{self.test_api_import}`")
         if self.recommended_test_file:
             lines.append(f"- recommended regression test file: {self.recommended_test_file}")
+        if self.source_line_range:
+            start = self.source_line_range.get("start")
+            end = self.source_line_range.get("end")
+            source = self.source_line_range.get("source")
+            if start and end and source == "definition":
+                lines.append(f"- target source range: {self.source_file}:{start}-{end}")
+        for fact in self.test_api_facts or []:
+            lines.append(f"- test API fact: {fact}")
         nearby = ", ".join(self.nearby_tests) if self.nearby_tests else "none"
         lines.append(f"- nearby tests in {source_dir}: {nearby}")
         symbol = ", ".join(self.symbol_tests) if self.symbol_tests else "none"
@@ -65,6 +75,8 @@ class RunnerFacts:
             "target_symbol": self.target_symbol,
             "nearby_tests": list(self.nearby_tests),
             "symbol_tests": list(self.symbol_tests),
+            "source_line_range": dict(self.source_line_range) if self.source_line_range else None,
+            "test_api_facts": list(self.test_api_facts or []),
         }
 
 
@@ -108,6 +120,8 @@ def build_runner_facts(
         target_symbol=target_symbol,
         nearby_tests=nearby_tests,
         symbol_tests=symbol_tests,
+        source_line_range=_episode_line_range(episode),
+        test_api_facts=_test_api_facts(test_runner),
     )
 
 
@@ -116,6 +130,29 @@ def _episode_value(episode: dict | None, key: str) -> str | None:
         return None
     value = episode.get(key)
     return value if isinstance(value, str) and value else None
+
+
+def _episode_line_range(episode: dict | None) -> dict | None:
+    if not episode:
+        return None
+    value = episode.get("function_line_range")
+    if not isinstance(value, dict):
+        return None
+    start = value.get("start")
+    end = value.get("end")
+    source = value.get("source")
+    if not isinstance(start, int) or not isinstance(end, int):
+        return None
+    return {"start": start, "end": end, "source": source}
+
+
+def _test_api_facts(test_runner: str) -> list[str]:
+    if test_runner != "bun:test":
+        return []
+    return [
+        "Bun mock functions reset call history with `mockFn.mockClear()`; do not use `.mock.reset()`.",
+        "When a module has import-time side effects, register `mock.module(...)` before dynamically importing the target module.",
+    ]
 
 
 def _discover_test_files(root: Path, patterns: list[str], exclude_dirs: set[str]) -> list[str]:

@@ -99,3 +99,65 @@ def test_router_allows_edit_to_pending_test_file_then_clears_gate():
         "run_command",
         {"command": "bun test src/twitch/handleResub.test.ts"},
     ) is None
+
+
+def test_router_matches_pretty_tsc_missing_bun_globals():
+    router = IntentRouter(_facts())
+    router.observe_tool_result(
+        "run_command",
+        {"command": "bun run typecheck"},
+        (
+            "[Reactive typecheck]\n"
+            "src/twitch/handleResub.test.ts:4:1 - error TS2304: Cannot find name 'describe'.\n"
+        ),
+        applied=None,
+    )
+
+    decision = router.review_tool_call("run_command", {"command": "bun test"})
+
+    assert decision is not None
+    assert "RUNNER FACT ANSWER" in decision.message
+    assert "describe" in decision.message
+
+
+def test_router_answers_bun_mock_reset_type_error_before_more_tooling():
+    router = IntentRouter(_facts())
+    router.observe_tool_result(
+        "create_file",
+        {"path": "src/twitch/handleResub.test.ts"},
+        (
+            "[Reactive typecheck]\n"
+            "src/twitch/handleResub.test.ts(22,18): error TS2339: "
+            "Property 'reset' does not exist on type 'MockFunctionState<() => void>'.\n"
+        ),
+        applied=True,
+    )
+
+    decision = router.review_tool_call("run_command", {"command": "bun test"})
+
+    assert decision is not None
+    assert decision.event == "intent_router_answered"
+    assert decision.data["intent"] == "fix_bun_mock_api"
+    assert "mockClear()" in decision.message
+    assert "src/twitch/handleResub.test.ts" in decision.message
+
+
+def test_router_answers_typed_tuple_mock_contract_error():
+    router = IntentRouter(_facts())
+    router.observe_tool_result(
+        "create_file",
+        {"path": "src/twitch/handleResub.test.ts"},
+        (
+            "[Reactive typecheck]\n"
+            "src/twitch/handleResub.test.ts(30,5): error TS2322: Type "
+            "'Mock<() => Promise<string[]>>' is not assignable to type "
+            "'(channel: string, message: string) => Promise<[string]>'.\n"
+        ),
+        applied=True,
+    )
+
+    decision = router.review_tool_call("read_file", {"path": "src/twitch/client.ts"})
+
+    assert decision is not None
+    assert decision.data["intent"] == "fix_typed_mock_contract"
+    assert "Promise.resolve([value] as [string])" in decision.message

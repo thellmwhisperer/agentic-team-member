@@ -292,6 +292,46 @@ def test_reactive_test_feedback_returns_compact_failure(tmp_path, monkeypatch):
     assert "expect(true).toBe(false)" in result
 
 
+def test_reactive_test_feedback_keeps_deep_runtime_error_digest(tmp_path, monkeypatch):
+    monkeypatch.setenv("PATH", "/usr/bin")
+
+    def fake_run(command, **kwargs):
+        return subprocess.CompletedProcess(
+            command,
+            1,
+            stdout="\n".join(
+                [
+                    "src/file.test.ts:",
+                    "1 | setup",
+                    "2 | setup",
+                    "3 | setup",
+                    "4 | setup",
+                    "5 | setup",
+                    "6 | setup",
+                    "7 | setup",
+                    "error: API key is required",
+                    "    at new Provider (/repo/src/provider.ts:10:11)",
+                    "    at /repo/src/file.ts:5:1",
+                ]
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr("agentic_tdd_runner.tools.subprocess.run", fake_run)
+
+    result = reactive_test_feedback(
+        "src/file.test.ts",
+        workdir=str(tmp_path),
+        config={"timeouts": {"test_run": 10}},
+        is_test_file_path=lambda path: path.endswith(".test.ts"),
+        test_runner_command_for_file=lambda _path: "bun test",
+    )
+
+    assert "[Reactive test]" in result
+    assert "error: API key is required" in result
+    assert "at new Provider" in result
+
+
 def test_reactive_forbidden_feedback_reports_test_quality_issues(tmp_path):
     target = tmp_path / "src" / "file.test.ts"
     target.parent.mkdir()
