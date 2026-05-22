@@ -3,6 +3,21 @@
 from agentic_tdd_runner import runtime
 
 
+def test_has_contract_evidence_matches_real_handle_resub_issue_text():
+    issue_text = """
+    ## Root cause
+    The function receives `streakMonths` (3rd param from tmi.js) but treats it
+    as cumulative months. The tmi.js `resub` event signature is:
+    ```
+    resub(channel, username, months, message, userstate, methods)
+    ```
+    Cumulative months are in `userstate['msg-param-cumulative-months']`, but
+    the function only accepts 3 params.
+    """
+
+    assert runtime.has_contract_evidence(issue_text, episode=None) is True
+
+
 def test_reactive_test_feedback_reopens_dependency_contract_lookup_gate(tmp_path):
     config = {
         "agent": {"max_steps": 2, "non_apply_step_warning_threshold": 0},

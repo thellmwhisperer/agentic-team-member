@@ -111,6 +111,12 @@ class TestLoadConfig:
         assert budget["recover"] > budget["default"]
         assert budget["late"] < budget["default"]
 
+    def test_production_ships_state_reviewer_disabled_by_default(self):
+        prod = CONFIG_DIR / "agent.toml"
+        cfg = load_config(prod)
+        assert cfg["state_reviewer"]["enabled"] is False
+        assert cfg["state_reviewer"]["max_dependency_contract_lookups"] >= 2
+
     def test_loads_system_prompt(self, tmp_path):
         _write_config(tmp_path)
         cfg = load_config(tmp_path / "agent.toml")
