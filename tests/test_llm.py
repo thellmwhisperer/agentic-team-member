@@ -110,6 +110,27 @@ def test_dynamic_thinking_budget_recover_overrides_phase_before_late_steps():
     assert llm.resolve_thinking_budget_tokens(config) == 512
 
 
+def test_dynamic_thinking_budget_recover_overrides_late_throttle():
+    config = _config({
+        "thinking_budget": {
+            "enabled": True,
+            "default": 256,
+            "fix": 256,
+            "recover": 512,
+            "late": 64,
+            "late_step_ratio": 0.7,
+        },
+    })
+    config["_runtime"] = {
+        "thinking_phase": "fix",
+        "completion_rejected": True,
+        "step": 40,
+        "max_steps": 50,
+    }
+
+    assert llm.resolve_thinking_budget_tokens(config) == 512
+
+
 def test_chat_completion_omits_thinking_budget_tokens_when_not_configured(monkeypatch):
     captured = {}
 

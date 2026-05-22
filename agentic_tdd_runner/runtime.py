@@ -273,7 +273,11 @@ def run_agent_loop(
                 if display.count("\n") > 20:
                     emit(f"    ... ({display.count(chr(10))} lines total)")
 
-                if "[Reactive typecheck]" in result or "error TS" in result:
+                if (
+                    "[Reactive typecheck]" in result
+                    or "[Reactive test]" in result
+                    or "error TS" in result
+                ):
                     allow_dependency_contract_lookup = True
 
                 messages.append({

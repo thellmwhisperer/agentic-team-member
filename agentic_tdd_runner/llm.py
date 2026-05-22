@@ -33,6 +33,9 @@ def resolve_thinking_budget_tokens(config: dict) -> int | None:
     runtime = config.get("_runtime", {})
     phase = str(runtime.get("thinking_phase") or "default")
 
+    if runtime.get("completion_rejected") and _coerce_int(budget_cfg.get("recover")) is not None:
+        return _coerce_int(budget_cfg.get("recover"))
+
     late_ratio_raw = budget_cfg.get("late_step_ratio", 0.7)
     try:
         late_ratio = float(late_ratio_raw)
@@ -48,9 +51,6 @@ def resolve_thinking_budget_tokens(config: dict) -> int | None:
         and _coerce_int(budget_cfg.get("late")) is not None
     ):
         return _coerce_int(budget_cfg.get("late"))
-
-    if runtime.get("completion_rejected") and _coerce_int(budget_cfg.get("recover")) is not None:
-        return _coerce_int(budget_cfg.get("recover"))
 
     phase_budget = _coerce_int(budget_cfg.get(phase))
     if phase_budget is not None:

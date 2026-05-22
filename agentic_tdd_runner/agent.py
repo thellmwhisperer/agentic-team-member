@@ -179,6 +179,7 @@ def execute_tool(name: str, args: dict) -> str:
         typecheck_ownership_hint=_typecheck_ownership_hint,
         is_test_file_path=_is_test_file_path,
         test_runner_command_for_file=_test_runner_command_for_file,
+        log=log,
     )
 
 

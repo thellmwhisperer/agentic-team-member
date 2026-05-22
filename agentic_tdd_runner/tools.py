@@ -94,6 +94,7 @@ def execute_tool(
     typecheck_ownership_hint: Callable[[str, str, list[str]], str | None],
     is_test_file_path: Callable[[str], bool],
     test_runner_command_for_file: Callable[[str], str],
+    log: Callable[[str, dict], None] | None = None,
 ) -> str:
     """Execute one model-requested tool call."""
     try:
@@ -113,6 +114,11 @@ def execute_tool(
         if name == "run_command":
             set_last_run_exit_code(None)
             if is_blocked_dependency_contract_lookup(args["command"], config):
+                if log:
+                    log("dependency_contract_lookup_blocked", {
+                        "command": args["command"],
+                        "runtime": dict((config or {}).get("_runtime", {})),
+                    })
                 return (
                     "BLOCKED: dependency contract lookup is disabled for this step "
                     "because the issue/cookbook already provided concrete contract "
