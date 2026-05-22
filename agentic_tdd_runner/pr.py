@@ -1,7 +1,6 @@
 """Pull request creation helpers for the agent runner."""
 
-from __future__ import annotations
-
+import json
 import os
 import re
 import subprocess
@@ -54,6 +53,7 @@ def build_pr_content_messages(
     *,
     pr_prompt: str,
     changed_files: list[str],
+    diff_context: str = "",
 ) -> list[dict]:
     """Build a text-only prompt for PR copy generation.
 
@@ -63,16 +63,24 @@ def build_pr_content_messages(
     """
     pr_messages: list[dict] = []
     for message in messages:
-        if message.get("role") == "system" and isinstance(message.get("content"), str):
-            pr_messages.append({"role": "system", "content": message["content"]})
+        if message.get("role") != "system":
+            continue
+        system_text = _plain_message_content(message)
+        if not system_text and isinstance(message.get("content"), dict):
+            system_text = json.dumps(message["content"], sort_keys=True)
+        if system_text:
+            pr_messages.append({"role": "system", "content": system_text})
             break
 
     changed_section = "\n".join(f"- {path}" for path in changed_files) or "- No changed files detected"
     final_context = _plain_message_content(last_msg)
+    diff_section = diff_context.strip() or "No diff context available."
     prompt = (
         f"{pr_prompt}\n\n"
         "Changed files:\n"
         f"{changed_section}\n\n"
+        "Git diff:\n"
+        f"{diff_section}\n\n"
         "Final agent message:\n"
         f"{final_context[:4000] if final_context else 'DONE'}"
     )
@@ -204,6 +212,69 @@ def collect_pr_changed_files(
     }
 
 
+def collect_pr_diff_context(
+    workdir: str,
+    changed_files: list[str],
+    command_timeout: int,
+    *,
+    command_env: dict[str, str] | None = None,
+    max_chars: int = 12000,
+) -> str:
+    """Return a plain-text diff for PR copy generation."""
+    if not changed_files:
+        return ""
+    env = command_env or build_command_env()
+    sections: list[str] = []
+    for args in (
+        ["git", "diff", "--", *changed_files],
+        ["git", "diff", "--cached", "--", *changed_files],
+    ):
+        result = subprocess.run(
+            args,
+            cwd=workdir,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=command_timeout,
+        )
+        if result.stdout.strip():
+            sections.append(result.stdout.strip())
+
+    untracked = subprocess.run(
+        ["git", "ls-files", "--others", "--exclude-standard"],
+        cwd=workdir,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=command_timeout,
+    )
+    untracked_files = {
+        path.strip()
+        for path in untracked.stdout.splitlines()
+        if path.strip() in changed_files
+    }
+    for path in sorted(untracked_files):
+        full_path = os.path.join(workdir, path)
+        if not os.path.isfile(full_path):
+            continue
+        result = subprocess.run(
+            ["git", "diff", "--no-index", "--no-ext-diff", "--", os.devnull, path],
+            cwd=workdir,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=command_timeout,
+        )
+        output = result.stdout.strip()
+        if output:
+            sections.append(output)
+
+    diff_context = "\n\n".join(sections).strip()
+    if len(diff_context) > max_chars:
+        return f"{diff_context[:max_chars]}\n... [diff truncated]"
+    return diff_context
+
+
 def create_pr(
     messages: list,
     last_msg: dict,
@@ -268,11 +339,22 @@ def create_pr(
         log("pr_excluded_preexisting_changes", {"files": excluded_files})
 
     sorted_allowed_changed_files = sorted(allowed_changed_files)
+    try:
+        diff_context = collect_pr_diff_context(
+            workdir,
+            sorted_allowed_changed_files,
+            pr_timeout,
+            command_env=command_env,
+        )
+    except (OSError, subprocess.TimeoutExpired) as e:
+        diff_context = ""
+        log("pr_diff_context_error", {"error": str(e)})
     pr_messages = build_pr_content_messages(
         messages,
         last_msg,
         pr_prompt=config["prompt"]["pr_prompt"],
         changed_files=sorted_allowed_changed_files,
+        diff_context=diff_context,
     )
 
     emit("  [PR] Generating title/body")
