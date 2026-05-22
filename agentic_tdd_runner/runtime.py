@@ -102,6 +102,7 @@ def run_agent_loop(
     state_reviewer = BugStateReviewer(
         config,
         contract_evidence_available=block_dependency_contract_lookup,
+        runner_facts=(episode or {}).get("runner_facts"),
     )
     non_apply_warning_threshold = int(
         config.get("agent", {}).get("non_apply_step_warning_threshold", 5) or 0

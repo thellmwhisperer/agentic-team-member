@@ -222,6 +222,61 @@ The bot reports 0 months.
     ]
 
 
+def test_prepare_run_context_injects_runner_facts_when_runner_config_exists(tmp_path, monkeypatch):
+    logged = []
+    issue = """Bug: handleResub reports 0 months
+
+## Where
+`src/twitch/client.ts` -> `handleResub()`
+"""
+    (tmp_path / "package.json").write_text('{"scripts":{"typecheck":"tsc --noEmit"}}')
+    (tmp_path / "src/twitch").mkdir(parents=True)
+    (tmp_path / "src/twitch/client.ts").write_text("export function handleResub() {}\n")
+
+    def fake_episode(**kwargs):
+        return {
+            "source_file": kwargs["source_path"],
+            "target_symbol": kwargs["symbol"],
+            "test_file": "src/twitch/handleResub.test.ts",
+            "runner": "bun:test",
+            "pre_test_source_edits": [],
+            "function_line_range": {"start": 1, "end": 1, "source": "definition"},
+            "cookbook_text": "## Cookbook\n",
+        }
+
+    monkeypatch.setattr("agentic_tdd_runner.cookbook.build_episode_context", fake_episode)
+    args = SimpleNamespace(issue="unused", source=None, symbol=None)
+
+    context = prepare_run_context(
+        args,
+        repo=None,
+        workdir=str(tmp_path),
+        config={
+            "prompt": {"system": "system"},
+            "timeouts": {"tool_execution": 10},
+            "runner": {
+                "command": "bun test",
+                "framework": "bun:test",
+                "test_file_patterns": ["*.test.ts"],
+            },
+            "environment": {"run_typecheck": True},
+        },
+        load_issue_text=lambda _args, _repo: issue,
+        prepare_target_environment=lambda: None,
+        apply_mechanical_edits=lambda _edits, _workdir: 0,
+        collect_pr_changed_files=lambda _workdir, _timeout: set(),
+        discovery_enabled=True,
+        emit=lambda _msg: None,
+        log=lambda event, data: logged.append((event, data)),
+    )
+
+    assert context.episode["runner_facts"].test_api_import == (
+        'import { beforeEach, describe, expect, mock, test } from "bun:test";'
+    )
+    assert "## Runner Facts" in context.messages[0]["content"]
+    assert ("runner_facts", context.episode["runner_facts"].to_log_dict()) in logged
+
+
 def test_prepare_run_context_handles_missing_source_symbol_attrs(tmp_path):
     args = SimpleNamespace(issue="unused")
 

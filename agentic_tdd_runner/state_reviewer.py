@@ -8,6 +8,9 @@ import shlex
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 
+from agentic_tdd_runner.intent_router import IntentRouter
+from agentic_tdd_runner.runner_facts import RunnerFacts
+
 
 @dataclass(frozen=True)
 class StateReview:
@@ -26,7 +29,13 @@ class BugStateReviewer:
     the OpenAI tool-call transcript valid.
     """
 
-    def __init__(self, config: dict | None, *, contract_evidence_available: bool) -> None:
+    def __init__(
+        self,
+        config: dict | None,
+        *,
+        contract_evidence_available: bool,
+        runner_facts: RunnerFacts | None = None,
+    ) -> None:
         cfg = (config or {}).get("state_reviewer", {})
         self.enabled = bool(cfg.get("enabled", False))
         self.contract_evidence_available = contract_evidence_available
@@ -36,6 +45,7 @@ class BugStateReviewer:
         self.dependency_contract_lookup_count = 0
         self.pending_forbidden_file: str | None = None
         self.pending_forbidden_patterns: list[str] = []
+        self.intent_router = IntentRouter(runner_facts)
 
     def review_tool_call(
         self,
@@ -47,6 +57,14 @@ class BugStateReviewer:
         """Return a blocking review when a tool call violates state invariants."""
         if not self.enabled:
             return None
+
+        intent_decision = self.intent_router.review_tool_call(name, args)
+        if intent_decision:
+            return StateReview(
+                event=intent_decision.event,
+                message=intent_decision.message,
+                data=intent_decision.data,
+            )
 
         if (
             self.pending_forbidden_file
@@ -125,6 +143,8 @@ class BugStateReviewer:
         """Update reviewer state after an executed tool call."""
         if not self.enabled:
             return
+
+        self.intent_router.observe_tool_result(name, args, result, applied=applied)
 
         if is_dependency_contract_lookup(name, args):
             self.dependency_contract_lookup_count += 1
