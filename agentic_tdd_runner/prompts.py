@@ -6,6 +6,9 @@ def build_system_prompt(base_system_prompt: str, episode: dict | None = None) ->
     system_prompt = base_system_prompt.strip()
     if episode:
         system_prompt = f"{system_prompt}\n\n{episode['cookbook_text']}"
+        runner_facts_text = episode.get("runner_facts_text")
+        if runner_facts_text:
+            system_prompt = f"{system_prompt}\n\n{runner_facts_text}"
     return system_prompt
 
 
