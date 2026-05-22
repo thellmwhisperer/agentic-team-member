@@ -4836,6 +4836,67 @@ The bot reports 0 months.
         with pytest.raises(SystemExit, match="Issue rejected"):
             main()
 
+    def test_main_can_export_artifacts_and_stop_before_chat(self, tmp_path, monkeypatch):
+        issue = """Bug: handleResub reports 0 months
+
+## Where
+`src/twitch/client.ts` -> `handleResub()`
+"""
+        artifact_dir = tmp_path / "artifacts"
+        episode_calls = []
+
+        def fake_episode(**kwargs):
+            episode_calls.append(kwargs)
+            return {
+                "source_file": kwargs["source_path"],
+                "target_symbol": kwargs["symbol"],
+                "test_file": "src/twitch/handleResub.test.ts",
+                "source_import_path": "./client",
+                "runner": "bun:test",
+                "mocks_text": "",
+                "pre_test_source_edits": [],
+                "conditional_source_edits": [],
+                "assertion_hint": "",
+                "function_line_range": {"start": 770, "end": 790, "source": "definition"},
+                "cookbook_text": "## Mock Cookbook\n",
+            }
+
+        args = SimpleNamespace(
+            issue=issue,
+            source=None,
+            symbol=None,
+            workdir=str(tmp_path),
+            config="unused.toml",
+            log_dir=str(tmp_path),
+            repo=None,
+            base_ref="main",
+            run_root=None,
+            issue_number=None,
+            github_repo=None,
+            artifact_dir=str(artifact_dir),
+            prepare_only=True,
+        )
+
+        monkeypatch.setattr("agentic_tdd_runner.config.load_config", lambda path: self._make_config())
+        monkeypatch.setattr("agentic_tdd_runner.agent.parse_args", lambda: args)
+        monkeypatch.setattr("agentic_tdd_runner.agent.init_log", lambda: str(tmp_path / "agent.jsonl"))
+        monkeypatch.setattr("agentic_tdd_runner.agent.emit", lambda msg: None)
+        monkeypatch.setattr("agentic_tdd_runner.agent.log", lambda *a, **kw: None)
+        monkeypatch.setattr(
+            "agentic_tdd_runner.agent.apply_mechanical_edits",
+            lambda *a, **kw: (_ for _ in ()).throw(AssertionError("prepare-only should not mutate")),
+        )
+        monkeypatch.setattr("agentic_tdd_runner.cookbook.build_episode_context", fake_episode)
+        monkeypatch.setattr(
+            "agentic_tdd_runner.agent.chat",
+            lambda *a, **kw: (_ for _ in ()).throw(AssertionError("chat should not run")),
+        )
+
+        assert main() == 0
+        assert episode_calls
+        assert (artifact_dir / "manifest.json").exists()
+        assert (artifact_dir / "rendered" / "system_prompt.md").exists()
+
 
 class TestChatPayload:
     """Verify that chat() builds the correct request payload."""
