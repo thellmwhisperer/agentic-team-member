@@ -33,6 +33,7 @@ def _execute_tool(name: str, args: dict, tmp_path, **overrides):
         typecheck_ownership_hint=overrides.pop("typecheck_ownership_hint", lambda *_args: None),
         is_test_file_path=overrides.pop("is_test_file_path", lambda path: path.endswith(".test.ts")),
         test_runner_command_for_file=overrides.pop("test_runner_command_for_file", lambda _path: "bun test"),
+        log=overrides.pop("log", None),
     ), exit_codes
 
 
@@ -101,16 +102,28 @@ def test_blocks_node_modules_contract_lookup_when_contract_evidence_exists(tmp_p
         },
     }
 
+    logged = []
+
     result, exit_codes = _execute_tool(
         "run_command",
         {"command": 'rg "resub" node_modules/@types/tmi.js/index.d.ts'},
         tmp_path,
         config=config,
+        log=lambda event, data: logged.append((event, data)),
     )
 
     assert result.startswith("BLOCKED:")
     assert "already provided concrete contract evidence" in result
     assert exit_codes == [None]
+    assert logged == [
+        (
+            "dependency_contract_lookup_blocked",
+            {
+                "command": 'rg "resub" node_modules/@types/tmi.js/index.d.ts',
+                "runtime": config["_runtime"],
+            },
+        )
+    ]
 
 
 def test_allows_node_modules_contract_lookup_after_reactive_feedback(tmp_path, monkeypatch):
