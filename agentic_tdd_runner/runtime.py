@@ -6,6 +6,7 @@ from collections.abc import Callable
 
 from agentic_tdd_runner import completion as _completion
 from agentic_tdd_runner import llm as _llm
+from agentic_tdd_runner.state_reviewer import BugStateReviewer
 
 
 def has_contract_evidence(issue_text: str, episode: dict | None) -> bool:
@@ -98,6 +99,10 @@ def run_agent_loop(
     test_file_created = False
     allow_dependency_contract_lookup = False
     block_dependency_contract_lookup = has_contract_evidence(issue_text, episode)
+    state_reviewer = BugStateReviewer(
+        config,
+        contract_evidence_available=block_dependency_contract_lookup,
+    )
     non_apply_warning_threshold = int(
         config.get("agent", {}).get("non_apply_step_warning_threshold", 5) or 0
     )
@@ -243,10 +248,25 @@ def run_agent_loop(
                 emit(f"  [TOOL] {name}({args_preview})")
 
                 t1 = time.time()
-                result = execute_tool(name, args)
-                tool_elapsed = time.time() - t1
+                state_review = state_reviewer.review_tool_call(
+                    name,
+                    args,
+                    allow_dependency_contract_lookup=allow_dependency_contract_lookup,
+                )
+                if state_review:
+                    result = state_review.message
+                    tool_elapsed = 0.0
+                    applied = None
+                    log(state_review.event, {
+                        "step": step,
+                        **state_review.data,
+                    })
+                else:
+                    result = execute_tool(name, args)
+                    tool_elapsed = time.time() - t1
+                    applied = tool_applied_status(name, result)
+                    state_reviewer.observe_tool_result(name, args, result, applied=applied)
                 result_truncated = truncate(result)
-                applied = tool_applied_status(name, result)
                 loop_signature = tool_loop_signature(name, args)
 
                 log("tool", {
@@ -308,7 +328,7 @@ def run_agent_loop(
                 # intact. Only a successful edit (applied is True) breaks it,
                 # because only a successful edit represents actual progress.
 
-                if is_test_pass(name, args):
+                if not state_review and is_test_pass(name, args):
                     test_passed = True
 
             if step_had_successful_edit:
