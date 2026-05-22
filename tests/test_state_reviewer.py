@@ -1,6 +1,9 @@
 """Tests for deterministic bug-state review."""
 
-from agentic_tdd_runner.state_reviewer import BugStateReviewer
+from agentic_tdd_runner.state_reviewer import (
+    BugStateReviewer,
+    is_pending_forbidden_file_lookup,
+)
 
 
 def test_blocks_dependency_lookup_when_contract_is_already_known():
@@ -90,3 +93,107 @@ def test_successful_edit_clears_pending_forbidden_pattern_when_feedback_is_clean
     )
 
     assert review is None
+
+
+def test_successful_edit_clears_pending_forbidden_pattern_with_normalized_path():
+    reviewer = BugStateReviewer(
+        {
+            "state_reviewer": {"enabled": True},
+        },
+        contract_evidence_available=False,
+    )
+    reviewer.observe_tool_result(
+        "create_file",
+        {"path": "src/twitch/handleResub.test.ts"},
+        "[Reactive forbidden]\n  ./src/twitch/handleResub.test.ts:110 '{} as'",
+        applied=True,
+    )
+    reviewer.observe_tool_result(
+        "str_replace_editor",
+        {"path": "src/twitch/../twitch/handleResub.test.ts"},
+        "OK: replaced in src/twitch/handleResub.test.ts",
+        applied=True,
+    )
+
+    review = reviewer.review_tool_call(
+        "read_file",
+        {"path": "src/twitch/handleResub.test.ts"},
+        allow_dependency_contract_lookup=True,
+    )
+
+    assert review is None
+
+
+def test_pending_forbidden_allows_focused_read_after_failed_edit():
+    reviewer = BugStateReviewer(
+        {
+            "state_reviewer": {"enabled": True},
+        },
+        contract_evidence_available=False,
+    )
+    reviewer.observe_tool_result(
+        "create_file",
+        {"path": "src/twitch/handleResub.test.ts"},
+        "[Reactive forbidden]\n  src/twitch/handleResub.test.ts:110 '{} as'",
+        applied=True,
+    )
+    reviewer.observe_tool_result(
+        "str_replace_editor",
+        {"path": "src/twitch/handleResub.test.ts"},
+        "ERROR: old_str not found",
+        applied=False,
+    )
+
+    focused_read = reviewer.review_tool_call(
+        "read_file",
+        {"path": "./src/twitch/handleResub.test.ts"},
+        allow_dependency_contract_lookup=True,
+    )
+    unrelated_read = reviewer.review_tool_call(
+        "read_file",
+        {"path": "src/twitch/client.ts"},
+        allow_dependency_contract_lookup=True,
+    )
+
+    assert focused_read is None
+    assert unrelated_read is not None
+    assert "QUALITY_REPAIR" in unrelated_read.message
+
+
+def test_pending_forbidden_file_lookup_accepts_direct_rg_and_sed_context():
+    assert is_pending_forbidden_file_lookup(
+        "rg",
+        {"pattern": "{} as", "path": "./src/twitch/handleResub.test.ts"},
+        "src/twitch/handleResub.test.ts",
+    )
+    assert is_pending_forbidden_file_lookup(
+        "run_command",
+        {"command": "sed -n '100,120p' src/twitch/handleResub.test.ts"},
+        "src/twitch/handleResub.test.ts",
+    )
+
+
+def test_blocks_dependency_lookup_after_repair_budget_is_spent():
+    reviewer = BugStateReviewer(
+        {
+            "state_reviewer": {"enabled": True, "max_dependency_contract_lookups": 1},
+        },
+        contract_evidence_available=True,
+    )
+    reviewer.observe_tool_result(
+        "rg",
+        {"pattern": "SubMethods", "path": "node_modules/tmi.js"},
+        "resub(channel, username, months, message, userstate, methods)",
+        applied=None,
+    )
+
+    review = reviewer.review_tool_call(
+        "rg",
+        {"pattern": "SubUserstate", "path": "node_modules/tmi.js"},
+        allow_dependency_contract_lookup=True,
+    )
+
+    assert review is not None
+    assert "CONTRACT_REPAIR" in review.message
+    assert review.data["lookup_count"] == 1
+    assert review.data["lookup_budget"] == 1

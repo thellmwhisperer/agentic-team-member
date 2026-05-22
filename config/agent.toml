@@ -142,8 +142,8 @@ max_fix_rounds = 3
 # Only forbidden patterns need explicit config per language.
 
 [state_reviewer]
-enabled = true
-max_dependency_contract_lookups = 1
+enabled = false
+max_dependency_contract_lookups = 2
 
 [quality.typescript]
 forbidden = ["as any", "as unknown as", "as never", "{} as", ": any", "eslint-disable", "@ts-ignore", "@ts-expect-error"]
