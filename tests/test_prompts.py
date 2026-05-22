@@ -46,6 +46,21 @@ def test_build_initial_messages_with_episode_injects_cookbook_and_phase1_prompt(
     assert "Bug:\nbug text" in messages[1]["content"]
 
 
+def test_build_initial_messages_with_episode_injects_runner_facts():
+    messages = build_initial_messages(
+        base_system_prompt="system prompt",
+        issue_text_for_model="bug text",
+        episode=_episode(runner_facts_text="## Runner Facts\n- test runner: bun:test"),
+    )
+
+    assert messages[0]["content"] == (
+        "system prompt\n\n"
+        "## Cookbook\nUse real imports.\n"
+        "\n\n"
+        "## Runner Facts\n- test runner: bun:test"
+    )
+
+
 def test_function_line_hint_only_uses_definition_ranges():
     assert function_line_hint(_episode()) == " (lines 12-34)"
     assert function_line_hint(_episode(function_line_range={"start": 1, "end": 2, "source": "fallback"})) == ""

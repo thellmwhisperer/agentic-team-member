@@ -139,6 +139,13 @@ def prepare_run_context(
         log=log,
         discovery_candidates=discovery_candidates,
     )
+    if episode and config.get("runner"):
+        from agentic_tdd_runner.runner_facts import build_runner_facts
+
+        runner_facts = build_runner_facts(workdir, config, episode=episode)
+        episode["runner_facts"] = runner_facts
+        episode["runner_facts_text"] = runner_facts.to_prompt_section()
+        log("runner_facts", runner_facts.to_log_dict())
 
     messages = prompts.build_initial_messages(
         base_system_prompt=config["prompt"]["system"],
