@@ -568,6 +568,8 @@ def parse_args():
     parser.add_argument("--workdir", type=str, help="Project root directory, or destination when --repo is used")
     parser.add_argument("--config", type=str, default=_default_config_path(), help="Path to agent.toml config file")
     parser.add_argument("--log-dir", type=str, default=_default_log_dir(), help="Directory for JSONL logs (default: cwd)")
+    parser.add_argument("--artifact-dir", type=str, help="Directory for deterministic run artifact export")
+    parser.add_argument("--prepare-only", action="store_true", help="Prepare context/artifacts and exit before LLM calls")
     return parser.parse_args()
 
 
@@ -598,10 +600,31 @@ def main():
         apply_mechanical_edits=apply_mechanical_edits,
         collect_pr_changed_files=_pr.collect_pr_changed_files,
         discovery_enabled=_discovery_enabled(),
+        apply_pre_test_edits=not getattr(args, "prepare_only", False),
         emit=emit,
         log=log,
     )
     _RUN_BASELINE_CHANGED_FILES = run_context.baseline_changed_files
+    artifact_dir = getattr(args, "artifact_dir", None)
+    if artifact_dir:
+        from agentic_tdd_runner.artifacts import export_harness_artifacts
+
+        manifest = export_harness_artifacts(
+            artifact_dir,
+            run_context=run_context,
+            workdir=WORKDIR,
+            log_path=log_path,
+        )
+        emit(f"[ARTIFACTS] Wrote harness artifacts to {artifact_dir}")
+        log("artifacts_exported", {
+            "artifact_dir": artifact_dir,
+            "files": sorted(manifest.get("files", {}).keys()),
+        })
+
+    if getattr(args, "prepare_only", False):
+        emit("[PREPARE] prepare-only requested; stopping before LLM loop")
+        log("prepare_only", {"artifact_dir": artifact_dir})
+        return 0
 
     return _runtime.run_agent_loop(
         messages=run_context.messages,

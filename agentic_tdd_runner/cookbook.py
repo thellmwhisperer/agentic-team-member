@@ -389,8 +389,8 @@ def _render_cookbook_text(contract: dict, lang) -> str:
     parts.append("### Test Scope")
     parts.append("- Write one focused regression test first: the exact reported bug or acceptance path.")
     parts.append("- Add contrastive fixtures when they distinguish issue-grounded competing values.")
-    parts.append("- Add extra tests only when grounded in explicit acceptance criteria, a visible code branch, an existing test pattern, or a public type/framework contract.")
-    parts.append("- Limit optional extras to two tests; each extra test must protect a distinct branch or contract, not repeat the same behavior.")
+    parts.append("- Add up to two evidence-backed extra tests after the first red/green regression when grounded in explicit acceptance criteria, a visible code branch, an existing test pattern, a fallback path, or a public type/framework contract.")
+    parts.append("- Each extra test must protect a distinct branch or contract, not repeat the same behavior.")
     parts.append("- Do not invent domain edge cases just to make a larger suite.")
     parts.append("")
 

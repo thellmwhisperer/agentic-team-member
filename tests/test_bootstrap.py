@@ -412,3 +412,36 @@ def test_build_episode_for_target_returns_none_without_target(tmp_path):
         emit=lambda _msg: None,
         log=lambda _event, _data: None,
     ) is None
+
+
+def test_build_episode_for_target_can_skip_mechanical_edits_for_preview(tmp_path, monkeypatch):
+    calls = []
+    logged = []
+
+    def fake_episode(**_kwargs):
+        return {
+            "source_file": "src/client.ts",
+            "target_symbol": "handle",
+            "test_file": "src/handle.test.ts",
+            "pre_test_source_edits": [
+                {"path": "src/client.ts", "old": "function handle", "new": "export function handle"}
+            ],
+            "function_line_range": {"start": 1, "end": 1, "source": "definition"},
+            "cookbook_text": "## Cookbook\n",
+        }
+
+    monkeypatch.setattr("agentic_tdd_runner.cookbook.build_episode_context", fake_episode)
+
+    episode = build_episode_for_target(
+        "src/client.ts",
+        "handle",
+        workdir=str(tmp_path),
+        apply_mechanical_edits=lambda edits, workdir: calls.append((edits, workdir)) or len(edits),
+        emit=lambda _msg: None,
+        log=lambda event, data: logged.append((event, data)),
+        apply_pre_test_edits=False,
+    )
+
+    assert episode["target_symbol"] == "handle"
+    assert calls == []
+    assert ("mechanical_edits_preview", {"total": 1}) in logged

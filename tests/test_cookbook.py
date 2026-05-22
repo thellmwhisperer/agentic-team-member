@@ -631,8 +631,7 @@ class TestRegressionScopeGuidance:
         result = generate_cookbook("src/math.ts", "chooseMonths", str(tmp_path))
 
         assert "Write one focused regression test first" in result
-        assert "Add extra tests only when grounded" in result
-        assert "Limit optional extras to two tests" in result
+        assert "Add up to two evidence-backed extra tests" in result
         assert "Do not invent domain edge cases" in result
 
     def test_includes_contrastive_fixture_policy(self, tmp_path):
