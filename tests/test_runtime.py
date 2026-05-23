@@ -189,6 +189,98 @@ def test_permission_mode_blocks_tool_before_declared_intent(tmp_path):
     )
 
 
+def test_permission_mode_preserves_write_grant_across_informational_harness_answer(tmp_path):
+    source = tmp_path / "src" / "twitch" / "client.ts"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "\n".join([
+            "export function handleResub(channel: string, username: string, months: number): void {",
+            "  logger.event('resub', { username, months });",
+            "}",
+        ])
+    )
+    config = {
+        "agent": {
+            "max_steps": 3,
+            "non_apply_step_warning_threshold": 0,
+            "permission_driven": True,
+        },
+        "verification": {"max_rejections": 1},
+        "runner": {"command": "bun test"},
+    }
+    episode = {
+        "source_file": "src/twitch/client.ts",
+        "test_file": "src/twitch/handleResub.test.ts",
+        "target_symbol": "handleResub",
+        "cookbook_text": "\n".join([
+            "### Callback Contract Evidence",
+            "- line 115: `client.on('resub', handleResub)`",
+            "- tmi.js source emits `resub(channel, username, streakMonths, msg, tags, methods)`.",
+            "",
+            "### Source Edits (apply before testing)",
+            "OLD:",
+            "function handleResub(channel: string, username: string, months: number): void {",
+        ]),
+    }
+    calls = []
+    executed = []
+
+    def chat(_messages):
+        calls.append(None)
+        if len(calls) == 1:
+            tool_name = "ask_harness"
+            arguments = '{"intent": "write_regression_test", "question": "create test"}'
+        elif len(calls) == 2:
+            tool_name = "ask_harness"
+            arguments = '{"intent": "understand_contract", "question": "What does handleResub do internally?"}'
+        else:
+            tool_name = "create_file"
+            arguments = '{"path": "src/twitch/handleResub.test.ts", "content": "test"}'
+        return {
+            "choices": [{
+                "message": {
+                    "content": "",
+                    "tool_calls": [{
+                        "id": f"call_{len(calls)}",
+                        "function": {"name": tool_name, "arguments": arguments},
+                    }],
+                },
+                "finish_reason": "tool_calls",
+            }],
+            "usage": {},
+            "timings": {},
+        }
+
+    runtime.run_agent_loop(
+        messages=[],
+        episode=episode,
+        issue_text="bug text",
+        config=config,
+        workdir=str(tmp_path),
+        log_path=str(tmp_path / "log.jsonl"),
+        emit=lambda _msg: None,
+        log=lambda _event, _data: None,
+        chat=chat,
+        execute_tool=lambda name, args: executed.append((name, args)) or "OK: created",
+        truncate=lambda value: value,
+        is_llm_timeout_error=lambda _exc: False,
+        tool_applied_status=lambda name, _result: name == "create_file",
+        tool_loop_signature=lambda _name, _args: None,
+        tool_loop_warning_message=lambda signature: f"loop {signature}",
+        non_apply_step_warning_message=lambda count: f"non-apply {count}",
+        is_test_pass=lambda _name, _args: False,
+        is_test_file_path=lambda path: path.endswith(".test.ts"),
+        find_test_file=lambda _content: None,
+        verify_red_green=lambda *_args, **_kwargs: (False, "unused"),
+        run_quality_checks=lambda _test_file: (True, "unused"),
+        create_pr=lambda *_args, **_kwargs: None,
+    )
+
+    assert executed == [
+        ("create_file", {"path": "src/twitch/handleResub.test.ts", "content": "test"})
+    ]
+
+
 def test_state_reviewer_blocks_tool_execution_and_returns_scoped_feedback(tmp_path):
     config = {
         "agent": {"max_steps": 2, "non_apply_step_warning_threshold": 0},

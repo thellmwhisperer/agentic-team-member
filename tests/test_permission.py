@@ -24,6 +24,13 @@ def _context():
             "test API import: `import { beforeEach, describe, expect, mock, test } from \"bun:test\";`",
         ],
         "source_signature": "function handleResub(channel: string, username: string, months: number): void {",
+        "source_snippet": "\n".join([
+            "export function handleResub(channel: string, username: string, months: number): void {",
+            "  logger.event('resub', { username, months });",
+            "  streamSummaryManager.trackResub(username, months);",
+            "}",
+        ]),
+        "source_imports": "import tmi, { type SubUserstate } from 'tmi.js';",
         "source_seams": [
             "`client` -> call `__setClientForTests({ say })` before invoking target",
         ],
@@ -72,12 +79,43 @@ def test_understand_contract_answers_known_facts_without_granting_exploration():
     assert review.allowed is True
     assert review.grant is None
     assert "HARNESS ANSWER" in review.message
-    assert "Do not read source" in review.message
+    assert "Do not call read_file" in review.message
     assert "msg-param-cumulative-months" in review.message
     assert "Referenced type shapes" in review.message
     assert "SubUserstate" in review.message
     assert "msg-param-streak-months" in review.message
     assert "intent `write_regression_test`" in review.message
+
+
+def test_understand_contract_serves_target_body_when_question_asks_for_implementation():
+    review = permission.answer_harness(
+        {
+            "intent": "understand_contract",
+            "question": "What does handleResub do internally? Why does it report 0 months?",
+        },
+        _context(),
+    )
+
+    assert review.allowed is True
+    assert review.grant is None
+    assert "Target implementation snippet supplied by the harness" in review.message
+    assert "streamSummaryManager.trackResub(username, months);" in review.message
+    assert "Relevant existing imports" in review.message
+
+
+def test_informational_harness_answer_preserves_existing_grant():
+    current = permission.merge_grant_after_harness_answer(
+        "write_test",
+        permission.answer_harness(
+            {
+                "intent": "understand_contract",
+                "question": "What does handleResub do internally?",
+            },
+            _context(),
+        ),
+    )
+
+    assert current == "write_test"
 
 
 def test_blocks_tools_until_model_declares_intent():
