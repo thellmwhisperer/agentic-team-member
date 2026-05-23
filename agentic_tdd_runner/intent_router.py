@@ -56,6 +56,8 @@ class IntentRouter:
             f"reason: `{missing}` are test API globals provided by "
             f"{self.runner_facts.test_runner}; this is a missing import, not a project-config gap.\n"
             f"answer: {self.runner_facts.test_api_import}\n"
+            "note: if that import is already present, keep the next fix in the same test file "
+            "and correct the local import/type issue before rerunning.\n"
             f"required_next: {required_next}"
         )
         return RouterDecision(
