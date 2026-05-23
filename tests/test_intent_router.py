@@ -161,3 +161,74 @@ def test_router_answers_typed_tuple_mock_contract_error():
     assert decision is not None
     assert decision.data["intent"] == "fix_typed_mock_contract"
     assert "Promise.resolve([value] as [string])" in decision.message
+
+
+def test_router_answers_import_time_side_effect_before_more_exploration():
+    router = IntentRouter(_facts())
+    router.observe_tool_result(
+        "run_command",
+        {"command": "bun test src/twitch/handleResub.test.ts"},
+        (
+            "[Reactive test] failed:\n"
+            "  src/twitch/handleResub.test.ts:\n"
+            "  # Unhandled error between tests\n"
+            "  error: deepseek requires an API key\n"
+            "    at createProvider (/repo/node_modules/@thellmwhisperer/llm/src/provider.ts:50:19)\n"
+            "    at new StreamSummaryManager (/repo/src/managers/stream-summary.ts:31:21)\n"
+            "    at getStreamSummaryManager (/repo/src/managers/stream-summary.ts:358:16)\n"
+            "    at /repo/src/twitch/client.ts:62:30\n"
+            "    at loadAndEvaluateModule (2:1)\n"
+        ),
+        applied=None,
+    )
+
+    decision = router.review_tool_call(
+        "read_file",
+        {"path": "src/managers/stream-summary.ts"},
+    )
+
+    assert decision is not None
+    assert decision.event == "intent_router_answered"
+    assert decision.data["intent"] == "fix_import_time_side_effect"
+    assert decision.data["pending_test_file"] == "src/twitch/handleResub.test.ts"
+    assert "IMPORT-TIME SIDE EFFECT ANSWER" in decision.message
+    assert "await import('./client')" in decision.message
+    assert "Do not inspect provider/env/singleton modules" in decision.message
+
+
+def test_router_allows_edit_to_import_time_side_effect_test_then_clears_gate():
+    router = IntentRouter(_facts())
+    router.observe_tool_result(
+        "run_command",
+        {"command": "bun test src/twitch/handleResub.test.ts"},
+        (
+            "[Reactive test] failed:\n"
+            "  # Unhandled error between tests\n"
+            "  error: missing config\n"
+            "    at /repo/src/twitch/client.ts:62:30\n"
+            "    at loadAndEvaluateModule (2:1)\n"
+        ),
+        applied=None,
+    )
+
+    allowed = router.review_tool_call(
+        "str_replace_editor",
+        {
+            "path": "src/twitch/handleResub.test.ts",
+            "old_str": "import { handleResub } from './client';",
+            "new_str": "let subject: typeof import('./client');",
+        },
+    )
+    assert allowed is None
+
+    router.observe_tool_result(
+        "str_replace_editor",
+        {"path": "src/twitch/handleResub.test.ts"},
+        "OK: replaced in src/twitch/handleResub.test.ts",
+        applied=True,
+    )
+
+    assert router.review_tool_call(
+        "run_command",
+        {"command": "bun test src/twitch/handleResub.test.ts"},
+    ) is None
