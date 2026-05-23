@@ -266,7 +266,10 @@ def run_agent_loop(
                 permission_review = None
                 if permission_mode and name == "ask_harness":
                     permission_review = _permission.answer_harness(args, permission_context)
-                    permission_grant = permission_review.grant
+                    permission_grant = _permission.merge_grant_after_harness_answer(
+                        permission_grant,
+                        permission_review,
+                    )
                     result = permission_review.message
                     tool_elapsed = 0.0
                     applied = None
