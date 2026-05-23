@@ -90,6 +90,44 @@ def test_run_command_updates_last_exit_code(tmp_path, monkeypatch):
     assert exit_codes == [None, 7]
 
 
+def test_run_command_compacts_failing_test_output_with_stack(tmp_path, monkeypatch):
+    monkeypatch.setenv("PATH", "/usr/bin")
+
+    def fake_run(command, **kwargs):
+        assert command == "bun test src/twitch/handleResub.test.ts"
+        return subprocess.CompletedProcess(
+            command,
+            1,
+            stdout="\n".join(
+                [
+                    "bun test v1.2.3",
+                    "src/twitch/handleResub.test.ts:",
+                    *[f"noise line {index}" for index in range(20)],
+                    "# Unhandled error between tests",
+                    "error: deepseek requires an API key",
+                    "    at createProvider (/repo/src/provider.ts:50:19)",
+                    "    at /repo/src/twitch/client.ts:62:30",
+                    "    at loadAndEvaluateModule (2:1)",
+                ]
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr("agentic_tdd_runner.tools.subprocess.run", fake_run)
+
+    result, exit_codes = _execute_tool(
+        "run_command",
+        {"command": "bun test src/twitch/handleResub.test.ts"},
+        tmp_path,
+    )
+
+    assert result.startswith("[run_command test failure: exit 1]")
+    assert "error: deepseek requires an API key" in result
+    assert "at /repo/src/twitch/client.ts:62:30" in result
+    assert "noise line 0" not in result
+    assert exit_codes == [None, 1]
+
+
 def test_blocks_node_modules_contract_lookup_when_contract_evidence_exists(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "agentic_tdd_runner.tools.subprocess.run",
