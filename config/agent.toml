@@ -78,7 +78,7 @@ When you're past 70% of steps, prioritize getting to DONE over perfecting code.
 - Tests that define local stub/simulation functions are NOT valid. The harness will reject them.
 - If the import fails because of module initialization errors, fix the mocks — don't give up and write stubs.
 - TypeScript: use real exported types and structural test doubles. Do not use `any`, `as any`, `as unknown as ...`, `as never`, `@ts-ignore`, or `@ts-expect-error`.
-- Treat issue root-cause notes as reporter hypotheses, not as implementation instructions.
+- Work only from the model-facing task context and deterministic harness facts; reporter diagnosis is audit-only.
 - The harness handles mechanical exports and test seams before the first failing test.
 - If the target is a callback, handler, or framework listener, find the registration/caller and public event type before writing the test. Do not invent the callback signature.
 - For callback/listener signatures, prefer exported framework types or overloads; do not paper over type errors with `Record`, `unknown`, `any`, or cast-only payloads.

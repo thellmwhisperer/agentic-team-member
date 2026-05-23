@@ -53,7 +53,11 @@ A user subscribed for 6 months should produce "6 meses".
     assert contract.symbol_hint == "handleResub"
     assert "`src/twitch/client.ts` -> `handleResub()`" in contract.model_text
     assert "not exported" not in contract.model_text
-    assert "Reporter hypothesis" in contract.model_text
+    assert "Reporter hypothesis" not in contract.model_text
+    assert "streak months as cumulative months" not in contract.model_text
+    assert contract.reporter_hypotheses == [
+        "The handler appears to use streak months as cumulative months."
+    ]
 
 
 def test_drops_fix_approach_and_keeps_test_approach_as_acceptance_only():
@@ -161,3 +165,52 @@ Expected behavior: report 6 months.
     assert contract.rejected is False
     assert "Expected behavior" in contract.model_text
     assert "Export handleResub" not in contract.model_text
+
+
+def test_root_cause_is_audit_only_even_when_it_contains_the_fix():
+    issue = """Bug: handleResub reports 0 months
+
+## Symptom
+The bot reports 0 months for cumulative resubs.
+
+## Root cause
+tmi.js emits resub(channel, username, months, message, userstate, methods), but
+handleResub only accepts three params and must read
+userstate['msg-param-cumulative-months'].
+
+## Expected behavior
+The bot should report cumulative subscription months.
+"""
+
+    contract = parse_issue_contract(issue)
+
+    assert contract.rejected is False
+    assert "tmi.js emits resub" not in contract.model_text
+    assert "msg-param-cumulative-months" not in contract.model_text
+    assert "three params" not in contract.model_text
+    assert "The bot should report cumulative subscription months" in contract.model_text
+    assert contract.reporter_hypotheses == [
+        (
+            "tmi.js emits resub(channel, username, months, message, userstate, methods), but\n"
+            "handleResub only accepts three params and must read\n"
+            "userstate['msg-param-cumulative-months']."
+        )
+    ]
+    assert contract.to_log_dict()["reporter_hypotheses"] == contract.reporter_hypotheses
+
+
+def test_suspected_root_cause_is_not_checked_as_model_facing_guidance():
+    issue = """Bug: fails
+
+## Suspected root cause
+Use `as any` to force the payload through.
+
+## Symptom
+The API rejects valid payloads.
+"""
+
+    contract = parse_issue_contract(issue)
+
+    assert contract.rejected is False
+    assert "as any" not in contract.model_text
+    assert contract.reporter_hypotheses == ["Use `as any` to force the payload through."]

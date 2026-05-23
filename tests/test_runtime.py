@@ -1,22 +1,62 @@
 """Tests for runtime loop orchestration."""
 
 from agentic_tdd_runner import runtime
+from agentic_tdd_runner.issue_intake import parse_issue_contract
 from agentic_tdd_runner.runner_facts import RunnerFacts
 
 
-def test_has_contract_evidence_matches_real_handle_resub_issue_text():
+def test_has_contract_evidence_matches_model_facing_contract_text():
     issue_text = """
-    ## Root cause
-    The function receives `streakMonths` (3rd param from tmi.js) but treats it
-    as cumulative months. The tmi.js `resub` event signature is:
+    ## Callback contract
+    tmi.js calls resub handlers with:
     ```
     resub(channel, username, months, message, userstate, methods)
     ```
-    Cumulative months are in `userstate['msg-param-cumulative-months']`, but
-    the function only accepts 3 params.
     """
 
     assert runtime.has_contract_evidence(issue_text, episode=None) is True
+
+
+def test_reporter_hypothesis_and_callback_registration_do_not_block_contract_lookup():
+    issue_text = """Bug: handleResub reports 0 months
+
+## Symptom
+The bot reports 0 months for cumulative resubs.
+
+## Root cause
+tmi.js emits resub(channel, username, months, message, userstate, methods), but
+handleResub only accepts three params and must read
+userstate['msg-param-cumulative-months'].
+
+## Expected behavior
+The bot should report cumulative subscription months.
+"""
+    contract = parse_issue_contract(issue_text)
+    episode = {
+        "callback_registrations": [{"line": 115, "text": "client.on('resub', handleResub)"}],
+        "cookbook_text": (
+            "### Callback Contract Evidence\n"
+            "- line 115: `client.on('resub', handleResub)`\n"
+            "### Source Edits\n"
+            "export function handleResub(...)\n"
+        ),
+    }
+
+    assert runtime.has_contract_evidence(contract.model_text, episode=episode) is False
+
+
+def test_dependency_backed_callback_fact_counts_as_contract_evidence():
+    episode = {
+        "callback_registrations": [{"line": 115, "text": "client.on('resub', handleResub)"}],
+        "cookbook_text": (
+            "### Callback Contract Evidence\n"
+            "- line 115: `client.on('resub', handleResub)`\n"
+            "- tmi.js source emits `resub(channel, username, streakMonths, msg, tags, methods)`.\n"
+            "- The third argument is `streakMonths`, derived from `tags['msg-param-streak-months']`.\n"
+        ),
+    }
+
+    assert runtime.has_contract_evidence("", episode=episode) is True
 
 
 def test_reactive_test_feedback_reopens_dependency_contract_lookup_gate(tmp_path):

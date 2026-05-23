@@ -18,6 +18,11 @@ _IMPLEMENTATION_SECTIONS = {
     "test approach",
 }
 
+_REPORTER_HYPOTHESIS_SECTIONS = {
+    "root cause",
+    "suspected root cause",
+}
+
 _MODEL_SECTION_TITLES = {
     "acceptance criteria": "Acceptance criteria",
     "acceptance test": "Acceptance test",
@@ -28,9 +33,7 @@ _MODEL_SECTION_TITLES = {
     "observed examples": "Observed examples",
     "problem": "Problem",
     "requirements": "Requirements",
-    "root cause": "Reporter hypothesis",
     "suspected area": "Suspected area",
-    "suspected root cause": "Reporter hypothesis",
     "symptom": "Symptom",
     "tasks": "Tasks",
     "where": "Suspected area",
@@ -54,6 +57,7 @@ class IssueContract:
     rejected: bool = False
     rejection_reason: str = ""
     warnings: list[str] = field(default_factory=list)
+    reporter_hypotheses: list[str] = field(default_factory=list)
 
     def to_log_dict(self) -> dict:
         data = asdict(self)
@@ -76,7 +80,7 @@ def parse_issue_contract(issue_text: str) -> IssueContract:
         )
 
     source_hint, symbol_hint = _extract_target_hint(issue_text)
-    model_text, warnings = _build_model_text(sections, fallback=issue_text)
+    model_text, warnings, reporter_hypotheses = _build_model_text(sections, fallback=issue_text)
     if not model_text.strip():
         return IssueContract(
             raw_text=issue_text,
@@ -86,6 +90,7 @@ def parse_issue_contract(issue_text: str) -> IssueContract:
             rejected=True,
             rejection_reason="issue has no model-facing content after sanitization",
             warnings=warnings,
+            reporter_hypotheses=reporter_hypotheses,
         )
 
     return IssueContract(
@@ -94,6 +99,7 @@ def parse_issue_contract(issue_text: str) -> IssueContract:
         source_hint=source_hint,
         symbol_hint=symbol_hint,
         warnings=warnings,
+        reporter_hypotheses=reporter_hypotheses,
     )
 
 
@@ -116,7 +122,9 @@ def _split_sections(text: str) -> list[tuple[str, str]]:
 
 def _forbidden_guidance_reason(sections: list[tuple[str, str]]) -> str:
     for title, body in sections:
-        if title and _normalize_title(title) in _IMPLEMENTATION_SECTIONS:
+        if title and _normalize_title(title) in (
+            _IMPLEMENTATION_SECTIONS | _REPORTER_HYPOTHESIS_SECTIONS
+        ):
             continue
         haystack = f"{title}\n{body}"
         for pattern, label in _FORBIDDEN_GUIDANCE:
@@ -126,9 +134,12 @@ def _forbidden_guidance_reason(sections: list[tuple[str, str]]) -> str:
     return ""
 
 
-def _build_model_text(sections: list[tuple[str, str]], *, fallback: str) -> tuple[str, list[str]]:
+def _build_model_text(
+    sections: list[tuple[str, str]], *, fallback: str
+) -> tuple[str, list[str], list[str]]:
     parts: list[str] = []
     warnings: list[str] = []
+    reporter_hypotheses: list[str] = []
     saw_structured_section = False
 
     for title, body in sections:
@@ -150,6 +161,11 @@ def _build_model_text(sections: list[tuple[str, str]], *, fallback: str) -> tupl
                 warnings.append("dropped Fix approach before prompting because it contained forbidden guidance")
             else:
                 warnings.append("dropped Fix approach before prompting")
+            continue
+
+        if normalized in _REPORTER_HYPOTHESIS_SECTIONS:
+            reporter_hypotheses.append(body)
+            warnings.append(f"kept {title} as audit-only reporter hypothesis")
             continue
 
         if normalized == "test approach":
@@ -179,10 +195,10 @@ def _build_model_text(sections: list[tuple[str, str]], *, fallback: str) -> tupl
 
     model_text = "\n\n".join(part.strip() for part in parts if part.strip()).strip()
     if not model_text:
-        return "", warnings
+        return "", warnings, reporter_hypotheses
     if not saw_structured_section and len(parts) == 1:
-        return model_text, warnings
-    return model_text, warnings
+        return model_text, warnings, reporter_hypotheses
+    return model_text, warnings, reporter_hypotheses
 
 
 def _test_approach_to_acceptance(body: str) -> str:
