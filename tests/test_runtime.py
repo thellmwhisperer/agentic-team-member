@@ -122,6 +122,73 @@ def test_reactive_test_feedback_reopens_dependency_contract_lookup_gate(tmp_path
     assert runtime_states[1]["allow_dependency_contract_lookup"] is True
 
 
+def test_permission_mode_blocks_tool_before_declared_intent(tmp_path):
+    config = {
+        "agent": {
+            "max_steps": 1,
+            "non_apply_step_warning_threshold": 0,
+            "permission_driven": True,
+        },
+        "verification": {"max_rejections": 1},
+        "runner": {"command": "bun test"},
+    }
+    logged = []
+
+    def chat(_messages):
+        return {
+            "choices": [{
+                "message": {
+                    "content": "",
+                    "tool_calls": [{
+                        "id": "call_1",
+                        "function": {
+                            "name": "read_file",
+                            "arguments": '{"path": "src/twitch/client.ts"}',
+                        },
+                    }],
+                },
+                "finish_reason": "tool_calls",
+            }],
+            "usage": {},
+            "timings": {},
+        }
+
+    result = runtime.run_agent_loop(
+        messages=[],
+        episode={"source_file": "src/twitch/client.ts", "test_file": "src/twitch/client.test.ts"},
+        issue_text="bug text",
+        config=config,
+        workdir=str(tmp_path),
+        log_path=str(tmp_path / "log.jsonl"),
+        emit=lambda _msg: None,
+        log=lambda event, data: logged.append((event, data)),
+        chat=chat,
+        execute_tool=lambda _name, _args: (_ for _ in ()).throw(AssertionError("should not execute")),
+        truncate=lambda value: value,
+        is_llm_timeout_error=lambda _exc: False,
+        tool_applied_status=lambda _name, _result: None,
+        tool_loop_signature=lambda _name, _args: None,
+        tool_loop_warning_message=lambda signature: f"loop {signature}",
+        non_apply_step_warning_message=lambda count: f"non-apply {count}",
+        is_test_pass=lambda _name, _args: False,
+        is_test_file_path=lambda path: path.endswith(".test.ts"),
+        find_test_file=lambda _content: None,
+        verify_red_green=lambda *_args, **_kwargs: (False, "unused"),
+        run_quality_checks=lambda _test_file: (True, "unused"),
+        create_pr=lambda *_args, **_kwargs: None,
+    )
+
+    assert result == 1
+    assert any(
+        event == "permission_review" and data["tool"] == "read_file"
+        for event, data in logged
+    )
+    assert any(
+        event == "tool" and "PERMISSION REQUIRED" in data["result"]
+        for event, data in logged
+    )
+
+
 def test_state_reviewer_blocks_tool_execution_and_returns_scoped_feedback(tmp_path):
     config = {
         "agent": {"max_steps": 2, "non_apply_step_warning_threshold": 0},

@@ -2,6 +2,35 @@
   {
     "type": "function",
     "function": {
+      "name": "ask_harness",
+      "description": "Ask the harness for permission or deterministic facts before reading, editing, running tests, or finishing. Use this first in permission-driven mode.",
+      "parameters": {
+        "type": "object",
+        "required": ["intent"],
+        "properties": {
+          "intent": {
+            "type": "string",
+            "enum": [
+              "understand_contract",
+              "write_regression_test",
+              "repair_test_setup",
+              "edit_source",
+              "run_test",
+              "done"
+            ],
+            "description": "The next action you want permission for"
+          },
+          "question": {
+            "type": "string",
+            "description": "Optional concise question for the harness"
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
       "name": "read_file",
       "description": "Read the contents of a file. If path is a directory, lists its contents.",
       "parameters": {

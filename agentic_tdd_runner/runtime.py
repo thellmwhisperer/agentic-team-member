@@ -6,6 +6,7 @@ from collections.abc import Callable
 
 from agentic_tdd_runner import completion as _completion
 from agentic_tdd_runner import llm as _llm
+from agentic_tdd_runner import permission as _permission
 from agentic_tdd_runner.state_reviewer import BugStateReviewer
 
 
@@ -97,6 +98,8 @@ def run_agent_loop(
     recent_exploratory_signatures: list[str] = []
     consecutive_non_apply_steps = 0
     test_file_created = False
+    permission_grant: str | None = None
+    permission_mode = _permission.permission_enabled(config)
     allow_dependency_contract_lookup = False
     block_dependency_contract_lookup = has_contract_evidence(issue_text, episode)
     state_reviewer = BugStateReviewer(
@@ -135,6 +138,13 @@ def run_agent_loop(
             test_file_created=test_file_created,
             completion_state=completion_state,
         )
+        permission_context = _permission.build_permission_context(
+            episode=episode,
+            config=config,
+            phase=phase,
+            test_file_created=test_file_created,
+            workdir=workdir,
+        )
         config["_runtime"] = {
             "step": step,
             "max_steps": max_steps,
@@ -144,6 +154,9 @@ def run_agent_loop(
             ),
             "block_dependency_contract_lookup": block_dependency_contract_lookup,
             "allow_dependency_contract_lookup": allow_dependency_contract_lookup,
+            "permission_mode": permission_mode,
+            "permission_grant": permission_grant,
+            "permission_context": permission_context,
         }
         thinking_budget_tokens = _llm.resolve_thinking_budget_tokens(config)
 
@@ -249,24 +262,77 @@ def run_agent_loop(
                 emit(f"  [TOOL] {name}({args_preview})")
 
                 t1 = time.time()
-                state_review = state_reviewer.review_tool_call(
-                    name,
-                    args,
-                    allow_dependency_contract_lookup=allow_dependency_contract_lookup,
-                )
-                if state_review:
-                    result = state_review.message
+                state_review = None
+                permission_review = None
+                if permission_mode and name == "ask_harness":
+                    permission_review = _permission.answer_harness(args, permission_context)
+                    permission_grant = permission_review.grant
+                    result = permission_review.message
                     tool_elapsed = 0.0
                     applied = None
-                    log(state_review.event, {
+                    log(permission_review.event, {
                         "step": step,
-                        **state_review.data,
+                        "intent": args.get("intent"),
+                        "grant": permission_grant,
+                        "allowed": permission_review.allowed,
                     })
+                elif permission_mode:
+                    permission_review = _permission.review_tool_call(
+                        name,
+                        args,
+                        grant=permission_grant,
+                        context=permission_context,
+                        is_test_file_path=is_test_file_path,
+                    )
+                    if permission_review:
+                        result = permission_review.message
+                        tool_elapsed = 0.0
+                        applied = None
+                        log(permission_review.event, {
+                            "step": step,
+                            "tool": name,
+                            "grant": permission_grant,
+                            "allowed": permission_review.allowed,
+                        })
+                    else:
+                        state_review = state_reviewer.review_tool_call(
+                            name,
+                            args,
+                            allow_dependency_contract_lookup=allow_dependency_contract_lookup,
+                        )
+                        if state_review:
+                            result = state_review.message
+                            tool_elapsed = 0.0
+                            applied = None
+                            log(state_review.event, {
+                                "step": step,
+                                **state_review.data,
+                            })
+                        else:
+                            result = execute_tool(name, args)
+                            tool_elapsed = time.time() - t1
+                            applied = tool_applied_status(name, result)
+                            state_reviewer.observe_tool_result(name, args, result, applied=applied)
+                            permission_grant = _permission.consume_grant(name, permission_grant)
                 else:
-                    result = execute_tool(name, args)
-                    tool_elapsed = time.time() - t1
-                    applied = tool_applied_status(name, result)
-                    state_reviewer.observe_tool_result(name, args, result, applied=applied)
+                    state_review = state_reviewer.review_tool_call(
+                        name,
+                        args,
+                        allow_dependency_contract_lookup=allow_dependency_contract_lookup,
+                    )
+                    if state_review:
+                        result = state_review.message
+                        tool_elapsed = 0.0
+                        applied = None
+                        log(state_review.event, {
+                            "step": step,
+                            **state_review.data,
+                        })
+                    else:
+                        result = execute_tool(name, args)
+                        tool_elapsed = time.time() - t1
+                        applied = tool_applied_status(name, result)
+                        state_reviewer.observe_tool_result(name, args, result, applied=applied)
                 result_truncated = truncate(result)
                 loop_signature = tool_loop_signature(name, args)
 
