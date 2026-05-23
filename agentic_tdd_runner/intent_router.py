@@ -57,9 +57,9 @@ class IntentRouter:
                 )
                 source_file = self.runner_facts.source_file if self.runner_facts else None
                 required_next = (
-                    f"Edit `{self.pending_import_side_effect_file}`: replace the static import of "
-                    f"the target module with a typed subject variable, register mocks first, then "
-                    f"load the module with `await import('{import_path}')` inside `beforeEach`."
+                    f"Edit `{self.pending_import_side_effect_file}` so test mocks are registered "
+                    "before the target module is evaluated. Follow an existing sibling-test "
+                    "pattern if one already solves this; otherwise delay the target import."
                 )
                 message = (
                     "IMPORT-TIME SIDE EFFECT ANSWER\n"
@@ -67,9 +67,10 @@ class IntentRouter:
                     "reason: the focused test failed while Bun was evaluating the target module, "
                     "before the test body could run. This is an import-order problem in the test, "
                     "not a reason to inspect provider/env/singleton modules.\n"
-                    f"answer: mock dependencies with `mock.module(...)` before loading `{import_path}`; "
-                    f"then use `let subject: typeof import('{import_path}');` and "
-                    f"`subject = await import('{import_path}')` in `beforeEach`.\n"
+                    f"answer: make `mock.module(...)` registrations happen before `{import_path}` "
+                    "is evaluated. Prefer the repo's existing mock/import pattern. If a static "
+                    "target import would be hoisted before mocks, delay that import, for example "
+                    f"with `await import('{import_path}')`.\n"
                     "guardrail: Do not inspect provider/env/singleton modules; keep the fix "
                     "in the test harness.\n"
                     f"required_next: {required_next}"

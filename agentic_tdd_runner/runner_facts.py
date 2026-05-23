@@ -151,7 +151,7 @@ def _test_api_facts(test_runner: str) -> list[str]:
         return []
     return [
         "Bun mock functions reset call history with `mockFn.mockClear()`; do not use `.mock.reset()`.",
-        "When a module has import-time side effects, register `mock.module(...)` before dynamically importing the target module.",
+        "When a module has import-time side effects, make `mock.module(...)` registrations happen before the target module is evaluated.",
     ]
 
 
