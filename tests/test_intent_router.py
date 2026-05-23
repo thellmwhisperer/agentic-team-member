@@ -170,8 +170,10 @@ def test_router_answers_import_time_side_effect_before_more_exploration():
     assert decision.event == "intent_router_answered"
     assert decision.data["intent"] == "fix_import_time_side_effect"
     assert decision.data["pending_test_file"] == "src/twitch/handleResub.test.ts"
+    assert decision.data["import_path"] == "./client"
     assert "IMPORT-TIME SIDE EFFECT ANSWER" in decision.message
-    assert "await import('./client')" in decision.message
+    assert "mock.module(...)" in decision.message
+    assert "Prefer the repo's existing mock/import pattern" in decision.message
     assert "Do not inspect provider/env/singleton modules" in decision.message
 
 
