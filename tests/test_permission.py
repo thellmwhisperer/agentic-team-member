@@ -16,6 +16,7 @@ def _context():
         "contract_facts": [
             "line 115: `client.on('resub', handleResub)`",
             "tmi.js source emits `resub(channel, username, streakMonths, msg, tags, methods)`.",
+            "tmi.js type declarations expose `resub(channel: string, username: string, months: number, message: string, userstate: SubUserstate, methods: SubMethods)`.",
             "The userstate/tags argument exposes both `msg-param-streak-months` and `msg-param-cumulative-months`.",
         ],
         "runner_facts": [
@@ -40,6 +41,28 @@ def _context():
             "}",
             "));",
         ]),
+        "referenced_type_shapes": [
+            {
+                "module": "tmi.js",
+                "name": "SubUserstate",
+                "kind": "interface",
+                "fields": [
+                    {"name": "message-type", "optional": True, "type": '"sub" | "resub" | undefined'},
+                    {"name": "msg-param-streak-months", "optional": True, "type": "string | boolean | undefined"},
+                    {"name": "msg-param-cumulative-months", "optional": True, "type": "string | boolean | undefined"},
+                ],
+            },
+            {
+                "module": "tmi.js",
+                "name": "SubMethods",
+                "kind": "interface",
+                "fields": [
+                    {"name": "prime", "optional": True, "type": "boolean"},
+                    {"name": "plan", "optional": True, "type": "SubMethodsPlan"},
+                    {"name": "planName", "optional": True, "type": "string"},
+                ],
+            },
+        ],
     }
 
 
@@ -51,6 +74,9 @@ def test_understand_contract_answers_known_facts_without_granting_exploration():
     assert "HARNESS ANSWER" in review.message
     assert "Do not read source" in review.message
     assert "msg-param-cumulative-months" in review.message
+    assert "Referenced type shapes" in review.message
+    assert "SubUserstate" in review.message
+    assert "msg-param-streak-months" in review.message
     assert "intent `write_regression_test`" in review.message
 
 
@@ -90,16 +116,102 @@ def test_write_test_grant_allows_only_recommended_test_file():
     assert "Target callable currently has source signature" in grant.message
     assert "msg-param-cumulative-months" in grant.message
     assert "__setClientForTests" in grant.message
+    assert "Referenced type shapes" in grant.message
     assert "Suggested regression test skeleton" in grant.message
-    assert "type ResubHandler" in grant.message
+    assert 'import type { SubMethods, SubUserstate } from "tmi.js";' in grant.message
+    assert 'type TargetHandler = ClientModule["handleResub"];' in grant.message
+    assert "type CallbackContract = (" in grant.message
     assert 'await import("./client")' in grant.message
-    assert 'const getEmote = mock((): string => "teseoLove");' in grant.message
+    assert "targetHandler = clientModule.handleResub;" in grant.message
+    assert 'let __setClientForTests: ClientModule["__setClientForTests"];' in grant.message
+    assert 'const userstate: SubUserstate = {' in grant.message
+    assert '"msg-param-streak-months": "0",' in grant.message
+    assert '"msg-param-cumulative-months": "6",' in grant.message
+    assert 'const methods: SubMethods = {' in grant.message
+    assert 'callbackHandler(channel, username, months, message, userstate, methods);' in grant.message
     assert "const streamSummaryManager_trackResub_spy" in grant.message
     assert "for (const spy of [streamSummaryManager_trackResub_spy]) spy.mockClear();" in grant.message
     assert "streamSummaryManager_trackResub_spy" in grant.message
     assert allowed is None
     assert blocked is not None
     assert "PERMISSION DENIED" in blocked.message
+
+
+def test_write_grants_allow_reading_the_same_file_for_resync():
+    test_read = permission.review_tool_call(
+        "read_file",
+        {"path": "src/twitch/handleResub.test.ts"},
+        grant="write_test",
+        context=_context(),
+        is_test_file_path=lambda path: path.endswith(".test.ts"),
+    )
+    source_read = permission.review_tool_call(
+        "read_file",
+        {"path": "src/twitch/client.ts"},
+        grant="write_source",
+        context=_context(),
+        is_test_file_path=lambda path: path.endswith(".test.ts"),
+    )
+    unrelated_read = permission.review_tool_call(
+        "read_file",
+        {"path": "src/twitch/other.ts"},
+        grant="write_source",
+        context=_context(),
+        is_test_file_path=lambda path: path.endswith(".test.ts"),
+    )
+
+    assert test_read is None
+    assert source_read is None
+    assert unrelated_read is not None
+    assert "PERMISSION DENIED" in unrelated_read.message
+
+
+def test_write_test_skeleton_is_not_coupled_to_one_handler_name():
+    context = _context()
+    context.update({
+        "test_file": "src/twitch/handleCheer.test.ts",
+        "target_symbol": "handleCheer",
+        "source_signature": "function handleCheer(channel: string, userstate: ChatUserstate): void {",
+        "source_seams": [
+            "`notifier` -> call `__setNotifierForTests({ send })` before invoking target",
+        ],
+        "module_mock_block": "\n".join([
+            "const notifier_send_spy = mock(() => undefined);",
+            "",
+            "mock.module('../notifier', () => ({",
+            "  getNotifier: () => ({",
+            "    send: notifier_send_spy,",
+            "  }),",
+            "}));",
+        ]),
+        "contract_facts": [
+            "line 42: `client.on('cheer', handleCheer)`",
+            "tmi.js source emits `cheer(channel, userstate, message)`.",
+            "tmi.js type declarations expose `cheer(channel: string, userstate: ChatUserstate, message: string)`.",
+        ],
+        "referenced_type_shapes": [
+            {
+                "module": "tmi.js",
+                "name": "ChatUserstate",
+                "kind": "interface",
+                "fields": [
+                    {"name": "bits", "optional": True, "type": "string | undefined"},
+                    {"name": "user-id", "optional": True, "type": "string | undefined"},
+                ],
+            },
+        ],
+    })
+
+    grant = permission.answer_harness({"intent": "write_regression_test"}, context)
+
+    assert grant.grant == "write_test"
+    assert "Suggested regression test skeleton" in grant.message
+    assert 'type TargetHandler = ClientModule["handleCheer"];' in grant.message
+    assert "targetHandler = clientModule.handleCheer;" in grant.message
+    assert 'let __setNotifierForTests: ClientModule["__setNotifierForTests"];' in grant.message
+    assert "const notifier_send_spy" in grant.message
+    assert "const userstate: ChatUserstate = {" in grant.message
+    assert 'bits: "",' in grant.message
 
 
 def test_edit_source_denied_until_test_exists():
@@ -125,7 +237,7 @@ def test_edit_source_grant_includes_exact_target_snippet_after_test_exists():
 
     assert review.allowed is True
     assert review.grant == "write_source"
-    assert "Do not call read_file or rg" in review.message
+    assert "You may read_file this same source path" in review.message
     assert "Current target snippet for exact str_replace" in review.message
     assert "streamSummaryManager.trackResub(username, months);" in review.message
     assert "Existing relevant imports" in review.message
@@ -152,6 +264,21 @@ def test_build_permission_context_extracts_current_target_snippet(tmp_path):
             "}",
         ])
     )
+    types = tmp_path / "node_modules" / "@types" / "tmi.js" / "index.d.ts"
+    types.parent.mkdir(parents=True)
+    types.write_text(
+        "\n".join([
+            "interface SubUserstate {",
+            '  "msg-param-cumulative-months"?: string | boolean | undefined;',
+            '  "msg-param-streak-months"?: string | boolean | undefined;',
+            "}",
+            "interface SubMethods {",
+            "  prime?: boolean;",
+            "  plan?: SubMethodsPlan;",
+            "  planName?: string;",
+            "}",
+        ])
+    )
 
     context = permission.build_permission_context(
         episode={
@@ -161,6 +288,7 @@ def test_build_permission_context_extracts_current_target_snippet(tmp_path):
             "cookbook_text": "\n".join([
                 "### Callback Contract Evidence",
                 "- tmi.js source emits `resub(channel, username, streakMonths, msg, tags, methods)`.",
+                "- tmi.js type declarations expose `resub(channel: string, username: string, months: number, message: string, userstate: SubUserstate, methods: SubMethods)`.",
             ]),
         },
         config={},
@@ -176,3 +304,6 @@ def test_build_permission_context_extracts_current_target_snippet(tmp_path):
         "}",
     ])
     assert context["source_imports"] == "import tmi, { type ChatUserstate } from 'tmi.js';"
+    assert context["referenced_type_shapes"][0]["name"] == "SubMethods"
+    assert context["referenced_type_shapes"][1]["name"] == "SubUserstate"
+    assert context["referenced_type_shapes"][1]["fields"][0]["name"] == "msg-param-cumulative-months"

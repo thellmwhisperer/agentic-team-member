@@ -202,7 +202,13 @@ def execute_tool(
                 content = f.read()
             old_str = args["old_str"]
             if old_str not in content:
-                return f"ERROR: old_str not found in {args['path']}. Read the file first to get the exact text."
+                return (
+                    f"ERROR: old_str not found in {args['path']}.\n"
+                    "Current file excerpt for resync:\n"
+                    "```text\n"
+                    + _current_file_excerpt(content, old_str)
+                    + "\n```"
+                )
             if content.count(old_str) > 1:
                 return f"ERROR: old_str appears {content.count(old_str)} times. Make it more specific."
             new_content = content.replace(old_str, args["new_str"], 1)
@@ -264,6 +270,48 @@ def execute_tool(
 
     except Exception as e:
         return f"ERROR: {type(e).__name__}: {e}"
+
+
+def _current_file_excerpt(content: str, old_str: str, *, max_lines: int = 120) -> str:
+    lines = content.splitlines()
+    if not lines:
+        return ""
+
+    anchor = _first_nonempty_line(old_str)
+    center = _line_index_containing(lines, anchor) if anchor else -1
+    if center < 0:
+        start = 0
+    else:
+        start = max(0, center - max_lines // 2)
+    end = min(len(lines), start + max_lines)
+    start = max(0, end - max_lines)
+
+    rendered = [
+        f"{line_no}: {line}"
+        for line_no, line in enumerate(lines[start:end], start=start + 1)
+    ]
+    if start > 0:
+        rendered.insert(0, "... earlier lines omitted ...")
+    if end < len(lines):
+        rendered.append("... later lines omitted ...")
+    return "\n".join(rendered)
+
+
+def _first_nonempty_line(text: str) -> str:
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped:
+            return stripped
+    return ""
+
+
+def _line_index_containing(lines: list[str], needle: str) -> int:
+    if not needle:
+        return -1
+    for index, line in enumerate(lines):
+        if needle in line.strip():
+            return index
+    return -1
 
 
 def rg_paths_from_args(args: dict) -> list[str]:

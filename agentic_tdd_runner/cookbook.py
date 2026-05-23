@@ -366,14 +366,28 @@ def _discover_callback_contract_facts(
     facts: list[str] = []
     if not registrations:
         return facts
-    if "tmi.js" not in source_text:
-        return facts
 
+    frameworks = _callback_framework_modules(source_text)
     for registration in registrations:
         event = _event_name_from_registration(registration.get("call", ""), symbol)
-        if event == "resub":
-            facts.extend(_tmi_resub_contract_facts(Path(project_root)))
+        if not event:
+            continue
+        for framework in frameworks:
+            if framework == "tmi.js":
+                facts.extend(_tmi_event_contract_facts(Path(project_root), event))
     return _dedupe_preserve_order(facts)
+
+
+def _callback_framework_modules(source_text: str) -> list[str]:
+    modules: list[str] = []
+    import_patterns = [
+        r"from\s+['\"](?P<module>tmi\.js)['\"]",
+        r"require\(\s*['\"](?P<module>tmi\.js)['\"]\s*\)",
+    ]
+    for pattern in import_patterns:
+        if re.search(pattern, source_text):
+            modules.append("tmi.js")
+    return _dedupe_preserve_order(modules)
 
 
 def _event_name_from_registration(call: str, symbol: str) -> str | None:
@@ -386,37 +400,129 @@ def _event_name_from_registration(call: str, symbol: str) -> str | None:
     return match.group("event")
 
 
-def _tmi_resub_contract_facts(project_root: Path) -> list[str]:
+def _tmi_event_contract_facts(project_root: Path, event: str) -> list[str]:
     facts: list[str] = []
     client_js = project_root / "node_modules" / "tmi.js" / "lib" / "client.js"
     type_defs = project_root / "node_modules" / "@types" / "tmi.js" / "index.d.ts"
 
     if client_js.is_file():
         client_text = client_js.read_text(errors="ignore")
-        if (
-            "case 'resub'" in client_text
-            and "streakMonths" in client_text
-            and "[ channel, username, streakMonths, msg, tags, methods ]" in client_text
-        ):
+        emit_args = _tmi_emit_args_for_event(client_text, event)
+        if emit_args:
             facts.append(
-                "tmi.js source emits `resub(channel, username, streakMonths, msg, tags, methods)`."
+                f"tmi.js source emits `{event}({', '.join(emit_args)})`."
             )
-            if "tags['msg-param-streak-months']" in client_text:
-                facts.append(
-                    "The third argument is `streakMonths`, derived from `tags['msg-param-streak-months']`."
-                )
+            for index, arg_name in enumerate(emit_args, start=1):
+                tag_key = _tag_source_for_identifier(client_text, arg_name)
+                if tag_key:
+                    facts.append(
+                        f"Argument {index} is `{arg_name}`, derived from `tags['{tag_key}']`."
+                    )
 
     if type_defs.is_file():
         type_text = type_defs.read_text(errors="ignore")
-        if "msg-param-cumulative-months" in type_text and "msg-param-streak-months" in type_text:
-            facts.append(
-                "The userstate/tags argument exposes both `msg-param-streak-months` and `msg-param-cumulative-months`."
-            )
-            facts.append(
-                "For total-month behavior, read from userstate/tags and preserve the positional months value as fallback."
-            )
+        signature = _event_type_signature(type_text, event)
+        if signature:
+            facts.append(f"tmi.js type declarations expose `{event}({signature})`.")
+            facts.extend(_typed_tag_facts(type_text, signature))
 
     return facts
+
+
+def _tmi_emit_args_for_event(client_text: str, event: str) -> list[str]:
+    case_body = _case_body_for_event(client_text, event)
+    if not case_body:
+        return []
+
+    emit_match = re.search(r"\bthis\.emits\((?P<body>.*?)\);", case_body, re.DOTALL)
+    if not emit_match:
+        return []
+
+    arrays = re.findall(r"\[([^\[\]]+)\]", emit_match.group("body"), re.DOTALL)
+    for array_body in arrays:
+        if "'" in array_body or '"' in array_body:
+            continue
+        args = [
+            item.strip()
+            for item in array_body.replace("\n", " ").split(",")
+            if item.strip()
+        ]
+        if args:
+            return args
+    return []
+
+
+def _case_body_for_event(client_text: str, event: str) -> str:
+    pattern = re.compile(
+        rf"\bcase\s+['\"]{re.escape(event)}['\"]\s*:(?P<body>.*?)(?=\n\s*(?:case\s+['\"]|default\s*:)|\n\s*}}\s*$)",
+        re.DOTALL,
+    )
+    match = pattern.search(client_text)
+    return match.group("body") if match else ""
+
+
+def _tag_source_for_identifier(source_text: str, identifier: str) -> str:
+    if not re.match(r"^[A-Za-z_$][\w$]*$", identifier):
+        return ""
+    patterns = (
+        rf"\b(?:const|let|var)\s+{re.escape(identifier)}\b[^=]*=\s*.*?tags\[['\"](?P<tag>[^'\"]+)['\"]\]",
+        rf"\b{re.escape(identifier)}\b\s*=\s*.*?tags\[['\"](?P<tag>[^'\"]+)['\"]\]",
+    )
+    for line in source_text.splitlines():
+        for pattern in patterns:
+            match = re.search(pattern, line)
+            if match:
+                return match.group("tag")
+    return ""
+
+
+def _event_type_signature(type_text: str, event: str) -> str:
+    pattern = re.compile(
+        rf"\b{re.escape(event)}\s*\((?P<params>.*?)\)\s*:\s*[^;]+;",
+        re.DOTALL,
+    )
+    match = pattern.search(type_text)
+    if not match:
+        return ""
+    return re.sub(r"\s+", " ", match.group("params")).strip().rstrip(",")
+
+
+def _typed_tag_facts(type_text: str, signature: str) -> list[str]:
+    facts: list[str] = []
+    for param_name, type_name in _signature_param_types(signature):
+        tags = _tag_keys_for_type(type_text, type_name)
+        if tags:
+            facts.append(
+                f"The `{param_name}` argument type `{type_name}` exposes tags: "
+                + ", ".join(f"`{tag}`" for tag in tags)
+                + "."
+            )
+    return facts
+
+
+def _signature_param_types(signature: str) -> list[tuple[str, str]]:
+    pairs: list[tuple[str, str]] = []
+    for param in signature.split(","):
+        match = re.search(
+            r"\b(?P<name>[A-Za-z_$][\w$]*)\s*:\s*(?P<type>[A-Za-z_$][\w$]*)\b",
+            param,
+        )
+        if match:
+            pairs.append((match.group("name"), match.group("type")))
+    return pairs
+
+
+def _tag_keys_for_type(type_text: str, type_name: str) -> list[str]:
+    pattern = re.compile(
+        rf"\binterface\s+{re.escape(type_name)}\b\s*{{(?P<body>.*?)\n\s*}}",
+        re.DOTALL,
+    )
+    match = pattern.search(type_text)
+    if not match:
+        return []
+    body = match.group("body")
+    tags = re.findall(r"['\"](?P<tag>[^'\"]+)['\"]\??\s*:", body)
+    return sorted(tag for tag in set(tags) if "-" in tag)
 
 
 def _dedupe_preserve_order(values: list[str]) -> list[str]:
