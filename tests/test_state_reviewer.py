@@ -66,6 +66,44 @@ def test_reviewer_routes_known_runner_fact_answers_before_tool_execution():
     assert "RUNNER FACT ANSWER" in review.message
 
 
+def test_reviewer_routes_runner_facts_even_when_state_reviewer_is_disabled():
+    reviewer = BugStateReviewer(
+        {
+            "state_reviewer": {"enabled": False},
+        },
+        contract_evidence_available=False,
+        runner_facts=RunnerFacts(
+            test_runner="bun:test",
+            test_command="bun test",
+            typecheck_command="bun run typecheck",
+            test_api_import='import { beforeEach, describe, expect, mock, test } from "bun:test";',
+            recommended_test_file="src/twitch/handleResub.test.ts",
+            source_file="src/twitch/client.ts",
+            target_symbol="handleResub",
+            nearby_tests=[],
+            symbol_tests=[],
+        ),
+    )
+    reviewer.observe_tool_result(
+        "run_command",
+        {"command": "bun run typecheck"},
+        (
+            "[Reactive typecheck]\n"
+            "src/twitch/handleResub.test.ts(4,1): error TS2304: Cannot find name 'describe'.\n"
+        ),
+        applied=None,
+    )
+
+    review = reviewer.review_tool_call(
+        "read_file",
+        {"path": "tsconfig.json"},
+        allow_dependency_contract_lookup=True,
+    )
+
+    assert review is not None
+    assert review.event == "intent_router_answered"
+
+
 def test_pending_forbidden_pattern_blocks_exploration_until_same_file_is_edited():
     reviewer = BugStateReviewer(
         {

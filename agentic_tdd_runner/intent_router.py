@@ -13,8 +13,8 @@ from agentic_tdd_runner.runner_facts import RunnerFacts
 
 _BUN_TEST_GLOBALS = {"beforeEach", "describe", "expect", "mock", "test"}
 _MISSING_NAME_RE = re.compile(
-    r"(?P<file>[^\s:(]+\.test\.[tj]sx?)"
-    r"(?:\(\d+,\d+\)|:\d+:\d+)?:\s*error TS\d+:\s*"
+    r"(?P<file>[^\s:(]+\.(?:test|spec)\.[tj]sx?)"
+    r"(?:\(\d+,\d+\)|:\d+:\d+)?(?:\s*-\s*|:\s*)error TS\d+:\s*"
     r"Cannot find name ['\"](?P<name>[A-Za-z_]\w*)['\"]"
 )
 
