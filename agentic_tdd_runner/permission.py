@@ -76,6 +76,10 @@ def build_permission_context(
             source_file=episode.get("source_file"),
             contract_facts=contract_facts,
         ),
+        "referenced_type_shapes": _read_referenced_type_shapes(
+            workdir=workdir,
+            contract_facts=contract_facts,
+        ),
         "source_seams": _extract_section_bullets(str(episode.get("cookbook_text") or ""), "### Test Seams"),
         "source_mocks": _extract_mock_modules(str(episode.get("cookbook_text") or "")),
         "module_mock_block": _extract_code_block_after(
@@ -99,12 +103,15 @@ def answer_harness(args: dict, context: dict) -> PermissionReview:
     if intent == "understand_contract":
         facts = context.get("contract_facts") or []
         if facts:
+            type_shapes = _format_type_shapes(context.get("referenced_type_shapes") or [])
+            shape_block = f"\nReferenced type shapes:\n{type_shapes}" if type_shapes else ""
             return PermissionReview(
                 allowed=True,
                 message=(
                     "HARNESS ANSWER: contract facts are already known. "
                     "Do not read source for this intent.\n"
                     + _bullet_block(facts)
+                    + shape_block
                     + "\nNext required action: call ask_harness with intent `write_regression_test`, "
                     "then create/edit only the granted test file."
                 ),
@@ -125,6 +132,7 @@ def answer_harness(args: dict, context: dict) -> PermissionReview:
         lines = [
             f"PERMISSION GRANTED: create or edit only `{context.get('test_file')}`.",
             "Do not read source before writing the first regression test; the harness has supplied the needed target facts.",
+            "You may read_file this same test path while repairing/resyncing the granted file.",
             "Use the real callable contract and cover the acceptance bullets.",
             "Keep direct invocation and assertions inside the test, not shared setup.",
         ]
@@ -147,6 +155,10 @@ def answer_harness(args: dict, context: dict) -> PermissionReview:
         if runner_facts:
             lines.append("Runner facts:")
             lines.extend(f"- {fact}" for fact in runner_facts[:8])
+        type_shapes = _format_type_shapes(context.get("referenced_type_shapes") or [])
+        if type_shapes:
+            lines.append("Referenced type shapes:")
+            lines.append(type_shapes)
         skeleton = _build_regression_test_skeleton(context)
         if skeleton:
             lines.append("Suggested regression test skeleton:")
@@ -165,7 +177,8 @@ def answer_harness(args: dict, context: dict) -> PermissionReview:
             allowed=True,
             message=(
                 f"PERMISSION GRANTED: repair setup in `{context.get('test_file')}` only. "
-                "Use deterministic runner/mock feedback. Do not edit source behavior in this phase."
+                "Use deterministic runner/mock feedback. You may read_file this same test path. "
+                "Do not edit source behavior in this phase."
             ),
             grant="write_test",
             event="permission_granted",
@@ -180,7 +193,7 @@ def answer_harness(args: dict, context: dict) -> PermissionReview:
         lines = [
             f"PERMISSION GRANTED: edit only `{context.get('source_file')}` for the requested behavior.",
             "Preserve existing public payload keys and fallback behavior unless the issue requires otherwise.",
-            "Do not call read_file or rg for this edit; use the exact current target snippet below.",
+            "You may read_file this same source path while resyncing the granted edit. Do not use broad rg.",
         ]
         snippet = context.get("source_snippet")
         if snippet:
@@ -253,10 +266,14 @@ def review_tool_call(
             return None
     elif grant == "write_test":
         path = str(args.get("path") or "")
+        if name == "read_file" and _same_path(path, context.get("test_file")):
+            return None
         if name in {"create_file", "str_replace_editor"} and _same_path(path, context.get("test_file")):
             return None
     elif grant == "write_source":
         path = str(args.get("path") or "")
+        if name == "read_file" and _same_path(path, context.get("source_file")):
+            return None
         if name == "str_replace_editor" and _same_path(path, context.get("source_file")):
             return None
     elif grant == "run_test":
@@ -373,6 +390,118 @@ def _read_relevant_imports_snippet(
     return "\n".join(relevant[:6]).strip()
 
 
+def _read_referenced_type_shapes(
+    *,
+    workdir: str | None,
+    contract_facts: list[str],
+) -> list[dict[str, Any]]:
+    if not workdir:
+        return []
+
+    shapes: list[dict[str, Any]] = []
+    for module_name, type_names in _referenced_framework_types(contract_facts):
+        type_text = _read_module_type_declarations(Path(workdir), module_name)
+        if not type_text:
+            continue
+        for type_name in type_names:
+            shape = _extract_type_shape(type_text, type_name)
+            if shape:
+                shape["module"] = module_name
+                shapes.append(shape)
+    return shapes
+
+
+def _referenced_framework_types(contract_facts: list[str]) -> list[tuple[str, list[str]]]:
+    primitive_types = {"string", "number", "boolean", "void", "unknown", "object"}
+    refs: dict[str, set[str]] = {}
+    for fact in contract_facts:
+        match = re.search(
+            r"(?P<module>[\w@./-]+) type declarations expose `[^`]+\((?P<params>[^`]*)\)`",
+            fact,
+        )
+        if not match:
+            continue
+        names = refs.setdefault(match.group("module"), set())
+        for _param_name, type_name in _signature_param_types(match.group("params")):
+            if type_name not in primitive_types:
+                names.add(type_name)
+    return [
+        (module_name, sorted(type_names))
+        for module_name, type_names in sorted(refs.items())
+        if type_names
+    ]
+
+
+def _read_module_type_declarations(workdir: Path, module_name: str) -> str:
+    candidates = [
+        workdir / "node_modules" / "@types" / module_name / "index.d.ts",
+        workdir / "node_modules" / module_name / "index.d.ts",
+        workdir / "node_modules" / module_name / "types.d.ts",
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate.read_text(errors="ignore")
+    return ""
+
+
+def _extract_type_shape(type_text: str, type_name: str) -> dict[str, Any]:
+    interface_match = re.search(
+        rf"\binterface\s+{re.escape(type_name)}\b[^\{{]*{{(?P<body>.*?)\n\s*}}",
+        type_text,
+        re.DOTALL,
+    )
+    if interface_match:
+        fields = _extract_type_fields(interface_match.group("body"))
+        return {"name": type_name, "kind": "interface", "fields": fields}
+
+    alias_match = re.search(
+        rf"\btype\s+{re.escape(type_name)}\s*=\s*(?P<body>[^;]+);",
+        type_text,
+        re.DOTALL,
+    )
+    if alias_match:
+        return {
+            "name": type_name,
+            "kind": "type",
+            "alias": re.sub(r"\s+", " ", alias_match.group("body")).strip(),
+            "fields": [],
+        }
+    return {}
+
+
+def _extract_type_fields(body: str) -> list[dict[str, str | bool]]:
+    fields: list[dict[str, str | bool]] = []
+    pattern = re.compile(
+        r"^\s*(?P<name>['\"][^'\"]+['\"]|[A-Za-z_$][\w$]*)"
+        r"(?P<optional>\?)?\s*:\s*(?P<type>[^;\n]+);?",
+        re.MULTILINE,
+    )
+    for match in pattern.finditer(body):
+        raw_name = match.group("name")
+        name = raw_name[1:-1] if raw_name.startswith(("'", '"')) else raw_name
+        fields.append({
+            "name": name,
+            "optional": bool(match.group("optional")),
+            "type": re.sub(r"\s+", " ", match.group("type")).strip(),
+        })
+    return fields
+
+
+def _format_type_shapes(shapes: list[dict[str, Any]]) -> str:
+    lines: list[str] = []
+    for shape in shapes:
+        module_name = shape.get("module")
+        type_name = shape.get("name")
+        if shape.get("fields"):
+            lines.append(f"- {module_name}.{type_name}:")
+            for field in shape["fields"][:12]:
+                marker = "?" if field.get("optional") else ""
+                lines.append(f"  - {field['name']}{marker}: {field['type']}")
+        elif shape.get("alias"):
+            lines.append(f"- {module_name}.{type_name}: {shape['alias']}")
+    return "\n".join(lines)
+
+
 def _import_needles(contract_facts: list[str]) -> list[str]:
     needles: list[str] = []
     for fact in contract_facts:
@@ -427,46 +556,55 @@ def _extract_mock_modules(cookbook_text: str) -> list[str]:
 
 def _build_regression_test_skeleton(context: dict) -> str:
     """Build a compact, executable first-test shape when deterministic facts are enough."""
-    facts = "\n".join(context.get("contract_facts") or [])
-    if (
-        context.get("target_symbol") != "handleResub"
-        or "tmi.js source emits `resub" not in facts
-        or "msg-param-cumulative-months" not in facts
-    ):
+    facts = context.get("contract_facts") or []
+    mock_block = str(context.get("module_mock_block") or "").strip()
+    signature = str(context.get("source_signature") or "").strip()
+    target_symbol = str(context.get("target_symbol") or "").strip()
+    callback_params = _callback_params_from_contract_facts(facts)
+    if not (facts and mock_block and signature and target_symbol):
         return ""
 
     import_path = context.get("source_import_path") or "./client"
-    mock_block = str(context.get("module_mock_block") or "").strip()
     spy_names = _extract_spy_names(mock_block)
+    setter_names = _extract_test_seam_setters(context.get("source_seams") or [])
+    type_imports = _extract_type_imports_from_contract_facts(facts)
+    type_shapes = context.get("referenced_type_shapes") or []
+    fixture_lines = _build_callback_fixture_lines(
+        params=callback_params,
+        facts=facts,
+        type_shapes=type_shapes,
+    )
     lines = [
         'import { beforeEach, describe, expect, mock, test } from "bun:test";',
-        'import type { SubMethods, SubUserstate } from "tmi.js";',
-        "",
     ]
-    if mock_block:
-        lines.extend(mock_block.splitlines())
-        lines.append("")
-    else:
-        lines.extend([
-            "// Keep mock.module(...) registrations above the dynamic source import.",
-            "// Use the module mocks from the cookbook for logger, stream-summary, token, discord, and search.",
-            "",
-        ])
+    for module_name, names in type_imports:
+        lines.append(f'import type {{ {", ".join(names)} }} from "{module_name}";')
+    lines.append("")
+    lines.extend(mock_block.splitlines())
+    lines.append("")
 
     lines.extend([
         f'type ClientModule = typeof import("{import_path}");',
-        "type ResubHandler = (",
-        "  channel: string,",
-        "  username: string,",
-        "  streakMonths: number,",
-        "  message: string,",
-        "  userstate: SubUserstate,",
-        "  methods: SubMethods,",
-        ") => void;",
+        f'type TargetHandler = ClientModule["{target_symbol}"];',
+    ])
+    if callback_params:
+        lines.extend([
+            "type CallbackContract = (",
+            *[
+                f"  {param_name}: {type_name},"
+                for param_name, type_name in callback_params
+            ],
+            ") => void;",
+        ])
+    else:
+        lines.append("type CallbackContract = TargetHandler;")
+    lines.extend([
         "",
-        "let handleResub: ClientModule[\"handleResub\"];",
-        "let setClientForTests: ClientModule[\"__setClientForTests\"];",
-        "let setMemoryManagerForTests: ClientModule[\"__setMemoryManagerForTests\"];",
+        "let targetHandler: TargetHandler;",
+    ])
+    for setter_name in setter_names:
+        lines.append(f'let {setter_name}: ClientModule["{setter_name}"];')
+    lines.extend([
         "",
         "beforeEach(async () => {",
     ])
@@ -476,29 +614,25 @@ def _build_regression_test_skeleton(context: dict) -> str:
         lines.append("  // mockClear every *_spy from the cookbook here.")
     lines.extend([
         f'  const clientModule = await import("{import_path}");',
-        "  handleResub = clientModule.handleResub;",
-        "  setClientForTests = clientModule.__setClientForTests;",
-        "  setMemoryManagerForTests = clientModule.__setMemoryManagerForTests;",
+        f"  targetHandler = clientModule.{target_symbol};",
+    ])
+    for setter_name in setter_names:
+        lines.append(f"  {setter_name} = clientModule.{setter_name};")
+    lines.extend([
         "});",
         "",
-        'test("uses cumulative resub months instead of streak months", () => {',
-        '  const say = mock((_channel: string, _message: string): Promise<[string]> => Promise.resolve(["#channel"]));',
-        '  const getEmote = mock((): string => "teseoLove");',
-        "  setClientForTests({ say });",
-        "  setMemoryManagerForTests({ getEmote });",
-        "",
-        "  const resubHandler: ResubHandler = handleResub;",
-        "  const userstate: SubUserstate = {",
-        '    "message-type": "resub",',
-        '    "msg-param-streak-months": "0",',
-        '    "msg-param-cumulative-months": "6",',
-        "  };",
-        '  const methods: SubMethods = { prime: false, plan: "1000", planName: "Tier 1" };',
-        "",
-        '  resubHandler("#channel", "username", 0, "", userstate, methods);',
-        "",
-        '  expect(say).toHaveBeenCalledWith("#channel", expect.stringContaining("6 meses"));',
-        '  expect(streamSummaryManager_trackResub_spy).toHaveBeenCalledWith("username", 6);',
+        'test("covers the reported callback behavior", () => {',
+        "  // Arrange issue-grounded doubles and call any generated test-seam setters above.",
+    ])
+    if fixture_lines:
+        lines.extend(f"  {line}" if line else "" for line in fixture_lines)
+    else:
+        lines.append("  // Build typed callback arguments from the Callback Contract Evidence.")
+    lines.extend([
+        "  const callbackHandler: CallbackContract = targetHandler;",
+        "  callbackHandler(" + ", ".join(_callback_argument_names(callback_params)) + ");",
+        "  // Assert through the named *_spy variables and issue acceptance criteria.",
+        '  throw new Error("replace skeleton comments with the focused failing regression");',
         "});",
     ])
     return "\n".join(lines)
@@ -535,6 +669,168 @@ def _extract_spy_names(mock_block: str) -> list[str]:
         if name.endswith("_spy"):
             names.append(name)
     return names
+
+
+def _extract_test_seam_setters(seams: list[str]) -> list[str]:
+    setters: list[str] = []
+    for seam in seams:
+        for match in re.finditer(r"`(__set[A-Za-z0-9_]+)(?:\([^`]*)?`", seam):
+            setters.append(match.group(1))
+    return sorted(set(setters))
+
+
+def _extract_type_imports_from_contract_facts(facts: list[str]) -> list[tuple[str, list[str]]]:
+    return _referenced_framework_types(facts)
+
+
+def _callback_params_from_contract_facts(facts: list[str]) -> list[tuple[str, str]]:
+    for fact in facts:
+        match = re.search(
+            r"[\w@./-]+ type declarations expose `[^`]+\((?P<params>[^`]*)\)`",
+            fact,
+        )
+        if match:
+            return _signature_param_types(match.group("params"))
+    return []
+
+
+def _signature_param_types(signature: str) -> list[tuple[str, str]]:
+    pairs: list[tuple[str, str]] = []
+    for param in signature.split(","):
+        match = re.search(
+            r"\b(?P<name>[A-Za-z_$][\w$]*)\s*:\s*(?P<type>[A-Za-z_$][\w$]*)\b",
+            param,
+        )
+        if match:
+            pairs.append((match.group("name"), match.group("type")))
+    return pairs
+
+
+def _callback_argument_names(params: list[tuple[str, str]]) -> list[str]:
+    return [name for name, _type_name in params]
+
+
+def _build_callback_fixture_lines(
+    *,
+    params: list[tuple[str, str]],
+    facts: list[str],
+    type_shapes: list[dict[str, Any]],
+) -> list[str]:
+    if not params:
+        return []
+
+    event_name = _event_name_from_contract_facts(facts)
+    runtime_names = _runtime_arg_names_from_contract_facts(facts)
+    shapes_by_name = {shape.get("name"): shape for shape in type_shapes}
+    lines: list[str] = []
+    for index, (param_name, type_name) in enumerate(params):
+        shape = shapes_by_name.get(type_name)
+        if shape and shape.get("fields"):
+            lines.extend(_fixture_object_lines(param_name, type_name, shape, event_name=event_name, facts=facts))
+            continue
+        runtime_name = runtime_names[index] if index < len(runtime_names) else param_name
+        lines.append(f"const {param_name}: {type_name} = {_sample_primitive_value(param_name, runtime_name, type_name, facts)};")
+    return lines
+
+
+def _fixture_object_lines(
+    param_name: str,
+    type_name: str,
+    shape: dict[str, Any],
+    *,
+    event_name: str,
+    facts: list[str],
+) -> list[str]:
+    fields = shape.get("fields") or []
+    selected = _select_fixture_fields(fields, facts)
+    if not selected:
+        selected = [field for field in fields if not field.get("optional")][:3]
+    if not selected:
+        selected = fields[:3]
+    lines = [f"const {param_name}: {type_name} = {{"]
+    for field in selected:
+        key = field["name"]
+        value = _sample_field_value(str(key), str(field.get("type") or ""), event_name=event_name)
+        rendered_key = key if re.match(r"^[A-Za-z_$][\w$]*$", str(key)) else f'"{key}"'
+        lines.append(f"  {rendered_key}: {value},")
+    lines.append("};")
+    return lines
+
+
+def _select_fixture_fields(fields: list[dict[str, Any]], facts: list[str]) -> list[dict[str, Any]]:
+    selected: list[dict[str, Any]] = []
+    fact_text = "\n".join(facts)
+    for field in fields:
+        name = str(field.get("name") or "")
+        if name and (name in fact_text or name == "message-type"):
+            selected.append(field)
+    if selected:
+        return selected
+    return [
+        field for field in fields
+        if _is_simple_fixture_field(str(field.get("type") or ""))
+    ][:3]
+
+
+def _is_simple_fixture_field(type_text: str) -> bool:
+    return any(token in type_text for token in ["string", "boolean", "number"]) or re.match(r"^[A-Za-z_$][\w$]*Plan\b", type_text)
+
+
+def _sample_primitive_value(param_name: str, runtime_name: str, type_name: str, facts: list[str]) -> str:
+    name = f"{param_name} {runtime_name}".lower()
+    facts_text = "\n".join(facts)
+    if type_name == "string":
+        if "channel" in name:
+            return '"#channel"'
+        if "user" in name:
+            return '"username"'
+        if "message" in name or "msg" in name:
+            return '""'
+        return '""'
+    if type_name == "number":
+        if "streak" in name or "msg-param-cumulative-months" in facts_text:
+            return "0"
+        return "1"
+    if type_name == "boolean":
+        return "false"
+    return "{}"
+
+
+def _sample_field_value(field_name: str, type_text: str, *, event_name: str) -> str:
+    if field_name == "message-type" and event_name:
+        return f'"{event_name}"'
+    if "cumulative" in field_name:
+        return '"6"'
+    if "streak" in field_name:
+        return '"0"'
+    if field_name == "prime" or "boolean" in type_text:
+        return "false"
+    if field_name == "planName":
+        return '"Tier 1"'
+    if field_name == "plan" or type_text.endswith("Plan"):
+        return '"1000"'
+    if "number" in type_text:
+        return "1"
+    return '""'
+
+
+def _event_name_from_contract_facts(facts: list[str]) -> str:
+    for fact in facts:
+        match = re.search(r"\.on\(['\"](?P<event>[^'\"]+)['\"]", fact)
+        if match:
+            return match.group("event")
+        match = re.search(r"source emits `(?P<event>\w+)\(", fact)
+        if match:
+            return match.group("event")
+    return ""
+
+
+def _runtime_arg_names_from_contract_facts(facts: list[str]) -> list[str]:
+    for fact in facts:
+        match = re.search(r"source emits `\w+\((?P<params>[^`]*)\)`", fact)
+        if match:
+            return [part.strip() for part in match.group("params").split(",") if part.strip()]
+    return []
 
 
 def _bullet_block(lines: list[str]) -> str:

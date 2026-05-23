@@ -74,6 +74,27 @@ def test_str_replace_invalidates_read_cache(tmp_path):
     assert target.read_text() == "const x = 2;\n"
 
 
+def test_str_replace_old_str_not_found_returns_current_excerpt(tmp_path):
+    target = tmp_path / "src" / "file.ts"
+    target.parent.mkdir()
+    target.write_text("const actual = 1;\nconst next = 2;\n")
+
+    result, _ = _execute_tool(
+        "str_replace_editor",
+        {
+            "path": "src/file.ts",
+            "old_str": "const missing = 1;",
+            "new_str": "const actual = 2;",
+        },
+        tmp_path,
+    )
+
+    assert result.startswith("ERROR: old_str not found in src/file.ts")
+    assert "Current file excerpt for resync" in result
+    assert "1: const actual = 1;" in result
+    assert "2: const next = 2;" in result
+
+
 def test_run_command_updates_last_exit_code(tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", "/usr/bin")
 
