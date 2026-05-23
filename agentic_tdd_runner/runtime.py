@@ -10,32 +10,32 @@ from agentic_tdd_runner.state_reviewer import BugStateReviewer
 
 
 def has_contract_evidence(issue_text: str, episode: dict | None) -> bool:
-    """Return whether the prompt already carries concrete contract evidence."""
+    """Return whether the model-facing prompt carries concrete contract evidence."""
     text = (issue_text or "").lower()
     issue_has_contract = any(
         token in text
         for token in (
             "callback contract",
             "signature",
-            "acceptance test",
             "userstate[",
-            "when present",
         )
     )
     if issue_has_contract:
         return True
     if not episode:
         return False
-    if episode.get("callback_registrations"):
+    if episode.get("callback_contracts") or episode.get("dependency_contracts"):
         return True
     cookbook_text = str(episode.get("cookbook_text") or "").lower()
     return any(
         token in cookbook_text
         for token in (
-            "callback contract evidence",
-            "source edits",
-            "test seams",
-            "assertion",
+            "callback signature",
+            "source emits `",
+            "event signature",
+            "framework signature",
+            "dependency contract",
+            "userstate[",
         )
     )
 
