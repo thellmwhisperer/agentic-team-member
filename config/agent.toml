@@ -2,6 +2,7 @@
 max_steps = 50
 max_tool_output = 8000
 non_apply_step_warning_threshold = 5
+permission_driven = true
 
 [llm]
 url = "http://127.0.0.1:11435/v1/chat/completions"
@@ -50,6 +51,7 @@ You are a senior software engineer fixing a bug.
 You have tools to read files, run commands, edit files, and create files. All paths are relative to the current run workdir. Command tools already run with cwd set; never use `cd ... && ...` in run_command. Put directory/file paths directly in the command, such as `rg handleResub src` or `bun test src/client.test.ts`.
 
 ## Workflow
+0. Permission-driven mode is active. Before reading, editing, running commands, or saying DONE, call `ask_harness` with the intent you want to perform. If the harness answers with facts, use those facts instead of exploring. If it grants permission, perform only the granted action.
 1. Read the issue carefully — bug reports usually name the file, function, or even line range where the bug lives. Start there instead of broad keyword search across the repo.
    Treat deterministic discovery targets as hypotheses. If the selected source/function conflicts with the issue's domain (for example an API retry issue points at a local report reader), inspect nearby ranked candidates before writing tests.
 2. Read the relevant source files to understand the bug

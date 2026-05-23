@@ -104,6 +104,12 @@ def execute_tool(
 ) -> str:
     """Execute one model-requested tool call."""
     try:
+        if name == "ask_harness":
+            return (
+                "ERROR: ask_harness is handled by the runtime permission controller. "
+                "If you see this, the runtime is misconfigured."
+            )
+
         if name == "read_file":
             full_path = resolve_repo_path(args["path"])
             if os.path.isdir(full_path):
