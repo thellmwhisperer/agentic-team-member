@@ -128,6 +128,28 @@ def test_run_command_compacts_failing_test_output_with_stack(tmp_path, monkeypat
     assert exit_codes == [None, 1]
 
 
+def test_run_command_compacts_only_exact_package_manager_test_scripts(tmp_path, monkeypatch):
+    monkeypatch.setenv("PATH", "/usr/bin")
+
+    def fake_run(command, **kwargs):
+        return subprocess.CompletedProcess(
+            command,
+            1,
+            stdout="line 1\nline 2\nerror: package script failed\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr("agentic_tdd_runner.tools.subprocess.run", fake_run)
+
+    test_result, _ = _execute_tool("run_command", {"command": "npm run test"}, tmp_path)
+    pretest_result, _ = _execute_tool("run_command", {"command": "npm run pretest"}, tmp_path)
+    watch_result, _ = _execute_tool("run_command", {"command": "pnpm run test:watch"}, tmp_path)
+
+    assert test_result.startswith("[run_command test failure: exit 1]")
+    assert pretest_result == "line 1\nline 2\nerror: package script failed\n"
+    assert watch_result == "line 1\nline 2\nerror: package script failed\n"
+
+
 def test_blocks_node_modules_contract_lookup_when_contract_evidence_exists(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "agentic_tdd_runner.tools.subprocess.run",

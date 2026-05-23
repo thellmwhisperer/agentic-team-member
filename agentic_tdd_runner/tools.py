@@ -448,11 +448,17 @@ def _is_test_run_command(command: str) -> bool:
         return True
     if executable == "bun" and len(parts) > 1 and parts[1] == "test":
         return True
-    if executable in {"npm", "pnpm", "yarn"} and any(
-        "test" in part for part in parts[1:3]
-    ):
+    if _is_package_manager_test_command(executable, parts):
         return True
     return any(re.search(r"\.test\.[tj]sx?$|test_.*\.py$", part) for part in parts[1:])
+
+
+def _is_package_manager_test_command(executable: str, parts: list[str]) -> bool:
+    if executable not in {"npm", "pnpm", "yarn"}:
+        return False
+    return (len(parts) >= 2 and parts[1] == "test") or (
+        len(parts) >= 3 and parts[1] == "run" and parts[2] == "test"
+    )
 
 
 def reactive_forbidden_feedback(
