@@ -671,6 +671,54 @@ class TestCallbackContractGuidance:
         assert "TODO behavior" not in result
         assert "__todoValue" not in result
 
+    def test_derives_tmi_resub_contract_facts_from_installed_dependency(self, tmp_path):
+        _write_file(tmp_path, "src/twitch/client.ts", """\
+            import tmi from 'tmi.js';
+
+            const client = new tmi.Client({});
+
+            function handleResub(channel: string, username: string, months: number): void {
+              client.say(channel, `${username}:${months}`);
+            }
+
+            client.on('resub', handleResub);
+        """)
+        _write_file(tmp_path, "node_modules/tmi.js/lib/client.js", """\
+            const streakMonths = ~~(tags['msg-param-streak-months'] || 0);
+
+            switch(msgid) {
+              case 'resub':
+                this.emits([ 'resub', 'subanniversary' ], [
+                  [ channel, username, streakMonths, msg, tags, methods ]
+                ]);
+                break;
+            }
+        """)
+        _write_file(tmp_path, "node_modules/@types/tmi.js/index.d.ts", """\
+            interface Events {
+              resub(
+                channel: string,
+                username: string,
+                months: number,
+                message: string,
+                userstate: SubUserstate,
+                methods: SubMethods,
+              ): void;
+            }
+
+            interface SubUserstate {
+              "msg-param-cumulative-months"?: string | boolean | undefined;
+              "msg-param-streak-months"?: string | boolean | undefined;
+            }
+        """)
+
+        result = generate_cookbook("src/twitch/client.ts", "handleResub", str(tmp_path))
+
+        assert "tmi.js source emits `resub(channel, username, streakMonths, msg, tags, methods)`" in result
+        assert "third argument is `streakMonths`" in result
+        assert "`msg-param-cumulative-months`" in result
+        assert "`msg-param-streak-months`" in result
+
     def test_callback_guidance_preserves_types_and_fallbacks(self, tmp_path):
         _write_file(tmp_path, "src/client.ts", """\
             const bus = { on(_event: string, _handler: unknown) {} };

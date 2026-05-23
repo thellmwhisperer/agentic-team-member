@@ -629,7 +629,7 @@ def main():
     return _runtime.run_agent_loop(
         messages=run_context.messages,
         episode=run_context.episode,
-        issue_text=run_context.issue_text,
+        issue_text=run_context.issue_text_for_model,
         config=_CONFIG,
         workdir=WORKDIR,
         log_path=log_path,

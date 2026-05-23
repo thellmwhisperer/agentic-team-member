@@ -152,6 +152,14 @@ def _build_contract_for_symbol(
     resolved_test_path = test_path or lang.test_path(source_path, symbol)
     runner = lang.runner
 
+    callback_registrations = _discover_callback_registrations(source_text, symbol)
+    callback_contract_facts = _discover_callback_contract_facts(
+        source_text,
+        symbol,
+        project_root=project_root,
+        registrations=callback_registrations,
+    )
+
     facts = {
         "target": target,
         "test_file": {
@@ -166,9 +174,8 @@ def _build_contract_for_symbol(
         "execution_dependencies": execution_dependencies,
         "injection_plan": injection_plan,
         "assertion_surface": assertion_surface,
-        "callback_registrations": _discover_callback_registrations(
-            source_text, symbol,
-        ),
+        "callback_registrations": callback_registrations,
+        "callback_contract_facts": callback_contract_facts,
         "pattern_files": [],
         "gaps": assertion_gaps,
     }
@@ -348,6 +355,81 @@ def _discover_callback_registrations(source_text: str, symbol: str) -> list[dict
     return registrations
 
 
+def _discover_callback_contract_facts(
+    source_text: str,
+    symbol: str,
+    *,
+    project_root: str,
+    registrations: list[dict],
+) -> list[str]:
+    """Derive dependency-backed callback facts for known event frameworks."""
+    facts: list[str] = []
+    if not registrations:
+        return facts
+    if "tmi.js" not in source_text:
+        return facts
+
+    for registration in registrations:
+        event = _event_name_from_registration(registration.get("call", ""), symbol)
+        if event == "resub":
+            facts.extend(_tmi_resub_contract_facts(Path(project_root)))
+    return _dedupe_preserve_order(facts)
+
+
+def _event_name_from_registration(call: str, symbol: str) -> str | None:
+    pattern = re.compile(
+        rf"\.(?:on|once)\(\s*['\"](?P<event>[^'\"]+)['\"]\s*,\s*{re.escape(symbol)}\b"
+    )
+    match = pattern.search(call)
+    if not match:
+        return None
+    return match.group("event")
+
+
+def _tmi_resub_contract_facts(project_root: Path) -> list[str]:
+    facts: list[str] = []
+    client_js = project_root / "node_modules" / "tmi.js" / "lib" / "client.js"
+    type_defs = project_root / "node_modules" / "@types" / "tmi.js" / "index.d.ts"
+
+    if client_js.is_file():
+        client_text = client_js.read_text(errors="ignore")
+        if (
+            "case 'resub'" in client_text
+            and "streakMonths" in client_text
+            and "[ channel, username, streakMonths, msg, tags, methods ]" in client_text
+        ):
+            facts.append(
+                "tmi.js source emits `resub(channel, username, streakMonths, msg, tags, methods)`."
+            )
+            if "tags['msg-param-streak-months']" in client_text:
+                facts.append(
+                    "The third argument is `streakMonths`, derived from `tags['msg-param-streak-months']`."
+                )
+
+    if type_defs.is_file():
+        type_text = type_defs.read_text(errors="ignore")
+        if "msg-param-cumulative-months" in type_text and "msg-param-streak-months" in type_text:
+            facts.append(
+                "The userstate/tags argument exposes both `msg-param-streak-months` and `msg-param-cumulative-months`."
+            )
+            facts.append(
+                "For total-month behavior, read from userstate/tags and preserve the positional months value as fallback."
+            )
+
+    return facts
+
+
+def _dedupe_preserve_order(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        deduped.append(value)
+    return deduped
+
+
 def _render_cookbook_text(contract: dict, lang) -> str:
     """Render a contract as human-readable text for the agent's system prompt."""
     parts = []
@@ -384,6 +466,8 @@ def _render_cookbook_text(contract: dict, lang) -> str:
         parts.append("- Before writing the test, use these registrations plus any issue-provided callback contract. Do not invent callback parameters or re-derive a contract that the issue/cookbook already states.")
         for registration in callback_registrations[:5]:
             parts.append(f"- line {registration['line']}: `{registration['call']}`")
+        for fact in contract.get("callback_contract_facts", []):
+            parts.append(f"- {fact}")
         parts.append("")
 
     parts.append("### Test Scope")
