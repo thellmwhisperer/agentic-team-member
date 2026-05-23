@@ -83,6 +83,9 @@ def test_export_harness_artifacts_writes_canonical_and_rendered_files(tmp_path):
     assert (tmp_path / "rendered" / "cookbook.md").read_text() == (
         "## Mock Cookbook\nFULL COOKBOOK PAYLOAD\n"
     )
+    assert (tmp_path / "rendered" / "mocks.md").read_text() == (
+        "mock.module('../logger', () => ({}));"
+    )
     assert (tmp_path / "rendered" / "system_prompt.md").read_text().startswith("SYSTEM PROMPT")
     assert manifest["workdir"] == "/repo/worktree"
     assert manifest["log_path"] == "/logs/agent.jsonl"
@@ -120,7 +123,47 @@ def test_canonical_episode_replaces_rendered_payloads_with_file_refs(tmp_path):
     assert "conditional_source_edits" not in episode
     assert episode["conditional_source_edits_deduped_from"] == "pre_test_source_edits"
     assert episode["cookbook_ref"] == "rendered/cookbook.md"
+    assert episode["mocks_ref"] == "rendered/mocks.md"
     assert episode["runner_facts_ref"] == "canonical/runner_facts.json"
     assert episode["pre_test_source_edits"][0]["old"] == (
         "function handleResub(channel: string): void {"
     )
+
+
+def test_canonical_episode_omits_refs_for_empty_rendered_payloads(tmp_path):
+    context = _run_context()
+    context.episode["cookbook_text"] = " \n"
+    context.episode["mocks_text"] = ""
+    context.episode["runner_facts_text"] = ""
+
+    export_harness_artifacts(
+        tmp_path,
+        run_context=context,
+        workdir="/repo/worktree",
+        log_path="/logs/agent.jsonl",
+    )
+
+    episode = json.loads((tmp_path / "canonical" / "episode.json").read_text())
+
+    assert "cookbook_ref" not in episode
+    assert "mocks_ref" not in episode
+    assert "runner_facts_text_ref" not in episode
+    assert not (tmp_path / "rendered" / "cookbook.md").exists()
+    assert not (tmp_path / "rendered" / "mocks.md").exists()
+    assert not (tmp_path / "rendered" / "runner_facts.md").exists()
+
+
+def test_export_jsonable_handles_mixed_sets(tmp_path):
+    context = _run_context()
+    context.episode["mixed_set"] = {1, "a"}
+
+    export_harness_artifacts(
+        tmp_path,
+        run_context=context,
+        workdir="/repo/worktree",
+        log_path="/logs/agent.jsonl",
+    )
+
+    episode = json.loads((tmp_path / "canonical" / "episode.json").read_text())
+
+    assert episode["mixed_set"] == [1, "a"]

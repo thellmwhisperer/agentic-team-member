@@ -130,8 +130,12 @@ def _discover_test_files(root: Path, patterns: list[str], exclude_dirs: set[str]
             continue
         if any(part in exclude_dirs for part in rel.parts):
             continue
-        if any(fnmatch.fnmatch(path.name, pattern) for pattern in patterns):
-            files.append(rel.as_posix())
+        rel_posix = rel.as_posix()
+        if any(
+            fnmatch.fnmatch(rel_posix, pattern) or fnmatch.fnmatch(path.name, pattern)
+            for pattern in patterns
+        ):
+            files.append(rel_posix)
     return sorted(files)
 
 

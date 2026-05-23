@@ -55,9 +55,6 @@ class BugStateReviewer:
         allow_dependency_contract_lookup: bool,
     ) -> StateReview | None:
         """Return a blocking review when a tool call violates state invariants."""
-        if not self.enabled:
-            return None
-
         intent_decision = self.intent_router.review_tool_call(name, args)
         if intent_decision:
             return StateReview(
@@ -65,6 +62,9 @@ class BugStateReviewer:
                 message=intent_decision.message,
                 data=intent_decision.data,
             )
+
+        if not self.enabled:
+            return None
 
         if (
             self.pending_forbidden_file
@@ -141,10 +141,10 @@ class BugStateReviewer:
         applied: bool | None,
     ) -> None:
         """Update reviewer state after an executed tool call."""
+        self.intent_router.observe_tool_result(name, args, result, applied=applied)
+
         if not self.enabled:
             return
-
-        self.intent_router.observe_tool_result(name, args, result, applied=applied)
 
         if is_dependency_contract_lookup(name, args):
             self.dependency_contract_lookup_count += 1
