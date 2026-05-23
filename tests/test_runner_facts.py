@@ -92,3 +92,15 @@ def test_build_runner_facts_honors_directory_aware_patterns(tmp_path):
     facts = build_runner_facts(str(tmp_path), _config(), episode=_episode())
 
     assert facts.symbol_tests == ["tests/twitch/handleResub.spec.ts"]
+
+
+def test_build_runner_facts_excludes_build_artifact_directories_by_default(tmp_path):
+    _write_file(tmp_path, "package.json", json.dumps({"scripts": {"typecheck": "tsc --noEmit"}}))
+    _write_file(tmp_path, "src/twitch/client.ts", "export function handleResub() {}\n")
+    _write_file(tmp_path, "src/twitch/client.test.ts", "handleResub();\n")
+    _write_file(tmp_path, "dist/client.test.ts", "handleResub();\n")
+    _write_file(tmp_path, ".git/objects/noise.test.ts", "handleResub();\n")
+
+    facts = build_runner_facts(str(tmp_path), _config(), episode=_episode())
+
+    assert facts.symbol_tests == ["src/twitch/client.test.ts"]
