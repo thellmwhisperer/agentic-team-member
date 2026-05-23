@@ -671,7 +671,7 @@ class TestCallbackContractGuidance:
         assert "TODO behavior" not in result
         assert "__todoValue" not in result
 
-    def test_derives_tmi_resub_contract_facts_from_installed_dependency(self, tmp_path):
+    def test_derives_tmi_callback_contract_facts_from_installed_dependency(self, tmp_path):
         _write_file(tmp_path, "src/twitch/client.ts", """\
             import tmi from 'tmi.js';
 
@@ -715,9 +715,55 @@ class TestCallbackContractGuidance:
         result = generate_cookbook("src/twitch/client.ts", "handleResub", str(tmp_path))
 
         assert "tmi.js source emits `resub(channel, username, streakMonths, msg, tags, methods)`" in result
-        assert "third argument is `streakMonths`" in result
+        assert "Argument 3 is `streakMonths`" in result
+        assert "Argument 1 is `channel`" not in result
+        assert "Argument 6 is `methods`" not in result
+        assert "tmi.js type declarations expose `resub(channel: string, username: string, months: number, message: string, userstate: SubUserstate, methods: SubMethods)`" in result
         assert "`msg-param-cumulative-months`" in result
         assert "`msg-param-streak-months`" in result
+
+    def test_derives_tmi_contract_facts_for_detected_event_not_literal(self, tmp_path):
+        _write_file(tmp_path, "src/twitch/client.ts", """\
+            import tmi from 'tmi.js';
+
+            const client = new tmi.Client({});
+
+            function handleCheer(channel: string, userstate: ChatUserstate, message: string): void {
+              client.say(channel, message);
+            }
+
+            client.on('cheer', handleCheer);
+        """)
+        _write_file(tmp_path, "node_modules/tmi.js/lib/client.js", """\
+            switch(msgid) {
+              case 'cheer':
+                this.emits([ 'cheer' ], [
+                  [ channel, tags, message ]
+                ]);
+                break;
+            }
+        """)
+        _write_file(tmp_path, "node_modules/@types/tmi.js/index.d.ts", """\
+            interface Events {
+              cheer(
+                channel: string,
+                userstate: ChatUserstate,
+                message: string,
+              ): void;
+            }
+
+            interface ChatUserstate {
+              "bits"?: string | undefined;
+              "user-id"?: string | undefined;
+            }
+        """)
+
+        result = generate_cookbook("src/twitch/client.ts", "handleCheer", str(tmp_path))
+
+        assert "client.on('cheer', handleCheer)" in result
+        assert "tmi.js source emits `cheer(channel, tags, message)`" in result
+        assert "tmi.js type declarations expose `cheer(channel: string, userstate: ChatUserstate, message: string)`" in result
+        assert "`user-id`" in result
 
     def test_callback_guidance_preserves_types_and_fallbacks(self, tmp_path):
         _write_file(tmp_path, "src/client.ts", """\
