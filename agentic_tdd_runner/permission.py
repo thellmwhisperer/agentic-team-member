@@ -105,13 +105,15 @@ def answer_harness(args: dict, context: dict) -> PermissionReview:
         if facts:
             type_shapes = _format_type_shapes(context.get("referenced_type_shapes") or [])
             shape_block = f"\nReferenced type shapes:\n{type_shapes}" if type_shapes else ""
+            implementation_block = _implementation_answer_block(args, context)
             return PermissionReview(
                 allowed=True,
                 message=(
                     "HARNESS ANSWER: contract facts are already known. "
-                    "Do not read source for this intent.\n"
+                    "Do not call read_file for this intent.\n"
                     + _bullet_block(facts)
                     + shape_block
+                    + implementation_block
                     + "\nNext required action: call ask_harness with intent `write_regression_test`, "
                     "then create/edit only the granted test file."
                 ),
@@ -297,6 +299,64 @@ def consume_grant(name: str, grant: str | None) -> str | None:
     if name == "ask_harness":
         return grant
     return None
+
+
+def merge_grant_after_harness_answer(
+    current_grant: str | None,
+    review: PermissionReview,
+) -> str | None:
+    if review.grant is not None:
+        return review.grant
+    if review.allowed and review.event == "permission_answered":
+        return current_grant
+    return None
+
+
+def _implementation_answer_block(args: dict, context: dict) -> str:
+    question = str(args.get("question") or "")
+    if not _asks_for_target_implementation(question):
+        return ""
+
+    snippet = str(context.get("source_snippet") or "").strip()
+    if not snippet:
+        return (
+            "\nTarget implementation snippet: unavailable from deterministic context. "
+            "Continue from the contract facts and runner feedback."
+        )
+
+    imports = str(context.get("source_imports") or "").strip()
+    lines = [
+        "\nTarget implementation snippet supplied by the harness:",
+        "```ts",
+        snippet,
+        "```",
+    ]
+    if imports:
+        lines.extend([
+            "Relevant existing imports:",
+            "```ts",
+            imports,
+            "```",
+        ])
+    return "\n".join(lines)
+
+
+def _asks_for_target_implementation(question: str) -> bool:
+    lowered = question.lower()
+    implementation_terms = (
+        "implement",
+        "implementation",
+        "internally",
+        "body",
+        "source",
+        "what does",
+        "why does",
+        "how does",
+        "current code",
+        "actual code",
+        "function do",
+    )
+    return any(term in lowered for term in implementation_terms)
 
 
 def _extract_callback_contract_facts(cookbook_text: str) -> list[str]:
