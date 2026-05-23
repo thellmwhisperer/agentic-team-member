@@ -105,6 +105,7 @@ def answer_harness(args: dict, context: dict) -> PermissionReview:
         if facts:
             type_shapes = _format_type_shapes(context.get("referenced_type_shapes") or [])
             shape_block = f"\nReferenced type shapes:\n{type_shapes}" if type_shapes else ""
+            red_case = _red_case_guidance_block(context)
             implementation_block = _implementation_answer_block(args, context)
             return PermissionReview(
                 allowed=True,
@@ -113,6 +114,7 @@ def answer_harness(args: dict, context: dict) -> PermissionReview:
                     "Do not call read_file for this intent.\n"
                     + _bullet_block(facts)
                     + shape_block
+                    + red_case
                     + implementation_block
                     + "\nNext required action: call ask_harness with intent `write_regression_test`, "
                     "then create/edit only the granted test file."
@@ -161,6 +163,10 @@ def answer_harness(args: dict, context: dict) -> PermissionReview:
         if type_shapes:
             lines.append("Referenced type shapes:")
             lines.append(type_shapes)
+        red_case_notes = _red_case_guidance(context)
+        if red_case_notes:
+            lines.append("Regression red-case guidance:")
+            lines.extend(f"- {note}" for note in red_case_notes)
         skeleton = _build_regression_test_skeleton(context)
         if skeleton:
             lines.append("Suggested regression test skeleton:")
@@ -339,6 +345,39 @@ def _implementation_answer_block(args: dict, context: dict) -> str:
             "```",
         ])
     return "\n".join(lines)
+
+
+def _red_case_guidance_block(context: dict) -> str:
+    notes = _red_case_guidance(context)
+    if not notes:
+        return ""
+    return "\nRegression red-case guidance:\n" + "\n".join(f"- {note}" for note in notes)
+
+
+def _red_case_guidance(context: dict) -> list[str]:
+    facts = context.get("contract_facts") or []
+    runtime_names = _runtime_arg_names_from_contract_facts(facts)
+    fields = _referenced_type_fields(context.get("referenced_type_shapes") or [])
+    has_runtime_streak = any("streak" in name.lower() for name in runtime_names)
+    streak_fields = [field for field in fields if "streak" in field.lower()]
+    cumulative_fields = [field for field in fields if "cumulative" in field.lower()]
+    if not (has_runtime_streak and streak_fields and cumulative_fields):
+        return []
+    return [
+        "Use a contrastive callback fixture: keep the runtime streak argument at `0` and include the cumulative field with value `\"6\"`.",
+        "Do not make the third callback number `6`; that asserts the happy path and can pass before the source fix.",
+        "The red assertion should expect the user-facing output and summary tracking to use the cumulative value `6`.",
+    ]
+
+
+def _referenced_type_fields(shapes: list[dict[str, Any]]) -> list[str]:
+    fields: list[str] = []
+    for shape in shapes:
+        for field in shape.get("fields") or []:
+            name = str(field.get("name") or "")
+            if name:
+                fields.append(name)
+    return fields
 
 
 def _asks_for_target_implementation(question: str) -> bool:
@@ -822,14 +861,58 @@ def _select_fixture_fields(fields: list[dict[str, Any]], facts: list[str]) -> li
     fact_text = "\n".join(facts)
     for field in fields:
         name = str(field.get("name") or "")
-        if name and (name in fact_text or name == "message-type"):
+        if name and (
+            name in fact_text
+            or name == "message-type"
+            or _field_semantic_name_in_facts(name, fact_text)
+        ):
             selected.append(field)
+    selected = _add_contrastive_value_fields(selected, fields)
     if selected:
         return selected
     return [
         field for field in fields
         if _is_simple_fixture_field(str(field.get("type") or ""))
     ][:3]
+
+
+def _add_contrastive_value_fields(
+    selected: list[dict[str, Any]],
+    fields: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    selected_names = {str(field.get("name") or "") for field in selected}
+    selected_text = "\n".join(selected_names).lower()
+    all_names = [str(field.get("name") or "") for field in fields]
+    should_pair_streak = "streak" in selected_text and any(
+        "cumulative" in name.lower() for name in all_names
+    )
+    should_pair_cumulative = "cumulative" in selected_text and any(
+        "streak" in name.lower() for name in all_names
+    )
+    if not (should_pair_streak or should_pair_cumulative):
+        return selected
+
+    paired = list(selected)
+    for field in fields:
+        name = str(field.get("name") or "")
+        lowered = name.lower()
+        if name in selected_names:
+            continue
+        if (should_pair_streak and "cumulative" in lowered) or (
+            should_pair_cumulative and "streak" in lowered
+        ):
+            paired.append(field)
+            selected_names.add(name)
+    return paired
+
+
+def _field_semantic_name_in_facts(field_name: str, facts_text: str) -> bool:
+    lowered_name = field_name.lower()
+    lowered_facts = facts_text.lower()
+    return (
+        ("streak" in lowered_name and "streak" in lowered_facts)
+        or ("cumulative" in lowered_name and "cumulative" in lowered_facts)
+    )
 
 
 def _is_simple_fixture_field(type_text: str) -> bool:

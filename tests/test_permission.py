@@ -84,6 +84,8 @@ def test_understand_contract_answers_known_facts_without_granting_exploration():
     assert "Referenced type shapes" in review.message
     assert "SubUserstate" in review.message
     assert "msg-param-streak-months" in review.message
+    assert "Regression red-case guidance" in review.message
+    assert "Do not make the third callback number `6`" in review.message
     assert "intent `write_regression_test`" in review.message
 
 
@@ -155,6 +157,8 @@ def test_write_test_grant_allows_only_recommended_test_file():
     assert "msg-param-cumulative-months" in grant.message
     assert "__setClientForTests" in grant.message
     assert "Referenced type shapes" in grant.message
+    assert "Regression red-case guidance" in grant.message
+    assert "runtime streak argument at `0`" in grant.message
     assert "Suggested regression test skeleton" in grant.message
     assert 'import type { SubMethods, SubUserstate } from "tmi.js";' in grant.message
     assert 'type TargetHandler = ClientModule["handleResub"];' in grant.message
@@ -173,6 +177,25 @@ def test_write_test_grant_allows_only_recommended_test_file():
     assert allowed is None
     assert blocked is not None
     assert "PERMISSION DENIED" in blocked.message
+
+
+def test_callback_skeleton_adds_contrastive_cumulative_field_from_type_shape():
+    context = _context()
+    context["contract_facts"] = [
+        "line 115: `client.on('subgift', handleGift)`",
+        "tmi.js source emits `subgift(channel, username, streakMonths, msg, tags, methods)`.",
+        "tmi.js type declarations expose `subgift(channel: string, username: string, months: number, message: string, userstate: SubUserstate, methods: SubMethods)`.",
+    ]
+    context["target_symbol"] = "handleGift"
+    context["test_file"] = "src/twitch/handleGift.test.ts"
+
+    grant = permission.answer_harness({"intent": "write_regression_test"}, context)
+
+    assert grant.grant == "write_test"
+    assert 'const months: number = 0;' in grant.message
+    assert '"msg-param-streak-months": "0",' in grant.message
+    assert '"msg-param-cumulative-months": "6",' in grant.message
+    assert "Do not make the third callback number `6`" in grant.message
 
 
 def test_write_grants_allow_reading_the_same_file_for_resync():
