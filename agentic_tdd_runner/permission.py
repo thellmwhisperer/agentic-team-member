@@ -301,9 +301,19 @@ def review_tool_call(
     )
 
 
-def consume_grant(name: str, grant: str | None) -> str | None:
+def consume_grant(
+    name: str,
+    args: dict | None,
+    grant: str | None,
+    context: dict | None = None,
+) -> str | None:
     if name == "ask_harness":
         return grant
+    if grant in {"write_test", "write_source"}:
+        path = str((args or {}).get("path") or "")
+        target = (context or {}).get("test_file") if grant == "write_test" else (context or {}).get("source_file")
+        if name in {"read_file", "create_file", "str_replace_editor"} and _same_path(path, target):
+            return grant
     return None
 
 
@@ -666,6 +676,7 @@ def _build_regression_test_skeleton(context: dict) -> str:
     import_path = context.get("source_import_path") or "./client"
     spy_names = _extract_spy_names(mock_block)
     setter_names = _extract_test_seam_setters(context.get("source_seams") or [])
+    setter_setup_lines = _setter_setup_lines(context.get("source_seams") or [])
     type_imports = _extract_type_imports_from_contract_facts(facts)
     type_shapes = context.get("referenced_type_shapes") or []
     fixture_lines = _build_callback_fixture_lines(
@@ -727,6 +738,8 @@ def _build_regression_test_skeleton(context: dict) -> str:
         lines.extend(f"  {line}" if line else "" for line in fixture_lines)
     else:
         lines.append("  // Build typed callback arguments from the Callback Contract Evidence.")
+    if setter_setup_lines:
+        lines.extend(f"  {line}" if line else "" for line in setter_setup_lines)
     lines.extend([
         "  const callbackHandler: CallbackContract = targetHandler;",
         "  callbackHandler(" + ", ".join(_callback_argument_names(callback_params)) + ");",
@@ -776,6 +789,22 @@ def _extract_test_seam_setters(seams: list[str]) -> list[str]:
         for match in re.finditer(r"`(__set[A-Za-z0-9_]+)(?:\([^`]*)?`", seam):
             setters.append(match.group(1))
     return sorted(set(setters))
+
+
+def _setter_setup_lines(seams: list[str]) -> list[str]:
+    lines: list[str] = []
+    seam_text = "\n".join(seams)
+    if "__setClientForTests" in seam_text and "{ say" in seam_text:
+        lines.extend([
+            'const sayResult: [string] = [""];',
+            "const say_spy = mock((_channel: string, _message: string) => Promise.resolve(sayResult));",
+            "__setClientForTests({ say: say_spy });",
+        ])
+    if "__setMemoryManagerForTests" in seam_text and "getEmote" in seam_text:
+        lines.append('__setMemoryManagerForTests({ getEmote: () => "teseLove" });')
+    if lines:
+        lines.append("")
+    return lines
 
 
 def _extract_type_imports_from_contract_facts(facts: list[str]) -> list[tuple[str, list[str]]]:
@@ -881,13 +910,12 @@ def _add_contrastive_value_fields(
     fields: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     selected_names = {str(field.get("name") or "") for field in selected}
-    selected_text = "\n".join(selected_names).lower()
     all_names = [str(field.get("name") or "") for field in fields]
-    should_pair_streak = "streak" in selected_text and any(
-        "cumulative" in name.lower() for name in all_names
+    should_pair_streak = any(_is_streak_month_field(name) for name in selected_names) and any(
+        _is_cumulative_month_field(name) for name in all_names
     )
-    should_pair_cumulative = "cumulative" in selected_text and any(
-        "streak" in name.lower() for name in all_names
+    should_pair_cumulative = any(_is_cumulative_month_field(name) for name in selected_names) and any(
+        _is_streak_month_field(name) for name in all_names
     )
     if not (should_pair_streak or should_pair_cumulative):
         return selected
@@ -898,8 +926,8 @@ def _add_contrastive_value_fields(
         lowered = name.lower()
         if name in selected_names:
             continue
-        if (should_pair_streak and "cumulative" in lowered) or (
-            should_pair_cumulative and "streak" in lowered
+        if (should_pair_streak and _is_cumulative_month_field(lowered)) or (
+            should_pair_cumulative and _is_streak_month_field(lowered)
         ):
             paired.append(field)
             selected_names.add(name)
@@ -910,9 +938,19 @@ def _field_semantic_name_in_facts(field_name: str, facts_text: str) -> bool:
     lowered_name = field_name.lower()
     lowered_facts = facts_text.lower()
     return (
-        ("streak" in lowered_name and "streak" in lowered_facts)
-        or ("cumulative" in lowered_name and "cumulative" in lowered_facts)
+        (_is_streak_month_field(lowered_name) and "streak" in lowered_facts)
+        or (_is_cumulative_month_field(lowered_name) and "cumulative" in lowered_facts)
     )
+
+
+def _is_streak_month_field(field_name: str) -> bool:
+    lowered = field_name.lower()
+    return "streak" in lowered and "month" in lowered
+
+
+def _is_cumulative_month_field(field_name: str) -> bool:
+    lowered = field_name.lower()
+    return "cumulative" in lowered and "month" in lowered
 
 
 def _is_simple_fixture_field(type_text: str) -> bool:
@@ -942,9 +980,9 @@ def _sample_primitive_value(param_name: str, runtime_name: str, type_name: str, 
 def _sample_field_value(field_name: str, type_text: str, *, event_name: str) -> str:
     if field_name == "message-type" and event_name:
         return f'"{event_name}"'
-    if "cumulative" in field_name:
+    if _is_cumulative_month_field(field_name):
         return '"6"'
-    if "streak" in field_name:
+    if _is_streak_month_field(field_name):
         return '"0"'
     if field_name == "prime" or "boolean" in type_text:
         return "false"

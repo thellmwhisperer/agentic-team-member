@@ -316,7 +316,12 @@ def run_agent_loop(
                             tool_elapsed = time.time() - t1
                             applied = tool_applied_status(name, result)
                             state_reviewer.observe_tool_result(name, args, result, applied=applied)
-                            permission_grant = _permission.consume_grant(name, permission_grant)
+                            permission_grant = _permission.consume_grant(
+                                name,
+                                args,
+                                permission_grant,
+                                permission_context,
+                            )
                 else:
                     state_review = state_reviewer.review_tool_call(
                         name,
