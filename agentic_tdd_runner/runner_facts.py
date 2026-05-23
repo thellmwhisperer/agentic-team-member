@@ -91,7 +91,8 @@ def build_runner_facts(
         "*.test.jsx",
         "test_*.py",
     ]
-    exclude_dirs = set(runner_cfg.get("exclude_dirs") or ["node_modules"])
+    default_exclude_dirs = {"node_modules", ".git", ".next", ".turbo", "build", "coverage", "dist"}
+    exclude_dirs = default_exclude_dirs | set(runner_cfg.get("exclude_dirs") or [])
 
     test_files = _discover_test_files(root, patterns, exclude_dirs)
     nearby_tests = _nearby_tests(test_files, source_file)

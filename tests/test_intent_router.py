@@ -39,6 +39,7 @@ def test_router_answers_from_runner_facts_for_missing_bun_test_globals():
     assert decision.data["intent"] == "inspect_test_framework"
     assert "RUNNER FACT ANSWER" in decision.message
     assert 'import { beforeEach, describe, expect, mock, test } from "bun:test";' in decision.message
+    assert "if that import is already present" in decision.message
     assert "src/twitch/handleResub.test.ts" in decision.message
 
 
