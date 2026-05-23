@@ -18,7 +18,13 @@ def _config():
         "runner": {
             "command": "bun test",
             "framework": "bun:test",
-            "test_file_patterns": ["*.test.ts", "*.test.tsx", "*.test.js", "*.test.jsx"],
+            "test_file_patterns": [
+                "*.test.ts",
+                "*.test.tsx",
+                "*.test.js",
+                "*.test.jsx",
+                "tests/**/*.spec.ts",
+            ],
         },
         "environment": {"run_typecheck": True},
     }
@@ -69,3 +75,20 @@ def test_build_runner_facts_discovers_existing_nearby_and_symbol_tests(tmp_path)
     assert facts.nearby_tests == ["src/twitch/client.test.ts"]
     assert facts.symbol_tests == ["src/twitch/client.test.ts"]
     assert "nearby tests in src/twitch: src/twitch/client.test.ts" in facts.to_prompt_section()
+
+
+def test_build_runner_facts_honors_directory_aware_patterns(tmp_path):
+    _write_file(tmp_path, "package.json", json.dumps({"scripts": {"typecheck": "tsc --noEmit"}}))
+    _write_file(tmp_path, "src/twitch/client.ts", "export function handleResub() {}\n")
+    _write_file(
+        tmp_path,
+        "tests/twitch/handleResub.spec.ts",
+        """
+        import { handleResub } from "../../src/twitch/client";
+        handleResub();
+        """,
+    )
+
+    facts = build_runner_facts(str(tmp_path), _config(), episode=_episode())
+
+    assert facts.symbol_tests == ["tests/twitch/handleResub.spec.ts"]

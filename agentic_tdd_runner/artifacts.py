@@ -53,11 +53,15 @@ def export_harness_artifacts(
         _write_json(canonical / "episode.json", episode_payload, root, files)
 
     cookbook_text = _episode_text(episode, "cookbook_text")
-    if cookbook_text:
+    if cookbook_text.strip():
         _write_text(rendered / "cookbook.md", cookbook_text, root, files)
 
+    mocks_text = _episode_text(episode, "mocks_text")
+    if mocks_text.strip():
+        _write_text(rendered / "mocks.md", mocks_text, root, files)
+
     runner_facts_text = _episode_text(episode, "runner_facts_text")
-    if runner_facts_text:
+    if runner_facts_text.strip():
         _write_text(rendered / "runner_facts.md", runner_facts_text, root, files)
 
     system_prompt = _message_content(run_context, "system")
@@ -94,11 +98,13 @@ def _canonical_episode_payload(episode: Any, *, has_runner_facts: bool) -> dict:
         }
     }
     _dedupe_conditional_source_edits(payload)
-    if "cookbook_text" in episode:
+    if _episode_text(episode, "cookbook_text").strip():
         payload["cookbook_ref"] = "rendered/cookbook.md"
+    if _episode_text(episode, "mocks_text").strip():
+        payload["mocks_ref"] = "rendered/mocks.md"
     if has_runner_facts:
         payload["runner_facts_ref"] = "canonical/runner_facts.json"
-    if "runner_facts_text" in episode:
+    if _episode_text(episode, "runner_facts_text").strip():
         payload["runner_facts_text_ref"] = "rendered/runner_facts.md"
     return payload
 
@@ -169,5 +175,8 @@ def _jsonable(value: Any) -> Any:
     if isinstance(value, (list, tuple)):
         return [_jsonable(inner) for inner in value]
     if isinstance(value, set):
-        return sorted(_jsonable(inner) for inner in value)
+        return sorted(
+            (_jsonable(inner) for inner in value),
+            key=lambda inner: (type(inner).__name__, repr(inner)),
+        )
     return value

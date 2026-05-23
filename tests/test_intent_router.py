@@ -42,6 +42,26 @@ def test_router_answers_from_runner_facts_for_missing_bun_test_globals():
     assert "src/twitch/handleResub.test.ts" in decision.message
 
 
+def test_router_matches_spec_files_and_pretty_tsc_missing_bun_globals():
+    router = IntentRouter(_facts())
+    router.observe_tool_result(
+        "run_command",
+        {"command": "bun run typecheck"},
+        (
+            "[Reactive typecheck]\n"
+            "src/twitch/handleResub.spec.ts:4:1 - error TS2304: Cannot find name 'describe'.\n"
+        ),
+        applied=None,
+    )
+
+    decision = router.review_tool_call("run_command", {"command": "bun test"})
+
+    assert decision is not None
+    assert decision.data["intent"] == "inspect_test_framework"
+    assert decision.data["pending_test_file"] == "src/twitch/handleResub.spec.ts"
+    assert "describe" in decision.message
+
+
 def test_router_allows_edit_to_pending_test_file_then_clears_gate():
     router = IntentRouter(_facts())
     router.observe_tool_result(
