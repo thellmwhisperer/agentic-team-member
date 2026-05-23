@@ -142,27 +142,6 @@ def test_router_answers_bun_mock_reset_type_error_before_more_tooling():
     assert "src/twitch/handleResub.test.ts" in decision.message
 
 
-def test_router_answers_typed_tuple_mock_contract_error():
-    router = IntentRouter(_facts())
-    router.observe_tool_result(
-        "create_file",
-        {"path": "src/twitch/handleResub.test.ts"},
-        (
-            "[Reactive typecheck]\n"
-            "src/twitch/handleResub.test.ts(30,5): error TS2322: Type "
-            "'Mock<() => Promise<string[]>>' is not assignable to type "
-            "'(channel: string, message: string) => Promise<[string]>'.\n"
-        ),
-        applied=True,
-    )
-
-    decision = router.review_tool_call("read_file", {"path": "src/twitch/client.ts"})
-
-    assert decision is not None
-    assert decision.data["intent"] == "fix_typed_mock_contract"
-    assert "Promise.resolve([value] as [string])" in decision.message
-
-
 def test_router_answers_import_time_side_effect_before_more_exploration():
     router = IntentRouter(_facts())
     router.observe_tool_result(

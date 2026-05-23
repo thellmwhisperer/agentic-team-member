@@ -182,6 +182,12 @@ def execute_tool(
             )
             set_last_run_exit_code(result.returncode)
             output = result.stdout + result.stderr
+            if (
+                output.strip()
+                and result.returncode != 0
+                and _is_test_run_command(args["command"])
+            ):
+                return _compact_run_command_test_failure(output, result.returncode)
             return output if output.strip() else "(no output)"
 
         if name == "str_replace_editor":
@@ -419,6 +425,34 @@ def _compact_test_failure_lines(raw: str, *, max_lines: int = 16) -> list[str]:
     if end < len(lines):
         sample.append("... later output omitted ...")
     return sample[:max_lines]
+
+
+def _compact_run_command_test_failure(raw: str, returncode: int) -> str:
+    sample_lines = _compact_test_failure_lines(raw)
+    sample = "\n".join(sample_lines) if sample_lines else raw[:200]
+    return f"[run_command test failure: exit {returncode}]\n{sample}"
+
+
+def _is_test_run_command(command: str) -> bool:
+    try:
+        parts = shlex.split(command)
+    except ValueError:
+        parts = command.split()
+    if not parts:
+        return False
+
+    executable = Path(parts[0]).name
+    if executable in {"pytest"}:
+        return True
+    if executable.startswith("python") and "-m" in parts and "pytest" in parts:
+        return True
+    if executable == "bun" and len(parts) > 1 and parts[1] == "test":
+        return True
+    if executable in {"npm", "pnpm", "yarn"} and any(
+        "test" in part for part in parts[1:3]
+    ):
+        return True
+    return any(re.search(r"\.test\.[tj]sx?$|test_.*\.py$", part) for part in parts[1:])
 
 
 def reactive_forbidden_feedback(

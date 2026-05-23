@@ -22,12 +22,6 @@ _BUN_MOCK_RESET_RE = re.compile(
     r"(?:\(\d+,\d+\)|:\d+:\d+)?(?:\s*-\s*|:\s*)error TS\d+:\s*"
     r"Property ['\"]reset['\"] does not exist on type ['\"]?MockFunctionState",
 )
-_TYPED_TUPLE_MOCK_RE = re.compile(
-    r"(?P<file>[^\s:(]+\.test\.[tj]sx?).*?"
-    r"Mock<\(\) => Promise<string\[\]>>.*?"
-    r"Promise<\[string\]>",
-    flags=re.DOTALL,
-)
 _TEST_FILE_RE = re.compile(r"(?P<file>[^\s:]+\.test\.[tj]sx?)[:\s]")
 
 
@@ -48,7 +42,6 @@ class IntentRouter:
         self.pending_test_file: str | None = None
         self.pending_missing_globals: set[str] = set()
         self.pending_mock_api_file: str | None = None
-        self.pending_typed_mock_file: str | None = None
         self.pending_import_side_effect_file: str | None = None
 
     def review_tool_call(self, name: str, args: dict) -> RouterDecision | None:
@@ -122,34 +115,6 @@ class IntentRouter:
                     },
                 )
 
-        if self.pending_typed_mock_file:
-            if _is_edit_to_path(name, args, self.pending_typed_mock_file):
-                return None
-            if _is_framework_lookup_or_premature_run(name, args) or _is_source_or_test_lookup(name, args):
-                required_next = (
-                    f"Edit `{self.pending_typed_mock_file}` so the mock returns "
-                    "a one-element tuple typed as `[string]`, then rerun typecheck."
-                )
-                message = (
-                    "RUNNER FACT ANSWER\n"
-                    "intent: fix_typed_mock_contract\n"
-                    "reason: the mocked method contract requires a tuple `Promise<[string]>`, not `Promise<string[]>`.\n"
-                    "answer: preserve the semantic value the test needs, but return it as "
-                    "`Promise.resolve([value] as [string])` from that mock.\n"
-                    f"required_next: {required_next}"
-                )
-                return RouterDecision(
-                    event="intent_router_answered",
-                    message=message,
-                    data={
-                        "intent": "fix_typed_mock_contract",
-                        "pending_test_file": self.pending_typed_mock_file,
-                        "required_next": required_next,
-                        "tool": name,
-                        "args": args,
-                    },
-                )
-
         if not (self.runner_facts and self.pending_test_file and self.pending_missing_globals):
             return None
         if _is_edit_to_path(name, args, self.pending_test_file):
@@ -199,8 +164,6 @@ class IntentRouter:
             self.pending_missing_globals.clear()
         if applied is True and _is_edit_to_path(name, args, self.pending_mock_api_file):
             self.pending_mock_api_file = None
-        if applied is True and _is_edit_to_path(name, args, self.pending_typed_mock_file):
-            self.pending_typed_mock_file = None
         if applied is True and _is_edit_to_path(
             name, args, self.pending_import_side_effect_file
         ):
@@ -214,10 +177,6 @@ class IntentRouter:
         mock_api_file = _parse_bun_mock_reset_file(result)
         if mock_api_file:
             self.pending_mock_api_file = mock_api_file
-
-        typed_mock_file = _parse_typed_tuple_mock_file(result)
-        if typed_mock_file:
-            self.pending_typed_mock_file = typed_mock_file
 
         import_side_effect_file = _parse_import_time_side_effect_file(
             name, args, result, self.runner_facts
@@ -242,11 +201,6 @@ def _parse_missing_test_globals(result: str) -> tuple[str | None, set[str]]:
 
 def _parse_bun_mock_reset_file(result: str) -> str | None:
     match = _BUN_MOCK_RESET_RE.search(result or "")
-    return _normalize_path(match.group("file")) if match else None
-
-
-def _parse_typed_tuple_mock_file(result: str) -> str | None:
-    match = _TYPED_TUPLE_MOCK_RE.search(result or "")
     return _normalize_path(match.group("file")) if match else None
 
 
