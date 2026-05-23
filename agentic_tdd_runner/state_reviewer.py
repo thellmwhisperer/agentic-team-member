@@ -316,12 +316,15 @@ def is_target_source_lookup(name: str, args: dict, runner_facts: RunnerFacts | N
 
 
 def result_points_at_source(result: str, runner_facts: RunnerFacts | None) -> bool:
+    output = result or ""
     source_file = normalize_review_path(runner_facts.source_file if runner_facts else None)
-    if not source_file or "[Reactive" not in (result or ""):
+    if not source_file or (
+        "[Reactive" not in output and "[run_command test failure" not in output
+    ):
         return False
     source_re = re.escape(source_file)
     return bool(
-        re.search(rf"{source_re}(?::\d+(?::\d+)?|\(\d+,\d+\))", result)
+        re.search(rf"{source_re}(?::\d+(?::\d+)?|\(\d+,\d+\))", output)
     )
 
 
