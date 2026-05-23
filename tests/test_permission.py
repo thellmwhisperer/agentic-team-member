@@ -33,6 +33,7 @@ def _context():
         "source_imports": "import tmi, { type SubUserstate } from 'tmi.js';",
         "source_seams": [
             "`client` -> call `__setClientForTests({ say })` before invoking target",
+            "`memoryManager` -> call `__setMemoryManagerForTests({ getEmote })` before invoking target",
         ],
         "source_mocks": [
             "mock.module('../managers/stream-summary', () => ({",
@@ -170,6 +171,10 @@ def test_write_test_grant_allows_only_recommended_test_file():
     assert '"msg-param-streak-months": "0",' in grant.message
     assert '"msg-param-cumulative-months": "6",' in grant.message
     assert 'const methods: SubMethods = {' in grant.message
+    assert 'const sayResult: [string] = [""];' in grant.message
+    assert "const say_spy = mock((_channel: string, _message: string) => Promise.resolve(sayResult));" in grant.message
+    assert "__setClientForTests({ say: say_spy });" in grant.message
+    assert '__setMemoryManagerForTests({ getEmote: () => "teseLove" });' in grant.message
     assert 'callbackHandler(channel, username, months, message, userstate, methods);' in grant.message
     assert "const streamSummaryManager_trackResub_spy" in grant.message
     assert "for (const spy of [streamSummaryManager_trackResub_spy]) spy.mockClear();" in grant.message
@@ -186,6 +191,10 @@ def test_callback_skeleton_adds_contrastive_cumulative_field_from_type_shape():
         "tmi.js source emits `subgift(channel, username, streakMonths, msg, tags, methods)`.",
         "tmi.js type declarations expose `subgift(channel: string, username: string, months: number, message: string, userstate: SubUserstate, methods: SubMethods)`.",
     ]
+    context["referenced_type_shapes"][0]["fields"].insert(
+        2,
+        {"name": "msg-param-should-share-streak", "optional": True, "type": "boolean | undefined"},
+    )
     context["target_symbol"] = "handleGift"
     context["test_file"] = "src/twitch/handleGift.test.ts"
 
@@ -195,6 +204,7 @@ def test_callback_skeleton_adds_contrastive_cumulative_field_from_type_shape():
     assert 'const months: number = 0;' in grant.message
     assert '"msg-param-streak-months": "0",' in grant.message
     assert '"msg-param-cumulative-months": "6",' in grant.message
+    assert '"msg-param-should-share-streak"' not in grant.message
     assert "Do not make the third callback number `6`" in grant.message
 
 
@@ -225,6 +235,27 @@ def test_write_grants_allow_reading_the_same_file_for_resync():
     assert source_read is None
     assert unrelated_read is not None
     assert "PERMISSION DENIED" in unrelated_read.message
+
+
+def test_write_grants_survive_same_file_reads_and_edits():
+    assert permission.consume_grant(
+        "read_file",
+        {"path": "src/twitch/handleResub.test.ts"},
+        "write_test",
+        _context(),
+    ) == "write_test"
+    assert permission.consume_grant(
+        "str_replace_editor",
+        {"path": "src/twitch/client.ts"},
+        "write_source",
+        _context(),
+    ) == "write_source"
+    assert permission.consume_grant(
+        "run_command",
+        {"command": "bun test"},
+        "run_test",
+        _context(),
+    ) is None
 
 
 def test_write_test_skeleton_is_not_coupled_to_one_handler_name():
