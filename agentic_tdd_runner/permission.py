@@ -374,9 +374,8 @@ def _red_case_guidance(context: dict) -> list[str]:
     if not (has_runtime_streak and streak_fields and cumulative_fields):
         return []
     return [
-        "Use a contrastive callback fixture: keep the runtime streak argument at `0` and include the cumulative field with value `\"6\"`.",
-        "Do not make the third callback number `6`; that asserts the happy path and can pass before the source fix.",
-        "The red assertion should expect the user-facing output and summary tracking to use the cumulative value `6`.",
+        "The callback contract exposes multiple month-like values. Choose issue-specific distinct values in the regression test so red/green proves which value the source behavior uses.",
+        "Do not reuse the same value across semantically related callback arguments and metadata fields; identical values can make the test pass for the wrong reason.",
     ]
 
 
@@ -896,42 +895,12 @@ def _select_fixture_fields(fields: list[dict[str, Any]], facts: list[str]) -> li
             or _field_semantic_name_in_facts(name, fact_text)
         ):
             selected.append(field)
-    selected = _add_contrastive_value_fields(selected, fields)
     if selected:
         return selected
     return [
         field for field in fields
         if _is_simple_fixture_field(str(field.get("type") or ""))
     ][:3]
-
-
-def _add_contrastive_value_fields(
-    selected: list[dict[str, Any]],
-    fields: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    selected_names = {str(field.get("name") or "") for field in selected}
-    all_names = [str(field.get("name") or "") for field in fields]
-    should_pair_streak = any(_is_streak_month_field(name) for name in selected_names) and any(
-        _is_cumulative_month_field(name) for name in all_names
-    )
-    should_pair_cumulative = any(_is_cumulative_month_field(name) for name in selected_names) and any(
-        _is_streak_month_field(name) for name in all_names
-    )
-    if not (should_pair_streak or should_pair_cumulative):
-        return selected
-
-    paired = list(selected)
-    for field in fields:
-        name = str(field.get("name") or "")
-        lowered = name.lower()
-        if name in selected_names:
-            continue
-        if (should_pair_streak and _is_cumulative_month_field(lowered)) or (
-            should_pair_cumulative and _is_streak_month_field(lowered)
-        ):
-            paired.append(field)
-            selected_names.add(name)
-    return paired
 
 
 def _field_semantic_name_in_facts(field_name: str, facts_text: str) -> bool:
@@ -959,7 +928,6 @@ def _is_simple_fixture_field(type_text: str) -> bool:
 
 def _sample_primitive_value(param_name: str, runtime_name: str, type_name: str, facts: list[str]) -> str:
     name = f"{param_name} {runtime_name}".lower()
-    facts_text = "\n".join(facts)
     if type_name == "string":
         if "channel" in name:
             return '"#channel"'
@@ -969,8 +937,6 @@ def _sample_primitive_value(param_name: str, runtime_name: str, type_name: str, 
             return '""'
         return '""'
     if type_name == "number":
-        if "streak" in name or "msg-param-cumulative-months" in facts_text:
-            return "0"
         return "1"
     if type_name == "boolean":
         return "false"
@@ -980,16 +946,14 @@ def _sample_primitive_value(param_name: str, runtime_name: str, type_name: str, 
 def _sample_field_value(field_name: str, type_text: str, *, event_name: str) -> str:
     if field_name == "message-type" and event_name:
         return f'"{event_name}"'
-    if _is_cumulative_month_field(field_name):
-        return '"6"'
-    if _is_streak_month_field(field_name):
-        return '"0"'
-    if field_name == "prime" or "boolean" in type_text:
-        return "false"
     if field_name == "planName":
         return '"Tier 1"'
     if field_name == "plan" or type_text.endswith("Plan"):
         return '"1000"'
+    if "string" in type_text:
+        return '""'
+    if field_name == "prime" or "boolean" in type_text:
+        return "false"
     if "number" in type_text:
         return "1"
     return '""'
