@@ -3,6 +3,13 @@
 from agentic_tdd_runner import permission
 
 
+def _suggested_skeleton(message: str) -> str:
+    marker = "Suggested regression test skeleton:\n```ts\n"
+    if marker not in message:
+        return ""
+    return message.split(marker, 1)[1].split("\n```", 1)[0]
+
+
 def _context():
     return {
         "phase": "test",
@@ -86,7 +93,8 @@ def test_understand_contract_answers_known_facts_without_granting_exploration():
     assert "SubUserstate" in review.message
     assert "msg-param-streak-months" in review.message
     assert "Regression red-case guidance" in review.message
-    assert "Do not make the third callback number `6`" in review.message
+    assert "Choose issue-specific distinct values" in review.message
+    assert "third callback number `6`" not in review.message
     assert "intent `write_regression_test`" in review.message
 
 
@@ -159,7 +167,8 @@ def test_write_test_grant_allows_only_recommended_test_file():
     assert "__setClientForTests" in grant.message
     assert "Referenced type shapes" in grant.message
     assert "Regression red-case guidance" in grant.message
-    assert "runtime streak argument at `0`" in grant.message
+    assert "Choose issue-specific distinct values" in grant.message
+    assert "runtime streak argument at `0`" not in grant.message
     assert "Suggested regression test skeleton" in grant.message
     assert 'import type { SubMethods, SubUserstate } from "tmi.js";' in grant.message
     assert 'type TargetHandler = ClientModule["handleResub"];' in grant.message
@@ -168,8 +177,11 @@ def test_write_test_grant_allows_only_recommended_test_file():
     assert "targetHandler = clientModule.handleResub;" in grant.message
     assert 'let __setClientForTests: ClientModule["__setClientForTests"];' in grant.message
     assert 'const userstate: SubUserstate = {' in grant.message
-    assert '"msg-param-streak-months": "0",' in grant.message
-    assert '"msg-param-cumulative-months": "6",' in grant.message
+    skeleton = _suggested_skeleton(grant.message)
+    assert '"msg-param-streak-months": "",' in skeleton
+    assert '"msg-param-cumulative-months": "",' in skeleton
+    assert '"msg-param-streak-months": "0",' not in skeleton
+    assert '"msg-param-cumulative-months": "6",' not in skeleton
     assert 'const methods: SubMethods = {' in grant.message
     assert 'const sayResult: [string] = [""];' in grant.message
     assert "const say_spy = mock((_channel: string, _message: string) => Promise.resolve(sayResult));" in grant.message
@@ -184,7 +196,7 @@ def test_write_test_grant_allows_only_recommended_test_file():
     assert "PERMISSION DENIED" in blocked.message
 
 
-def test_callback_skeleton_adds_contrastive_cumulative_field_from_type_shape():
+def test_callback_skeleton_does_not_invent_contrastive_values_from_type_shape():
     context = _context()
     context["contract_facts"] = [
         "line 115: `client.on('subgift', handleGift)`",
@@ -200,12 +212,16 @@ def test_callback_skeleton_adds_contrastive_cumulative_field_from_type_shape():
 
     grant = permission.answer_harness({"intent": "write_regression_test"}, context)
 
+    skeleton = _suggested_skeleton(grant.message)
+
     assert grant.grant == "write_test"
-    assert 'const months: number = 0;' in grant.message
-    assert '"msg-param-streak-months": "0",' in grant.message
-    assert '"msg-param-cumulative-months": "6",' in grant.message
-    assert '"msg-param-should-share-streak"' not in grant.message
-    assert "Do not make the third callback number `6`" in grant.message
+    assert 'const months: number = 1;' in skeleton
+    assert '"msg-param-streak-months": "",' in skeleton
+    assert '"msg-param-streak-months": "0",' not in skeleton
+    assert '"msg-param-cumulative-months": "6",' not in skeleton
+    assert '"msg-param-cumulative-months":' not in skeleton
+    assert '"msg-param-should-share-streak"' not in skeleton
+    assert "third callback number `6`" not in grant.message
 
 
 def test_write_grants_allow_reading_the_same_file_for_resync():
