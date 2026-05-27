@@ -199,6 +199,27 @@ The bot should report cumulative subscription months.
     assert contract.to_log_dict()["reporter_hypotheses"] == contract.reporter_hypotheses
 
 
+def test_rejected_contract_still_preserves_reporter_hypotheses():
+    issue = """Bug: handleResub reports 0 months
+
+## Root cause
+The handler appears to read the wrong month value.
+
+## Expected behavior
+Use `userstate: any` and report 6 months.
+"""
+
+    contract = parse_issue_contract(issue)
+
+    assert contract.rejected is True
+    assert contract.model_text == ""
+    assert "model-facing issue section 'Expected behavior'" in contract.rejection_reason
+    assert contract.reporter_hypotheses == [
+        "The handler appears to read the wrong month value."
+    ]
+    assert contract.to_log_dict()["reporter_hypotheses"] == contract.reporter_hypotheses
+
+
 def test_suspected_root_cause_is_not_checked_as_model_facing_guidance():
     issue = """Bug: fails
 

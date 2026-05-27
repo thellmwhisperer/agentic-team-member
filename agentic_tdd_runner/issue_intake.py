@@ -70,17 +70,21 @@ class IssueContract:
 def parse_issue_contract(issue_text: str) -> IssueContract:
     """Extract target hints and sanitize issue text before it reaches the model."""
     sections = _split_sections(issue_text)
+    source_hint, symbol_hint = _extract_target_hint(issue_text)
+    model_text, warnings, reporter_hypotheses = _build_model_text(sections, fallback=issue_text)
     rejected_reason = _forbidden_guidance_reason(sections)
     if rejected_reason:
         return IssueContract(
             raw_text=issue_text,
             model_text="",
+            source_hint=source_hint,
+            symbol_hint=symbol_hint,
             rejected=True,
             rejection_reason=rejected_reason,
+            warnings=warnings,
+            reporter_hypotheses=reporter_hypotheses,
         )
 
-    source_hint, symbol_hint = _extract_target_hint(issue_text)
-    model_text, warnings, reporter_hypotheses = _build_model_text(sections, fallback=issue_text)
     if not model_text.strip():
         return IssueContract(
             raw_text=issue_text,
