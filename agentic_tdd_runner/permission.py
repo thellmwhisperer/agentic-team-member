@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import posixpath
+import shlex
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -264,7 +265,7 @@ def review_tool_call(
             ),
         )
     if grant == "read_contract":
-        if name in {"read_file", "rg", "run_command"}:
+        if name in {"read_file", "rg"}:
             return None
     elif grant == "write_test":
         path = str(args.get("path") or "")
@@ -942,8 +943,29 @@ def _normalize_permission_path(path: str) -> str:
 
 
 def _looks_like_focused_test_command(command: str, *, context: dict) -> bool:
+    command = command.strip()
     test_file = str(context.get("test_file") or "")
     test_command = str(context.get("test_command") or "")
-    if test_file and test_file in command:
+    if not command or not test_command or _contains_shell_control(command):
+        return False
+
+    try:
+        command_parts = shlex.split(command)
+        test_command_parts = shlex.split(test_command)
+    except ValueError:
+        return False
+
+    if not command_parts or not test_command_parts:
+        return False
+    if command_parts == test_command_parts:
         return True
-    return bool(test_command and command.strip() == test_command)
+    return (
+        bool(test_file)
+        and len(command_parts) == len(test_command_parts) + 1
+        and command_parts[:len(test_command_parts)] == test_command_parts
+        and _same_path(command_parts[-1], test_file)
+    )
+
+
+def _contains_shell_control(command: str) -> bool:
+    return bool(re.search(r"[;&|<>`]|[$]\(|\r|\n", command))
