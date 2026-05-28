@@ -281,6 +281,153 @@ def test_permission_mode_preserves_write_grant_across_informational_harness_answ
     ]
 
 
+def test_permission_mode_accepts_target_challenge_and_reroutes_episode(tmp_path):
+    wrong_source = tmp_path / "src" / "personality" / "sanitizer.ts"
+    right_source = tmp_path / "src" / "twitch" / "client.ts"
+    wrong_source.parent.mkdir(parents=True)
+    right_source.parent.mkdir(parents=True)
+    wrong_source.write_text(
+        "\n".join([
+            "export function wrapUserMessage(input: string): string {",
+            "  return input.trim();",
+            "}",
+        ])
+    )
+    right_source.write_text(
+        "\n".join([
+            "export function handleMention(message: string): boolean {",
+            "  return message.includes('@manolitozurrapa');",
+            "}",
+        ])
+    )
+    config = {
+        "agent": {
+            "max_steps": 3,
+            "non_apply_step_warning_threshold": 0,
+            "permission_driven": True,
+        },
+        "verification": {"max_rejections": 1},
+        "runner": {
+            "framework": "bun:test",
+            "command": "bun test",
+            "test_file_patterns": ["*.test.ts"],
+            "exclude_dirs": [],
+        },
+    }
+    episode = {
+        "source_file": "src/personality/sanitizer.ts",
+        "test_file": "src/personality/wrapUserMessage.test.ts",
+        "target_symbol": "wrapUserMessage",
+        "cookbook_text": "",
+    }
+    calls = []
+    executed = []
+    logged = []
+
+    def chat(messages):
+        calls.append(None)
+        if len(calls) == 1:
+            return {
+                "choices": [{
+                    "message": {
+                        "content": "",
+                        "tool_calls": [{
+                            "id": "call_1",
+                            "function": {
+                                "name": "ask_harness",
+                                "arguments": (
+                                    '{"intent": "challenge_target", '
+                                    '"source_file": "src/twitch/client.ts", '
+                                    '"target_symbol": "handleMention", '
+                                    '"evidence": "rg found mention dispatch in client.ts; sanitizer only trims text"}'
+                                ),
+                            },
+                        }],
+                    },
+                    "finish_reason": "tool_calls",
+                }],
+                "usage": {},
+                "timings": {},
+            }
+        if len(calls) == 2:
+            assert "TARGET CHALLENGE ACCEPTED" in messages[-1]["content"]
+            assert "src/twitch/client.ts::handleMention" in messages[-1]["content"]
+            return {
+                "choices": [{
+                    "message": {
+                        "content": "",
+                        "tool_calls": [{
+                            "id": "call_2",
+                            "function": {
+                                "name": "ask_harness",
+                                "arguments": '{"intent": "write_regression_test"}',
+                            },
+                        }],
+                    },
+                    "finish_reason": "tool_calls",
+                }],
+                "usage": {},
+                "timings": {},
+            }
+        assert "src/twitch/handleMention.test.ts" in messages[-1]["content"]
+        assert "src/personality/wrapUserMessage.test.ts" not in messages[-1]["content"]
+        return {
+            "choices": [{
+                "message": {
+                    "content": "",
+                    "tool_calls": [{
+                        "id": "call_3",
+                        "function": {
+                            "name": "create_file",
+                            "arguments": (
+                                '{"path": "src/twitch/handleMention.test.ts", '
+                                '"content": "test"}'
+                            ),
+                        },
+                    }],
+                },
+                "finish_reason": "tool_calls",
+            }],
+            "usage": {},
+            "timings": {},
+        }
+
+    runtime.run_agent_loop(
+        messages=[],
+        episode=episode,
+        issue_text="@manolitozurrapa solo funciona al principio del mensaje",
+        config=config,
+        workdir=str(tmp_path),
+        log_path=str(tmp_path / "log.jsonl"),
+        emit=lambda _msg: None,
+        log=lambda event, data: logged.append((event, data)),
+        chat=chat,
+        execute_tool=lambda name, args: executed.append((name, args)) or "OK: created",
+        truncate=lambda value: value,
+        is_llm_timeout_error=lambda _exc: False,
+        tool_applied_status=lambda name, _result: name == "create_file",
+        tool_loop_signature=lambda _name, _args: None,
+        tool_loop_warning_message=lambda signature: f"loop {signature}",
+        non_apply_step_warning_message=lambda count: f"non-apply {count}",
+        is_test_pass=lambda _name, _args: False,
+        is_test_file_path=lambda path: path.endswith(".test.ts"),
+        find_test_file=lambda _content: None,
+        verify_red_green=lambda *_args, **_kwargs: (False, "unused"),
+        run_quality_checks=lambda _test_file: (True, "unused"),
+        create_pr=lambda *_args, **_kwargs: None,
+    )
+
+    assert executed == [
+        ("create_file", {"path": "src/twitch/handleMention.test.ts", "content": "test"})
+    ]
+    assert any(
+        event == "target_challenge_accepted"
+        and data["from"] == "src/personality/sanitizer.ts::wrapUserMessage"
+        and data["to"] == "src/twitch/client.ts::handleMention"
+        for event, data in logged
+    )
+
+
 def test_state_reviewer_blocks_tool_execution_and_returns_scoped_feedback(tmp_path):
     config = {
         "agent": {"max_steps": 2, "non_apply_step_warning_threshold": 0},

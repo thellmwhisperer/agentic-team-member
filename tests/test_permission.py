@@ -129,6 +129,62 @@ def test_informational_harness_answer_preserves_existing_grant():
     assert current == "write_test"
 
 
+def test_target_challenge_accepts_code_derived_alternate_target(tmp_path):
+    source = tmp_path / "src" / "twitch" / "client.ts"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "\n".join([
+            "export function handleMention(message: string): boolean {",
+            "  return message.includes('@manolitozurrapa');",
+            "}",
+        ])
+    )
+
+    review = permission.review_target_challenge(
+        {
+            "source_file": "src/twitch/client.ts",
+            "target_symbol": "handleMention",
+            "evidence": "rg found mention dispatch here and the old sanitizer target only trims text",
+        },
+        _context(),
+        workdir=str(tmp_path),
+    )
+
+    assert review.allowed is True
+    assert review.event == "target_challenge_accepted"
+    assert "src/twitch/client.ts::handleMention" in review.message
+
+
+def test_target_challenge_rejects_unreadable_or_missing_symbol(tmp_path):
+    source = tmp_path / "src" / "twitch" / "client.ts"
+    source.parent.mkdir(parents=True)
+    source.write_text("export const notTheHandler = true;\n")
+
+    outside = permission.review_target_challenge(
+        {
+            "source_file": "../client.ts",
+            "target_symbol": "handleMention",
+            "evidence": "try to leave repo",
+        },
+        _context(),
+        workdir=str(tmp_path),
+    )
+    missing = permission.review_target_challenge(
+        {
+            "source_file": "src/twitch/client.ts",
+            "target_symbol": "handleMention",
+            "evidence": "symbol does not exist",
+        },
+        _context(),
+        workdir=str(tmp_path),
+    )
+
+    assert outside.allowed is False
+    assert "relative repo path" in outside.message
+    assert missing.allowed is False
+    assert "not found as a definition" in missing.message
+
+
 def test_blocks_tools_until_model_declares_intent():
     review = permission.review_tool_call(
         "read_file",
