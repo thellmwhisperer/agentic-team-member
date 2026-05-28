@@ -82,34 +82,24 @@ def _build_rerouted_episode(
     previous_source = (current_episode or {}).get("source_file")
     previous_symbol = (current_episode or {}).get("target_symbol")
 
-    try:
-        from agentic_tdd_runner.bootstrap import build_episode_for_target
+    from agentic_tdd_runner.bootstrap import build_episode_for_target
 
-        new_episode = build_episode_for_target(
-            source_file,
-            target_symbol,
-            workdir=workdir,
-            apply_mechanical_edits=apply_mechanical_edits or (lambda _edits, _workdir: 0),
-            emit=emit,
-            log=log,
-            apply_pre_test_edits=apply_mechanical_edits is not None,
-        )
-        if new_episode and config.get("runner"):
-            from agentic_tdd_runner.runner_facts import build_runner_facts
+    new_episode = build_episode_for_target(
+        source_file,
+        target_symbol,
+        workdir=workdir,
+        apply_mechanical_edits=lambda _edits, _workdir: 0,
+        emit=emit,
+        log=log,
+        apply_pre_test_edits=False,
+    )
+    if new_episode and config.get("runner"):
+        from agentic_tdd_runner.runner_facts import build_runner_facts
 
-            runner_facts = build_runner_facts(workdir, config, episode=new_episode)
-            new_episode["runner_facts"] = runner_facts
-            new_episode["runner_facts_text"] = runner_facts.to_prompt_section()
-            log("runner_facts", runner_facts.to_log_dict())
-    except Exception as exc:
-        return (
-            _permission.PermissionReview(
-                allowed=False,
-                message=f"TARGET CHALLENGE DENIED: could not build rerouted episode: {exc}",
-                event="target_challenge_denied",
-            ),
-            current_episode,
-        )
+        runner_facts = build_runner_facts(workdir, config, episode=new_episode)
+        new_episode["runner_facts"] = runner_facts
+        new_episode["runner_facts_text"] = runner_facts.to_prompt_section()
+        log("runner_facts", runner_facts.to_log_dict())
 
     if not new_episode:
         return (
@@ -120,6 +110,12 @@ def _build_rerouted_episode(
             ),
             current_episode,
         )
+
+    edits = new_episode.get("pre_test_source_edits", [])
+    if edits and apply_mechanical_edits:
+        n = apply_mechanical_edits(edits, workdir)
+        emit(f"[PREP] Applied {n}/{len(edits)} mechanical source edits after target reroute")
+        log("mechanical_edits", {"applied": n, "total": len(edits), "source": "target_reroute"})
 
     previous = f"{previous_source}::{previous_symbol}"
     current = f"{new_episode['source_file']}::{new_episode['target_symbol']}"
@@ -331,6 +327,7 @@ def run_agent_loop(
             # append it AFTER the loop, so siblings stay contiguous instead of
             # producing assistant→tool→user→tool (an invalid transcript).
             post_tool_warnings = []
+            created_test_this_step = False
             for tc in msg["tool_calls"]:
                 fn = tc["function"]
                 name = fn["name"]
@@ -353,6 +350,10 @@ def run_agent_loop(
                     and name == "ask_harness"
                     and str(args.get("intent") or "") == "challenge_target"
                 ):
+                    challenge_from = (
+                        f"{permission_context.get('source_file')}::"
+                        f"{permission_context.get('target_symbol')}"
+                    )
                     permission_review, maybe_episode = _build_rerouted_episode(
                         args,
                         current_episode=episode,
@@ -374,6 +375,25 @@ def run_agent_loop(
                             contract_evidence_available=block_dependency_contract_lookup,
                             runner_facts=(episode or {}).get("runner_facts"),
                         )
+                        phase = thinking_phase(
+                            step=step,
+                            test_file_created=test_file_created,
+                            completion_state=completion_state,
+                        )
+                        permission_context = _permission.build_permission_context(
+                            episode=episode,
+                            config=config,
+                            phase=phase,
+                            test_file_created=test_file_created,
+                            workdir=workdir,
+                        )
+                        config["_runtime"].update({
+                            "thinking_phase": phase,
+                            "block_dependency_contract_lookup": block_dependency_contract_lookup,
+                            "allow_dependency_contract_lookup": allow_dependency_contract_lookup,
+                            "permission_grant": permission_grant,
+                            "permission_context": permission_context,
+                        })
                     result = permission_review.message
                     tool_elapsed = 0.0
                     applied = True if permission_review.allowed else None
@@ -381,10 +401,7 @@ def run_agent_loop(
                         "step": step,
                         "intent": args.get("intent"),
                         "allowed": permission_review.allowed,
-                        "from": (
-                            f"{permission_context.get('source_file')}::"
-                            f"{permission_context.get('target_symbol')}"
-                        ),
+                        "from": challenge_from,
                         "to": f"{args.get('source_file')}::{args.get('target_symbol')}",
                     })
                 elif permission_mode and name == "ask_harness":
@@ -463,6 +480,8 @@ def run_agent_loop(
                         tool_elapsed = time.time() - t1
                         applied = tool_applied_status(name, result)
                         state_reviewer.observe_tool_result(name, args, result, applied=applied)
+                if applied is True and name == "create_file" and is_test_file_path(str(args.get("path", ""))):
+                    created_test_this_step = True
                 result_truncated = truncate(result)
                 loop_signature = tool_loop_signature(name, args)
 
@@ -550,19 +569,7 @@ def run_agent_loop(
 
             # --- PHASE NUDGE: test file created → nudge to run + fix ---
             if episode:
-                created_test = False
-                for tc in msg.get("tool_calls", []):
-                    try:
-                        fn = tc["function"]
-                        if fn["name"] != "create_file":
-                            continue
-                        tc_args = json.loads(fn["arguments"])
-                    except (json.JSONDecodeError, KeyError, TypeError):
-                        continue
-                    if is_test_file_path(str(tc_args.get("path", ""))):
-                        created_test = True
-                        break
-                if created_test:
+                if created_test_this_step:
                     test_file_created = True
                     nudge = (
                         f"Good. Now run the test to confirm it fails, then fix "
