@@ -193,7 +193,7 @@ def test_write_test_grant_allows_only_recommended_test_file():
     assert "PERMISSION DENIED" in blocked.message
 
 
-def test_callback_skeleton_does_not_invent_contrastive_values_from_type_shape():
+def test_callback_skeleton_does_not_select_fields_by_semantic_aliases():
     context = _context()
     context["contract_facts"] = [
         "line 115: `client.on('subgift', handleGift)`",
@@ -213,7 +213,7 @@ def test_callback_skeleton_does_not_invent_contrastive_values_from_type_shape():
 
     assert grant.grant == "write_test"
     assert 'const months: number = 1;' in skeleton
-    assert '"msg-param-streak-months": "",' in skeleton
+    assert '"msg-param-streak-months":' not in skeleton
     assert '"msg-param-streak-months": "0",' not in skeleton
     assert '"msg-param-cumulative-months": "6",' not in skeleton
     assert '"msg-param-cumulative-months":' not in skeleton

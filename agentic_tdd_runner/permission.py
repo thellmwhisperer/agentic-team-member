@@ -854,7 +854,6 @@ def _select_fixture_fields(fields: list[dict[str, Any]], facts: list[str]) -> li
         if name and (
             name in fact_text
             or name == "message-type"
-            or _field_semantic_name_in_facts(name, fact_text)
         ):
             selected.append(field)
     if selected:
@@ -863,25 +862,6 @@ def _select_fixture_fields(fields: list[dict[str, Any]], facts: list[str]) -> li
         field for field in fields
         if _is_simple_fixture_field(str(field.get("type") or ""))
     ][:3]
-
-
-def _field_semantic_name_in_facts(field_name: str, facts_text: str) -> bool:
-    lowered_name = field_name.lower()
-    lowered_facts = facts_text.lower()
-    return (
-        (_is_streak_month_field(lowered_name) and "streak" in lowered_facts)
-        or (_is_cumulative_month_field(lowered_name) and "cumulative" in lowered_facts)
-    )
-
-
-def _is_streak_month_field(field_name: str) -> bool:
-    lowered = field_name.lower()
-    return "streak" in lowered and "month" in lowered
-
-
-def _is_cumulative_month_field(field_name: str) -> bool:
-    lowered = field_name.lower()
-    return "cumulative" in lowered and "month" in lowered
 
 
 def _is_simple_fixture_field(type_text: str) -> bool:
