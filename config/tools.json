@@ -37,6 +37,14 @@
             "type": "string",
             "description": "For challenge_target only: concise code-derived evidence for rerouting"
           }
+        },
+        "if": {
+          "properties": {
+            "intent": { "const": "challenge_target" }
+          }
+        },
+        "then": {
+          "required": ["source_file", "target_symbol", "evidence"]
         }
       }
     }

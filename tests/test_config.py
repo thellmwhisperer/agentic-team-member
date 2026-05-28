@@ -73,6 +73,22 @@ class TestProductionConfig:
         assert any(marker in description for marker in ("do not", "never", "don't"))
         assert "relative" in description or "directly" in description
 
+    def test_ask_harness_schema_requires_target_challenge_fields_conditionally(self):
+        prod = CONFIG_DIR / "agent.toml"
+        cfg = load_config(prod)
+        ask_harness = next(
+            tool["function"]
+            for tool in cfg["tools"]
+            if tool["function"]["name"] == "ask_harness"
+        )
+        parameters = ask_harness["parameters"]
+        assert parameters["if"]["properties"]["intent"]["const"] == "challenge_target"
+        assert parameters["then"]["required"] == [
+            "source_file",
+            "target_symbol",
+            "evidence",
+        ]
+
     def test_system_prompt_tells_agent_to_reuse_fixtures_and_write_narrow_regression(self):
         """Observed on the Python run (agent-20260419-000440.jsonl): after
         opening an existing test module, the agent expanded into a broad
