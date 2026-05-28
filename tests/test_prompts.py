@@ -95,3 +95,13 @@ def test_build_phase1_message_includes_ranked_candidates_when_available():
 
 def test_build_system_prompt_without_episode_strips_base_prompt():
     assert build_system_prompt("  system prompt\n") == "system prompt"
+
+
+def test_build_system_prompt_injects_permission_instructions_only_when_enabled():
+    disabled = build_system_prompt("system prompt", permission_driven=False)
+    enabled = build_system_prompt("system prompt", permission_driven=True)
+
+    assert "Permission-Driven Mode" not in disabled
+    assert "ask_harness" not in disabled
+    assert "Permission-Driven Mode" in enabled
+    assert "ask_harness" in enabled

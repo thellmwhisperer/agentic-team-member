@@ -150,10 +150,12 @@ def prepare_run_context(
         episode["runner_facts_text"] = runner_facts.to_prompt_section()
         log("runner_facts", runner_facts.to_log_dict())
 
+    permission_driven = bool((config.get("agent", {}) or {}).get("permission_driven", False))
     messages = prompts.build_initial_messages(
         base_system_prompt=config["prompt"]["system"],
         issue_text_for_model=issue_text_for_model,
         episode=episode,
+        permission_driven=permission_driven,
     )
     return RunBootstrapContext(
         issue_text=issue_text,

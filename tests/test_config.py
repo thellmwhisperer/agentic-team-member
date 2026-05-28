@@ -22,6 +22,18 @@ class TestProductionConfig:
         assert "system" in cfg["prompt"]
         assert "Never move the direct call to the function under test" in cfg["prompt"]["system"]
 
+    def test_production_agent_permission_driven_disabled_by_default(self):
+        prod = CONFIG_DIR / "agent.toml"
+        cfg = load_config(prod)
+        assert cfg["agent"]["permission_driven"] is False
+
+    def test_production_prompt_does_not_enable_permission_mode_by_default(self):
+        prod = CONFIG_DIR / "agent.toml"
+        cfg = load_config(prod)
+        system = cfg["prompt"]["system"]
+        assert "ask_harness" not in system
+        assert "Permission-driven mode is active" not in system
+
     def test_system_prompt_tells_agent_to_use_issue_location_hints(self):
         """Bug reports often name the file/function/lines. Without an explicit
         nudge, models default to broad keyword search and waste exploration
