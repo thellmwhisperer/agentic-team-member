@@ -92,8 +92,8 @@ def test_understand_contract_answers_known_facts_without_granting_exploration():
     assert "Referenced type shapes" in review.message
     assert "SubUserstate" in review.message
     assert "msg-param-streak-months" in review.message
-    assert "Regression red-case guidance" in review.message
-    assert "Choose issue-specific distinct values" in review.message
+    assert "Regression red-case guidance" not in review.message
+    assert "Choose issue-specific distinct values" not in review.message
     assert "third callback number `6`" not in review.message
     assert "intent `write_regression_test`" in review.message
 
@@ -163,8 +163,8 @@ def test_write_test_grant_allows_only_recommended_test_file():
     assert "msg-param-cumulative-months" in grant.message
     assert "__setClientForTests" in grant.message
     assert "Referenced type shapes" in grant.message
-    assert "Regression red-case guidance" in grant.message
-    assert "Choose issue-specific distinct values" in grant.message
+    assert "Regression red-case guidance" not in grant.message
+    assert "Choose issue-specific distinct values" not in grant.message
     assert "runtime streak argument at `0`" not in grant.message
     assert "Suggested regression test skeleton" in grant.message
     assert 'import type { SubMethods, SubUserstate } from "tmi.js";' in grant.message
