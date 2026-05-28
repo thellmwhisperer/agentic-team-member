@@ -650,6 +650,7 @@ def main():
         run_quality_checks=run_quality_checks,
         create_pr=create_pr,
         clear_file_read_cache=_file_read_cache.clear,
+        apply_mechanical_edits=apply_mechanical_edits,
     )
 
 

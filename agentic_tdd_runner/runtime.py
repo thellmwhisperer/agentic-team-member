@@ -57,6 +57,89 @@ def thinking_phase(
     return "test"
 
 
+def _build_rerouted_episode(
+    args: dict,
+    *,
+    current_episode: dict | None,
+    permission_context: dict,
+    config: dict,
+    workdir: str,
+    apply_mechanical_edits: Callable[[list[dict], str], int] | None,
+    emit: Callable[[str], None],
+    log: Callable[[str, dict], None],
+) -> tuple[_permission.PermissionReview, dict | None]:
+    """Validate a target challenge and rebuild the active episode when accepted."""
+    review = _permission.review_target_challenge(
+        args,
+        permission_context,
+        workdir=workdir,
+    )
+    if not review.allowed:
+        return review, current_episode
+
+    source_file = str(args.get("source_file") or "").strip()
+    target_symbol = str(args.get("target_symbol") or "").strip()
+    previous_source = (current_episode or {}).get("source_file")
+    previous_symbol = (current_episode or {}).get("target_symbol")
+
+    try:
+        from agentic_tdd_runner.bootstrap import build_episode_for_target
+
+        new_episode = build_episode_for_target(
+            source_file,
+            target_symbol,
+            workdir=workdir,
+            apply_mechanical_edits=apply_mechanical_edits or (lambda _edits, _workdir: 0),
+            emit=emit,
+            log=log,
+            apply_pre_test_edits=apply_mechanical_edits is not None,
+        )
+        if new_episode and config.get("runner"):
+            from agentic_tdd_runner.runner_facts import build_runner_facts
+
+            runner_facts = build_runner_facts(workdir, config, episode=new_episode)
+            new_episode["runner_facts"] = runner_facts
+            new_episode["runner_facts_text"] = runner_facts.to_prompt_section()
+            log("runner_facts", runner_facts.to_log_dict())
+    except Exception as exc:
+        return (
+            _permission.PermissionReview(
+                allowed=False,
+                message=f"TARGET CHALLENGE DENIED: could not build rerouted episode: {exc}",
+                event="target_challenge_denied",
+            ),
+            current_episode,
+        )
+
+    if not new_episode:
+        return (
+            _permission.PermissionReview(
+                allowed=False,
+                message="TARGET CHALLENGE DENIED: reroute produced no episode.",
+                event="target_challenge_denied",
+            ),
+            current_episode,
+        )
+
+    previous = f"{previous_source}::{previous_symbol}"
+    current = f"{new_episode['source_file']}::{new_episode['target_symbol']}"
+    message = "\n".join([
+        f"TARGET CHALLENGE ACCEPTED: rerouted from `{previous}` to `{current}`.",
+        f"New regression test file: `{new_episode['test_file']}`.",
+        "Ignore the previous target, previous test file, and previous cookbook for future actions.",
+        "Next required action: call ask_harness with intent `write_regression_test` for the rerouted target.",
+    ])
+    return (
+        _permission.PermissionReview(
+            allowed=True,
+            message=message,
+            grant=None,
+            event="target_challenge_accepted",
+        ),
+        new_episode,
+    )
+
+
 def run_agent_loop(
     *,
     messages: list[dict],
@@ -82,6 +165,7 @@ def run_agent_loop(
     run_quality_checks: Callable[[str], tuple[bool, str]],
     create_pr: Callable[[list[dict], dict, str, int], str | None],
     clear_file_read_cache: Callable[[], None] | None = None,
+    apply_mechanical_edits: Callable[[list[dict], str], int] | None = None,
 ) -> int:
     """Run the model/tool/verification loop until DONE or exhaustion."""
     max_steps = config["agent"]["max_steps"]
@@ -264,7 +348,46 @@ def run_agent_loop(
                 t1 = time.time()
                 state_review = None
                 permission_review = None
-                if permission_mode and name == "ask_harness":
+                if (
+                    permission_mode
+                    and name == "ask_harness"
+                    and str(args.get("intent") or "") == "challenge_target"
+                ):
+                    permission_review, maybe_episode = _build_rerouted_episode(
+                        args,
+                        current_episode=episode,
+                        permission_context=permission_context,
+                        config=config,
+                        workdir=workdir,
+                        apply_mechanical_edits=apply_mechanical_edits,
+                        emit=emit,
+                        log=log,
+                    )
+                    if permission_review.allowed and maybe_episode is not episode:
+                        episode = maybe_episode
+                        permission_grant = None
+                        test_file_created = False
+                        allow_dependency_contract_lookup = False
+                        block_dependency_contract_lookup = has_contract_evidence(issue_text, episode)
+                        state_reviewer = BugStateReviewer(
+                            config,
+                            contract_evidence_available=block_dependency_contract_lookup,
+                            runner_facts=(episode or {}).get("runner_facts"),
+                        )
+                    result = permission_review.message
+                    tool_elapsed = 0.0
+                    applied = True if permission_review.allowed else None
+                    log(permission_review.event, {
+                        "step": step,
+                        "intent": args.get("intent"),
+                        "allowed": permission_review.allowed,
+                        "from": (
+                            f"{permission_context.get('source_file')}::"
+                            f"{permission_context.get('target_symbol')}"
+                        ),
+                        "to": f"{args.get('source_file')}::{args.get('target_symbol')}",
+                    })
+                elif permission_mode and name == "ask_harness":
                     permission_review = _permission.answer_harness(args, permission_context)
                     permission_grant = _permission.merge_grant_after_harness_answer(
                         permission_grant,

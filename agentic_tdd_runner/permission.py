@@ -18,6 +18,7 @@ from agentic_tdd_runner.languages import get_language
 
 
 INTENTS = {
+    "challenge_target",
     "understand_contract",
     "write_regression_test",
     "repair_test_setup",
@@ -100,6 +101,16 @@ def answer_harness(args: dict, context: dict) -> PermissionReview:
                 "PERMISSION DENIED: unknown intent. Use one of: "
                 + ", ".join(sorted(INTENTS))
             ),
+        )
+
+    if intent == "challenge_target":
+        return PermissionReview(
+            allowed=False,
+            message=(
+                "TARGET CHALLENGE REQUIRES RUNTIME REROUTE: provide `source_file`, "
+                "`target_symbol`, and `evidence` to the runtime ask_harness handler."
+            ),
+            event="target_challenge_denied",
         )
 
     if intent == "understand_contract":
@@ -260,7 +271,7 @@ def review_tool_call(
             allowed=False,
             message=(
                 "PERMISSION REQUIRED: call ask_harness before using tools. "
-                "Declare one intent: understand_contract, write_regression_test, "
+                "Declare one intent: challenge_target, understand_contract, write_regression_test, "
                 "repair_test_setup, edit_source, run_test, or done."
             ),
         )
@@ -321,6 +332,71 @@ def merge_grant_after_harness_answer(
     if review.allowed and review.event == "permission_answered":
         return current_grant
     return None
+
+
+def review_target_challenge(
+    args: dict,
+    context: dict,
+    *,
+    workdir: str,
+) -> PermissionReview:
+    """Validate a model request to move the episode to a different target."""
+    source_file = _normalize_permission_path(str(args.get("source_file") or ""))
+    target_symbol = str(args.get("target_symbol") or "").strip()
+    evidence = str(args.get("evidence") or args.get("question") or "").strip()
+
+    if not source_file or not target_symbol or not evidence:
+        return PermissionReview(
+            allowed=False,
+            message=(
+                "TARGET CHALLENGE DENIED: provide `source_file`, `target_symbol`, "
+                "and concise code-derived `evidence`."
+            ),
+            event="target_challenge_denied",
+        )
+    if source_file.startswith("/") or source_file.startswith("../") or "/../" in source_file:
+        return PermissionReview(
+            allowed=False,
+            message="TARGET CHALLENGE DENIED: source_file must be a relative repo path.",
+            event="target_challenge_denied",
+        )
+    if _same_path(source_file, context.get("source_file")) and target_symbol == context.get("target_symbol"):
+        return PermissionReview(
+            allowed=False,
+            message="TARGET CHALLENGE DENIED: proposed target is already the active target.",
+            event="target_challenge_denied",
+        )
+
+    path = Path(workdir) / source_file
+    try:
+        source_text = path.read_text()
+    except OSError:
+        return PermissionReview(
+            allowed=False,
+            message=f"TARGET CHALLENGE DENIED: `{source_file}` is not readable.",
+            event="target_challenge_denied",
+        )
+
+    start, source = _find_symbol_line_with_source(source_text, target_symbol)
+    if source != "definition" or not start:
+        return PermissionReview(
+            allowed=False,
+            message=(
+                f"TARGET CHALLENGE DENIED: `{target_symbol}` was not found as a "
+                f"definition in `{source_file}`."
+            ),
+            event="target_challenge_denied",
+        )
+
+    return PermissionReview(
+        allowed=True,
+        message=(
+            "TARGET CHALLENGE ACCEPTED: deterministic validation found "
+            f"`{source_file}::{target_symbol}`. Reroute the episode before continuing."
+        ),
+        grant=None,
+        event="target_challenge_accepted",
+    )
 
 
 def _implementation_answer_block(args: dict, context: dict) -> str:

@@ -2,7 +2,8 @@
 
 PERMISSION_DRIVEN_INSTRUCTIONS = """## Permission-Driven Mode
 Before reading, editing, running commands, or saying DONE, call `ask_harness` with the intent you want to perform.
-If the harness answers with facts, use those facts instead of exploring. If it grants permission, perform only the granted action."""
+If the harness answers with facts, use those facts instead of exploring. If it grants permission, perform only the granted action.
+If code evidence shows the selected target is wrong, call `ask_harness` with intent `challenge_target` and provide `source_file`, `target_symbol`, and concise evidence."""
 
 
 def build_system_prompt(
