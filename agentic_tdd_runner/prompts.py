@@ -1,9 +1,20 @@
 """Prompt construction helpers for the agent runner."""
 
+PERMISSION_DRIVEN_INSTRUCTIONS = """## Permission-Driven Mode
+Before reading, editing, running commands, or saying DONE, call `ask_harness` with the intent you want to perform.
+If the harness answers with facts, use those facts instead of exploring. If it grants permission, perform only the granted action."""
 
-def build_system_prompt(base_system_prompt: str, episode: dict | None = None) -> str:
+
+def build_system_prompt(
+    base_system_prompt: str,
+    episode: dict | None = None,
+    *,
+    permission_driven: bool = False,
+) -> str:
     """Return the system prompt, optionally enriched with episode cookbook text."""
     system_prompt = base_system_prompt.strip()
+    if permission_driven:
+        system_prompt = f"{system_prompt}\n\n{PERMISSION_DRIVEN_INSTRUCTIONS}"
     if episode:
         system_prompt = f"{system_prompt}\n\n{episode['cookbook_text']}"
         runner_facts_text = episode.get("runner_facts_text")
@@ -53,9 +64,14 @@ def build_initial_messages(
     base_system_prompt: str,
     issue_text_for_model: str,
     episode: dict | None = None,
+    permission_driven: bool = False,
 ) -> list[dict]:
     """Build the initial system/user message pair for the runtime loop."""
-    system_prompt = build_system_prompt(base_system_prompt, episode)
+    system_prompt = build_system_prompt(
+        base_system_prompt,
+        episode,
+        permission_driven=permission_driven,
+    )
     if episode:
         user_prompt = build_phase1_message(episode, issue_text_for_model)
     else:
