@@ -377,8 +377,8 @@ def review_target_challenge(
             event="target_challenge_denied",
         )
 
-    start, source = _find_symbol_line_with_source(source_text, target_symbol)
-    if source != "definition" or not start:
+    start, source = _find_challenge_symbol_line(source_text, target_symbol)
+    if source not in {"definition", "method"} or not start:
         return PermissionReview(
             allowed=False,
             message=(
@@ -397,6 +397,25 @@ def review_target_challenge(
         grant=None,
         event="target_challenge_accepted",
     )
+
+
+def _find_challenge_symbol_line(source_text: str, symbol: str) -> tuple[int | None, str | None]:
+    start, source = _find_symbol_line_with_source(source_text, symbol)
+    if source == "definition" or not start:
+        return start, source
+    lines = source_text.splitlines()
+    if 1 <= start <= len(lines) and _looks_like_method_definition(lines[start - 1], symbol):
+        return start, "method"
+    return start, source
+
+
+def _looks_like_method_definition(line: str, symbol: str) -> bool:
+    esc = re.escape(symbol)
+    patterns = (
+        rf"^\s*(?:public|private|protected|static|async|\s)*{esc}\s*\(",
+        rf"^\s*(?:async\s+)?def\s+{esc}\s*\(",
+    )
+    return any(re.search(pattern, line) for pattern in patterns)
 
 
 def _implementation_answer_block(args: dict, context: dict) -> str:

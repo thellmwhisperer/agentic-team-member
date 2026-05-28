@@ -1,5 +1,7 @@
 """Tests for runtime loop orchestration."""
 
+import pytest
+
 from agentic_tdd_runner import runtime
 from agentic_tdd_runner.issue_intake import parse_issue_contract
 from agentic_tdd_runner.runner_facts import RunnerFacts
@@ -424,6 +426,145 @@ def test_permission_mode_accepts_target_challenge_and_reroutes_episode(tmp_path)
         event == "target_challenge_accepted"
         and data["from"] == "src/personality/sanitizer.ts::wrapUserMessage"
         and data["to"] == "src/twitch/client.ts::handleMention"
+        for event, data in logged
+    )
+
+
+def test_target_challenge_does_not_apply_mechanical_edits_before_enrichment(tmp_path, monkeypatch):
+    source = tmp_path / "src" / "client.ts"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "\n".join([
+            "function handleMention(message: string): boolean {",
+            "  return message.includes('@manolitozurrapa');",
+            "}",
+        ])
+    )
+    applied = []
+
+    def failing_runner_facts(*_args, **_kwargs):
+        raise RuntimeError("runner facts failed")
+
+    monkeypatch.setattr(
+        "agentic_tdd_runner.runner_facts.build_runner_facts",
+        failing_runner_facts,
+    )
+
+    with pytest.raises(RuntimeError, match="runner facts failed"):
+        runtime._build_rerouted_episode(
+            {
+                "source_file": "src/client.ts",
+                "target_symbol": "handleMention",
+                "evidence": "mention dispatch lives here",
+            },
+            current_episode={
+                "source_file": "src/personality/sanitizer.ts",
+                "target_symbol": "wrapUserMessage",
+            },
+            permission_context={
+                "source_file": "src/personality/sanitizer.ts",
+                "target_symbol": "wrapUserMessage",
+            },
+            config={"runner": {"command": "bun test"}},
+            workdir=str(tmp_path),
+            apply_mechanical_edits=lambda edits, workdir: applied.append((edits, workdir)) or len(edits),
+            emit=lambda _msg: None,
+            log=lambda _event, _data: None,
+        )
+
+    assert applied == []
+
+
+def test_blocked_test_create_does_not_open_edit_source_gate(tmp_path):
+    config = {
+        "agent": {
+            "max_steps": 2,
+            "non_apply_step_warning_threshold": 0,
+            "permission_driven": True,
+        },
+        "verification": {"max_rejections": 1},
+        "runner": {"command": "bun test"},
+    }
+    episode = {
+        "source_file": "src/client.ts",
+        "test_file": "src/client.test.ts",
+        "target_symbol": "handle",
+        "cookbook_text": "",
+    }
+    calls = []
+    executed = []
+    logged = []
+
+    def chat(_messages):
+        calls.append(None)
+        if len(calls) == 1:
+            return {
+                "choices": [{
+                    "message": {
+                        "content": "",
+                        "tool_calls": [{
+                            "id": "call_1",
+                            "function": {
+                                "name": "create_file",
+                                "arguments": '{"path": "src/client.test.ts", "content": "test"}',
+                            },
+                        }],
+                    },
+                    "finish_reason": "tool_calls",
+                }],
+                "usage": {},
+                "timings": {},
+            }
+        return {
+            "choices": [{
+                "message": {
+                    "content": "",
+                    "tool_calls": [{
+                        "id": "call_2",
+                        "function": {
+                            "name": "ask_harness",
+                            "arguments": '{"intent": "edit_source"}',
+                        },
+                    }],
+                },
+                "finish_reason": "tool_calls",
+            }],
+            "usage": {},
+            "timings": {},
+        }
+
+    runtime.run_agent_loop(
+        messages=[],
+        episode=episode,
+        issue_text="bug text",
+        config=config,
+        workdir=str(tmp_path),
+        log_path=str(tmp_path / "log.jsonl"),
+        emit=lambda _msg: None,
+        log=lambda event, data: logged.append((event, data)),
+        chat=chat,
+        execute_tool=lambda name, args: executed.append((name, args)) or "OK",
+        truncate=lambda value: value,
+        is_llm_timeout_error=lambda _exc: False,
+        tool_applied_status=lambda name, _result: name == "create_file",
+        tool_loop_signature=lambda _name, _args: None,
+        tool_loop_warning_message=lambda signature: f"loop {signature}",
+        non_apply_step_warning_message=lambda count: f"non-apply {count}",
+        is_test_pass=lambda _name, _args: False,
+        is_test_file_path=lambda path: path.endswith(".test.ts"),
+        find_test_file=lambda _content: None,
+        verify_red_green=lambda *_args, **_kwargs: (False, "unused"),
+        run_quality_checks=lambda _test_file: (True, "unused"),
+        create_pr=lambda *_args, **_kwargs: None,
+    )
+
+    assert executed == []
+    assert any(
+        event == "tool" and "PERMISSION REQUIRED" in data["result"]
+        for event, data in logged
+    )
+    assert any(
+        event == "tool" and "create a focused failing regression test" in data["result"]
         for event, data in logged
     )
 

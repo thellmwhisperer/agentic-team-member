@@ -155,6 +155,34 @@ def test_target_challenge_accepts_code_derived_alternate_target(tmp_path):
     assert "src/twitch/client.ts::handleMention" in review.message
 
 
+def test_target_challenge_accepts_class_method_target(tmp_path):
+    source = tmp_path / "src" / "worker.ts"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "\n".join([
+            "export class Worker {",
+            "  handleMention(message: string): boolean {",
+            "    return message.includes('@manolitozurrapa');",
+            "  }",
+            "}",
+        ])
+    )
+
+    review = permission.review_target_challenge(
+        {
+            "source_file": "src/worker.ts",
+            "target_symbol": "handleMention",
+            "evidence": "the mention dispatch is implemented as a class method",
+        },
+        _context(),
+        workdir=str(tmp_path),
+    )
+
+    assert review.allowed is True
+    assert review.event == "target_challenge_accepted"
+    assert "src/worker.ts::handleMention" in review.message
+
+
 def test_target_challenge_rejects_unreadable_or_missing_symbol(tmp_path):
     source = tmp_path / "src" / "twitch" / "client.ts"
     source.parent.mkdir(parents=True)
