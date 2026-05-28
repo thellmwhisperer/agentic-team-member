@@ -11,6 +11,7 @@
           "intent": {
             "type": "string",
             "enum": [
+              "challenge_target",
               "understand_contract",
               "write_regression_test",
               "repair_test_setup",
@@ -23,6 +24,18 @@
           "question": {
             "type": "string",
             "description": "Optional concise question for the harness"
+          },
+          "source_file": {
+            "type": "string",
+            "description": "For challenge_target only: proposed source file relative to the repo root"
+          },
+          "target_symbol": {
+            "type": "string",
+            "description": "For challenge_target only: proposed function/symbol definition"
+          },
+          "evidence": {
+            "type": "string",
+            "description": "For challenge_target only: concise code-derived evidence for rerouting"
           }
         }
       }
