@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import re
+import posixpath
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from agentic_tdd_runner.compiler.parser import (
     _extract_target_snippet,
@@ -256,7 +257,6 @@ def review_tool_call(
     *,
     grant: str | None,
     context: dict,
-    is_test_file_path: Callable[[str], bool],
 ) -> PermissionReview | None:
     if name == "ask_harness":
         return None
@@ -983,7 +983,20 @@ def _bullet_block(lines: list[str]) -> str:
 
 
 def _same_path(left: str | None, right: str | None) -> bool:
-    return (left or "").strip("./") == (right or "").strip("./")
+    left_text = str(left or "").strip()
+    right_text = str(right or "").strip()
+    if not left_text or not right_text:
+        return False
+    if left_text.startswith("/") != right_text.startswith("/"):
+        return False
+    return _normalize_permission_path(left_text) == _normalize_permission_path(right_text)
+
+
+def _normalize_permission_path(path: str) -> str:
+    while path.startswith("./"):
+        path = path[2:]
+    normalized = posixpath.normpath(path)
+    return "" if normalized == "." else normalized
 
 
 def _looks_like_focused_test_command(command: str, *, context: dict) -> bool:
