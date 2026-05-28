@@ -135,7 +135,6 @@ def test_blocks_tools_until_model_declares_intent():
         {"path": "src/twitch/client.ts"},
         grant=None,
         context=_context(),
-        is_test_file_path=lambda path: path.endswith(".test.ts"),
     )
 
     assert review is not None
@@ -150,14 +149,12 @@ def test_write_test_grant_allows_only_recommended_test_file():
         {"path": "src/twitch/handleResub.test.ts"},
         grant="write_test",
         context=_context(),
-        is_test_file_path=lambda path: path.endswith(".test.ts"),
     )
     blocked = permission.review_tool_call(
         "str_replace_editor",
         {"path": "src/twitch/client.ts"},
         grant="write_test",
         context=_context(),
-        is_test_file_path=lambda path: path.endswith(".test.ts"),
     )
 
     assert grant.grant == "write_test"
@@ -230,27 +227,35 @@ def test_write_grants_allow_reading_the_same_file_for_resync():
         {"path": "src/twitch/handleResub.test.ts"},
         grant="write_test",
         context=_context(),
-        is_test_file_path=lambda path: path.endswith(".test.ts"),
     )
     source_read = permission.review_tool_call(
         "read_file",
         {"path": "src/twitch/client.ts"},
         grant="write_source",
         context=_context(),
-        is_test_file_path=lambda path: path.endswith(".test.ts"),
     )
     unrelated_read = permission.review_tool_call(
         "read_file",
         {"path": "src/twitch/other.ts"},
         grant="write_source",
         context=_context(),
-        is_test_file_path=lambda path: path.endswith(".test.ts"),
     )
 
     assert test_read is None
     assert source_read is None
     assert unrelated_read is not None
     assert "PERMISSION DENIED" in unrelated_read.message
+
+
+def test_permission_path_matching_normalizes_only_relative_path_syntax():
+    assert permission._same_path("./src/twitch/client.ts", "src/twitch/client.ts")
+    assert permission._same_path(
+        "src/twitch/../twitch/client.ts",
+        "src/twitch/client.ts",
+    )
+    assert not permission._same_path("/src/twitch/client.ts", "src/twitch/client.ts")
+    assert not permission._same_path(".env", "env")
+    assert not permission._same_path("", "src/twitch/client.ts")
 
 
 def test_write_grants_survive_same_file_reads_and_edits():

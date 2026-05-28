@@ -285,7 +285,6 @@ def run_agent_loop(
                         args,
                         grant=permission_grant,
                         context=permission_context,
-                        is_test_file_path=is_test_file_path,
                     )
                     if permission_review:
                         result = permission_review.message
