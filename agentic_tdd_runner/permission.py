@@ -106,7 +106,6 @@ def answer_harness(args: dict, context: dict) -> PermissionReview:
         if facts:
             type_shapes = _format_type_shapes(context.get("referenced_type_shapes") or [])
             shape_block = f"\nReferenced type shapes:\n{type_shapes}" if type_shapes else ""
-            red_case = _red_case_guidance_block(context)
             implementation_block = _implementation_answer_block(args, context)
             return PermissionReview(
                 allowed=True,
@@ -115,7 +114,6 @@ def answer_harness(args: dict, context: dict) -> PermissionReview:
                     "Do not call read_file for this intent.\n"
                     + _bullet_block(facts)
                     + shape_block
-                    + red_case
                     + implementation_block
                     + "\nNext required action: call ask_harness with intent `write_regression_test`, "
                     "then create/edit only the granted test file."
@@ -164,10 +162,6 @@ def answer_harness(args: dict, context: dict) -> PermissionReview:
         if type_shapes:
             lines.append("Referenced type shapes:")
             lines.append(type_shapes)
-        red_case_notes = _red_case_guidance(context)
-        if red_case_notes:
-            lines.append("Regression red-case guidance:")
-            lines.extend(f"- {note}" for note in red_case_notes)
         skeleton = _build_regression_test_skeleton(context)
         if skeleton:
             lines.append("Suggested regression test skeleton:")
@@ -355,38 +349,6 @@ def _implementation_answer_block(args: dict, context: dict) -> str:
             "```",
         ])
     return "\n".join(lines)
-
-
-def _red_case_guidance_block(context: dict) -> str:
-    notes = _red_case_guidance(context)
-    if not notes:
-        return ""
-    return "\nRegression red-case guidance:\n" + "\n".join(f"- {note}" for note in notes)
-
-
-def _red_case_guidance(context: dict) -> list[str]:
-    facts = context.get("contract_facts") or []
-    runtime_names = _runtime_arg_names_from_contract_facts(facts)
-    fields = _referenced_type_fields(context.get("referenced_type_shapes") or [])
-    has_runtime_streak = any("streak" in name.lower() for name in runtime_names)
-    streak_fields = [field for field in fields if "streak" in field.lower()]
-    cumulative_fields = [field for field in fields if "cumulative" in field.lower()]
-    if not (has_runtime_streak and streak_fields and cumulative_fields):
-        return []
-    return [
-        "The callback contract exposes multiple month-like values. Choose issue-specific distinct values in the regression test so red/green proves which value the source behavior uses.",
-        "Do not reuse the same value across semantically related callback arguments and metadata fields; identical values can make the test pass for the wrong reason.",
-    ]
-
-
-def _referenced_type_fields(shapes: list[dict[str, Any]]) -> list[str]:
-    fields: list[str] = []
-    for shape in shapes:
-        for field in shape.get("fields") or []:
-            name = str(field.get("name") or "")
-            if name:
-                fields.append(name)
-    return fields
 
 
 def _asks_for_target_implementation(question: str) -> bool:
