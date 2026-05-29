@@ -43,7 +43,19 @@ command=(
 if [[ -n "${ATM_GITHUB_REPO:-}" && -n "${ATM_ISSUE_NUMBER:-}" ]]; then
   command+=(--github-repo "${ATM_GITHUB_REPO}" --issue-number "${ATM_ISSUE_NUMBER}")
 elif [[ -n "${ATM_ISSUE_FILE:-}" ]]; then
-  command+=("${ATM_ISSUE_FILE}")
+  issue_file="${ATM_ISSUE_FILE}"
+  if [[ "${issue_file}" != /* ]]; then
+    issue_file="${REPO_ROOT}/${issue_file}"
+  fi
+  if [[ ! -f "${issue_file}" ]]; then
+    echo "ATM_ISSUE_FILE does not exist: ${ATM_ISSUE_FILE}" >&2
+    exit 2
+  fi
+  if [[ ! -r "${issue_file}" ]]; then
+    echo "ATM_ISSUE_FILE is not readable: ${ATM_ISSUE_FILE}" >&2
+    exit 2
+  fi
+  command+=("${issue_file}")
 else
   echo "Set ATM_GITHUB_REPO + ATM_ISSUE_NUMBER, or ATM_ISSUE_FILE" >&2
   exit 2
