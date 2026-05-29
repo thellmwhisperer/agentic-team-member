@@ -7,6 +7,23 @@ from agentic_tdd_runner.issue_intake import parse_issue_contract
 from agentic_tdd_runner.runner_facts import RunnerFacts
 
 
+def _tool_call_response(call_id: str, name: str, arguments: str) -> dict:
+    return {
+        "choices": [{
+            "message": {
+                "content": "",
+                "tool_calls": [{
+                    "id": call_id,
+                    "function": {"name": name, "arguments": arguments},
+                }],
+            },
+            "finish_reason": "tool_calls",
+        }],
+        "usage": {},
+        "timings": {},
+    }
+
+
 def test_has_contract_evidence_matches_model_facing_contract_text():
     issue_text = """
     ## Callback contract
@@ -430,6 +447,207 @@ def test_permission_mode_accepts_target_challenge_and_reroutes_episode(tmp_path)
     )
 
 
+def test_permission_mode_requires_challenge_after_search_finds_better_target(tmp_path):
+    wrong_source = tmp_path / "src" / "personality" / "sanitizer.ts"
+    right_source = tmp_path / "src" / "twitch" / "client.ts"
+    wrong_source.parent.mkdir(parents=True)
+    right_source.parent.mkdir(parents=True)
+    wrong_source.write_text(
+        "\n".join([
+            "export function wrapUserMessage(input: string): string {",
+            "  return input.trim();",
+            "}",
+        ])
+    )
+    right_source.write_text(
+        "\n".join([
+            "export function handleMessage(message: string): boolean {",
+            "  const lower = message.toLowerCase();",
+            "  const isMention = lower.startsWith('@manolitozurrapa');",
+            "  return isMention;",
+            "}",
+        ])
+    )
+    config = {
+        "agent": {
+            "max_steps": 4,
+            "non_apply_step_warning_threshold": 0,
+            "permission_driven": True,
+        },
+        "verification": {"max_rejections": 1},
+        "runner": {
+            "framework": "bun:test",
+            "command": "bun test",
+            "test_file_patterns": ["*.test.ts"],
+            "exclude_dirs": [],
+        },
+    }
+    episode = {
+        "source_file": "src/personality/sanitizer.ts",
+        "test_file": "src/personality/wrapUserMessage.test.ts",
+        "target_symbol": "wrapUserMessage",
+        "cookbook_text": "",
+    }
+    calls = []
+    logged = []
+
+    def chat(messages):
+        calls.append(messages[-1]["content"] if messages else "")
+        if len(calls) == 1:
+            return _tool_call_response(
+                "call_1",
+                "ask_harness",
+                '{"intent": "understand_contract", "question": "search mention dispatch"}',
+            )
+        if len(calls) == 2:
+            return _tool_call_response("call_2", "rg", '{"pattern": "@manolitozurrapa"}')
+        if len(calls) == 3:
+            return _tool_call_response("call_3", "ask_harness", '{"intent": "write_regression_test"}')
+        assert "TARGET CHALLENGE REQUIRED" in messages[-1]["content"]
+        assert '"target_symbol": "handleMessage"' in messages[-1]["content"]
+        return {"choices": [{"message": {"content": "blocked"}, "finish_reason": "stop"}], "usage": {}, "timings": {}}
+
+    runtime.run_agent_loop(
+        messages=[],
+        episode=episode,
+        issue_text="@manolitozurrapa solo funciona al principio del mensaje",
+        config=config,
+        workdir=str(tmp_path),
+        log_path=str(tmp_path / "log.jsonl"),
+        emit=lambda _msg: None,
+        log=lambda event, data: logged.append((event, data)),
+        chat=chat,
+        execute_tool=lambda name, _args: (
+            "./src/twitch/client.ts:3:  const isMention = lower.startsWith('@manolitozurrapa');"
+            if name == "rg"
+            else "OK"
+        ),
+        truncate=lambda value: value,
+        is_llm_timeout_error=lambda _exc: False,
+        tool_applied_status=lambda _name, _result: None,
+        tool_loop_signature=lambda _name, _args: None,
+        tool_loop_warning_message=lambda signature: f"loop {signature}",
+        non_apply_step_warning_message=lambda count: f"non-apply {count}",
+        is_test_pass=lambda _name, _args: False,
+        is_test_file_path=lambda path: path.endswith(".test.ts"),
+        find_test_file=lambda _content: None,
+        verify_red_green=lambda *_args, **_kwargs: (False, "unused"),
+        run_quality_checks=lambda _test_file: (True, "unused"),
+        create_pr=lambda *_args, **_kwargs: None,
+    )
+
+    assert any(
+        event == "target_challenge_hint"
+        and data["source_file"] == "src/twitch/client.ts"
+        and data["target_symbol"] == "handleMessage"
+        for event, data in logged
+    )
+    assert any(
+        event == "target_challenge_required"
+        and data["intent"] == "write_regression_test"
+        for event, data in logged
+    )
+
+
+def test_permission_mode_requires_challenge_after_read_file_finds_better_target(tmp_path):
+    wrong_source = tmp_path / "src" / "personality" / "sanitizer.ts"
+    right_source = tmp_path / "src" / "twitch" / "client.ts"
+    wrong_source.parent.mkdir(parents=True)
+    right_source.parent.mkdir(parents=True)
+    wrong_source.write_text(
+        "\n".join([
+            "export function wrapUserMessage(input: string): string {",
+            "  return input.trim();",
+            "}",
+        ])
+    )
+    right_source.write_text(
+        "\n".join([
+            "export function connect(): void {",
+            "  logger.info('ready');",
+            "}",
+            "",
+            "export async function handleMessage(message: string): Promise<void> {",
+            "  const botMention = '@manolitozurrapa';",
+            "  const isMention = message.startsWith(botMention);",
+            "  if (isMention) await respond(message);",
+            "}",
+        ])
+    )
+    config = {
+        "agent": {
+            "max_steps": 4,
+            "non_apply_step_warning_threshold": 0,
+            "permission_driven": True,
+        },
+        "verification": {"max_rejections": 1},
+        "runner": {
+            "framework": "bun:test",
+            "command": "bun test",
+            "test_file_patterns": ["*.test.ts"],
+            "exclude_dirs": [],
+        },
+    }
+    episode = {
+        "source_file": "src/personality/sanitizer.ts",
+        "test_file": "src/personality/wrapUserMessage.test.ts",
+        "target_symbol": "wrapUserMessage",
+        "cookbook_text": "",
+    }
+    calls = []
+    logged = []
+
+    def chat(messages):
+        calls.append(messages[-1]["content"] if messages else "")
+        if len(calls) == 1:
+            return _tool_call_response("call_1", "ask_harness", '{"intent": "understand_contract"}')
+        if len(calls) == 2:
+            return _tool_call_response("call_2", "read_file", '{"path": "src/twitch/client.ts"}')
+        if len(calls) == 3:
+            return _tool_call_response("call_3", "ask_harness", '{"intent": "write_regression_test"}')
+        assert "TARGET CHALLENGE REQUIRED" in messages[-1]["content"]
+        assert '"source_file": "src/twitch/client.ts"' in messages[-1]["content"]
+        assert '"target_symbol": "handleMessage"' in messages[-1]["content"]
+        return {"choices": [{"message": {"content": "blocked"}, "finish_reason": "stop"}], "usage": {}, "timings": {}}
+
+    runtime.run_agent_loop(
+        messages=[],
+        episode=episode,
+        issue_text="@manolitozurrapa solo funciona al principio del mensaje",
+        config=config,
+        workdir=str(tmp_path),
+        log_path=str(tmp_path / "log.jsonl"),
+        emit=lambda _msg: None,
+        log=lambda event, data: logged.append((event, data)),
+        chat=chat,
+        execute_tool=lambda name, _args: right_source.read_text() if name == "read_file" else "OK",
+        truncate=lambda value: value,
+        is_llm_timeout_error=lambda _exc: False,
+        tool_applied_status=lambda _name, _result: None,
+        tool_loop_signature=lambda _name, _args: None,
+        tool_loop_warning_message=lambda signature: f"loop {signature}",
+        non_apply_step_warning_message=lambda count: f"non-apply {count}",
+        is_test_pass=lambda _name, _args: False,
+        is_test_file_path=lambda path: path.endswith(".test.ts"),
+        find_test_file=lambda _content: None,
+        verify_red_green=lambda *_args, **_kwargs: (False, "unused"),
+        run_quality_checks=lambda _test_file: (True, "unused"),
+        create_pr=lambda *_args, **_kwargs: None,
+    )
+
+    assert any(
+        event == "target_challenge_hint"
+        and data["source_file"] == "src/twitch/client.ts"
+        and data["target_symbol"] == "handleMessage"
+        for event, data in logged
+    )
+    assert any(
+        event == "target_challenge_required"
+        and data["intent"] == "write_regression_test"
+        for event, data in logged
+    )
+
+
 def test_target_challenge_does_not_apply_mechanical_edits_before_enrichment(tmp_path, monkeypatch):
     source = tmp_path / "src" / "client.ts"
     source.parent.mkdir(parents=True)
@@ -565,6 +783,73 @@ def test_blocked_test_create_does_not_open_edit_source_gate(tmp_path):
     )
     assert any(
         event == "tool" and "create a focused failing regression test" in data["result"]
+        for event, data in logged
+    )
+
+
+def test_denied_test_command_does_not_trigger_red_green_verification(tmp_path):
+    config = {
+        "agent": {
+            "max_steps": 2,
+            "non_apply_step_warning_threshold": 0,
+            "permission_driven": True,
+        },
+        "verification": {"max_rejections": 1},
+        "runner": {"command": "bun test"},
+    }
+    episode = {
+        "source_file": "src/client.ts",
+        "test_file": "src/client.test.ts",
+        "target_symbol": "handle",
+        "cookbook_text": "",
+    }
+    calls = []
+    logged = []
+
+    def chat(_messages):
+        calls.append(None)
+        if len(calls) == 1:
+            return _tool_call_response(
+                "call_1",
+                "ask_harness",
+                '{"intent": "write_regression_test"}',
+            )
+        return _tool_call_response(
+            "call_2",
+            "run_command",
+            '{"command": "bun test src/client.test.ts"}',
+        )
+
+    def verify_red_green(*_args, **_kwargs):
+        raise AssertionError("denied run_command must not trigger red/green verification")
+
+    runtime.run_agent_loop(
+        messages=[],
+        episode=episode,
+        issue_text="bug text",
+        config=config,
+        workdir=str(tmp_path),
+        log_path=str(tmp_path / "log.jsonl"),
+        emit=lambda _msg: None,
+        log=lambda event, data: logged.append((event, data)),
+        chat=chat,
+        execute_tool=lambda _name, _args: "should not execute",
+        truncate=lambda value: value,
+        is_llm_timeout_error=lambda _exc: False,
+        tool_applied_status=lambda _name, _result: None,
+        tool_loop_signature=lambda _name, _args: None,
+        tool_loop_warning_message=lambda signature: f"loop {signature}",
+        non_apply_step_warning_message=lambda count: f"non-apply {count}",
+        is_test_pass=lambda name, _args: name == "run_command",
+        is_test_file_path=lambda path: path.endswith(".test.ts"),
+        find_test_file=lambda _content: None,
+        verify_red_green=verify_red_green,
+        run_quality_checks=lambda _test_file: (True, "unused"),
+        create_pr=lambda *_args, **_kwargs: None,
+    )
+
+    assert any(
+        event == "tool" and "PERMISSION DENIED" in data["result"]
         for event, data in logged
     )
 
