@@ -66,13 +66,17 @@ llama-server \
   --reasoning-budget -1 \
   --parallel 1 \
   --spec-type draft-mtp \
-  --spec-draft-n-max 2
+  --spec-draft-n-max 2 \
+  --no-webui
 ```
 
 The binary path remains local. Put your MTP-capable `llama-server` build path in
 `ATM_LLAMA_SERVER_BIN` inside `.env.local`. If you use a local GGUF file instead
 of a Hugging Face model reference, set `ATM_LLAMA_MODEL_ARG=--model` and
 `ATM_LLAMA_MODEL=/path/to/model.gguf`.
+
+This profile disables `llama-server`'s built-in web UI by default. Set
+`ATM_LLAMA_NO_WEBUI=false` in `.env.local` to leave the web UI enabled.
 
 For this profile, the harness config should use the same served model alias:
 
