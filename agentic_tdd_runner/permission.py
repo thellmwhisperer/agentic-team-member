@@ -36,6 +36,11 @@ class PermissionReview:
     event: str = "permission_review"
 
 
+_SEARCH_RESULT_RE = re.compile(
+    r"^(?:\./)?(?P<path>[^:\n]+):(?P<line>\d+):(?P<text>.*)$"
+)
+
+
 def permission_enabled(config: dict) -> bool:
     return bool((config or {}).get("agent", {}).get("permission_driven", False))
 
@@ -83,6 +88,10 @@ def build_permission_context(
             workdir=workdir,
             contract_facts=contract_facts,
         ),
+        "test_setup_read_paths": _read_test_setup_dependency_paths(
+            workdir=workdir,
+            test_file=episode.get("test_file"),
+        ),
         "source_seams": _extract_section_bullets(str(episode.get("cookbook_text") or ""), "### Test Seams"),
         "source_mocks": _extract_mock_modules(str(episode.get("cookbook_text") or "")),
         "module_mock_block": _extract_code_block_after(
@@ -112,6 +121,9 @@ def answer_harness(args: dict, context: dict) -> PermissionReview:
             ),
             event="target_challenge_denied",
         )
+
+    if context.get("target_challenge_hint"):
+        return _target_challenge_required_review(context["target_challenge_hint"])
 
     if intent == "understand_contract":
         facts = context.get("contract_facts") or []
@@ -192,7 +204,8 @@ def answer_harness(args: dict, context: dict) -> PermissionReview:
             allowed=True,
             message=(
                 f"PERMISSION GRANTED: repair setup in `{context.get('test_file')}` only. "
-                "Use deterministic runner/mock feedback. You may read_file this same test path. "
+                "Use deterministic runner/mock feedback. You may read_file this same test path "
+                "and modules explicitly mocked by this test. "
                 "Do not edit source behavior in this phase."
             ),
             grant="write_test",
@@ -266,6 +279,8 @@ def review_tool_call(
 ) -> PermissionReview | None:
     if name == "ask_harness":
         return None
+    if context.get("target_challenge_hint"):
+        return _target_challenge_required_review(context["target_challenge_hint"])
     if grant is None:
         return PermissionReview(
             allowed=False,
@@ -280,7 +295,10 @@ def review_tool_call(
             return None
     elif grant == "write_test":
         path = str(args.get("path") or "")
-        if name == "read_file" and _same_path(path, context.get("test_file")):
+        if name == "read_file" and (
+            _same_path(path, context.get("test_file"))
+            or _path_in_list(path, context.get("test_setup_read_paths") or [])
+        ):
             return None
         if name in {"create_file", "str_replace_editor"} and _same_path(path, context.get("test_file")):
             return None
@@ -307,6 +325,191 @@ def review_tool_call(
     )
 
 
+def extract_target_challenge_hint(
+    name: str,
+    args: dict,
+    result: str,
+    context: dict,
+    *,
+    workdir: str,
+) -> dict[str, str] | None:
+    """Infer a pending target challenge from issue-relevant code evidence."""
+    if name not in {"rg", "read_file"}:
+        return None
+    if not result.strip():
+        return None
+
+    active_source = _normalize_permission_path(str(context.get("source_file") or ""))
+    active_symbol = str(context.get("target_symbol") or "").strip()
+    if not active_source or not active_symbol:
+        return None
+
+    if name == "read_file":
+        source_file = _normalize_permission_path(str(args.get("path") or ""))
+        if (
+            not source_file
+            or _same_path(source_file, active_source)
+            or _looks_like_test_file(source_file)
+            or source_file.startswith("../")
+            or "/../" in source_file
+        ):
+            return None
+        path = Path(workdir) / source_file
+        try:
+            source_text = path.read_text()
+        except OSError:
+            source_text = result
+        view_range = args.get("view_range")
+        line_offset = view_range[0] - 1 if _is_view_range(view_range) else 0
+        for index, raw_line in enumerate(source_text.splitlines(), start=1):
+            if not _line_matches_issue_terms(raw_line, context):
+                continue
+            line_no = line_offset + index
+            target_symbol = _find_enclosing_symbol(source_text, index, source_file)
+            if not target_symbol or target_symbol == active_symbol:
+                continue
+            return {
+                "source_file": source_file,
+                "target_symbol": target_symbol,
+                "evidence": (
+                    f"read_file found issue-relevant code in {source_file}:{line_no} inside "
+                    f"{target_symbol} while the active target is "
+                    f"{active_source}::{active_symbol}."
+                ),
+            }
+        return None
+
+    for raw_line in result.splitlines():
+        match = _SEARCH_RESULT_RE.match(raw_line)
+        if not match:
+            continue
+        source_file = _normalize_permission_path(match.group("path"))
+        if not source_file or _same_path(source_file, active_source):
+            continue
+        if source_file.startswith("../") or "/../" in source_file:
+            continue
+        line_no = int(match.group("line"))
+        path = Path(workdir) / source_file
+        try:
+            source_text = path.read_text()
+        except OSError:
+            continue
+
+        target_symbol = _find_enclosing_symbol(source_text, line_no, source_file)
+        if not target_symbol or target_symbol == active_symbol:
+            continue
+
+        return {
+            "source_file": source_file,
+            "target_symbol": target_symbol,
+            "evidence": (
+                f"rg found issue-relevant code in {source_file}:{line_no} inside "
+                f"{target_symbol} while the active target is "
+                f"{active_source}::{active_symbol}."
+            ),
+        }
+    return None
+
+
+def _is_view_range(value: Any) -> bool:
+    return (
+        isinstance(value, list)
+        and len(value) == 2
+        and all(isinstance(item, int) for item in value)
+        and value[0] > 0
+    )
+
+
+def _looks_like_test_file(path: str) -> bool:
+    normalized = _normalize_permission_path(path)
+    filename = posixpath.basename(normalized)
+    return bool(
+        re.search(r"(^|[._-])(test|spec)\.[A-Za-z0-9]+$", filename)
+        or normalized.endswith("__tests__")
+        or "/__tests__/" in normalized
+    )
+
+
+def _line_matches_issue_terms(line: str, context: dict) -> bool:
+    line_terms = set(_evidence_tokens(line))
+    if not line_terms:
+        return False
+    issue_terms = set(_evidence_tokens(str(context.get("issue_text") or "")))
+    if not issue_terms:
+        return False
+    return bool(line_terms & issue_terms)
+
+
+def _evidence_tokens(text: str) -> list[str]:
+    normalized = text.lower().replace("@", " ")
+    tokens = re.findall(r"[a-z0-9_]{4,}", normalized)
+    stop = {
+        "const",
+        "function",
+        "return",
+        "string",
+        "boolean",
+        "message",
+        "export",
+        "async",
+        "await",
+        "solo",
+        "funciona",
+        "principio",
+    }
+    return [token for token in tokens if token not in stop]
+
+
+def _target_challenge_required_review(hint: dict[str, str]) -> PermissionReview:
+    source_file = hint.get("source_file") or ""
+    target_symbol = hint.get("target_symbol") or ""
+    evidence = hint.get("evidence") or ""
+    return PermissionReview(
+        allowed=False,
+        message=(
+            "TARGET CHALLENGE REQUIRED: code evidence points at a different target. "
+            "Call ask_harness with:\n"
+            "{\n"
+            '  "intent": "challenge_target",\n'
+            f'  "source_file": "{source_file}",\n'
+            f'  "target_symbol": "{target_symbol}",\n'
+            f'  "evidence": "{evidence}"\n'
+            "}\n"
+            "Do not continue writing tests or edits for the previous target."
+        ),
+        event="target_challenge_required",
+    )
+
+
+def _find_enclosing_symbol(source_text: str, line_no: int, source_path: str) -> str | None:
+    lines = source_text.splitlines()
+    if not lines or line_no < 1 or line_no > len(lines):
+        return None
+    lang = get_language(source_path)
+    for index in range(line_no, 0, -1):
+        symbol = _definition_symbol_from_line(lines[index - 1])
+        if not symbol:
+            continue
+        end = _find_function_end(source_text, index, lang=lang) or index
+        if index <= line_no <= end:
+            return symbol
+    return None
+
+
+def _definition_symbol_from_line(line: str) -> str | None:
+    patterns = (
+        r"^\s*(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(",
+        r"^\s*(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=.*=>",
+        r"^\s*(?:async\s+)?def\s+([A-Za-z_][\w]*)\s*\(",
+        r"^\s*(?:public|private|protected|static|async|\s)*([A-Za-z_$][\w$]*)\s*\([^)]*\)\s*(?::[^{]+)?\{",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, line)
+        if match:
+            return match.group(1)
+    return None
+
+
 def consume_grant(
     name: str,
     args: dict | None,
@@ -319,6 +522,12 @@ def consume_grant(
         path = str((args or {}).get("path") or "")
         target = (context or {}).get("test_file") if grant == "write_test" else (context or {}).get("source_file")
         if name in {"read_file", "create_file", "str_replace_editor"} and _same_path(path, target):
+            return grant
+        if (
+            grant == "write_test"
+            and name == "read_file"
+            and _path_in_list(path, (context or {}).get("test_setup_read_paths") or [])
+        ):
             return grant
     return None
 
@@ -361,6 +570,13 @@ def review_target_challenge(
             event="target_challenge_denied",
         )
     if _same_path(source_file, context.get("source_file")) and target_symbol == context.get("target_symbol"):
+        retry = _target_challenge_retry_from_evidence(
+            evidence,
+            context=context,
+            workdir=workdir,
+        )
+        if retry:
+            return retry
         return PermissionReview(
             allowed=False,
             message="TARGET CHALLENGE DENIED: proposed target is already the active target.",
@@ -407,6 +623,90 @@ def _find_challenge_symbol_line(source_text: str, symbol: str) -> tuple[int | No
     if 1 <= start <= len(lines) and _looks_like_method_definition(lines[start - 1], symbol):
         return start, "method"
     return start, source
+
+
+def _target_challenge_retry_from_evidence(
+    evidence: str,
+    *,
+    context: dict,
+    workdir: str,
+) -> PermissionReview | None:
+    suggested = _suggest_target_from_evidence(
+        evidence,
+        active_source=_normalize_permission_path(str(context.get("source_file") or "")),
+        active_symbol=str(context.get("target_symbol") or ""),
+        workdir=workdir,
+    )
+    if not suggested:
+        return None
+    source_file, target_symbol = suggested
+    return PermissionReview(
+        allowed=False,
+        message=(
+            "TARGET CHALLENGE DENIED: your evidence names a different target, "
+            "but the structured fields still point at the active target. "
+            "Call ask_harness again with:\n"
+            "{\n"
+            '  "intent": "challenge_target",\n'
+            f'  "source_file": "{source_file}",\n'
+            f'  "target_symbol": "{target_symbol}",\n'
+            f'  "evidence": "{_json_safe(evidence)}"\n'
+            "}"
+        ),
+        event="target_challenge_denied",
+    )
+
+
+def _suggest_target_from_evidence(
+    evidence: str,
+    *,
+    active_source: str,
+    active_symbol: str,
+    workdir: str,
+) -> tuple[str, str] | None:
+    for match in re.finditer(
+        r"(?P<path>(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\.(?:ts|tsx|js|jsx|py))(?::(?P<line>\d+))?",
+        evidence,
+    ):
+        source_file = _normalize_permission_path(match.group("path"))
+        if (
+            not source_file
+            or _same_path(source_file, active_source)
+            or source_file.startswith("../")
+            or "/../" in source_file
+        ):
+            continue
+        path = Path(workdir) / source_file
+        try:
+            source_text = path.read_text()
+        except OSError:
+            continue
+        line_no = int(match.group("line")) if match.group("line") else None
+        if line_no:
+            target_symbol = _find_enclosing_symbol(source_text, line_no, source_file)
+            if target_symbol and target_symbol != active_symbol:
+                return source_file, target_symbol
+        mentioned = _mentioned_symbols_in_source(source_text, evidence)
+        for target_symbol in mentioned:
+            if target_symbol != active_symbol:
+                return source_file, target_symbol
+    return None
+
+
+def _mentioned_symbols_in_source(source_text: str, evidence: str) -> list[str]:
+    symbols: list[str] = []
+    for index, line in enumerate(source_text.splitlines(), start=1):
+        symbol = _definition_symbol_from_line(line)
+        if not symbol or symbol not in evidence:
+            continue
+        end = _find_function_end(source_text, index, lang=None) or index
+        if index <= end:
+            symbols.append(symbol)
+    return symbols
+
+
+def _json_safe(text: str) -> str:
+    return text.replace("\\", "\\\\").replace('"', '\\"')
 
 
 def _looks_like_method_definition(line: str, symbol: str) -> bool:
@@ -575,6 +875,59 @@ def _read_referenced_type_shapes(
                 shape["module"] = module_name
                 shapes.append(shape)
     return shapes
+
+
+def _read_test_setup_dependency_paths(
+    *,
+    workdir: str | None,
+    test_file: Any,
+) -> list[str]:
+    if not workdir or not test_file:
+        return []
+
+    test_path = Path(workdir) / str(test_file)
+    try:
+        test_text = test_path.read_text()
+    except OSError:
+        return []
+
+    test_dir = posixpath.dirname(_normalize_permission_path(str(test_file)))
+    paths: set[str] = set()
+    for spec in _extract_mock_module_specs(test_text):
+        if not spec.startswith(("./", "../")):
+            continue
+        candidate_base = _normalize_permission_path(posixpath.join(test_dir, spec))
+        if not candidate_base or candidate_base.startswith("../") or "/../" in candidate_base:
+            continue
+        resolved = _resolve_repo_module_path(Path(workdir), candidate_base)
+        if resolved:
+            paths.add(resolved)
+    return sorted(paths)
+
+
+def _extract_mock_module_specs(test_text: str) -> list[str]:
+    return [
+        match.group("spec")
+        for match in re.finditer(
+            r"mock\.module\(\s*['\"](?P<spec>\.{1,2}/[^'\"]+)['\"]",
+            test_text,
+        )
+    ]
+
+
+def _resolve_repo_module_path(workdir: Path, candidate_base: str) -> str:
+    candidates = [
+        candidate_base,
+        *[f"{candidate_base}{suffix}" for suffix in (".ts", ".tsx", ".js", ".jsx", ".mts", ".cts")],
+        *[
+            posixpath.join(candidate_base, f"index{suffix}")
+            for suffix in (".ts", ".tsx", ".js", ".jsx", ".mts", ".cts")
+        ],
+    ]
+    for candidate in candidates:
+        if (workdir / candidate).is_file():
+            return candidate
+    return ""
 
 
 def _referenced_framework_types(contract_facts: list[str]) -> list[tuple[str, list[str]]]:
@@ -1028,6 +1381,10 @@ def _same_path(left: str | None, right: str | None) -> bool:
     if left_text.startswith("/") != right_text.startswith("/"):
         return False
     return _normalize_permission_path(left_text) == _normalize_permission_path(right_text)
+
+
+def _path_in_list(path: str | None, candidates: list[str]) -> bool:
+    return any(_same_path(path, candidate) for candidate in candidates)
 
 
 def _normalize_permission_path(path: str) -> str:
