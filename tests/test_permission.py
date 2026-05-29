@@ -213,6 +213,163 @@ def test_target_challenge_rejects_unreadable_or_missing_symbol(tmp_path):
     assert "not found as a definition" in missing.message
 
 
+def test_extracts_pending_target_challenge_from_search_result(tmp_path):
+    wrong = tmp_path / "src" / "personality" / "sanitizer.ts"
+    right = tmp_path / "src" / "twitch" / "client.ts"
+    wrong.parent.mkdir(parents=True)
+    right.parent.mkdir(parents=True)
+    wrong.write_text(
+        "\n".join([
+            "export function wrapUserMessage(message: string): string {",
+            "  return message.trim();",
+            "}",
+        ])
+    )
+    right.write_text(
+        "\n".join([
+            "export function handleMessage(message: string): boolean {",
+            "  const lower = message.toLowerCase();",
+            "  const isMention = lower.startsWith('@manolitozurrapa');",
+            "  return isMention;",
+            "}",
+        ])
+    )
+
+    hint = permission.extract_target_challenge_hint(
+        "rg",
+        {"pattern": "@manolitozurrapa"},
+        "./src/twitch/client.ts:3:  const isMention = lower.startsWith('@manolitozurrapa');",
+        {
+            "source_file": "src/personality/sanitizer.ts",
+            "target_symbol": "wrapUserMessage",
+        },
+        workdir=str(tmp_path),
+    )
+
+    assert hint == {
+        "source_file": "src/twitch/client.ts",
+        "target_symbol": "handleMessage",
+        "evidence": (
+            "rg found issue-relevant code in src/twitch/client.ts:3 inside "
+            "handleMessage while the active target is "
+            "src/personality/sanitizer.ts::wrapUserMessage."
+        ),
+    }
+
+
+def test_extracts_pending_target_challenge_from_issue_relevant_read_file(tmp_path):
+    right = tmp_path / "src" / "twitch" / "client.ts"
+    right.parent.mkdir(parents=True)
+    right.write_text(
+        "\n".join([
+            "export function connect(): void {",
+            "  logger.info('ready');",
+            "}",
+            "",
+            "export async function handleMessage(message: string): Promise<void> {",
+            "  const botMention = '@manolitozurrapa';",
+            "  const isMention = message.startsWith(botMention);",
+            "  if (isMention) await respond(message);",
+            "}",
+        ])
+    )
+
+    context = {
+        "source_file": "src/personality/sanitizer.ts",
+        "target_symbol": "wrapUserMessage",
+        "issue_text": "@manolitozurrapa solo funciona al principio del mensaje",
+    }
+    hint = permission.extract_target_challenge_hint(
+        "read_file",
+        {"path": "src/twitch/client.ts"},
+        right.read_text(),
+        context,
+        workdir=str(tmp_path),
+    )
+
+    assert hint == {
+        "source_file": "src/twitch/client.ts",
+        "target_symbol": "handleMessage",
+        "evidence": (
+            "read_file found issue-relevant code in src/twitch/client.ts:6 inside "
+            "handleMessage while the active target is "
+            "src/personality/sanitizer.ts::wrapUserMessage."
+        ),
+    }
+
+
+def test_read_file_target_challenge_ignores_test_files(tmp_path):
+    test_file = tmp_path / "src" / "personality" / "security.test.ts"
+    test_file.parent.mkdir(parents=True)
+    test_file.write_text("test('mentions @manolitozurrapa anywhere', () => {});\n")
+
+    hint = permission.extract_target_challenge_hint(
+        "read_file",
+        {"path": "src/personality/security.test.ts"},
+        test_file.read_text(),
+        {
+            "source_file": "src/personality/sanitizer.ts",
+            "target_symbol": "wrapUserMessage",
+            "issue_text": "@manolitozurrapa solo funciona al principio del mensaje",
+        },
+        workdir=str(tmp_path),
+    )
+
+    assert hint is None
+
+
+def test_active_target_challenge_with_evidence_for_other_target_returns_retry_shape(tmp_path):
+    right = tmp_path / "src" / "twitch" / "client.ts"
+    right.parent.mkdir(parents=True)
+    right.write_text(
+        "\n".join([
+            "export async function handleMessage(message: string): Promise<void> {",
+            "  return undefined;",
+            "}",
+        ])
+    )
+
+    review = permission.review_target_challenge(
+        {
+            "source_file": "src/personality/sanitizer.ts",
+            "target_symbol": "wrapUserMessage",
+            "evidence": (
+                "The bug is in handleMessage at src/twitch/client.ts:1; "
+                "wrapUserMessage only wraps messages."
+            ),
+        },
+        {
+            "source_file": "src/personality/sanitizer.ts",
+            "target_symbol": "wrapUserMessage",
+        },
+        workdir=str(tmp_path),
+    )
+
+    assert review.allowed is False
+    assert review.event == "target_challenge_denied"
+    assert "your evidence names a different target" in review.message
+    assert '"source_file": "src/twitch/client.ts"' in review.message
+    assert '"target_symbol": "handleMessage"' in review.message
+
+
+def test_pending_target_challenge_blocks_non_challenge_harness_intent():
+    context = _context()
+    context["target_challenge_hint"] = {
+        "source_file": "src/twitch/client.ts",
+        "target_symbol": "handleMessage",
+        "evidence": "rg found issue-relevant code in client.ts",
+    }
+
+    review = permission.answer_harness({"intent": "write_regression_test"}, context)
+
+    assert review.allowed is False
+    assert review.event == "target_challenge_required"
+    assert "TARGET CHALLENGE REQUIRED" in review.message
+    assert '"intent": "challenge_target"' in review.message
+    assert '"source_file": "src/twitch/client.ts"' in review.message
+    assert '"target_symbol": "handleMessage"' in review.message
+
+
 def test_blocks_tools_until_model_declares_intent():
     review = permission.review_tool_call(
         "read_file",
@@ -329,6 +486,52 @@ def test_write_grants_allow_reading_the_same_file_for_resync():
     assert source_read is None
     assert unrelated_read is not None
     assert "PERMISSION DENIED" in unrelated_read.message
+
+
+def test_write_test_grant_allows_reading_test_setup_dependencies(tmp_path):
+    test_file = tmp_path / "src" / "twitch" / "handleMessage.test.ts"
+    dependency = tmp_path / "src" / "personality" / "literales.ts"
+    test_file.parent.mkdir(parents=True)
+    dependency.parent.mkdir(parents=True)
+    test_file.write_text(
+        "\n".join([
+            "import { describe } from 'bun:test';",
+            "import { handleMessage } from './client';",
+            "mock.module('../personality/literales', () => ({",
+            "  getMessage: mock(() => undefined),",
+            "}));",
+        ])
+    )
+    dependency.write_text("export const getSystemPrompt = () => '';\n")
+
+    context = permission.build_permission_context(
+        episode={
+            "source_file": "src/twitch/client.ts",
+            "test_file": "src/twitch/handleMessage.test.ts",
+            "target_symbol": "handleMessage",
+        },
+        config={"runner": {"command": "bun test"}},
+        phase="test",
+        test_file_created=True,
+        workdir=str(tmp_path),
+    )
+
+    review = permission.review_tool_call(
+        "read_file",
+        {"path": "src/personality/literales.ts"},
+        grant="write_test",
+        context=context,
+    )
+    next_grant = permission.consume_grant(
+        "read_file",
+        {"path": "src/personality/literales.ts"},
+        "write_test",
+        context,
+    )
+
+    assert "src/personality/literales.ts" in context["test_setup_read_paths"]
+    assert review is None
+    assert next_grant == "write_test"
 
 
 def test_permission_path_matching_normalizes_only_relative_path_syntax():

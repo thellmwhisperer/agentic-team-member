@@ -179,6 +179,7 @@ def run_agent_loop(
     consecutive_non_apply_steps = 0
     test_file_created = False
     permission_grant: str | None = None
+    target_challenge_hint: dict | None = None
     permission_mode = _permission.permission_enabled(config)
     allow_dependency_contract_lookup = False
     block_dependency_contract_lookup = has_contract_evidence(issue_text, episode)
@@ -225,6 +226,9 @@ def run_agent_loop(
             test_file_created=test_file_created,
             workdir=workdir,
         )
+        permission_context["issue_text"] = issue_text
+        if target_challenge_hint:
+            permission_context["target_challenge_hint"] = target_challenge_hint
         config["_runtime"] = {
             "step": step,
             "max_steps": max_steps,
@@ -367,6 +371,7 @@ def run_agent_loop(
                     if permission_review.allowed and maybe_episode is not episode:
                         episode = maybe_episode
                         permission_grant = None
+                        target_challenge_hint = None
                         test_file_created = False
                         allow_dependency_contract_lookup = False
                         block_dependency_contract_lookup = has_contract_evidence(issue_text, episode)
@@ -387,6 +392,7 @@ def run_agent_loop(
                             test_file_created=test_file_created,
                             workdir=workdir,
                         )
+                        permission_context["issue_text"] = issue_text
                         config["_runtime"].update({
                             "thinking_phase": phase,
                             "block_dependency_contract_lookup": block_dependency_contract_lookup,
@@ -455,6 +461,21 @@ def run_agent_loop(
                             tool_elapsed = time.time() - t1
                             applied = tool_applied_status(name, result)
                             state_reviewer.observe_tool_result(name, args, result, applied=applied)
+                            maybe_hint = _permission.extract_target_challenge_hint(
+                                name,
+                                args,
+                                result,
+                                permission_context,
+                                workdir=workdir,
+                            )
+                            if maybe_hint:
+                                target_challenge_hint = maybe_hint
+                                permission_context["target_challenge_hint"] = target_challenge_hint
+                                config["_runtime"]["permission_context"] = permission_context
+                                log("target_challenge_hint", {
+                                    "step": step,
+                                    **target_challenge_hint,
+                                })
                             permission_grant = _permission.consume_grant(
                                 name,
                                 args,
@@ -544,7 +565,7 @@ def run_agent_loop(
                 # intact. Only a successful edit (applied is True) breaks it,
                 # because only a successful edit represents actual progress.
 
-                if not state_review and is_test_pass(name, args):
+                if permission_review is None and not state_review and is_test_pass(name, args):
                     test_passed = True
 
             if step_had_successful_edit:
