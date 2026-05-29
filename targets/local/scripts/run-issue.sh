@@ -17,7 +17,7 @@ if [[ -f "${TARGET_DIR}/.env.local" ]]; then
   set +a
 fi
 
-ATM_PYTHON="${ATM_PYTHON:-python3.12}"
+ATM_PYTHON="${ATM_PYTHON:-python3}"
 ATM_CONFIG_PATH="${ATM_CONFIG_PATH:-config/agent.toml}"
 ATM_LOG_DIR="${ATM_LOG_DIR:-.atm/logs}"
 ATM_RUN_ROOT="${ATM_RUN_ROOT:-.atm/worktrees}"
