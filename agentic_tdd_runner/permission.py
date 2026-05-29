@@ -39,6 +39,19 @@ class PermissionReview:
 _SEARCH_RESULT_RE = re.compile(
     r"^(?:\./)?(?P<path>[^:\n]+):(?P<line>\d+):(?P<text>.*)$"
 )
+_CONTROL_FLOW_SYMBOLS = {
+    "if",
+    "else",
+    "for",
+    "while",
+    "switch",
+    "catch",
+    "do",
+    "try",
+    "finally",
+    "return",
+    "await",
+}
 
 
 def permission_enabled(config: dict) -> bool:
@@ -357,10 +370,11 @@ def extract_target_challenge_hint(
         path = Path(workdir) / source_file
         try:
             source_text = path.read_text()
+            line_offset = 0
         except OSError:
             source_text = result
-        view_range = args.get("view_range")
-        line_offset = view_range[0] - 1 if _is_view_range(view_range) else 0
+            view_range = args.get("view_range")
+            line_offset = view_range[0] - 1 if _is_view_range(view_range) else 0
         for index, raw_line in enumerate(source_text.splitlines(), start=1):
             if not _line_matches_issue_terms(raw_line, context):
                 continue
@@ -473,7 +487,7 @@ def _target_challenge_required_review(hint: dict[str, str]) -> PermissionReview:
             '  "intent": "challenge_target",\n'
             f'  "source_file": "{source_file}",\n'
             f'  "target_symbol": "{target_symbol}",\n'
-            f'  "evidence": "{evidence}"\n'
+            f'  "evidence": "{_json_safe(evidence)}"\n'
             "}\n"
             "Do not continue writing tests or edits for the previous target."
         ),
@@ -506,7 +520,10 @@ def _definition_symbol_from_line(line: str) -> str | None:
     for pattern in patterns:
         match = re.search(pattern, line)
         if match:
-            return match.group(1)
+            symbol = match.group(1)
+            if symbol in _CONTROL_FLOW_SYMBOLS:
+                return None
+            return symbol
     return None
 
 
@@ -697,12 +714,16 @@ def _mentioned_symbols_in_source(source_text: str, evidence: str) -> list[str]:
     symbols: list[str] = []
     for index, line in enumerate(source_text.splitlines(), start=1):
         symbol = _definition_symbol_from_line(line)
-        if not symbol or symbol not in evidence:
+        if not symbol or not _symbol_mentioned_in_evidence(symbol, evidence):
             continue
         end = _find_function_end(source_text, index, lang=None) or index
         if index <= end:
             symbols.append(symbol)
     return symbols
+
+
+def _symbol_mentioned_in_evidence(symbol: str, evidence: str) -> bool:
+    return bool(re.search(rf"(?<![A-Za-z0-9_$]){re.escape(symbol)}(?![A-Za-z0-9_$])", evidence))
 
 
 def _json_safe(text: str) -> str:
