@@ -257,6 +257,38 @@ def test_extracts_pending_target_challenge_from_search_result(tmp_path):
     }
 
 
+def test_search_target_challenge_ignores_control_flow_keywords(tmp_path):
+    right = tmp_path / "src" / "twitch" / "client.ts"
+    right.parent.mkdir(parents=True)
+    right.write_text(
+        "\n".join([
+            "export function handleMessage(message: string): boolean {",
+            "  const lower = message.toLowerCase();",
+            "  if (lower.startsWith('@manolitozurrapa')) {",
+            "    return true;",
+            "  }",
+            "  return false;",
+            "}",
+        ])
+    )
+
+    hint = permission.extract_target_challenge_hint(
+        "rg",
+        {"pattern": "@manolitozurrapa"},
+        "./src/twitch/client.ts:3:  if (lower.startsWith('@manolitozurrapa')) {",
+        {
+            "source_file": "src/personality/sanitizer.ts",
+            "target_symbol": "wrapUserMessage",
+        },
+        workdir=str(tmp_path),
+    )
+
+    assert hint is not None
+    assert hint["target_symbol"] == "handleMessage"
+    assert "inside handleMessage" in hint["evidence"]
+    assert "inside if" not in hint["evidence"]
+
+
 def test_extracts_pending_target_challenge_from_issue_relevant_read_file(tmp_path):
     right = tmp_path / "src" / "twitch" / "client.ts"
     right.parent.mkdir(parents=True)
@@ -296,6 +328,39 @@ def test_extracts_pending_target_challenge_from_issue_relevant_read_file(tmp_pat
             "src/personality/sanitizer.ts::wrapUserMessage."
         ),
     }
+
+
+def test_read_file_target_challenge_does_not_double_count_view_range_when_full_file_is_read(tmp_path):
+    right = tmp_path / "src" / "twitch" / "client.ts"
+    right.parent.mkdir(parents=True)
+    right.write_text(
+        "\n".join([
+            "export function connect(): void {",
+            "  logger.info('ready');",
+            "}",
+            "",
+            "export async function handleMessage(message: string): Promise<void> {",
+            "  const botMention = '@manolitozurrapa';",
+            "  if (message.startsWith(botMention)) await respond(message);",
+            "}",
+        ])
+    )
+
+    hint = permission.extract_target_challenge_hint(
+        "read_file",
+        {"path": "src/twitch/client.ts", "view_range": [100, 120]},
+        right.read_text(),
+        {
+            "source_file": "src/personality/sanitizer.ts",
+            "target_symbol": "wrapUserMessage",
+            "issue_text": "@manolitozurrapa solo funciona al principio del mensaje",
+        },
+        workdir=str(tmp_path),
+    )
+
+    assert hint is not None
+    assert "src/twitch/client.ts:6" in hint["evidence"]
+    assert "src/twitch/client.ts:105" not in hint["evidence"]
 
 
 def test_read_file_target_challenge_ignores_test_files(tmp_path):
@@ -350,6 +415,29 @@ def test_active_target_challenge_with_evidence_for_other_target_returns_retry_sh
     assert "your evidence names a different target" in review.message
     assert '"source_file": "src/twitch/client.ts"' in review.message
     assert '"target_symbol": "handleMessage"' in review.message
+
+
+def test_target_challenge_required_escapes_evidence_json():
+    review = permission._target_challenge_required_review({
+        "source_file": "src/twitch/client.ts",
+        "target_symbol": "handleMessage",
+        "evidence": 'quote " and slash \\ inside evidence',
+    })
+
+    assert '\\"' in review.message
+    assert "\\\\ inside evidence" in review.message
+
+
+def test_mentioned_symbols_use_identifier_boundaries():
+    source = "\n".join([
+        "export function get(): void {",
+        "}",
+        "",
+        "export function getUser(): void {",
+        "}",
+    ])
+
+    assert permission._mentioned_symbols_in_source(source, "src/client.ts mentions getUser") == ["getUser"]
 
 
 def test_pending_target_challenge_blocks_non_challenge_harness_intent():
