@@ -7,8 +7,9 @@
 [![license](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 [![status](https://img.shields.io/badge/status-alpha-orange)](#status)
 
-ATM is a small Python harness that turns a local code model (Qwen 3.5 27B / 4B on
-[llama-server](https://github.com/ggml-org/llama.cpp) or [Ollama](https://ollama.ai))
+ATM is a small Python harness that turns a local code model (for example Qwen
+3.6 MTP on [llama-server](https://github.com/ggml-org/llama.cpp), or another
+OpenAI-compatible local endpoint)
 into a **TDD bug-fix agent** for your repository. No model API key — your code
 is never sent to a hosted inference provider. (GitHub auth via `gh` is still
 required for issue ingestion and PR creation.)
@@ -29,6 +30,7 @@ the code, write a failing test, fix the bug, verify red-green, and open a PR.
 
 - [Why local-first](#why-local-first)
 - [Quick look](#quick-look)
+- [Execution targets](#execution-targets)
 - [How it works](#how-it-works)
 - [The cookbook](#the-cookbook)
 - [Skills](#skills)
@@ -67,12 +69,10 @@ That constraint shaped every design decision:
 ## Quick look
 
 ```bash
-# 1. Start a local model server
-llama-server \
-  --model Qwen3.5-27B.Q4_K_M.gguf \
-  --host 127.0.0.1 --port 11435 \
-  --ctx-size 32768 --n-gpu-layers 999 \
-  --jinja --no-webui
+# 1. Start a local model server with the local target profile
+cp targets/local/.env.example targets/local/.env.local
+# edit targets/local/.env.local for your llama-server binary and local config
+make -C targets/local start-model
 
 # 2. Point ATM at a GitHub issue
 python3.12 -m agentic_tdd_runner.agent \
@@ -85,6 +85,22 @@ ATM clones a detached worktree under `your-repo/.worktree/`, runs environment
 prep, generates a cookbook for the target function, then drives the model
 through a two-phase TDD loop. If everything goes green, it commits and opens a
 PR via `gh`.
+
+---
+
+## Execution targets
+
+ATM has one canonical harness: `agentic_tdd_runner`. Execution targets describe
+how to operate that harness in a specific environment without forking it.
+
+| Target | Path | Purpose |
+| --- | --- | --- |
+| Local | [`targets/local`](targets/local) | Run ATM on a developer machine with `llama-server` or another local OpenAI-compatible endpoint. |
+| AWS AgentCore | [`targets/aws-agentcore`](targets/aws-agentcore) | Optional hosted execution target for AWS AgentCore and Bedrock. |
+
+Target-specific settings belong in `.env.local`, `*.local.toml`, cloud secret
+stores, or target-local docs. The core harness remains AWS-agnostic and should
+not import deployment-specific code.
 
 ---
 
@@ -372,8 +388,9 @@ There is no published package yet — clone and run from source.
 - Python 3.12+
 - [`requests`](https://pypi.org/project/requests/)
 - A local LLM server — [llama-server](https://github.com/ggml-org/llama.cpp)
-  or [Ollama](https://ollama.ai)
-- A GGUF model with tool-calling support (tested with Qwen 3.5 27B and 4B)
+  or another OpenAI-compatible endpoint
+- A model with tool-calling support. The local target documents the current
+  Qwen 3.6 MTP `llama-server` profile.
 - [`gh`](https://cli.github.com/) CLI for PR creation
 - [`rg`](https://github.com/BurntSushi/ripgrep) recommended for the agent's
   search tool
@@ -385,12 +402,13 @@ There is no published package yet — clone and run from source.
 ### Start the model server
 
 ```bash
-llama-server \
-  --model Qwen3.5-27B.Q4_K_M.gguf \
-  --host 127.0.0.1 --port 11435 \
-  --ctx-size 32768 --n-gpu-layers 999 \
-  --jinja --no-webui
+cp targets/local/.env.example targets/local/.env.local
+# edit targets/local/.env.local for your machine
+make -C targets/local start-model
 ```
+
+The local target keeps machine-specific model paths and `llama-server` build
+paths out of git. See [`targets/local`](targets/local) for the exact profile.
 
 ### Run the agent
 
