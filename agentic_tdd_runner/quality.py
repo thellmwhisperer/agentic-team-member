@@ -17,6 +17,9 @@ _TEST_ONLY_SETTER_EXPORT_RE = re.compile(
     r"|\bexport\s+(?:const|let|var)\s+__set[A-Za-z0-9_]*ForTests\b"
     r"|\bexport\s*\{[^}\n]*__set[A-Za-z0-9_]*ForTests[^}\n]*\}"
 )
+_SOURCE_TEXT_READ_RE = re.compile(
+    r"\b(?:[A-Za-z_$][\w$]*\.)?readFileSync\s*\(\s*['\"](?:\./)?src/[^'\"]+\.(?:ts|tsx|js|jsx|py)['\"]"
+)
 
 
 def detect_package_manager(workdir: str, pkg: dict | None = None) -> str:
@@ -277,6 +280,9 @@ def run_quality_checks(
                 report_lines = list(ambiguous_dupes)
         if report_lines:
             failures.append(format_duplicated_setup_finding(f, report_lines))
+        source_text_finding = detect_source_text_assertion_test(f, file_text)
+        if source_text_finding:
+            failures.append(source_text_finding)
 
     for finding in detect_side_effect_shape_changes(changed, workdir, is_test_file_path):
         failures.append(finding)
@@ -343,6 +349,22 @@ def detect_production_test_only_exports(
                 f"{sample}"
             )
     return findings
+
+
+def detect_source_text_assertion_test(file_path: str, file_text: str) -> str | None:
+    hits = [
+        f"  {file_path}:{line_no} `{line.strip()[:120]}`"
+        for line_no, line in enumerate(file_text.splitlines(), 1)
+        if _SOURCE_TEXT_READ_RE.search(line)
+    ]
+    if not hits:
+        return None
+    sample = "\n".join(hits[:3])
+    return (
+        f"[Invalid test] {file_path}: test reads production source text; "
+        "import and exercise the real behavior instead of asserting implementation strings.\n"
+        f"{sample}"
+    )
 
 
 def is_obvious_setup_line(line: str) -> bool:
