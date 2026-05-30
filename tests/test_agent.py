@@ -1395,6 +1395,28 @@ class TestRunQualityChecks:
         assert ok is False
         assert ": any" in msg
 
+    def test_rejects_production_test_only_setter_exports(self, tmp_path, monkeypatch):
+        self._setup_repo(tmp_path, monkeypatch)
+        (tmp_path / "src" / "file.ts").write_text(
+            "export function __setClientForTests(client: unknown): void {\n"
+            "  void client;\n"
+            "}\n"
+        )
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "quality": {
+                "enabled": True, "max_fix_rounds": 3,
+                "typescript": {"checks": [], "forbidden": []},
+            },
+            "timeouts": {"tool_execution": 10},
+            "prompt": {"quality_failed": "FAIL: {details}"},
+        })
+
+        ok, msg = run_quality_checks("src/file.test.ts")
+
+        assert ok is False
+        assert "test-only production export" in msg
+        assert "src/file.ts:1" in msg
+
     def test_passes_clean_code(self, tmp_path, monkeypatch):
         self._setup_repo(tmp_path, monkeypatch)
         (tmp_path / "src" / "file.test.ts").write_text("const x: number = 1;")

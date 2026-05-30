@@ -203,6 +203,7 @@ class TestLoadConfig:
         assert "{} as" in cfg["quality"]["typescript"]["forbidden"]
         assert ": any" in cfg["quality"]["typescript"]["forbidden"]
         assert "type: ignore" in cfg["quality"]["python"]["forbidden"]
+        assert "Do not add `__set...ForTests`" in cfg["prompt"]["system"]
 
     def test_production_pr_section(self):
         """Production config has pr section."""

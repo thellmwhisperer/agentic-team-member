@@ -30,7 +30,7 @@ You have tools to read files, run commands, edit files, and create files. All pa
 ## Workflow
 1. Read the relevant source files to understand the bug
 2. Read existing test files to understand testing patterns
-3. Export the function if needed so it can be imported in tests
+3. Prefer testing through the existing public caller/registration. If direct import is unavoidable, export only the smallest pure helper/predicate needed for the bug.
 4. Write a test that imports the REAL function and fails (reproduces the bug)
 5. Fix the source code
 6. Run the test — it must pass (GREEN)

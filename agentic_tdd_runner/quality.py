@@ -12,6 +12,13 @@ from pathlib import Path, PurePosixPath
 import requests
 
 
+_TEST_ONLY_SETTER_EXPORT_RE = re.compile(
+    r"\bexport\s+(?:async\s+)?function\s+__set[A-Za-z0-9_]*ForTests\b"
+    r"|\bexport\s+(?:const|let|var)\s+__set[A-Za-z0-9_]*ForTests\b"
+    r"|\bexport\s*\{[^}\n]*__set[A-Za-z0-9_]*ForTests[^}\n]*\}"
+)
+
+
 def detect_package_manager(workdir: str, pkg: dict | None = None) -> str:
     """Detect the package manager. Checks packageManager field first, then lockfiles."""
     if pkg:
@@ -246,6 +253,9 @@ def run_quality_checks(
         n = len(hits)
         failures.append(f"[Forbidden] {f}: {n} forbidden patterns\n{sample}")
 
+    for finding in detect_production_test_only_exports(changed, workdir, is_test_file_path):
+        failures.append(finding)
+
     # Detect duplicated setup lines in test files - report identifiers, not full lines
     test_files = [f for f in changed if is_test_file_path(f)]
     for f in test_files:
@@ -301,6 +311,38 @@ def is_obvious_assert_line(line: str) -> bool:
     ):
         return True
     return False
+
+
+def detect_production_test_only_exports(
+    changed_files: list[str],
+    workdir: str,
+    is_test_file_path: Callable[[str], bool],
+) -> list[str]:
+    findings: list[str] = []
+    for path in changed_files:
+        if is_test_file_path(path):
+            continue
+        full = os.path.join(workdir, path)
+        if not os.path.isfile(full):
+            continue
+        try:
+            with open(full, errors="replace") as fh:
+                lines = fh.read().splitlines()
+        except OSError:
+            continue
+        hits = [
+            f"  {path}:{line_no} test-only export `{line.strip()[:120]}`"
+            for line_no, line in enumerate(lines, 1)
+            if _TEST_ONLY_SETTER_EXPORT_RE.search(line)
+        ]
+        if hits:
+            sample = "\n".join(hits[:3])
+            findings.append(
+                f"[test-only production export] {path}: remove production `__set...ForTests` APIs; "
+                "prefer a public caller/registration path, module mock, or smallest pure helper.\n"
+                f"{sample}"
+            )
+    return findings
 
 
 def is_obvious_setup_line(line: str) -> bool:

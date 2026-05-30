@@ -78,7 +78,7 @@ def _build_bun_scaffold(contract):
                 spy_name = f"{binding}_{member}_spy"
                 arrange_lines.append(f"const {spy_name} = {_render_ts_mock()};")
                 arrange_lines.append(
-                    f"// TODO: inject {spy_name} through the framework seam for {binding}"
+                    f"// TODO: exercise {binding} through a public caller/registration, module mock, or smallest pure helper using {spy_name}."
                 )
                 todo_slots.append(f"inject_{binding}_seam")
 
@@ -231,7 +231,7 @@ def _build_pytest_scaffold(contract):
                 spy_name = f"{binding}_{member}_spy"
                 arrange_lines.append(f"{spy_name} = Mock()")
                 arrange_lines.append(
-                    f"# TODO: inject {spy_name} through the framework seam for {binding}"
+                    f"# TODO: exercise {binding} through a public caller/registration, module mock, or smallest pure helper using {spy_name}"
                 )
                 todo_slots.append(f"inject_{binding}_seam")
 
