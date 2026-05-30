@@ -33,7 +33,7 @@ permission_driven = false
 
 [llm]
 url = "http://127.0.0.1:11435/v1/chat/completions"
-model = "qwen3.6-27b"
+model = "qwen3.6-27b-mtp"
 
 [quality.duplicated_setup_judge]
 enabled = true
