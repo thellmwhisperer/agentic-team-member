@@ -5,6 +5,8 @@ separate product and it does not carry a forked harness. The runtime image is
 built from the monorepo root and includes the canonical `agentic_tdd_runner`
 package.
 
+![ATM AWS AgentCore target architecture](architecture-aws-agentcore.svg)
+
 ## What Changes From Local
 
 | Concern | Local target | AWS AgentCore target |

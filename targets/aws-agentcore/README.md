@@ -23,21 +23,7 @@ configured, the runtime uses a no-op memory adapter.
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    Job["ATM job payload<br/>repo + issue"] --> Runtime["Bedrock AgentCore Runtime<br/>ATM container"]
-    Runtime --> Harness["agentic_tdd_runner<br/>canonical harness"]
-    Runtime --> Proxy["OpenAI-compatible<br/>Bedrock proxy"]
-    Harness --> Proxy
-    Proxy --> Bedrock["Amazon Bedrock<br/>Converse"]
-    Runtime --> Secrets["AWS Secrets Manager<br/>GitHub token<br/>optional Roca token"]
-    Runtime --> Logs["CloudWatch Logs<br/>runtime + harness output"]
-    Runtime --> Memory["optional Roca Cloud MCP<br/>query + store"]
-    Harness --> GitHub["GitHub API<br/>current git push / PR path"]
-    Runtime -. planned governed tools .-> Gateway["AgentCore Gateway<br/>MCP + IAM"]
-    Gateway -. invoke .-> Lambda["GitHub tool Lambda<br/>allowlist + branch guard"]
-    Lambda -. planned writes .-> GitHub
-```
+![ATM AWS AgentCore target architecture](../../docs/architecture-aws-agentcore.svg)
 
 Solid arrows show the runtime path this target supports today. Dashed arrows
 show the provisioned Gateway perimeter for moving GitHub writes behind

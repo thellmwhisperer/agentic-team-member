@@ -67,6 +67,10 @@ runtime path. Their operational diagrams live in:
 - [`../targets/local/README.md`](../targets/local/README.md)
 - [`../targets/aws-agentcore/README.md`](../targets/aws-agentcore/README.md)
 
+![ATM local target architecture](architecture-local.svg)
+
+![ATM AWS AgentCore target architecture](architecture-aws-agentcore.svg)
+
 ## Boundaries
 
 Versioned core config belongs under `config/`. Personal machine settings belong
