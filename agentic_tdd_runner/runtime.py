@@ -57,6 +57,13 @@ def thinking_phase(
     return "test"
 
 
+def _edited_test_file(name: str, args: dict, is_test_file_path: Callable[[str], bool]) -> bool:
+    if name not in {"create_file", "str_replace_editor"}:
+        return False
+    path = str((args or {}).get("path") or "")
+    return bool(path and is_test_file_path(path))
+
+
 def _build_rerouted_episode(
     args: dict,
     *,
@@ -517,7 +524,7 @@ def run_agent_loop(
                         tool_elapsed = time.time() - t1
                         applied = tool_applied_status(name, result)
                         state_reviewer.observe_tool_result(name, args, result, applied=applied)
-                if applied is True and name == "create_file" and is_test_file_path(str(args.get("path", ""))):
+                if applied is True and _edited_test_file(name, args, is_test_file_path):
                     created_test_this_step = True
                 result_truncated = truncate(result)
                 loop_signature = tool_loop_signature(name, args)
