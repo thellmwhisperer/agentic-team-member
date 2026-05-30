@@ -447,6 +447,152 @@ def test_permission_mode_accepts_target_challenge_and_reroutes_episode(tmp_path)
     )
 
 
+def test_challenge_target_reroutes_without_permission_mode(tmp_path):
+    wrong_source = tmp_path / "src" / "personality" / "sanitizer.ts"
+    right_source = tmp_path / "src" / "twitch" / "client.ts"
+    wrong_source.parent.mkdir(parents=True)
+    right_source.parent.mkdir(parents=True)
+    wrong_source.write_text(
+        "\n".join([
+            "export function wrapUserMessage(input: string): string {",
+            "  return input.trim();",
+            "}",
+        ])
+    )
+    right_source.write_text(
+        "\n".join([
+            "export function handleMention(message: string): boolean {",
+            "  return message.includes('@manolitozurrapa');",
+            "}",
+        ])
+    )
+    config = {
+        "agent": {
+            "max_steps": 2,
+            "non_apply_step_warning_threshold": 0,
+            "permission_driven": False,
+        },
+        "verification": {"max_rejections": 1},
+        "runner": {
+            "framework": "bun:test",
+            "command": "bun test",
+            "test_file_patterns": ["*.test.ts"],
+            "exclude_dirs": [],
+        },
+    }
+    episode = {
+        "source_file": "src/personality/sanitizer.ts",
+        "test_file": "src/personality/wrapUserMessage.test.ts",
+        "target_symbol": "wrapUserMessage",
+        "cookbook_text": "",
+    }
+    calls = []
+    executed = []
+    logged = []
+
+    def chat(messages):
+        calls.append(None)
+        if len(calls) == 1:
+            return _tool_call_response(
+                "call_1",
+                "ask_harness",
+                (
+                    '{"intent": "challenge_target", '
+                    '"source_file": "src/twitch/client.ts", '
+                    '"target_symbol": "handleMention", '
+                    '"evidence": "rg found mention dispatch in client.ts; sanitizer only trims text"}'
+                ),
+            )
+        assert "TARGET CHALLENGE ACCEPTED" in messages[-1]["content"]
+        assert "src/twitch/client.ts::handleMention" in messages[-1]["content"]
+        return {"choices": [{"message": {"content": "blocked"}, "finish_reason": "stop"}], "usage": {}, "timings": {}}
+
+    runtime.run_agent_loop(
+        messages=[],
+        episode=episode,
+        issue_text="@manolitozurrapa solo funciona al principio del mensaje",
+        config=config,
+        workdir=str(tmp_path),
+        log_path=str(tmp_path / "log.jsonl"),
+        emit=lambda _msg: None,
+        log=lambda event, data: logged.append((event, data)),
+        chat=chat,
+        execute_tool=lambda name, args: executed.append((name, args)) or "ERROR: misconfigured",
+        truncate=lambda value: value,
+        is_llm_timeout_error=lambda _exc: False,
+        tool_applied_status=lambda _name, _result: None,
+        tool_loop_signature=lambda _name, _args: None,
+        tool_loop_warning_message=lambda signature: f"loop {signature}",
+        non_apply_step_warning_message=lambda count: f"non-apply {count}",
+        is_test_pass=lambda _name, _args: False,
+        is_test_file_path=lambda path: path.endswith(".test.ts"),
+        find_test_file=lambda _content: None,
+        verify_red_green=lambda *_args, **_kwargs: (False, "unused"),
+        run_quality_checks=lambda _test_file: (True, "unused"),
+        create_pr=lambda *_args, **_kwargs: None,
+    )
+
+    assert executed == []
+    assert any(
+        event == "target_challenge_accepted"
+        and data["from"] == "src/personality/sanitizer.ts::wrapUserMessage"
+        and data["to"] == "src/twitch/client.ts::handleMention"
+        for event, data in logged
+    )
+
+
+def test_other_ask_harness_intents_without_permission_mode_get_useful_message(tmp_path):
+    config = {
+        "agent": {
+            "max_steps": 2,
+            "non_apply_step_warning_threshold": 0,
+            "permission_driven": False,
+        },
+        "verification": {"max_rejections": 1},
+    }
+    executed = []
+    tool_results = []
+
+    def chat(messages):
+        if not tool_results:
+            return _tool_call_response(
+                "call_1",
+                "ask_harness",
+                '{"intent": "write_regression_test", "question": "may I write a test?"}',
+            )
+        assert "HARNESS INTENT UNAVAILABLE" in messages[-1]["content"]
+        return {"choices": [{"message": {"content": "blocked"}, "finish_reason": "stop"}], "usage": {}, "timings": {}}
+
+    runtime.run_agent_loop(
+        messages=[],
+        episode=None,
+        issue_text="bug",
+        config=config,
+        workdir=str(tmp_path),
+        log_path=str(tmp_path / "log.jsonl"),
+        emit=lambda _msg: None,
+        log=lambda _event, _data: None,
+        chat=chat,
+        execute_tool=lambda name, args: executed.append((name, args)) or "ERROR: misconfigured",
+        truncate=lambda value: tool_results.append(value) or value,
+        is_llm_timeout_error=lambda _exc: False,
+        tool_applied_status=lambda _name, _result: None,
+        tool_loop_signature=lambda _name, _args: None,
+        tool_loop_warning_message=lambda signature: f"loop {signature}",
+        non_apply_step_warning_message=lambda count: f"non-apply {count}",
+        is_test_pass=lambda _name, _args: False,
+        is_test_file_path=lambda path: path.endswith(".test.ts"),
+        find_test_file=lambda _content: None,
+        verify_red_green=lambda *_args, **_kwargs: (False, "unused"),
+        run_quality_checks=lambda _test_file: (True, "unused"),
+        create_pr=lambda *_args, **_kwargs: None,
+    )
+
+    assert executed == []
+    assert "permission_driven" in tool_results[0]
+    assert "misconfigured" not in tool_results[0]
+
+
 def test_permission_mode_requires_challenge_after_search_finds_better_target(tmp_path):
     wrong_source = tmp_path / "src" / "personality" / "sanitizer.ts"
     right_source = tmp_path / "src" / "twitch" / "client.ts"
