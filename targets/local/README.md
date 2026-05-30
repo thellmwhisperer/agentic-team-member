@@ -11,6 +11,24 @@ around:
 python -m agentic_tdd_runner.agent
 ```
 
+## Run Shape
+
+```mermaid
+flowchart LR
+    Env["targets/local/.env.local<br/>machine values"] --> Model["llama-server<br/>OpenAI-compatible endpoint"]
+    Config["config/agent.local.toml<br/>or config/agent.toml"] --> Harness["agentic_tdd_runner<br/>core harness"]
+    Issue["GitHub issue<br/>or issue file"] --> Wrapper["targets/local<br/>run-issue"]
+    Wrapper --> Harness
+    Harness --> Model
+    Harness --> Worktree["local run worktree<br/>.atm/worktrees"]
+    Harness --> Logs["JSONL logs<br/>.atm/logs"]
+    Harness --> GitHub["optional gh push<br/>and PR"]
+```
+
+The local target owns process startup and local paths. The harness still owns
+issue intake, discovery, cookbook generation, the TDD loop, verification,
+quality gates, artifacts, and PR creation.
+
 ## Files
 
 ```text
@@ -92,6 +110,17 @@ Keep that in a git-ignored config such as `config/agent.local.toml`, then set
 You can also run any OpenAI-compatible server yourself. In that case, keep
 `ATM_CONFIG_PATH` pointed at a config whose `[llm].url` and `[llm].model` match
 your server.
+
+## Flow
+
+1. `make -C targets/local start-model` starts `llama-server` with values from
+   `.env.local`.
+2. `make -C targets/local run-issue` loads `.env.local`, resolves the issue
+   source, and invokes `python -m agentic_tdd_runner.agent`.
+3. The harness creates a run worktree under `ATM_RUN_ROOT`, writes JSONL logs
+   under `ATM_LOG_DIR`, and calls the local model endpoint from TOML config.
+4. If verification and quality gates pass and PRs are enabled, the harness uses
+   `gh` and local git credentials to push the branch and open a PR.
 
 ## Run An Issue
 

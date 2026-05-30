@@ -7,6 +7,51 @@ and AgentCore runtime entrypoints around that harness.
 
 This target must not vendor or fork `agentic_tdd_runner`.
 
+The shape is the same harness with three things swapped underneath it:
+
+- The model moves from local `llama-server` to Amazon Bedrock, reached through
+  an in-container OpenAI-compatible proxy.
+- The host moves from a developer machine to Bedrock AgentCore Runtime, which
+  receives a job payload and returns a structured result.
+- GitHub side effects can still run through the harness's authenticated git
+  flow; an AgentCore Gateway plus a narrow GitHub Lambda is provisioned as the
+  governed migration path with a repo allowlist and branch-prefix guard.
+
+Roca Cloud memory is optional. When configured, the runner reads context before
+the harness starts and writes a handoff after the run. When it is not
+configured, the runtime uses a no-op memory adapter.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    Job["ATM job payload<br/>repo + issue"] --> Runtime["Bedrock AgentCore Runtime<br/>ATM container"]
+    Runtime --> Harness["agentic_tdd_runner<br/>canonical harness"]
+    Runtime --> Proxy["OpenAI-compatible<br/>Bedrock proxy"]
+    Harness --> Proxy
+    Proxy --> Bedrock["Amazon Bedrock<br/>Converse"]
+    Runtime --> Secrets["AWS Secrets Manager<br/>GitHub token<br/>optional Roca token"]
+    Runtime --> Logs["CloudWatch Logs<br/>runtime + harness output"]
+    Runtime --> Memory["optional Roca Cloud MCP<br/>query + store"]
+    Harness --> GitHub["GitHub API<br/>current git push / PR path"]
+    Runtime -. planned governed tools .-> Gateway["AgentCore Gateway<br/>MCP + IAM"]
+    Gateway -. invoke .-> Lambda["GitHub tool Lambda<br/>allowlist + branch guard"]
+    Lambda -. planned writes .-> GitHub
+```
+
+Solid arrows show the runtime path this target supports today. Dashed arrows
+show the provisioned Gateway perimeter for moving GitHub writes behind
+governed tools.
+
+## Planes
+
+| Plane | Where it runs | What it does |
+| --- | --- | --- |
+| Agent runtime | Bedrock AgentCore Runtime | Hosts the ATM container, receives jobs, returns results. |
+| Model runner | In-container proxy to Bedrock | Presents OpenAI chat completions to the harness and translates to Bedrock Converse. |
+| Tool perimeter | AgentCore Gateway to GitHub Lambda | Governed migration path for GitHub side effects. |
+| Memory plane | Optional Roca Cloud MCP | Durable pre-run context and post-run handoffs. |
+
 ## Current Slice
 
 This target currently contains the runtime-facing pieces from the former
@@ -29,6 +74,9 @@ targets/aws-agentcore/
 
 Deploy/operator scripts are intentionally left for later PRs. This slice stops
 at a buildable runtime image, local smoke checks, and CDK synthesis wiring.
+
+No vendor sync model remains. Docker builds use the monorepo root context and
+copy the canonical harness from `agentic_tdd_runner/`.
 
 ## Runtime Contract
 
@@ -61,6 +109,21 @@ python -m agentic_tdd_runner.agent
 
 It passes `--github-repo`, `--issue-number`, `--repo`, `--run-root`,
 `--log-dir`, and an optional rendered `--config`.
+
+## How A Run Works
+
+1. Validate the JSON payload into an `AtmJob`: repo slug, issue number, branch
+   prefix, mode, optional run id, optional source/symbol pins, and optional
+   memory project.
+2. Read optional memory context from Roca Cloud when `ROCA_CLOUD_MCP_URL` is
+   configured.
+3. Start the Bedrock proxy when `ATM_ENABLE_BEDROCK_PROXY=true` and render a
+   target-local harness config that points `[llm]` at that proxy.
+4. Invoke `python -m agentic_tdd_runner.agent` against a cached clone/run
+   worktree inside the container.
+5. Stream runtime and harness output to CloudWatch Logs.
+6. Extract the PR URL when one is produced, write an optional memory handoff,
+   and return a structured result.
 
 ## Build And Smoke
 
@@ -211,6 +274,26 @@ Optional controls:
 - `ATM_NPM_SCOPE`: required only when GitHub Packages auth is enabled
 - `ATM_NPM_REGISTRY`: default `https://npm.pkg.github.com`
 
+## GitHub Gateway Tools
+
+The Gateway schema is intentionally narrow:
+
+| Tool | Operation |
+| --- | --- |
+| `github_get_issue` | Read an issue. |
+| `github_create_branch` | Create a branch from a base ref. |
+| `github_commit_files` | Commit complete file contents through the Git database API. |
+| `github_open_pr` | Open a pull request. |
+| `github_comment_issue` | Comment on an issue. |
+
+The Lambda dispatches only these names. Write operations enforce
+`GITHUB_REPO_ALLOWLIST` and `ATM_BRANCH_PREFIX`. PRs can be opened but not
+merged; issues can be commented on but not closed.
+
+Status: the runtime can still give the harness a GitHub token for direct git
+push and PR creation. The Gateway is the governed perimeter for a later side
+effect migration, not the only GitHub path yet.
+
 ## Local Tests
 
 From the monorepo root:
@@ -222,3 +305,6 @@ PYTHONPATH=. pytest -p no:cacheprovider targets/aws-agentcore/tests
 These tests validate job parsing, subprocess command construction, optional
 memory behavior, secret loading, log humanization, and Bedrock proxy request
 translation without deploying AWS resources.
+
+See [`../../docs/aws-agentcore.md`](../../docs/aws-agentcore.md) for the
+operator-oriented AWS guide.

@@ -7,12 +7,11 @@
 [![license](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 [![status](https://img.shields.io/badge/status-alpha-orange)](#status)
 
-ATM is a small Python harness that turns a local code model (for example Qwen
-3.6 MTP on [llama-server](https://github.com/ggml-org/llama.cpp), or another
-OpenAI-compatible local endpoint)
-into a **TDD bug-fix agent** for your repository. No model API key — your code
-is never sent to a hosted inference provider. (GitHub auth via `gh` is still
-required for issue ingestion and PR creation.)
+ATM is a small Python harness that turns an OpenAI-compatible code model into a
+**TDD bug-fix agent** for your repository. The default open-source target runs
+locally with [llama-server](https://github.com/ggml-org/llama.cpp), so your
+source code stays on your machine. Optional execution targets can host the same
+harness elsewhere, such as AWS AgentCore with Bedrock.
 
 It does the work an engineer would do on a single, well-scoped issue: read
 the code, write a failing test, fix the bug, verify red-green, and open a PR.
@@ -31,6 +30,7 @@ the code, write a failing test, fix the bug, verify red-green, and open a PR.
 - [Why local-first](#why-local-first)
 - [Quick look](#quick-look)
 - [Execution targets](#execution-targets)
+- [Core lifecycle](#core-lifecycle)
 - [How it works](#how-it-works)
 - [The cookbook](#the-cookbook)
 - [Skills](#skills)
@@ -48,8 +48,9 @@ the code, write a failing test, fix the bug, verify red-green, and open a PR.
 ## Why local-first
 
 Most coding agents assume a frontier model behind a paid API. ATM assumes the
-opposite: a 4B–27B model running on your laptop or workstation, with a 32k
-context window and no network egress.
+opposite by default: a local model running on your laptop or workstation, with
+no model-provider egress. The harness is still one portable core; targets decide
+where it runs.
 
 That constraint shaped every design decision:
 
@@ -74,17 +75,15 @@ cp targets/local/.env.example targets/local/.env.local
 # edit targets/local/.env.local for your llama-server binary and local config
 make -C targets/local start-model
 
-# 2. Point ATM at a GitHub issue
-python3.12 -m agentic_tdd_runner.agent \
-  --repo /path/to/your/repo \
-  --github-repo your-org/your-repo \
-  --issue-number 41
+# 2. Run ATM through the local target wrapper
+ATM_TARGET_REPO=/path/to/your/repo \
+ATM_GITHUB_REPO=your-org/your-repo \
+ATM_ISSUE_NUMBER=41 \
+make -C targets/local run-issue
 ```
 
-ATM clones a detached worktree under `your-repo/.worktree/`, runs environment
-prep, generates a cookbook for the target function, then drives the model
-through a two-phase TDD loop. If everything goes green, it commits and opens a
-PR via `gh`.
+The wrapper still invokes `python -m agentic_tdd_runner.agent`. It only supplies
+local paths, config, logs, and worktree locations.
 
 ---
 
@@ -102,29 +101,58 @@ Target-specific settings belong in `.env.local`, `*.local.toml`, cloud secret
 stores, or target-local docs. The core harness remains AWS-agnostic and should
 not import deployment-specific code.
 
+```mermaid
+flowchart LR
+    Issue["Issue or issue file"] --> Core["agentic_tdd_runner<br/>canonical harness"]
+    Config["versioned config<br/>plus target-local overrides"] --> Core
+    Core --> Local["local target<br/>llama-server + local worktree"]
+    Core --> AWS["aws-agentcore target<br/>AgentCore + Bedrock"]
+    Local --> Outcome["verified branch<br/>artifacts and optional PR"]
+    AWS --> Outcome
+```
+
+See [`targets/README.md`](targets/README.md) for the target contract,
+[`targets/local`](targets/local) for local operation, and
+[`targets/aws-agentcore`](targets/aws-agentcore) for the AWS adapter.
+
 ---
 
-## How it works
+## Core lifecycle
 
 ```mermaid
 flowchart TB
-    A[python -m agentic_tdd_runner.agent<br/>--repo + issue + optional target] --> B
-    B[Environment Prep<br/><i>git worktree, package manager,<br/>install, preflight, runner bootstrap</i>]:::det --> C
-    C[Target Discovery<br/><i>issue text → source + symbol</i>]:::det --> D
-    D[Cookbook Generator<br/><i>imports, deps, mocks, seams</i>]:::det --> E
-    E[Phased Agent Loop<br/><i>P1: failing test → P2: quality fix</i>]:::llm --> F
-    F[Red-Green Verifier<br/><i>stash fix → FAIL, restore → PASS</i>]:::det --> G
-    G[Quality Gate<br/><i>typecheck + lint + format +<br/>forbidden patterns</i>]:::det --> H
-    H[PR Creation<br/><i>git commit + push + gh pr create</i>]:::det
+    A[Issue Intake<br/><i>inline text, file, or GitHub issue</i>]:::det --> B
+    B[Environment Prep<br/><i>isolated worktree, package manager,<br/>install, preflight, runner facts</i>]:::det --> C
+    C[Discovery<br/><i>ranked source and symbol hypotheses</i>]:::det --> D
+    D[Episode Builder<br/><i>cookbook, runner facts,<br/>model-facing contract</i>]:::det --> E
+    E[Agent Runtime Loop<br/><i>tool calls, optional permission gate,<br/>target challenge, state review</i>]:::llm --> F
+    F[Red-Green Verifier<br/><i>fail with fix stashed,<br/>pass with fix restored</i>]:::det --> G
+    G[Quality Gate<br/><i>typecheck, lint, format,<br/>forbidden patterns</i>]:::det --> H
+    H[Artifacts and PR<br/><i>JSONL logs, exported context,<br/>optional git push and gh pr create</i>]:::det
 
     classDef det fill:#e0f2fe,stroke:#0369a1,color:#0c4a6e
     classDef llm fill:#fef3c7,stroke:#b45309,color:#7c2d12
 ```
 
-Blue blocks are deterministic Python. The single yellow block is where the
-local model runs. Each deterministic block in front of the model is one less
-round-trip, one less chance for the model to drift, and one less surface for
-unverified output to slip through.
+Blue blocks are deterministic Python. The yellow block is where the selected
+target's model is called. The same lifecycle runs locally and in AWS; only the
+execution target around the harness changes.
+
+For a fuller architecture view, see [`docs/architecture.md`](docs/architecture.md).
+
+---
+
+## How it works
+
+ATM reads an issue, prepares an isolated run worktree, discovers likely source
+targets, builds a deterministic model-facing episode, and drives the model
+through a bounded TDD loop. The model writes a failing regression test first,
+then fixes the source. The harness verifies red-green behavior, runs quality
+checks, exports artifacts when requested, and can open a PR.
+
+Recent harness features include ranked discovery hypotheses, runner facts,
+permission-driven `ask_harness` flows, target challenge/reroute, intent routing,
+state review, prepare-only artifact export, and phase-aware thinking budgets.
 
 ---
 
@@ -287,13 +315,22 @@ different models and strategies.
 max_steps = 50
 max_tool_output = 8000
 non_apply_step_warning_threshold = 5
+permission_driven = false
 
 [llm]
 url = "http://127.0.0.1:11435/v1/chat/completions"
-model = "qwen3.5-27b"
+model = "qwen3.6-27b-mtp"
 temperature = 0.6
 top_p = 0.95
 top_k = 20
+thinking_budget_tokens = 0
+
+[llm.thinking_budget]
+enabled = true
+default = 256
+test = 256
+fix = 256
+recover = 512
 
 [timeouts]
 tool_execution = 60
@@ -327,6 +364,13 @@ forbidden = ["as any", "as unknown as", "as never", "{} as", ": any", "eslint-di
 [quality.python]
 forbidden = ["type: ignore", "noqa"]
 
+[verification]
+max_rejections = 3
+
+[state_reviewer]
+enabled = false
+max_dependency_contract_lookups = 2
+
 [pr]
 enabled = true
 base_branch = "main"
@@ -337,9 +381,10 @@ file = "tools.json"
 recommended = ["rg"]
 ```
 
-The `[prompt]` and `[verification]` sections (system prompt template, max
-rejection rounds) are also configurable — see `config/agent.toml` for the full
-reference.
+The `[prompt]`, `[verification]`, `[quality]`, `[state_reviewer]`, `[pr]`, and
+`[tools]` sections are also configurable. See `config/agent.toml` for the full
+reference and [`docs/configuration.md`](docs/configuration.md) for what belongs
+in versioned config versus `.env.local` or cloud secrets.
 
 With environment prep enabled, ATM inspects the nearest `package.json` and
 lockfile before the model starts. For focused JS test runs it uses the detected
@@ -446,6 +491,8 @@ discovery).
 | `--workdir`         | Project root, or destination when `--repo` is used                |
 | `--config`          | Path to agent.toml config file                                    |
 | `--log-dir`         | Directory for JSONL logs (default `cwd`)                          |
+| `--artifact-dir`    | Directory for deterministic run artifact export                   |
+| `--prepare-only`    | Build context/artifacts and stop before LLM calls                 |
 
 ### Environment variables
 
@@ -455,8 +502,8 @@ discovery).
 | `AGENT_LOG_DIR` / `ATM_LOG_DIR` | Default log directory when `--log-dir` is not passed |
 | `AGENT_WORKDIR`                | Default project root                                  |
 
-Everything else (model URL, model name, step budgets, tool output cap) lives
-in the TOML config.
+Everything else (model URL, model name, step budgets, tool output cap,
+permission-driven mode, thinking budgets, quality gates) lives in TOML config.
 
 ---
 
