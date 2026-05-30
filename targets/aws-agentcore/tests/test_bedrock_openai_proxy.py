@@ -1,8 +1,5 @@
 import json
-import threading
 import unittest
-import urllib.error
-import urllib.request
 
 from runtime import bedrock_openai_proxy as proxy
 
@@ -168,38 +165,18 @@ class BedrockOpenAIProxyTest(unittest.TestCase):
     def test_http_handler_returns_400_for_invalid_json(self):
         bedrock_proxy = proxy.BedrockOpenAIProxy(model_id="provider.model-v1:0", client=FakeBedrockClient())
 
-        with serve_proxy(bedrock_proxy) as url:
-            request = urllib.request.Request(
-                f"{url}/v1/chat/completions",
-                data=b"{",
-                headers={"content-type": "application/json"},
-                method="POST",
-            )
+        status, body = proxy.chat_completion_http_response(bedrock_proxy, b"{")
 
-            with self.assertRaises(urllib.error.HTTPError) as raised:
-                urllib.request.urlopen(request, timeout=5)
-
-        self.assertEqual(raised.exception.code, 400)
-        body = json.loads(raised.exception.read().decode("utf-8"))
+        self.assertEqual(status, 400)
         self.assertEqual(body["error"]["type"], "invalid_request")
 
     def test_http_handler_returns_400_for_request_validation_errors(self):
         bedrock_proxy = proxy.BedrockOpenAIProxy(model_id="provider.model-v1:0", client=FakeBedrockClient())
         payload = json.dumps({"model": "provider.other-model-v1:0", "messages": []}).encode("utf-8")
 
-        with serve_proxy(bedrock_proxy) as url:
-            request = urllib.request.Request(
-                f"{url}/v1/chat/completions",
-                data=payload,
-                headers={"content-type": "application/json"},
-                method="POST",
-            )
+        status, body = proxy.chat_completion_http_response(bedrock_proxy, payload)
 
-            with self.assertRaises(urllib.error.HTTPError) as raised:
-                urllib.request.urlopen(request, timeout=5)
-
-        self.assertEqual(raised.exception.code, 400)
-        body = json.loads(raised.exception.read().decode("utf-8"))
+        self.assertEqual(status, 400)
         self.assertEqual(body["error"]["type"], "invalid_request")
 
 
@@ -214,24 +191,6 @@ class FakeBedrockClient:
             "usage": {"inputTokens": 1, "outputTokens": 1, "totalTokens": 2},
             "output": {"message": {"role": "assistant", "content": [{"text": "ok"}]}},
         }
-
-
-class serve_proxy:
-    def __init__(self, bedrock_proxy):
-        self.server = proxy.ThreadingHTTPServer(
-            ("127.0.0.1", 0),
-            proxy.make_handler(bedrock_proxy),
-        )
-        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
-
-    def __enter__(self):
-        self.thread.start()
-        host, port = self.server.server_address
-        return f"http://{host}:{port}"
-
-    def __exit__(self, exc_type, exc, traceback):
-        self.server.shutdown()
-        self.thread.join(timeout=5)
 
 
 if __name__ == "__main__":
