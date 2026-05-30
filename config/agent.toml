@@ -6,7 +6,7 @@ permission_driven = false
 
 [llm]
 url = "http://127.0.0.1:11435/v1/chat/completions"
-model = "qwen3.6-27b"
+model = "qwen3.6-27b-mtp"
 temperature = 0.6
 top_p = 0.95
 top_k = 20
@@ -158,7 +158,7 @@ enabled = true
 # format, while `llm.url` above uses an OpenAI-compatible `/v1/chat/completions`
 # endpoint. Both formats coexist on purpose because they target different backends.
 url = "http://127.0.0.1:11434/api/chat"
-model = "qwen3.6:0.8b"
+model = "gemma4:e2b"
 temperature = 0
 num_ctx = 4096
 think = false

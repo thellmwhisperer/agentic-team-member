@@ -32,6 +32,7 @@ class TargetSettings:
     roca_token_secret_name: str
     roca_mcp_url: str
     github_repo_allowlist: str
+    npm_scope: str
     permission_driven: bool
 
 
@@ -51,6 +52,7 @@ def target_context(node: Any) -> TargetSettings:
         roca_token_secret_name=_context_value(node, "rocaTokenSecretName", "ROCA_TOKEN_SECRET_NAME", ""),
         roca_mcp_url=_context_value(node, "rocaMcpUrl", "ROCA_CLOUD_MCP_URL", ""),
         github_repo_allowlist=_context_value(node, "githubRepoAllowlist", "GITHUB_REPO_ALLOWLIST", ""),
+        npm_scope=_context_value(node, "npmScope", "ATM_NPM_SCOPE", ""),
         permission_driven=_context_bool(
             os.environ.get("ATM_PERMISSION_DRIVEN")
             if os.environ.get("ATM_PERMISSION_DRIVEN") is not None
@@ -216,9 +218,6 @@ class AtmAgentCoreStack(Stack):
                 )
             },
         )
-        github_token_secret.grant_read(runtime_role)
-        if roca_token_secret is not None:
-            roca_token_secret.grant_read(runtime_role)
 
         environment_variables = {
             "GITHUB_TOKEN_SECRET_ARN": github_token_secret.secret_arn,
@@ -227,8 +226,7 @@ class AtmAgentCoreStack(Stack):
             "ATM_HARNESS_MODULE": "agentic_tdd_runner.agent",
             "ATM_BRANCH_PREFIX": settings.branch_prefix,
             "ATM_ENABLE_BEDROCK_PROXY": "true",
-            "ATM_ENABLE_GITHUB_PACKAGES_AUTH": "true",
-            "ATM_NPM_SCOPE": "@thellmwhisperer",
+            "ATM_ENABLE_GITHUB_PACKAGES_AUTH": "true" if settings.npm_scope else "false",
             "ATM_NPM_REGISTRY": "https://npm.pkg.github.com",
             "ATM_BEDROCK_MODEL_ID": settings.runner_model_id,
             "ATM_PERMISSION_DRIVEN": "true" if settings.permission_driven else "false",
@@ -240,6 +238,8 @@ class AtmAgentCoreStack(Stack):
             "AWS_REGION": self.region,
             "AWS_DEFAULT_REGION": self.region,
         }
+        if settings.npm_scope:
+            environment_variables["ATM_NPM_SCOPE"] = settings.npm_scope
         if settings.roca_mcp_url:
             environment_variables["ROCA_CLOUD_MCP_URL"] = settings.roca_mcp_url
         if roca_token_secret is not None:

@@ -149,6 +149,8 @@ Optional context/env values:
   `ATM_AGENTCORE_RUNTIME_NAME`.
 - Gateway name: `-c atmGatewayName=<gateway-name>` or
   `ATM_AGENTCORE_GATEWAY_NAME`.
+- GitHub Packages npm scope: `-c npmScope=@owner` or `ATM_NPM_SCOPE`.
+  When omitted, package auth is disabled.
 - permission-driven flow: `-c atmPermissionDriven=true` or
   `ATM_PERMISSION_DRIVEN=true`.
 
