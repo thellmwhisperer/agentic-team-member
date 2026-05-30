@@ -27,7 +27,7 @@ adapters. It must not fork, vendor, or patch the core harness.
 | Target | Purpose | Status |
 | --- | --- | --- |
 | `local` | Canonical OSS local operation with `llama-server` or another OpenAI-compatible local endpoint. | scaffolded |
-| `aws-agentcore` | Optional AWS AgentCore deployment adapter for running the same harness on Bedrock. | runtime adapter |
+| `aws-agentcore` | Optional AWS AgentCore deployment adapter for running the same harness on Bedrock. | runtime + Docker packaging |
 
 ## Non-Goals
 
