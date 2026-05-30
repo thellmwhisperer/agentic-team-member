@@ -3553,17 +3553,14 @@ class TestMain:
         assert result == 1, "Should not auto-complete on failed tests"
         assert len(verify_calls) == 0, f"Verify should NOT have been called, got {verify_calls}"
 
-    def test_quality_rounds_not_capped_by_max_fix_rounds(self, tmp_path, monkeypatch):
-        """Quality iterations should be bounded by step budget, not max_fix_rounds."""
+    def test_quality_rounds_give_up_at_max_fix_rounds(self, tmp_path, monkeypatch):
+        """Quality iterations should stop at max_fix_rounds instead of burning the step budget."""
         quality_call_count = 0
 
-        def quality_fails_then_passes(test_file):
+        def quality_always_fails(test_file):
             nonlocal quality_call_count
             quality_call_count += 1
-            # Fail 4 times (more than max_fix_rounds=3), then pass
-            if quality_call_count <= 4:
-                return False, f"QUALITY FAIL #{quality_call_count}"
-            return True, "All quality checks passed"
+            return False, f"QUALITY FAIL #{quality_call_count}"
 
         config = {
             "agent": {"max_steps": 10},
@@ -3598,7 +3595,7 @@ class TestMain:
             "timings": {},
         })
         monkeypatch.setattr("agentic_tdd_runner.agent.find_test_file", lambda hint=None: "src/file.test.ts")
-        monkeypatch.setattr("agentic_tdd_runner.agent.run_quality_checks", quality_fails_then_passes)
+        monkeypatch.setattr("agentic_tdd_runner.agent.run_quality_checks", quality_always_fails)
         monkeypatch.setattr("agentic_tdd_runner.agent.verify_red_green", lambda tf: (True, "verified"))
         monkeypatch.setattr(
             "agentic_tdd_runner.agent.subprocess.run",
@@ -3607,8 +3604,8 @@ class TestMain:
 
         result = main()
 
-        assert result == 0, "Agent should succeed after quality eventually passes"
-        assert quality_call_count == 5, f"Expected 5 quality calls (4 fails + 1 pass), got {quality_call_count}"
+        assert result == 1, "Agent should give up once quality reaches max_fix_rounds"
+        assert quality_call_count == 3, f"Expected 3 quality calls, got {quality_call_count}"
 
     def test_quality_fail_compacts_context_before_retry_when_context_is_tight(self, tmp_path, monkeypatch):
         import agentic_tdd_runner.agent as _agent_mod

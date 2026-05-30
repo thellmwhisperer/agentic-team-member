@@ -88,6 +88,47 @@ def test_try_complete_compacts_quality_feedback_near_context_limit():
     ]
 
 
+def test_try_complete_gives_up_after_max_quality_rounds():
+    messages = [
+        {"role": "system", "content": "system prompt"},
+        {"role": "user", "content": "Fix this bug:\n\nbug text"},
+    ]
+    state = completion.CompletionState(quality_rejected=1)
+    config = _base_config(quality_enabled=True)
+    config["quality"]["max_fix_rounds"] = 2
+    emitted = []
+    logged = []
+
+    result = completion.try_complete(
+        7,
+        {"content": "DONE"},
+        messages=messages,
+        episode=None,
+        state=state,
+        max_rejections=3,
+        config=config,
+        workdir="/unused",
+        emit=emitted.append,
+        log=lambda event, data: logged.append((event, data)),
+        find_test_file=lambda hint=None: "src/file.test.ts",
+        verify_red_green=lambda test_file: (True, "verified"),
+        run_quality_checks=lambda test_file: (False, "QUALITY FAIL"),
+        create_pr=lambda messages, msg, test_file, step: None,
+    )
+
+    assert result == "give_up"
+    assert state.quality_rejected == 2
+    assert messages == [
+        {"role": "system", "content": "system prompt"},
+        {"role": "user", "content": "Fix this bug:\n\nbug text"},
+    ]
+    assert any("Quality rejected 2 times" in msg for msg in emitted)
+    assert logged[-1] == (
+        "give_up",
+        {"step": 7, "quality_rejected": 2, "max_fix_rounds": 2},
+    )
+
+
 def test_try_complete_reads_untracked_files_with_replacement_encoding(tmp_path, monkeypatch):
     bad_file = tmp_path / "bad.bin"
     bad_file.write_bytes(b"valid\n\xff\n")

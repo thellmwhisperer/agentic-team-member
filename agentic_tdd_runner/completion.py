@@ -131,6 +131,14 @@ def _verify_with_mechanical_edits(
     return verify_red_green(test_file)
 
 
+def max_quality_fix_rounds(config: dict) -> int:
+    raw_value = config.get("quality", {}).get("max_fix_rounds", 3)
+    try:
+        return max(1, int(raw_value))
+    except (TypeError, ValueError):
+        return 3
+
+
 def _read_file_preview(path: str, max_bytes: int = MAX_UNTRACKED_PREVIEW_BYTES) -> tuple[str, bool, bool]:
     with open(path, "rb") as fh:
         data = fh.read(max_bytes + 1)
@@ -192,6 +200,15 @@ def try_complete(
 
         if not quality_ok:
             state.quality_rejected += 1
+            max_fix_rounds = max_quality_fix_rounds(config)
+            if state.quality_rejected >= max_fix_rounds:
+                emit(f"\n  [GIVE UP] Quality rejected {state.quality_rejected} times. Stopping.")
+                log("give_up", {
+                    "step": step,
+                    "quality_rejected": state.quality_rejected,
+                    "max_fix_rounds": max_fix_rounds,
+                })
+                return "give_up"
             emit(f"  [QUALITY] Round {state.quality_rejected} — feeding back to model")
             should_compact, compact_info = should_compact_after_quality_failure(
                 config,
