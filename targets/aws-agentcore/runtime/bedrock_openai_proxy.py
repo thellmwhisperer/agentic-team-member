@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import re
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
@@ -10,6 +11,8 @@ from uuid import uuid4
 
 
 LOGGER = logging.getLogger("bedrock_openai_proxy")
+TOOL_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
+INVALID_TOOL_NAME_CHARS = re.compile(r"[^A-Za-z0-9_-]+")
 
 
 class BedrockOpenAIProxy:
@@ -25,10 +28,22 @@ class BedrockOpenAIProxy:
                 raise ValueError("model override is not allowed for this proxy")
         model_id = self.model_id
         request = build_converse_request(payload, model_id=model_id)
+        tool_name_map = sanitize_converse_request(request)
         started = time.monotonic()
-        response = self.client.converse(**request)
+        try:
+            response = self.client.converse(**request)
+        except Exception as exc:
+            bedrock_message = bedrock_error_message(exc)
+            if bedrock_message:
+                raise ValueError(bedrock_message) from exc
+            raise
         elapsed_ms = int((time.monotonic() - started) * 1000)
-        return openai_response(response, model_id=model_id, elapsed_ms=elapsed_ms)
+        return openai_response(
+            response,
+            model_id=model_id,
+            elapsed_ms=elapsed_ms,
+            tool_name_map=tool_name_map,
+        )
 
 
 def normalize_model_id(model: str) -> str:
@@ -41,6 +56,53 @@ def normalize_model_id(model: str) -> str:
         if value.startswith(prefix):
             return value.removeprefix(prefix)
     return value
+
+
+def sanitize_tool_name(name: str) -> str:
+    sanitized = INVALID_TOOL_NAME_CHARS.sub("_", name).strip("_")
+    sanitized = re.sub(r"_+", "_", sanitized)
+    return sanitized or "tool"
+
+
+def sanitize_converse_request(request: dict[str, Any]) -> dict[str, str]:
+    refs = list(tool_name_refs(request))
+    originals = list(dict.fromkeys(container[key] for container, key in refs))
+    valid_names = {name for name in originals if TOOL_NAME_PATTERN.fullmatch(name)}
+    used = set(valid_names)
+    by_original: dict[str, str] = {}
+    reverse_map: dict[str, str] = {}
+
+    for original in originals:
+        if TOOL_NAME_PATTERN.fullmatch(original):
+            by_original[original] = original
+            continue
+        base = sanitize_tool_name(original)
+        candidate = base
+        suffix = 2
+        while candidate in used:
+            candidate = f"{base}_{suffix}"
+            suffix += 1
+        used.add(candidate)
+        by_original[original] = candidate
+        reverse_map[candidate] = original
+
+    for container, key in refs:
+        container[key] = by_original[container[key]]
+    return reverse_map
+
+
+def tool_name_refs(request: dict[str, Any]):
+    tool_config = request.get("toolConfig") or {}
+    for tool in tool_config.get("tools") or []:
+        tool_spec = tool.get("toolSpec") or {}
+        if isinstance(tool_spec.get("name"), str):
+            yield tool_spec, "name"
+
+    for message in request.get("messages") or []:
+        for block in message.get("content") or []:
+            tool_use = block.get("toolUse") if isinstance(block, dict) else None
+            if isinstance(tool_use, dict) and isinstance(tool_use.get("name"), str):
+                yield tool_use, "name"
 
 
 def build_converse_request(payload: dict[str, Any], *, model_id: str) -> dict[str, Any]:
@@ -165,7 +227,13 @@ def inference_config_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return config
 
 
-def openai_response(response: dict[str, Any], *, model_id: str, elapsed_ms: int) -> dict[str, Any]:
+def openai_response(
+    response: dict[str, Any],
+    *,
+    model_id: str,
+    elapsed_ms: int,
+    tool_name_map: dict[str, str] | None = None,
+) -> dict[str, Any]:
     message = response.get("output", {}).get("message", {})
     content_blocks = message.get("content") or []
     text_parts: list[str] = []
@@ -176,12 +244,13 @@ def openai_response(response: dict[str, Any], *, model_id: str, elapsed_ms: int)
             text_parts.append(block["text"])
         if "toolUse" in block:
             tool_use = block["toolUse"]
+            tool_name = tool_use["name"]
             tool_calls.append(
                 {
                     "id": tool_use["toolUseId"],
                     "type": "function",
                     "function": {
-                        "name": tool_use["name"],
+                        "name": (tool_name_map or {}).get(tool_name, tool_name),
                         "arguments": json.dumps(tool_use.get("input") or {}),
                     },
                 }
@@ -264,6 +333,18 @@ def parse_arguments(value: Any) -> dict[str, Any]:
     except json.JSONDecodeError:
         return {}
     return parsed if isinstance(parsed, dict) else {}
+
+
+def bedrock_error_message(exc: Exception) -> str | None:
+    response = getattr(exc, "response", None)
+    if not isinstance(response, dict):
+        return None
+    error = response.get("Error")
+    if not isinstance(error, dict):
+        return None
+    code = str(error.get("Code") or exc.__class__.__name__)
+    message = str(error.get("Message") or exc)
+    return f"{code}: {message}"
 
 
 def _bedrock_client(region: str | None = None) -> Any:
