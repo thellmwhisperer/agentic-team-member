@@ -10,4 +10,6 @@ build/
 cdk.out/
 *.jsonl
 .atm/
+.tmp/
+.workspace/
 *.local.toml

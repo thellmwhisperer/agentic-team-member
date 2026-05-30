@@ -290,7 +290,7 @@ non_apply_step_warning_threshold = 5
 
 [llm]
 url = "http://127.0.0.1:11435/v1/chat/completions"
-model = "qwen3.5-27b"
+model = "qwen3.6-27b"
 temperature = 0.6
 top_p = 0.95
 top_k = 20

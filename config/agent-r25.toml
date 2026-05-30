@@ -89,7 +89,7 @@ forbidden = ["type: ignore", "noqa"]
 [quality.duplicated_setup_judge]
 enabled = false
 url = "http://127.0.0.1:11434/api/chat"
-model = "qwen3.5:0.8b"
+model = "qwen3.6:0.8b"
 temperature = 0
 num_ctx = 4096
 think = false
