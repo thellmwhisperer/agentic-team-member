@@ -1000,6 +1000,86 @@ def test_denied_test_command_does_not_trigger_red_green_verification(tmp_path):
     )
 
 
+def test_permission_mode_marks_test_created_after_str_replace_edit(tmp_path):
+    config = {
+        "agent": {
+            "max_steps": 4,
+            "non_apply_step_warning_threshold": 0,
+            "permission_driven": True,
+        },
+        "verification": {"max_rejections": 1},
+        "runner": {"command": "bun test"},
+    }
+    episode = {
+        "source_file": "src/client.ts",
+        "test_file": "src/client.test.ts",
+        "target_symbol": "handle",
+        "cookbook_text": "",
+    }
+    calls = []
+    executed = []
+    logged = []
+
+    def chat(_messages):
+        calls.append(None)
+        if len(calls) == 1:
+            return _tool_call_response(
+                "call_1",
+                "ask_harness",
+                '{"intent": "write_regression_test"}',
+            )
+        if len(calls) == 2:
+            return _tool_call_response(
+                "call_2",
+                "str_replace_editor",
+                '{"path": "src/client.test.ts", "old_str": "old", "new_str": "new"}',
+            )
+        if len(calls) == 3:
+            return _tool_call_response(
+                "call_3",
+                "ask_harness",
+                '{"intent": "run_test"}',
+            )
+        return _tool_call_response(
+            "call_4",
+            "run_command",
+            '{"command": "bun test src/client.test.ts"}',
+        )
+
+    runtime.run_agent_loop(
+        messages=[],
+        episode=episode,
+        issue_text="bug text",
+        config=config,
+        workdir=str(tmp_path),
+        log_path=str(tmp_path / "log.jsonl"),
+        emit=lambda _msg: None,
+        log=lambda event, data: logged.append((event, data)),
+        chat=chat,
+        execute_tool=lambda name, args: executed.append((name, args)) or "OK",
+        truncate=lambda value: value,
+        is_llm_timeout_error=lambda _exc: False,
+        tool_applied_status=lambda name, _result: name == "str_replace_editor",
+        tool_loop_signature=lambda _name, _args: None,
+        tool_loop_warning_message=lambda signature: f"loop {signature}",
+        non_apply_step_warning_message=lambda count: f"non-apply {count}",
+        is_test_pass=lambda _name, _args: False,
+        is_test_file_path=lambda path: path.endswith(".test.ts"),
+        find_test_file=lambda _content: None,
+        verify_red_green=lambda *_args, **_kwargs: (False, "unused"),
+        run_quality_checks=lambda _test_file: (True, "unused"),
+        create_pr=lambda *_args, **_kwargs: None,
+    )
+
+    assert ("run_command", {"command": "bun test src/client.test.ts"}) in executed
+    assert not any(
+        event == "permission_review"
+        and data["intent"] == "run_test"
+        and data["allowed"] is False
+        for event, data in logged
+    )
+
+
 def test_state_reviewer_blocks_tool_execution_and_returns_scoped_feedback(tmp_path):
     config = {
         "agent": {"max_steps": 2, "non_apply_step_warning_threshold": 0},
