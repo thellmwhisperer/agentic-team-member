@@ -1,4 +1,5 @@
 import json
+from io import BytesIO
 import unittest
 
 from runtime import bedrock_openai_proxy as proxy
@@ -175,6 +176,18 @@ class BedrockOpenAIProxyTest(unittest.TestCase):
         payload = json.dumps({"model": "provider.other-model-v1:0", "messages": []}).encode("utf-8")
 
         status, body = proxy.chat_completion_http_response(bedrock_proxy, payload)
+
+        self.assertEqual(status, 400)
+        self.assertEqual(body["error"]["type"], "invalid_request")
+
+    def test_http_handler_returns_400_for_invalid_content_length(self):
+        bedrock_proxy = proxy.BedrockOpenAIProxy(model_id="provider.model-v1:0", client=FakeBedrockClient())
+
+        status, body = proxy.chat_completion_http_response(
+            bedrock_proxy,
+            content_length="not-a-number",
+            body_stream=BytesIO(b"{}"),
+        )
 
         self.assertEqual(status, 400)
         self.assertEqual(body["error"]["type"], "invalid_request")

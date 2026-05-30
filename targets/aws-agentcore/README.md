@@ -94,6 +94,10 @@ Run the same smoke check inside the image:
 make -C targets/aws-agentcore docker-smoke
 ```
 
+The image uses Python 3.14 on Debian trixie to match the local target's
+preferred interpreter and keep Debian's `gh` package available from the base
+repository. It runs as the non-root `atm` user.
+
 The smoke path imports the root harness and AWS adapter modules, then invokes
 the AgentCore entrypoint in `dry_run` mode. It does not call Bedrock, Secrets
 Manager, Roca Cloud, GitHub, CDK, or AgentCore deploy APIs.
