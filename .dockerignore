@@ -8,6 +8,8 @@ build/
 cdk.out/
 *.jsonl
 .atm/
+.tmp/
+.workspace/
 .worktree/
 .worktrees/
 .env
