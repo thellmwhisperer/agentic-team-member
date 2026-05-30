@@ -235,13 +235,18 @@ def execute_tool(
 
         if name == "create_file":
             full_path = resolve_repo_path(args["path"])
-            if os.path.exists(full_path):
+            exists = os.path.exists(full_path)
+            if exists and not is_test_file_path(str(args["path"])):
                 return f"ERROR: {args['path']} already exists. Use str_replace_editor to modify it."
             os.makedirs(os.path.dirname(full_path), exist_ok=True)
             with open(full_path, "w") as f:
                 f.write(args["content"])
             file_read_cache.pop(full_path, None)
-            result = f"OK: created {args['path']}"
+            result = (
+                f"OK: replaced existing test file {args['path']}"
+                if exists
+                else f"OK: created {args['path']}"
+            )
             return (
                 result
                 + reactive_typecheck_feedback(
