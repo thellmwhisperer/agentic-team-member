@@ -96,6 +96,33 @@ model = "local-model"
 
         self.assertIn("[agent]\n\npermission_driven = true", rendered)
 
+    def test_render_agentcore_config_overrides_max_steps(self):
+        source = """[agent]
+max_steps = 50
+permission_driven = false
+
+[llm]
+url = "local"
+model = "local-model"
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            source_path = Path(tmp) / "agent.toml"
+            target_path = Path(tmp) / "agentcore.toml"
+            source_path.write_text(source)
+            (Path(tmp) / "tools.json").write_text("[]\n")
+
+            model_runner.render_agentcore_config(
+                source_path,
+                target_path,
+                model="qwen.qwen3-coder-480b-a35b-v1:0",
+                url="http://127.0.0.1:11435/v1/chat/completions",
+                max_steps=100,
+            )
+
+            rendered = target_path.read_text()
+
+        self.assertIn("max_steps = 100", rendered)
+
     def test_configure_model_runner_writes_config_and_starts_proxy(self):
         source = """[agent]
 permission_driven = false
@@ -115,6 +142,7 @@ model = "local-model"
                 "ATM_CONFIG": str(target_path),
                 "ATM_BEDROCK_MODEL_ID": "qwen.qwen3-coder-480b-a35b-v1:0",
                 "ATM_PERMISSION_DRIVEN": "true",
+                "ATM_MAX_STEPS": "100",
             }
             with patch.dict(os.environ, env, clear=True):
                 with patch.object(model_runner, "ensure_bedrock_proxy", return_value="proc") as proxy:
@@ -130,6 +158,7 @@ model = "local-model"
             self.assertEqual(configured_path, str(target_path))
             self.assertIn("qwen.qwen3-coder-480b-a35b-v1:0", target_path.read_text())
             self.assertIn("permission_driven = true", target_path.read_text())
+            self.assertIn("max_steps = 100", target_path.read_text())
 
     def test_proxy_launch_uses_native_bedrock_proxy(self):
         with patch.dict(os.environ, {"AWS_REGION": "eu-west-2"}, clear=True):
