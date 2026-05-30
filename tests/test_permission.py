@@ -670,6 +670,19 @@ def test_run_test_grant_allows_focused_test_with_stderr_merge_redirect():
     assert review is None
 
 
+def test_run_test_grant_allows_focused_test_with_harmless_head_filter():
+    context = _context()
+
+    review = permission.review_tool_call(
+        "run_command",
+        {"command": "bun test src/twitch/handleResub.test.ts 2>&1 | head -100"},
+        grant="run_test",
+        context=context,
+    )
+
+    assert review is None
+
+
 def test_run_test_grant_rejects_shell_bypass_commands():
     context = _context()
     blocked_commands = [
@@ -733,6 +746,29 @@ def test_read_only_tools_are_allowed_without_consuming_active_grants():
         "write_test",
         context,
     ) == "write_test"
+
+
+def test_write_test_grant_allows_focused_test_reruns_after_test_exists():
+    context = _context()
+    context["test_file_created"] = True
+
+    review = permission.review_tool_call(
+        "run_command",
+        {"command": "bun test src/twitch/handleResub.test.ts 2>&1 | head -100"},
+        grant="write_test",
+        context=context,
+    )
+
+    assert review is None
+    assert (
+        permission.consume_grant(
+            "run_command",
+            {"command": "bun test src/twitch/handleResub.test.ts 2>&1 | head -100"},
+            "write_test",
+            context,
+        )
+        == "write_test"
+    )
 
 
 def test_read_contract_grant_does_not_allow_shell_commands():
