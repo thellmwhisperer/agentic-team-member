@@ -30,7 +30,7 @@ You have tools to read files, run commands, edit files, and create files. All pa
 ## Workflow
 1. Read the relevant source files to understand the bug
 2. Read existing test files to understand testing patterns
-3. Export the function if needed so it can be imported in tests
+3. Prefer testing through the existing public caller/registration. If direct import is unavoidable, export only the smallest pure helper/predicate needed for the bug.
 4. Write a test that imports the REAL function and fails (reproduces the bug)
 5. Fix the source code
 6. Run the test — it must pass
@@ -39,7 +39,7 @@ You have tools to read files, run commands, edit files, and create files. All pa
 ## Testing rules (CRITICAL)
 - Your test MUST import the real function from the source file.
 - Tests that define local stub/simulation functions are NOT valid. The harness will reject them.
-- Only if importing the real function is blocked by module initialization errors, add the smallest mock/seam needed to reach a real failing test. Don't build seams speculatively and don't give up and write stubs.
+- If importing the real function is blocked by module initialization errors, use public module mocks, caller/registration paths, or a small pure helper/predicate. Do not add production test-only APIs.
 
 ## Test strategy
 - Start with one test that reproduces the reported bug. Add extra cases only if a failure proves they matter.

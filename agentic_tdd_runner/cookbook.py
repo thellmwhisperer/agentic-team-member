@@ -19,7 +19,6 @@ from agentic_tdd_runner.compiler import (
     _extract_signature,
     _extract_target_snippet,
     _observed_members,
-    _realize_generated_test_seams,
     _render_module_mocks,
     build_contract,
 )
@@ -139,10 +138,7 @@ def _build_contract_for_symbol(
             injection_plan.append(injection_entry)
             seen_injection.add(injection_entry["binding"])
 
-    seam_edits = _realize_generated_test_seams(
-        source_path, source_text, assignments,
-        execution_dependencies, injection_plan,
-    )
+    seam_edits = []
     pre_test_source_edits = _build_pre_test_source_edits(
         target, source_text,
         exported_hint=lang.is_exported(source_text, symbol),
@@ -558,7 +554,8 @@ def _render_cookbook_text(contract: dict, lang) -> str:
     parts.append("- Do not use loose `Record`, `unknown`, `any`, empty-object casts like `{} as SomeType`, or cast-only test payloads; create the minimal structural payload or declare a typed value that TypeScript can check.")
     parts.append("- For value-selection bugs, use contrastive fixtures only when the issue or source shows competing inputs; preserve fallback values only when the real contract requires them.")
     parts.append("- Use the issue text, source registration, and reactive compiler/test feedback before dependency lookup. Only inspect dependency type files after those sources leave a concrete gap or contradict each other.")
-    parts.append("- Before the first failing test, apply only the mechanical edits listed below, such as exports or generated test-seam setters.")
+    parts.append("- Before the first failing test, apply only the mechanical exports listed below.")
+    parts.append("- Do not add production `__set...ForTests` setters or other test-only APIs. Prefer a public caller/registration path, a module mock, or the smallest pure helper/predicate for the bug.")
     parts.append("- For module-load mocks, assert against the named `*_spy` variables emitted below; do not import and patch the mocked factory after importing the target.")
     if contract["test_file"]["runner"] == "bun:test":
         parts.append("")
@@ -610,20 +607,20 @@ def _render_cookbook_text(contract: dict, lang) -> str:
         parts.append("```")
         parts.append("")
 
-    # Test seams
+    # Dependency seams
     seam_deps = [
         dep for dep in contract.get("execution_dependencies", [])
         if dep.get("strategy") == "set_test_seam"
     ]
     if seam_deps:
-        parts.append("### Test Seams")
+        parts.append("### Dependency Injection Notes")
+        parts.append("- Direct source-level test-seam setters are not generated. Prefer a public caller/registration path, a module mock, or the smallest pure helper/predicate for the bug.")
         for dep in seam_deps:
             binding = dep["binding"]
-            setter = dep.get("setter_name") or lang.setter_name(binding)
             members = dep.get("observed_members", [])
             members_str = ", ".join(members) if members else "..."
             parts.append(
-                f"- `{binding}` → call `{setter}({{ {members_str} }})` before invoking target"
+                f"- `{binding}` is observed through `{members_str}`; do not add a production test-only setter for it."
             )
         parts.append("")
 

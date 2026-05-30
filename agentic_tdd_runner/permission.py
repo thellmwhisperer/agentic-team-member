@@ -52,6 +52,7 @@ _CONTROL_FLOW_SYMBOLS = {
     "return",
     "await",
 }
+_READ_ONLY_SHELL_COMMANDS = {"grep", "rg"}
 
 
 def permission_enabled(config: dict) -> bool:
@@ -105,7 +106,6 @@ def build_permission_context(
             workdir=workdir,
             test_file=episode.get("test_file"),
         ),
-        "source_seams": _extract_section_bullets(str(episode.get("cookbook_text") or ""), "### Test Seams"),
         "source_mocks": _extract_mock_modules(str(episode.get("cookbook_text") or "")),
         "module_mock_block": _extract_code_block_after(
             str(episode.get("cookbook_text") or ""),
@@ -175,6 +175,7 @@ def answer_harness(args: dict, context: dict) -> PermissionReview:
             "You may read_file this same test path while repairing/resyncing the granted file.",
             "Use the real callable contract and cover the acceptance bullets.",
             "Keep direct invocation and assertions inside the test, not shared setup.",
+            "Do not add production `__set...ForTests` setters. Prefer a public caller/registration path, module mock, or smallest pure helper/predicate when hard-wired dependencies block a direct test.",
         ]
         signature = context.get("source_signature")
         if signature:
@@ -183,10 +184,6 @@ def answer_harness(args: dict, context: dict) -> PermissionReview:
         if contract_facts:
             lines.append("Contract facts:")
             lines.extend(f"- {fact}" for fact in contract_facts)
-        seams = context.get("source_seams") or []
-        if seams:
-            lines.append("Available test seams:")
-            lines.extend(f"- {seam}" for seam in seams)
         mocks = context.get("source_mocks") or []
         if mocks:
             lines.append("Module mocks to use before source import:")
@@ -303,6 +300,8 @@ def review_tool_call(
                 "repair_test_setup, edit_source, run_test, or done."
             ),
         )
+    if grant != "done" and _is_read_only_tool_call(name, args):
+        return None
     if grant == "read_contract":
         if name in {"read_file", "rg"}:
             return None
@@ -534,6 +533,8 @@ def consume_grant(
     context: dict | None = None,
 ) -> str | None:
     if name == "ask_harness":
+        return grant
+    if grant not in {None, "done"} and _is_read_only_tool_call(name, args or {}):
         return grant
     if grant in {"write_test", "write_source"}:
         path = str((args or {}).get("path") or "")
@@ -1106,8 +1107,6 @@ def _build_regression_test_skeleton(context: dict) -> str:
 
     import_path = context.get("source_import_path") or "./client"
     spy_names = _extract_spy_names(mock_block)
-    setter_names = _extract_test_seam_setters(context.get("source_seams") or [])
-    setter_setup_lines = _setter_setup_lines(context.get("source_seams") or [])
     type_imports = _extract_type_imports_from_contract_facts(facts)
     type_shapes = context.get("referenced_type_shapes") or []
     fixture_lines = _build_callback_fixture_lines(
@@ -1143,8 +1142,6 @@ def _build_regression_test_skeleton(context: dict) -> str:
         "",
         "let targetHandler: TargetHandler;",
     ])
-    for setter_name in setter_names:
-        lines.append(f'let {setter_name}: ClientModule["{setter_name}"];')
     lines.extend([
         "",
         "beforeEach(async () => {",
@@ -1157,20 +1154,16 @@ def _build_regression_test_skeleton(context: dict) -> str:
         f'  const clientModule = await import("{import_path}");',
         f"  targetHandler = clientModule.{target_symbol};",
     ])
-    for setter_name in setter_names:
-        lines.append(f"  {setter_name} = clientModule.{setter_name};")
     lines.extend([
         "});",
         "",
         'test("covers the reported callback behavior", () => {',
-        "  // Arrange issue-grounded doubles and call any generated test-seam setters above.",
+        "  // Arrange issue-grounded doubles; do not add production test-only setters.",
     ])
     if fixture_lines:
         lines.extend(f"  {line}" if line else "" for line in fixture_lines)
     else:
         lines.append("  // Build typed callback arguments from the Callback Contract Evidence.")
-    if setter_setup_lines:
-        lines.extend(f"  {line}" if line else "" for line in setter_setup_lines)
     lines.extend([
         "  const callbackHandler: CallbackContract = targetHandler;",
         "  callbackHandler(" + ", ".join(_callback_argument_names(callback_params)) + ");",
@@ -1212,30 +1205,6 @@ def _extract_spy_names(mock_block: str) -> list[str]:
         if name.endswith("_spy"):
             names.append(name)
     return names
-
-
-def _extract_test_seam_setters(seams: list[str]) -> list[str]:
-    setters: list[str] = []
-    for seam in seams:
-        for match in re.finditer(r"`(__set[A-Za-z0-9_]+)(?:\([^`]*)?`", seam):
-            setters.append(match.group(1))
-    return sorted(set(setters))
-
-
-def _setter_setup_lines(seams: list[str]) -> list[str]:
-    lines: list[str] = []
-    seam_text = "\n".join(seams)
-    if "__setClientForTests" in seam_text and "{ say" in seam_text:
-        lines.extend([
-            'const sayResult: [string] = [""];',
-            "const say_spy = mock((_channel: string, _message: string) => Promise.resolve(sayResult));",
-            "__setClientForTests({ say: say_spy });",
-        ])
-    if "__setMemoryManagerForTests" in seam_text and "getEmote" in seam_text:
-        lines.append('__setMemoryManagerForTests({ getEmote: () => "teseLove" });')
-    if lines:
-        lines.append("")
-    return lines
 
 
 def _extract_type_imports_from_contract_facts(facts: list[str]) -> list[tuple[str, list[str]]]:
@@ -1417,6 +1386,7 @@ def _normalize_permission_path(path: str) -> str:
 
 def _looks_like_focused_test_command(command: str, *, context: dict) -> bool:
     command = command.strip()
+    command = _strip_innocuous_redirects(command) or ""
     test_file = str(context.get("test_file") or "")
     test_command = str(context.get("test_command") or "")
     if not command or not test_command or _contains_shell_control(command):
@@ -1438,6 +1408,42 @@ def _looks_like_focused_test_command(command: str, *, context: dict) -> bool:
         and command_parts[:len(test_command_parts)] == test_command_parts
         and _same_path(command_parts[-1], test_file)
     )
+
+
+def _strip_innocuous_redirects(command: str) -> str | None:
+    """Ignore harmless stderr-to-stdout suffixes when matching focused tests."""
+    try:
+        parts = shlex.split(command)
+    except ValueError:
+        return None
+    while parts and parts[-1] == "2>&1":
+        parts.pop()
+    if not parts:
+        return None
+    return shlex.join(parts)
+
+
+def _is_read_only_tool_call(name: str, args: dict | None) -> bool:
+    args = args or {}
+    if name in {"read_file", "rg"}:
+        return True
+    if name != "run_command":
+        return False
+    return _looks_like_read_only_shell_command(str(args.get("command") or ""))
+
+
+def _looks_like_read_only_shell_command(command: str) -> bool:
+    command = command.strip()
+    if not command or _contains_shell_control(command):
+        return False
+    try:
+        parts = shlex.split(command)
+    except ValueError:
+        return False
+    if not parts:
+        return False
+    binary = posixpath.basename(parts[0])
+    return binary in _READ_ONLY_SHELL_COMMANDS
 
 
 def _contains_shell_control(command: str) -> bool:
