@@ -1417,6 +1417,31 @@ class TestRunQualityChecks:
         assert "test-only production export" in msg
         assert "src/file.ts:1" in msg
 
+    def test_rejects_tests_that_assert_source_text(self, tmp_path, monkeypatch):
+        self._setup_repo(tmp_path, monkeypatch)
+        (tmp_path / "src" / "file.test.ts").write_text(
+            "import { expect, test } from 'bun:test';\n"
+            "import fs from 'fs';\n"
+            "test('implementation text', () => {\n"
+            "  const source = fs.readFileSync('src/file.ts', 'utf-8');\n"
+            "  expect(source).toContain('includes');\n"
+            "});\n"
+        )
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "quality": {
+                "enabled": True, "max_fix_rounds": 3,
+                "typescript": {"checks": [], "forbidden": []},
+            },
+            "timeouts": {"tool_execution": 10},
+            "prompt": {"quality_failed": "FAIL: {details}"},
+        })
+
+        ok, msg = run_quality_checks("src/file.test.ts")
+
+        assert ok is False
+        assert "reads production source text" in msg
+        assert "import and exercise the real behavior" in msg
+
     def test_passes_clean_code(self, tmp_path, monkeypatch):
         self._setup_repo(tmp_path, monkeypatch)
         (tmp_path / "src" / "file.test.ts").write_text("const x: number = 1;")
