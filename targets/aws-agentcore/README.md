@@ -9,19 +9,23 @@ This target must not vendor or fork `agentic_tdd_runner`.
 
 ## Current Slice
 
-This PR brings over the runtime-facing pieces from the former standalone
-`atm-cloud` repo:
+This target currently contains the runtime-facing pieces from the former
+standalone `atm-cloud` repo plus Docker packaging that builds from the
+monorepo root:
 
 ```text
 targets/aws-agentcore/
+  Dockerfile           AgentCore runtime image; build with monorepo root context
+  Makefile             local test, smoke, and docker build helpers
   runtime/             AgentCore entrypoint and Bedrock OpenAI-compatible proxy
+  scripts/             local packaging smoke checks; no deploy
   src/atm_cloud/       job contract, optional memory client, runner adapters
   tests/               local adapter tests; no AWS deployment required
   requirements.txt     runtime dependencies for the AWS target
 ```
 
-Docker, CDK, and deploy scripts are intentionally left for later PRs so the
-runtime contract can settle first.
+CDK and deploy scripts are intentionally left for later PRs. This slice stops
+at a buildable runtime image and local smoke checks.
 
 ## Runtime Contract
 
@@ -54,6 +58,45 @@ python -m agentic_tdd_runner.agent
 
 It passes `--github-repo`, `--issue-number`, `--repo`, `--run-root`,
 `--log-dir`, and an optional rendered `--config`.
+
+## Build And Smoke
+
+Build from the monorepo root context so the image copies the canonical harness
+directly from `agentic_tdd_runner/`:
+
+```bash
+make -C targets/aws-agentcore docker-build
+```
+
+The equivalent raw Docker command is:
+
+```bash
+docker build \
+  -f targets/aws-agentcore/Dockerfile \
+  -t atm-aws-agentcore:local \
+  .
+```
+
+Run a no-AWS smoke check locally:
+
+```bash
+make -C targets/aws-agentcore smoke
+```
+
+Set `PYTHON=/path/to/python3.12+` if your default `python3` is older than the
+project's Python requirement. Local `test` and `smoke` targets expect the root
+development dependencies such as `requests` and `pytest` to be installed for
+that interpreter; the Docker image installs its runtime dependencies itself.
+
+Run the same smoke check inside the image:
+
+```bash
+make -C targets/aws-agentcore docker-smoke
+```
+
+The smoke path imports the root harness and AWS adapter modules, then invokes
+the AgentCore entrypoint in `dry_run` mode. It does not call Bedrock, Secrets
+Manager, Roca Cloud, GitHub, CDK, or AgentCore deploy APIs.
 
 ## Bedrock Proxy
 

@@ -275,6 +275,22 @@ def _bedrock_client(region: str | None = None) -> Any:
     return boto3.client(**kwargs)
 
 
+def chat_completion_http_response(
+    proxy: BedrockOpenAIProxy,
+    raw_body: bytes,
+) -> tuple[int, dict[str, Any]]:
+    try:
+        payload = json.loads(raw_body.decode("utf-8") or "{}")
+        return 200, proxy.chat_completion(payload)
+    except json.JSONDecodeError as exc:
+        return 400, {"error": {"message": str(exc), "type": "invalid_request"}}
+    except (KeyError, TypeError, ValueError) as exc:
+        return 400, {"error": {"message": str(exc), "type": "invalid_request"}}
+    except Exception as exc:  # pragma: no cover - defensive HTTP boundary.
+        LOGGER.exception("bedrock proxy request failed")
+        return 500, {"error": {"message": str(exc), "type": exc.__class__.__name__}}
+
+
 def make_handler(proxy: BedrockOpenAIProxy) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
@@ -287,17 +303,9 @@ def make_handler(proxy: BedrockOpenAIProxy) -> type[BaseHTTPRequestHandler]:
             if self.path != "/v1/chat/completions":
                 self.respond(404, {"error": "not found"})
                 return
-            try:
-                length = int(self.headers.get("content-length") or "0")
-                payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
-                self.respond(200, proxy.chat_completion(payload))
-            except json.JSONDecodeError as exc:
-                self.respond(400, {"error": {"message": str(exc), "type": "invalid_request"}})
-            except (KeyError, TypeError, ValueError) as exc:
-                self.respond(400, {"error": {"message": str(exc), "type": "invalid_request"}})
-            except Exception as exc:  # pragma: no cover - defensive HTTP boundary.
-                LOGGER.exception("bedrock proxy request failed")
-                self.respond(500, {"error": {"message": str(exc), "type": exc.__class__.__name__}})
+            length = int(self.headers.get("content-length") or "0")
+            status, response = chat_completion_http_response(proxy, self.rfile.read(length))
+            self.respond(status, response)
 
         def log_message(self, fmt: str, *args: Any) -> None:
             LOGGER.info("%s - %s", self.address_string(), fmt % args)
