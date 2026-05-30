@@ -478,6 +478,40 @@ def test_create_file_includes_reactive_forbidden_feedback(tmp_path, monkeypatch)
     assert "as never" in result
 
 
+def test_create_file_rewrites_existing_test_file(tmp_path, monkeypatch):
+    def fake_run(command, **kwargs):
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("agentic_tdd_runner.tools.subprocess.run", fake_run)
+    target = tmp_path / "src" / "file.test.ts"
+    target.parent.mkdir()
+    target.write_text("old test\n")
+
+    result, _ = _execute_tool(
+        "create_file",
+        {"path": "src/file.test.ts", "content": "new test\n"},
+        tmp_path,
+    )
+
+    assert result.startswith("OK: replaced existing test file src/file.test.ts")
+    assert target.read_text() == "new test\n"
+
+
+def test_create_file_does_not_rewrite_existing_non_test_file(tmp_path):
+    target = tmp_path / "src" / "file.ts"
+    target.parent.mkdir()
+    target.write_text("old source\n")
+
+    result, _ = _execute_tool(
+        "create_file",
+        {"path": "src/file.ts", "content": "new source\n"},
+        tmp_path,
+    )
+
+    assert result == "ERROR: src/file.ts already exists. Use str_replace_editor to modify it."
+    assert target.read_text() == "old source\n"
+
+
 def test_str_replace_editor_includes_reactive_forbidden_feedback(tmp_path, monkeypatch):
     def fake_run(command, **kwargs):
         return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
