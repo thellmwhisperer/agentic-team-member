@@ -307,6 +307,12 @@ def review_tool_call(
             return None
     elif grant == "write_test":
         path = str(args.get("path") or "")
+        if (
+            context.get("test_file_created")
+            and name == "run_command"
+            and _looks_like_focused_test_command(str(args.get("command") or ""), context=context)
+        ):
+            return None
         if name == "read_file" and (
             _same_path(path, context.get("test_file"))
             or _path_in_list(path, context.get("test_setup_read_paths") or [])
@@ -535,6 +541,13 @@ def consume_grant(
     if name == "ask_harness":
         return grant
     if grant not in {None, "done"} and _is_read_only_tool_call(name, args or {}):
+        return grant
+    if (
+        grant == "write_test"
+        and (context or {}).get("test_file_created")
+        and name == "run_command"
+        and _looks_like_focused_test_command(str((args or {}).get("command") or ""), context=context or {})
+    ):
         return grant
     if grant in {"write_test", "write_source"}:
         path = str((args or {}).get("path") or "")
@@ -1386,7 +1399,7 @@ def _normalize_permission_path(path: str) -> str:
 
 def _looks_like_focused_test_command(command: str, *, context: dict) -> bool:
     command = command.strip()
-    command = _strip_innocuous_redirects(command) or ""
+    command = _strip_innocuous_output_filters(command) or ""
     test_file = str(context.get("test_file") or "")
     test_command = str(context.get("test_command") or "")
     if not command or not test_command or _contains_shell_control(command):
@@ -1410,17 +1423,35 @@ def _looks_like_focused_test_command(command: str, *, context: dict) -> bool:
     )
 
 
-def _strip_innocuous_redirects(command: str) -> str | None:
-    """Ignore harmless stderr-to-stdout suffixes when matching focused tests."""
+def _strip_innocuous_output_filters(command: str) -> str | None:
+    """Ignore harmless stderr merge and head/tail suffixes for focused tests."""
     try:
         parts = shlex.split(command)
     except ValueError:
         return None
+    if "|" in parts:
+        pipe_index = len(parts) - 1 - parts[::-1].index("|")
+        if not _looks_like_harmless_output_filter(parts[pipe_index + 1:]):
+            return None
+        parts = parts[:pipe_index]
     while parts and parts[-1] == "2>&1":
         parts.pop()
     if not parts:
         return None
     return shlex.join(parts)
+
+
+def _looks_like_harmless_output_filter(parts: list[str]) -> bool:
+    if not parts:
+        return False
+    binary = posixpath.basename(parts[0])
+    if binary not in {"head", "tail"}:
+        return False
+    if len(parts) == 1:
+        return True
+    if len(parts) == 2 and re.fullmatch(r"-\d+", parts[1]):
+        return True
+    return len(parts) == 3 and parts[1] == "-n" and parts[2].isdigit()
 
 
 def _is_read_only_tool_call(name: str, args: dict | None) -> bool:
