@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import urllib.request
 from typing import Any
+from urllib.parse import urlparse
 
 
 class UrlLibHttp:
@@ -24,6 +25,9 @@ class RocaMcpClient:
     """JSON-RPC MCP client for the Roca Cloud endpoint."""
 
     def __init__(self, mcp_url: str, api_token: str, *, http: Any | None = None):
+        parsed = urlparse(mcp_url)
+        if parsed.scheme != "https" or not parsed.netloc:
+            raise ValueError("ROCA Cloud MCP URL must be an https URL")
         self.mcp_url = mcp_url
         self.api_token = api_token
         self.http = http or UrlLibHttp()

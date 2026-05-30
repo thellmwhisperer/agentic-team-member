@@ -1,3 +1,4 @@
+import os
 import unittest
 from unittest.mock import patch
 
@@ -28,6 +29,27 @@ class FakeHarness:
     def run(self, job, context):
         self.calls.append((job, context))
         return self.result
+
+
+class FailingQueryMemory(FakeMemory):
+    def query(self, **kwargs):
+        self.queries.append(kwargs)
+        raise RuntimeError("roca query unavailable")
+
+
+class FailingStoreMemory(FakeMemory):
+    def store(self, **kwargs):
+        self.stores.append(kwargs)
+        raise RuntimeError("roca store unavailable")
+
+
+class FailingHarness:
+    def __init__(self):
+        self.calls = []
+
+    def run(self, job, context):
+        self.calls.append((job, context))
+        raise RuntimeError("harness timed out")
 
 
 class AtmCloudRunnerTest(unittest.TestCase):
@@ -92,6 +114,49 @@ class AtmCloudRunnerTest(unittest.TestCase):
         self.assertEqual(memory.stores[0]["metadata"]["pr_url"], "https://github.com/acme/repo/pull/7")
         self.assertIn("PR: https://github.com/acme/repo/pull/7.", memory.stores[0]["content"])
 
+    def test_memory_query_failure_uses_empty_context_and_continues(self):
+        memory = FailingQueryMemory()
+        harness = FakeHarness(CommandResult(exit_code=0, stdout="ok", stderr=""))
+        runner = AtmCloudRunner(memory=memory, harness=harness)
+        job = AtmJob.from_dict({"repo": "acme/repo", "issue_number": 12})
+
+        result = runner.run(job)
+
+        self.assertEqual(result.status, "succeeded")
+        self.assertEqual(result.events[0].phase, "memory_context")
+        self.assertEqual(result.events[0].status, "failed")
+        self.assertEqual(harness.calls[0][1], {"items": []})
+        self.assertIn("roca query unavailable", result.events[0].metadata["error"])
+
+    def test_harness_exception_returns_deterministic_failure(self):
+        memory = FakeMemory()
+        harness = FailingHarness()
+        runner = AtmCloudRunner(memory=memory, harness=harness)
+        job = AtmJob.from_dict({"repo": "acme/repo", "issue_number": 12})
+
+        result = runner.run(job)
+
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.command.exit_code, 1)
+        self.assertEqual(result.events[1].phase, "atm_harness")
+        self.assertEqual(result.events[1].status, "failed")
+        self.assertEqual(result.command.metadata["exception"], "RuntimeError")
+        self.assertIn("harness timed out", memory.stores[0]["content"])
+
+    def test_memory_store_failure_returns_failed_result_event(self):
+        memory = FailingStoreMemory()
+        harness = FakeHarness(CommandResult(exit_code=0, stdout="ok", stderr=""))
+        runner = AtmCloudRunner(memory=memory, harness=harness)
+        job = AtmJob.from_dict({"repo": "acme/repo", "issue_number": 12})
+
+        result = runner.run(job)
+
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.command.exit_code, 0)
+        self.assertEqual(result.events[-1].phase, "memory_handoff")
+        self.assertEqual(result.events[-1].status, "failed")
+        self.assertIn("roca store unavailable", result.events[-1].metadata["error"])
+
     def test_dry_run_skips_harness_and_writes_handoff(self):
         memory = FakeMemory()
         harness = FakeHarness(CommandResult(exit_code=99, stdout="", stderr="should not run"))
@@ -140,6 +205,28 @@ class AtmCloudRunnerTest(unittest.TestCase):
         self.assertIn("--log-dir", command)
         self.assertIn("/tmp/atm-agentcore/logs/run-123", command)
         self.assertEqual(result.metadata["log_dir"], "/tmp/atm-agentcore/logs/run-123")
+
+    def test_subprocess_harness_passes_github_token_to_child_env(self):
+        harness = SubprocessAtmHarness(
+            python="python",
+            module="custom.atm",
+            repo_root="/tmp/repo",
+            timeout=1,
+            github_token="secret-token",
+        )
+        job = AtmJob.from_dict({"repo": "acme/repo", "issue_number": 12})
+
+        with patch.dict("os.environ", {}, clear=True):
+            with patch("atm_cloud.runner.subprocess.run") as run:
+                run.return_value.returncode = 0
+                run.return_value.stdout = ""
+                run.return_value.stderr = ""
+                harness.run(job, {})
+
+        env = run.call_args.kwargs["env"]
+        self.assertEqual(env["GH_TOKEN"], "secret-token")
+        self.assertEqual(env["GITHUB_TOKEN"], "secret-token")
+        self.assertNotIn("GH_TOKEN", os.environ)
 
     def test_subprocess_harness_uses_rendered_runtime_config(self):
         harness = SubprocessAtmHarness(python="python", module="custom.atm", repo_root="/tmp/repo", timeout=1)

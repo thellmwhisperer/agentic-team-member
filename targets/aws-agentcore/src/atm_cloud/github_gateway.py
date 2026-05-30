@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 import urllib.request
-from typing import Any
+from typing import Any, Mapping
 
 
 class UrlLibTransport:
@@ -62,6 +62,7 @@ class GitHubGatewayClient:
     ) -> dict[str, Any]:
         _validate_repo_allowed(repo)
         _validate_atm_branch(branch)
+        files = _validate_commit_files(files)
         head_ref = self._request("GET", f"/repos/{repo}/git/ref/heads/{branch}")
         parent_sha = head_ref["object"]["sha"]
         parent = self._request("GET", f"/repos/{repo}/git/commits/{parent_sha}")
@@ -155,9 +156,7 @@ def dispatch_tool(tool_name: str, payload: dict[str, Any], client: GitHubGateway
             branch=_required(payload, "branch"),
         )
     if tool_name == "github_commit_files":
-        files = _required(payload, "files")
-        if not isinstance(files, list) or not files:
-            raise ValueError("files must be a non-empty list")
+        files = _validate_commit_files(_required(payload, "files"))
         return client.commit_files(
             repo=_required(payload, "repo"),
             branch=_required(payload, "branch"),
@@ -193,7 +192,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         return {"statusCode": 500, "body": json.dumps({"error": str(exc)})}
 
 
-def _required(payload: dict[str, Any], key: str) -> Any:
+def _required(payload: Mapping[str, Any], key: str) -> Any:
     value = payload.get(key)
     if value in (None, ""):
         raise ValueError(f"missing required field: {key}")
@@ -219,9 +218,11 @@ def load_github_token() -> str:
 
 def _validate_repo_allowed(repo: str) -> None:
     allowlist = os.environ.get("GITHUB_REPO_ALLOWLIST")
-    if not allowlist:
-        return
+    if not allowlist or not allowlist.strip():
+        raise ValueError("GITHUB_REPO_ALLOWLIST must include at least one allowed repo")
     allowed = {item.strip() for item in allowlist.split(",") if item.strip()}
+    if not allowed:
+        raise ValueError("GITHUB_REPO_ALLOWLIST must include at least one allowed repo")
     if repo not in allowed:
         raise ValueError(f"repo is not allowlisted: {repo}")
 
@@ -230,3 +231,20 @@ def _validate_atm_branch(branch: str) -> None:
     prefix = os.environ.get("ATM_BRANCH_PREFIX", "atm-agentcore/")
     if not branch.startswith(prefix):
         raise ValueError(f"branch must start with {prefix}")
+
+
+def _validate_commit_files(files: Any) -> list[dict[str, str]]:
+    if not isinstance(files, list) or not files:
+        raise ValueError("files must be a non-empty list")
+    validated = []
+    for index, item in enumerate(files):
+        if not isinstance(item, Mapping):
+            raise ValueError(f"files[{index}] must be an object")
+        path = _required(item, "path")
+        content = _required(item, "content")
+        if not isinstance(path, str):
+            raise ValueError(f"files[{index}].path must be a string")
+        if not isinstance(content, str):
+            raise ValueError(f"files[{index}].content must be a string")
+        validated.append({"path": path, "content": content})
+    return validated

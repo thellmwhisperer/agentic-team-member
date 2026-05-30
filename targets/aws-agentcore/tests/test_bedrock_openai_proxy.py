@@ -1,4 +1,8 @@
+import json
+import threading
 import unittest
+import urllib.error
+import urllib.request
 
 from runtime import bedrock_openai_proxy as proxy
 
@@ -132,6 +136,102 @@ class BedrockOpenAIProxyTest(unittest.TestCase):
 
         self.assertEqual(len(compacted), 2)
         self.assertEqual(compacted[0]["content"], [{"text": "first"}, {"text": "second"}])
+
+    def test_chat_completion_rejects_model_override(self):
+        client = FakeBedrockClient()
+        bedrock_proxy = proxy.BedrockOpenAIProxy(model_id="provider.model-v1:0", client=client)
+
+        with self.assertRaisesRegex(ValueError, "model override"):
+            bedrock_proxy.chat_completion(
+                {
+                    "model": "provider.other-model-v1:0",
+                    "messages": [{"role": "user", "content": "hello"}],
+                }
+            )
+
+        self.assertEqual(client.requests, [])
+
+    def test_chat_completion_accepts_matching_model_alias(self):
+        client = FakeBedrockClient()
+        bedrock_proxy = proxy.BedrockOpenAIProxy(model_id="provider.model-v1:0", client=client)
+
+        response = bedrock_proxy.chat_completion(
+            {
+                "model": "bedrock/provider.model-v1:0",
+                "messages": [{"role": "user", "content": "hello"}],
+            }
+        )
+
+        self.assertEqual(client.requests[0]["modelId"], "provider.model-v1:0")
+        self.assertEqual(response["model"], "provider.model-v1:0")
+
+    def test_http_handler_returns_400_for_invalid_json(self):
+        bedrock_proxy = proxy.BedrockOpenAIProxy(model_id="provider.model-v1:0", client=FakeBedrockClient())
+
+        with serve_proxy(bedrock_proxy) as url:
+            request = urllib.request.Request(
+                f"{url}/v1/chat/completions",
+                data=b"{",
+                headers={"content-type": "application/json"},
+                method="POST",
+            )
+
+            with self.assertRaises(urllib.error.HTTPError) as raised:
+                urllib.request.urlopen(request, timeout=5)
+
+        self.assertEqual(raised.exception.code, 400)
+        body = json.loads(raised.exception.read().decode("utf-8"))
+        self.assertEqual(body["error"]["type"], "invalid_request")
+
+    def test_http_handler_returns_400_for_request_validation_errors(self):
+        bedrock_proxy = proxy.BedrockOpenAIProxy(model_id="provider.model-v1:0", client=FakeBedrockClient())
+        payload = json.dumps({"model": "provider.other-model-v1:0", "messages": []}).encode("utf-8")
+
+        with serve_proxy(bedrock_proxy) as url:
+            request = urllib.request.Request(
+                f"{url}/v1/chat/completions",
+                data=payload,
+                headers={"content-type": "application/json"},
+                method="POST",
+            )
+
+            with self.assertRaises(urllib.error.HTTPError) as raised:
+                urllib.request.urlopen(request, timeout=5)
+
+        self.assertEqual(raised.exception.code, 400)
+        body = json.loads(raised.exception.read().decode("utf-8"))
+        self.assertEqual(body["error"]["type"], "invalid_request")
+
+
+class FakeBedrockClient:
+    def __init__(self):
+        self.requests = []
+
+    def converse(self, **request):
+        self.requests.append(request)
+        return {
+            "stopReason": "end_turn",
+            "usage": {"inputTokens": 1, "outputTokens": 1, "totalTokens": 2},
+            "output": {"message": {"role": "assistant", "content": [{"text": "ok"}]}},
+        }
+
+
+class serve_proxy:
+    def __init__(self, bedrock_proxy):
+        self.server = proxy.ThreadingHTTPServer(
+            ("127.0.0.1", 0),
+            proxy.make_handler(bedrock_proxy),
+        )
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+
+    def __enter__(self):
+        self.thread.start()
+        host, port = self.server.server_address
+        return f"http://{host}:{port}"
+
+    def __exit__(self, exc_type, exc, traceback):
+        self.server.shutdown()
+        self.thread.join(timeout=5)
 
 
 if __name__ == "__main__":

@@ -150,7 +150,24 @@ model = "local-model"
         self.assertIn("qwen.qwen3-coder-480b-a35b-v1:0", command)
         self.assertIn("eu-west-2", command)
 
+    def test_proxy_launch_detects_process_exit_after_tcp_probe(self):
+        with patch.object(model_runner, "wait_for_tcp"):
+            with patch.object(model_runner.subprocess, "Popen") as popen:
+                popen.return_value = DeadProcess()
+
+                with self.assertRaisesRegex(RuntimeError, "exited before becoming ready"):
+                    model_runner.ensure_bedrock_proxy(
+                        host="127.0.0.1",
+                        port=11435,
+                        model="qwen.qwen3-coder-480b-a35b-v1:0",
+                    )
+
 
 class FakeProcess:
     def poll(self):
         return None
+
+
+class DeadProcess:
+    def poll(self):
+        return 1

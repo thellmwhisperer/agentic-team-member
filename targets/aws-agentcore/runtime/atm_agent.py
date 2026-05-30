@@ -25,7 +25,7 @@ except ImportError:  # Local tests/dev can import handle without AgentCore insta
 
 
 def build_runner_from_env() -> AtmCloudRunner:
-    configure_runtime_environment()
+    github_token = configure_runtime_environment()
     mcp_url = os.environ.get("ROCA_CLOUD_MCP_URL")
     memory = RocaMcpClient(mcp_url, load_roca_token()) if mcp_url else NoopMemoryClient()
     harness = SubprocessAtmHarness(
@@ -33,26 +33,27 @@ def build_runner_from_env() -> AtmCloudRunner:
         module=os.environ.get("ATM_HARNESS_MODULE", "agentic_tdd_runner.agent"),
         repo_root=os.environ.get("ATM_SOURCE_REPO"),
         timeout=int(os.environ.get("ATM_TIMEOUT_SECONDS", "1800")),
+        github_token=github_token,
     )
     return AtmCloudRunner(memory=memory, harness=harness)
 
 
-def configure_runtime_environment() -> None:
-    configure_github_auth_from_env()
+def configure_runtime_environment() -> str | None:
+    github_token = configure_github_auth_from_env()
     configure_git_identity_from_env()
     configure_model_runner_from_env()
+    return github_token
 
 
-def configure_github_auth_from_env() -> None:
+def configure_github_auth_from_env() -> str | None:
     token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
     if not token and not os.environ.get("GITHUB_TOKEN_SECRET_ARN"):
-        return
+        return None
     if not token:
         token = load_github_token()
-    os.environ.setdefault("GH_TOKEN", token)
-    os.environ.setdefault("GITHUB_TOKEN", token)
     configure_github_packages_auth(token)
     configure_git_https_auth(token)
+    return token
 
 
 def configure_github_packages_auth(token: str) -> None:
@@ -81,8 +82,17 @@ def configure_git_https_auth(token: str) -> None:
     if os.environ.get("ATM_ENABLE_GIT_HTTPS_AUTH", "true").lower() not in {"1", "true", "yes", "on"}:
         return
 
-    os.environ.setdefault("GH_TOKEN", token)
-    os.environ.setdefault("GITHUB_TOKEN", token)
+    token_path = Path(
+        os.environ.get(
+            "ATM_GIT_TOKEN_FILE",
+            str(Path(tempfile.gettempdir()) / "atm-agentcore-git-token"),
+        )
+    )
+    token_path.parent.mkdir(parents=True, exist_ok=True)
+    token_path.write_text(token)
+    token_path.chmod(0o600)
+    os.environ.setdefault("ATM_GIT_TOKEN_FILE", str(token_path))
+
     askpass_path = Path(
         os.environ.get(
             "ATM_GIT_ASKPASS_PATH",
@@ -92,10 +102,13 @@ def configure_git_https_auth(token: str) -> None:
     askpass_path.parent.mkdir(parents=True, exist_ok=True)
     askpass_path.write_text(
         "#!/bin/sh\n"
+        "if [ -z \"${ATM_GIT_TOKEN_FILE:-}\" ] || [ ! -r \"$ATM_GIT_TOKEN_FILE\" ]; then\n"
+        "  exit 1\n"
+        "fi\n"
         "case \"$1\" in\n"
         "  *Username*) printf '%s\\n' \"x-access-token\" ;;\n"
-        "  *Password*) printf '%s\\n' \"$GITHUB_TOKEN\" ;;\n"
-        "  *) printf '%s\\n' \"$GITHUB_TOKEN\" ;;\n"
+        "  *Password*) cat \"$ATM_GIT_TOKEN_FILE\" ;;\n"
+        "  *) cat \"$ATM_GIT_TOKEN_FILE\" ;;\n"
         "esac\n"
     )
     askpass_path.chmod(0o700)
