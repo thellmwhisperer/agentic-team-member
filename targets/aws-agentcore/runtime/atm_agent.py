@@ -60,6 +60,7 @@ def configure_github_packages_auth(token: str) -> None:
     if not _env_bool("ATM_ENABLE_GITHUB_PACKAGES_AUTH", default=False):
         return
 
+    os.environ.setdefault("NPM_TOKEN", token)
     scope = os.environ.get("ATM_NPM_SCOPE")
     if not scope:
         raise KeyError("ATM_NPM_SCOPE is required when ATM_ENABLE_GITHUB_PACKAGES_AUTH=true")

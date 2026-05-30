@@ -7,7 +7,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     ATM_PYTHON=python \
     ATM_HARNESS_MODULE=agentic_tdd_runner.agent \
     ATM_BASE_CONFIG=/app/config/agent.toml \
+    BUN_INSTALL=/usr/local/bun \
     HOME=/home/atm \
+    PATH=/usr/local/bun/bin:$PATH \
     PYTHONPATH=/app:/app/targets/aws-agentcore:/app/targets/aws-agentcore/src
 
 WORKDIR /app
@@ -16,10 +18,15 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         bash \
         ca-certificates \
+        curl \
         gh \
         git \
         ripgrep \
+        unzip \
     && rm -rf /var/lib/apt/lists/*
+
+RUN curl -fsSL https://bun.sh/install | bash \
+    && bun --version
 
 RUN groupadd --system atm \
     && useradd --system --gid atm --create-home --home-dir /home/atm --shell /usr/sbin/nologin atm

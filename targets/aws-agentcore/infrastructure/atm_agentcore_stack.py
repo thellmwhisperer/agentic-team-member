@@ -122,10 +122,14 @@ class AtmAgentCoreStack(Stack):
             exclude=[
                 ".git",
                 ".atm",
+                ".tmp",
+                ".workspace",
                 ".worktree",
                 ".worktrees",
                 "cdk.out",
                 "targets/aws-agentcore/cdk.out",
+                "targets/aws-agentcore/.venv",
+                "**/.venv",
                 "**/__pycache__",
                 "**/*.pyc",
                 "**/*.local.toml",
@@ -212,6 +216,9 @@ class AtmAgentCoreStack(Stack):
                 )
             },
         )
+        github_token_secret.grant_read(runtime_role)
+        if roca_token_secret is not None:
+            roca_token_secret.grant_read(runtime_role)
 
         environment_variables = {
             "GITHUB_TOKEN_SECRET_ARN": github_token_secret.secret_arn,
@@ -220,6 +227,9 @@ class AtmAgentCoreStack(Stack):
             "ATM_HARNESS_MODULE": "agentic_tdd_runner.agent",
             "ATM_BRANCH_PREFIX": settings.branch_prefix,
             "ATM_ENABLE_BEDROCK_PROXY": "true",
+            "ATM_ENABLE_GITHUB_PACKAGES_AUTH": "true",
+            "ATM_NPM_SCOPE": "@thellmwhisperer",
+            "ATM_NPM_REGISTRY": "https://npm.pkg.github.com",
             "ATM_BEDROCK_MODEL_ID": settings.runner_model_id,
             "ATM_PERMISSION_DRIVEN": "true" if settings.permission_driven else "false",
             "ATM_BASE_CONFIG": "/app/config/agent.toml",
