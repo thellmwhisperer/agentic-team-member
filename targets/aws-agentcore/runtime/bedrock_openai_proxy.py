@@ -1,0 +1,329 @@
+from __future__ import annotations
+
+import argparse
+import json
+import logging
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Any
+from uuid import uuid4
+
+
+LOGGER = logging.getLogger("bedrock_openai_proxy")
+
+
+class BedrockOpenAIProxy:
+    def __init__(self, *, model_id: str, region: str | None = None, client: Any | None = None):
+        self.model_id = normalize_model_id(model_id)
+        self.client = client or _bedrock_client(region)
+
+    def chat_completion(self, payload: dict[str, Any]) -> dict[str, Any]:
+        model_id = normalize_model_id(payload.get("model") or self.model_id)
+        request = build_converse_request(payload, model_id=model_id)
+        started = time.monotonic()
+        response = self.client.converse(**request)
+        elapsed_ms = int((time.monotonic() - started) * 1000)
+        return openai_response(response, model_id=model_id, elapsed_ms=elapsed_ms)
+
+
+def normalize_model_id(model: str) -> str:
+    value = model.strip()
+    if not value:
+        raise ValueError("model cannot be empty")
+    for prefix in ("bedrock/converse/", "bedrock/"):
+        if value.startswith(prefix):
+            return value.removeprefix(prefix)
+    return value
+
+
+def build_converse_request(payload: dict[str, Any], *, model_id: str) -> dict[str, Any]:
+    system, messages = convert_messages(payload.get("messages") or [])
+    request: dict[str, Any] = {
+        "modelId": model_id,
+        "messages": compact_messages(messages),
+    }
+    if system:
+        request["system"] = system
+
+    inference_config = inference_config_from_payload(payload)
+    if inference_config:
+        request["inferenceConfig"] = inference_config
+
+    tool_config = tool_config_from_openai(payload.get("tools") or [])
+    if tool_config:
+        request["toolConfig"] = tool_config
+    return request
+
+
+def convert_messages(messages: list[dict[str, Any]]) -> tuple[list[dict[str, str]], list[dict[str, Any]]]:
+    system: list[dict[str, str]] = []
+    converted: list[dict[str, Any]] = []
+
+    for message in messages:
+        role = message.get("role")
+        if role == "system":
+            text = text_content(message.get("content"))
+            if text:
+                system.append({"text": text})
+            continue
+
+        if role == "tool":
+            converted.append(
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "toolResult": {
+                                "toolUseId": message["tool_call_id"],
+                                "content": [{"text": text_content(message.get("content"))}],
+                                "status": "success",
+                            }
+                        }
+                    ],
+                }
+            )
+            continue
+
+        if role not in {"user", "assistant"}:
+            continue
+
+        content_blocks = content_blocks_from_message(message)
+        if content_blocks:
+            converted.append({"role": role, "content": content_blocks})
+
+    if not converted:
+        converted.append({"role": "user", "content": [{"text": ""}]})
+    return system, converted
+
+
+def content_blocks_from_message(message: dict[str, Any]) -> list[dict[str, Any]]:
+    blocks: list[dict[str, Any]] = []
+    text = text_content(message.get("content"))
+    if text:
+        blocks.append({"text": text})
+
+    for tool_call in message.get("tool_calls") or []:
+        function = tool_call.get("function") or {}
+        blocks.append(
+            {
+                "toolUse": {
+                    "toolUseId": tool_call["id"],
+                    "name": function["name"],
+                    "input": parse_arguments(function.get("arguments")),
+                }
+            }
+        )
+    return blocks
+
+
+def compact_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    compacted: list[dict[str, Any]] = []
+    for message in messages:
+        if compacted and compacted[-1]["role"] == message["role"]:
+            compacted[-1]["content"].extend(message["content"])
+        else:
+            compacted.append({"role": message["role"], "content": list(message["content"])})
+    return compacted
+
+
+def tool_config_from_openai(tools: list[dict[str, Any]]) -> dict[str, Any] | None:
+    converted = []
+    for tool in tools:
+        if tool.get("type") != "function":
+            continue
+        function = tool.get("function") or {}
+        name = function.get("name")
+        if not name:
+            continue
+        converted.append(
+            {
+                "toolSpec": {
+                    "name": name,
+                    "description": function.get("description") or name,
+                    "inputSchema": {"json": function.get("parameters") or {"type": "object"}},
+                }
+            }
+        )
+    return {"tools": converted} if converted else None
+
+
+def inference_config_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    config: dict[str, Any] = {}
+    if "temperature" in payload:
+        config["temperature"] = float(payload["temperature"])
+    if "top_p" in payload:
+        config["topP"] = float(payload["top_p"])
+    if "max_tokens" in payload:
+        config["maxTokens"] = int(payload["max_tokens"])
+    return config
+
+
+def openai_response(response: dict[str, Any], *, model_id: str, elapsed_ms: int) -> dict[str, Any]:
+    message = response.get("output", {}).get("message", {})
+    content_blocks = message.get("content") or []
+    text_parts: list[str] = []
+    tool_calls: list[dict[str, Any]] = []
+
+    for block in content_blocks:
+        if "text" in block:
+            text_parts.append(block["text"])
+        if "toolUse" in block:
+            tool_use = block["toolUse"]
+            tool_calls.append(
+                {
+                    "id": tool_use["toolUseId"],
+                    "type": "function",
+                    "function": {
+                        "name": tool_use["name"],
+                        "arguments": json.dumps(tool_use.get("input") or {}),
+                    },
+                }
+            )
+
+    assistant_message: dict[str, Any] = {
+        "role": "assistant",
+        "content": "\n".join(part for part in text_parts if part),
+    }
+    if tool_calls:
+        assistant_message["tool_calls"] = tool_calls
+
+    usage = response.get("usage") or {}
+    prompt_tokens = usage.get("inputTokens", 0)
+    completion_tokens = usage.get("outputTokens", 0)
+    prompt_per_second = tokens_per_second(prompt_tokens, elapsed_ms)
+    predicted_per_second = tokens_per_second(completion_tokens, elapsed_ms)
+
+    return {
+        "id": f"chatcmpl-{uuid4().hex}",
+        "object": "chat.completion",
+        "created": int(time.time()),
+        "model": model_id,
+        "choices": [
+            {
+                "index": 0,
+                "message": assistant_message,
+                "finish_reason": finish_reason(response.get("stopReason")),
+            }
+        ],
+        "usage": {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": usage.get("totalTokens", prompt_tokens + completion_tokens),
+        },
+        "timings": {
+            "prompt_ms": None,
+            "predicted_ms": elapsed_ms,
+            "prompt_per_second": prompt_per_second,
+            "predicted_per_second": predicted_per_second,
+        },
+    }
+
+
+def tokens_per_second(tokens: int | float | None, elapsed_ms: int | float | None) -> float:
+    if not tokens or not elapsed_ms or elapsed_ms <= 0:
+        return 0.0
+    return float(tokens) * 1000.0 / float(elapsed_ms)
+
+
+def finish_reason(stop_reason: str | None) -> str:
+    if stop_reason == "tool_use":
+        return "tool_calls"
+    if stop_reason == "max_tokens":
+        return "length"
+    return "stop"
+
+
+def text_content(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        parts = []
+        for item in value:
+            if isinstance(item, dict) and item.get("type") == "text":
+                parts.append(str(item.get("text") or ""))
+        return "\n".join(part for part in parts if part)
+    return str(value)
+
+
+def parse_arguments(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if not value:
+        return {}
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _bedrock_client(region: str | None = None) -> Any:
+    import boto3
+
+    kwargs = {"service_name": "bedrock-runtime"}
+    if region:
+        kwargs["region_name"] = region
+    return boto3.client(**kwargs)
+
+
+def make_handler(proxy: BedrockOpenAIProxy) -> type[BaseHTTPRequestHandler]:
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            if self.path == "/health":
+                self.respond(200, {"ok": True, "model": proxy.model_id})
+                return
+            self.respond(404, {"error": "not found"})
+
+        def do_POST(self) -> None:
+            if self.path != "/v1/chat/completions":
+                self.respond(404, {"error": "not found"})
+                return
+            try:
+                length = int(self.headers.get("content-length") or "0")
+                payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+                self.respond(200, proxy.chat_completion(payload))
+            except Exception as exc:  # pragma: no cover - defensive HTTP boundary.
+                LOGGER.exception("bedrock proxy request failed")
+                self.respond(500, {"error": {"message": str(exc), "type": exc.__class__.__name__}})
+
+        def log_message(self, fmt: str, *args: Any) -> None:
+            LOGGER.info("%s - %s", self.address_string(), fmt % args)
+
+        def respond(self, status: int, payload: dict[str, Any]) -> None:
+            body = json.dumps(payload).encode("utf-8")
+            self.send_response(status)
+            self.send_header("content-type", "application/json")
+            self.send_header("content-length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    return Handler
+
+
+def serve(*, host: str, port: int, model_id: str, region: str | None = None) -> None:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    proxy = BedrockOpenAIProxy(model_id=model_id, region=region)
+    server = ThreadingHTTPServer((host, port), make_handler(proxy))
+    LOGGER.info("Bedrock OpenAI proxy listening on http://%s:%s for %s", host, port, proxy.model_id)
+    server.serve_forever()
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="OpenAI-compatible proxy backed by Bedrock Converse.")
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=11435)
+    parser.add_argument("--model", required=True)
+    parser.add_argument("--region")
+    return parser.parse_args()
+
+
+def main() -> int:
+    args = parse_args()
+    serve(host=args.host, port=args.port, model_id=args.model, region=args.region)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
