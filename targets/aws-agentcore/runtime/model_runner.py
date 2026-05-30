@@ -43,6 +43,7 @@ def configure_model_runner_from_env() -> subprocess.Popen | None:
         base_branch=os.environ.get("ATM_BASE_BRANCH"),
         branch_prefix=os.environ.get("ATM_BRANCH_PREFIX"),
         permission_driven=env_bool_or_none("ATM_PERMISSION_DRIVEN"),
+        max_steps=env_int_or_none("ATM_MAX_STEPS"),
         disable_local_judges=env_bool("ATM_DISABLE_LOCAL_JUDGES", default=True),
     )
     os.environ["ATM_CONFIG"] = str(target_config)
@@ -69,12 +70,15 @@ def render_agentcore_config(
     base_branch: str | None = None,
     branch_prefix: str | None = None,
     permission_driven: bool | None = None,
+    max_steps: int | None = None,
     disable_local_judges: bool = True,
 ) -> None:
     """Write a cloud-safe ATM config derived from the full harness config."""
     agent_replacements = {}
     if permission_driven is not None:
         agent_replacements["permission_driven"] = "true" if permission_driven else "false"
+    if max_steps is not None:
+        agent_replacements["max_steps"] = str(max_steps)
 
     pr_replacements = {}
     if base_branch:
@@ -153,6 +157,13 @@ def env_bool_or_none(name: str) -> bool | None:
     if value is None or not value.strip():
         return None
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def env_int_or_none(name: str) -> int | None:
+    value = os.environ.get(name)
+    if value is None or not value.strip():
+        return None
+    return int(value)
 
 
 def _replace_toml_keys(text: str, replacements: dict[str, dict[str, str]]) -> str:
