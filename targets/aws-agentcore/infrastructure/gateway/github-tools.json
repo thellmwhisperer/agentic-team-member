@@ -8,7 +8,8 @@
         "repo": { "type": "string", "description": "GitHub repository slug, for example owner/repo." },
         "issue_number": { "type": "integer", "description": "GitHub issue number." }
       },
-      "required": ["repo", "issue_number"]
+      "required": ["repo", "issue_number"],
+      "additionalProperties": false
     }
   },
   {
@@ -21,7 +22,8 @@
         "base": { "type": "string", "description": "Base branch, usually main." },
         "branch": { "type": "string", "description": "New branch name using the configured ATM branch prefix." }
       },
-      "required": ["repo", "base", "branch"]
+      "required": ["repo", "base", "branch"],
+      "additionalProperties": false
     }
   },
   {
@@ -41,11 +43,13 @@
               "path": { "type": "string" },
               "content": { "type": "string" }
             },
-            "required": ["path", "content"]
+            "required": ["path", "content"],
+            "additionalProperties": false
           }
         }
       },
-      "required": ["repo", "branch", "message", "files"]
+      "required": ["repo", "branch", "message", "files"],
+      "additionalProperties": false
     }
   },
   {
@@ -60,7 +64,8 @@
         "title": { "type": "string" },
         "body": { "type": "string" }
       },
-      "required": ["repo", "head", "base", "title", "body"]
+      "required": ["repo", "head", "base", "title", "body"],
+      "additionalProperties": false
     }
   },
   {
@@ -73,7 +78,8 @@
         "issue_number": { "type": "integer" },
         "body": { "type": "string" }
       },
-      "required": ["repo", "issue_number", "body"]
+      "required": ["repo", "issue_number", "body"],
+      "additionalProperties": false
     }
   }
 ]
