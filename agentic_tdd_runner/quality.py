@@ -748,7 +748,7 @@ def judge_duplicated_setup(
 
     prompt = build_duplicated_setup_judge_prompt(file_path, file_text, duplicated_lines)
     payload = {
-        "model": judge_cfg.get("model", "qwen3.6:0.8b"),
+        "model": judge_cfg.get("model", "gemma4:e2b"),
         "messages": [{"role": "user", "content": prompt}],
         "stream": False,
         "think": judge_cfg.get("think", False),

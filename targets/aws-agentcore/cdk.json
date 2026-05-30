@@ -10,6 +10,7 @@
     "rocaTokenSecretName": "",
     "rocaMcpUrl": "",
     "githubRepoAllowlist": "owner/repo",
+    "npmScope": "",
     "atmPermissionDriven": false
   }
 }

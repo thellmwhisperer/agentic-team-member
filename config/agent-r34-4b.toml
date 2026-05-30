@@ -4,7 +4,7 @@ max_tool_output = 8000
 
 [llm]
 url = "http://127.0.0.1:11434/v1/chat/completions"
-model = "qwen3.6:4b"
+model = "gemma4:e4b"
 temperature = 0.6
 top_p = 0.95
 top_k = 20
@@ -124,7 +124,7 @@ forbidden = ["type: ignore", "noqa"]
 [quality.duplicated_setup_judge]
 enabled = false
 url = "http://127.0.0.1:11434/api/chat"
-model = "qwen3.6:0.8b"
+model = "gemma4:e2b"
 temperature = 0
 num_ctx = 4096
 think = false
