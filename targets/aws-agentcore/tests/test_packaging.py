@@ -14,10 +14,13 @@ class PackagingTest(unittest.TestCase):
     def test_dockerfile_copies_canonical_harness_from_monorepo_root(self):
         dockerfile = (TARGET_ROOT / "Dockerfile").read_text()
 
-        self.assertIn("COPY agentic_tdd_runner ./agentic_tdd_runner", dockerfile)
-        self.assertIn("COPY config ./config", dockerfile)
-        self.assertIn("COPY targets/aws-agentcore/runtime", dockerfile)
-        self.assertIn("COPY targets/aws-agentcore/src", dockerfile)
+        self.assertIn("FROM python:3.14-slim-trixie", dockerfile)
+        self.assertIn("USER atm", dockerfile)
+        self.assertIn("agentic_tdd_runner ./agentic_tdd_runner", dockerfile)
+        self.assertIn("config ./config", dockerfile)
+        self.assertIn("targets/aws-agentcore/runtime", dockerfile)
+        self.assertIn("targets/aws-agentcore/src", dockerfile)
+        self.assertNotIn("ATM_SOURCE_REPO=/app", dockerfile)
         self.assertNotIn("vendor", dockerfile.lower())
         self.assertNotIn("/Volumes/", dockerfile)
         self.assertNotIn("llm-whisperer", dockerfile)
