@@ -119,11 +119,15 @@ def _build_rerouted_episode(
 
     previous = f"{previous_source}::{previous_symbol}"
     current = f"{new_episode['source_file']}::{new_episode['target_symbol']}"
+    if _permission.permission_enabled(config):
+        next_action = "Next required action: call ask_harness with intent `write_regression_test` for the rerouted target."
+    else:
+        next_action = f"Continue from the rerouted target and write the regression test at `{new_episode['test_file']}`."
     message = "\n".join([
         f"TARGET CHALLENGE ACCEPTED: rerouted from `{previous}` to `{current}`.",
         f"New regression test file: `{new_episode['test_file']}`.",
         "Ignore the previous target, previous test file, and previous cookbook for future actions.",
-        "Next required action: call ask_harness with intent `write_regression_test` for the rerouted target.",
+        next_action,
     ])
     return (
         _permission.PermissionReview(
@@ -350,8 +354,7 @@ def run_agent_loop(
                 state_review = None
                 permission_review = None
                 if (
-                    permission_mode
-                    and name == "ask_harness"
+                    name == "ask_harness"
                     and str(args.get("intent") or "") == "challenge_target"
                 ):
                     challenge_from = (
@@ -424,6 +427,19 @@ def run_agent_loop(
                         "intent": args.get("intent"),
                         "grant": permission_grant,
                         "allowed": permission_review.allowed,
+                    })
+                elif name == "ask_harness":
+                    result = (
+                        "HARNESS INTENT UNAVAILABLE: `challenge_target` is available without "
+                        "permission_driven, but other ask_harness intents require "
+                        "`agent.permission_driven = true`. Continue with the normal tools."
+                    )
+                    tool_elapsed = 0.0
+                    applied = None
+                    log("harness_intent_unavailable", {
+                        "step": step,
+                        "intent": args.get("intent"),
+                        "permission_mode": permission_mode,
                     })
                 elif permission_mode:
                     permission_review = _permission.review_tool_call(
