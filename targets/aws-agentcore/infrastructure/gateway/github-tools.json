@@ -1,0 +1,79 @@
+[
+  {
+    "name": "github_get_issue",
+    "description": "Read a GitHub issue by repository slug and issue number.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "repo": { "type": "string", "description": "GitHub repository slug, for example owner/repo." },
+        "issue_number": { "type": "integer", "description": "GitHub issue number." }
+      },
+      "required": ["repo", "issue_number"]
+    }
+  },
+  {
+    "name": "github_create_branch",
+    "description": "Create an ATM branch from a base branch.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "repo": { "type": "string" },
+        "base": { "type": "string", "description": "Base branch, usually main." },
+        "branch": { "type": "string", "description": "New branch name using the configured ATM branch prefix." }
+      },
+      "required": ["repo", "base", "branch"]
+    }
+  },
+  {
+    "name": "github_commit_files",
+    "description": "Commit one or more complete file contents to an existing branch using the GitHub Git database API.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "repo": { "type": "string" },
+        "branch": { "type": "string" },
+        "message": { "type": "string" },
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": { "type": "string" },
+              "content": { "type": "string" }
+            },
+            "required": ["path", "content"]
+          }
+        }
+      },
+      "required": ["repo", "branch", "message", "files"]
+    }
+  },
+  {
+    "name": "github_open_pr",
+    "description": "Open a pull request from an ATM branch.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "repo": { "type": "string" },
+        "head": { "type": "string" },
+        "base": { "type": "string" },
+        "title": { "type": "string" },
+        "body": { "type": "string" }
+      },
+      "required": ["repo", "head", "base", "title", "body"]
+    }
+  },
+  {
+    "name": "github_comment_issue",
+    "description": "Write a comment on a GitHub issue.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "repo": { "type": "string" },
+        "issue_number": { "type": "integer" },
+        "body": { "type": "string" }
+      },
+      "required": ["repo", "issue_number", "body"]
+    }
+  }
+]

@@ -10,22 +10,25 @@ This target must not vendor or fork `agentic_tdd_runner`.
 ## Current Slice
 
 This target currently contains the runtime-facing pieces from the former
-standalone `atm-cloud` repo plus Docker packaging that builds from the
-monorepo root:
+standalone `atm-cloud` repo, Docker packaging that builds from the monorepo
+root, and a minimal CDK stack for AWS AgentCore:
 
 ```text
 targets/aws-agentcore/
   Dockerfile           AgentCore runtime image; build with monorepo root context
   Makefile             local test, smoke, and docker build helpers
+  cdk.json             example CDK context with placeholders
+  infrastructure/      CDK app, AgentCore runtime, Gateway, IAM, Lambda wiring
   runtime/             AgentCore entrypoint and Bedrock OpenAI-compatible proxy
   scripts/             local packaging smoke checks; no deploy
   src/atm_cloud/       job contract, optional memory client, runner adapters
   tests/               local adapter tests; no AWS deployment required
   requirements.txt     runtime dependencies for the AWS target
+  requirements-cdk.txt CDK dependencies for synth/deploy tooling
 ```
 
-CDK and deploy scripts are intentionally left for later PRs. This slice stops
-at a buildable runtime image and local smoke checks.
+Deploy/operator scripts are intentionally left for later PRs. This slice stops
+at a buildable runtime image, local smoke checks, and CDK synthesis wiring.
 
 ## Runtime Contract
 
@@ -101,6 +104,58 @@ repository. It runs as the non-root `atm` user.
 The smoke path imports the root harness and AWS adapter modules, then invokes
 the AgentCore entrypoint in `dry_run` mode. It does not call Bedrock, Secrets
 Manager, Roca Cloud, GitHub, CDK, or AgentCore deploy APIs.
+
+## CDK Infrastructure
+
+The CDK app is intentionally parameterized. It should synthesize without any
+personal AWS account IDs, ARNs, profiles, deployed URLs, or repository names in
+the repo.
+
+Install CDK dependencies in your preferred environment:
+
+```bash
+python -m pip install -r targets/aws-agentcore/requirements-cdk.txt
+```
+
+Then synthesize from this directory:
+
+```bash
+make -C targets/aws-agentcore cdk-synth
+```
+
+`cdk-synth` does not deploy anything. Deployment remains an explicit operator
+action once you have supplied real context values and reviewed the synthesized
+template. The Makefile writes synthesized output under `.atm/cdk.out`, which is
+ignored by git and by the Docker image asset.
+
+Required context/env values for a real deployment:
+
+- AWS profile: set via your normal `AWS_PROFILE`; do not commit it.
+- AWS region: `CDK_DEFAULT_REGION`, `AWS_REGION`, or `AWS_DEFAULT_REGION`.
+- stack name: `-c atmStackName=<stack-name>` or `ATM_AGENTCORE_STACK_NAME`.
+- Bedrock model id: `-c atmRunnerModelId=<model-id>` or `ATM_BEDROCK_MODEL_ID`.
+- GitHub token secret name: `-c githubTokenSecretName=<secret-name>` or
+  `GITHUB_TOKEN_SECRET_NAME`.
+- repo allowlist: `-c githubRepoAllowlist=owner/repo,owner/other` or
+  `GITHUB_REPO_ALLOWLIST`.
+
+Optional context/env values:
+
+- Roca Cloud URL: `-c rocaMcpUrl=https://...` or `ROCA_CLOUD_MCP_URL`.
+- Roca token secret name: `-c rocaTokenSecretName=<secret-name>` or
+  `ROCA_TOKEN_SECRET_NAME`.
+- branch prefix: `-c atmBranchPrefix=atm-agentcore/` or `ATM_BRANCH_PREFIX`.
+- runtime name: `-c atmRuntimeName=<runtime-name>` or
+  `ATM_AGENTCORE_RUNTIME_NAME`.
+- Gateway name: `-c atmGatewayName=<gateway-name>` or
+  `ATM_AGENTCORE_GATEWAY_NAME`.
+- permission-driven flow: `-c atmPermissionDriven=true` or
+  `ATM_PERMISSION_DRIVEN=true`.
+
+The stack references the GitHub and optional Roca secrets by name; it does not
+create personal placeholder secrets. Create and populate those secrets in your
+AWS account before deploying. `GITHUB_REPO_ALLOWLIST` fails closed in the
+Gateway Lambda if omitted or empty.
 
 ## Bedrock Proxy
 
