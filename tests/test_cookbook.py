@@ -539,7 +539,7 @@ class TestBuildEpisodeContext:
         assert len(edits) >= 1
         assert any("export" in e["new"] for e in edits)
 
-    def test_typescript_seams_accept_minimal_test_double_shape(self, tmp_path):
+    def test_typescript_does_not_generate_production_test_seam_setters(self, tmp_path):
         from agentic_tdd_runner.cookbook import build_episode_context
 
         _write_file(tmp_path, "src/handler.ts", """\
@@ -552,10 +552,12 @@ class TestBuildEpisodeContext:
             }
         """)
         ctx = build_episode_context("src/handler.ts", "handle", str(tmp_path))
-        seam_text = "\n".join(edit["new"] for edit in ctx["pre_test_source_edits"])
-        assert "value: Pick<tmi.Client, 'say'>" in seam_text
-        assert "client = value as tmi.Client;" in seam_text
-        assert "any" not in seam_text
+        edit_text = "\n".join(edit["new"] for edit in ctx["pre_test_source_edits"])
+
+        assert all(edit["kind"] != "mechanical_test_seam" for edit in ctx["pre_test_source_edits"])
+        assert "__set" not in edit_text
+        assert "### Test Seams" not in ctx["cookbook_text"]
+        assert "Prefer a public caller/registration path, a module mock, or the smallest pure helper" in ctx["cookbook_text"]
 
     def test_includes_assertion_hint(self, tmp_path):
         from agentic_tdd_runner.cookbook import build_episode_context

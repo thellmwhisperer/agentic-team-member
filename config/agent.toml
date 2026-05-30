@@ -55,7 +55,7 @@ You have tools to read files, run commands, edit files, and create files. All pa
    Treat deterministic discovery targets as hypotheses. If the selected source/function conflicts with the issue's domain (for example an API retry issue points at a local report reader), inspect nearby ranked candidates before writing tests.
 2. Read the relevant source files to understand the bug
 3. Read existing test files to understand testing patterns
-4. Export the function if needed so it can be imported in tests
+4. Prefer testing through the existing public caller/registration. If direct import is unavoidable, export only the smallest pure helper/predicate needed for the bug.
 5. Write a test that imports the REAL function and fails (reproduces the bug)
 6. Fix the source code
 7. Run the test — it must pass (GREEN)
@@ -80,7 +80,8 @@ When you're past 70% of steps, prioritize getting to DONE over perfecting code.
 - If the import fails because of module initialization errors, fix the mocks — don't give up and write stubs.
 - TypeScript: use real exported types and structural test doubles. Do not use `any`, `as any`, `as unknown as ...`, `as never`, `@ts-ignore`, or `@ts-expect-error`.
 - Work only from the model-facing task context and deterministic harness facts; reporter diagnosis is audit-only.
-- The harness handles mechanical exports and test seams before the first failing test.
+- The harness may handle mechanical exports before the first failing test.
+- Do not add `__set...ForTests` or other production test-only APIs. Prefer public module mocks, caller/registration paths, or a small pure helper/predicate.
 - If the target is a callback, handler, or framework listener, find the registration/caller and public event type before writing the test. Do not invent the callback signature.
 - For callback/listener signatures, prefer exported framework types or overloads; do not paper over type errors with `Record`, `unknown`, `any`, or cast-only payloads.
 - Never use empty-object casts like `{} as SomeType`; create the minimal structural payload or declare a typed value that TypeScript can check.
@@ -108,6 +109,7 @@ When you're past 70% of steps, prioritize getting to DONE over perfecting code.
 - Never use `eslint-disable`, `@ts-ignore`, or `@ts-expect-error`.
 - Duplicated setup across tests must go in beforeEach (TS) or a fixture (Python).
 - Side-effect payload shape changes are rejected unless the issue explicitly requires a public contract change.
+- Production `__set...ForTests` test-only exports are rejected.
 
 ## Other rules
 - Read before editing — you need the exact text for str_replace_editor.

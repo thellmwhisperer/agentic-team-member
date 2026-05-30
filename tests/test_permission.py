@@ -490,7 +490,8 @@ def test_write_test_grant_allows_only_recommended_test_file():
     assert "Do not read source before writing" in grant.message
     assert "Target callable currently has source signature" in grant.message
     assert "msg-param-cumulative-months" in grant.message
-    assert "__setClientForTests" in grant.message
+    assert "__setClientForTests" not in grant.message
+    assert "Do not add production `__set...ForTests` setters" in grant.message
     assert "Referenced type shapes" in grant.message
     assert "Regression red-case guidance" not in grant.message
     assert "Choose issue-specific distinct values" not in grant.message
@@ -501,7 +502,6 @@ def test_write_test_grant_allows_only_recommended_test_file():
     assert "type CallbackContract = (" in grant.message
     assert 'await import("./client")' in grant.message
     assert "targetHandler = clientModule.handleResub;" in grant.message
-    assert 'let __setClientForTests: ClientModule["__setClientForTests"];' in grant.message
     assert 'const userstate: SubUserstate = {' in grant.message
     skeleton = _suggested_skeleton(grant.message)
     assert '"msg-param-streak-months": "",' in skeleton
@@ -509,10 +509,6 @@ def test_write_test_grant_allows_only_recommended_test_file():
     assert '"msg-param-streak-months": "0",' not in skeleton
     assert '"msg-param-cumulative-months": "6",' not in skeleton
     assert 'const methods: SubMethods = {' in grant.message
-    assert 'const sayResult: [string] = [""];' in grant.message
-    assert "const say_spy = mock((_channel: string, _message: string) => Promise.resolve(sayResult));" in grant.message
-    assert "__setClientForTests({ say: say_spy });" in grant.message
-    assert '__setMemoryManagerForTests({ getEmote: () => "teseLove" });' in grant.message
     assert 'callbackHandler(channel, username, months, message, userstate, methods);' in grant.message
     assert "const streamSummaryManager_trackResub_spy" in grant.message
     assert "for (const spy of [streamSummaryManager_trackResub_spy]) spy.mockClear();" in grant.message
@@ -550,30 +546,39 @@ def test_callback_skeleton_does_not_select_fields_by_semantic_aliases():
     assert "third callback number `6`" not in grant.message
 
 
-def test_write_grants_allow_reading_the_same_file_for_resync():
+def test_write_grants_allow_read_only_exploration_for_resync():
+    context = _context()
     test_read = permission.review_tool_call(
         "read_file",
         {"path": "src/twitch/handleResub.test.ts"},
         grant="write_test",
-        context=_context(),
+        context=context,
     )
     source_read = permission.review_tool_call(
         "read_file",
         {"path": "src/twitch/client.ts"},
         grant="write_source",
-        context=_context(),
+        context=context,
     )
     unrelated_read = permission.review_tool_call(
         "read_file",
         {"path": "src/twitch/other.ts"},
         grant="write_source",
-        context=_context(),
+        context=context,
     )
 
     assert test_read is None
     assert source_read is None
-    assert unrelated_read is not None
-    assert "PERMISSION DENIED" in unrelated_read.message
+    assert unrelated_read is None
+    assert (
+        permission.consume_grant(
+            "read_file",
+            {"path": "src/twitch/other.ts"},
+            "write_source",
+            context,
+        )
+        == "write_source"
+    )
 
 
 def test_write_test_grant_allows_reading_test_setup_dependencies(tmp_path):
@@ -652,6 +657,19 @@ def test_run_test_grant_allows_only_structured_focused_test_commands():
     assert allowed_focused is None
 
 
+def test_run_test_grant_allows_focused_test_with_stderr_merge_redirect():
+    context = _context()
+
+    review = permission.review_tool_call(
+        "run_command",
+        {"command": "bun test src/twitch/handleResub.test.ts 2>&1"},
+        grant="run_test",
+        context=context,
+    )
+
+    assert review is None
+
+
 def test_run_test_grant_rejects_shell_bypass_commands():
     context = _context()
     blocked_commands = [
@@ -670,6 +688,51 @@ def test_run_test_grant_rejects_shell_bypass_commands():
         )
         assert review is not None, command
         assert "PERMISSION DENIED" in review.message
+
+
+def test_read_only_tools_are_allowed_without_consuming_active_grants():
+    context = _context()
+
+    source_read = permission.review_tool_call(
+        "read_file",
+        {"path": "src/twitch/client.ts"},
+        grant="write_test",
+        context=context,
+    )
+    search = permission.review_tool_call(
+        "rg",
+        {"pattern": "manolitozurrapa", "path": "src/twitch"},
+        grant="write_test",
+        context=context,
+    )
+    grep = permission.review_tool_call(
+        "run_command",
+        {"command": 'grep -n "manolitozurrapa" src/twitch/client.ts'},
+        grant="write_test",
+        context=context,
+    )
+
+    assert source_read is None
+    assert search is None
+    assert grep is None
+    assert permission.consume_grant(
+        "read_file",
+        {"path": "src/twitch/client.ts"},
+        "write_test",
+        context,
+    ) == "write_test"
+    assert permission.consume_grant(
+        "rg",
+        {"pattern": "manolitozurrapa", "path": "src/twitch"},
+        "write_test",
+        context,
+    ) == "write_test"
+    assert permission.consume_grant(
+        "run_command",
+        {"command": 'grep -n "manolitozurrapa" src/twitch/client.ts'},
+        "write_test",
+        context,
+    ) == "write_test"
 
 
 def test_read_contract_grant_does_not_allow_shell_commands():
@@ -747,7 +810,7 @@ def test_write_test_skeleton_is_not_coupled_to_one_handler_name():
     assert "Suggested regression test skeleton" in grant.message
     assert 'type TargetHandler = ClientModule["handleCheer"];' in grant.message
     assert "targetHandler = clientModule.handleCheer;" in grant.message
-    assert 'let __setNotifierForTests: ClientModule["__setNotifierForTests"];' in grant.message
+    assert "__setNotifierForTests" not in grant.message
     assert "const notifier_send_spy" in grant.message
     assert "const userstate: ChatUserstate = {" in grant.message
     assert 'bits: "",' in grant.message
