@@ -44,7 +44,10 @@ class InfrastructureTest(unittest.TestCase):
         self.assertIn('file="targets/aws-agentcore/Dockerfile"', stack)
         self.assertIn('"targets/aws-agentcore/cdk.out"', stack)
         self.assertIn("log_group=logs.LogGroup", stack)
+        self.assertIn("RemovalPolicy", stack)
+        self.assertIn("removal_policy=RemovalPolicy.DESTROY", stack)
         self.assertNotIn("log_retention=", stack)
+        self.assertIn("resources=[runtime_image.repository.repository_arn]", stack)
         self.assertIn("env_value = os.environ.get(env_var)", stack)
         self.assertIn('"ATM_HARNESS_MODULE": "agentic_tdd_runner.agent"', stack)
         self.assertNotIn("vendor/agentic-team-member", stack)
@@ -70,6 +73,10 @@ class InfrastructureTest(unittest.TestCase):
         for tool in schema:
             self.assertIn("inputSchema", tool)
             self.assertEqual(tool["inputSchema"]["type"], "object")
+            self.assertIs(tool["inputSchema"]["additionalProperties"], False)
+        commit_files = next(tool for tool in schema if tool["name"] == "github_commit_files")
+        file_item_schema = commit_files["inputSchema"]["properties"]["files"]["items"]
+        self.assertIs(file_item_schema["additionalProperties"], False)
 
     def test_makefile_exposes_synth_but_not_deploy(self):
         makefile = (TARGET_ROOT / "Makefile").read_text()
@@ -86,6 +93,23 @@ class InfrastructureTest(unittest.TestCase):
 
         self.assertIn("cdk.out/", gitignore)
         self.assertIn("cdk.out/", dockerignore)
+
+    def test_pytest_ini_preserves_default_norecursedirs(self):
+        pytest_ini = (REPO_ROOT / "pytest.ini").read_text()
+
+        for expected in [
+            "*.egg",
+            ".*",
+            "_darcs",
+            "build",
+            "CVS",
+            "dist",
+            "node_modules",
+            "venv",
+            "{arch}",
+            "cdk.out",
+        ]:
+            self.assertIn(expected, pytest_ini)
 
 
 if __name__ == "__main__":

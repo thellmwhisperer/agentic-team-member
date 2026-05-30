@@ -9,6 +9,7 @@ from typing import Any
 from aws_cdk import (
     CfnOutput,
     Duration,
+    RemovalPolicy,
     Stack,
     aws_bedrockagentcore as bedrockagentcore,
     aws_ecr_assets as ecr_assets,
@@ -104,6 +105,7 @@ class AtmAgentCoreStack(Stack):
                 self,
                 "GithubToolFunctionLogGroup",
                 retention=logs.RetentionDays.THREE_DAYS,
+                removal_policy=RemovalPolicy.DESTROY,
             ),
             environment={
                 "GITHUB_TOKEN_SECRET_ARN": github_token_secret.secret_arn,
@@ -153,7 +155,7 @@ class AtmAgentCoreStack(Stack):
                                 "ecr:BatchGetImage",
                                 "ecr:GetDownloadUrlForLayer",
                             ],
-                            resources=["*"],
+                            resources=[runtime_image.repository.repository_arn],
                         ),
                         iam.PolicyStatement(
                             sid="RuntimeLogs",
