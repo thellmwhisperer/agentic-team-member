@@ -64,7 +64,8 @@ class AtmJob:
         if not _SAFE_ID_RE.match(base_branch.replace("/", "-")):
             raise JobValidationError("base_branch must be a safe git ref name")
 
-        roca_project = payload.get("roca_project")
+        raw_roca_project = payload.get("roca_project")
+        roca_project = str(raw_roca_project).strip() if raw_roca_project is not None else ""
         return cls(
             repo=repo,
             issue_number=issue_number,
@@ -72,7 +73,7 @@ class AtmJob:
             base_branch=base_branch,
             branch_prefix=branch_prefix,
             mode=mode,
-            roca_project=str(roca_project).strip() if roca_project else repo,
+            roca_project=roca_project or repo,
             attempt=attempt,
             source=_optional_str(payload.get("source")),
             symbol=_optional_str(payload.get("symbol")),

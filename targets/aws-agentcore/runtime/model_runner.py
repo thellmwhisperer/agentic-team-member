@@ -124,6 +124,9 @@ def ensure_bedrock_proxy(*, host: str, port: int, model: str) -> subprocess.Pope
         command.extend(["--region", region])
     _PROXY_PROCESS = subprocess.Popen(command, env=env)
     wait_for_tcp(host, port, timeout=float(os.environ.get("ATM_PROXY_STARTUP_TIMEOUT", "45")))
+    returncode = _PROXY_PROCESS.poll()
+    if returncode is not None:
+        raise RuntimeError(f"Bedrock proxy process exited before becoming ready: {returncode}")
     return _PROXY_PROCESS
 
 

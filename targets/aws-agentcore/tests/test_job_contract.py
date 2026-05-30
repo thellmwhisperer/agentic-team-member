@@ -30,6 +30,11 @@ class AtmJobContractTest(unittest.TestCase):
         self.assertEqual(job.roca_project, "client-a")
         self.assertEqual(job.branch_name, "atm-agentcore/payments-tax-fix")
 
+    def test_blank_roca_project_defaults_to_repo(self):
+        job = AtmJob.from_dict({"repo": "acme/example", "issue_number": 42, "roca_project": "   "})
+
+        self.assertEqual(job.roca_project, "acme/example")
+
     def test_rejects_invalid_repo_slug(self):
         with self.assertRaises(JobValidationError):
             AtmJob.from_dict({"repo": "not-a-slug", "issue_number": 1})
