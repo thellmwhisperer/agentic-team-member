@@ -277,9 +277,18 @@ def _bedrock_client(region: str | None = None) -> Any:
 
 def chat_completion_http_response(
     proxy: BedrockOpenAIProxy,
-    raw_body: bytes,
+    raw_body: bytes | None = None,
+    *,
+    content_length: str | None = None,
+    body_stream: Any | None = None,
 ) -> tuple[int, dict[str, Any]]:
     try:
+        if body_stream is not None:
+            length = int(content_length or "0")
+            if length < 0:
+                raise ValueError("content-length must be non-negative")
+            raw_body = body_stream.read(length)
+        raw_body = raw_body or b""
         payload = json.loads(raw_body.decode("utf-8") or "{}")
         return 200, proxy.chat_completion(payload)
     except json.JSONDecodeError as exc:
@@ -303,8 +312,11 @@ def make_handler(proxy: BedrockOpenAIProxy) -> type[BaseHTTPRequestHandler]:
             if self.path != "/v1/chat/completions":
                 self.respond(404, {"error": "not found"})
                 return
-            length = int(self.headers.get("content-length") or "0")
-            status, response = chat_completion_http_response(proxy, self.rfile.read(length))
+            status, response = chat_completion_http_response(
+                proxy,
+                content_length=self.headers.get("content-length"),
+                body_stream=self.rfile,
+            )
             self.respond(status, response)
 
         def log_message(self, fmt: str, *args: Any) -> None:
