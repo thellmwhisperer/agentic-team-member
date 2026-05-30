@@ -192,18 +192,167 @@ class BedrockOpenAIProxyTest(unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertEqual(body["error"]["type"], "invalid_request")
 
+    def test_sanitize_tool_name_replaces_invalid_chars(self):
+        self.assertEqual(proxy.sanitize_tool_name("read_file"), "read_file")
+        self.assertEqual(proxy.sanitize_tool_name("functions.read_file"), "functions_read_file")
+        self.assertEqual(proxy.sanitize_tool_name("a/b c"), "a_b_c")
+        self.assertEqual(proxy.sanitize_tool_name("..."), "tool")
+
+    def test_sanitize_converse_request_rewrites_history_and_specs(self):
+        request = {
+            "modelId": "provider.model-v1:0",
+            "toolConfig": {
+                "tools": [
+                    {"toolSpec": {"name": "functions.read_file", "description": "Read file"}},
+                    {"toolSpec": {"name": "run_command", "description": "Run command"}},
+                ]
+            },
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": [
+                        {"toolUse": {"toolUseId": "x", "name": "functions.read_file", "input": {}}},
+                        {"toolUse": {"toolUseId": "y", "name": "run_command", "input": {}}},
+                    ],
+                }
+            ],
+        }
+
+        name_map = proxy.sanitize_converse_request(request)
+
+        self.assertEqual(request["toolConfig"]["tools"][0]["toolSpec"]["name"], "functions_read_file")
+        self.assertEqual(request["toolConfig"]["tools"][1]["toolSpec"]["name"], "run_command")
+        self.assertEqual(request["messages"][0]["content"][0]["toolUse"]["name"], "functions_read_file")
+        self.assertEqual(request["messages"][0]["content"][1]["toolUse"]["name"], "run_command")
+        self.assertEqual(name_map["functions_read_file"], "functions.read_file")
+        self.assertNotIn("run_command", name_map)
+        self.assertNotIn("_toolNameMap", request)
+
+    def test_sanitize_converse_request_preserves_valid_name_when_invalid_name_collides(self):
+        request = {
+            "toolConfig": {
+                "tools": [
+                    {"toolSpec": {"name": "a.b", "description": "Invalid"}},
+                    {"toolSpec": {"name": "a_b", "description": "Valid"}},
+                    {"toolSpec": {"name": "a/b", "description": "Also invalid"}},
+                ]
+            },
+            "messages": [],
+        }
+
+        name_map = proxy.sanitize_converse_request(request)
+
+        sent = [tool["toolSpec"]["name"] for tool in request["toolConfig"]["tools"]]
+        self.assertEqual(len(set(sent)), 3)
+        self.assertIn("a_b", sent)
+        self.assertEqual(name_map["a_b_2"], "a.b")
+        self.assertEqual(name_map["a_b_3"], "a/b")
+
+    def test_openai_response_reverts_sanitized_tool_name(self):
+        bedrock_response = {
+            "stopReason": "tool_use",
+            "usage": {"inputTokens": 1, "outputTokens": 1, "totalTokens": 2},
+            "output": {
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "toolUse": {
+                                "toolUseId": "tooluse_123",
+                                "name": "functions_read_file",
+                                "input": {"path": "src/app.ts"},
+                            }
+                        },
+                    ],
+                }
+            },
+        }
+
+        response = proxy.openai_response(
+            bedrock_response,
+            model_id="provider.model-v1:0",
+            elapsed_ms=42,
+            tool_name_map={"functions_read_file": "functions.read_file"},
+        )
+
+        self.assertEqual(
+            response["choices"][0]["message"]["tool_calls"][0]["function"]["name"],
+            "functions.read_file",
+        )
+
+    def test_chat_completion_sanitizes_request_and_reverts_response_tool_name(self):
+        client = FakeBedrockClient(
+            response={
+                "stopReason": "tool_use",
+                "usage": {"inputTokens": 1, "outputTokens": 1, "totalTokens": 2},
+                "output": {
+                    "message": {
+                        "role": "assistant",
+                        "content": [
+                            {"toolUse": {"toolUseId": "tooluse_123", "name": "functions_read_file", "input": {}}}
+                        ],
+                    }
+                },
+            }
+        )
+        bedrock_proxy = proxy.BedrockOpenAIProxy(model_id="provider.model-v1:0", client=client)
+
+        response = bedrock_proxy.chat_completion(
+            {
+                "messages": [{"role": "user", "content": "hello"}],
+                "tools": [
+                    {
+                        "type": "function",
+                        "function": {"name": "functions.read_file", "parameters": {"type": "object"}},
+                    }
+                ],
+            }
+        )
+
+        sent_tool = client.requests[0]["toolConfig"]["tools"][0]["toolSpec"]["name"]
+        returned_tool = response["choices"][0]["message"]["tool_calls"][0]["function"]["name"]
+        self.assertEqual(sent_tool, "functions_read_file")
+        self.assertEqual(returned_tool, "functions.read_file")
+
+    def test_http_handler_returns_400_for_bedrock_validation_errors(self):
+        bedrock_proxy = proxy.BedrockOpenAIProxy(
+            model_id="provider.model-v1:0",
+            client=FakeBedrockValidationClient(),
+        )
+        payload = json.dumps({"messages": [{"role": "user", "content": "hello"}]}).encode("utf-8")
+
+        status, body = proxy.chat_completion_http_response(bedrock_proxy, payload)
+
+        self.assertEqual(status, 400)
+        self.assertEqual(body["error"]["type"], "invalid_request")
+        self.assertIn("ValidationException", body["error"]["message"])
+
 
 class FakeBedrockClient:
-    def __init__(self):
+    def __init__(self, response=None):
         self.requests = []
+        self.response = response
 
     def converse(self, **request):
         self.requests.append(request)
+        if self.response is not None:
+            return self.response
         return {
             "stopReason": "end_turn",
             "usage": {"inputTokens": 1, "outputTokens": 1, "totalTokens": 2},
             "output": {"message": {"role": "assistant", "content": [{"text": "ok"}]}},
         }
+
+
+class FakeBedrockValidationClient:
+    def converse(self, **request):
+        raise FakeClientError("ValidationException", "toolUse.name failed validation")
+
+
+class FakeClientError(Exception):
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.response = {"Error": {"Code": code, "Message": message}}
 
 
 if __name__ == "__main__":
