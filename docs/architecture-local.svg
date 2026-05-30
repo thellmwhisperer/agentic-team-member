@@ -1,89 +1,86 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="940" viewBox="0 0 1600 940" role="img" aria-labelledby="title desc">
-  <title id="title">ATM Local Target Architecture</title>
-  <desc id="desc">A developer machine runs the local ATM target wrapper, llama-server, the canonical agentic_tdd_runner harness, ignored worktrees, logs, and optional GitHub PR creation.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+  <title id="title">ATM local target architecture</title>
+  <desc id="desc">The local target reads local settings, starts llama-server, invokes the canonical ATM harness, writes ignored worktrees and logs, and optionally opens a GitHub pull request.</desc>
   <defs>
-    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
-      <path d="M 0 0 L 12 6 L 0 12 z" fill="#334155"/>
+    <marker id="arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L9,4.5 L0,9 Z" fill="#334155"/>
     </marker>
-    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#0f172a" flood-opacity="0.13"/>
+    <filter id="shadow" x="-15%" y="-15%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="5" stdDeviation="7" flood-color="#0f172a" flood-opacity="0.12"/>
     </filter>
     <style>
-      .title { font: 700 44px Arial, sans-serif; fill: #111827; }
-      .subtitle { font: 400 22px Arial, sans-serif; fill: #475569; }
-      .label { font: 700 24px Arial, sans-serif; fill: #111827; }
-      .small { font: 400 18px Arial, sans-serif; fill: #334155; }
-      .tiny { font: 400 16px Arial, sans-serif; fill: #475569; }
-      .box { stroke-width: 3; rx: 22; filter: url(#shadow); }
-      .arrow { stroke: #334155; stroke-width: 4; fill: none; marker-end: url(#arrow); }
-      .soft { fill: #eff6ff; stroke: #93c5fd; }
-      .harness { fill: #ecfdf5; stroke: #10b981; }
+      .page-title { font: 700 44px Arial, sans-serif; fill: #111827; }
+      .subtitle { font: 400 21px Arial, sans-serif; fill: #475569; }
+      .group-title { font: 700 18px Arial, sans-serif; fill: #334155; }
+      .box-title { font: 700 24px Arial, sans-serif; fill: #111827; }
+      .box-text { font: 400 18px Arial, sans-serif; fill: #334155; }
+      .small { font: 400 16px Arial, sans-serif; fill: #475569; }
+      .box { stroke-width: 3; rx: 20; filter: url(#shadow); }
+      .input { fill: #eff6ff; stroke: #60a5fa; }
+      .target { fill: #f8fafc; stroke: #94a3b8; }
+      .core { fill: #ecfdf5; stroke: #10b981; }
       .model { fill: #fff7ed; stroke: #fb923c; }
-      .state { fill: #f8fafc; stroke: #94a3b8; }
+      .output { fill: #f8fafc; stroke: #94a3b8; }
       .github { fill: #111827; stroke: #111827; }
-      .githubText { font: 700 24px Arial, sans-serif; fill: #ffffff; }
-      .githubSmall { font: 400 18px Arial, sans-serif; fill: #e5e7eb; }
-      .caption { font: 700 18px Arial, sans-serif; fill: #334155; }
+      .github-title { font: 700 24px Arial, sans-serif; fill: #ffffff; }
+      .github-text { font: 400 18px Arial, sans-serif; fill: #e5e7eb; }
+      .arrow { stroke: #334155; stroke-width: 4; fill: none; marker-end: url(#arrow); stroke-linecap: round; stroke-linejoin: round; }
+      .thin { stroke-width: 3; }
     </style>
   </defs>
 
-  <rect width="1600" height="940" fill="#ffffff"/>
-  <text x="800" y="70" text-anchor="middle" class="title">ATM Local Target</text>
-  <text x="800" y="108" text-anchor="middle" class="subtitle">Developer machine execution: local model endpoint, local worktrees, local logs, optional PR.</text>
+  <rect width="1600" height="900" fill="#ffffff"/>
+  <text x="800" y="68" text-anchor="middle" class="page-title">ATM Local Target</text>
+  <text x="800" y="106" text-anchor="middle" class="subtitle">Developer-machine execution: local model endpoint, local worktrees, local logs, optional PR.</text>
 
-  <rect x="70" y="150" width="1460" height="700" rx="34" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="3"/>
-  <text x="105" y="196" class="caption">developer machine</text>
+  <rect x="70" y="145" width="1460" height="665" rx="32" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="3"/>
+  <text x="105" y="190" class="group-title">developer machine</text>
 
-  <rect x="120" y="250" width="270" height="130" class="box soft"/>
-  <text x="255" y="300" text-anchor="middle" class="label">.env.local</text>
-  <text x="255" y="332" text-anchor="middle" class="small">model path</text>
-  <text x="255" y="358" text-anchor="middle" class="small">repo + issue values</text>
+  <rect x="120" y="235" width="260" height="120" class="box input"/>
+  <text x="250" y="282" text-anchor="middle" class="box-title">.env.local</text>
+  <text x="250" y="314" text-anchor="middle" class="box-text">machine values</text>
+  <text x="250" y="340" text-anchor="middle" class="box-text">repo + issue</text>
 
-  <rect x="120" y="475" width="270" height="130" class="box soft"/>
-  <text x="255" y="525" text-anchor="middle" class="label">TOML config</text>
-  <text x="255" y="557" text-anchor="middle" class="small">config/agent.toml</text>
-  <text x="255" y="583" text-anchor="middle" class="small">or *.local.toml</text>
+  <rect x="120" y="430" width="260" height="120" class="box input"/>
+  <text x="250" y="477" text-anchor="middle" class="box-title">TOML config</text>
+  <text x="250" y="509" text-anchor="middle" class="box-text">versioned defaults</text>
+  <text x="250" y="535" text-anchor="middle" class="box-text">or local override</text>
 
-  <rect x="485" y="250" width="310" height="130" class="box soft"/>
-  <text x="640" y="300" text-anchor="middle" class="label">targets/local</text>
-  <text x="640" y="332" text-anchor="middle" class="small">run-issue wrapper</text>
-  <text x="640" y="358" text-anchor="middle" class="small">start-model helper</text>
+  <rect x="470" y="330" width="275" height="135" class="box target"/>
+  <text x="607.5" y="380" text-anchor="middle" class="box-title">targets/local</text>
+  <text x="607.5" y="412" text-anchor="middle" class="box-text">start-model</text>
+  <text x="607.5" y="438" text-anchor="middle" class="box-text">run-issue wrapper</text>
 
-  <rect x="485" y="475" width="310" height="145" class="box model"/>
-  <text x="640" y="528" text-anchor="middle" class="label">llama-server</text>
-  <text x="640" y="560" text-anchor="middle" class="small">OpenAI-compatible</text>
-  <text x="640" y="586" text-anchor="middle" class="small">127.0.0.1:11435</text>
+  <rect x="835" y="285" width="330" height="150" class="box core"/>
+  <text x="1000" y="340" text-anchor="middle" class="box-title">agentic_tdd_runner</text>
+  <text x="1000" y="372" text-anchor="middle" class="box-text">canonical harness</text>
+  <text x="1000" y="398" text-anchor="middle" class="box-text">issue -> test -> fix -> verify</text>
 
-  <rect x="890" y="335" width="350" height="170" class="box harness"/>
-  <text x="1065" y="392" text-anchor="middle" class="label">agentic_tdd_runner</text>
-  <text x="1065" y="424" text-anchor="middle" class="small">canonical core harness</text>
-  <text x="1065" y="450" text-anchor="middle" class="small">issue -> test -> fix -> verify</text>
+  <rect x="835" y="555" width="330" height="125" class="box model"/>
+  <text x="1000" y="604" text-anchor="middle" class="box-title">llama-server</text>
+  <text x="1000" y="636" text-anchor="middle" class="box-text">OpenAI-compatible</text>
+  <text x="1000" y="662" text-anchor="middle" class="box-text">127.0.0.1:11435</text>
 
-  <rect x="1280" y="230" width="200" height="110" class="box state"/>
-  <text x="1380" y="276" text-anchor="middle" class="label">.atm/logs</text>
-  <text x="1380" y="306" text-anchor="middle" class="small">JSONL output</text>
+  <rect x="1255" y="225" width="220" height="105" class="box output"/>
+  <text x="1365" y="270" text-anchor="middle" class="box-title">.atm/logs</text>
+  <text x="1365" y="300" text-anchor="middle" class="box-text">JSONL output</text>
 
-  <rect x="1280" y="410" width="200" height="120" class="box state"/>
-  <text x="1380" y="458" text-anchor="middle" class="label">.atm/worktrees</text>
-  <text x="1380" y="488" text-anchor="middle" class="small">isolated runs</text>
+  <rect x="1255" y="395" width="220" height="110" class="box output"/>
+  <text x="1365" y="440" text-anchor="middle" class="box-title">.atm/worktrees</text>
+  <text x="1365" y="470" text-anchor="middle" class="box-text">isolated runs</text>
 
-  <rect x="1280" y="605" width="200" height="120" class="box github"/>
-  <text x="1380" y="653" text-anchor="middle" class="githubText">GitHub</text>
-  <text x="1380" y="684" text-anchor="middle" class="githubSmall">optional push</text>
-  <text x="1380" y="708" text-anchor="middle" class="githubSmall">and PR</text>
+  <rect x="1255" y="570" width="220" height="120" class="box github"/>
+  <text x="1365" y="618" text-anchor="middle" class="github-title">GitHub</text>
+  <text x="1365" y="650" text-anchor="middle" class="github-text">optional push</text>
+  <text x="1365" y="676" text-anchor="middle" class="github-text">and PR</text>
 
-  <path class="arrow" d="M 390 315 H 485"/>
-  <path class="arrow" d="M 390 540 H 485"/>
-  <path class="arrow" d="M 795 315 C 845 315 845 390 890 390"/>
-  <path class="arrow" d="M 890 455 C 815 455 815 548 795 548"/>
-  <path class="arrow" d="M 795 548 C 835 548 835 470 890 470"/>
-  <path class="arrow" d="M 1240 395 C 1265 350 1260 285 1280 285"/>
-  <path class="arrow" d="M 1240 430 H 1280"/>
-  <path class="arrow" d="M 1240 478 C 1265 535 1260 665 1280 665"/>
+  <path class="arrow" d="M380,295 H430 V365 H470"/>
+  <path class="arrow" d="M380,490 H430 V430 H470"/>
+  <path class="arrow" d="M745,397 H835"/>
+  <path class="arrow" d="M1000,435 V555"/>
+  <path class="arrow thin" d="M1165,335 H1255"/>
+  <path class="arrow thin" d="M1165,395 H1210 V450 H1255"/>
+  <path class="arrow thin" d="M1165,420 H1210 V630 H1255"/>
 
-  <text x="438" y="300" text-anchor="middle" class="tiny">env</text>
-  <text x="438" y="525" text-anchor="middle" class="tiny">config</text>
-  <text x="842" y="355" text-anchor="middle" class="tiny">invoke</text>
-  <text x="840" y="585" text-anchor="middle" class="tiny">chat</text>
-  <text x="1375" y="790" text-anchor="middle" class="tiny">Generated state is ignored by git unless explicitly overridden.</text>
+  <text x="800" y="760" text-anchor="middle" class="small">Generated logs and worktrees stay in ignored runtime directories unless overridden.</text>
 </svg>
