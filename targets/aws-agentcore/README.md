@@ -82,7 +82,7 @@ no-op memory adapter and still runs the harness.
 
 To enable Roca Cloud:
 
-- `ROCA_CLOUD_MCP_URL`
+- `ROCA_CLOUD_MCP_URL`: HTTPS MCP endpoint
 - one of `ROCA_CLOUD_API_TOKEN` or `ROCA_CLOUD_API_TOKEN_SECRET_ARN`
 
 The default source agent written to memory is `atm-aws-agentcore`.
@@ -94,10 +94,13 @@ For GitHub issue intake and PR creation, provide either:
 - `GITHUB_TOKEN`
 - or `GITHUB_TOKEN_SECRET_ARN`
 
+Required for AgentCore Gateway tools:
+
+- `GITHUB_REPO_ALLOWLIST`: comma-separated `owner/repo` allowlist. Gateway
+  calls fail closed when this is unset or empty.
+
 Optional controls:
 
-- `GITHUB_REPO_ALLOWLIST`: comma-separated `owner/repo` allowlist for gateway
-  calls
 - `ATM_BRANCH_PREFIX`: default `atm-agentcore/`
 - `ATM_GIT_USER_NAME`: default `ATM AgentCore`
 - `ATM_GIT_USER_EMAIL`: default `atm-agentcore@example.invalid`

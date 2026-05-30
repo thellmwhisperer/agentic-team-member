@@ -47,3 +47,7 @@ class RocaMcpClientTest(unittest.TestCase):
         _, payload, _ = http.requests[0]
         self.assertEqual(payload["params"]["name"], "roca_store")
         self.assertEqual(payload["params"]["arguments"]["metadata"], {"run_id": "r1"})
+
+    def test_rejects_non_https_mcp_url(self):
+        with self.assertRaisesRegex(ValueError, "https"):
+            RocaMcpClient("http://roca.example/mcp", "secret", http=FakeHttp())

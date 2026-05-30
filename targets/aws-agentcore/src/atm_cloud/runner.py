@@ -69,18 +69,21 @@ class SubprocessAtmHarness:
         module: str = "agentic_tdd_runner.agent",
         repo_root: str | None = None,
         timeout: int = 1800,
+        github_token: str | None = None,
     ):
         self.python = python
         self.module = module
         self.repo_root = repo_root
         self.timeout = timeout
+        self.github_token = github_token
 
     def run(self, job: AtmJob, context: Any) -> CommandResult:
         run_nonce = os.environ.get("ATM_RUN_NONCE") or f"{job.run_id}-{int(time.time())}"
         workdir = os.environ.get("ATM_TARGET_WORKDIR", f"/tmp/atm-agentcore/runs/{run_nonce}")
         run_root = os.environ.get("ATM_RUN_ROOT", f"/tmp/atm-agentcore/worktrees/{run_nonce}")
         log_dir = _run_log_dir(run_nonce)
-        repo_root = self.repo_root or ensure_github_repo_cache(job.repo)
+        repo_root = self.repo_root or ensure_github_repo_cache(job.repo, github_token=self.github_token)
+        env = _subprocess_env(self.github_token)
         command = [
             self.python,
             "-m",
@@ -108,7 +111,7 @@ class SubprocessAtmHarness:
             command.extend(["--config", config_ref])
 
         if _env_bool("ATM_STREAM_HARNESS_OUTPUT", default=False):
-            completed = _run_streaming(command, timeout=self.timeout)
+            completed = _run_streaming(command, timeout=self.timeout, env=env)
         else:
             completed = subprocess.run(
                 command,
@@ -116,6 +119,7 @@ class SubprocessAtmHarness:
                 text=True,
                 timeout=self.timeout,
                 check=False,
+                env=env,
             )
         return CommandResult(
             exit_code=completed.returncode,
@@ -125,11 +129,16 @@ class SubprocessAtmHarness:
         )
 
 
-def ensure_github_repo_cache(repo: str, *, cache_root: str | None = None) -> str:
+def ensure_github_repo_cache(
+    repo: str,
+    *,
+    cache_root: str | None = None,
+    github_token: str | None = None,
+) -> str:
     root = Path(cache_root or os.environ.get("ATM_REPO_CACHE_ROOT", "/tmp/atm-agentcore/repos"))
     repo_path = root / _safe_repo_cache_name(repo)
     if (repo_path / ".git").is_dir():
-        _best_effort_fetch(repo_path)
+        _best_effort_fetch(repo_path, github_token=github_token)
         return str(repo_path)
     if repo_path.exists() and any(repo_path.iterdir()):
         raise RuntimeError(f"repo cache path exists and is not a git repo: {repo_path}")
@@ -141,6 +150,7 @@ def ensure_github_repo_cache(repo: str, *, cache_root: str | None = None) -> str
         text=True,
         timeout=int(os.environ.get("ATM_REPO_CLONE_TIMEOUT_SECONDS", "300")),
         check=False,
+        env=_subprocess_env(github_token),
     )
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "").strip()
@@ -148,13 +158,14 @@ def ensure_github_repo_cache(repo: str, *, cache_root: str | None = None) -> str
     return str(repo_path)
 
 
-def _best_effort_fetch(repo_path: Path) -> None:
+def _best_effort_fetch(repo_path: Path, *, github_token: str | None = None) -> None:
     subprocess.run(
         ["git", "-C", str(repo_path), "fetch", "origin", "--prune"],
         capture_output=True,
         text=True,
         timeout=int(os.environ.get("ATM_REPO_FETCH_TIMEOUT_SECONDS", "120")),
         check=False,
+        env=_subprocess_env(github_token),
     )
 
 
@@ -178,13 +189,28 @@ def _env_bool(name: str, *, default: bool) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _run_streaming(command: list[str], *, timeout: int) -> subprocess.CompletedProcess[str]:
+def _subprocess_env(github_token: str | None) -> dict[str, str] | None:
+    if not github_token:
+        return None
+    env = os.environ.copy()
+    env["GH_TOKEN"] = github_token
+    env["GITHUB_TOKEN"] = github_token
+    return env
+
+
+def _run_streaming(
+    command: list[str],
+    *,
+    timeout: int,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
     process = subprocess.Popen(
         command,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
         bufsize=1,
+        env=env,
     )
     stdout_parts: list[str] = []
     stderr_parts: list[str] = []
@@ -234,12 +260,22 @@ class AtmCloudRunner:
 
     def run(self, job: AtmJob) -> RunResult:
         events: list[RunEvent] = []
-        context = self.memory.query(
-            query=f"latest handoff for {job.repo}",
-            project=job.roca_project,
-            limit=5,
-        )
-        events.append(RunEvent("memory_context", "succeeded", {"project": job.roca_project}))
+        try:
+            context = self.memory.query(
+                query=f"latest handoff for {job.repo}",
+                project=job.roca_project,
+                limit=5,
+            )
+            events.append(RunEvent("memory_context", "succeeded", {"project": job.roca_project}))
+        except Exception as exc:
+            context = {"items": []}
+            events.append(
+                RunEvent(
+                    "memory_context",
+                    "failed",
+                    {"project": job.roca_project, "error": str(exc)},
+                )
+            )
 
         if job.mode == "dry_run":
             command = CommandResult(
@@ -250,16 +286,31 @@ class AtmCloudRunner:
             )
             events.append(RunEvent("dry_run", "succeeded", {"repo": job.repo}))
         else:
-            command = self.harness.run(job, context)
-            command = _with_extracted_pr_url(command)
-            harness_status = "succeeded" if command.exit_code == 0 else "failed"
-            events.append(
-                RunEvent(
-                    "atm_harness",
-                    harness_status,
-                    {"exit_code": command.exit_code, **command.metadata},
+            try:
+                command = self.harness.run(job, context)
+                command = _with_extracted_pr_url(command)
+                harness_status = "succeeded" if command.exit_code == 0 else "failed"
+                events.append(
+                    RunEvent(
+                        "atm_harness",
+                        harness_status,
+                        {"exit_code": command.exit_code, **command.metadata},
+                    )
                 )
-            )
+            except Exception as exc:
+                command = CommandResult(
+                    exit_code=1,
+                    stdout="",
+                    stderr=str(exc),
+                    metadata={"exception": exc.__class__.__name__},
+                )
+                events.append(
+                    RunEvent(
+                        "atm_harness",
+                        "failed",
+                        {"exit_code": command.exit_code, "error": str(exc), **command.metadata},
+                    )
+                )
 
         run_status = "succeeded" if command.exit_code == 0 else "failed"
         metadata = {
@@ -268,14 +319,24 @@ class AtmCloudRunner:
             **command.metadata,
         }
         content = _handoff_content(job, run_status, command)
-        self.memory.store(
-            layer="handoff",
-            project=job.roca_project,
-            source_agent="atm-aws-agentcore",
-            content=content,
-            metadata=metadata,
-        )
-        events.append(RunEvent("memory_handoff", "succeeded", {"project": job.roca_project}))
+        try:
+            self.memory.store(
+                layer="handoff",
+                project=job.roca_project,
+                source_agent="atm-aws-agentcore",
+                content=content,
+                metadata=metadata,
+            )
+            events.append(RunEvent("memory_handoff", "succeeded", {"project": job.roca_project}))
+        except Exception as exc:
+            run_status = "failed"
+            events.append(
+                RunEvent(
+                    "memory_handoff",
+                    "failed",
+                    {"project": job.roca_project, "error": str(exc)},
+                )
+            )
         return RunResult(status=run_status, job=job, events=events, command=command)
 
 

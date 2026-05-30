@@ -18,7 +18,12 @@ class BedrockOpenAIProxy:
         self.client = client or _bedrock_client(region)
 
     def chat_completion(self, payload: dict[str, Any]) -> dict[str, Any]:
-        model_id = normalize_model_id(payload.get("model") or self.model_id)
+        requested_model = payload.get("model")
+        if requested_model:
+            requested_model_id = normalize_model_id(requested_model)
+            if requested_model_id != self.model_id:
+                raise ValueError("model override is not allowed for this proxy")
+        model_id = self.model_id
         request = build_converse_request(payload, model_id=model_id)
         started = time.monotonic()
         response = self.client.converse(**request)
@@ -27,6 +32,8 @@ class BedrockOpenAIProxy:
 
 
 def normalize_model_id(model: str) -> str:
+    if not isinstance(model, str):
+        raise ValueError("model must be a string")
     value = model.strip()
     if not value:
         raise ValueError("model cannot be empty")
@@ -284,6 +291,10 @@ def make_handler(proxy: BedrockOpenAIProxy) -> type[BaseHTTPRequestHandler]:
                 length = int(self.headers.get("content-length") or "0")
                 payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
                 self.respond(200, proxy.chat_completion(payload))
+            except json.JSONDecodeError as exc:
+                self.respond(400, {"error": {"message": str(exc), "type": "invalid_request"}})
+            except (KeyError, TypeError, ValueError) as exc:
+                self.respond(400, {"error": {"message": str(exc), "type": "invalid_request"}})
             except Exception as exc:  # pragma: no cover - defensive HTTP boundary.
                 LOGGER.exception("bedrock proxy request failed")
                 self.respond(500, {"error": {"message": str(exc), "type": exc.__class__.__name__}})
