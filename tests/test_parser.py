@@ -6,13 +6,13 @@ class TestFindSymbolLine:
     def test_finds_function_definition_not_reference(self):
         source = (
             "// setup\n"
-            "client.on('resub', handleResub);\n"
+            "client.on('renewal', processRenewal);\n"
             "\n"
-            "function handleResub(channel, username, months) {\n"
+            "function processRenewal(channel, username, months) {\n"
             "  // body\n"
             "}\n"
         )
-        assert _find_symbol_line(source, "handleResub") == 4
+        assert _find_symbol_line(source, "processRenewal") == 4
 
     def test_finds_export_function(self):
         source = "export function process(item) {\n  return item;\n}\n"
@@ -29,18 +29,18 @@ class TestFindSymbolLine:
     def test_commented_out_decoy_does_not_mask_real_definition(self):
         """CodeRabbit (PR #14, comment 3106068384): without a line-start anchor,
         the TS/JS definition patterns match commented-out code like
-        `// function handleResub()`. The commented decoy at line 1 then wins
+        `// function processRenewal()`. The commented decoy at line 1 then wins
         over the real definition below, sending the agent to the wrong
         region. With ^\\s*, the real definition at line 3 is the one that
         classifies as 'definition'."""
         source = (
-            "// function handleResub(channel) {}  // old stub, kept for history\n"
+            "// function processRenewal(channel) {}  // old stub, kept for history\n"
             "\n"
-            "export function handleResub(channel) {\n"
+            "export function processRenewal(channel) {\n"
             "  return channel;\n"
             "}\n"
         )
-        assert _find_symbol_line(source, "handleResub") == 3
+        assert _find_symbol_line(source, "processRenewal") == 3
 
     def test_commented_out_const_decoy_does_not_mask_real_definition(self):
         source = (
@@ -74,7 +74,7 @@ class TestFindSymbolLine:
 class TestExtractSignature:
     def test_multiline_ts_function(self):
         source = (
-            "export function handleResub(\n"
+            "export function processRenewal(\n"
             "  channel: string,\n"
             "  username: string,\n"
             "  months: number,\n"
@@ -82,7 +82,7 @@ class TestExtractSignature:
             "  // body\n"
             "}\n"
         )
-        sig = _extract_signature(source, "handleResub")
+        sig = _extract_signature(source, "processRenewal")
         assert "channel" in sig
         assert "username" in sig
         assert "months" in sig

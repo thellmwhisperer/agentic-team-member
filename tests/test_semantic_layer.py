@@ -27,23 +27,23 @@ class TestSemanticLayerSchema:
     def test_build_semantic_index_emits_file_and_symbol_tables(self, tmp_path):
         _write_file(
             tmp_path,
-            "src/twitch/client.ts",
+            "src/events/client.ts",
             """\
-            export function initTwitch(): void {
-              client.on('message', handleMessage);
+            export function initEventBus(): void {
+              client.on('message', routeMessage);
             }
 
-            async function handleMessage(message: string): Promise<void> {
+            async function routeMessage(message: string): Promise<void> {
               const lower = message.toLowerCase();
-              if (lower.startsWith('@manolitozurrapa')) {
-                client.say('#canal', 'hola');
+              if (lower.startsWith('@dispatcher')) {
+                client.say('#room', 'hello');
               }
             }
             """,
         )
         _write_file(
             tmp_path,
-            "src/twitch/mentions.test.ts",
+            "src/events/mentions.test.ts",
             """\
             import { test, expect } from 'bun:test';
 
@@ -60,21 +60,21 @@ class TestSemanticLayerSchema:
         assert "symbols" in index
         assert "candidates" in index
 
-        file_fact = _get_file(index, "src/twitch/client.ts")
+        file_fact = _get_file(index, "src/events/client.ts")
         assert file_fact["language"] == "typescript"
-        assert "twitch" in file_fact["domains"]
+        assert "events" in file_fact["domains"]
         assert "event.message" in file_fact["domains"]
         assert "routing.mention" in file_fact["domains"]
-        assert file_fact["symbols"] == ["handleMessage", "initTwitch"]
-        assert file_fact["nearby_tests"] == ["src/twitch/mentions.test.ts"]
+        assert file_fact["symbols"] == ["initEventBus", "routeMessage"]
+        assert file_fact["nearby_tests"] == ["src/events/mentions.test.ts"]
 
-        symbol_fact = _get_symbol(index, "src/twitch/client.ts", "handleMessage")
-        assert symbol_fact["qualified_name"] == "handleMessage"
-        assert "twitch" in symbol_fact["domains"]
+        symbol_fact = _get_symbol(index, "src/events/client.ts", "routeMessage")
+        assert symbol_fact["qualified_name"] == "routeMessage"
+        assert "events" in symbol_fact["domains"]
         assert "event.message" in symbol_fact["domains"]
         assert "routing.mention" in symbol_fact["domains"]
-        assert all(not domain.startswith("twitch.") for domain in symbol_fact["domains"])
-        assert symbol_fact["nearby_tests"] == ["src/twitch/mentions.test.ts"]
+        assert all(not domain.startswith("events.") for domain in symbol_fact["domains"])
+        assert symbol_fact["nearby_tests"] == ["src/events/mentions.test.ts"]
         assert symbol_fact["calls"] == ["client.say"]
         assert symbol_fact["telemetry"] == []
         assert symbol_fact["test_seams"] == [
@@ -82,54 +82,54 @@ class TestSemanticLayerSchema:
         ]
         assert symbol_fact["routes"] == [
             {
-                "condition": "lower.startsWith('@manolitozurrapa')",
-                "guard_patterns": ["startsWith('@manolitozurrapa')"],
+                "condition": "lower.startsWith('@dispatcher')",
+                "guard_patterns": ["startsWith('@dispatcher')"],
                 "label": None,
-                "triggers": ["@manolitozurrapa"],
+                "triggers": ["@dispatcher"],
             }
         ]
 
     def test_nearby_tests_prefers_symbol_and_source_stem_matches(self, tmp_path):
         _write_file(
             tmp_path,
-            "src/twitch/client.ts",
+            "src/events/client.ts",
             """\
-            export function initTwitch(): void {
-              client.on('message', handleMessage);
+            export function initEventBus(): void {
+              client.on('message', routeMessage);
             }
 
-            async function handleMessage(message: string): Promise<void> {
-              if (message.startsWith('@manolitozurrapa')) {
-                client.say('#canal', 'hola');
+            async function routeMessage(message: string): Promise<void> {
+              if (message.startsWith('@dispatcher')) {
+                client.say('#room', 'hello');
               }
             }
             """,
         )
         _write_file(
             tmp_path,
-            "src/twitch/client.test.ts",
+            "src/events/client.test.ts",
             """\
-            import { handleMessage } from './client';
+            import { routeMessage } from './client';
 
             test('client test', () => {
-              expect(handleMessage).toBeDefined();
+              expect(routeMessage).toBeDefined();
             });
             """,
         )
         _write_file(
             tmp_path,
-            "src/twitch/handleMessage.test.ts",
+            "src/events/routeMessage.test.ts",
             """\
-            import { handleMessage } from './client';
+            import { routeMessage } from './client';
 
-            test('handleMessage test', () => {
-              expect(handleMessage).toBeDefined();
+            test('routeMessage test', () => {
+              expect(routeMessage).toBeDefined();
             });
             """,
         )
         _write_file(
             tmp_path,
-            "src/twitch/mentions.test.ts",
+            "src/events/mentions.test.ts",
             """\
             test('mention routing', () => {
               expect(true).toBe(true);
@@ -138,26 +138,26 @@ class TestSemanticLayerSchema:
         )
 
         index = build_semantic_index(str(tmp_path))
-        symbol_fact = _get_symbol(index, "src/twitch/client.ts", "handleMessage")
+        symbol_fact = _get_symbol(index, "src/events/client.ts", "routeMessage")
 
         assert symbol_fact["nearby_tests"] == [
-            "src/twitch/handleMessage.test.ts",
-            "src/twitch/client.test.ts",
-            "src/twitch/mentions.test.ts",
+            "src/events/routeMessage.test.ts",
+            "src/events/client.test.ts",
+            "src/events/mentions.test.ts",
         ]
 
     def test_nearby_tests_uses_semantic_overlap_when_no_symbol_named_test_exists(self, tmp_path):
         _write_file(
             tmp_path,
-            "src/twitch/client.ts",
+            "src/events/client.ts",
             """\
-            async function handleMessage(message: string): Promise<void> {
+            async function routeMessage(message: string): Promise<void> {
               const trimmed = message.trim();
               const lower = trimmed.toLowerCase();
-              const isMention = lower.startsWith('@manolitozurrapa');
-              const isOyeManolito = lower.startsWith('!oyemanolito');
+              const isMention = lower.startsWith('@dispatcher');
+              const isOyeDispatcher = lower.startsWith('!dispatch');
 
-              if (isOyeManolito || isMention) {
+              if (isOyeDispatcher || isMention) {
                 const argsLowerCmd = trimmed.toLowerCase();
                 if (argsLowerCmd === 'habla') {
                   setDiceMode(true);
@@ -166,7 +166,7 @@ class TestSemanticLayerSchema:
                   setDiceMode(false);
                 }
                 if (getVoiceUser('teseo')?.ttsPrefix) {
-                  client.say('#canal', 'hola');
+                  client.say('#room', 'hello');
                 }
               }
             }
@@ -174,7 +174,7 @@ class TestSemanticLayerSchema:
         )
         _write_file(
             tmp_path,
-            "src/twitch/dice-mode.test.ts",
+            "src/events/dice-mode.test.ts",
             """\
             test('habla command should activate dice mode', () => {
               expect(true).toBe(true);
@@ -187,7 +187,7 @@ class TestSemanticLayerSchema:
         )
         _write_file(
             tmp_path,
-            "src/twitch/voice-users.test.ts",
+            "src/events/voice-users.test.ts",
             """\
             test('voice users should have tts prefix', () => {
               expect(true).toBe(true);
@@ -196,7 +196,7 @@ class TestSemanticLayerSchema:
         )
         _write_file(
             tmp_path,
-            "src/twitch/reconnect.test.ts",
+            "src/events/reconnect.test.ts",
             """\
             test('reconnect client disables auto reconnect', () => {
               expect(true).toBe(true);
@@ -205,33 +205,33 @@ class TestSemanticLayerSchema:
         )
 
         index = build_semantic_index(str(tmp_path))
-        symbol_fact = _get_symbol(index, "src/twitch/client.ts", "handleMessage")
+        symbol_fact = _get_symbol(index, "src/events/client.ts", "routeMessage")
 
         assert symbol_fact["nearby_tests"] == [
-            "src/twitch/dice-mode.test.ts",
-            "src/twitch/voice-users.test.ts",
-            "src/twitch/reconnect.test.ts",
+            "src/events/dice-mode.test.ts",
+            "src/events/voice-users.test.ts",
+            "src/events/reconnect.test.ts",
         ]
 
     def test_nearby_tests_deemphasizes_generic_code_tokens(self, tmp_path):
         _write_file(
             tmp_path,
-            "src/twitch/client.ts",
+            "src/events/client.ts",
             """\
-            async function handleMessage(message: string): Promise<void> {
+            async function routeMessage(message: string): Promise<void> {
               const trimmed = message.trim();
               const lower = trimmed.toLowerCase();
 
               if (getVoiceUser('teseo')?.ttsPrefix) {
                 setDiceMode(true);
-                client.say('#canal', 'hola');
+                client.say('#room', 'hello');
               }
             }
             """,
         )
         _write_file(
             tmp_path,
-            "src/twitch/reconnect.test.ts",
+            "src/events/reconnect.test.ts",
             """\
             test('generic reconnect boilerplate', async () => {
               const client = await Promise.resolve({ reconnect: false });
@@ -243,7 +243,7 @@ class TestSemanticLayerSchema:
         )
         _write_file(
             tmp_path,
-            "src/twitch/voice-users.test.ts",
+            "src/events/voice-users.test.ts",
             """\
             test('voice users should have tts prefix', () => {
               const voiceUsers = [{ username: 'teseo', ttsPrefix: '!dice' }];
@@ -253,29 +253,29 @@ class TestSemanticLayerSchema:
         )
 
         index = build_semantic_index(str(tmp_path))
-        symbol_fact = _get_symbol(index, "src/twitch/client.ts", "handleMessage")
+        symbol_fact = _get_symbol(index, "src/events/client.ts", "routeMessage")
 
         assert symbol_fact["nearby_tests"] == [
-            "src/twitch/voice-users.test.ts",
-            "src/twitch/reconnect.test.ts",
+            "src/events/voice-users.test.ts",
+            "src/events/reconnect.test.ts",
         ]
 
     def test_nearby_tests_ignores_cross_module_noise_without_strong_seams(self, tmp_path):
         _write_file(
             tmp_path,
-            "src/twitch/client.ts",
+            "src/events/client.ts",
             """\
-            async function handleMessage(message: string): Promise<void> {
+            async function routeMessage(message: string): Promise<void> {
               const lower = message.toLowerCase();
-              if (lower.startsWith('@manolitozurrapa')) {
-                client.say('#canal', 'hola');
+              if (lower.startsWith('@dispatcher')) {
+                client.say('#room', 'hello');
               }
             }
             """,
         )
         _write_file(
             tmp_path,
-            "src/twitch/dice-mode.test.ts",
+            "src/events/dice-mode.test.ts",
             """\
             test('dice mode nearby', () => {
               expect(true).toBe(true);
@@ -293,33 +293,33 @@ class TestSemanticLayerSchema:
         )
         _write_file(
             tmp_path,
-            "src/managers/stream-summary.test.ts",
+            "src/managers/metrics-summary.test.ts",
             """\
-            test('stream summary noise', () => {
+            test('metrics summary noise', () => {
               expect(true).toBe(true);
             });
             """,
         )
 
         index = build_semantic_index(str(tmp_path))
-        symbol_fact = _get_symbol(index, "src/twitch/client.ts", "handleMessage")
+        symbol_fact = _get_symbol(index, "src/events/client.ts", "routeMessage")
 
-        assert symbol_fact["nearby_tests"] == ["src/twitch/dice-mode.test.ts"]
+        assert symbol_fact["nearby_tests"] == ["src/events/dice-mode.test.ts"]
 
 
 class TestSemanticLayerGoldens:
     def test_handle_message_semantic_facts(self, tmp_path):
         _write_file(
             tmp_path,
-            "src/twitch/client.ts",
+            "src/events/client.ts",
             """\
-            export function initTwitch(): void {
-              client.on('message', handleMessage);
+            export function initEventBus(): void {
+              client.on('message', routeMessage);
             }
 
-            async function handleMessage(
+            async function routeMessage(
               channel: string,
-              userstate: ChatUserstate,
+              eventPayload: ChatEventPayload,
               message: string,
               self: boolean,
             ): Promise<void> {
@@ -327,30 +327,30 @@ class TestSemanticLayerGoldens:
 
               const trimmed = message.trim();
               const lower = trimmed.toLowerCase();
-              // --- @manolitozurrapa or !oyemanolito ---
-              const isMention = lower.startsWith('@manolitozurrapa');
-              const isOyeManolito = lower.startsWith('!oyemanolito');
+              // --- @dispatcher or !dispatch ---
+              const isMention = lower.startsWith('@dispatcher');
+              const isOyeDispatcher = lower.startsWith('!dispatch');
 
-              if (isOyeManolito || isMention) {
-                client.say(channel, `@${userstate.username} hola illo`);
+              if (isOyeDispatcher || isMention) {
+                client.say(channel, `@${eventPayload.username} hello illo`);
               }
             }
             """,
         )
         _write_file(
             tmp_path,
-            "src/twitch/handleMessage.test.ts",
+            "src/events/routeMessage.test.ts",
             """\
             import { test, expect } from 'bun:test';
 
-            test('handleMessage', () => {
+            test('routeMessage', () => {
               expect(true).toBe(true);
             });
             """,
         )
 
         index = build_semantic_index(str(tmp_path))
-        symbol_fact = _get_symbol(index, "src/twitch/client.ts", "handleMessage")
+        symbol_fact = _get_symbol(index, "src/events/client.ts", "routeMessage")
 
         assert "event.message" in symbol_fact["domains"]
         assert "routing.mention" in symbol_fact["domains"]
@@ -363,51 +363,51 @@ class TestSemanticLayerGoldens:
                 "line": 2,
             }
         ]
-        assert symbol_fact["triggers"] == ["!oyemanolito", "@manolitozurrapa"]
+        assert symbol_fact["triggers"] == ["!dispatch", "@dispatcher"]
         assert symbol_fact["guard_patterns"] == [
-            "startsWith('!oyemanolito')",
-            "startsWith('@manolitozurrapa')",
+            "startsWith('!dispatch')",
+            "startsWith('@dispatcher')",
         ]
         assert symbol_fact["observables"] == ["client.say"]
         assert symbol_fact["telemetry"] == []
         assert symbol_fact["test_seams"] == [
             {"kind": "module_object", "members": ["say"], "name": "client"},
         ]
-        assert symbol_fact["nearby_tests"] == ["src/twitch/handleMessage.test.ts"]
+        assert symbol_fact["nearby_tests"] == ["src/events/routeMessage.test.ts"]
         assert symbol_fact["routes"] == [
             {
-                "condition": "isOyeManolito || isMention",
+                "condition": "isOyeDispatcher || isMention",
                 "guard_patterns": [
-                    "startsWith('!oyemanolito')",
-                    "startsWith('@manolitozurrapa')",
+                    "startsWith('!dispatch')",
+                    "startsWith('@dispatcher')",
                 ],
-                "label": "@manolitozurrapa or !oyemanolito",
-                "triggers": ["!oyemanolito", "@manolitozurrapa"],
+                "label": "@dispatcher or !dispatch",
+                "triggers": ["!dispatch", "@dispatcher"],
             }
         ]
 
     def test_handle_message_triggers_exclude_nested_branch_literals(self, tmp_path):
         _write_file(
             tmp_path,
-            "src/twitch/client.ts",
+            "src/events/client.ts",
             """\
-            async function handleMessage(message: string): Promise<void> {
+            async function routeMessage(message: string): Promise<void> {
               const trimmed = message.trim();
               const lower = trimmed.toLowerCase();
 
-              if (lower === '!mismensajes') {
-                client.say('#canal', 'ok');
+              if (lower === '!mytasks') {
+                client.say('#room', 'ok');
                 return;
               }
 
-              // --- @manolitozurrapa or !oyemanolito ---
-              const isMention = lower.startsWith('@manolitozurrapa');
-              const isOyeManolito = lower.startsWith('!oyemanolito');
+              // --- @dispatcher or !dispatch ---
+              const isMention = lower.startsWith('@dispatcher');
+              const isOyeDispatcher = lower.startsWith('!dispatch');
 
-              if (isOyeManolito || isMention) {
+              if (isOyeDispatcher || isMention) {
                 const argsLowerCmd = trimmed.toLowerCase();
                 if (argsLowerCmd === 'calla' || argsLowerCmd === 'callate') {
-                  client.say('#canal', 'vale');
+                  client.say('#room', 'done');
                 }
               }
             }
@@ -415,57 +415,57 @@ class TestSemanticLayerGoldens:
         )
 
         index = build_semantic_index(str(tmp_path))
-        symbol_fact = _get_symbol(index, "src/twitch/client.ts", "handleMessage")
+        symbol_fact = _get_symbol(index, "src/events/client.ts", "routeMessage")
 
         assert "routing.mention" in symbol_fact["domains"]
         assert "routing.command" in symbol_fact["domains"]
-        assert symbol_fact["triggers"] == ["!mismensajes", "!oyemanolito", "@manolitozurrapa"]
+        assert symbol_fact["triggers"] == ["!dispatch", "!mytasks", "@dispatcher"]
         assert symbol_fact["guard_patterns"] == [
-            "== '!mismensajes'",
-            "startsWith('!oyemanolito')",
-            "startsWith('@manolitozurrapa')",
+            "== '!mytasks'",
+            "startsWith('!dispatch')",
+            "startsWith('@dispatcher')",
         ]
         assert all("calla" not in route["condition"] for route in symbol_fact["routes"])
 
-    def test_handle_resub_semantic_facts(self, tmp_path):
+    def test_handle_renewal_semantic_facts(self, tmp_path):
         _write_file(
             tmp_path,
-            "src/twitch/client.ts",
+            "src/events/client.ts",
             """\
-            export function initTwitch(): void {
-              client.on('resub', handleResub);
+            export function initEventBus(): void {
+              client.on('renewal', processRenewal);
             }
 
-            function handleResub(channel: string, username: string, months: number): void {
-              logger.event('resub', { username, months });
-              streamSummaryManager.trackResub(username, months);
+            function processRenewal(channel: string, username: string, months: number): void {
+              logger.event('renewal', { username, months });
+              metricsSummaryManager.trackRenewal(username, months);
               client.say(channel, `@${username} ${months}`);
             }
             """,
         )
 
         index = build_semantic_index(str(tmp_path))
-        symbol_fact = _get_symbol(index, "src/twitch/client.ts", "handleResub")
+        symbol_fact = _get_symbol(index, "src/events/client.ts", "processRenewal")
 
-        assert "event.resub" in symbol_fact["domains"]
-        assert "feature.resub" in symbol_fact["domains"]
+        assert "event.renewal" in symbol_fact["domains"]
+        assert "feature.renewal" in symbol_fact["domains"]
         assert symbol_fact["entrypoints"] == [
             {
                 "kind": "event",
                 "emitter": "client.on",
-                "name": "resub",
+                "name": "renewal",
                 "line": 2,
             }
         ]
         assert symbol_fact["triggers"] == []
         assert symbol_fact["observables"] == [
             "client.say",
-            "streamSummaryManager.trackResub",
+            "metricsSummaryManager.trackRenewal",
         ]
         assert symbol_fact["telemetry"] == ["logger.event"]
         assert symbol_fact["test_seams"] == [
             {"kind": "module_object", "members": ["say"], "name": "client"},
-            {"kind": "module_object", "members": ["trackResub"], "name": "streamSummaryManager"},
+            {"kind": "module_object", "members": ["trackRenewal"], "name": "metricsSummaryManager"},
         ]
         assert symbol_fact["routes"] == []
 
@@ -484,10 +484,10 @@ class TestSemanticLayerGoldens:
                 this.actionTimers.clear();
 
                 const timer = setInterval(() => {
-                  this.executeAction('piropo', ['reina'], sendMessage);
+                  this.executeAction('action', ['target'], sendMessage);
                 }, 1000);
 
-                this.actionTimers.set('piropo', timer);
+                this.actionTimers.set('action', timer);
               }
 
               private executeAction(
@@ -547,18 +547,18 @@ class TestSemanticLayerGoldens:
     def test_nearby_tests_can_surface_cross_module_semantic_matches(self, tmp_path):
         _write_file(
             tmp_path,
-            "src/twitch/client.ts",
+            "src/events/client.ts",
             """\
-            function handleResub(channel: string, username: string, months: number): void {
-              logger.event('resub', { username, months });
-              streamSummaryManager.trackResub(username, months);
+            function processRenewal(channel: string, username: string, months: number): void {
+              logger.event('renewal', { username, months });
+              metricsSummaryManager.trackRenewal(username, months);
               client.say(channel, `@${username} ${months}`);
             }
             """,
         )
         _write_file(
             tmp_path,
-            "src/twitch/token.test.ts",
+            "src/events/token.test.ts",
             """\
             test('token manager boilerplate', () => {
               expect(true).toBe(true);
@@ -567,10 +567,10 @@ class TestSemanticLayerGoldens:
         )
         _write_file(
             tmp_path,
-            "src/managers/stream-summary.test.ts",
+            "src/managers/metrics-summary.test.ts",
             """\
-            test('trackResub increments event count', () => {
-              manager.trackResub('testuser', 12);
+            test('trackRenewal increments event count', () => {
+              manager.trackRenewal('testuser', 12);
               expect(true).toBe(true);
             });
             """,
@@ -587,44 +587,44 @@ class TestSemanticLayerGoldens:
         )
 
         index = build_semantic_index(str(tmp_path))
-        symbol_fact = _get_symbol(index, "src/twitch/client.ts", "handleResub")
+        symbol_fact = _get_symbol(index, "src/events/client.ts", "processRenewal")
 
         assert symbol_fact["nearby_tests"] == [
-            "src/managers/stream-summary.test.ts",
-            "src/twitch/token.test.ts",
+            "src/managers/metrics-summary.test.ts",
+            "src/events/token.test.ts",
         ]
 
     def test_handle_search_semantic_facts(self, tmp_path):
         _write_file(
             tmp_path,
-            "src/twitch/client.ts",
+            "src/events/client.ts",
             """\
             async function handleSearch(
               channel: string,
-              userstate: ChatUserstate,
+              eventPayload: ChatEventPayload,
               query: string,
             ): Promise<void> {
-              const username = (userstate.username || '').toLowerCase();
+              const username = (eventPayload.username || '').toLowerCase();
 
               if (!searchService.hasApiKey()) {
                 logger.error('search_no_api_key', new Error('missing'));
-                client.say(channel, `@${userstate.username} No hay API de búsqueda configurada illo`);
+                client.say(channel, `@${eventPayload.username} Search API is not configured`);
                 return;
               }
 
-              streamSummaryManager.trackSearch(username, query);
+              metricsSummaryManager.trackSearch(username, query);
               const results = await searchService.search(query);
               const response = await aiService.askWithSearch(query, results, username, 'es');
-              client.say(channel, `@${userstate.username} ${response}`);
+              client.say(channel, `@${eventPayload.username} ${response}`);
             }
             """,
         )
         _write_file(
             tmp_path,
-            "src/managers/stream-summary.test.ts",
+            "src/managers/metrics-summary.test.ts",
             """\
             test('trackSearch increments event count', () => {
-              manager.trackSearch('testuser', 'algo');
+              manager.trackSearch('testuser', 'query');
               expect(true).toBe(true);
             });
             """,
@@ -634,60 +634,60 @@ class TestSemanticLayerGoldens:
             "src/services/search.test.ts",
             """\
             test('search service search returns results', async () => {
-              const results = await searchService.search('algo');
+              const results = await searchService.search('query');
               expect(results).toBeDefined();
             });
             """,
         )
 
         index = build_semantic_index(str(tmp_path))
-        symbol_fact = _get_symbol(index, "src/twitch/client.ts", "handleSearch")
+        symbol_fact = _get_symbol(index, "src/events/client.ts", "handleSearch")
 
         assert "feature.search" in symbol_fact["domains"]
         assert symbol_fact["observables"] == [
             "aiService.askWithSearch",
             "client.say",
+            "metricsSummaryManager.trackSearch",
             "searchService.search",
-            "streamSummaryManager.trackSearch",
         ]
         assert symbol_fact["telemetry"] == ["logger.error"]
         assert symbol_fact["test_seams"] == [
             {"kind": "module_object", "members": ["askWithSearch"], "name": "aiService"},
             {"kind": "module_object", "members": ["say"], "name": "client"},
+            {"kind": "module_object", "members": ["trackSearch"], "name": "metricsSummaryManager"},
             {"kind": "module_object", "members": ["search"], "name": "searchService"},
-            {"kind": "module_object", "members": ["trackSearch"], "name": "streamSummaryManager"},
         ]
         assert symbol_fact["nearby_tests"] == [
-            "src/managers/stream-summary.test.ts",
+            "src/managers/metrics-summary.test.ts",
             "src/services/search.test.ts",
         ]
 
-    def test_handle_clip_semantic_facts(self, tmp_path):
+    def test_handle_asset_semantic_facts(self, tmp_path):
         _write_file(
             tmp_path,
-            "src/twitch/client.ts",
+            "src/events/client.ts",
             """\
-            async function handleClip(
+            async function handleAsset(
               channel: string,
-              userstate: ChatUserstate,
+              eventPayload: ChatEventPayload,
               args: string,
             ): Promise<void> {
-              const username = (userstate.username || '').toLowerCase();
+              const username = (eventPayload.username || '').toLowerCase();
 
               if (!args) {
-                client.say(channel, `@${userstate.username} Dime el título del clip`);
+                client.say(channel, `@${eventPayload.username} Provide the asset title`);
                 return;
               }
 
-              const broadcasterId = await twitchService.getBroadcasterId('canal');
-              const clip = await twitchService.createClip(broadcasterId, 30, args);
-              const clipUrl = twitchService.getClipUrl(clip.id);
-              client.say(channel, `Clip creado: ${clipUrl}`);
-              streamSummaryManager.trackClip(username, clipUrl, args, 30);
+              const ownerId = await mediaService.getOwnerId('room');
+              const asset = await mediaService.createAsset(ownerId, 30, args);
+              const assetUrl = mediaService.getAssetUrl(asset.id);
+              client.say(channel, `Asset created: ${assetUrl}`);
+              metricsSummaryManager.trackAsset(username, assetUrl, args, 30);
 
-              if (discordService.hasWebhook()) {
-                await discordService.sendClip({
-                  url: clipUrl,
+              if (webhookService.hasWebhook()) {
+                await webhookService.sendAsset({
+                  url: assetUrl,
                   title: args,
                   creator: username,
                   duration: 30,
@@ -698,74 +698,74 @@ class TestSemanticLayerGoldens:
         )
         _write_file(
             tmp_path,
-            "src/managers/stream-summary.test.ts",
+            "src/managers/metrics-summary.test.ts",
             """\
-            test('trackClip increments event count', () => {
-              manager.trackClip('testuser', 'https://clip', 'algo', 30);
+            test('trackAsset increments event count', () => {
+              manager.trackAsset('testuser', 'https://asset', 'query', 30);
               expect(true).toBe(true);
             });
             """,
         )
         _write_file(
             tmp_path,
-            "src/services/discord.test.ts",
+            "src/services/webhook.test.ts",
             """\
-            test('sendClip sends payload', async () => {
-              await discordService.sendClip({ url: 'https://clip' });
+            test('sendAsset sends payload', async () => {
+              await webhookService.sendAsset({ url: 'https://asset' });
               expect(true).toBe(true);
             });
             """,
         )
 
         index = build_semantic_index(str(tmp_path))
-        symbol_fact = _get_symbol(index, "src/twitch/client.ts", "handleClip")
+        symbol_fact = _get_symbol(index, "src/events/client.ts", "handleAsset")
 
-        assert "feature.clip" in symbol_fact["domains"]
+        assert "feature.asset" in symbol_fact["domains"]
         assert symbol_fact["observables"] == [
             "client.say",
-            "discordService.sendClip",
-            "streamSummaryManager.trackClip",
-            "twitchService.createClip",
-            "twitchService.getBroadcasterId",
-            "twitchService.getClipUrl",
+            "mediaService.createAsset",
+            "mediaService.getAssetUrl",
+            "mediaService.getOwnerId",
+            "metricsSummaryManager.trackAsset",
+            "webhookService.sendAsset",
         ]
         assert symbol_fact["telemetry"] == []
         assert symbol_fact["test_seams"] == [
             {"kind": "module_object", "members": ["say"], "name": "client"},
-            {"kind": "module_object", "members": ["sendClip"], "name": "discordService"},
-            {"kind": "module_object", "members": ["trackClip"], "name": "streamSummaryManager"},
-            {"kind": "module_object", "members": ["createClip", "getBroadcasterId", "getClipUrl"], "name": "twitchService"},
+            {"kind": "module_object", "members": ["createAsset", "getAssetUrl", "getOwnerId"], "name": "mediaService"},
+            {"kind": "module_object", "members": ["trackAsset"], "name": "metricsSummaryManager"},
+            {"kind": "module_object", "members": ["sendAsset"], "name": "webhookService"},
         ]
         assert symbol_fact["nearby_tests"] == [
-            "src/managers/stream-summary.test.ts",
-            "src/services/discord.test.ts",
+            "src/managers/metrics-summary.test.ts",
+            "src/services/webhook.test.ts",
         ]
 
     def test_handle_search_nearby_tests_prioritize_feature_service_before_ai_consumers(self, tmp_path):
         _write_file(
             tmp_path,
-            "src/twitch/client.ts",
+            "src/events/client.ts",
             """\
             async function handleSearch(
               channel: string,
-              userstate: ChatUserstate,
+              eventPayload: ChatEventPayload,
               query: string,
             ): Promise<void> {
-              const username = (userstate.username || '').toLowerCase();
+              const username = (eventPayload.username || '').toLowerCase();
 
-              streamSummaryManager.trackSearch(username, query);
+              metricsSummaryManager.trackSearch(username, query);
               const results = await searchService.search(query);
               const response = await aiService.askWithSearch(query, results, username, 'es');
-              client.say(channel, `@${userstate.username} ${response}`);
+              client.say(channel, `@${eventPayload.username} ${response}`);
             }
             """,
         )
         _write_file(
             tmp_path,
-            "src/managers/stream-summary.test.ts",
+            "src/managers/metrics-summary.test.ts",
             """\
             test('trackSearch increments event count', () => {
-              manager.trackSearch('testuser', 'algo');
+              manager.trackSearch('testuser', 'query');
               expect(true).toBe(true);
             });
             """,
@@ -775,7 +775,7 @@ class TestSemanticLayerGoldens:
             "src/services/search.test.ts",
             """\
             test('search service search returns results', async () => {
-              const results = await searchService.search('algo');
+              const results = await searchService.search('query');
               expect(results).toBeDefined();
             });
             """,
@@ -785,17 +785,17 @@ class TestSemanticLayerGoldens:
             "src/personality/ai.test.ts",
             """\
             test('askWithSearch includes search results in prompt', async () => {
-              await aiService.askWithSearch('algo', [], 'user', 'es');
+              await aiService.askWithSearch('query', [], 'user', 'es');
               expect(true).toBe(true);
             });
             """,
         )
 
         index = build_semantic_index(str(tmp_path))
-        symbol_fact = _get_symbol(index, "src/twitch/client.ts", "handleSearch")
+        symbol_fact = _get_symbol(index, "src/events/client.ts", "handleSearch")
 
         assert symbol_fact["nearby_tests"] == [
-            "src/managers/stream-summary.test.ts",
+            "src/managers/metrics-summary.test.ts",
             "src/services/search.test.ts",
             "src/personality/ai.test.ts",
         ]
