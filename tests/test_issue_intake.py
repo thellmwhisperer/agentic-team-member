@@ -7,7 +7,7 @@ def test_drops_forbidden_any_inside_fix_approach():
     issue = """Bug: processRenewal reports 0 months
 
 ## Symptom
-The bot reports 0 months.
+The service reports 0 months.
 
 ## Fix approach
 1. Add `message: string` and `eventPayload: any` params to the signature
@@ -64,7 +64,7 @@ def test_drops_fix_approach_and_keeps_test_approach_as_acceptance_only():
     issue = """Bug: processRenewal reports 0 months
 
 ## Symptom
-The bot reports 0 months.
+The service reports 0 months.
 
 ## Fix approach
 1. Export processRenewal so it can be tested
@@ -138,7 +138,7 @@ def test_numbered_test_approach_steps_become_acceptance_checks():
     issue = """Bug: processRenewal reports 0 months
 
 ## Symptom
-The bot reports 0 months.
+The service reports 0 months.
 
 ## Test approach
 1. Verify the response message contains "6 meses"
@@ -171,7 +171,7 @@ def test_root_cause_is_audit_only_even_when_it_contains_the_fix():
     issue = """Bug: processRenewal reports 0 months
 
 ## Symptom
-The bot reports 0 months for cumulative renewals.
+The service reports 0 months for cumulative renewals.
 
 ## Root cause
 @example/event-bus emits renewal(channel, username, months, message, eventPayload, methods), but
@@ -179,7 +179,7 @@ processRenewal only accepts three params and must read
 eventPayload['event-total-count'].
 
 ## Expected behavior
-The bot should report cumulative subscription months.
+The service should report cumulative subscription months.
 """
 
     contract = parse_issue_contract(issue)
@@ -188,7 +188,7 @@ The bot should report cumulative subscription months.
     assert "@example/event-bus emits renewal" not in contract.model_text
     assert "event-total-count" not in contract.model_text
     assert "three params" not in contract.model_text
-    assert "The bot should report cumulative subscription months" in contract.model_text
+    assert "The service should report cumulative subscription months" in contract.model_text
     assert contract.reporter_hypotheses == [
         (
             "@example/event-bus emits renewal(channel, username, months, message, eventPayload, methods), but\n"

@@ -4711,17 +4711,17 @@ class TestDiscoveryIntegration:
             "project_root": str(tmp_path),
             "candidates": [
                 {
-                    "source_path": "src/events/client.ts",
-                    "symbol": "routeMessage",
+                    "source_path": "src/http/router.ts",
+                    "symbol": "routeRequest",
                     "kind": "function",
                     "owner_class": None,
                     "line_start": 10,
                     "line_end": 30,
-                    "path_tokens": ["src", "events", "client"],
-                    "symbol_tokens": ["handle", "message"],
-                    "string_tokens": ["dispatcher"],
-                    "strings": ["@dispatcher"],
-                    "terms": ["client", "handle", "dispatcher", "message", "src", "events"],
+                    "path_tokens": ["src", "http", "router"],
+                    "symbol_tokens": ["route", "request"],
+                    "string_tokens": ["api", "tasks"],
+                    "strings": ["/api/tasks"],
+                    "terms": ["api", "http", "request", "route", "router", "src", "tasks"],
                 }
             ],
         }
@@ -4739,8 +4739,8 @@ class TestDiscoveryIntegration:
             return {
                 "source_file": kwargs["source_path"],
                 "target_symbol": kwargs["symbol"],
-                "test_file": "src/client.test.ts",
-                "source_import_path": "./client",
+                "test_file": "src/router.test.ts",
+                "source_import_path": "./router",
                 "runner": "bun:test",
                 "mocks_text": "",
                 "pre_test_source_edits": [],
@@ -4774,8 +4774,8 @@ class TestDiscoveryIntegration:
             assert index is semantic_index
             assert limit == 5
             return [{
-                "source_path": "src/events/client.ts",
-                "symbol": "routeMessage",
+                "source_path": "src/http/router.ts",
+                "symbol": "routeRequest",
                 "score": 22,
             }]
 
@@ -4789,14 +4789,14 @@ class TestDiscoveryIntegration:
 
         assert episode_calls == [
             {
-                "source_path": "src/events/client.ts",
-                "symbol": "routeMessage",
+                "source_path": "src/http/router.ts",
+                "symbol": "routeRequest",
                 "project_root": str(tmp_path),
             }
         ]
         user_msg = next(m for m in captured[0] if m["role"] == "user")
-        assert "routeMessage" in user_msg["content"]
-        assert "src/events/client.ts" in user_msg["content"]
+        assert "routeRequest" in user_msg["content"]
+        assert "src/http/router.ts" in user_msg["content"]
 
     def test_main_exits_when_target_cannot_be_discovered(self, tmp_path, monkeypatch):
         args = SimpleNamespace(
@@ -4837,7 +4837,7 @@ class TestDiscoveryIntegration:
 `src/events/client.ts` -> `processRenewal()` (line 770, not exported)
 
 ## Symptom
-The bot reports 0 months.
+The service reports 0 months.
 
 ## Fix approach
 1. Export processRenewal so it can be tested

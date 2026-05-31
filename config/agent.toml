@@ -131,7 +131,7 @@ quality_failed = """QUALITY CHECK FAILED. Fix the issues below and say DONE agai
 
 pr_prompt = """All checks passed. Generate a pull request.
 
-Write the PR description in the voice/personality of the project (read the README if unsure).
+Write the PR description in the style and terminology of the project (read the README if unsure).
 Keep the title short and conventional (fix:, feat:, etc.).
 
 Respond EXACTLY in this format:

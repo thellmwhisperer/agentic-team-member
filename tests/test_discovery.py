@@ -22,17 +22,17 @@ class TestSemanticIndex:
     def test_indexes_typescript_function_with_trigger_strings(self, tmp_path):
         _write_file(
             tmp_path,
-            "src/events/client.ts",
+            "src/http/router.ts",
             """\
-            export function initClient(client: any): void {
-              client.on('message', routeMessage);
+            export function initRouter(server: any): void {
+              server.on('request', routeRequest);
             }
 
-            async function routeMessage(message: string): Promise<void> {
-              const lower = message.toLowerCase();
-              const isMention = lower.startsWith('@dispatcher');
-              const isOyeDispatcher = lower.startsWith('!dispatch');
-              if (isMention || isOyeDispatcher) {
+            async function routeRequest(path: string): Promise<void> {
+              const lower = path.toLowerCase();
+              const isTasksEndpoint = lower.startsWith('/api/tasks');
+              const isJobsEndpoint = lower.startsWith('/api/jobs');
+              if (isTasksEndpoint || isJobsEndpoint) {
                 console.log('reply');
               }
             }
@@ -40,13 +40,13 @@ class TestSemanticIndex:
         )
 
         index = build_semantic_index(str(tmp_path))
-        candidate = next(c for c in index["candidates"] if c["symbol"] == "routeMessage")
+        candidate = next(c for c in index["candidates"] if c["symbol"] == "routeRequest")
 
-        assert candidate["source_path"] == "src/events/client.ts"
+        assert candidate["source_path"] == "src/http/router.ts"
         assert candidate["kind"] == "function"
-        assert "@dispatcher" in candidate["strings"]
-        assert "message" in candidate["terms"]
-        assert "events" in candidate["path_tokens"]
+        assert "/api/tasks" in candidate["strings"]
+        assert "request" in candidate["terms"]
+        assert "http" in candidate["path_tokens"]
 
     def test_skips_generated_and_environment_directories(self, tmp_path):
         _write_file(
@@ -154,16 +154,16 @@ class TestDiscoverTarget:
     def test_rank_targets_orders_best_candidate_first(self, tmp_path):
         _write_file(
             tmp_path,
-            "src/events/client.ts",
+            "src/http/router.ts",
             """\
-            export function initClient(client: any): void {
-              client.on('message', routeMessage);
+            export function initRouter(server: any): void {
+              server.on('request', routeRequest);
             }
 
-            async function routeMessage(message: string): Promise<void> {
-              const lower = message.toLowerCase();
-              const isMention = lower.startsWith('@dispatcher');
-              if (isMention) {
+            async function routeRequest(path: string): Promise<void> {
+              const lower = path.toLowerCase();
+              const isTasksEndpoint = lower.startsWith('/api/tasks');
+              if (isTasksEndpoint) {
                 console.log('reply');
               }
             }
@@ -173,8 +173,8 @@ class TestDiscoverTarget:
             tmp_path,
             "src/events/other.ts",
             """\
-            export function mentionFallback(message: string): void {
-              if (message.includes('@dispatcher')) {
+            export function routeFallback(path: string): void {
+              if (path.includes('/api/tasks')) {
                 console.log('fallback');
               }
             }
@@ -182,30 +182,30 @@ class TestDiscoverTarget:
         )
 
         ranked = rank_targets(
-            issue_text="Dispatcher misses @dispatcher away from the message start",
+            issue_text="Router misses /api/tasks away from the path start",
             project_root=str(tmp_path),
             limit=3,
         )
 
         ranked_symbols = [candidate["symbol"] for candidate in ranked]
-        assert ranked_symbols[0] == "routeMessage"
-        assert "mentionFallback" in ranked_symbols
+        assert ranked_symbols[0] == "routeRequest"
+        assert "routeFallback" in ranked_symbols
         assert ranked[0]["score"] >= ranked[1]["score"]
 
-    def test_ranks_mention_routing_issue_to_handle_message(self, tmp_path):
+    def test_ranks_endpoint_routing_issue_to_route_request(self, tmp_path):
         _write_file(
             tmp_path,
-            "src/events/client.ts",
+            "src/http/router.ts",
             """\
-            export function initClient(client: any): void {
-              client.on('message', routeMessage);
+            export function initRouter(server: any): void {
+              server.on('request', routeRequest);
             }
 
-            async function routeMessage(message: string): Promise<void> {
-              const lower = message.toLowerCase();
-              const isMention = lower.startsWith('@dispatcher');
-              const isOyeDispatcher = lower.startsWith('!dispatch');
-              if (isMention || isOyeDispatcher) {
+            async function routeRequest(path: string): Promise<void> {
+              const lower = path.toLowerCase();
+              const isTasksEndpoint = lower.startsWith('/api/tasks');
+              const isJobsEndpoint = lower.startsWith('/api/jobs');
+              if (isTasksEndpoint || isJobsEndpoint) {
                 console.log('reply');
               }
             }
@@ -223,15 +223,15 @@ class TestDiscoverTarget:
 
         target = discover_target(
             issue_text=(
-                "Dispatcher only responds when the mention @dispatcher "
-                "aparece como primera palabra del mensaje"
+                "Router only responds when the /api/tasks endpoint "
+                "appears as the first segment of the request path"
             ),
             project_root=str(tmp_path),
         )
 
         assert target is not None
-        assert target["source_path"] == "src/events/client.ts"
-        assert target["symbol"] == "routeMessage"
+        assert target["source_path"] == "src/http/router.ts"
+        assert target["symbol"] == "routeRequest"
 
     def test_ranks_duplicate_timer_issue_to_start_action_timers(self, tmp_path):
         _write_file(
@@ -253,11 +253,11 @@ class TestDiscoverTarget:
         )
         _write_file(
             tmp_path,
-            "src/events/client.ts",
+            "src/http/router.ts",
             """\
-            async function routeMessage(message: string): Promise<void> {
-              const lower = message.toLowerCase();
-              if (lower.startsWith('@dispatcher')) {
+            async function routeRequest(path: string): Promise<void> {
+              const lower = path.toLowerCase();
+              if (lower.startsWith('/api/tasks')) {
                 console.log('reply');
               }
             }
@@ -400,11 +400,11 @@ class TestSemanticIndexPersistence:
     def test_writes_generated_semantic_layer_json(self, tmp_path):
         _write_file(
             tmp_path,
-            "src/events/client.ts",
+            "src/http/router.ts",
             """\
-            async function routeMessage(message: string): Promise<void> {
-              const lower = message.toLowerCase();
-              if (lower.startsWith('@dispatcher')) {
+            async function routeRequest(path: string): Promise<void> {
+              const lower = path.toLowerCase();
+              if (lower.startsWith('/api/tasks')) {
                 console.log('reply');
               }
             }
@@ -419,16 +419,16 @@ class TestSemanticIndexPersistence:
         assert payload["version"] == 5
         assert "files" in payload
         assert "symbols" in payload
-        assert any(c["symbol"] == "routeMessage" for c in payload["candidates"])
+        assert any(c["symbol"] == "routeRequest" for c in payload["candidates"])
 
     def test_load_or_build_semantic_index_writes_default_generated_file(self, tmp_path):
         _write_file(
             tmp_path,
-            "src/events/client.ts",
+            "src/http/router.ts",
             """\
-            async function routeMessage(message: string): Promise<void> {
-              const lower = message.toLowerCase();
-              if (lower.includes('@dispatcher')) {
+            async function routeRequest(path: string): Promise<void> {
+              const lower = path.toLowerCase();
+              if (lower.includes('/api/tasks')) {
                 console.log('reply');
               }
             }
@@ -442,7 +442,7 @@ class TestSemanticIndexPersistence:
         assert payload["version"] == 5
         assert "files" in payload
         assert "symbols" in payload
-        assert any(c["symbol"] == "routeMessage" for c in payload["candidates"])
+        assert any(c["symbol"] == "routeRequest" for c in payload["candidates"])
 
     def test_load_or_build_semantic_index_reuses_existing_file(self, tmp_path, monkeypatch):
         output_path = tmp_path / ".atm" / "semantic-index.generated.json"
@@ -454,17 +454,17 @@ class TestSemanticIndexPersistence:
                     "project_root": str(tmp_path),
                     "candidates": [
                         {
-                            "source_path": "src/events/client.ts",
-                            "symbol": "routeMessage",
+                            "source_path": "src/http/router.ts",
+                            "symbol": "routeRequest",
                             "kind": "function",
                             "owner_class": None,
                             "line_start": 1,
                             "line_end": 5,
-                            "path_tokens": ["src", "events", "client"],
-                            "symbol_tokens": ["handle", "message"],
-                            "string_tokens": ["dispatcher"],
-                            "strings": ["@dispatcher"],
-                            "terms": ["client", "handle", "dispatcher", "message", "src", "events"],
+                            "path_tokens": ["src", "http", "router"],
+                            "symbol_tokens": ["route", "request"],
+                            "string_tokens": ["api", "tasks"],
+                            "strings": ["/api/tasks"],
+                            "terms": ["api", "http", "request", "route", "router", "src", "tasks"],
                         }
                     ],
                 }
@@ -478,7 +478,7 @@ class TestSemanticIndexPersistence:
 
         payload = load_or_build_semantic_index(str(tmp_path))
 
-        assert payload["candidates"][0]["symbol"] == "routeMessage"
+        assert payload["candidates"][0]["symbol"] == "routeRequest"
 
     def test_load_or_build_semantic_index_rebuilds_stale_version(self, tmp_path, monkeypatch):
         output_path = tmp_path / ".atm" / "semantic-index.generated.json"

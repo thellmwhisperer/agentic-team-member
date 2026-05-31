@@ -123,19 +123,18 @@ class TestBunMockHygiene:
 
 
 class TestModuleLocalMutable:
-    """Module-local mutable binding (let client) → test seam setter."""
+    """Module-local mutable binding -> test seam setter."""
 
     def test_includes_seam_setter(self, tmp_path):
-        _write_file(tmp_path, "src/bot.ts", """\
-            let client: any;
+        _write_file(tmp_path, "src/notifier.ts", """\
+            let transport: any;
 
             export function sendMessage(channel: string, msg: string): void {
-              client.say(channel, msg);
+              transport.send(channel, msg);
             }
         """)
-        result = generate_cookbook("src/bot.ts", "sendMessage", str(tmp_path))
-        # Should mention test seam or setter for client
-        assert "client" in result
+        result = generate_cookbook("src/notifier.ts", "sendMessage", str(tmp_path))
+        assert "transport" in result
         assert "set" in result.lower() or "seam" in result.lower() or "inject" in result.lower()
 
 
