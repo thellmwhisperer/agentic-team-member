@@ -585,7 +585,7 @@ def _render_cookbook_text(contract: dict, lang) -> str:
     if repo_profile_facts:
         parts.append("### Repo Profile Facts")
         parts.append("- Stable repo facts from `.atm/profile.toml`; use them for setup and contracts, not as per-issue fixes.")
-        for fact in repo_profile_facts[:12]:
+        for fact in repo_profile_facts:
             parts.append(f"- {fact}")
         parts.append("")
 

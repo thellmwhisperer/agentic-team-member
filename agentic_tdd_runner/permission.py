@@ -1086,6 +1086,9 @@ def _import_needles(contract_facts: list[str]) -> list[str]:
         module_match = re.search(r"uses module `(?P<module>[^`]+)`", fact)
         if module_match:
             needles.append(module_match.group("module"))
+        imports_match = re.search(r"expected imports: (?P<imports>[^.]+)", fact)
+        if imports_match:
+            needles.extend(re.findall(r"`([^`]+)`", imports_match.group("imports")))
     return sorted(set(needles))
 
 

@@ -808,6 +808,11 @@ class TestRepoProfileGuidance:
               { name = "getStreamSummaryManager", kind = "function_returns_object", members = ["startPeriodicSummaries", "trackResub", "generateFinalSummary"] },
               { name = "StreamSummaryManager", kind = "class", members = ["startPeriodicSummaries", "generateFinalSummary"] },
             ]
+
+            [[import_expectations]]
+            module = "../managers/stream-summary"
+            expected_imports = ["../managers/stream-summary"]
+            applies_when = "import_time_dependency"
         """)
         _write_file(tmp_path, "src/twitch/client.ts", """\
             import { getStreamSummaryManager } from '../managers/stream-summary';
@@ -827,6 +832,7 @@ class TestRepoProfileGuidance:
         assert "side effect `import_time`" in result
         assert "mock `../managers/stream-summary` before importing the target" in result
         assert "getStreamSummaryManager (function_returns_object: startPeriodicSummaries, trackResub, generateFinalSummary)" in result
+        assert "import expectation for module `../managers/stream-summary`" in result
 
     def test_includes_profile_event_framework_without_tmi_specific_code_path(self, tmp_path):
         _write_file(tmp_path, ".atm/profile.toml", """\
@@ -853,3 +859,24 @@ class TestRepoProfileGuidance:
         assert "event framework `event-bus` (callback_event) uses module `@acme/event-bus`" in result
         assert "registrations: on, subscribe" in result
         assert "contract sources: docs/event-bus.md" in result
+
+    def test_repo_profile_facts_are_not_silently_truncated(self, tmp_path):
+        expectations = "\n".join(
+            f"""
+            [[import_expectations]]
+            module = "pkg-{index}"
+            expected_imports = ["pkg-{index}"]
+            """
+            for index in range(14)
+        )
+        _write_file(tmp_path, ".atm/profile.toml", expectations)
+        _write_file(tmp_path, "src/client.ts", """\
+            export function handleEvent(message: string): string {
+              return message.trim();
+            }
+        """)
+
+        result = generate_cookbook("src/client.ts", "handleEvent", str(tmp_path))
+
+        assert "import expectation for module `pkg-0`" in result
+        assert "import expectation for module `pkg-13`" in result
