@@ -850,13 +850,10 @@ class TestFindTestFile:
         assert "test scaffold is incomplete" in msg.lower()
 
     def test_verify_red_green_rejects_reference_error_is_not_defined(self, tmp_path, monkeypatch):
-        """CodeRabbit (PR #13, comment 3106087624): ReferenceError / NameError
-        around __setXForTests seams both produce the exact substring
-        'is not defined' (TS: 'ReferenceError: __setClientForTests is not
-        defined'; Python: \"NameError: name '__setClientForTests' is not
-        defined\"). These are the same invalid-red-phase bug as the
-        __setXForTests check, just a different runtime phrasing. Must be
-        rejected, not verified."""
+        """ReferenceError / NameError around __setXForTests seams both produce
+        the exact substring 'is not defined'. These are the same invalid-red-phase
+        bug as the __setXForTests check, just a different runtime phrasing. Must
+        be rejected, not verified."""
         from unittest.mock import patch as mock_patch
         from agentic_tdd_runner.agent import verify_red_green
 
@@ -4214,11 +4211,10 @@ class TestMain:
         assert _tool_loop_signature("str_replace_editor", {}) is None
 
     def test_tool_loop_signature_handles_non_string_command(self):
-        """CodeRabbit PR #13: models sometimes emit malformed tool_calls where
-        `command` is a dict/list/int instead of a string. shlex.split raises
-        AttributeError on non-strings, which the ValueError handler below does
-        not catch. That would break the main loop. Return None for garbage
-        shapes instead of exploding."""
+        """Models sometimes emit malformed tool_calls where `command` is a
+        dict/list/int instead of a string. shlex.split raises AttributeError on
+        non-strings, which the ValueError handler below does not catch. Return
+        None for garbage shapes instead of exploding."""
         assert _tool_loop_signature("run_command", {"command": 123}) is None
         assert _tool_loop_signature("run_command", {"command": {"cmd": "git status"}}) is None
         assert _tool_loop_signature("run_command", {"command": ["git", "status"]}) is None
