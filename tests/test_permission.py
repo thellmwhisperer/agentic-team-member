@@ -945,3 +945,40 @@ def test_build_permission_context_extracts_current_target_snippet(tmp_path):
     assert context["referenced_type_shapes"][0]["name"] == "SubMethods"
     assert context["referenced_type_shapes"][1]["name"] == "SubUserstate"
     assert context["referenced_type_shapes"][1]["fields"][0]["name"] == "msg-param-cumulative-months"
+
+
+def test_build_permission_context_reads_imports_from_repo_profile_facts(tmp_path):
+    source = tmp_path / "src" / "client.ts"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "\n".join([
+            "import { bus } from '@acme/event-bus';",
+            "import { helper } from './helper';",
+            "",
+            "export function handleEvent(message: string): string {",
+            "  return message.trim();",
+            "}",
+        ])
+    )
+
+    context = permission.build_permission_context(
+        episode={
+            "source_file": "src/client.ts",
+            "test_file": "src/handleEvent.test.ts",
+            "target_symbol": "handleEvent",
+            "cookbook_text": "\n".join([
+                "### Repo Profile Facts",
+                "- Stable repo facts from `.atm/profile.toml`; use them for setup and contracts, not as per-issue fixes.",
+                "- event framework `event-bus` (callback_event) uses module `@acme/event-bus`; registrations: on, subscribe; contract sources: docs/event-bus.md.",
+            ]),
+        },
+        config={},
+        phase="fix",
+        test_file_created=True,
+        workdir=str(tmp_path),
+    )
+
+    assert context["repo_profile_facts"] == [
+        "event framework `event-bus` (callback_event) uses module `@acme/event-bus`; registrations: on, subscribe; contract sources: docs/event-bus.md.",
+    ]
+    assert context["source_imports"] == "import { bus } from '@acme/event-bus';"

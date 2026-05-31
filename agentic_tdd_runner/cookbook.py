@@ -24,6 +24,7 @@ from agentic_tdd_runner.compiler import (
 )
 from agentic_tdd_runner.compiler.parser import _find_symbol_line_with_source
 from agentic_tdd_runner.languages import get_language
+from agentic_tdd_runner.repo_profile import load_repo_profile
 
 
 def _build_contract_for_symbol(
@@ -41,6 +42,7 @@ def _build_contract_for_symbol(
     """
     full_path = Path(project_root) / source_path
     source_text = full_path.read_text()
+    repo_profile = load_repo_profile(project_root)
 
     lang = get_language(source_path)
     if lang is None:
@@ -155,6 +157,11 @@ def _build_contract_for_symbol(
         project_root=project_root,
         registrations=callback_registrations,
     )
+    repo_profile_facts = repo_profile.render_facts(
+        source_path=source_path,
+        symbol=symbol,
+        source_text=source_text,
+    )
 
     facts = {
         "target": target,
@@ -172,6 +179,7 @@ def _build_contract_for_symbol(
         "assertion_surface": assertion_surface,
         "callback_registrations": callback_registrations,
         "callback_contract_facts": callback_contract_facts,
+        "repo_profile_facts": repo_profile_facts,
         "pattern_files": [],
         "gaps": assertion_gaps,
     }
@@ -570,6 +578,14 @@ def _render_cookbook_text(contract: dict, lang) -> str:
         for registration in callback_registrations[:5]:
             parts.append(f"- line {registration['line']}: `{registration['call']}`")
         for fact in contract.get("callback_contract_facts", []):
+            parts.append(f"- {fact}")
+        parts.append("")
+
+    repo_profile_facts = contract.get("repo_profile_facts", [])
+    if repo_profile_facts:
+        parts.append("### Repo Profile Facts")
+        parts.append("- Stable repo facts from `.atm/profile.toml`; use them for setup and contracts, not as per-issue fixes.")
+        for fact in repo_profile_facts[:12]:
             parts.append(f"- {fact}")
         parts.append("")
 
