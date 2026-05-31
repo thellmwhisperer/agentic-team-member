@@ -27,27 +27,27 @@ class TestSemanticLayerSchema:
     def test_build_semantic_index_emits_file_and_symbol_tables(self, tmp_path):
         _write_file(
             tmp_path,
-            "src/events/client.ts",
+            "src/http/router.ts",
             """\
-            export function initEventBus(): void {
-              client.on('message', routeMessage);
+            export function initRouter(): void {
+              server.on('request', routeRequest);
             }
 
-            async function routeMessage(message: string): Promise<void> {
-              const lower = message.toLowerCase();
-              if (lower.startsWith('@dispatcher')) {
-                client.say('#room', 'hello');
+            async function routeRequest(path: string): Promise<void> {
+              const lower = path.toLowerCase();
+              if (lower.startsWith('/api/tasks')) {
+                response.send('ok');
               }
             }
             """,
         )
         _write_file(
             tmp_path,
-            "src/events/mentions.test.ts",
+            "src/http/router.test.ts",
             """\
             import { test, expect } from 'bun:test';
 
-            test('mention routing', () => {
+            test('endpoint routing', () => {
               expect(true).toBe(true);
             });
             """,
@@ -60,113 +60,113 @@ class TestSemanticLayerSchema:
         assert "symbols" in index
         assert "candidates" in index
 
-        file_fact = _get_file(index, "src/events/client.ts")
+        file_fact = _get_file(index, "src/http/router.ts")
         assert file_fact["language"] == "typescript"
-        assert "events" in file_fact["domains"]
-        assert "event.message" in file_fact["domains"]
-        assert "routing.mention" in file_fact["domains"]
-        assert file_fact["symbols"] == ["initEventBus", "routeMessage"]
-        assert file_fact["nearby_tests"] == ["src/events/mentions.test.ts"]
+        assert "http" in file_fact["domains"]
+        assert "event.request" in file_fact["domains"]
+        assert "routing.endpoint" in file_fact["domains"]
+        assert file_fact["symbols"] == ["initRouter", "routeRequest"]
+        assert file_fact["nearby_tests"] == ["src/http/router.test.ts"]
 
-        symbol_fact = _get_symbol(index, "src/events/client.ts", "routeMessage")
-        assert symbol_fact["qualified_name"] == "routeMessage"
-        assert "events" in symbol_fact["domains"]
-        assert "event.message" in symbol_fact["domains"]
-        assert "routing.mention" in symbol_fact["domains"]
+        symbol_fact = _get_symbol(index, "src/http/router.ts", "routeRequest")
+        assert symbol_fact["qualified_name"] == "routeRequest"
+        assert "http" in symbol_fact["domains"]
+        assert "event.request" in symbol_fact["domains"]
+        assert "routing.endpoint" in symbol_fact["domains"]
         assert all(not domain.startswith("events.") for domain in symbol_fact["domains"])
-        assert symbol_fact["nearby_tests"] == ["src/events/mentions.test.ts"]
-        assert symbol_fact["calls"] == ["client.say"]
+        assert symbol_fact["nearby_tests"] == ["src/http/router.test.ts"]
+        assert symbol_fact["calls"] == ["response.send"]
         assert symbol_fact["telemetry"] == []
         assert symbol_fact["test_seams"] == [
-            {"kind": "module_object", "members": ["say"], "name": "client"}
+            {"kind": "module_object", "members": ["send"], "name": "response"}
         ]
         assert symbol_fact["routes"] == [
             {
-                "condition": "lower.startsWith('@dispatcher')",
-                "guard_patterns": ["startsWith('@dispatcher')"],
+                "condition": "lower.startsWith('/api/tasks')",
+                "guard_patterns": ["startsWith('/api/tasks')"],
                 "label": None,
-                "triggers": ["@dispatcher"],
+                "triggers": ["/api/tasks"],
             }
         ]
 
     def test_nearby_tests_prefers_symbol_and_source_stem_matches(self, tmp_path):
         _write_file(
             tmp_path,
-            "src/events/client.ts",
+            "src/http/router.ts",
             """\
-            export function initEventBus(): void {
-              client.on('message', routeMessage);
+            export function initRouter(): void {
+              server.on('request', routeRequest);
             }
 
-            async function routeMessage(message: string): Promise<void> {
-              if (message.startsWith('@dispatcher')) {
-                client.say('#room', 'hello');
+            async function routeRequest(path: string): Promise<void> {
+              if (path.startsWith('/api/tasks')) {
+                response.send('ok');
               }
             }
             """,
         )
         _write_file(
             tmp_path,
-            "src/events/client.test.ts",
+            "src/http/router.test.ts",
             """\
-            import { routeMessage } from './client';
+            import { routeRequest } from './router';
 
-            test('client test', () => {
-              expect(routeMessage).toBeDefined();
+            test('router test', () => {
+              expect(routeRequest).toBeDefined();
             });
             """,
         )
         _write_file(
             tmp_path,
-            "src/events/routeMessage.test.ts",
+            "src/http/routeRequest.test.ts",
             """\
-            import { routeMessage } from './client';
+            import { routeRequest } from './router';
 
-            test('routeMessage test', () => {
-              expect(routeMessage).toBeDefined();
+            test('routeRequest test', () => {
+              expect(routeRequest).toBeDefined();
             });
             """,
         )
         _write_file(
             tmp_path,
-            "src/events/mentions.test.ts",
+            "src/http/routes.test.ts",
             """\
-            test('mention routing', () => {
+            test('endpoint routing', () => {
               expect(true).toBe(true);
             });
             """,
         )
 
         index = build_semantic_index(str(tmp_path))
-        symbol_fact = _get_symbol(index, "src/events/client.ts", "routeMessage")
+        symbol_fact = _get_symbol(index, "src/http/router.ts", "routeRequest")
 
         assert symbol_fact["nearby_tests"] == [
-            "src/events/routeMessage.test.ts",
-            "src/events/client.test.ts",
-            "src/events/mentions.test.ts",
+            "src/http/routeRequest.test.ts",
+            "src/http/router.test.ts",
+            "src/http/routes.test.ts",
         ]
 
     def test_nearby_tests_uses_semantic_overlap_when_no_symbol_named_test_exists(self, tmp_path):
         _write_file(
             tmp_path,
-            "src/events/client.ts",
+            "src/http/router.ts",
             """\
-            async function routeMessage(message: string): Promise<void> {
-              const trimmed = message.trim();
+            async function routeRequest(path: string): Promise<void> {
+              const trimmed = path.trim();
               const lower = trimmed.toLowerCase();
-              const isMention = lower.startsWith('@dispatcher');
-              const isOyeDispatcher = lower.startsWith('!dispatch');
+              const isTasksEndpoint = lower.startsWith('/api/tasks');
+              const isJobsEndpoint = lower.startsWith('/api/jobs');
 
-              if (isOyeDispatcher || isMention) {
+              if (isJobsEndpoint || isTasksEndpoint) {
                 const argsLowerCmd = trimmed.toLowerCase();
-                if (argsLowerCmd === 'habla') {
-                  setDiceMode(true);
+                if (argsLowerCmd === 'enable') {
+                  setRetryMode(true);
                 }
-                if (argsLowerCmd === 'calla' || argsLowerCmd === 'callate') {
-                  setDiceMode(false);
+                if (argsLowerCmd === 'disable' || argsLowerCmd === 'stop') {
+                  setRetryMode(false);
                 }
-                if (getVoiceUser('teseo')?.ttsPrefix) {
-                  client.say('#room', 'hello');
+                if (getFeatureFlag('retry-policy')?.enabled) {
+                  response.send('ok');
                 }
               }
             }
@@ -174,64 +174,64 @@ class TestSemanticLayerSchema:
         )
         _write_file(
             tmp_path,
-            "src/events/dice-mode.test.ts",
+            "src/http/retry-mode.test.ts",
             """\
-            test('habla command should activate dice mode', () => {
+            test('enable route should activate retry mode', () => {
               expect(true).toBe(true);
             });
 
-            test('calla command should deactivate dice mode', () => {
+            test('disable route should deactivate retry mode', () => {
               expect(true).toBe(true);
             });
             """,
         )
         _write_file(
             tmp_path,
-            "src/events/voice-users.test.ts",
+            "src/http/feature-flags.test.ts",
             """\
-            test('voice users should have tts prefix', () => {
+            test('feature flags should expose retry policy', () => {
               expect(true).toBe(true);
             });
             """,
         )
         _write_file(
             tmp_path,
-            "src/events/reconnect.test.ts",
+            "src/http/reconnect.test.ts",
             """\
-            test('reconnect client disables auto reconnect', () => {
+            test('reconnect transport disables auto reconnect', () => {
               expect(true).toBe(true);
             });
             """,
         )
 
         index = build_semantic_index(str(tmp_path))
-        symbol_fact = _get_symbol(index, "src/events/client.ts", "routeMessage")
+        symbol_fact = _get_symbol(index, "src/http/router.ts", "routeRequest")
 
         assert symbol_fact["nearby_tests"] == [
-            "src/events/dice-mode.test.ts",
-            "src/events/voice-users.test.ts",
-            "src/events/reconnect.test.ts",
+            "src/http/retry-mode.test.ts",
+            "src/http/feature-flags.test.ts",
+            "src/http/reconnect.test.ts",
         ]
 
     def test_nearby_tests_deemphasizes_generic_code_tokens(self, tmp_path):
         _write_file(
             tmp_path,
-            "src/events/client.ts",
+            "src/http/router.ts",
             """\
-            async function routeMessage(message: string): Promise<void> {
-              const trimmed = message.trim();
+            async function routeRequest(path: string): Promise<void> {
+              const trimmed = path.trim();
               const lower = trimmed.toLowerCase();
 
-              if (getVoiceUser('teseo')?.ttsPrefix) {
-                setDiceMode(true);
-                client.say('#room', 'hello');
+              if (getFeatureFlag('retry-policy')?.enabled) {
+                setRetryMode(true);
+                response.send('ok');
               }
             }
             """,
         )
         _write_file(
             tmp_path,
-            "src/events/reconnect.test.ts",
+            "src/http/reconnect.test.ts",
             """\
             test('generic reconnect boilerplate', async () => {
               const client = await Promise.resolve({ reconnect: false });
@@ -243,41 +243,41 @@ class TestSemanticLayerSchema:
         )
         _write_file(
             tmp_path,
-            "src/events/voice-users.test.ts",
+            "src/http/feature-flags.test.ts",
             """\
-            test('voice users should have tts prefix', () => {
-              const voiceUsers = [{ username: 'teseo', ttsPrefix: '!dice' }];
-              expect(voiceUsers[0]?.ttsPrefix).toBe('!dice');
+            test('feature flags should expose retry policy', () => {
+              const featureFlags = [{ key: 'retry-policy', enabled: true }];
+              expect(featureFlags[0]?.enabled).toBe(true);
             });
             """,
         )
 
         index = build_semantic_index(str(tmp_path))
-        symbol_fact = _get_symbol(index, "src/events/client.ts", "routeMessage")
+        symbol_fact = _get_symbol(index, "src/http/router.ts", "routeRequest")
 
         assert symbol_fact["nearby_tests"] == [
-            "src/events/voice-users.test.ts",
-            "src/events/reconnect.test.ts",
+            "src/http/feature-flags.test.ts",
+            "src/http/reconnect.test.ts",
         ]
 
     def test_nearby_tests_ignores_cross_module_noise_without_strong_seams(self, tmp_path):
         _write_file(
             tmp_path,
-            "src/events/client.ts",
+            "src/http/router.ts",
             """\
-            async function routeMessage(message: string): Promise<void> {
-              const lower = message.toLowerCase();
-              if (lower.startsWith('@dispatcher')) {
-                client.say('#room', 'hello');
+            async function routeRequest(path: string): Promise<void> {
+              const lower = path.toLowerCase();
+              if (lower.startsWith('/api/tasks')) {
+                response.send('ok');
               }
             }
             """,
         )
         _write_file(
             tmp_path,
-            "src/events/dice-mode.test.ts",
+            "src/http/retry-mode.test.ts",
             """\
-            test('dice mode nearby', () => {
+            test('retry mode nearby', () => {
               expect(true).toBe(true);
             });
             """,
@@ -302,112 +302,107 @@ class TestSemanticLayerSchema:
         )
 
         index = build_semantic_index(str(tmp_path))
-        symbol_fact = _get_symbol(index, "src/events/client.ts", "routeMessage")
+        symbol_fact = _get_symbol(index, "src/http/router.ts", "routeRequest")
 
-        assert symbol_fact["nearby_tests"] == ["src/events/dice-mode.test.ts"]
+        assert symbol_fact["nearby_tests"] == ["src/http/retry-mode.test.ts"]
 
 
 class TestSemanticLayerGoldens:
     def test_handle_message_semantic_facts(self, tmp_path):
         _write_file(
             tmp_path,
-            "src/events/client.ts",
+            "src/http/router.ts",
             """\
-            export function initEventBus(): void {
-              client.on('message', routeMessage);
+            export function initRouter(): void {
+              server.on('request', routeRequest);
             }
 
-            async function routeMessage(
-              channel: string,
-              eventPayload: ChatEventPayload,
-              message: string,
-              self: boolean,
+            async function routeRequest(
+              path: string,
+              request: RequestPayload,
             ): Promise<void> {
-              if (self) return;
-
-              const trimmed = message.trim();
+              const trimmed = path.trim();
               const lower = trimmed.toLowerCase();
-              // --- @dispatcher or !dispatch ---
-              const isMention = lower.startsWith('@dispatcher');
-              const isOyeDispatcher = lower.startsWith('!dispatch');
+              // --- /api/tasks or /api/jobs ---
+              const isTasksEndpoint = lower.startsWith('/api/tasks');
+              const isJobsEndpoint = lower.startsWith('/api/jobs');
 
-              if (isOyeDispatcher || isMention) {
-                client.say(channel, `@${eventPayload.username} hello illo`);
+              if (isJobsEndpoint || isTasksEndpoint) {
+                response.send(request.id, `ok ${request.userId}`);
               }
             }
             """,
         )
         _write_file(
             tmp_path,
-            "src/events/routeMessage.test.ts",
+            "src/http/routeRequest.test.ts",
             """\
             import { test, expect } from 'bun:test';
 
-            test('routeMessage', () => {
+            test('routeRequest', () => {
               expect(true).toBe(true);
             });
             """,
         )
 
         index = build_semantic_index(str(tmp_path))
-        symbol_fact = _get_symbol(index, "src/events/client.ts", "routeMessage")
+        symbol_fact = _get_symbol(index, "src/http/router.ts", "routeRequest")
 
-        assert "event.message" in symbol_fact["domains"]
-        assert "routing.mention" in symbol_fact["domains"]
-        assert "routing.command" in symbol_fact["domains"]
+        assert "event.request" in symbol_fact["domains"]
+        assert "routing.endpoint" in symbol_fact["domains"]
         assert symbol_fact["entrypoints"] == [
             {
                 "kind": "event",
-                "emitter": "client.on",
-                "name": "message",
+                "emitter": "server.on",
+                "name": "request",
                 "line": 2,
             }
         ]
-        assert symbol_fact["triggers"] == ["!dispatch", "@dispatcher"]
+        assert symbol_fact["triggers"] == ["/api/jobs", "/api/tasks"]
         assert symbol_fact["guard_patterns"] == [
-            "startsWith('!dispatch')",
-            "startsWith('@dispatcher')",
+            "startsWith('/api/jobs')",
+            "startsWith('/api/tasks')",
         ]
-        assert symbol_fact["observables"] == ["client.say"]
+        assert symbol_fact["observables"] == ["response.send"]
         assert symbol_fact["telemetry"] == []
         assert symbol_fact["test_seams"] == [
-            {"kind": "module_object", "members": ["say"], "name": "client"},
+            {"kind": "module_object", "members": ["send"], "name": "response"},
         ]
-        assert symbol_fact["nearby_tests"] == ["src/events/routeMessage.test.ts"]
+        assert symbol_fact["nearby_tests"] == ["src/http/routeRequest.test.ts"]
         assert symbol_fact["routes"] == [
             {
-                "condition": "isOyeDispatcher || isMention",
+                "condition": "isJobsEndpoint || isTasksEndpoint",
                 "guard_patterns": [
-                    "startsWith('!dispatch')",
-                    "startsWith('@dispatcher')",
+                    "startsWith('/api/jobs')",
+                    "startsWith('/api/tasks')",
                 ],
-                "label": "@dispatcher or !dispatch",
-                "triggers": ["!dispatch", "@dispatcher"],
+                "label": "/api/tasks or /api/jobs",
+                "triggers": ["/api/jobs", "/api/tasks"],
             }
         ]
 
     def test_handle_message_triggers_exclude_nested_branch_literals(self, tmp_path):
         _write_file(
             tmp_path,
-            "src/events/client.ts",
+            "src/http/router.ts",
             """\
-            async function routeMessage(message: string): Promise<void> {
-              const trimmed = message.trim();
+            async function routeRequest(path: string): Promise<void> {
+              const trimmed = path.trim();
               const lower = trimmed.toLowerCase();
 
-              if (lower === '!mytasks') {
-                client.say('#room', 'ok');
+              if (lower === '/health') {
+                response.send('ok');
                 return;
               }
 
-              // --- @dispatcher or !dispatch ---
-              const isMention = lower.startsWith('@dispatcher');
-              const isOyeDispatcher = lower.startsWith('!dispatch');
+              // --- /api/tasks or /api/jobs ---
+              const isTasksEndpoint = lower.startsWith('/api/tasks');
+              const isJobsEndpoint = lower.startsWith('/api/jobs');
 
-              if (isOyeDispatcher || isMention) {
+              if (isJobsEndpoint || isTasksEndpoint) {
                 const argsLowerCmd = trimmed.toLowerCase();
-                if (argsLowerCmd === 'calla' || argsLowerCmd === 'callate') {
-                  client.say('#room', 'done');
+                if (argsLowerCmd === 'disable' || argsLowerCmd === 'stop') {
+                  response.send('done');
                 }
               }
             }
@@ -415,17 +410,16 @@ class TestSemanticLayerGoldens:
         )
 
         index = build_semantic_index(str(tmp_path))
-        symbol_fact = _get_symbol(index, "src/events/client.ts", "routeMessage")
+        symbol_fact = _get_symbol(index, "src/http/router.ts", "routeRequest")
 
-        assert "routing.mention" in symbol_fact["domains"]
-        assert "routing.command" in symbol_fact["domains"]
-        assert symbol_fact["triggers"] == ["!dispatch", "!mytasks", "@dispatcher"]
+        assert "routing.endpoint" in symbol_fact["domains"]
+        assert symbol_fact["triggers"] == ["/api/jobs", "/api/tasks", "/health"]
         assert symbol_fact["guard_patterns"] == [
-            "== '!mytasks'",
-            "startsWith('!dispatch')",
-            "startsWith('@dispatcher')",
+            "== '/health'",
+            "startsWith('/api/jobs')",
+            "startsWith('/api/tasks')",
         ]
-        assert all("calla" not in route["condition"] for route in symbol_fact["routes"])
+        assert all("disable" not in route["condition"] for route in symbol_fact["routes"])
 
     def test_handle_renewal_semantic_facts(self, tmp_path):
         _write_file(
@@ -439,7 +433,7 @@ class TestSemanticLayerGoldens:
             function processRenewal(channel: string, username: string, months: number): void {
               logger.event('renewal', { username, months });
               metricsSummaryManager.trackRenewal(username, months);
-              client.say(channel, `@${username} ${months}`);
+              response.send(channel, `${username} ${months}`);
             }
             """,
         )
@@ -459,13 +453,13 @@ class TestSemanticLayerGoldens:
         ]
         assert symbol_fact["triggers"] == []
         assert symbol_fact["observables"] == [
-            "client.say",
             "metricsSummaryManager.trackRenewal",
+            "response.send",
         ]
         assert symbol_fact["telemetry"] == ["logger.event"]
         assert symbol_fact["test_seams"] == [
-            {"kind": "module_object", "members": ["say"], "name": "client"},
             {"kind": "module_object", "members": ["trackRenewal"], "name": "metricsSummaryManager"},
+            {"kind": "module_object", "members": ["send"], "name": "response"},
         ]
         assert symbol_fact["routes"] == []
 
@@ -782,7 +776,7 @@ class TestSemanticLayerGoldens:
         )
         _write_file(
             tmp_path,
-            "src/personality/ai.test.ts",
+            "src/assistants/ai.test.ts",
             """\
             test('askWithSearch includes search results in prompt', async () => {
               await aiService.askWithSearch('query', [], 'user', 'es');
@@ -797,5 +791,5 @@ class TestSemanticLayerGoldens:
         assert symbol_fact["nearby_tests"] == [
             "src/managers/metrics-summary.test.ts",
             "src/services/search.test.ts",
-            "src/personality/ai.test.ts",
+            "src/assistants/ai.test.ts",
         ]

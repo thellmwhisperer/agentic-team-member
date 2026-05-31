@@ -845,9 +845,13 @@ def _extract_triggers(guard_patterns: list[str]) -> list[str]:
         if not match:
             continue
         literal = match.group(1)
-        if literal.startswith(("@", "!")):
+        if literal.startswith(("@", "!")) or _is_http_route_literal(literal):
             triggers.add(literal)
     return sorted(triggers)
+
+
+def _is_http_route_literal(value: str) -> bool:
+    return value.startswith(("/api/", "/v1/", "/v2/", "/health", "/metrics", "/webhook"))
 
 
 def _extract_routes(snippet: str) -> list[dict]:
@@ -1036,6 +1040,8 @@ def _infer_domains(
         domains.add("routing.mention")
     if any(trigger.startswith("!") for trigger in route_triggers):
         domains.add("routing.command")
+    if any(_is_http_route_literal(trigger) for trigger in route_triggers):
+        domains.add("routing.endpoint")
 
     domains.update(_feature_domains(symbol=symbol, observables=observables))
 

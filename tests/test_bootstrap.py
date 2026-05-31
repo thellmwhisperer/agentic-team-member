@@ -118,7 +118,7 @@ def test_prepare_run_context_logs_deprecated_manual_target_override(tmp_path, mo
 `src/events/client.ts` -> `handleSearch()`
 
 ## Symptom
-The bot replies with stale data.
+The service replies with stale data.
 """
 
     def fake_episode(**kwargs):
@@ -170,7 +170,7 @@ def test_prepare_run_context_uses_issue_hints_and_builds_messages(tmp_path, monk
 `src/events/client.ts` -> `processRenewal()`
 
 ## Symptom
-The bot reports 0 months.
+The service reports 0 months.
 """
 
     def fake_episode(**kwargs):
