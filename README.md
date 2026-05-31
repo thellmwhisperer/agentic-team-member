@@ -279,8 +279,9 @@ Each plugin implements: `parse_imports`, `parse_assignments`,
 
 ## Configuration
 
-Per-run configuration in TOML. Multiple presets live in `config/` for
-different models and strategies.
+Per-run configuration in TOML. The canonical checked-in config lives at
+`config/agent.toml`; local model or strategy overrides should use ignored
+`*.local.toml` files.
 
 ```toml
 [agent]
