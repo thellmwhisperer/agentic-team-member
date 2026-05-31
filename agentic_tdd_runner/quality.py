@@ -181,9 +181,8 @@ def detect_pr_target_violation(changed_files: list[str], episode: dict | None) -
     """PR-time obedience gate: the change must touch the (final/rerouted) target source.
 
     Catches degenerate passes where the model fixed the wrong file or invented an
-    unrelated feature instead of the targeted symbol's source (e.g. gpt_oss creating a
-    new helper, or minimax editing a neighbour module). Compares against the target the
-    harness settled on, which is the rerouted episode by PR time.
+    unrelated feature instead of the targeted symbol's source. Compares against the
+    target the harness settled on, which is the rerouted episode by PR time.
     """
     target = (episode or {}).get("source_file")
     if not target:

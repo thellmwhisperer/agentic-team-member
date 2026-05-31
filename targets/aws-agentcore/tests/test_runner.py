@@ -279,4 +279,4 @@ class AtmCloudRunnerTest(unittest.TestCase):
 
     def test_run_log_dir_is_sanitized(self):
         with patch.dict("os.environ", {"ATM_LOG_DIR": "/tmp/custom-logs"}):
-            self.assertEqual(_run_log_dir("repo/issue 41"), "/tmp/custom-logs/repo-issue-41")
+            self.assertEqual(_run_log_dir("repo/issue 7"), "/tmp/custom-logs/repo-issue-7")

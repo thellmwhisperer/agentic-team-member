@@ -2,7 +2,6 @@ from agentic_tdd_runner.quality import detect_pr_target_violation
 
 
 def test_pr_target_violation_when_diff_misses_target():
-    # gpt_oss #95 shape: invented a different feature, never touched the real target.
     episode = {"source_file": "src/personality/sanitizer.ts", "target_symbol": "wrapUserMessage"}
     changed = ["src/events/client.ts", "src/events/parseBotCommand.ts", "tmp_test.js"]
     violation = detect_pr_target_violation(changed, episode)
@@ -11,7 +10,6 @@ def test_pr_target_violation_when_diff_misses_target():
 
 
 def test_pr_target_violation_when_only_neighbor_source_touched():
-    # minimax #98 shape: edited a neighbor source, not the target where the symbol lives.
     episode = {"source_file": "src/personality/sanitizer.ts", "target_symbol": "wrapUserMessage"}
     changed = ["src/events/client.ts", "src/personality/wrapUserMessage.test.ts"]
     assert detect_pr_target_violation(changed, episode) is not None
