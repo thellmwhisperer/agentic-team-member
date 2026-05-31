@@ -163,7 +163,13 @@ def env_int_or_none(name: str) -> int | None:
     value = os.environ.get(name)
     if value is None or not value.strip():
         return None
-    return int(value)
+    try:
+        result = int(value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer, got {value!r}") from exc
+    if result <= 0:
+        raise ValueError(f"{name} must be a positive integer, got {result}")
+    return result
 
 
 def _replace_toml_keys(text: str, replacements: dict[str, dict[str, str]]) -> str:
