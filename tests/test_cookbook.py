@@ -785,3 +785,71 @@ class TestCallbackContractGuidance:
         assert "Only inspect dependency type files" in result
         assert "node_modules/@types" not in result
         assert "metadata fallback" not in result
+
+
+class TestRepoProfileGuidance:
+    """Cookbook should render stable repo-profile facts without hardcoding them."""
+
+    def test_includes_profile_mock_recipe_for_import_time_dependency(self, tmp_path):
+        _write_file(tmp_path, ".atm/profile.toml", """\
+            [[dependency_contracts]]
+            id = "stream-summary"
+            module = "src/managers/stream-summary.ts"
+            contract_mode = "inline"
+            import_specs = ["../managers/stream-summary"]
+            side_effect = "import_time"
+            reason = "creates LLM provider at import time"
+            mock_recipe = "stream-summary"
+
+            [[mock_recipes]]
+            id = "stream-summary"
+            module = "../managers/stream-summary"
+            exports = [
+              { name = "getStreamSummaryManager", kind = "function_returns_object", members = ["startPeriodicSummaries", "trackResub", "generateFinalSummary"] },
+              { name = "StreamSummaryManager", kind = "class", members = ["startPeriodicSummaries", "generateFinalSummary"] },
+            ]
+        """)
+        _write_file(tmp_path, "src/twitch/client.ts", """\
+            import { getStreamSummaryManager } from '../managers/stream-summary';
+
+            const summary = getStreamSummaryManager();
+
+            export function handleMessage(channel: string, message: string): void {
+              summary.trackResub(channel, message);
+            }
+        """)
+
+        result = generate_cookbook("src/twitch/client.ts", "handleMessage", str(tmp_path))
+
+        assert "### Repo Profile Facts" in result
+        assert "dependency `stream-summary` imports `src/managers/stream-summary.ts`" in result
+        assert "contract mode `inline`" in result
+        assert "side effect `import_time`" in result
+        assert "mock `../managers/stream-summary` before importing the target" in result
+        assert "getStreamSummaryManager (function_returns_object: startPeriodicSummaries, trackResub, generateFinalSummary)" in result
+
+    def test_includes_profile_event_framework_without_tmi_specific_code_path(self, tmp_path):
+        _write_file(tmp_path, ".atm/profile.toml", """\
+            [[event_frameworks]]
+            id = "event-bus"
+            kind = "callback_event"
+            module = "@acme/event-bus"
+            imports = ["@acme/event-bus"]
+            registrations = ["on", "subscribe"]
+            contract_sources = ["docs/event-bus.md"]
+        """)
+        _write_file(tmp_path, "src/client.ts", """\
+            import { bus } from '@acme/event-bus';
+
+            export function handleEvent(message: string): string {
+              return message.trim();
+            }
+
+            bus.subscribe('message', handleEvent);
+        """)
+
+        result = generate_cookbook("src/client.ts", "handleEvent", str(tmp_path))
+
+        assert "event framework `event-bus` (callback_event) uses module `@acme/event-bus`" in result
+        assert "registrations: on, subscribe" in result
+        assert "contract sources: docs/event-bus.md" in result

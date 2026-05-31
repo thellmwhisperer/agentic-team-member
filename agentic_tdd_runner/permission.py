@@ -69,7 +69,9 @@ def build_permission_context(
 ) -> dict:
     episode = episode or {}
     runner_cfg = (config or {}).get("runner", {})
-    contract_facts = _extract_callback_contract_facts(str(episode.get("cookbook_text") or ""))
+    cookbook_text = str(episode.get("cookbook_text") or "")
+    contract_facts = _extract_callback_contract_facts(cookbook_text)
+    repo_profile_facts = _extract_repo_profile_facts(cookbook_text)
     runner_facts = []
     runner_facts_text = str(episode.get("runner_facts_text") or "")
     for line in runner_facts_text.splitlines():
@@ -86,8 +88,9 @@ def build_permission_context(
         "runner": episode.get("runner") or runner_cfg.get("framework"),
         "test_command": runner_cfg.get("command"),
         "contract_facts": contract_facts,
+        "repo_profile_facts": repo_profile_facts,
         "runner_facts": runner_facts,
-        "source_signature": _extract_source_signature(str(episode.get("cookbook_text") or "")),
+        "source_signature": _extract_source_signature(cookbook_text),
         "source_snippet": _read_target_source_snippet(
             workdir=workdir,
             source_file=episode.get("source_file"),
@@ -96,7 +99,7 @@ def build_permission_context(
         "source_imports": _read_relevant_imports_snippet(
             workdir=workdir,
             source_file=episode.get("source_file"),
-            contract_facts=contract_facts,
+            contract_facts=contract_facts + repo_profile_facts,
         ),
         "referenced_type_shapes": _read_referenced_type_shapes(
             workdir=workdir,
@@ -106,9 +109,9 @@ def build_permission_context(
             workdir=workdir,
             test_file=episode.get("test_file"),
         ),
-        "source_mocks": _extract_mock_modules(str(episode.get("cookbook_text") or "")),
+        "source_mocks": _extract_mock_modules(cookbook_text),
         "module_mock_block": _extract_code_block_after(
-            str(episode.get("cookbook_text") or ""),
+            cookbook_text,
             "### Module Mocks (paste before source import)",
         ),
     }
@@ -819,6 +822,25 @@ def _extract_callback_contract_facts(cookbook_text: str) -> list[str]:
     return facts
 
 
+def _extract_repo_profile_facts(cookbook_text: str) -> list[str]:
+    facts: list[str] = []
+    in_section = False
+    for line in cookbook_text.splitlines():
+        stripped = line.strip()
+        if stripped == "### Repo Profile Facts":
+            in_section = True
+            continue
+        if in_section and stripped.startswith("### "):
+            break
+        if not in_section or not stripped.startswith("- "):
+            continue
+        body = stripped[2:]
+        if body.startswith("Stable repo facts"):
+            continue
+        facts.append(body)
+    return facts
+
+
 def _extract_source_signature(cookbook_text: str) -> str:
     in_source_edits = False
     lines = cookbook_text.splitlines()
@@ -1061,6 +1083,9 @@ def _import_needles(contract_facts: list[str]) -> list[str]:
     for fact in contract_facts:
         if "tmi.js" in fact:
             needles.append("tmi.js")
+        module_match = re.search(r"uses module `(?P<module>[^`]+)`", fact)
+        if module_match:
+            needles.append(module_match.group("module"))
     return sorted(set(needles))
 
 
