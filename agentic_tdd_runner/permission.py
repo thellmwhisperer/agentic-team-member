@@ -1081,8 +1081,12 @@ def _format_type_shapes(shapes: list[dict[str, Any]]) -> str:
 def _import_needles(contract_facts: list[str]) -> list[str]:
     needles: list[str] = []
     for fact in contract_facts:
-        if "tmi.js" in fact:
-            needles.append("tmi.js")
+        module_fact_match = re.search(
+            r"^(?P<module>[\w@./-]+)\s+(?:source emits|type declarations expose)\s+`",
+            fact,
+        )
+        if module_fact_match:
+            needles.append(module_fact_match.group("module"))
         module_match = re.search(r"uses module `(?P<module>[^`]+)`", fact)
         if module_match:
             needles.append(module_match.group("module"))
@@ -1387,7 +1391,7 @@ def _event_name_from_contract_facts(facts: list[str]) -> str:
         match = re.search(r"\.on\(['\"](?P<event>[^'\"]+)['\"]", fact)
         if match:
             return match.group("event")
-        match = re.search(r"source emits `(?P<event>\w+)\(", fact)
+        match = re.search(r"source emits `(?P<event>[^`(]+)\(", fact)
         if match:
             return match.group("event")
     return ""
@@ -1395,7 +1399,7 @@ def _event_name_from_contract_facts(facts: list[str]) -> str:
 
 def _runtime_arg_names_from_contract_facts(facts: list[str]) -> list[str]:
     for fact in facts:
-        match = re.search(r"source emits `\w+\((?P<params>[^`]*)\)`", fact)
+        match = re.search(r"source emits `[^`(]+\((?P<params>[^`]*)\)`", fact)
         if match:
             return [part.strip() for part in match.group("params").split(",") if part.strip()]
     return []

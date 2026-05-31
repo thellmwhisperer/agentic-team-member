@@ -14,10 +14,10 @@ def _runner_facts():
         test_command="bun test",
         typecheck_command="bun run typecheck",
         test_api_import='import { beforeEach, describe, expect, mock, test } from "bun:test";',
-        recommended_test_file="src/twitch/handleResub.test.ts",
-        source_file="src/twitch/client.ts",
-        target_symbol="handleResub",
-        nearby_tests=["src/twitch/client.test.ts"],
+        recommended_test_file="src/events/processRenewal.test.ts",
+        source_file="src/events/client.ts",
+        target_symbol="processRenewal",
+        nearby_tests=["src/events/client.test.ts"],
         symbol_tests=[],
     )
 
@@ -25,20 +25,20 @@ def _runner_facts():
 def _run_context():
     runner_facts = _runner_facts()
     episode = {
-        "source_file": "src/twitch/client.ts",
-        "target_symbol": "handleResub",
-        "test_file": "src/twitch/handleResub.test.ts",
+        "source_file": "src/events/client.ts",
+        "target_symbol": "processRenewal",
+        "test_file": "src/events/processRenewal.test.ts",
         "runner": "bun:test",
         "mocks_text": "mock.module('../logger', () => ({}));",
         "pre_test_source_edits": [{
-            "path": "src/twitch/client.ts",
-            "old": "function handleResub(channel: string): void {",
-            "new": "export function handleResub(channel: string): void {",
+            "path": "src/events/client.ts",
+            "old": "function processRenewal(channel: string): void {",
+            "new": "export function processRenewal(channel: string): void {",
         }],
         "conditional_source_edits": [{
-            "path": "src/twitch/client.ts",
-            "old": "function handleResub(channel: string): void {",
-            "new": "export function handleResub(channel: string): void {",
+            "path": "src/events/client.ts",
+            "old": "function processRenewal(channel: string): void {",
+            "new": "export function processRenewal(channel: string): void {",
         }],
         "cookbook_text": "## Mock Cookbook\nFULL COOKBOOK PAYLOAD\n",
         "runner_facts": runner_facts,
@@ -48,14 +48,14 @@ def _run_context():
         issue_contract=IssueContract(
             raw_text="raw issue text",
             model_text="## Symptom\nBug",
-            source_hint="src/twitch/client.ts",
-            symbol_hint="handleResub",
+            source_hint="src/events/client.ts",
+            symbol_hint="processRenewal",
             warnings=["dropped Fix approach before prompting"],
         ),
         issue_text="raw issue text",
         issue_text_for_model="## Symptom\nBug",
-        source_path="src/twitch/client.ts",
-        symbol="handleResub",
+        source_path="src/events/client.ts",
+        symbol="processRenewal",
         episode=episode,
         messages=[
             {
@@ -101,7 +101,7 @@ def test_export_manifest_uses_refs_instead_of_repeating_payloads(tmp_path):
 
     manifest_text = json.dumps(manifest, ensure_ascii=False)
     assert "FULL COOKBOOK PAYLOAD" not in manifest_text
-    assert "function handleResub(channel: string): void {" not in manifest_text
+    assert "function processRenewal(channel: string): void {" not in manifest_text
     assert "canonical/episode.json" in manifest_text
     assert "rendered/cookbook.md" in manifest_text
     assert "rendered/mocks.md" in manifest_text
@@ -127,7 +127,7 @@ def test_canonical_episode_replaces_rendered_payloads_with_file_refs(tmp_path):
     assert episode["mocks_ref"] == "rendered/mocks.md"
     assert episode["runner_facts_ref"] == "canonical/runner_facts.json"
     assert episode["pre_test_source_edits"][0]["old"] == (
-        "function handleResub(channel: string): void {"
+        "function processRenewal(channel: string): void {"
     )
 
 

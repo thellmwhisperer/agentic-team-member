@@ -115,19 +115,19 @@ def test_run_command_compacts_failing_test_output_with_stack(tmp_path, monkeypat
     monkeypatch.setenv("PATH", "/usr/bin")
 
     def fake_run(command, **kwargs):
-        assert command == "bun test src/twitch/handleResub.test.ts"
+        assert command == "bun test src/events/processRenewal.test.ts"
         return subprocess.CompletedProcess(
             command,
             1,
             stdout="\n".join(
                 [
                     "bun test v1.2.3",
-                    "src/twitch/handleResub.test.ts:",
+                    "src/events/processRenewal.test.ts:",
                     *[f"noise line {index}" for index in range(20)],
                     "# Unhandled error between tests",
                     "error: deepseek requires an API key",
                     "    at createProvider (/repo/src/provider.ts:50:19)",
-                    "    at /repo/src/twitch/client.ts:62:30",
+                    "    at /repo/src/events/client.ts:62:30",
                     "    at loadAndEvaluateModule (2:1)",
                 ]
             ),
@@ -138,13 +138,13 @@ def test_run_command_compacts_failing_test_output_with_stack(tmp_path, monkeypat
 
     result, exit_codes = _execute_tool(
         "run_command",
-        {"command": "bun test src/twitch/handleResub.test.ts"},
+        {"command": "bun test src/events/processRenewal.test.ts"},
         tmp_path,
     )
 
     assert result.startswith("[run_command test failure: exit 1]")
     assert "error: deepseek requires an API key" in result
-    assert "at /repo/src/twitch/client.ts:62:30" in result
+    assert "at /repo/src/events/client.ts:62:30" in result
     assert "noise line 0" not in result
     assert exit_codes == [None, 1]
 
@@ -188,7 +188,7 @@ def test_blocks_node_modules_contract_lookup_when_contract_evidence_exists(tmp_p
 
     result, exit_codes = _execute_tool(
         "run_command",
-        {"command": 'rg "resub" node_modules/@types/tmi.js/index.d.ts'},
+        {"command": 'rg "renewal" node_modules/@types/@example/event-bus/index.d.ts'},
         tmp_path,
         config=config,
         log=lambda event, data: logged.append((event, data)),
@@ -201,7 +201,7 @@ def test_blocks_node_modules_contract_lookup_when_contract_evidence_exists(tmp_p
         (
             "dependency_contract_lookup_blocked",
             {
-                "command": 'rg "resub" node_modules/@types/tmi.js/index.d.ts',
+                "command": 'rg "renewal" node_modules/@types/@example/event-bus/index.d.ts',
                 "runtime": config["_runtime"],
             },
         )
@@ -210,8 +210,8 @@ def test_blocks_node_modules_contract_lookup_when_contract_evidence_exists(tmp_p
 
 def test_allows_node_modules_contract_lookup_after_reactive_feedback(tmp_path, monkeypatch):
     def fake_run(command, **kwargs):
-        assert command == 'rg "resub" node_modules/@types/tmi.js/index.d.ts'
-        return subprocess.CompletedProcess(command, 0, stdout="resub(...)\n", stderr="")
+        assert command == 'rg "renewal" node_modules/@types/@example/event-bus/index.d.ts'
+        return subprocess.CompletedProcess(command, 0, stdout="renewal(...)\n", stderr="")
 
     monkeypatch.setattr("agentic_tdd_runner.tools.subprocess.run", fake_run)
     config = {
@@ -224,12 +224,12 @@ def test_allows_node_modules_contract_lookup_after_reactive_feedback(tmp_path, m
 
     result, exit_codes = _execute_tool(
         "run_command",
-        {"command": 'rg "resub" node_modules/@types/tmi.js/index.d.ts'},
+        {"command": 'rg "renewal" node_modules/@types/@example/event-bus/index.d.ts'},
         tmp_path,
         config=config,
     )
 
-    assert result == "resub(...)\n"
+    assert result == "renewal(...)\n"
     assert exit_codes == [None, 0]
 
 
@@ -242,7 +242,7 @@ def test_dependency_contract_lookup_guard_ignores_non_dependency_commands():
     }
 
     assert is_blocked_dependency_contract_lookup("bun test src/file.test.ts", config) is False
-    assert is_blocked_dependency_contract_lookup("rg handleResub src", config) is False
+    assert is_blocked_dependency_contract_lookup("rg processRenewal src", config) is False
 
 
 def test_rg_tool_respects_dependency_contract_lookup_guard(tmp_path, monkeypatch):
@@ -260,7 +260,7 @@ def test_rg_tool_respects_dependency_contract_lookup_guard(tmp_path, monkeypatch
 
     result, exit_codes = _execute_tool(
         "rg",
-        {"pattern": "resub", "path": "node_modules/@types/tmi.js/index.d.ts"},
+        {"pattern": "renewal", "path": "node_modules/@types/@example/event-bus/index.d.ts"},
         tmp_path,
         config=config,
     )
@@ -280,19 +280,19 @@ def test_rg_tool_runs_ripgrep_with_safe_argv(tmp_path, monkeypatch):
             "--ignore-case",
             "--glob",
             "*.ts",
-            "handle resub",
+            "handle renewal",
             "src",
         ]
         assert kwargs["shell"] is False
         assert kwargs["cwd"] == str(tmp_path)
-        return subprocess.CompletedProcess(command, 0, stdout="src/file.ts:1:handle resub", stderr="")
+        return subprocess.CompletedProcess(command, 0, stdout="src/file.ts:1:handle renewal", stderr="")
 
     monkeypatch.setattr("agentic_tdd_runner.tools.subprocess.run", fake_run)
 
     result, exit_codes = _execute_tool(
         "rg",
         {
-            "pattern": "handle resub",
+            "pattern": "handle renewal",
             "path": "src",
             "glob": "*.ts",
             "case_sensitive": False,
@@ -300,7 +300,7 @@ def test_rg_tool_runs_ripgrep_with_safe_argv(tmp_path, monkeypatch):
         tmp_path,
     )
 
-    assert result == "src/file.ts:1:handle resub"
+    assert result == "src/file.ts:1:handle renewal"
     assert exit_codes == [None, 0]
 
 
@@ -311,8 +311,8 @@ def test_rg_tool_searches_explicit_ignored_directories(tmp_path, monkeypatch):
             "--line-number",
             "--no-heading",
             "--no-ignore",
-            "SubUserstate",
-            "node_modules/tmi.js",
+            "RenewalEventPayload",
+            "node_modules/@example/event-bus",
         ]
         return subprocess.CompletedProcess(command, 1, stdout="", stderr="")
 
@@ -320,7 +320,7 @@ def test_rg_tool_searches_explicit_ignored_directories(tmp_path, monkeypatch):
 
     result, exit_codes = _execute_tool(
         "rg",
-        {"pattern": "SubUserstate", "path": "node_modules/tmi.js"},
+        {"pattern": "RenewalEventPayload", "path": "node_modules/@example/event-bus"},
         tmp_path,
     )
 
@@ -416,13 +416,13 @@ def test_reactive_test_feedback_keeps_deep_runtime_error_digest(tmp_path, monkey
 def test_reactive_forbidden_feedback_reports_test_quality_issues(tmp_path):
     target = tmp_path / "src" / "file.test.ts"
     target.parent.mkdir()
-    repeated_setup = "const client_say_spy = mock(() => undefined as never);"
+    repeated_setup = "const notifier_send_spy = mock(() => undefined as never);"
     target.write_text(
         "\n".join([
             "import { mock } from 'bun:test';",
             repeated_setup,
             repeated_setup,
-            "expect(client_say_spy).toHaveBeenCalled();",
+            "expect(notifier_send_spy).toHaveBeenCalled();",
         ])
     )
 
@@ -442,7 +442,7 @@ def test_reactive_forbidden_feedback_reports_test_quality_issues(tmp_path):
     assert "2 forbidden patterns" in result
     assert "as never" in result
     assert "Duplicated setup" in result
-    assert "client_say_spy" in result
+    assert "notifier_send_spy" in result
     assert "beforeEach" in result
 
 
@@ -451,7 +451,7 @@ def test_create_file_includes_reactive_forbidden_feedback(tmp_path, monkeypatch)
         return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
     monkeypatch.setattr("agentic_tdd_runner.tools.subprocess.run", fake_run)
-    repeated_setup = "const client_say_spy = mock(() => undefined as never);"
+    repeated_setup = "const notifier_send_spy = mock(() => undefined as never);"
 
     result, _ = _execute_tool(
         "create_file",
@@ -460,7 +460,7 @@ def test_create_file_includes_reactive_forbidden_feedback(tmp_path, monkeypatch)
             "content": "\n".join([
                 repeated_setup,
                 repeated_setup,
-                "expect(client_say_spy).toHaveBeenCalled();",
+                "expect(notifier_send_spy).toHaveBeenCalled();",
             ]),
         },
         tmp_path,
@@ -521,7 +521,7 @@ def test_str_replace_editor_includes_reactive_forbidden_feedback(tmp_path, monke
     target = tmp_path / "src" / "file.test.ts"
     target.parent.mkdir()
     target.write_text("const ok = 1;\n")
-    repeated_setup = "const client_say_spy = mock(() => undefined as never);"
+    repeated_setup = "const notifier_send_spy = mock(() => undefined as never);"
 
     result, _ = _execute_tool(
         "str_replace_editor",
@@ -531,7 +531,7 @@ def test_str_replace_editor_includes_reactive_forbidden_feedback(tmp_path, monke
             "new_str": "\n".join([
                 repeated_setup,
                 repeated_setup,
-                "expect(client_say_spy).toHaveBeenCalled();",
+                "expect(notifier_send_spy).toHaveBeenCalled();",
             ]),
         },
         tmp_path,

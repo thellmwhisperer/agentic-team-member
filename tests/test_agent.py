@@ -131,7 +131,7 @@ class TestValidateCommand:
 
     def test_allows_quoted_regex_alternation_without_treating_it_as_pipe(self):
         _validate_command(
-            'grep -n "SubUserstate\\|SubMethods" node_modules/@types/tmi.js/index.d.ts'
+            'grep -n "RenewalEventPayload\\|DeliveryOptions" node_modules/@types/@example/event-bus/index.d.ts'
         )
 
     def test_blocks_command_substitution(self):
@@ -218,16 +218,16 @@ class TestCliDefaults:
 class TestIssueLoading:
     def test_parses_github_repo_slug_from_common_remote_urls(self):
         assert (
-            _github_repo_slug_from_remote_url("https://github.com/thellmwhisperer/manolito-zurrapa.git")
-            == "thellmwhisperer/manolito-zurrapa"
+            _github_repo_slug_from_remote_url("https://github.com/example-org/sample-service.git")
+            == "example-org/sample-service"
         )
         assert (
-            _github_repo_slug_from_remote_url("git@github.com:thellmwhisperer/manolito-zurrapa.git")
-            == "thellmwhisperer/manolito-zurrapa"
+            _github_repo_slug_from_remote_url("git@github.com:example-org/sample-service.git")
+            == "example-org/sample-service"
         )
         assert (
-            _github_repo_slug_from_remote_url("ssh://git@github.com/thellmwhisperer/manolito-zurrapa.git")
-            == "thellmwhisperer/manolito-zurrapa"
+            _github_repo_slug_from_remote_url("ssh://git@github.com/example-org/sample-service.git")
+            == "example-org/sample-service"
         )
 
     def test_loads_github_issue_body_from_issue_number(self, tmp_path, monkeypatch):
@@ -240,7 +240,7 @@ class TestIssueLoading:
                 return subprocess.CompletedProcess(
                     cmd,
                     0,
-                    stdout="https://github.com/thellmwhisperer/manolito-zurrapa.git\n",
+                    stdout="https://github.com/example-org/sample-service.git\n",
                     stderr="",
                 )
             if cmd[:3] == ["gh", "issue", "view"]:
@@ -257,7 +257,7 @@ class TestIssueLoading:
         issue_text = _load_issue_text(args, repo_path=str(tmp_path))
 
         assert issue_text == "Resub months bug\n\n## Symptom\n0 meses"
-        assert ["gh", "issue", "view", "41", "--repo", "thellmwhisperer/manolito-zurrapa", "--json", "title,body"] in calls
+        assert ["gh", "issue", "view", "41", "--repo", "example-org/sample-service", "--json", "title,body"] in calls
 
     def test_github_issue_fetch_reports_missing_git(self, tmp_path, monkeypatch):
         args = SimpleNamespace(issue=None, issue_number=41, github_repo=None)
@@ -383,13 +383,13 @@ class TestFindTestFile:
     def test_uses_hint_path_when_exists(self, tmp_path, monkeypatch):
         self._setup_git_repo(tmp_path)
         (tmp_path / "src").mkdir()
-        (tmp_path / "src" / "handleResub.test.ts").write_text("test")
+        (tmp_path / "src" / "processRenewal.test.ts").write_text("test")
         (tmp_path / "src" / "other.test.ts").write_text("test")
         monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
         monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
             "runner": {"test_file_patterns": ["*.test.ts"], "exclude_dirs": []},
         })
-        assert find_test_file(hint="src/handleResub.test.ts") == "src/handleResub.test.ts"
+        assert find_test_file(hint="src/processRenewal.test.ts") == "src/processRenewal.test.ts"
 
     def test_falls_back_to_discovery_when_hint_missing(self, tmp_path, monkeypatch):
         self._setup_git_repo(tmp_path)
@@ -1529,14 +1529,14 @@ class TestRunQualityChecks:
 
     def test_check_failure_shows_multiline_error_context(self, tmp_path, monkeypatch):
         """tsc errors span multiple lines; quality gate must show continuation lines
-        so the model sees type names like SubUserstate without exploring node_modules."""
+        so the model sees type names like RenewalEventPayload without exploring node_modules."""
         self._setup_repo(tmp_path, monkeypatch)
         (tmp_path / "src" / "file.test.ts").write_text("clean")
 
         tsc_output = (
             "src/file.ts(123,10): error TS2769: No overload matches this call.\n"
-            "  Overload 1 of 2, '(event: \"resub\", listener: (..., "
-            "userstate: SubUserstate, methods: SubMethods) => void): Client'\n"
+            "  Overload 1 of 2, '(event: \"renewal\", listener: (..., "
+            "eventPayload: RenewalEventPayload, methods: DeliveryOptions) => void): Client'\n"
             "  gave the following error.\n"
             "    Argument of type '(a: string) => void' is not assignable.\n"
         )
@@ -1558,8 +1558,8 @@ class TestRunQualityChecks:
         })
         ok, msg = run_quality_checks("src/file.test.ts")
         assert ok is False
-        assert "SubUserstate" in msg, f"Type name from continuation line missing: {msg}"
-        assert "SubMethods" in msg
+        assert "RenewalEventPayload" in msg, f"Type name from continuation line missing: {msg}"
+        assert "DeliveryOptions" in msg
 
     def test_check_failure_shows_all_errors_not_just_three(self, tmp_path, monkeypatch):
         """Quality gate must not truncate to 3 error lines when there are more."""
@@ -1699,14 +1699,14 @@ class TestRunQualityChecks:
         test_file.write_text(
             "describe('x', () => {\n"
             "  test('a', () => {\n"
-            "    const client_say_spy = mock(() => undefined);\n"
-            "    __setClientForTests(client_say_spy);\n"
-            "    handleResub(channel, username, 0, message, userstate);\n"
+            "    const notifier_send_spy = mock(() => undefined);\n"
+            "    __setClientForTests(notifier_send_spy);\n"
+            "    processRenewal(channel, username, 0, message, eventPayload);\n"
             "  });\n"
             "  test('b', () => {\n"
-            "    const client_say_spy = mock(() => undefined);\n"
-            "    __setClientForTests(client_say_spy);\n"
-            "    handleResub(channel, username, 1, message, userstate);\n"
+            "    const notifier_send_spy = mock(() => undefined);\n"
+            "    __setClientForTests(notifier_send_spy);\n"
+            "    processRenewal(channel, username, 1, message, eventPayload);\n"
             "  });\n"
             "});\n"
         )
@@ -1723,7 +1723,7 @@ class TestRunQualityChecks:
 
         assert ok is False
         assert "Duplicated setup" in msg
-        assert "client_say_spy" in msg
+        assert "notifier_send_spy" in msg
 
     def test_filters_changed_files_by_language_extensions(self, tmp_path, monkeypatch):
         """Only files matching the active language's extensions are scanned."""
@@ -1887,16 +1887,16 @@ class TestRunQualityChecks:
         test_file.write_text(
             "describe('x', () => {\n"
             "  test('a', () => {\n"
-            "    handleResub(channel, username, streakMonths, message, userstate);\n"
-            "    expect(client_say_spy).toHaveBeenCalledWith(channel, expected_message);\n"
+            "    processRenewal(channel, username, retryCount, message, eventPayload);\n"
+            "    expect(notifier_send_spy).toHaveBeenCalledWith(channel, expected_message);\n"
             "  });\n"
             "  test('b', () => {\n"
-            "    handleResub(channel, username, streakMonths, message, userstate);\n"
-            "    expect(client_say_spy).toHaveBeenCalledWith(channel, expected_message);\n"
+            "    processRenewal(channel, username, retryCount, message, eventPayload);\n"
+            "    expect(notifier_send_spy).toHaveBeenCalledWith(channel, expected_message);\n"
             "  });\n"
             "  test('c', () => {\n"
-            "    handleResub(channel, username, streakMonths, message, userstate);\n"
-            "    expect(client_say_spy).toHaveBeenCalledWith(channel, expected_message);\n"
+            "    processRenewal(channel, username, retryCount, message, eventPayload);\n"
+            "    expect(notifier_send_spy).toHaveBeenCalledWith(channel, expected_message);\n"
             "  });\n"
             "});\n"
         )
@@ -1931,16 +1931,16 @@ class TestRunQualityChecks:
         test_file.write_text(
             "describe('x', () => {\n"
             "  test('a', () => {\n"
-            "    handleResub(channel, username, streakMonths, message, userstate);\n"
-            "    expect(client_say_spy).toHaveBeenCalledWith(channel, expected_message);\n"
+            "    processRenewal(channel, username, retryCount, message, eventPayload);\n"
+            "    expect(notifier_send_spy).toHaveBeenCalledWith(channel, expected_message);\n"
             "  });\n"
             "  test('b', () => {\n"
-            "    handleResub(channel, username, streakMonths, message, userstate);\n"
-            "    expect(client_say_spy).toHaveBeenCalledWith(channel, expected_message);\n"
+            "    processRenewal(channel, username, retryCount, message, eventPayload);\n"
+            "    expect(notifier_send_spy).toHaveBeenCalledWith(channel, expected_message);\n"
             "  });\n"
             "  test('c', () => {\n"
-            "    handleResub(channel, username, streakMonths, message, userstate);\n"
-            "    expect(client_say_spy).toHaveBeenCalledWith(channel, expected_message);\n"
+            "    processRenewal(channel, username, retryCount, message, eventPayload);\n"
+            "    expect(notifier_send_spy).toHaveBeenCalledWith(channel, expected_message);\n"
             "  });\n"
             "});\n"
         )
@@ -1962,15 +1962,15 @@ class TestRunQualityChecks:
         assert _is_obvious_assert_line("toHaveBeenCalledWith(channel, expected_message);") is True
 
     def test_duplicated_setup_treats_function_under_test_call_as_act(self):
-        assert _is_obvious_act_line("handleResub(channel, username, streakMonths, message, userstate);") is True
+        assert _is_obvious_act_line("processRenewal(channel, username, retryCount, message, eventPayload);") is True
 
     def test_duplicated_setup_judge_prompt_explicitly_bans_act_assert_in_before_each(self):
         prompt = _build_duplicated_setup_judge_prompt(
             "src/file.test.ts",
             "describe('x', () => {})\n",
             [
-                "handleResub(channel, username, streakMonths, message, userstate);",
-                "expect(client_say_spy).toHaveBeenCalledWith(channel, expected_message);",
+                "processRenewal(channel, username, retryCount, message, eventPayload);",
+                "expect(notifier_send_spy).toHaveBeenCalledWith(channel, expected_message);",
             ],
         )
 
@@ -1985,22 +1985,22 @@ class TestRunQualityChecks:
         test_file.write_text(
             "describe('x', () => {\n"
             "  test('a', () => {\n"
-            "    const client_say_spy = mock(() => undefined);\n"
-            "    __setClientForTests(client_say_spy);\n"
-            "    handleResub(channel, username, streakMonths, message, userstate);\n"
-            "    expect(client_say_spy).toHaveBeenCalledWith(channel, expected_message);\n"
+            "    const notifier_send_spy = mock(() => undefined);\n"
+            "    __setClientForTests(notifier_send_spy);\n"
+            "    processRenewal(channel, username, retryCount, message, eventPayload);\n"
+            "    expect(notifier_send_spy).toHaveBeenCalledWith(channel, expected_message);\n"
             "  });\n"
             "  test('b', () => {\n"
-            "    const client_say_spy = mock(() => undefined);\n"
-            "    __setClientForTests(client_say_spy);\n"
-            "    handleResub(channel, username, streakMonths, message, userstate);\n"
-            "    expect(client_say_spy).toHaveBeenCalledWith(channel, expected_message);\n"
+            "    const notifier_send_spy = mock(() => undefined);\n"
+            "    __setClientForTests(notifier_send_spy);\n"
+            "    processRenewal(channel, username, retryCount, message, eventPayload);\n"
+            "    expect(notifier_send_spy).toHaveBeenCalledWith(channel, expected_message);\n"
             "  });\n"
             "  test('c', () => {\n"
-            "    const client_say_spy = mock(() => undefined);\n"
-            "    __setClientForTests(client_say_spy);\n"
-            "    handleResub(channel, username, streakMonths, message, userstate);\n"
-            "    expect(client_say_spy).toHaveBeenCalledWith(channel, expected_message);\n"
+            "    const notifier_send_spy = mock(() => undefined);\n"
+            "    __setClientForTests(notifier_send_spy);\n"
+            "    processRenewal(channel, username, retryCount, message, eventPayload);\n"
+            "    expect(notifier_send_spy).toHaveBeenCalledWith(channel, expected_message);\n"
             "  });\n"
             "});\n"
         )
@@ -2016,8 +2016,8 @@ class TestRunQualityChecks:
         ok, msg = run_quality_checks("src/file.test.ts")
 
         assert ok is False
-        assert "client_say_spy" in msg
-        assert "handleResub" not in msg
+        assert "notifier_send_spy" in msg
+        assert "processRenewal" not in msg
 
     def test_duplicated_setup_ignores_non_test_files_with_test_substring(self, tmp_path, monkeypatch):
         """Non-test files like contest.ts must not be pulled into duplicated-setup scan."""
@@ -2147,15 +2147,15 @@ class TestRunQualityChecks:
         source = tmp_path / "src" / "file.ts"
         source.write_text(
             "export function f(logger, username, months) {\n"
-            "  logger.event('resub', { username, months });\n"
+            "  logger.event('renewal', { username, months });\n"
             "}\n"
         )
         subprocess.run([GIT, "add", "-A"], cwd=tmp_path, capture_output=True, check=True)
         subprocess.run([GIT, "commit", "-m", "payload baseline"], cwd=tmp_path, capture_output=True, check=True)
 
         source.write_text(
-            "export function f(logger, username, cumulativeMonths) {\n"
-            "  logger.event('resub', { username, cumulativeMonths });\n"
+            "export function f(logger, username, totalCount) {\n"
+            "  logger.event('renewal', { username, totalCount });\n"
             "}\n"
         )
         (tmp_path / "src" / "file.test.ts").write_text("const x: number = 1;")
@@ -2173,22 +2173,22 @@ class TestRunQualityChecks:
         assert ok is False
         assert "Side-effect shape" in msg
         assert "months" in msg
-        assert "cumulativeMonths" in msg
+        assert "totalCount" in msg
 
     def test_allows_side_effect_payload_value_change_with_same_key(self, tmp_path, monkeypatch):
         self._setup_repo(tmp_path, monkeypatch)
         source = tmp_path / "src" / "file.ts"
         source.write_text(
             "export function f(logger, username, months) {\n"
-            "  logger.event('resub', { username, months });\n"
+            "  logger.event('renewal', { username, months });\n"
             "}\n"
         )
         subprocess.run([GIT, "add", "-A"], cwd=tmp_path, capture_output=True, check=True)
         subprocess.run([GIT, "commit", "-m", "payload baseline"], cwd=tmp_path, capture_output=True, check=True)
 
         source.write_text(
-            "export function f(logger, username, cumulativeMonths) {\n"
-            "  logger.event('resub', { username, months: cumulativeMonths });\n"
+            "export function f(logger, username, totalCount) {\n"
+            "  logger.event('renewal', { username, months: totalCount });\n"
             "}\n"
         )
         (tmp_path / "src" / "file.test.ts").write_text("const x: number = 1;")
@@ -2210,8 +2210,8 @@ class TestRunQualityChecks:
         self._setup_repo(tmp_path, monkeypatch)
         source = tmp_path / "src" / "file.ts"
         source.write_text(
-            "export function f(_streakMonths: number, userstate: Record<string, string>) {\n"
-            "  const months = parseInt(userstate['msg-param-cumulative-months'] || '0', 10);\n"
+            "export function f(_retryCount: number, eventPayload: Record<string, string>) {\n"
+            "  const months = parseInt(eventPayload['event-total-count'] || '0', 10);\n"
             "  return months;\n"
             "}\n"
         )
@@ -2229,15 +2229,15 @@ class TestRunQualityChecks:
 
         assert ok is False
         assert "Metadata fallback" in msg
-        assert "_streakMonths" in msg
+        assert "_retryCount" in msg
 
     def test_rejects_plain_callback_value_metadata_fallback_without_invalid_guard(self, tmp_path, monkeypatch):
         self._setup_repo(tmp_path, monkeypatch)
         source = tmp_path / "src" / "file.ts"
         source.write_text(
-            "export function f(streakMonths: number, userstate: Record<string, string>) {\n"
-            "  const raw = userstate['msg-param-cumulative-months'];\n"
-            "  const months = typeof raw === 'string' ? parseInt(raw, 10) : streakMonths;\n"
+            "export function f(retryCount: number, eventPayload: Record<string, string>) {\n"
+            "  const raw = eventPayload['event-total-count'];\n"
+            "  const months = typeof raw === 'string' ? parseInt(raw, 10) : retryCount;\n"
             "  return months;\n"
             "}\n"
         )
@@ -2255,15 +2255,15 @@ class TestRunQualityChecks:
 
         assert ok is False
         assert "Metadata fallback" in msg
-        assert "streakMonths" in msg
+        assert "retryCount" in msg
 
     def test_allows_parsed_metadata_with_original_fallback(self, tmp_path, monkeypatch):
         self._setup_repo(tmp_path, monkeypatch)
         source = tmp_path / "src" / "file.ts"
         source.write_text(
-            "export function f(_streakMonths: number, userstate: Record<string, string>) {\n"
-            "  const parsed = Number(userstate['msg-param-cumulative-months']);\n"
-            "  const months = Number.isNaN(parsed) ? _streakMonths : parsed;\n"
+            "export function f(_retryCount: number, eventPayload: Record<string, string>) {\n"
+            "  const parsed = Number(eventPayload['event-total-count']);\n"
+            "  const months = Number.isNaN(parsed) ? _retryCount : parsed;\n"
             "  return months;\n"
             "}\n"
         )
@@ -2285,8 +2285,8 @@ class TestRunQualityChecks:
         self._setup_repo(tmp_path, monkeypatch)
         source = tmp_path / "src" / "file.ts"
         source.write_text(
-            "export function f(_streakMonths: number, userstate: Record<string, string>) {\n"
-            "  const months = Number(userstate['msg-param-cumulative-months']) || _streakMonths;\n"
+            "export function f(_retryCount: number, eventPayload: Record<string, string>) {\n"
+            "  const months = Number(eventPayload['event-total-count']) || _retryCount;\n"
             "  return months;\n"
             "}\n"
         )
@@ -2304,15 +2304,15 @@ class TestRunQualityChecks:
 
         assert ok is False
         assert "invalid parsed values" in msg
-        assert "_streakMonths" in msg
+        assert "_retryCount" in msg
 
     def test_rejects_parse_default_that_does_not_handle_invalid_metadata(self, tmp_path, monkeypatch):
         self._setup_repo(tmp_path, monkeypatch)
         source = tmp_path / "src" / "file.ts"
         source.write_text(
-            "export function f(_streakMonths: number, userstate: Record<string, string>) {\n"
+            "export function f(_retryCount: number, eventPayload: Record<string, string>) {\n"
             "  const months = parseInt(\n"
-            "    String(userstate['msg-param-cumulative-months'] ?? _streakMonths),\n"
+            "    String(eventPayload['event-total-count'] ?? _retryCount),\n"
             "    10,\n"
             "  );\n"
             "  return months;\n"
@@ -2332,15 +2332,15 @@ class TestRunQualityChecks:
 
         assert ok is False
         assert "invalid parsed values" in msg
-        assert "_streakMonths" in msg
+        assert "_retryCount" in msg
 
     def test_allows_nan_guarded_metadata_fallback(self, tmp_path, monkeypatch):
         self._setup_repo(tmp_path, monkeypatch)
         source = tmp_path / "src" / "file.ts"
         source.write_text(
-            "export function f(_streakMonths: number, userstate: Record<string, string>) {\n"
-            "  const parsed = Number(userstate['msg-param-cumulative-months']);\n"
-            "  const months = Number.isFinite(parsed) ? parsed : _streakMonths;\n"
+            "export function f(_retryCount: number, eventPayload: Record<string, string>) {\n"
+            "  const parsed = Number(eventPayload['event-total-count']);\n"
+            "  const months = Number.isFinite(parsed) ? parsed : _retryCount;\n"
             "  return months;\n"
             "}\n"
         )
@@ -2364,8 +2364,8 @@ class TestRunQualityChecks:
         source.write_text("export function f() {}\n")
         test_file = tmp_path / "src" / "file.test.ts"
         test_file.write_text(
-            "import type { SubMethods } from 'tmi.js';\n"
-            "const methods = {} as SubMethods;\n"
+            "import type { DeliveryOptions } from '@example/event-bus';\n"
+            "const methods = {} as DeliveryOptions;\n"
         )
         monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
             "quality": {
@@ -2380,7 +2380,7 @@ class TestRunQualityChecks:
 
         assert ok is False
         assert "Type assertion" in msg
-        assert "{} as SubMethods" in msg
+        assert "{} as DeliveryOptions" in msg
 
 
 class TestFileReadDedup:
@@ -2599,13 +2599,13 @@ class TestExecuteToolReactiveChecks:
         # Real tsc output: error line + continuation with the expected type
         tsc_output = (
             "src/file.ts(123,10): error TS2769: No overload matches this call.\n"
-            "  Overload 1 of 2, '(event: \"resub\", listener: (channel: string, "
+            "  Overload 1 of 2, '(event: \"renewal\", listener: (channel: string, "
             "username: string, months: number, message: string, "
-            "userstate: SubUserstate, methods: SubMethods) => void): Client'\n"
+            "eventPayload: RenewalEventPayload, methods: DeliveryOptions) => void): Client'\n"
             "  gave the following error.\n"
             "    Argument of type '(channel: string, username: string) => void' "
             "is not assignable to parameter of type '(channel: string, username: string, "
-            "months: number, message: string, userstate: SubUserstate, methods: SubMethods) => void'.\n"
+            "months: number, message: string, eventPayload: RenewalEventPayload, methods: DeliveryOptions) => void'.\n"
         )
 
         def fake_run(command, **kwargs):
@@ -2619,10 +2619,10 @@ class TestExecuteToolReactiveChecks:
             "new_str": "const value = 'bad';\n",
         })
 
-        # The model MUST see 'SubUserstate' — that's the type it needs to import
-        assert "SubUserstate" in result
-        # And 'SubMethods' — the full overload signature
-        assert "SubMethods" in result
+        # The model MUST see 'RenewalEventPayload' — that's the type it needs to import
+        assert "RenewalEventPayload" in result
+        # And 'DeliveryOptions' — the full overload signature
+        assert "DeliveryOptions" in result
 
     def test_reactive_typecheck_shows_all_errors_not_just_three(self, tmp_path, monkeypatch):
         """When tsc reports >3 errors, all should be visible, not truncated to 3."""
@@ -2777,10 +2777,10 @@ class TestParsePrContent:
     """_parse_pr_content extracts title and body from LLM response."""
 
     def test_extracts_title_and_body(self):
-        content = "PR_TITLE: fix: use cumulative months in handleResub\nPR_BODY: The bug was in handleResub."
+        content = "PR_TITLE: fix: use cumulative months in processRenewal\nPR_BODY: The bug was in processRenewal."
         title, body = _parse_pr_content(content)
-        assert title == "fix: use cumulative months in handleResub"
-        assert "handleResub" in body
+        assert title == "fix: use cumulative months in processRenewal"
+        assert "processRenewal" in body
 
     def test_truncates_long_title(self):
         content = "PR_TITLE: " + "x" * 100 + "\nPR_BODY: body"
@@ -4245,25 +4245,25 @@ class TestApplyMechanicalEdits:
 
         src = tmp_path / "src" / "client.ts"
         src.parent.mkdir(parents=True)
-        src.write_text("function handleResub(event) {\n  return event;\n}\n")
+        src.write_text("function processRenewal(event) {\n  return event;\n}\n")
 
         edits = [{
             "path": "src/client.ts",
-            "old": "function handleResub(event) {",
-            "new": "export function handleResub(event) {",
+            "old": "function processRenewal(event) {",
+            "new": "export function processRenewal(event) {",
         }]
 
         applied = apply_mechanical_edits(edits, str(tmp_path))
 
         assert applied == 1
-        assert "export function handleResub" in src.read_text()
+        assert "export function processRenewal" in src.read_text()
 
     def test_skips_edit_when_old_not_found(self, tmp_path):
         from agentic_tdd_runner.agent import apply_mechanical_edits
 
         src = tmp_path / "src" / "client.ts"
         src.parent.mkdir(parents=True)
-        src.write_text("export function handleResub(event) {\n  return event;\n}\n")
+        src.write_text("export function processRenewal(event) {\n  return event;\n}\n")
 
         edits = [{
             "path": "src/client.ts",
@@ -4274,7 +4274,7 @@ class TestApplyMechanicalEdits:
         applied = apply_mechanical_edits(edits, str(tmp_path))
 
         assert applied == 0
-        assert src.read_text() == "export function handleResub(event) {\n  return event;\n}\n"
+        assert src.read_text() == "export function processRenewal(event) {\n  return event;\n}\n"
 
     def test_applies_multiple_edits_across_files(self, tmp_path):
         from agentic_tdd_runner.agent import apply_mechanical_edits
@@ -4342,21 +4342,21 @@ class TestPhasedRunner:
 
         src = tmp_path / "src" / "client.ts"
         src.parent.mkdir(parents=True)
-        src.write_text("function handleResub(event) {\n  return event;\n}\n")
+        src.write_text("function processRenewal(event) {\n  return event;\n}\n")
 
         episode = {
             "source_file": "src/client.ts",
-            "target_symbol": "handleResub",
+            "target_symbol": "processRenewal",
             "test_file": "src/client.test.ts",
             "source_import_path": "./client",
             "runner": "bun:test",
             "mocks_text": "",
             "pre_test_source_edits": [
-                {"path": "src/client.ts", "old": "function handleResub(", "new": "export function handleResub("},
+                {"path": "src/client.ts", "old": "function processRenewal(", "new": "export function processRenewal("},
             ],
             "conditional_source_edits": [],
             "assertion_hint": "assert on the return value",
-            "cookbook_text": "## Mock Cookbook for handleResub\n",
+            "cookbook_text": "## Mock Cookbook for processRenewal\n",
         }
 
         chat_messages = []
@@ -4370,7 +4370,7 @@ class TestPhasedRunner:
             }
 
         args = SimpleNamespace(
-            issue="bug text", source="src/client.ts", symbol="handleResub",
+            issue="bug text", source="src/client.ts", symbol="processRenewal",
             workdir=str(tmp_path), config="unused.toml", log_dir=str(tmp_path),
         )
         monkeypatch.setattr("agentic_tdd_runner.config.load_config", lambda path: self._make_config())
@@ -4387,13 +4387,13 @@ class TestPhasedRunner:
         main()
 
         # Source file should have been edited on disk before the loop
-        assert "export function handleResub" in src.read_text()
+        assert "export function processRenewal" in src.read_text()
 
         # First user message should be the phase-1 prompt, NOT "Fix this bug"
         first_call_messages = chat_messages[0]
         user_msg = next(m for m in first_call_messages if m["role"] == "user")
         assert "Fix this bug" not in user_msg["content"]
-        assert "handleResub" in user_msg["content"]
+        assert "processRenewal" in user_msg["content"]
 
     def test_injects_fix_nudge_after_test_file_created(self, tmp_path, monkeypatch):
         """After model creates a test file, harness injects a nudge to run + fix."""
@@ -4401,11 +4401,11 @@ class TestPhasedRunner:
 
         src = tmp_path / "src" / "client.ts"
         src.parent.mkdir(parents=True)
-        src.write_text("export function handleResub(event) {\n  return event;\n}\n")
+        src.write_text("export function processRenewal(event) {\n  return event;\n}\n")
 
         episode = {
             "source_file": "src/client.ts",
-            "target_symbol": "handleResub",
+            "target_symbol": "processRenewal",
             "test_file": "src/client.test.ts",
             "source_import_path": "./client",
             "runner": "bun:test",
@@ -4451,7 +4451,7 @@ class TestPhasedRunner:
             return f"OK: created {args.get('path', '')}"
 
         args = SimpleNamespace(
-            issue="bug text", source="src/client.ts", symbol="handleResub",
+            issue="bug text", source="src/client.ts", symbol="processRenewal",
             workdir=str(tmp_path), config="unused.toml", log_dir=str(tmp_path),
         )
         monkeypatch.setattr("agentic_tdd_runner.config.load_config", lambda path: self._make_config())
@@ -4478,7 +4478,7 @@ class TestPhasedRunner:
     def test_uses_episode_test_file_hint_during_completion(self, tmp_path, monkeypatch):
         episode = {
             "source_file": "src/client.ts",
-            "target_symbol": "handleResub",
+            "target_symbol": "processRenewal",
             "test_file": "src/client.test.ts",
             "source_import_path": "./client",
             "runner": "bun:test",
@@ -4491,7 +4491,7 @@ class TestPhasedRunner:
         hinted = []
 
         args = SimpleNamespace(
-            issue="bug text", source="src/client.ts", symbol="handleResub",
+            issue="bug text", source="src/client.ts", symbol="processRenewal",
             workdir=str(tmp_path), config="unused.toml", log_dir=str(tmp_path),
         )
         monkeypatch.setattr("agentic_tdd_runner.config.load_config", lambda path: self._make_config())
@@ -4529,11 +4529,11 @@ class TestPhasedRunner:
 
         src = tmp_path / "src" / "client.ts"
         src.parent.mkdir(parents=True)
-        src.write_text("export function handleResub(event) {\n  return event;\n}\n")
+        src.write_text("export function processRenewal(event) {\n  return event;\n}\n")
 
         episode = {
             "source_file": "src/client.ts",
-            "target_symbol": "handleResub",
+            "target_symbol": "processRenewal",
             "test_file": "src/client.test.ts",
             "source_import_path": "./client",
             "runner": "bun:test",
@@ -4577,7 +4577,7 @@ class TestPhasedRunner:
             return f"OK: created {args.get('path', '')}"
 
         args = SimpleNamespace(
-            issue="bug text", source="src/client.ts", symbol="handleResub",
+            issue="bug text", source="src/client.ts", symbol="processRenewal",
             workdir=str(tmp_path), config="unused.toml", log_dir=str(tmp_path),
         )
         monkeypatch.setattr("agentic_tdd_runner.config.load_config", lambda path: self._make_config())
@@ -4664,12 +4664,12 @@ class TestPhasedRunner:
         the hint entirely rather than misdirect the model."""
         src = tmp_path / "src" / "client.ts"
         src.parent.mkdir(parents=True)
-        src.write_text("// handleResub\nexport class C { handleResub() {} }\n")
+        src.write_text("// processRenewal\nexport class C { processRenewal() {} }\n")
 
         episode = {
             "source_file": "src/client.ts",
-            "target_symbol": "handleResub",
-            "test_file": "src/handleResub.test.ts",
+            "target_symbol": "processRenewal",
+            "test_file": "src/processRenewal.test.ts",
             "source_import_path": "./client",
             "runner": "bun:test",
             "mocks_text": "",
@@ -4715,17 +4715,17 @@ class TestDiscoveryIntegration:
             "project_root": str(tmp_path),
             "candidates": [
                 {
-                    "source_path": "src/twitch/client.ts",
-                    "symbol": "handleMessage",
+                    "source_path": "src/events/client.ts",
+                    "symbol": "routeMessage",
                     "kind": "function",
                     "owner_class": None,
                     "line_start": 10,
                     "line_end": 30,
-                    "path_tokens": ["src", "twitch", "client"],
+                    "path_tokens": ["src", "events", "client"],
                     "symbol_tokens": ["handle", "message"],
-                    "string_tokens": ["manolitozurrapa"],
-                    "strings": ["@manolitozurrapa"],
-                    "terms": ["client", "handle", "manolitozurrapa", "message", "src", "twitch"],
+                    "string_tokens": ["dispatcher"],
+                    "strings": ["@dispatcher"],
+                    "terms": ["client", "handle", "dispatcher", "message", "src", "events"],
                 }
             ],
         }
@@ -4778,8 +4778,8 @@ class TestDiscoveryIntegration:
             assert index is semantic_index
             assert limit == 5
             return [{
-                "source_path": "src/twitch/client.ts",
-                "symbol": "handleMessage",
+                "source_path": "src/events/client.ts",
+                "symbol": "routeMessage",
                 "score": 22,
             }]
 
@@ -4793,14 +4793,14 @@ class TestDiscoveryIntegration:
 
         assert episode_calls == [
             {
-                "source_path": "src/twitch/client.ts",
-                "symbol": "handleMessage",
+                "source_path": "src/events/client.ts",
+                "symbol": "routeMessage",
                 "project_root": str(tmp_path),
             }
         ]
         user_msg = next(m for m in captured[0] if m["role"] == "user")
-        assert "handleMessage" in user_msg["content"]
-        assert "src/twitch/client.ts" in user_msg["content"]
+        assert "routeMessage" in user_msg["content"]
+        assert "src/events/client.ts" in user_msg["content"]
 
     def test_main_exits_when_target_cannot_be_discovered(self, tmp_path, monkeypatch):
         args = SimpleNamespace(
@@ -4835,17 +4835,17 @@ class TestDiscoveryIntegration:
     def test_main_uses_issue_target_hints_before_discovery(self, tmp_path, monkeypatch):
         captured = []
         episode_calls = []
-        issue = """Bug: handleResub reports 0 months
+        issue = """Bug: processRenewal reports 0 months
 
 ## Where
-`src/twitch/client.ts` -> `handleResub()` (line 770, not exported)
+`src/events/client.ts` -> `processRenewal()` (line 770, not exported)
 
 ## Symptom
 The bot reports 0 months.
 
 ## Fix approach
-1. Export handleResub so it can be tested
-2. Read cumulative months from the resub userstate
+1. Export processRenewal so it can be tested
+2. Read cumulative months from the renewal eventPayload
 """
         args = SimpleNamespace(
             issue=issue,
@@ -4861,7 +4861,7 @@ The bot reports 0 months.
             return {
                 "source_file": kwargs["source_path"],
                 "target_symbol": kwargs["symbol"],
-                "test_file": "src/twitch/client.test.ts",
+                "test_file": "src/events/client.test.ts",
                 "source_import_path": "./client",
                 "runner": "bun:test",
                 "mocks_text": "",
@@ -4891,24 +4891,24 @@ The bot reports 0 months.
 
         assert episode_calls == [
             {
-                "source_path": "src/twitch/client.ts",
-                "symbol": "handleResub",
+                "source_path": "src/events/client.ts",
+                "symbol": "processRenewal",
                 "project_root": str(tmp_path),
             }
         ]
         user_msg = next(m for m in captured[0] if m["role"] == "user")
-        assert "src/twitch/client.ts" in user_msg["content"]
-        assert "handleResub" in user_msg["content"]
+        assert "src/events/client.ts" in user_msg["content"]
+        assert "processRenewal" in user_msg["content"]
         assert "not exported" not in user_msg["content"]
         assert "Fix approach" not in user_msg["content"]
-        assert "Export handleResub" not in user_msg["content"]
+        assert "Export processRenewal" not in user_msg["content"]
 
     def test_main_rejects_model_facing_forbidden_issue_guidance_before_chat(self, tmp_path, monkeypatch):
         args = SimpleNamespace(
-            issue="""Bug: handleResub reports 0 months
+            issue="""Bug: processRenewal reports 0 months
 
 ## Expected behavior
-1. Add `userstate: any` to the signature
+1. Add `eventPayload: any` to the signature
 """,
             source=None,
             symbol=None,
@@ -4934,10 +4934,10 @@ The bot reports 0 months.
             main()
 
     def test_main_can_export_artifacts_and_stop_before_chat(self, tmp_path, monkeypatch):
-        issue = """Bug: handleResub reports 0 months
+        issue = """Bug: processRenewal reports 0 months
 
 ## Where
-`src/twitch/client.ts` -> `handleResub()`
+`src/events/client.ts` -> `processRenewal()`
 """
         artifact_dir = tmp_path / "artifacts"
         episode_calls = []
@@ -4947,7 +4947,7 @@ The bot reports 0 months.
             return {
                 "source_file": kwargs["source_path"],
                 "target_symbol": kwargs["symbol"],
-                "test_file": "src/twitch/handleResub.test.ts",
+                "test_file": "src/events/processRenewal.test.ts",
                 "source_import_path": "./client",
                 "runner": "bun:test",
                 "mocks_text": "",

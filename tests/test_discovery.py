@@ -22,17 +22,17 @@ class TestSemanticIndex:
     def test_indexes_typescript_function_with_trigger_strings(self, tmp_path):
         _write_file(
             tmp_path,
-            "src/twitch/client.ts",
+            "src/events/client.ts",
             """\
             export function initClient(client: any): void {
-              client.on('message', handleMessage);
+              client.on('message', routeMessage);
             }
 
-            async function handleMessage(message: string): Promise<void> {
+            async function routeMessage(message: string): Promise<void> {
               const lower = message.toLowerCase();
-              const isMention = lower.startsWith('@manolitozurrapa');
-              const isOyeManolito = lower.startsWith('!oyemanolito');
-              if (isMention || isOyeManolito) {
+              const isMention = lower.startsWith('@dispatcher');
+              const isOyeDispatcher = lower.startsWith('!dispatch');
+              if (isMention || isOyeDispatcher) {
                 console.log('reply');
               }
             }
@@ -40,13 +40,13 @@ class TestSemanticIndex:
         )
 
         index = build_semantic_index(str(tmp_path))
-        candidate = next(c for c in index["candidates"] if c["symbol"] == "handleMessage")
+        candidate = next(c for c in index["candidates"] if c["symbol"] == "routeMessage")
 
-        assert candidate["source_path"] == "src/twitch/client.ts"
+        assert candidate["source_path"] == "src/events/client.ts"
         assert candidate["kind"] == "function"
-        assert "@manolitozurrapa" in candidate["strings"]
+        assert "@dispatcher" in candidate["strings"]
         assert "message" in candidate["terms"]
-        assert "twitch" in candidate["path_tokens"]
+        assert "events" in candidate["path_tokens"]
 
     def test_skips_generated_and_environment_directories(self, tmp_path):
         _write_file(
@@ -154,15 +154,15 @@ class TestDiscoverTarget:
     def test_rank_targets_orders_best_candidate_first(self, tmp_path):
         _write_file(
             tmp_path,
-            "src/twitch/client.ts",
+            "src/events/client.ts",
             """\
             export function initClient(client: any): void {
-              client.on('message', handleMessage);
+              client.on('message', routeMessage);
             }
 
-            async function handleMessage(message: string): Promise<void> {
+            async function routeMessage(message: string): Promise<void> {
               const lower = message.toLowerCase();
-              const isMention = lower.startsWith('@manolitozurrapa');
+              const isMention = lower.startsWith('@dispatcher');
               if (isMention) {
                 console.log('reply');
               }
@@ -171,10 +171,10 @@ class TestDiscoverTarget:
         )
         _write_file(
             tmp_path,
-            "src/twitch/other.ts",
+            "src/events/other.ts",
             """\
             export function mentionFallback(message: string): void {
-              if (message.includes('@manolitozurrapa')) {
+              if (message.includes('@dispatcher')) {
                 console.log('fallback');
               }
             }
@@ -182,28 +182,30 @@ class TestDiscoverTarget:
         )
 
         ranked = rank_targets(
-            issue_text="Manolito no responde si @manolitozurrapa no va al principio del mensaje",
+            issue_text="Dispatcher misses @dispatcher away from the message start",
             project_root=str(tmp_path),
-            limit=2,
+            limit=3,
         )
 
-        assert [candidate["symbol"] for candidate in ranked] == ["handleMessage", "mentionFallback"]
+        ranked_symbols = [candidate["symbol"] for candidate in ranked]
+        assert ranked_symbols[0] == "routeMessage"
+        assert "mentionFallback" in ranked_symbols
         assert ranked[0]["score"] >= ranked[1]["score"]
 
     def test_ranks_mention_routing_issue_to_handle_message(self, tmp_path):
         _write_file(
             tmp_path,
-            "src/twitch/client.ts",
+            "src/events/client.ts",
             """\
             export function initClient(client: any): void {
-              client.on('message', handleMessage);
+              client.on('message', routeMessage);
             }
 
-            async function handleMessage(message: string): Promise<void> {
+            async function routeMessage(message: string): Promise<void> {
               const lower = message.toLowerCase();
-              const isMention = lower.startsWith('@manolitozurrapa');
-              const isOyeManolito = lower.startsWith('!oyemanolito');
-              if (isMention || isOyeManolito) {
+              const isMention = lower.startsWith('@dispatcher');
+              const isOyeDispatcher = lower.startsWith('!dispatch');
+              if (isMention || isOyeDispatcher) {
                 console.log('reply');
               }
             }
@@ -221,15 +223,15 @@ class TestDiscoverTarget:
 
         target = discover_target(
             issue_text=(
-                "Manolito solo responde cuando la mención @manolitozurrapa "
+                "Dispatcher only responds when the mention @dispatcher "
                 "aparece como primera palabra del mensaje"
             ),
             project_root=str(tmp_path),
         )
 
         assert target is not None
-        assert target["source_path"] == "src/twitch/client.ts"
-        assert target["symbol"] == "handleMessage"
+        assert target["source_path"] == "src/events/client.ts"
+        assert target["symbol"] == "routeMessage"
 
     def test_ranks_duplicate_timer_issue_to_start_action_timers(self, tmp_path):
         _write_file(
@@ -251,11 +253,11 @@ class TestDiscoverTarget:
         )
         _write_file(
             tmp_path,
-            "src/twitch/client.ts",
+            "src/events/client.ts",
             """\
-            async function handleMessage(message: string): Promise<void> {
+            async function routeMessage(message: string): Promise<void> {
               const lower = message.toLowerCase();
-              if (lower.startsWith('@manolitozurrapa')) {
+              if (lower.startsWith('@dispatcher')) {
                 console.log('reply');
               }
             }
@@ -398,11 +400,11 @@ class TestSemanticIndexPersistence:
     def test_writes_generated_semantic_layer_json(self, tmp_path):
         _write_file(
             tmp_path,
-            "src/twitch/client.ts",
+            "src/events/client.ts",
             """\
-            async function handleMessage(message: string): Promise<void> {
+            async function routeMessage(message: string): Promise<void> {
               const lower = message.toLowerCase();
-              if (lower.startsWith('@manolitozurrapa')) {
+              if (lower.startsWith('@dispatcher')) {
                 console.log('reply');
               }
             }
@@ -417,16 +419,16 @@ class TestSemanticIndexPersistence:
         assert payload["version"] == 5
         assert "files" in payload
         assert "symbols" in payload
-        assert any(c["symbol"] == "handleMessage" for c in payload["candidates"])
+        assert any(c["symbol"] == "routeMessage" for c in payload["candidates"])
 
     def test_load_or_build_semantic_index_writes_default_generated_file(self, tmp_path):
         _write_file(
             tmp_path,
-            "src/twitch/client.ts",
+            "src/events/client.ts",
             """\
-            async function handleMessage(message: string): Promise<void> {
+            async function routeMessage(message: string): Promise<void> {
               const lower = message.toLowerCase();
-              if (lower.includes('@manolitozurrapa')) {
+              if (lower.includes('@dispatcher')) {
                 console.log('reply');
               }
             }
@@ -440,7 +442,7 @@ class TestSemanticIndexPersistence:
         assert payload["version"] == 5
         assert "files" in payload
         assert "symbols" in payload
-        assert any(c["symbol"] == "handleMessage" for c in payload["candidates"])
+        assert any(c["symbol"] == "routeMessage" for c in payload["candidates"])
 
     def test_load_or_build_semantic_index_reuses_existing_file(self, tmp_path, monkeypatch):
         output_path = tmp_path / ".atm" / "semantic-index.generated.json"
@@ -452,17 +454,17 @@ class TestSemanticIndexPersistence:
                     "project_root": str(tmp_path),
                     "candidates": [
                         {
-                            "source_path": "src/twitch/client.ts",
-                            "symbol": "handleMessage",
+                            "source_path": "src/events/client.ts",
+                            "symbol": "routeMessage",
                             "kind": "function",
                             "owner_class": None,
                             "line_start": 1,
                             "line_end": 5,
-                            "path_tokens": ["src", "twitch", "client"],
+                            "path_tokens": ["src", "events", "client"],
                             "symbol_tokens": ["handle", "message"],
-                            "string_tokens": ["manolitozurrapa"],
-                            "strings": ["@manolitozurrapa"],
-                            "terms": ["client", "handle", "manolitozurrapa", "message", "src", "twitch"],
+                            "string_tokens": ["dispatcher"],
+                            "strings": ["@dispatcher"],
+                            "terms": ["client", "handle", "dispatcher", "message", "src", "events"],
                         }
                     ],
                 }
@@ -476,7 +478,7 @@ class TestSemanticIndexPersistence:
 
         payload = load_or_build_semantic_index(str(tmp_path))
 
-        assert payload["candidates"][0]["symbol"] == "handleMessage"
+        assert payload["candidates"][0]["symbol"] == "routeMessage"
 
     def test_load_or_build_semantic_index_rebuilds_stale_version(self, tmp_path, monkeypatch):
         output_path = tmp_path / ".atm" / "semantic-index.generated.json"

@@ -27,9 +27,9 @@ def _tool_call_response(call_id: str, name: str, arguments: str) -> dict:
 def test_has_contract_evidence_matches_model_facing_contract_text():
     issue_text = """
     ## Callback contract
-    tmi.js calls resub handlers with:
+    @example/event-bus calls renewal handlers with:
     ```
-    resub(channel, username, months, message, userstate, methods)
+    renewal(channel, username, months, message, eventPayload, methods)
     ```
     """
 
@@ -37,27 +37,27 @@ def test_has_contract_evidence_matches_model_facing_contract_text():
 
 
 def test_reporter_hypothesis_and_callback_registration_do_not_block_contract_lookup():
-    issue_text = """Bug: handleResub reports 0 months
+    issue_text = """Bug: processRenewal reports 0 months
 
 ## Symptom
-The bot reports 0 months for cumulative resubs.
+The bot reports 0 months for cumulative renewals.
 
 ## Root cause
-tmi.js emits resub(channel, username, months, message, userstate, methods), but
-handleResub only accepts three params and must read
-userstate['msg-param-cumulative-months'].
+@example/event-bus emits renewal(channel, username, months, message, eventPayload, methods), but
+processRenewal only accepts three params and must read
+eventPayload['event-total-count'].
 
 ## Expected behavior
 The bot should report cumulative subscription months.
 """
     contract = parse_issue_contract(issue_text)
     episode = {
-        "callback_registrations": [{"line": 115, "text": "client.on('resub', handleResub)"}],
+        "callback_registrations": [{"line": 115, "text": "client.on('renewal', processRenewal)"}],
         "cookbook_text": (
             "### Callback Contract Evidence\n"
-            "- line 115: `client.on('resub', handleResub)`\n"
+            "- line 115: `client.on('renewal', processRenewal)`\n"
             "### Source Edits\n"
-            "export function handleResub(...)\n"
+            "export function processRenewal(...)\n"
         ),
     }
 
@@ -66,12 +66,12 @@ The bot should report cumulative subscription months.
 
 def test_dependency_backed_callback_fact_counts_as_contract_evidence():
     episode = {
-        "callback_registrations": [{"line": 115, "text": "client.on('resub', handleResub)"}],
+        "callback_registrations": [{"line": 115, "text": "client.on('renewal', processRenewal)"}],
         "cookbook_text": (
             "### Callback Contract Evidence\n"
-            "- line 115: `client.on('resub', handleResub)`\n"
-            "- tmi.js source emits `resub(channel, username, streakMonths, msg, tags, methods)`.\n"
-            "- The third argument is `streakMonths`, derived from `tags['msg-param-streak-months']`.\n"
+            "- line 115: `client.on('renewal', processRenewal)`\n"
+            "- @example/event-bus source emits `renewal(channel, username, retryCount, msg, tags, methods)`.\n"
+            "- The third argument is `retryCount`, derived from `tags['event-retry-count']`.\n"
         ),
     }
 
@@ -114,7 +114,7 @@ def test_reactive_test_feedback_reopens_dependency_contract_lookup_gate(tmp_path
     result = runtime.run_agent_loop(
         messages=[],
         episode=None,
-        issue_text="callback contract: use userstate",
+        issue_text="callback contract: use eventPayload",
         config=config,
         workdir=str(tmp_path),
         log_path=str(tmp_path / "log.jsonl"),
@@ -162,7 +162,7 @@ def test_permission_mode_blocks_tool_before_declared_intent(tmp_path):
                         "id": "call_1",
                         "function": {
                             "name": "read_file",
-                            "arguments": '{"path": "src/twitch/client.ts"}',
+                            "arguments": '{"path": "src/events/client.ts"}',
                         },
                     }],
                 },
@@ -174,7 +174,7 @@ def test_permission_mode_blocks_tool_before_declared_intent(tmp_path):
 
     result = runtime.run_agent_loop(
         messages=[],
-        episode={"source_file": "src/twitch/client.ts", "test_file": "src/twitch/client.test.ts"},
+        episode={"source_file": "src/events/client.ts", "test_file": "src/events/client.test.ts"},
         issue_text="bug text",
         config=config,
         workdir=str(tmp_path),
@@ -209,12 +209,12 @@ def test_permission_mode_blocks_tool_before_declared_intent(tmp_path):
 
 
 def test_permission_mode_preserves_write_grant_across_informational_harness_answer(tmp_path):
-    source = tmp_path / "src" / "twitch" / "client.ts"
+    source = tmp_path / "src" / "events" / "client.ts"
     source.parent.mkdir(parents=True)
     source.write_text(
         "\n".join([
-            "export function handleResub(channel: string, username: string, months: number): void {",
-            "  logger.event('resub', { username, months });",
+            "export function processRenewal(channel: string, username: string, months: number): void {",
+            "  logger.event('renewal', { username, months });",
             "}",
         ])
     )
@@ -228,17 +228,17 @@ def test_permission_mode_preserves_write_grant_across_informational_harness_answ
         "runner": {"command": "bun test"},
     }
     episode = {
-        "source_file": "src/twitch/client.ts",
-        "test_file": "src/twitch/handleResub.test.ts",
-        "target_symbol": "handleResub",
+        "source_file": "src/events/client.ts",
+        "test_file": "src/events/processRenewal.test.ts",
+        "target_symbol": "processRenewal",
         "cookbook_text": "\n".join([
             "### Callback Contract Evidence",
-            "- line 115: `client.on('resub', handleResub)`",
-            "- tmi.js source emits `resub(channel, username, streakMonths, msg, tags, methods)`.",
+            "- line 115: `client.on('renewal', processRenewal)`",
+            "- @example/event-bus source emits `renewal(channel, username, retryCount, msg, tags, methods)`.",
             "",
             "### Source Edits (apply before testing)",
             "OLD:",
-            "function handleResub(channel: string, username: string, months: number): void {",
+            "function processRenewal(channel: string, username: string, months: number): void {",
         ]),
     }
     calls = []
@@ -251,10 +251,10 @@ def test_permission_mode_preserves_write_grant_across_informational_harness_answ
             arguments = '{"intent": "write_regression_test", "question": "create test"}'
         elif len(calls) == 2:
             tool_name = "ask_harness"
-            arguments = '{"intent": "understand_contract", "question": "What does handleResub do internally?"}'
+            arguments = '{"intent": "understand_contract", "question": "What does processRenewal do internally?"}'
         else:
             tool_name = "create_file"
-            arguments = '{"path": "src/twitch/handleResub.test.ts", "content": "test"}'
+            arguments = '{"path": "src/events/processRenewal.test.ts", "content": "test"}'
         return {
             "choices": [{
                 "message": {
@@ -296,13 +296,13 @@ def test_permission_mode_preserves_write_grant_across_informational_harness_answ
     )
 
     assert executed == [
-        ("create_file", {"path": "src/twitch/handleResub.test.ts", "content": "test"})
+        ("create_file", {"path": "src/events/processRenewal.test.ts", "content": "test"})
     ]
 
 
 def test_permission_mode_accepts_target_challenge_and_reroutes_episode(tmp_path):
     wrong_source = tmp_path / "src" / "personality" / "sanitizer.ts"
-    right_source = tmp_path / "src" / "twitch" / "client.ts"
+    right_source = tmp_path / "src" / "events" / "client.ts"
     wrong_source.parent.mkdir(parents=True)
     right_source.parent.mkdir(parents=True)
     wrong_source.write_text(
@@ -315,7 +315,7 @@ def test_permission_mode_accepts_target_challenge_and_reroutes_episode(tmp_path)
     right_source.write_text(
         "\n".join([
             "export function handleMention(message: string): boolean {",
-            "  return message.includes('@manolitozurrapa');",
+            "  return message.includes('@dispatcher');",
             "}",
         ])
     )
@@ -356,7 +356,7 @@ def test_permission_mode_accepts_target_challenge_and_reroutes_episode(tmp_path)
                                 "name": "ask_harness",
                                 "arguments": (
                                     '{"intent": "challenge_target", '
-                                    '"source_file": "src/twitch/client.ts", '
+                                    '"source_file": "src/events/client.ts", '
                                     '"target_symbol": "handleMention", '
                                     '"evidence": "rg found mention dispatch in client.ts; sanitizer only trims text"}'
                                 ),
@@ -370,7 +370,7 @@ def test_permission_mode_accepts_target_challenge_and_reroutes_episode(tmp_path)
             }
         if len(calls) == 2:
             assert "TARGET CHALLENGE ACCEPTED" in messages[-1]["content"]
-            assert "src/twitch/client.ts::handleMention" in messages[-1]["content"]
+            assert "src/events/client.ts::handleMention" in messages[-1]["content"]
             return {
                 "choices": [{
                     "message": {
@@ -388,7 +388,7 @@ def test_permission_mode_accepts_target_challenge_and_reroutes_episode(tmp_path)
                 "usage": {},
                 "timings": {},
             }
-        assert "src/twitch/handleMention.test.ts" in messages[-1]["content"]
+        assert "src/events/handleMention.test.ts" in messages[-1]["content"]
         assert "src/personality/wrapUserMessage.test.ts" not in messages[-1]["content"]
         return {
             "choices": [{
@@ -399,7 +399,7 @@ def test_permission_mode_accepts_target_challenge_and_reroutes_episode(tmp_path)
                         "function": {
                             "name": "create_file",
                             "arguments": (
-                                '{"path": "src/twitch/handleMention.test.ts", '
+                                '{"path": "src/events/handleMention.test.ts", '
                                 '"content": "test"}'
                             ),
                         },
@@ -414,7 +414,7 @@ def test_permission_mode_accepts_target_challenge_and_reroutes_episode(tmp_path)
     runtime.run_agent_loop(
         messages=[],
         episode=episode,
-        issue_text="@manolitozurrapa solo funciona al principio del mensaje",
+        issue_text="@dispatcher only matches at the beginning of the message",
         config=config,
         workdir=str(tmp_path),
         log_path=str(tmp_path / "log.jsonl"),
@@ -437,19 +437,19 @@ def test_permission_mode_accepts_target_challenge_and_reroutes_episode(tmp_path)
     )
 
     assert executed == [
-        ("create_file", {"path": "src/twitch/handleMention.test.ts", "content": "test"})
+        ("create_file", {"path": "src/events/handleMention.test.ts", "content": "test"})
     ]
     assert any(
         event == "target_challenge_accepted"
         and data["from"] == "src/personality/sanitizer.ts::wrapUserMessage"
-        and data["to"] == "src/twitch/client.ts::handleMention"
+        and data["to"] == "src/events/client.ts::handleMention"
         for event, data in logged
     )
 
 
 def test_challenge_target_reroutes_without_permission_mode(tmp_path):
     wrong_source = tmp_path / "src" / "personality" / "sanitizer.ts"
-    right_source = tmp_path / "src" / "twitch" / "client.ts"
+    right_source = tmp_path / "src" / "events" / "client.ts"
     wrong_source.parent.mkdir(parents=True)
     right_source.parent.mkdir(parents=True)
     wrong_source.write_text(
@@ -462,7 +462,7 @@ def test_challenge_target_reroutes_without_permission_mode(tmp_path):
     right_source.write_text(
         "\n".join([
             "export function handleMention(message: string): boolean {",
-            "  return message.includes('@manolitozurrapa');",
+            "  return message.includes('@dispatcher');",
             "}",
         ])
     )
@@ -498,19 +498,19 @@ def test_challenge_target_reroutes_without_permission_mode(tmp_path):
                 "ask_harness",
                 (
                     '{"intent": "challenge_target", '
-                    '"source_file": "src/twitch/client.ts", '
+                    '"source_file": "src/events/client.ts", '
                     '"target_symbol": "handleMention", '
                     '"evidence": "rg found mention dispatch in client.ts; sanitizer only trims text"}'
                 ),
             )
         assert "TARGET CHALLENGE ACCEPTED" in messages[-1]["content"]
-        assert "src/twitch/client.ts::handleMention" in messages[-1]["content"]
+        assert "src/events/client.ts::handleMention" in messages[-1]["content"]
         return {"choices": [{"message": {"content": "blocked"}, "finish_reason": "stop"}], "usage": {}, "timings": {}}
 
     runtime.run_agent_loop(
         messages=[],
         episode=episode,
-        issue_text="@manolitozurrapa solo funciona al principio del mensaje",
+        issue_text="@dispatcher only matches at the beginning of the message",
         config=config,
         workdir=str(tmp_path),
         log_path=str(tmp_path / "log.jsonl"),
@@ -536,7 +536,7 @@ def test_challenge_target_reroutes_without_permission_mode(tmp_path):
     assert any(
         event == "target_challenge_accepted"
         and data["from"] == "src/personality/sanitizer.ts::wrapUserMessage"
-        and data["to"] == "src/twitch/client.ts::handleMention"
+        and data["to"] == "src/events/client.ts::handleMention"
         for event, data in logged
     )
 
@@ -595,7 +595,7 @@ def test_other_ask_harness_intents_without_permission_mode_get_useful_message(tm
 
 def test_permission_mode_requires_challenge_after_search_finds_better_target(tmp_path):
     wrong_source = tmp_path / "src" / "personality" / "sanitizer.ts"
-    right_source = tmp_path / "src" / "twitch" / "client.ts"
+    right_source = tmp_path / "src" / "events" / "client.ts"
     wrong_source.parent.mkdir(parents=True)
     right_source.parent.mkdir(parents=True)
     wrong_source.write_text(
@@ -607,9 +607,9 @@ def test_permission_mode_requires_challenge_after_search_finds_better_target(tmp
     )
     right_source.write_text(
         "\n".join([
-            "export function handleMessage(message: string): boolean {",
+            "export function routeMessage(message: string): boolean {",
             "  const lower = message.toLowerCase();",
-            "  const isMention = lower.startsWith('@manolitozurrapa');",
+            "  const isMention = lower.startsWith('@dispatcher');",
             "  return isMention;",
             "}",
         ])
@@ -646,17 +646,17 @@ def test_permission_mode_requires_challenge_after_search_finds_better_target(tmp
                 '{"intent": "understand_contract", "question": "search mention dispatch"}',
             )
         if len(calls) == 2:
-            return _tool_call_response("call_2", "rg", '{"pattern": "@manolitozurrapa"}')
+            return _tool_call_response("call_2", "rg", '{"pattern": "@dispatcher"}')
         if len(calls) == 3:
             return _tool_call_response("call_3", "ask_harness", '{"intent": "write_regression_test"}')
         assert "TARGET CHALLENGE REQUIRED" in messages[-1]["content"]
-        assert '"target_symbol": "handleMessage"' in messages[-1]["content"]
+        assert '"target_symbol": "routeMessage"' in messages[-1]["content"]
         return {"choices": [{"message": {"content": "blocked"}, "finish_reason": "stop"}], "usage": {}, "timings": {}}
 
     runtime.run_agent_loop(
         messages=[],
         episode=episode,
-        issue_text="@manolitozurrapa solo funciona al principio del mensaje",
+        issue_text="@dispatcher only matches at the beginning of the message",
         config=config,
         workdir=str(tmp_path),
         log_path=str(tmp_path / "log.jsonl"),
@@ -664,7 +664,7 @@ def test_permission_mode_requires_challenge_after_search_finds_better_target(tmp
         log=lambda event, data: logged.append((event, data)),
         chat=chat,
         execute_tool=lambda name, _args: (
-            "./src/twitch/client.ts:3:  const isMention = lower.startsWith('@manolitozurrapa');"
+            "./src/events/client.ts:3:  const isMention = lower.startsWith('@dispatcher');"
             if name == "rg"
             else "OK"
         ),
@@ -684,8 +684,8 @@ def test_permission_mode_requires_challenge_after_search_finds_better_target(tmp
 
     assert any(
         event == "target_challenge_hint"
-        and data["source_file"] == "src/twitch/client.ts"
-        and data["target_symbol"] == "handleMessage"
+        and data["source_file"] == "src/events/client.ts"
+        and data["target_symbol"] == "routeMessage"
         for event, data in logged
     )
     assert any(
@@ -697,7 +697,7 @@ def test_permission_mode_requires_challenge_after_search_finds_better_target(tmp
 
 def test_permission_mode_requires_challenge_after_read_file_finds_better_target(tmp_path):
     wrong_source = tmp_path / "src" / "personality" / "sanitizer.ts"
-    right_source = tmp_path / "src" / "twitch" / "client.ts"
+    right_source = tmp_path / "src" / "events" / "client.ts"
     wrong_source.parent.mkdir(parents=True)
     right_source.parent.mkdir(parents=True)
     wrong_source.write_text(
@@ -713,8 +713,8 @@ def test_permission_mode_requires_challenge_after_read_file_finds_better_target(
             "  logger.info('ready');",
             "}",
             "",
-            "export async function handleMessage(message: string): Promise<void> {",
-            "  const botMention = '@manolitozurrapa';",
+            "export async function routeMessage(message: string): Promise<void> {",
+            "  const botMention = '@dispatcher';",
             "  const isMention = message.startsWith(botMention);",
             "  if (isMention) await respond(message);",
             "}",
@@ -748,18 +748,18 @@ def test_permission_mode_requires_challenge_after_read_file_finds_better_target(
         if len(calls) == 1:
             return _tool_call_response("call_1", "ask_harness", '{"intent": "understand_contract"}')
         if len(calls) == 2:
-            return _tool_call_response("call_2", "read_file", '{"path": "src/twitch/client.ts"}')
+            return _tool_call_response("call_2", "read_file", '{"path": "src/events/client.ts"}')
         if len(calls) == 3:
             return _tool_call_response("call_3", "ask_harness", '{"intent": "write_regression_test"}')
         assert "TARGET CHALLENGE REQUIRED" in messages[-1]["content"]
-        assert '"source_file": "src/twitch/client.ts"' in messages[-1]["content"]
-        assert '"target_symbol": "handleMessage"' in messages[-1]["content"]
+        assert '"source_file": "src/events/client.ts"' in messages[-1]["content"]
+        assert '"target_symbol": "routeMessage"' in messages[-1]["content"]
         return {"choices": [{"message": {"content": "blocked"}, "finish_reason": "stop"}], "usage": {}, "timings": {}}
 
     runtime.run_agent_loop(
         messages=[],
         episode=episode,
-        issue_text="@manolitozurrapa solo funciona al principio del mensaje",
+        issue_text="@dispatcher only matches at the beginning of the message",
         config=config,
         workdir=str(tmp_path),
         log_path=str(tmp_path / "log.jsonl"),
@@ -783,8 +783,8 @@ def test_permission_mode_requires_challenge_after_read_file_finds_better_target(
 
     assert any(
         event == "target_challenge_hint"
-        and data["source_file"] == "src/twitch/client.ts"
-        and data["target_symbol"] == "handleMessage"
+        and data["source_file"] == "src/events/client.ts"
+        and data["target_symbol"] == "routeMessage"
         for event, data in logged
     )
     assert any(
@@ -799,7 +799,7 @@ def test_repeated_target_challenge_denials_give_up(tmp_path):
     # TARGET CHALLENGE REQUIRED instruction for the same candidate, the loop must
     # give up cleanly instead of burning every step (cf. gpt_oss 94-denial exhaustion).
     wrong_source = tmp_path / "src" / "personality" / "sanitizer.ts"
-    right_source = tmp_path / "src" / "twitch" / "client.ts"
+    right_source = tmp_path / "src" / "events" / "client.ts"
     wrong_source.parent.mkdir(parents=True)
     right_source.parent.mkdir(parents=True)
     wrong_source.write_text(
@@ -811,9 +811,9 @@ def test_repeated_target_challenge_denials_give_up(tmp_path):
     )
     right_source.write_text(
         "\n".join([
-            "export function handleMessage(message: string): boolean {",
+            "export function routeMessage(message: string): boolean {",
             "  const lower = message.toLowerCase();",
-            "  const isMention = lower.startsWith('@manolitozurrapa');",
+            "  const isMention = lower.startsWith('@dispatcher');",
             "  return isMention;",
             "}",
         ])
@@ -853,12 +853,12 @@ def test_repeated_target_challenge_denials_give_up(tmp_path):
                 "ask_harness",
                 '{"intent": "understand_contract", "question": "search mention dispatch"}',
             )
-        return _tool_call_response(f"call_{len(calls)}", "rg", '{"pattern": "@manolitozurrapa"}')
+        return _tool_call_response(f"call_{len(calls)}", "rg", '{"pattern": "@dispatcher"}')
 
     result = runtime.run_agent_loop(
         messages=[],
         episode=episode,
-        issue_text="@manolitozurrapa solo funciona al principio del mensaje",
+        issue_text="@dispatcher only matches at the beginning of the message",
         config=config,
         workdir=str(tmp_path),
         log_path=str(tmp_path / "log.jsonl"),
@@ -866,7 +866,7 @@ def test_repeated_target_challenge_denials_give_up(tmp_path):
         log=lambda event, data: logged.append((event, data)),
         chat=chat,
         execute_tool=lambda name, _args: (
-            "./src/twitch/client.ts:3:  const isMention = lower.startsWith('@manolitozurrapa');"
+            "./src/events/client.ts:3:  const isMention = lower.startsWith('@dispatcher');"
             if name == "rg"
             else "OK"
         ),
@@ -899,7 +899,7 @@ def test_target_challenge_does_not_apply_mechanical_edits_before_enrichment(tmp_
     source.write_text(
         "\n".join([
             "function handleMention(message: string): boolean {",
-            "  return message.includes('@manolitozurrapa');",
+            "  return message.includes('@dispatcher');",
             "}",
         ])
     )
@@ -1198,7 +1198,7 @@ def test_state_reviewer_blocks_tool_execution_and_returns_scoped_feedback(tmp_pa
                             "id": "call_1",
                             "function": {
                                 "name": "run_command",
-                                "arguments": '{"command": "rg \\"SubMethods\\" node_modules/tmi.js"}',
+                                "arguments": '{"command": "rg \\"DeliveryOptions\\" node_modules/@example/event-bus"}',
                             },
                         }],
                     },
@@ -1222,7 +1222,7 @@ def test_state_reviewer_blocks_tool_execution_and_returns_scoped_feedback(tmp_pa
     result = runtime.run_agent_loop(
         messages=[],
         episode=None,
-        issue_text="callback contract: use userstate['msg-param-cumulative-months']",
+        issue_text="callback contract: use eventPayload['event-total-count']",
         config=config,
         workdir=str(tmp_path),
         log_path=str(tmp_path / "log.jsonl"),
@@ -1261,9 +1261,9 @@ def test_intent_router_answers_known_runner_fact_as_tool_result(tmp_path):
             test_command="bun test",
             typecheck_command="bun run typecheck",
             test_api_import='import { beforeEach, describe, expect, mock, test } from "bun:test";',
-            recommended_test_file="src/twitch/handleResub.test.ts",
-            source_file="src/twitch/client.ts",
-            target_symbol="handleResub",
+            recommended_test_file="src/events/processRenewal.test.ts",
+            source_file="src/events/client.ts",
+            target_symbol="processRenewal",
             nearby_tests=[],
             symbol_tests=[],
         )
@@ -1331,7 +1331,7 @@ def test_intent_router_answers_known_runner_fact_as_tool_result(tmp_path):
         chat=chat,
         execute_tool=lambda name, args: executed.append((name, args)) or (
             "[Reactive typecheck]\n"
-            "src/twitch/handleResub.test.ts(4,1): error TS2304: Cannot find name 'describe'.\n"
+            "src/events/processRenewal.test.ts(4,1): error TS2304: Cannot find name 'describe'.\n"
         ),
         truncate=lambda value: value,
         is_llm_timeout_error=lambda _exc: False,

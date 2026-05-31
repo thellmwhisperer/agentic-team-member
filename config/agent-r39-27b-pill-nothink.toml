@@ -69,9 +69,9 @@ tsc errors are structured: the first line names the conflict, indented continuat
 lines explain the cause. The exact type you need appears in those continuation lines.
 
   error TS2345: Argument of type 'string' is not assignable to
-    parameter of type 'SubUserstate'.
+    parameter of type 'RenewalEventPayload'.
 
-The target type is SubUserstate. Import it: `import type { SubUserstate } from 'tmi.js'`
+The target type is RenewalEventPayload. Import it: `import type { RenewalEventPayload } from '@example/event-bus'`
 
 ### Type narrowing
 When a variable has a union type, narrow it before using type-specific operations:

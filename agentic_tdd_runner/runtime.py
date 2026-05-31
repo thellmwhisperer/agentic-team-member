@@ -18,7 +18,6 @@ def has_contract_evidence(issue_text: str, episode: dict | None) -> bool:
         for token in (
             "callback contract",
             "signature",
-            "userstate[",
         )
     )
     if issue_has_contract:
@@ -36,7 +35,6 @@ def has_contract_evidence(issue_text: str, episode: dict | None) -> bool:
             "event signature",
             "framework signature",
             "dependency contract",
-            "userstate[",
         )
     )
 

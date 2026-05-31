@@ -28,17 +28,17 @@ class LogHumanizerTest(unittest.TestCase):
         )
         self.assertEqual(
             format_message(
-                "    PERMISSION GRANTED: create or edit only `src/twitch/handleMessage.test.ts`."
+                "    PERMISSION GRANTED: create or edit only `src/events/routeMessage.test.ts`."
             ),
-            ["  permission granted: create or edit only `src/twitch/handleMessage.test.ts`."],
+            ["  permission granted: create or edit only `src/events/routeMessage.test.ts`."],
         )
 
     def test_formats_target_challenge(self):
         self.assertEqual(
             format_message(
-                "    TARGET CHALLENGE ACCEPTED: rerouted from `a::b` to `src/twitch/client.ts::handleMessage`."
+                "    TARGET CHALLENGE ACCEPTED: rerouted from `a::b` to `src/events/client.ts::routeMessage`."
             ),
-            ["  target challenge accepted: rerouted from `a::b` to `src/twitch/client.ts::handleMessage`."],
+            ["  target challenge accepted: rerouted from `a::b` to `src/events/client.ts::routeMessage`."],
         )
 
     def test_drops_discovery_json_noise(self):

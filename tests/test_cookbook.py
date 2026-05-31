@@ -376,16 +376,16 @@ class TestMultiLineSignatureDetection:
 
             const logger = getLogger();
 
-            export function handleResub(
+            export function processRenewal(
               channel: string,
               username: string,
               months: number,
             ): void {
-              logger.event('resub', { username, months });
+              logger.event('renewal', { username, months });
               const response = 'hello';
             }
         """)
-        result = generate_cookbook("src/handler.ts", "handleResub", str(tmp_path))
+        result = generate_cookbook("src/handler.ts", "processRenewal", str(tmp_path))
         assert "mock.module(" in result
         assert "../logger" in result
         assert "logger" in result
@@ -396,17 +396,17 @@ class TestCookbookGuardrails:
 
     def test_warns_to_preserve_runtime_signature_before_testing(self, tmp_path):
         _write_file(tmp_path, "src/handler.ts", """\
-            import tmi from 'tmi.js';
+            import eventBus from '@example/event-bus';
 
-            let client: tmi.Client;
+            let client: EventBusClient;
 
-            client.on('resub', handleResub);
+            client.on('renewal', processRenewal);
 
-            function handleResub(channel: string, username: string, months: number): void {
+            function processRenewal(channel: string, username: string, months: number): void {
               client.say(channel, `${username} lleva ${months} meses`);
             }
         """)
-        result = generate_cookbook("src/handler.ts", "handleResub", str(tmp_path))
+        result = generate_cookbook("src/handler.ts", "processRenewal", str(tmp_path))
         assert "Do not change the target's runtime signature just to fit the test scaffold." in result
         assert "Write the first failing test against the real callable contract from source." in result
         assert "For callbacks, handlers, and framework listeners: preserve the production contract" in result
@@ -543,9 +543,9 @@ class TestBuildEpisodeContext:
         from agentic_tdd_runner.cookbook import build_episode_context
 
         _write_file(tmp_path, "src/handler.ts", """\
-            import tmi from 'tmi.js';
+            import eventBus from '@example/event-bus';
 
-            let client: tmi.Client;
+            let client: EventBusClient;
 
             function handle(channel: string): void {
               client.say(channel, 'ok');
@@ -609,15 +609,15 @@ class TestBuildEpisodeContext:
         from agentic_tdd_runner.cookbook import build_episode_context
 
         _write_file(tmp_path, "src/client.ts", """\
-            // handleResub: see related comment in callsite
+            // processRenewal: see related comment in callsite
             export class Client {
-              callsite() { this.handleResub(); }
-              handleResub(event: string) {
+              callsite() { this.processRenewal(); }
+              processRenewal(event: string) {
                 return event;
               }
             }
         """)
-        ctx = build_episode_context("src/client.ts", "handleResub", str(tmp_path))
+        ctx = build_episode_context("src/client.ts", "processRenewal", str(tmp_path))
         assert ctx["function_line_range"]["source"] == "fallback"
 
 
@@ -653,119 +653,107 @@ class TestCallbackContractGuidance:
     """Callback targets should carry deterministic registration evidence."""
 
     def test_includes_callback_registration_evidence(self, tmp_path):
-        _write_file(tmp_path, "src/twitch/client.ts", """\
-            import tmi from 'tmi.js';
+        _write_file(tmp_path, "src/events/processor.ts", """\
+            import { createQueue } from '@example/job-queue';
 
-            const client = new tmi.Client({});
+            const queue = createQueue();
 
-            function handleResub(channel: string, username: string, months: number): void {
-              client.say(channel, `${username}:${months}`);
+            function processJob(jobId: string, payload: unknown): void {
+              queue.ack(jobId, payload);
             }
 
-            client.on('resub', handleResub);
+            queue.on('job.completed', processJob);
         """)
-        result = generate_cookbook("src/twitch/client.ts", "handleResub", str(tmp_path))
+        result = generate_cookbook("src/events/processor.ts", "processJob", str(tmp_path))
 
         assert "### Callback Contract Evidence" in result
         assert "issue-provided callback contract" in result
         assert "Do not invent callback parameters" in result
-        assert "client.on('resub', handleResub)" in result
+        assert "queue.on('job.completed', processJob)" in result
         assert "TODO behavior" not in result
         assert "__todoValue" not in result
 
-    def test_derives_tmi_callback_contract_facts_from_installed_dependency(self, tmp_path):
-        _write_file(tmp_path, "src/twitch/client.ts", """\
-            import tmi from 'tmi.js';
+    def test_derives_callback_contract_facts_from_repo_profile(self, tmp_path):
+        _write_file(tmp_path, ".atm/profile.toml", """\
+            [profile]
+            schema_version = "repo-profile.v1"
 
-            const client = new tmi.Client({});
+            [[event_frameworks]]
+            id = "job-queue"
+            kind = "callback_event"
+            module = "@example/job-queue"
+            imports = ["@example/job-queue"]
+            registrations = ["on", "once"]
+            dependency_contract = "job-events"
 
-            function handleResub(channel: string, username: string, months: number): void {
-              client.say(channel, `${username}:${months}`);
-            }
-
-            client.on('resub', handleResub);
+            [[dependency_contracts]]
+            id = "job-events"
+            module = "@example/job-queue"
+            contract_mode = "inline"
+            import_specs = ["@example/job-queue"]
+            events = [
+              { name = "job.completed", args = ["jobId", "payload", "metadata"], arg_sources = { payload = "message.payload" } },
+            ]
         """)
-        _write_file(tmp_path, "node_modules/tmi.js/lib/client.js", """\
-            const streakMonths = ~~(tags['msg-param-streak-months'] || 0);
+        _write_file(tmp_path, "src/events/processor.ts", """\
+            import { createQueue } from '@example/job-queue';
 
-            switch(msgid) {
-              case 'resub':
-                this.emits([ 'resub', 'subanniversary' ], [
-                  [ channel, username, streakMonths, msg, tags, methods ]
-                ]);
-                break;
-            }
-        """)
-        _write_file(tmp_path, "node_modules/@types/tmi.js/index.d.ts", """\
-            interface Events {
-              resub(
-                channel: string,
-                username: string,
-                months: number,
-                message: string,
-                userstate: SubUserstate,
-                methods: SubMethods,
-              ): void;
+            const queue = createQueue();
+
+            function processJob(jobId: string, payload: unknown): void {
+              queue.ack(jobId, payload);
             }
 
-            interface SubUserstate {
-              "msg-param-cumulative-months"?: string | boolean | undefined;
-              "msg-param-streak-months"?: string | boolean | undefined;
-            }
+            queue.on('job.completed', processJob);
         """)
 
-        result = generate_cookbook("src/twitch/client.ts", "handleResub", str(tmp_path))
+        result = generate_cookbook("src/events/processor.ts", "processJob", str(tmp_path))
 
-        assert "tmi.js source emits `resub(channel, username, streakMonths, msg, tags, methods)`" in result
-        assert "Argument 3 is `streakMonths`" in result
-        assert "Argument 1 is `channel`" not in result
-        assert "Argument 6 is `methods`" not in result
-        assert "tmi.js type declarations expose `resub(channel: string, username: string, months: number, message: string, userstate: SubUserstate, methods: SubMethods)`" in result
-        assert "`msg-param-cumulative-months`" in result
-        assert "`msg-param-streak-months`" in result
+        assert "@example/job-queue source emits `job.completed(jobId, payload, metadata)`" in result
+        assert "Argument 2 is `payload`, derived from `message.payload`." in result
+        assert "Argument 1 is `jobId`" not in result
+        assert "Argument 3 is `metadata`" not in result
 
-    def test_derives_tmi_contract_facts_for_detected_event_not_literal(self, tmp_path):
-        _write_file(tmp_path, "src/twitch/client.ts", """\
-            import tmi from 'tmi.js';
+    def test_derives_profile_contract_facts_for_detected_event_not_literal(self, tmp_path):
+        _write_file(tmp_path, ".atm/profile.toml", """\
+            [profile]
+            schema_version = "repo-profile.v1"
 
-            const client = new tmi.Client({});
+            [[event_frameworks]]
+            id = "event-bus"
+            kind = "callback_event"
+            module = "@example/event-bus"
+            imports = ["@example/event-bus"]
+            registrations = ["on"]
+            dependency_contract = "event-bus-events"
 
-            function handleCheer(channel: string, userstate: ChatUserstate, message: string): void {
-              client.say(channel, message);
-            }
-
-            client.on('cheer', handleCheer);
+            [[dependency_contracts]]
+            id = "event-bus-events"
+            module = "@example/event-bus"
+            contract_mode = "inline"
+            import_specs = ["@example/event-bus"]
+            events = [
+              { name = "alert.created", args = ["alertId: string", "metadata: AlertMetadata", "message: string"], arg_sources = { metadata = "event.metadata" } },
+            ]
         """)
-        _write_file(tmp_path, "node_modules/tmi.js/lib/client.js", """\
-            switch(msgid) {
-              case 'cheer':
-                this.emits([ 'cheer' ], [
-                  [ channel, tags, message ]
-                ]);
-                break;
-            }
-        """)
-        _write_file(tmp_path, "node_modules/@types/tmi.js/index.d.ts", """\
-            interface Events {
-              cheer(
-                channel: string,
-                userstate: ChatUserstate,
-                message: string,
-              ): void;
+        _write_file(tmp_path, "src/events/alerts.ts", """\
+            import { createBus } from '@example/event-bus';
+
+            const bus = createBus();
+
+            function handleAlert(alertId: string, metadata: AlertMetadata, message: string): void {
+              bus.publish(alertId, message);
             }
 
-            interface ChatUserstate {
-              "bits"?: string | undefined;
-              "user-id"?: string | undefined;
-            }
+            bus.on('alert.created', handleAlert);
         """)
 
-        result = generate_cookbook("src/twitch/client.ts", "handleCheer", str(tmp_path))
+        result = generate_cookbook("src/events/alerts.ts", "handleAlert", str(tmp_path))
 
-        assert "client.on('cheer', handleCheer)" in result
-        assert "tmi.js source emits `cheer(channel, tags, message)`" in result
-        assert "tmi.js type declarations expose `cheer(channel: string, userstate: ChatUserstate, message: string)`" in result
-        assert "`user-id`" in result
+        assert "bus.on('alert.created', handleAlert)" in result
+        assert "@example/event-bus source emits `alert.created(alertId, metadata, message)`" in result
+        assert "@example/event-bus type declarations expose `alert.created(alertId: string, metadata: AlertMetadata, message: string)`" in result
+        assert "Argument 2 is `metadata`, derived from `event.metadata`." in result
 
     def test_callback_guidance_preserves_types_and_fallbacks(self, tmp_path):
         _write_file(tmp_path, "src/events.ts", """\

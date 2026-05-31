@@ -11,7 +11,7 @@ from agentic_tdd_runner.prompts import (
 def _episode(**overrides):
     episode = {
         "source_file": "src/client.ts",
-        "target_symbol": "handleResub",
+        "target_symbol": "processRenewal",
         "test_file": "src/client.test.ts",
         "function_line_range": {"start": 12, "end": 34, "source": "definition"},
         "cookbook_text": "## Cookbook\nUse real imports.\n",
@@ -41,7 +41,7 @@ def test_build_initial_messages_with_episode_injects_cookbook_and_phase1_prompt(
 
     assert messages[0]["content"] == "system prompt\n\n## Cookbook\nUse real imports.\n"
     assert "Read src/client.ts" in messages[1]["content"]
-    assert "Start with `handleResub` (lines 12-34) as a discovery hypothesis" in messages[1]["content"]
+    assert "Start with `processRenewal` (lines 12-34) as a discovery hypothesis" in messages[1]["content"]
     assert "src/client.test.ts" in messages[1]["content"]
     assert "Bug:\nbug text" in messages[1]["content"]
 
@@ -75,7 +75,7 @@ def test_build_phase1_message_omits_fallback_line_hint():
     )
 
     assert "lines 1-2" not in msg
-    assert "Start with `handleResub` as a discovery hypothesis" in msg
+    assert "Start with `processRenewal` as a discovery hypothesis" in msg
 
 
 def test_build_phase1_message_includes_ranked_candidates_when_available():

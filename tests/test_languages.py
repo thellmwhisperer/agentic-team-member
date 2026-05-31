@@ -6,7 +6,7 @@ class TestRegistry:
     """Language plugins are registered and resolved by file extension."""
 
     def test_typescript_resolved_by_ts_extension(self):
-        lang = get_language("src/twitch/client.ts")
+        lang = get_language("src/events/client.ts")
         assert lang.name == "typescript"
 
     def test_python_resolved_by_py_extension(self):
@@ -55,7 +55,7 @@ class TestTypeScriptPlugin:
 
     def test_test_path_convention(self):
         lang = get_language("file.ts")
-        assert lang.test_path("src/twitch/client.ts", "handleResub") == "src/twitch/handleResub.test.ts"
+        assert lang.test_path("src/events/client.ts", "processRenewal") == "src/events/processRenewal.test.ts"
 
     def test_setter_name_convention(self):
         lang = get_language("file.ts")
@@ -63,24 +63,24 @@ class TestTypeScriptPlugin:
 
     def test_seam_setter_uses_type_annotation(self):
         lang = get_language("file.ts")
-        assignment = {"kind": "let", "type_annotation": "tmi.Client", "rhs": "undefined", "line": "let client: tmi.Client;"}
+        assignment = {"kind": "let", "type_annotation": "EventBusClient", "rhs": "undefined", "line": "let client: EventBusClient;"}
         result = lang.render_seam_setter("client", assignment)
         assert "any" not in result
-        assert "tmi.Client" in result
+        assert "EventBusClient" in result
 
     def test_seam_setter_uses_pick_for_observed_members(self):
         lang = get_language("file.ts")
         assignment = {
             "kind": "let",
-            "type_annotation": "tmi.Client",
+            "type_annotation": "EventBusClient",
             "observed_members": ["say"],
             "rhs": "undefined",
-            "line": "let client: tmi.Client;",
+            "line": "let client: EventBusClient;",
         }
         result = lang.render_seam_setter("client", assignment)
         assert "any" not in result
-        assert "value: Pick<tmi.Client, 'say'>" in result
-        assert "client = value as tmi.Client;" in result
+        assert "value: Pick<EventBusClient, 'say'>" in result
+        assert "client = value as EventBusClient;" in result
 
     def test_seam_setter_without_annotation_uses_typeof(self):
         lang = get_language("file.ts")
@@ -100,11 +100,11 @@ class TestTypeScriptImportPath:
 
     def test_sibling_import_path(self):
         lang = get_language("file.ts")
-        assert lang.import_path("src/twitch/handleResub.test.ts", "src/twitch/client.ts") == "./client"
+        assert lang.import_path("src/events/processRenewal.test.ts", "src/events/client.ts") == "./client"
 
     def test_parent_import_path(self):
         lang = get_language("file.ts")
-        assert lang.import_path("src/twitch/test.ts", "src/logger.ts") == "../logger"
+        assert lang.import_path("src/events/test.ts", "src/logger.ts") == "../logger"
 
 
 class TestPythonImportPath:
