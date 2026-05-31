@@ -794,6 +794,105 @@ def test_permission_mode_requires_challenge_after_read_file_finds_better_target(
     )
 
 
+def test_repeated_target_challenge_denials_give_up(tmp_path):
+    # Disobedience-loop guard: if the model keeps acting without obeying the
+    # TARGET CHALLENGE REQUIRED instruction for the same candidate, the loop must
+    # give up cleanly instead of burning every step (cf. gpt_oss 94-denial exhaustion).
+    wrong_source = tmp_path / "src" / "personality" / "sanitizer.ts"
+    right_source = tmp_path / "src" / "twitch" / "client.ts"
+    wrong_source.parent.mkdir(parents=True)
+    right_source.parent.mkdir(parents=True)
+    wrong_source.write_text(
+        "\n".join([
+            "export function wrapUserMessage(input: string): string {",
+            "  return input.trim();",
+            "}",
+        ])
+    )
+    right_source.write_text(
+        "\n".join([
+            "export function handleMessage(message: string): boolean {",
+            "  const lower = message.toLowerCase();",
+            "  const isMention = lower.startsWith('@manolitozurrapa');",
+            "  return isMention;",
+            "}",
+        ])
+    )
+    config = {
+        "agent": {
+            "max_steps": 20,
+            "non_apply_step_warning_threshold": 0,
+            "permission_driven": True,
+            "max_target_challenge_denials": 3,
+        },
+        "verification": {"max_rejections": 1},
+        "runner": {
+            "framework": "bun:test",
+            "command": "bun test",
+            "test_file_patterns": ["*.test.ts"],
+            "exclude_dirs": [],
+        },
+    }
+    episode = {
+        "source_file": "src/personality/sanitizer.ts",
+        "test_file": "src/personality/wrapUserMessage.test.ts",
+        "target_symbol": "wrapUserMessage",
+        "cookbook_text": "",
+    }
+    calls = []
+    logged = []
+
+    def chat(messages):
+        # 1) declare intent to earn a read grant; 2) rg seeds the target-challenge
+        # hint; 3+) the model refuses to obey the challenge and keeps doing rg, so
+        # every later turn is denied with TARGET CHALLENGE REQUIRED.
+        calls.append(messages[-1]["content"] if messages else "")
+        if len(calls) == 1:
+            return _tool_call_response(
+                "call_1",
+                "ask_harness",
+                '{"intent": "understand_contract", "question": "search mention dispatch"}',
+            )
+        return _tool_call_response(f"call_{len(calls)}", "rg", '{"pattern": "@manolitozurrapa"}')
+
+    result = runtime.run_agent_loop(
+        messages=[],
+        episode=episode,
+        issue_text="@manolitozurrapa solo funciona al principio del mensaje",
+        config=config,
+        workdir=str(tmp_path),
+        log_path=str(tmp_path / "log.jsonl"),
+        emit=lambda _msg: None,
+        log=lambda event, data: logged.append((event, data)),
+        chat=chat,
+        execute_tool=lambda name, _args: (
+            "./src/twitch/client.ts:3:  const isMention = lower.startsWith('@manolitozurrapa');"
+            if name == "rg"
+            else "OK"
+        ),
+        truncate=lambda value: value,
+        is_llm_timeout_error=lambda _exc: False,
+        tool_applied_status=lambda _name, _result: None,
+        tool_loop_signature=lambda _name, _args: None,
+        tool_loop_warning_message=lambda signature: f"loop {signature}",
+        non_apply_step_warning_message=lambda count: f"non-apply {count}",
+        is_test_pass=lambda _name, _args: False,
+        is_test_file_path=lambda path: path.endswith(".test.ts"),
+        find_test_file=lambda _content: None,
+        verify_red_green=lambda *_args, **_kwargs: (False, "unused"),
+        run_quality_checks=lambda _test_file: (True, "unused"),
+        create_pr=lambda *_args, **_kwargs: None,
+    )
+
+    # Gave up cleanly (exit 1) WITHOUT exhausting all 20 steps.
+    assert result == 1
+    assert len(calls) <= 6
+    assert any(
+        event == "give_up" and data.get("reason") == "target_challenge_disobedience"
+        for event, data in logged
+    )
+
+
 def test_target_challenge_does_not_apply_mechanical_edits_before_enrichment(tmp_path, monkeypatch):
     source = tmp_path / "src" / "client.ts"
     source.parent.mkdir(parents=True)

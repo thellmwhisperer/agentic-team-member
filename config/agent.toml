@@ -3,6 +3,9 @@ max_steps = 50
 max_tool_output = 8000
 non_apply_step_warning_threshold = 5
 permission_driven = false
+# Give up cleanly after this many consecutive TARGET CHALLENGE REQUIRED denials
+# for the same candidate (model ignoring the reroute instruction). 0 disables.
+max_target_challenge_denials = 3
 
 [llm]
 url = "http://127.0.0.1:11435/v1/chat/completions"
