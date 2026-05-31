@@ -768,7 +768,7 @@ class TestCallbackContractGuidance:
         assert "`user-id`" in result
 
     def test_callback_guidance_preserves_types_and_fallbacks(self, tmp_path):
-        _write_file(tmp_path, "src/client.ts", """\
+        _write_file(tmp_path, "src/events.ts", """\
             const bus = { on(_event: string, _handler: unknown) {} };
 
             function handleEvent(count: number): number {
@@ -777,7 +777,7 @@ class TestCallbackContractGuidance:
 
             bus.on('event', handleEvent);
         """)
-        result = generate_cookbook("src/client.ts", "handleEvent", str(tmp_path))
+        result = generate_cookbook("src/events.ts", "handleEvent", str(tmp_path))
 
         assert "use exported framework types or overloads" in result
         assert "empty-object casts" in result
@@ -793,59 +793,59 @@ class TestRepoProfileGuidance:
     def test_includes_profile_mock_recipe_for_import_time_dependency(self, tmp_path):
         _write_file(tmp_path, ".atm/profile.toml", """\
             [[dependency_contracts]]
-            id = "stream-summary"
-            module = "src/managers/stream-summary.ts"
+            id = "metrics-reporter"
+            module = "src/metrics/reporter.ts"
             contract_mode = "inline"
-            import_specs = ["../managers/stream-summary"]
+            import_specs = ["../metrics/reporter"]
             side_effect = "import_time"
-            reason = "creates LLM provider at import time"
-            mock_recipe = "stream-summary"
+            reason = "opens reporter connection at import time"
+            mock_recipe = "metrics-reporter"
 
             [[mock_recipes]]
-            id = "stream-summary"
-            module = "../managers/stream-summary"
+            id = "metrics-reporter"
+            module = "../metrics/reporter"
             exports = [
-              { name = "getStreamSummaryManager", kind = "function_returns_object", members = ["startPeriodicSummaries", "trackResub", "generateFinalSummary"] },
-              { name = "StreamSummaryManager", kind = "class", members = ["startPeriodicSummaries", "generateFinalSummary"] },
+              { name = "getMetricsReporter", kind = "function_returns_object", members = ["start", "record", "flush"] },
+              { name = "MetricsReporter", kind = "class", members = ["start", "flush"] },
             ]
 
             [[import_expectations]]
-            module = "../managers/stream-summary"
-            expected_imports = ["../managers/stream-summary"]
+            module = "../metrics/reporter"
+            expected_imports = ["../metrics/reporter"]
             applies_when = "import_time_dependency"
         """)
-        _write_file(tmp_path, "src/twitch/client.ts", """\
-            import { getStreamSummaryManager } from '../managers/stream-summary';
+        _write_file(tmp_path, "src/jobs/processor.ts", """\
+            import { getMetricsReporter } from '../metrics/reporter';
 
-            const summary = getStreamSummaryManager();
+            const reporter = getMetricsReporter();
 
-            export function handleMessage(channel: string, message: string): void {
-              summary.trackResub(channel, message);
+            export function processJob(jobId: string): void {
+              reporter.record(jobId);
             }
         """)
 
-        result = generate_cookbook("src/twitch/client.ts", "handleMessage", str(tmp_path))
+        result = generate_cookbook("src/jobs/processor.ts", "processJob", str(tmp_path))
 
         assert "### Repo Profile Facts" in result
-        assert "dependency `stream-summary` imports `src/managers/stream-summary.ts`" in result
+        assert "dependency `metrics-reporter` imports `src/metrics/reporter.ts`" in result
         assert "contract mode `inline`" in result
         assert "side effect `import_time`" in result
-        assert "mock `../managers/stream-summary` before importing the target" in result
-        assert "getStreamSummaryManager (function_returns_object: startPeriodicSummaries, trackResub, generateFinalSummary)" in result
-        assert "import expectation for module `../managers/stream-summary`" in result
+        assert "mock `../metrics/reporter` before importing the target" in result
+        assert "getMetricsReporter (function_returns_object: start, record, flush)" in result
+        assert "import expectation for module `../metrics/reporter`" in result
 
     def test_includes_profile_declared_event_framework(self, tmp_path):
         _write_file(tmp_path, ".atm/profile.toml", """\
             [[event_frameworks]]
             id = "event-bus"
             kind = "callback_event"
-            module = "@acme/event-bus"
-            imports = ["@acme/event-bus"]
+            module = "@example/event-bus"
+            imports = ["@example/event-bus"]
             registrations = ["on", "subscribe"]
             contract_sources = ["docs/event-bus.md"]
         """)
-        _write_file(tmp_path, "src/client.ts", """\
-            import { bus } from '@acme/event-bus';
+        _write_file(tmp_path, "src/events.ts", """\
+            import { bus } from '@example/event-bus';
 
             export function handleEvent(message: string): string {
               return message.trim();
@@ -854,9 +854,9 @@ class TestRepoProfileGuidance:
             bus.subscribe('message', handleEvent);
         """)
 
-        result = generate_cookbook("src/client.ts", "handleEvent", str(tmp_path))
+        result = generate_cookbook("src/events.ts", "handleEvent", str(tmp_path))
 
-        assert "event framework `event-bus` (callback_event) uses module `@acme/event-bus`" in result
+        assert "event framework `event-bus` (callback_event) uses module `@example/event-bus`" in result
         assert "registrations: on, subscribe" in result
         assert "contract sources: docs/event-bus.md" in result
 
@@ -870,13 +870,13 @@ class TestRepoProfileGuidance:
             for index in range(14)
         )
         _write_file(tmp_path, ".atm/profile.toml", expectations)
-        _write_file(tmp_path, "src/client.ts", """\
+        _write_file(tmp_path, "src/events.ts", """\
             export function handleEvent(message: string): string {
               return message.trim();
             }
         """)
 
-        result = generate_cookbook("src/client.ts", "handleEvent", str(tmp_path))
+        result = generate_cookbook("src/events.ts", "handleEvent", str(tmp_path))
 
         assert "import expectation for module `pkg-0`" in result
         assert "import expectation for module `pkg-13`" in result
