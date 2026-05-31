@@ -18,7 +18,24 @@ _TEST_ONLY_SETTER_EXPORT_RE = re.compile(
     r"|\bexport\s*\{[^}\n]*__set[A-Za-z0-9_]*ForTests[^}\n]*\}"
 )
 _SOURCE_TEXT_READ_RE = re.compile(
-    r"\b(?:[A-Za-z_$][\w$]*\.)?readFileSync\s*\(\s*['\"](?:\./)?src/[^'\"]+\.(?:ts|tsx|js|jsx|py)['\"]"
+    r"\b(?:[A-Za-z_$][\w$]*\.)?readFileSync\s*\(\s*['\"]"
+    r"(?P<path>(?:\./)?src/[^'\"]+\.(?:ts|tsx|js|jsx|py))['\"]"
+)
+_SOURCE_TEXT_READ_ALLOWED_DIRS = {
+    "__fixtures__",
+    "__mocks__",
+    "assets",
+    "fixtures",
+    "mocks",
+    "testdata",
+    "test-data",
+}
+_SOURCE_TEXT_READ_ALLOWED_FILE_MARKERS = (
+    ".fixture.",
+    ".mock.",
+    ".spec.",
+    ".stub.",
+    ".test.",
 )
 
 
@@ -355,7 +372,7 @@ def detect_source_text_assertion_test(file_path: str, file_text: str) -> str | N
     hits = [
         f"  {file_path}:{line_no} `{line.strip()[:120]}`"
         for line_no, line in enumerate(file_text.splitlines(), 1)
-        if _SOURCE_TEXT_READ_RE.search(line)
+        if _reads_production_source_text(line)
     ]
     if not hits:
         return None
@@ -365,6 +382,25 @@ def detect_source_text_assertion_test(file_path: str, file_text: str) -> str | N
         "import and exercise the real behavior instead of asserting implementation strings.\n"
         f"{sample}"
     )
+
+
+def _reads_production_source_text(line: str) -> bool:
+    return any(
+        _is_production_source_text_path(match.group("path"))
+        for match in _SOURCE_TEXT_READ_RE.finditer(line)
+    )
+
+
+def _is_production_source_text_path(path: str) -> bool:
+    normalized = PurePosixPath(path.removeprefix("./")).as_posix()
+    parts = PurePosixPath(normalized).parts
+    if len(parts) < 2 or parts[0] != "src":
+        return False
+    lowered_dirs = {part.lower() for part in parts[1:-1]}
+    if lowered_dirs & _SOURCE_TEXT_READ_ALLOWED_DIRS:
+        return False
+    filename = parts[-1].lower()
+    return not any(marker in filename for marker in _SOURCE_TEXT_READ_ALLOWED_FILE_MARKERS)
 
 
 def is_obvious_setup_line(line: str) -> bool:

@@ -1442,6 +1442,59 @@ class TestRunQualityChecks:
         assert "reads production source text" in msg
         assert "import and exercise the real behavior" in msg
 
+    def test_allows_tests_that_read_fixture_source_text(self, tmp_path, monkeypatch):
+        self._setup_repo(tmp_path, monkeypatch)
+        (tmp_path / "src" / "__fixtures__").mkdir()
+        (tmp_path / "src" / "__fixtures__" / "case.ts").write_text(
+            "export const fixture = 'includes';\n"
+        )
+        (tmp_path / "src" / "file.test.ts").write_text(
+            "import { expect, test } from 'bun:test';\n"
+            "import fs from 'fs';\n"
+            "test('fixture text', () => {\n"
+            "  const source = fs.readFileSync('src/__fixtures__/case.ts', 'utf-8');\n"
+            "  expect(source).toContain('includes');\n"
+            "});\n"
+        )
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "quality": {
+                "enabled": True, "max_fix_rounds": 3,
+                "typescript": {"checks": [], "forbidden": []},
+            },
+            "timeouts": {"tool_execution": 10},
+            "prompt": {"quality_failed": "FAIL: {details}"},
+        })
+
+        ok, msg = run_quality_checks("src/file.test.ts")
+
+        assert ok is True
+        assert msg == "All quality checks passed"
+
+    def test_allows_tests_that_read_test_source_text(self, tmp_path, monkeypatch):
+        self._setup_repo(tmp_path, monkeypatch)
+        (tmp_path / "src" / "file.spec.ts").write_text("test('existing spec', () => {});\n")
+        (tmp_path / "src" / "file.test.ts").write_text(
+            "import { expect, test } from 'bun:test';\n"
+            "import fs from 'fs';\n"
+            "test('test helper text', () => {\n"
+            "  const source = fs.readFileSync('src/file.spec.ts', 'utf-8');\n"
+            "  expect(source).toContain('existing spec');\n"
+            "});\n"
+        )
+        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", {
+            "quality": {
+                "enabled": True, "max_fix_rounds": 3,
+                "typescript": {"checks": [], "forbidden": []},
+            },
+            "timeouts": {"tool_execution": 10},
+            "prompt": {"quality_failed": "FAIL: {details}"},
+        })
+
+        ok, msg = run_quality_checks("src/file.test.ts")
+
+        assert ok is True
+        assert msg == "All quality checks passed"
+
     def test_passes_clean_code(self, tmp_path, monkeypatch):
         self._setup_repo(tmp_path, monkeypatch)
         (tmp_path / "src" / "file.test.ts").write_text("const x: number = 1;")
