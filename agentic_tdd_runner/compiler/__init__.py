@@ -24,7 +24,6 @@ from agentic_tdd_runner.compiler.renderer import (
 )
 from agentic_tdd_runner.compiler.edits import (
     _build_pre_test_source_edits,
-    _realize_generated_test_seams,
     _setter_name,
 )
 
