@@ -338,6 +338,15 @@ file = "tools.json"
 recommended = ["rg"]
 ```
 
+### Repository profile
+
+Optional stable repository facts live in `.atm/profile.toml`. Use this file
+for callback frameworks, dependency contracts, import expectations, and mock
+recipes that are true for the repository across issues. ATM does not infer
+dependency-specific callback contracts from installed packages when no profile
+is present; repos that need those contracts should add a profile before relying
+on issue-only discovery.
+
 The `[prompt]` and `[verification]` sections (system prompt template, max
 rejection rounds) are also configurable — see `config/agent.toml` for the full
 reference.

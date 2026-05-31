@@ -40,7 +40,7 @@ def test_reporter_hypothesis_and_callback_registration_do_not_block_contract_loo
     issue_text = """Bug: processRenewal reports 0 months
 
 ## Symptom
-The bot reports 0 months for cumulative renewals.
+The service reports 0 months for cumulative renewals.
 
 ## Root cause
 @example/event-bus emits renewal(channel, username, months, message, eventPayload, methods), but
@@ -48,14 +48,14 @@ processRenewal only accepts three params and must read
 eventPayload['event-total-count'].
 
 ## Expected behavior
-The bot should report cumulative subscription months.
+The service should report cumulative subscription months.
 """
     contract = parse_issue_contract(issue_text)
     episode = {
-        "callback_registrations": [{"line": 115, "text": "client.on('renewal', processRenewal)"}],
+        "callback_registrations": [{"line": 115, "text": "eventBus.on('renewal', processRenewal)"}],
         "cookbook_text": (
             "### Callback Contract Evidence\n"
-            "- line 115: `client.on('renewal', processRenewal)`\n"
+            "- line 115: `eventBus.on('renewal', processRenewal)`\n"
             "### Source Edits\n"
             "export function processRenewal(...)\n"
         ),
@@ -66,10 +66,10 @@ The bot should report cumulative subscription months.
 
 def test_dependency_backed_callback_fact_counts_as_contract_evidence():
     episode = {
-        "callback_registrations": [{"line": 115, "text": "client.on('renewal', processRenewal)"}],
+        "callback_registrations": [{"line": 115, "text": "eventBus.on('renewal', processRenewal)"}],
         "cookbook_text": (
             "### Callback Contract Evidence\n"
-            "- line 115: `client.on('renewal', processRenewal)`\n"
+            "- line 115: `eventBus.on('renewal', processRenewal)`\n"
             "- @example/event-bus source emits `renewal(channel, username, retryCount, msg, tags, methods)`.\n"
             "- The third argument is `retryCount`, derived from `tags['event-retry-count']`.\n"
         ),
@@ -162,7 +162,7 @@ def test_permission_mode_blocks_tool_before_declared_intent(tmp_path):
                         "id": "call_1",
                         "function": {
                             "name": "read_file",
-                            "arguments": '{"path": "src/events/client.ts"}',
+                            "arguments": '{"path": "src/http/router.ts"}',
                         },
                     }],
                 },
@@ -174,7 +174,7 @@ def test_permission_mode_blocks_tool_before_declared_intent(tmp_path):
 
     result = runtime.run_agent_loop(
         messages=[],
-        episode={"source_file": "src/events/client.ts", "test_file": "src/events/client.test.ts"},
+        episode={"source_file": "src/http/router.ts", "test_file": "src/http/router.test.ts"},
         issue_text="bug text",
         config=config,
         workdir=str(tmp_path),
@@ -209,7 +209,7 @@ def test_permission_mode_blocks_tool_before_declared_intent(tmp_path):
 
 
 def test_permission_mode_preserves_write_grant_across_informational_harness_answer(tmp_path):
-    source = tmp_path / "src" / "events" / "client.ts"
+    source = tmp_path / "src" / "events" / "router.ts"
     source.parent.mkdir(parents=True)
     source.write_text(
         "\n".join([
@@ -228,7 +228,7 @@ def test_permission_mode_preserves_write_grant_across_informational_harness_answ
         "runner": {"command": "bun test"},
     }
     episode = {
-        "source_file": "src/events/client.ts",
+        "source_file": "src/http/router.ts",
         "test_file": "src/events/processRenewal.test.ts",
         "target_symbol": "processRenewal",
         "cookbook_text": "\n".join([
@@ -301,21 +301,21 @@ def test_permission_mode_preserves_write_grant_across_informational_harness_answ
 
 
 def test_permission_mode_accepts_target_challenge_and_reroutes_episode(tmp_path):
-    wrong_source = tmp_path / "src" / "personality" / "sanitizer.ts"
-    right_source = tmp_path / "src" / "events" / "client.ts"
+    wrong_source = tmp_path / "src" / "text" / "sanitizer.ts"
+    right_source = tmp_path / "src" / "http" / "router.ts"
     wrong_source.parent.mkdir(parents=True)
     right_source.parent.mkdir(parents=True)
     wrong_source.write_text(
         "\n".join([
-            "export function wrapUserMessage(input: string): string {",
+            "export function sanitizeText(input: string): string {",
             "  return input.trim();",
             "}",
         ])
     )
     right_source.write_text(
         "\n".join([
-            "export function handleMention(message: string): boolean {",
-            "  return message.includes('@dispatcher');",
+            "export function matchEndpoint(path: string): boolean {",
+            "  return path.includes('/api/tasks');",
             "}",
         ])
     )
@@ -334,9 +334,9 @@ def test_permission_mode_accepts_target_challenge_and_reroutes_episode(tmp_path)
         },
     }
     episode = {
-        "source_file": "src/personality/sanitizer.ts",
-        "test_file": "src/personality/wrapUserMessage.test.ts",
-        "target_symbol": "wrapUserMessage",
+        "source_file": "src/text/sanitizer.ts",
+        "test_file": "src/text/sanitizeText.test.ts",
+        "target_symbol": "sanitizeText",
         "cookbook_text": "",
     }
     calls = []
@@ -356,9 +356,9 @@ def test_permission_mode_accepts_target_challenge_and_reroutes_episode(tmp_path)
                                 "name": "ask_harness",
                                 "arguments": (
                                     '{"intent": "challenge_target", '
-                                    '"source_file": "src/events/client.ts", '
-                                    '"target_symbol": "handleMention", '
-                                    '"evidence": "rg found mention dispatch in client.ts; sanitizer only trims text"}'
+                                    '"source_file": "src/http/router.ts", '
+                                    '"target_symbol": "matchEndpoint", '
+                                    '"evidence": "rg found endpoint routing in router.ts; sanitizer only trims text"}'
                                 ),
                             },
                         }],
@@ -370,7 +370,7 @@ def test_permission_mode_accepts_target_challenge_and_reroutes_episode(tmp_path)
             }
         if len(calls) == 2:
             assert "TARGET CHALLENGE ACCEPTED" in messages[-1]["content"]
-            assert "src/events/client.ts::handleMention" in messages[-1]["content"]
+            assert "src/http/router.ts::matchEndpoint" in messages[-1]["content"]
             return {
                 "choices": [{
                     "message": {
@@ -388,8 +388,8 @@ def test_permission_mode_accepts_target_challenge_and_reroutes_episode(tmp_path)
                 "usage": {},
                 "timings": {},
             }
-        assert "src/events/handleMention.test.ts" in messages[-1]["content"]
-        assert "src/personality/wrapUserMessage.test.ts" not in messages[-1]["content"]
+        assert "src/http/matchEndpoint.test.ts" in messages[-1]["content"]
+        assert "src/text/sanitizeText.test.ts" not in messages[-1]["content"]
         return {
             "choices": [{
                 "message": {
@@ -399,7 +399,7 @@ def test_permission_mode_accepts_target_challenge_and_reroutes_episode(tmp_path)
                         "function": {
                             "name": "create_file",
                             "arguments": (
-                                '{"path": "src/events/handleMention.test.ts", '
+                                '{"path": "src/http/matchEndpoint.test.ts", '
                                 '"content": "test"}'
                             ),
                         },
@@ -414,7 +414,7 @@ def test_permission_mode_accepts_target_challenge_and_reroutes_episode(tmp_path)
     runtime.run_agent_loop(
         messages=[],
         episode=episode,
-        issue_text="@dispatcher only matches at the beginning of the message",
+        issue_text="/api/tasks only matches at the beginning of the request path",
         config=config,
         workdir=str(tmp_path),
         log_path=str(tmp_path / "log.jsonl"),
@@ -437,32 +437,32 @@ def test_permission_mode_accepts_target_challenge_and_reroutes_episode(tmp_path)
     )
 
     assert executed == [
-        ("create_file", {"path": "src/events/handleMention.test.ts", "content": "test"})
+        ("create_file", {"path": "src/http/matchEndpoint.test.ts", "content": "test"})
     ]
     assert any(
         event == "target_challenge_accepted"
-        and data["from"] == "src/personality/sanitizer.ts::wrapUserMessage"
-        and data["to"] == "src/events/client.ts::handleMention"
+        and data["from"] == "src/text/sanitizer.ts::sanitizeText"
+        and data["to"] == "src/http/router.ts::matchEndpoint"
         for event, data in logged
     )
 
 
 def test_challenge_target_reroutes_without_permission_mode(tmp_path):
-    wrong_source = tmp_path / "src" / "personality" / "sanitizer.ts"
-    right_source = tmp_path / "src" / "events" / "client.ts"
+    wrong_source = tmp_path / "src" / "text" / "sanitizer.ts"
+    right_source = tmp_path / "src" / "http" / "router.ts"
     wrong_source.parent.mkdir(parents=True)
     right_source.parent.mkdir(parents=True)
     wrong_source.write_text(
         "\n".join([
-            "export function wrapUserMessage(input: string): string {",
+            "export function sanitizeText(input: string): string {",
             "  return input.trim();",
             "}",
         ])
     )
     right_source.write_text(
         "\n".join([
-            "export function handleMention(message: string): boolean {",
-            "  return message.includes('@dispatcher');",
+            "export function matchEndpoint(path: string): boolean {",
+            "  return path.includes('/api/tasks');",
             "}",
         ])
     )
@@ -481,9 +481,9 @@ def test_challenge_target_reroutes_without_permission_mode(tmp_path):
         },
     }
     episode = {
-        "source_file": "src/personality/sanitizer.ts",
-        "test_file": "src/personality/wrapUserMessage.test.ts",
-        "target_symbol": "wrapUserMessage",
+        "source_file": "src/text/sanitizer.ts",
+        "test_file": "src/text/sanitizeText.test.ts",
+        "target_symbol": "sanitizeText",
         "cookbook_text": "",
     }
     calls = []
@@ -498,19 +498,19 @@ def test_challenge_target_reroutes_without_permission_mode(tmp_path):
                 "ask_harness",
                 (
                     '{"intent": "challenge_target", '
-                    '"source_file": "src/events/client.ts", '
-                    '"target_symbol": "handleMention", '
-                    '"evidence": "rg found mention dispatch in client.ts; sanitizer only trims text"}'
+                    '"source_file": "src/http/router.ts", '
+                    '"target_symbol": "matchEndpoint", '
+                    '"evidence": "rg found endpoint routing in router.ts; sanitizer only trims text"}'
                 ),
             )
         assert "TARGET CHALLENGE ACCEPTED" in messages[-1]["content"]
-        assert "src/events/client.ts::handleMention" in messages[-1]["content"]
+        assert "src/http/router.ts::matchEndpoint" in messages[-1]["content"]
         return {"choices": [{"message": {"content": "blocked"}, "finish_reason": "stop"}], "usage": {}, "timings": {}}
 
     runtime.run_agent_loop(
         messages=[],
         episode=episode,
-        issue_text="@dispatcher only matches at the beginning of the message",
+        issue_text="/api/tasks only matches at the beginning of the request path",
         config=config,
         workdir=str(tmp_path),
         log_path=str(tmp_path / "log.jsonl"),
@@ -535,8 +535,8 @@ def test_challenge_target_reroutes_without_permission_mode(tmp_path):
     assert executed == []
     assert any(
         event == "target_challenge_accepted"
-        and data["from"] == "src/personality/sanitizer.ts::wrapUserMessage"
-        and data["to"] == "src/events/client.ts::handleMention"
+        and data["from"] == "src/text/sanitizer.ts::sanitizeText"
+        and data["to"] == "src/http/router.ts::matchEndpoint"
         for event, data in logged
     )
 
@@ -594,23 +594,23 @@ def test_other_ask_harness_intents_without_permission_mode_get_useful_message(tm
 
 
 def test_permission_mode_requires_challenge_after_search_finds_better_target(tmp_path):
-    wrong_source = tmp_path / "src" / "personality" / "sanitizer.ts"
-    right_source = tmp_path / "src" / "events" / "client.ts"
+    wrong_source = tmp_path / "src" / "text" / "sanitizer.ts"
+    right_source = tmp_path / "src" / "http" / "router.ts"
     wrong_source.parent.mkdir(parents=True)
     right_source.parent.mkdir(parents=True)
     wrong_source.write_text(
         "\n".join([
-            "export function wrapUserMessage(input: string): string {",
+            "export function sanitizeText(input: string): string {",
             "  return input.trim();",
             "}",
         ])
     )
     right_source.write_text(
         "\n".join([
-            "export function routeMessage(message: string): boolean {",
-            "  const lower = message.toLowerCase();",
-            "  const isMention = lower.startsWith('@dispatcher');",
-            "  return isMention;",
+            "export function routeRequest(path: string): boolean {",
+            "  const lower = path.toLowerCase();",
+            "  const isEndpoint = lower.startsWith('/api/tasks');",
+            "  return isEndpoint;",
             "}",
         ])
     )
@@ -629,9 +629,9 @@ def test_permission_mode_requires_challenge_after_search_finds_better_target(tmp
         },
     }
     episode = {
-        "source_file": "src/personality/sanitizer.ts",
-        "test_file": "src/personality/wrapUserMessage.test.ts",
-        "target_symbol": "wrapUserMessage",
+        "source_file": "src/text/sanitizer.ts",
+        "test_file": "src/text/sanitizeText.test.ts",
+        "target_symbol": "sanitizeText",
         "cookbook_text": "",
     }
     calls = []
@@ -643,20 +643,20 @@ def test_permission_mode_requires_challenge_after_search_finds_better_target(tmp
             return _tool_call_response(
                 "call_1",
                 "ask_harness",
-                '{"intent": "understand_contract", "question": "search mention dispatch"}',
+                '{"intent": "understand_contract", "question": "search endpoint routing"}',
             )
         if len(calls) == 2:
-            return _tool_call_response("call_2", "rg", '{"pattern": "@dispatcher"}')
+            return _tool_call_response("call_2", "rg", '{"pattern": "/api/tasks"}')
         if len(calls) == 3:
             return _tool_call_response("call_3", "ask_harness", '{"intent": "write_regression_test"}')
         assert "TARGET CHALLENGE REQUIRED" in messages[-1]["content"]
-        assert '"target_symbol": "routeMessage"' in messages[-1]["content"]
+        assert '"target_symbol": "routeRequest"' in messages[-1]["content"]
         return {"choices": [{"message": {"content": "blocked"}, "finish_reason": "stop"}], "usage": {}, "timings": {}}
 
     runtime.run_agent_loop(
         messages=[],
         episode=episode,
-        issue_text="@dispatcher only matches at the beginning of the message",
+        issue_text="/api/tasks only matches at the beginning of the request path",
         config=config,
         workdir=str(tmp_path),
         log_path=str(tmp_path / "log.jsonl"),
@@ -664,7 +664,7 @@ def test_permission_mode_requires_challenge_after_search_finds_better_target(tmp
         log=lambda event, data: logged.append((event, data)),
         chat=chat,
         execute_tool=lambda name, _args: (
-            "./src/events/client.ts:3:  const isMention = lower.startsWith('@dispatcher');"
+            "./src/http/router.ts:3:  const isEndpoint = lower.startsWith('/api/tasks');"
             if name == "rg"
             else "OK"
         ),
@@ -684,8 +684,8 @@ def test_permission_mode_requires_challenge_after_search_finds_better_target(tmp
 
     assert any(
         event == "target_challenge_hint"
-        and data["source_file"] == "src/events/client.ts"
-        and data["target_symbol"] == "routeMessage"
+        and data["source_file"] == "src/http/router.ts"
+        and data["target_symbol"] == "routeRequest"
         for event, data in logged
     )
     assert any(
@@ -696,13 +696,13 @@ def test_permission_mode_requires_challenge_after_search_finds_better_target(tmp
 
 
 def test_permission_mode_requires_challenge_after_read_file_finds_better_target(tmp_path):
-    wrong_source = tmp_path / "src" / "personality" / "sanitizer.ts"
-    right_source = tmp_path / "src" / "events" / "client.ts"
+    wrong_source = tmp_path / "src" / "text" / "sanitizer.ts"
+    right_source = tmp_path / "src" / "http" / "router.ts"
     wrong_source.parent.mkdir(parents=True)
     right_source.parent.mkdir(parents=True)
     wrong_source.write_text(
         "\n".join([
-            "export function wrapUserMessage(input: string): string {",
+            "export function sanitizeText(input: string): string {",
             "  return input.trim();",
             "}",
         ])
@@ -713,10 +713,10 @@ def test_permission_mode_requires_challenge_after_read_file_finds_better_target(
             "  logger.info('ready');",
             "}",
             "",
-            "export async function routeMessage(message: string): Promise<void> {",
-            "  const botMention = '@dispatcher';",
-            "  const isMention = message.startsWith(botMention);",
-            "  if (isMention) await respond(message);",
+            "export async function routeRequest(path: string): Promise<void> {",
+            "  const targetPath = '/api/tasks';",
+            "  const isEndpoint = path.startsWith(targetPath);",
+            "  if (isEndpoint) await respond(path);",
             "}",
         ])
     )
@@ -735,9 +735,9 @@ def test_permission_mode_requires_challenge_after_read_file_finds_better_target(
         },
     }
     episode = {
-        "source_file": "src/personality/sanitizer.ts",
-        "test_file": "src/personality/wrapUserMessage.test.ts",
-        "target_symbol": "wrapUserMessage",
+        "source_file": "src/text/sanitizer.ts",
+        "test_file": "src/text/sanitizeText.test.ts",
+        "target_symbol": "sanitizeText",
         "cookbook_text": "",
     }
     calls = []
@@ -748,18 +748,18 @@ def test_permission_mode_requires_challenge_after_read_file_finds_better_target(
         if len(calls) == 1:
             return _tool_call_response("call_1", "ask_harness", '{"intent": "understand_contract"}')
         if len(calls) == 2:
-            return _tool_call_response("call_2", "read_file", '{"path": "src/events/client.ts"}')
+            return _tool_call_response("call_2", "read_file", '{"path": "src/http/router.ts"}')
         if len(calls) == 3:
             return _tool_call_response("call_3", "ask_harness", '{"intent": "write_regression_test"}')
         assert "TARGET CHALLENGE REQUIRED" in messages[-1]["content"]
-        assert '"source_file": "src/events/client.ts"' in messages[-1]["content"]
-        assert '"target_symbol": "routeMessage"' in messages[-1]["content"]
+        assert '"source_file": "src/http/router.ts"' in messages[-1]["content"]
+        assert '"target_symbol": "routeRequest"' in messages[-1]["content"]
         return {"choices": [{"message": {"content": "blocked"}, "finish_reason": "stop"}], "usage": {}, "timings": {}}
 
     runtime.run_agent_loop(
         messages=[],
         episode=episode,
-        issue_text="@dispatcher only matches at the beginning of the message",
+        issue_text="/api/tasks only matches at the beginning of the request path",
         config=config,
         workdir=str(tmp_path),
         log_path=str(tmp_path / "log.jsonl"),
@@ -783,8 +783,8 @@ def test_permission_mode_requires_challenge_after_read_file_finds_better_target(
 
     assert any(
         event == "target_challenge_hint"
-        and data["source_file"] == "src/events/client.ts"
-        and data["target_symbol"] == "routeMessage"
+        and data["source_file"] == "src/http/router.ts"
+        and data["target_symbol"] == "routeRequest"
         for event, data in logged
     )
     assert any(
@@ -798,23 +798,23 @@ def test_repeated_target_challenge_denials_give_up(tmp_path):
     # Disobedience-loop guard: if the model keeps acting without obeying the
     # TARGET CHALLENGE REQUIRED instruction for the same candidate, the loop must
     # give up cleanly instead of burning every step.
-    wrong_source = tmp_path / "src" / "personality" / "sanitizer.ts"
-    right_source = tmp_path / "src" / "events" / "client.ts"
+    wrong_source = tmp_path / "src" / "text" / "sanitizer.ts"
+    right_source = tmp_path / "src" / "http" / "router.ts"
     wrong_source.parent.mkdir(parents=True)
     right_source.parent.mkdir(parents=True)
     wrong_source.write_text(
         "\n".join([
-            "export function wrapUserMessage(input: string): string {",
+            "export function sanitizeText(input: string): string {",
             "  return input.trim();",
             "}",
         ])
     )
     right_source.write_text(
         "\n".join([
-            "export function routeMessage(message: string): boolean {",
-            "  const lower = message.toLowerCase();",
-            "  const isMention = lower.startsWith('@dispatcher');",
-            "  return isMention;",
+            "export function routeRequest(path: string): boolean {",
+            "  const lower = path.toLowerCase();",
+            "  const isEndpoint = lower.startsWith('/api/tasks');",
+            "  return isEndpoint;",
             "}",
         ])
     )
@@ -834,9 +834,9 @@ def test_repeated_target_challenge_denials_give_up(tmp_path):
         },
     }
     episode = {
-        "source_file": "src/personality/sanitizer.ts",
-        "test_file": "src/personality/wrapUserMessage.test.ts",
-        "target_symbol": "wrapUserMessage",
+        "source_file": "src/text/sanitizer.ts",
+        "test_file": "src/text/sanitizeText.test.ts",
+        "target_symbol": "sanitizeText",
         "cookbook_text": "",
     }
     calls = []
@@ -851,14 +851,14 @@ def test_repeated_target_challenge_denials_give_up(tmp_path):
             return _tool_call_response(
                 "call_1",
                 "ask_harness",
-                '{"intent": "understand_contract", "question": "search mention dispatch"}',
+                '{"intent": "understand_contract", "question": "search endpoint routing"}',
             )
-        return _tool_call_response(f"call_{len(calls)}", "rg", '{"pattern": "@dispatcher"}')
+        return _tool_call_response(f"call_{len(calls)}", "rg", '{"pattern": "/api/tasks"}')
 
     result = runtime.run_agent_loop(
         messages=[],
         episode=episode,
-        issue_text="@dispatcher only matches at the beginning of the message",
+        issue_text="/api/tasks only matches at the beginning of the request path",
         config=config,
         workdir=str(tmp_path),
         log_path=str(tmp_path / "log.jsonl"),
@@ -866,7 +866,7 @@ def test_repeated_target_challenge_denials_give_up(tmp_path):
         log=lambda event, data: logged.append((event, data)),
         chat=chat,
         execute_tool=lambda name, _args: (
-            "./src/events/client.ts:3:  const isMention = lower.startsWith('@dispatcher');"
+            "./src/http/router.ts:3:  const isEndpoint = lower.startsWith('/api/tasks');"
             if name == "rg"
             else "OK"
         ),
@@ -894,12 +894,12 @@ def test_repeated_target_challenge_denials_give_up(tmp_path):
 
 
 def test_target_challenge_does_not_apply_mechanical_edits_before_enrichment(tmp_path, monkeypatch):
-    source = tmp_path / "src" / "client.ts"
+    source = tmp_path / "src" / "router.ts"
     source.parent.mkdir(parents=True)
     source.write_text(
         "\n".join([
-            "function handleMention(message: string): boolean {",
-            "  return message.includes('@dispatcher');",
+            "function matchEndpoint(path: string): boolean {",
+            "  return path.includes('/api/tasks');",
             "}",
         ])
     )
@@ -916,17 +916,17 @@ def test_target_challenge_does_not_apply_mechanical_edits_before_enrichment(tmp_
     with pytest.raises(RuntimeError, match="runner facts failed"):
         runtime._build_rerouted_episode(
             {
-                "source_file": "src/client.ts",
-                "target_symbol": "handleMention",
-                "evidence": "mention dispatch lives here",
+                "source_file": "src/router.ts",
+                "target_symbol": "matchEndpoint",
+                "evidence": "endpoint routing lives here",
             },
             current_episode={
-                "source_file": "src/personality/sanitizer.ts",
-                "target_symbol": "wrapUserMessage",
+                "source_file": "src/text/sanitizer.ts",
+                "target_symbol": "sanitizeText",
             },
             permission_context={
-                "source_file": "src/personality/sanitizer.ts",
-                "target_symbol": "wrapUserMessage",
+                "source_file": "src/text/sanitizer.ts",
+                "target_symbol": "sanitizeText",
             },
             config={"runner": {"command": "bun test"}},
             workdir=str(tmp_path),
@@ -949,7 +949,7 @@ def test_blocked_test_create_does_not_open_edit_source_gate(tmp_path):
         "runner": {"command": "bun test"},
     }
     episode = {
-        "source_file": "src/client.ts",
+        "source_file": "src/router.ts",
         "test_file": "src/client.test.ts",
         "target_symbol": "handle",
         "cookbook_text": "",
@@ -1043,7 +1043,7 @@ def test_denied_test_command_does_not_trigger_red_green_verification(tmp_path):
         "runner": {"command": "bun test"},
     }
     episode = {
-        "source_file": "src/client.ts",
+        "source_file": "src/router.ts",
         "test_file": "src/client.test.ts",
         "target_symbol": "handle",
         "cookbook_text": "",
@@ -1110,7 +1110,7 @@ def test_permission_mode_marks_test_created_after_str_replace_edit(tmp_path):
         "runner": {"command": "bun test"},
     }
     episode = {
-        "source_file": "src/client.ts",
+        "source_file": "src/router.ts",
         "test_file": "src/client.test.ts",
         "target_symbol": "handle",
         "cookbook_text": "",
@@ -1262,7 +1262,7 @@ def test_intent_router_answers_known_runner_fact_as_tool_result(tmp_path):
             typecheck_command="bun run typecheck",
             test_api_import='import { beforeEach, describe, expect, mock, test } from "bun:test";',
             recommended_test_file="src/events/processRenewal.test.ts",
-            source_file="src/events/client.ts",
+            source_file="src/http/router.ts",
             target_symbol="processRenewal",
             nearby_tests=[],
             symbol_tests=[],
