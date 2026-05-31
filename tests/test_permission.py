@@ -948,11 +948,11 @@ def test_build_permission_context_extracts_current_target_snippet(tmp_path):
 
 
 def test_build_permission_context_reads_imports_from_repo_profile_facts(tmp_path):
-    source = tmp_path / "src" / "client.ts"
+    source = tmp_path / "src" / "events.ts"
     source.parent.mkdir(parents=True)
     source.write_text(
         "\n".join([
-            "import { bus } from '@acme/event-bus';",
+            "import { bus } from '@example/event-bus.v2';",
             "import { helper } from './helper';",
             "",
             "export function handleEvent(message: string): string {",
@@ -963,13 +963,13 @@ def test_build_permission_context_reads_imports_from_repo_profile_facts(tmp_path
 
     context = permission.build_permission_context(
         episode={
-            "source_file": "src/client.ts",
+            "source_file": "src/events.ts",
             "test_file": "src/handleEvent.test.ts",
             "target_symbol": "handleEvent",
             "cookbook_text": "\n".join([
                 "### Repo Profile Facts",
                 "- Stable repo facts from `.atm/profile.toml`; use them for setup and contracts, not as per-issue fixes.",
-                "- import expectation for module `@acme/event-bus`: expected imports: `@acme/event-bus`; applies when `callback_contract`.",
+                "- import expectation for module `@example/event-bus.v2`: expected imports: `@example/event-bus.v2`; applies when `callback_contract`.",
             ]),
         },
         config={},
@@ -979,6 +979,6 @@ def test_build_permission_context_reads_imports_from_repo_profile_facts(tmp_path
     )
 
     assert context["repo_profile_facts"] == [
-        "import expectation for module `@acme/event-bus`: expected imports: `@acme/event-bus`; applies when `callback_contract`.",
+        "import expectation for module `@example/event-bus.v2`: expected imports: `@example/event-bus.v2`; applies when `callback_contract`.",
     ]
-    assert context["source_imports"] == "import { bus } from '@acme/event-bus';"
+    assert context["source_imports"] == "import { bus } from '@example/event-bus.v2';"
