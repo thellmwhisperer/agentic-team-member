@@ -797,7 +797,7 @@ def test_permission_mode_requires_challenge_after_read_file_finds_better_target(
 def test_repeated_target_challenge_denials_give_up(tmp_path):
     # Disobedience-loop guard: if the model keeps acting without obeying the
     # TARGET CHALLENGE REQUIRED instruction for the same candidate, the loop must
-    # give up cleanly instead of burning every step (cf. gpt_oss 94-denial exhaustion).
+    # give up cleanly instead of burning every step.
     wrong_source = tmp_path / "src" / "personality" / "sanitizer.ts"
     right_source = tmp_path / "src" / "events" / "client.ts"
     wrong_source.parent.mkdir(parents=True)
