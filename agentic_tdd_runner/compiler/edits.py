@@ -36,59 +36,6 @@ def _build_pre_test_source_edits(target, source_text, *, exported_hint, seam_edi
     return edits
 
 
-def _realize_generated_test_seams(
-    source_path,
-    source_text,
-    assignments,
-    execution_dependencies,
-    injection_plan,
-):
-    lang = get_language(source_path)
-    if not lang:
-        return []
-    edits = []
-    exec_by_binding = {entry["binding"]: entry for entry in execution_dependencies}
-    for plan in injection_plan:
-        if plan.get("strategy") != "set_test_seam":
-            continue
-        binding = plan["binding"]
-        assignment = assignments.get(binding)
-        if not _can_generate_test_seam(source_path, assignment):
-            continue
-        name = lang.setter_name(binding)
-        plan["seam_available"] = True
-        plan["setter_name"] = name
-        plan["steps"] = [f"call {name}(testDouble) before invoking target"]
-        execution_entry = exec_by_binding.get(binding)
-        if execution_entry is not None:
-            execution_entry["setter_name"] = name
-        if name in source_text:
-            continue
-        seam_assignment = dict(assignment)
-        if execution_entry is not None:
-            seam_assignment["observed_members"] = execution_entry.get("observed_members", [])
-        edits.append({
-            "kind": "mechanical_test_seam",
-            "path": source_path,
-            "binding": binding,
-            "setter_name": name,
-            "old": assignment["line"],
-            "new": assignment["line"]
-            + ("\n\n" if not assignment["line"].endswith("\n") else "\n")
-            + lang.render_seam_setter(binding, seam_assignment),
-        })
-    return edits
-
-
-def _can_generate_test_seam(source_path, assignment):
-    if not assignment:
-        return False
-    lang = get_language(source_path)
-    if lang and lang.name == "python":
-        return assignment.get("kind") == "assign"
-    return assignment.get("kind") in {"let", "var"}
-
-
 def _setter_name(binding, source_path):
     """Backward-compatible wrapper — delegates to language plugin."""
     lang = get_language(source_path)
