@@ -169,6 +169,32 @@ def get_changed_files(workdir: str) -> list[str]:
     return sorted(files)
 
 
+def _normalize_repo_path(path: str) -> str:
+    return PurePosixPath((path or "").strip().removeprefix("./")).as_posix()
+
+
+def detect_pr_target_violation(changed_files: list[str], episode: dict | None) -> str | None:
+    """PR-time obedience gate: the change must touch the (final/rerouted) target source.
+
+    Catches degenerate passes where the model fixed the wrong file or invented an
+    unrelated feature instead of the targeted symbol's source (e.g. gpt_oss creating a
+    new helper, or minimax editing a neighbour module). Compares against the target the
+    harness settled on, which is the rerouted episode by PR time.
+    """
+    target = (episode or {}).get("source_file")
+    if not target:
+        return None
+    target_norm = _normalize_repo_path(target)
+    changed_norm = {_normalize_repo_path(f) for f in (changed_files or [])}
+    if target_norm in changed_norm:
+        return None
+    return (
+        f"[PR target violation] diff does not touch the target source `{target}`. "
+        "The fix must change the targeted file/symbol; opening a PR for a different "
+        "file or an invented helper is a degenerate pass."
+    )
+
+
 def format_duplicated_setup_finding(path: str, report_lines: list[str]) -> str:
     """Format duplicated setup lines without echoing full test setup content."""
     identifiers: list[str] = []

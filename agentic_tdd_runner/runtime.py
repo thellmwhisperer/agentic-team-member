@@ -332,6 +332,8 @@ def run_agent_loop(
                     return 0
                 if completion == "give_up":
                     return 1
+                if completion == "gate_fail":
+                    return 1
                 continue
 
         # Append assistant message to history
@@ -665,6 +667,8 @@ def run_agent_loop(
                 if completion == "done":
                     return 0
                 if completion == "give_up":
+                    return 1
+                if completion == "gate_fail":
                     return 1
                 # quality_fail, verify_fail, no_test → continue loop
 
