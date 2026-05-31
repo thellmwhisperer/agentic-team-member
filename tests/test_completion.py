@@ -169,61 +169,18 @@ def test_try_complete_reads_untracked_files_with_replacement_encoding(tmp_path, 
     assert "postamble_error" not in [event for event, _data in logged]
 
 
-def _pr_gate_run_factory(name_only_stdout):
-    def fake_run(cmd, **kwargs):
-        if cmd == ["git", "diff"]:
-            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
-        if cmd == ["git", "diff", "--name-only"]:
-            return subprocess.CompletedProcess(cmd, 0, stdout=name_only_stdout, stderr="")
-        if cmd == ["git", "ls-files", "--others", "--exclude-standard"]:
-            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
-        raise AssertionError(f"unexpected command: {cmd}")
-
-    return fake_run
+def _pr_postamble_run(cmd, **kwargs):
+    if cmd == ["git", "diff"]:
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+    if cmd == ["git", "ls-files", "--others", "--exclude-standard"]:
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+    raise AssertionError(f"unexpected command: {cmd}")
 
 
-def test_try_complete_gate_blocks_pr_when_diff_misses_target(tmp_path, monkeypatch):
-    logged = []
-    created = []
-    monkeypatch.setattr(completion.shutil, "which", lambda name: "git")
-    monkeypatch.setattr(
-        completion.subprocess, "run", _pr_gate_run_factory("src/twitch/client.ts\n")
-    )
+def _gate_try_complete(tmp_path, create_pr):
     config = _base_config()
     config["pr"] = {"enabled": True}
-
-    result = completion.try_complete(
-        7,
-        {"content": "DONE"},
-        messages=[{"role": "system", "content": "system"}],
-        episode={"source_file": "src/personality/sanitizer.ts", "target_symbol": "wrapUserMessage"},
-        state=completion.CompletionState(),
-        max_rejections=3,
-        config=config,
-        workdir=str(tmp_path),
-        emit=lambda _msg: None,
-        log=lambda event, data: logged.append((event, data)),
-        find_test_file=lambda hint=None: "src/personality/wrapUserMessage.test.ts",
-        verify_red_green=lambda test_file: (True, "verified"),
-        run_quality_checks=lambda test_file: (True, "ok"),
-        create_pr=lambda *args, **kwargs: created.append(1) or "url",
-    )
-
-    assert result == "gate_fail"
-    assert created == []  # wrong-target diff must NOT open a PR
-    assert any(event == "pr_gate_fail" for event, _ in logged)
-
-
-def test_try_complete_creates_pr_when_diff_touches_target(tmp_path, monkeypatch):
-    created = []
-    monkeypatch.setattr(completion.shutil, "which", lambda name: "git")
-    monkeypatch.setattr(
-        completion.subprocess, "run", _pr_gate_run_factory("src/personality/sanitizer.ts\n")
-    )
-    config = _base_config()
-    config["pr"] = {"enabled": True}
-
-    result = completion.try_complete(
+    return completion.try_complete(
         7,
         {"content": "DONE"},
         messages=[{"role": "system", "content": "system"}],
@@ -237,11 +194,32 @@ def test_try_complete_creates_pr_when_diff_touches_target(tmp_path, monkeypatch)
         find_test_file=lambda hint=None: "src/personality/wrapUserMessage.test.ts",
         verify_red_green=lambda test_file: (True, "verified"),
         run_quality_checks=lambda test_file: (True, "ok"),
-        create_pr=lambda *args, **kwargs: created.append(1) or "url",
+        create_pr=create_pr,
+    )
+
+
+def test_try_complete_maps_pr_gate_sentinel_to_gate_fail(tmp_path, monkeypatch):
+    # The target-touch gate lives in create_pr (it owns the real post-baseline
+    # changeset); try_complete only maps its sentinel to a clean gate_fail terminal.
+    monkeypatch.setattr(completion.shutil, "which", lambda name: "git")
+    monkeypatch.setattr(completion.subprocess, "run", _pr_postamble_run)
+
+    result = _gate_try_complete(
+        tmp_path, create_pr=lambda *args, **kwargs: completion.PR_TARGET_GATE_FAILED
+    )
+
+    assert result == "gate_fail"
+
+
+def test_try_complete_returns_done_when_pr_created(tmp_path, monkeypatch):
+    monkeypatch.setattr(completion.shutil, "which", lambda name: "git")
+    monkeypatch.setattr(completion.subprocess, "run", _pr_postamble_run)
+
+    result = _gate_try_complete(
+        tmp_path, create_pr=lambda *args, **kwargs: "https://github.com/x/pr/1"
     )
 
     assert result == "done"
-    assert created == [1]
 
 
 def test_read_file_preview_bounds_large_binary_content(tmp_path):

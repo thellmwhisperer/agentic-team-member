@@ -8,6 +8,7 @@ from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
+from agentic_tdd_runner import quality as _quality
 from agentic_tdd_runner.shell import build_command_env
 
 
@@ -334,6 +335,21 @@ def create_pr(
         log("pr_error", {"stage": "changed_files", "error": str(e)})
         return None
     allowed_changed_files = current_changed_files - (baseline_changed_files or set())
+    target_source = (
+        config.get("_runtime", {}).get("permission_context", {}).get("source_file")
+    )
+    target_violation = _quality.detect_pr_target_violation(
+        sorted(allowed_changed_files), {"source_file": target_source}
+    )
+    if target_violation:
+        emit(f"\n  [PR GATE] {target_violation}")
+        log("pr_gate_fail", {
+            "step": step,
+            "reason": "target_not_touched",
+            "target": target_source,
+            "allowed_changed_files": sorted(allowed_changed_files),
+        })
+        return _quality.PR_TARGET_GATE_FAILED
     excluded_files = sorted(current_changed_files - allowed_changed_files)
     if excluded_files:
         log("pr_excluded_preexisting_changes", {"files": excluded_files})

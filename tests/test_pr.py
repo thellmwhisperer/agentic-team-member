@@ -214,6 +214,64 @@ def test_create_pr_stages_only_delta_after_baseline(tmp_path, monkeypatch):
     assert logged[-1][1]["url"] == "https://github.com/test/pr/1"
 
 
+def test_create_pr_gate_blocks_when_target_not_in_post_baseline_delta(tmp_path, monkeypatch):
+    # Target was dirty BEFORE the run (baseline); the model's real delta touches a
+    # different file. The gate must reject using the post-baseline set, not raw git
+    # diff (which still shows the pre-existing target change).
+    subprocess.run(["git", "init", "-b", "main"], cwd=tmp_path, capture_output=True, check=True)
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=tmp_path, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=tmp_path, capture_output=True)
+    (tmp_path / "target.ts").write_text("original")
+    (tmp_path / "other.ts").write_text("original")
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, capture_output=True, check=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=tmp_path, capture_output=True, check=True)
+    subprocess.run(["git", "update-ref", "refs/remotes/origin/main", "HEAD"], cwd=tmp_path, check=True)
+
+    (tmp_path / "target.ts").write_text("dirty before run")
+    baseline = collect_pr_changed_files(str(tmp_path), 10)
+    (tmp_path / "other.ts").write_text("agent changed the wrong file")
+
+    pushed = []
+    original_run = subprocess.run
+
+    def track_run(*args, **kwargs):
+        cmd = args[0] if args else kwargs.get("args", [])
+        if isinstance(cmd, list) and (cmd[0] == "gh" or (cmd[0] == "git" and "push" in cmd)):
+            pushed.append(cmd)
+            return subprocess.CompletedProcess(cmd, 0, stdout="https://github.com/test/pr/1\n")
+        return original_run(*args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", track_run)
+    logged = []
+
+    result = create_pr(
+        [],
+        {},
+        "other.test.ts",
+        3,
+        workdir=str(tmp_path),
+        config={
+            "pr": {"base_branch": "main", "branch_prefix": "atm/fix-"},
+            "prompt": {"pr_prompt": "Generate PR"},
+            "timeouts": {"pr_create": 10},
+            "_runtime": {"permission_context": {"source_file": "target.ts"}},
+        },
+        emit=lambda _msg: None,
+        log=lambda event, data: logged.append((event, data)),
+        chat=lambda _messages, include_tools=True: {
+            "choices": [{"message": {"content": "PR_TITLE: fix\nPR_BODY: done"}}],
+        },
+        get_changed_files_fn=lambda: [],
+        baseline_changed_files=baseline,
+    )
+
+    from agentic_tdd_runner.quality import PR_TARGET_GATE_FAILED
+
+    assert result == PR_TARGET_GATE_FAILED
+    assert pushed == []  # degenerate change must NOT open a PR
+    assert any(event == "pr_gate_fail" for event, _ in logged)
+
+
 def test_create_pr_logs_content_fallback_when_llm_returns_incomplete_body(tmp_path, monkeypatch):
     subprocess.run(["git", "init", "-b", "main"], cwd=tmp_path, capture_output=True, check=True)
     subprocess.run(["git", "config", "user.email", "t@t"], cwd=tmp_path, capture_output=True)
