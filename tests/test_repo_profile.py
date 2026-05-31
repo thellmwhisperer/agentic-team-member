@@ -222,3 +222,19 @@ def test_render_facts_supports_inline_event_contracts(tmp_path):
     assert "dependency contract `tmi-events`" in rendered
     assert "dependency `tmi-events` declares event `resub(channel, username, streakMonths)`" in rendered
     assert "argument `streakMonths` comes from `tags['msg-param-streak-months']`" in rendered
+
+
+def test_render_facts_includes_import_expectations(tmp_path):
+    path = _write_profile(tmp_path, """\
+        [[import_expectations]]
+        module = "tmi.js"
+        expected_imports = ["tmi.js", "@types/tmi.js"]
+        applies_when = "callback_contract"
+    """)
+    profile = read_repo_profile(path)
+
+    facts = profile.render_facts(source_text="")
+
+    assert facts == [
+        "import expectation for module `tmi.js`: expected imports: `tmi.js`, `@types/tmi.js`; applies when `callback_contract`.",
+    ]

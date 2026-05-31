@@ -232,6 +232,18 @@ class RepoProfile:
             if avoid:
                 facts.append(f"test seam for `{seam.source}`: avoid {avoid}.")
 
+        for expectation in self.import_expectations:
+            imports = ", ".join(f"`{item}`" for item in expectation.expected_imports)
+            applies = (
+                f"; applies when `{expectation.applies_when}`"
+                if expectation.applies_when
+                else ""
+            )
+            facts.append(
+                f"import expectation for module `{expectation.module}`: "
+                f"expected imports: {imports}{applies}."
+            )
+
         return facts
 
 
