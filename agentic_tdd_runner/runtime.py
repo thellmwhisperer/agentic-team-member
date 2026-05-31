@@ -191,6 +191,11 @@ def run_agent_loop(
     test_file_created = False
     permission_grant: str | None = None
     target_challenge_hint: dict | None = None
+    target_challenge_denials = 0
+    last_challenge_candidate: tuple[str | None, str | None] | None = None
+    max_target_challenge_denials = int(
+        config.get("agent", {}).get("max_target_challenge_denials", 0) or 0
+    )
     permission_mode = _permission.permission_enabled(config)
     allow_dependency_contract_lookup = False
     block_dependency_contract_lookup = has_contract_evidence(issue_text, episode)
@@ -382,6 +387,8 @@ def run_agent_loop(
                         episode = maybe_episode
                         permission_grant = None
                         target_challenge_hint = None
+                        target_challenge_denials = 0
+                        last_challenge_candidate = None
                         test_file_created = False
                         allow_dependency_contract_lookup = False
                         block_dependency_contract_lookup = has_contract_evidence(issue_text, episode)
@@ -524,6 +531,34 @@ def run_agent_loop(
                         tool_elapsed = time.time() - t1
                         applied = tool_applied_status(name, result)
                         state_reviewer.observe_tool_result(name, args, result, applied=applied)
+                if (
+                    permission_review is not None
+                    and getattr(permission_review, "event", None) == "target_challenge_required"
+                ):
+                    candidate = (
+                        (target_challenge_hint or {}).get("source_file"),
+                        (target_challenge_hint or {}).get("target_symbol"),
+                    )
+                    if candidate != last_challenge_candidate:
+                        last_challenge_candidate = candidate
+                        target_challenge_denials = 0
+                    target_challenge_denials += 1
+                    if (
+                        max_target_challenge_denials > 0
+                        and target_challenge_denials >= max_target_challenge_denials
+                    ):
+                        emit(
+                            f"\n  [GIVE UP] Target challenge ignored "
+                            f"{target_challenge_denials} times for "
+                            f"{candidate[0]}::{candidate[1]}. Stopping."
+                        )
+                        log("give_up", {
+                            "step": step,
+                            "reason": "target_challenge_disobedience",
+                            "candidate": f"{candidate[0]}::{candidate[1]}",
+                            "denials": target_challenge_denials,
+                        })
+                        return 1
                 if applied is True and _edited_test_file(name, args, is_test_file_path):
                     created_test_this_step = True
                 result_truncated = truncate(result)
