@@ -969,7 +969,7 @@ def test_build_permission_context_reads_imports_from_repo_profile_facts(tmp_path
             "cookbook_text": "\n".join([
                 "### Repo Profile Facts",
                 "- Stable repo facts from `.atm/profile.toml`; use them for setup and contracts, not as per-issue fixes.",
-                "- event framework `event-bus` (callback_event) uses module `@acme/event-bus`; registrations: on, subscribe; contract sources: docs/event-bus.md.",
+                "- import expectation for module `@acme/event-bus`: expected imports: `@acme/event-bus`; applies when `callback_contract`.",
             ]),
         },
         config={},
@@ -979,6 +979,6 @@ def test_build_permission_context_reads_imports_from_repo_profile_facts(tmp_path
     )
 
     assert context["repo_profile_facts"] == [
-        "event framework `event-bus` (callback_event) uses module `@acme/event-bus`; registrations: on, subscribe; contract sources: docs/event-bus.md.",
+        "import expectation for module `@acme/event-bus`: expected imports: `@acme/event-bus`; applies when `callback_contract`.",
     ]
     assert context["source_imports"] == "import { bus } from '@acme/event-bus';"
