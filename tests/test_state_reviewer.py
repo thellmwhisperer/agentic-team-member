@@ -17,7 +17,7 @@ def test_blocks_dependency_lookup_when_contract_is_already_known():
 
     review = reviewer.review_tool_call(
         "run_command",
-        {"command": 'rg "SubMethods" node_modules/tmi.js'},
+        {"command": 'rg "DeliveryOptions" node_modules/@example/event-bus'},
         allow_dependency_contract_lookup=False,
     )
 
@@ -38,9 +38,9 @@ def test_reviewer_routes_known_runner_fact_answers_before_tool_execution():
             test_command="bun test",
             typecheck_command="bun run typecheck",
             test_api_import='import { beforeEach, describe, expect, mock, test } from "bun:test";',
-            recommended_test_file="src/twitch/handleResub.test.ts",
-            source_file="src/twitch/client.ts",
-            target_symbol="handleResub",
+            recommended_test_file="src/events/processRenewal.test.ts",
+            source_file="src/events/client.ts",
+            target_symbol="processRenewal",
             nearby_tests=[],
             symbol_tests=[],
         ),
@@ -50,7 +50,7 @@ def test_reviewer_routes_known_runner_fact_answers_before_tool_execution():
         {"command": "bun run typecheck"},
         (
             "[Reactive typecheck]\n"
-            "src/twitch/handleResub.test.ts(4,1): error TS2304: Cannot find name 'describe'.\n"
+            "src/events/processRenewal.test.ts(4,1): error TS2304: Cannot find name 'describe'.\n"
         ),
         applied=None,
     )
@@ -77,9 +77,9 @@ def test_reviewer_routes_runner_facts_even_when_state_reviewer_is_disabled():
             test_command="bun test",
             typecheck_command="bun run typecheck",
             test_api_import='import { beforeEach, describe, expect, mock, test } from "bun:test";',
-            recommended_test_file="src/twitch/handleResub.test.ts",
-            source_file="src/twitch/client.ts",
-            target_symbol="handleResub",
+            recommended_test_file="src/events/processRenewal.test.ts",
+            source_file="src/events/client.ts",
+            target_symbol="processRenewal",
             nearby_tests=[],
             symbol_tests=[],
         ),
@@ -89,7 +89,7 @@ def test_reviewer_routes_runner_facts_even_when_state_reviewer_is_disabled():
         {"command": "bun run typecheck"},
         (
             "[Reactive typecheck]\n"
-            "src/twitch/handleResub.test.ts(4,1): error TS2304: Cannot find name 'describe'.\n"
+            "src/events/processRenewal.test.ts(4,1): error TS2304: Cannot find name 'describe'.\n"
         ),
         applied=None,
     )
@@ -113,26 +113,26 @@ def test_pending_forbidden_pattern_blocks_exploration_until_same_file_is_edited(
     )
     reviewer.observe_tool_result(
         "create_file",
-        {"path": "src/twitch/handleResub.test.ts"},
+        {"path": "src/events/processRenewal.test.ts"},
         (
-            "OK: created src/twitch/handleResub.test.ts\n\n"
+            "OK: created src/events/processRenewal.test.ts\n\n"
             "[Reactive forbidden] Potential quality issues detected before DONE:\n"
-            "[Forbidden] src/twitch/handleResub.test.ts: 1 forbidden patterns\n"
-            "  src/twitch/handleResub.test.ts:110 '{} as'"
+            "[Forbidden] src/events/processRenewal.test.ts: 1 forbidden patterns\n"
+            "  src/events/processRenewal.test.ts:110 '{} as'"
         ),
         applied=True,
     )
 
     blocked = reviewer.review_tool_call(
         "run_command",
-        {"command": 'rg "SubMethods" node_modules/tmi.js'},
+        {"command": 'rg "DeliveryOptions" node_modules/@example/event-bus'},
         allow_dependency_contract_lookup=True,
     )
     allowed_edit = reviewer.review_tool_call(
         "str_replace_editor",
         {
-            "path": "src/twitch/handleResub.test.ts",
-            "old_str": "{} as SubMethods",
+            "path": "src/events/processRenewal.test.ts",
+            "old_str": "{} as DeliveryOptions",
             "new_str": "methods",
         },
         allow_dependency_contract_lookup=True,
@@ -140,7 +140,7 @@ def test_pending_forbidden_pattern_blocks_exploration_until_same_file_is_edited(
 
     assert blocked is not None
     assert "QUALITY_REPAIR" in blocked.message
-    assert "src/twitch/handleResub.test.ts" in blocked.message
+    assert "src/events/processRenewal.test.ts" in blocked.message
     assert allowed_edit is None
 
 
@@ -153,20 +153,20 @@ def test_successful_edit_clears_pending_forbidden_pattern_when_feedback_is_clean
     )
     reviewer.observe_tool_result(
         "create_file",
-        {"path": "src/twitch/handleResub.test.ts"},
-        "[Reactive forbidden]\n  src/twitch/handleResub.test.ts:110 '{} as'",
+        {"path": "src/events/processRenewal.test.ts"},
+        "[Reactive forbidden]\n  src/events/processRenewal.test.ts:110 '{} as'",
         applied=True,
     )
     reviewer.observe_tool_result(
         "str_replace_editor",
-        {"path": "src/twitch/handleResub.test.ts"},
-        "OK: replaced in src/twitch/handleResub.test.ts",
+        {"path": "src/events/processRenewal.test.ts"},
+        "OK: replaced in src/events/processRenewal.test.ts",
         applied=True,
     )
 
     review = reviewer.review_tool_call(
         "rg",
-        {"pattern": "SubMethods", "path": "node_modules/tmi.js"},
+        {"pattern": "DeliveryOptions", "path": "node_modules/@example/event-bus"},
         allow_dependency_contract_lookup=True,
     )
 
@@ -182,20 +182,20 @@ def test_successful_edit_clears_pending_forbidden_pattern_with_normalized_path()
     )
     reviewer.observe_tool_result(
         "create_file",
-        {"path": "src/twitch/handleResub.test.ts"},
-        "[Reactive forbidden]\n  ./src/twitch/handleResub.test.ts:110 '{} as'",
+        {"path": "src/events/processRenewal.test.ts"},
+        "[Reactive forbidden]\n  ./src/events/processRenewal.test.ts:110 '{} as'",
         applied=True,
     )
     reviewer.observe_tool_result(
         "str_replace_editor",
-        {"path": "src/twitch/../twitch/handleResub.test.ts"},
-        "OK: replaced in src/twitch/handleResub.test.ts",
+        {"path": "src/events/../events/processRenewal.test.ts"},
+        "OK: replaced in src/events/processRenewal.test.ts",
         applied=True,
     )
 
     review = reviewer.review_tool_call(
         "read_file",
-        {"path": "src/twitch/handleResub.test.ts"},
+        {"path": "src/events/processRenewal.test.ts"},
         allow_dependency_contract_lookup=True,
     )
 
@@ -211,25 +211,25 @@ def test_pending_forbidden_allows_focused_read_after_failed_edit():
     )
     reviewer.observe_tool_result(
         "create_file",
-        {"path": "src/twitch/handleResub.test.ts"},
-        "[Reactive forbidden]\n  src/twitch/handleResub.test.ts:110 '{} as'",
+        {"path": "src/events/processRenewal.test.ts"},
+        "[Reactive forbidden]\n  src/events/processRenewal.test.ts:110 '{} as'",
         applied=True,
     )
     reviewer.observe_tool_result(
         "str_replace_editor",
-        {"path": "src/twitch/handleResub.test.ts"},
+        {"path": "src/events/processRenewal.test.ts"},
         "ERROR: old_str not found",
         applied=False,
     )
 
     focused_read = reviewer.review_tool_call(
         "read_file",
-        {"path": "./src/twitch/handleResub.test.ts"},
+        {"path": "./src/events/processRenewal.test.ts"},
         allow_dependency_contract_lookup=True,
     )
     unrelated_read = reviewer.review_tool_call(
         "read_file",
-        {"path": "src/twitch/client.ts"},
+        {"path": "src/events/client.ts"},
         allow_dependency_contract_lookup=True,
     )
 
@@ -241,13 +241,13 @@ def test_pending_forbidden_allows_focused_read_after_failed_edit():
 def test_pending_forbidden_file_lookup_accepts_direct_rg_and_sed_context():
     assert is_pending_forbidden_file_lookup(
         "rg",
-        {"pattern": "{} as", "path": "./src/twitch/handleResub.test.ts"},
-        "src/twitch/handleResub.test.ts",
+        {"pattern": "{} as", "path": "./src/events/processRenewal.test.ts"},
+        "src/events/processRenewal.test.ts",
     )
     assert is_pending_forbidden_file_lookup(
         "run_command",
-        {"command": "sed -n '100,120p' src/twitch/handleResub.test.ts"},
-        "src/twitch/handleResub.test.ts",
+        {"command": "sed -n '100,120p' src/events/processRenewal.test.ts"},
+        "src/events/processRenewal.test.ts",
     )
 
 
@@ -260,14 +260,14 @@ def test_blocks_dependency_lookup_after_repair_budget_is_spent():
     )
     reviewer.observe_tool_result(
         "rg",
-        {"pattern": "SubMethods", "path": "node_modules/tmi.js"},
-        "resub(channel, username, months, message, userstate, methods)",
+        {"pattern": "DeliveryOptions", "path": "node_modules/@example/event-bus"},
+        "renewal(channel, username, months, message, eventPayload, methods)",
         applied=None,
     )
 
     review = reviewer.review_tool_call(
         "rg",
-        {"pattern": "SubUserstate", "path": "node_modules/tmi.js"},
+        {"pattern": "RenewalEventPayload", "path": "node_modules/@example/event-bus"},
         allow_dependency_contract_lookup=True,
     )
 
@@ -288,30 +288,30 @@ def test_blocks_repeated_target_source_reads_after_source_context_was_observed()
             test_command="bun test",
             typecheck_command="bun run typecheck",
             test_api_import='import { beforeEach, describe, expect, mock, test } from "bun:test";',
-            recommended_test_file="src/twitch/handleResub.test.ts",
-            source_file="src/twitch/client.ts",
-            target_symbol="handleResub",
+            recommended_test_file="src/events/processRenewal.test.ts",
+            source_file="src/events/client.ts",
+            target_symbol="processRenewal",
             nearby_tests=[],
             symbol_tests=[],
         ),
     )
     reviewer.observe_tool_result(
         "read_file",
-        {"path": "src/twitch/client.ts"},
-        "export function handleResub() {}\n",
+        {"path": "src/events/client.ts"},
+        "export function processRenewal() {}\n",
         applied=None,
     )
 
     reread = reviewer.review_tool_call(
         "run_command",
-        {"command": "sed -n '120,170p' src/twitch/client.ts"},
+        {"command": "sed -n '120,170p' src/events/client.ts"},
         allow_dependency_contract_lookup=False,
     )
 
     assert reread is not None
     assert reread.event == "state_review_blocked"
     assert "SOURCE_CONTEXT" in reread.message
-    assert "already been read `src/twitch/client.ts`" in reread.message
+    assert "already been read `src/events/client.ts`" in reread.message
 
 
 def test_allows_target_source_reread_after_source_edit():
@@ -325,29 +325,29 @@ def test_allows_target_source_reread_after_source_edit():
             test_command="bun test",
             typecheck_command="bun run typecheck",
             test_api_import='import { beforeEach, describe, expect, mock, test } from "bun:test";',
-            recommended_test_file="src/twitch/handleResub.test.ts",
-            source_file="src/twitch/client.ts",
-            target_symbol="handleResub",
+            recommended_test_file="src/events/processRenewal.test.ts",
+            source_file="src/events/client.ts",
+            target_symbol="processRenewal",
             nearby_tests=[],
             symbol_tests=[],
         ),
     )
     reviewer.observe_tool_result(
         "read_file",
-        {"path": "src/twitch/client.ts"},
-        "export function handleResub() {}\n",
+        {"path": "src/events/client.ts"},
+        "export function processRenewal() {}\n",
         applied=None,
     )
     reviewer.observe_tool_result(
         "str_replace_editor",
-        {"path": "src/twitch/client.ts"},
-        "OK: replaced in src/twitch/client.ts",
+        {"path": "src/events/client.ts"},
+        "OK: replaced in src/events/client.ts",
         applied=True,
     )
 
     reread = reviewer.review_tool_call(
         "read_file",
-        {"path": "./src/twitch/client.ts"},
+        {"path": "./src/events/client.ts"},
         allow_dependency_contract_lookup=False,
     )
 
@@ -365,29 +365,29 @@ def test_allows_target_source_reread_after_reactive_feedback_points_at_source():
             test_command="bun test",
             typecheck_command="bun run typecheck",
             test_api_import='import { beforeEach, describe, expect, mock, test } from "bun:test";',
-            recommended_test_file="src/twitch/handleResub.test.ts",
-            source_file="src/twitch/client.ts",
-            target_symbol="handleResub",
+            recommended_test_file="src/events/processRenewal.test.ts",
+            source_file="src/events/client.ts",
+            target_symbol="processRenewal",
             nearby_tests=[],
             symbol_tests=[],
         ),
     )
     reviewer.observe_tool_result(
         "read_file",
-        {"path": "src/twitch/client.ts"},
-        "export function handleResub() {}\n",
+        {"path": "src/events/client.ts"},
+        "export function processRenewal() {}\n",
         applied=None,
     )
     reviewer.observe_tool_result(
         "run_command",
-        {"command": "bun test src/twitch/handleResub.test.ts"},
-        "[Reactive test] failed:\n  at src/twitch/client.ts:42:7",
+        {"command": "bun test src/events/processRenewal.test.ts"},
+        "[Reactive test] failed:\n  at src/events/client.ts:42:7",
         applied=None,
     )
 
     reread = reviewer.review_tool_call(
         "run_command",
-        {"command": "sed -n '38,46p' src/twitch/client.ts"},
+        {"command": "sed -n '38,46p' src/events/client.ts"},
         allow_dependency_contract_lookup=False,
     )
 
@@ -405,29 +405,29 @@ def test_allows_target_source_reread_after_compacted_test_failure_points_at_sour
             test_command="bun test",
             typecheck_command="bun run typecheck",
             test_api_import='import { beforeEach, describe, expect, mock, test } from "bun:test";',
-            recommended_test_file="src/twitch/handleResub.test.ts",
-            source_file="src/twitch/client.ts",
-            target_symbol="handleResub",
+            recommended_test_file="src/events/processRenewal.test.ts",
+            source_file="src/events/client.ts",
+            target_symbol="processRenewal",
             nearby_tests=[],
             symbol_tests=[],
         ),
     )
     reviewer.observe_tool_result(
         "read_file",
-        {"path": "src/twitch/client.ts"},
-        "export function handleResub() {}\n",
+        {"path": "src/events/client.ts"},
+        "export function processRenewal() {}\n",
         applied=None,
     )
     reviewer.observe_tool_result(
         "run_command",
-        {"command": "bun test src/twitch/handleResub.test.ts"},
-        "[run_command test failure: exit 1]\n  at src/twitch/client.ts:42:7",
+        {"command": "bun test src/events/processRenewal.test.ts"},
+        "[run_command test failure: exit 1]\n  at src/events/client.ts:42:7",
         applied=None,
     )
 
     reread = reviewer.review_tool_call(
         "run_command",
-        {"command": "sed -n '38,46p' src/twitch/client.ts"},
+        {"command": "sed -n '38,46p' src/events/client.ts"},
         allow_dependency_contract_lookup=False,
     )
 

@@ -3,26 +3,26 @@ from agentic_tdd_runner.compiler import build_contract
 from agentic_tdd_runner.languages.signature import parse_signature_params as _parse_signature_params
 
 
-def _handle_resub_facts():
+def _handle_renewal_facts():
     return {
         "target": {
-            "symbol": "handleResub",
+            "symbol": "processRenewal",
             "kind": "function",
-            "source_path": "src/twitch/client.ts",
+            "source_path": "src/events/client.ts",
             "line_start": 770,
             "line_end": 777,
-            "signature": "handleResub(channel: string, username: string, months: number): void",
+            "signature": "processRenewal(channel: string, username: string, months: number): void",
         },
         "test_file": {
-            "path": "src/twitch/client-resub.test.ts",
+            "path": "src/events/client-renewal.test.ts",
             "runner": "bun:test",
         },
         "pre_test_source_edits": [
             {
                 "kind": "mechanical_export",
-                "path": "src/twitch/client.ts",
-                "old": "function handleResub(",
-                "new": "export function handleResub(",
+                "path": "src/events/client.ts",
+                "old": "function processRenewal(",
+                "new": "export function processRenewal(",
             }
         ],
         "module_load_dependencies": [
@@ -37,11 +37,11 @@ def _handle_resub_facts():
                 "strategy": "mock_module",
             },
             {
-                "binding": "streamSummaryManager",
+                "binding": "metricsSummaryManager",
                 "origin_kind": "factory_result",
-                "source_module": "../managers/stream-summary",
+                "source_module": "../managers/metrics-summary",
                 "required_shape": {
-                    "getStreamSummaryManager": ["trackResub"],
+                    "getMetricsSummaryManager": ["trackRenewal"],
                 },
                 "strategy": "mock_module",
             },
@@ -55,11 +55,11 @@ def _handle_resub_facts():
                 "observed_members": ["getEmote"],
             },
             {
-                "binding": "client",
+                "binding": "notifier",
                 "origin_kind": "module_local_mutable",
-                "required_shape": {"say": []},
+                "required_shape": {"send": []},
                 "strategy": "set_test_seam",
-                "observed_members": ["say"],
+                "observed_members": ["send"],
             },
         ],
         "injection_plan": [
@@ -71,17 +71,17 @@ def _handle_resub_facts():
                 "seam_available": False,
             },
             {
-                "binding": "client",
+                "binding": "notifier",
                 "strategy": "set_test_seam",
-                "steps": ["inject a spy for say(channel, message)"],
+                "steps": ["inject a spy for send(channel, message)"],
                 "blocks_if_missing": True,
                 "seam_available": False,
             },
         ],
         "assertion_surface": {
             "kind": "outbound_call_arguments",
-            "binding": "client",
-            "member": "say",
+            "binding": "notifier",
+            "member": "send",
             "assertion_shape": "toHaveBeenCalledWith(channel, expectedMessage)",
         },
         "pattern_files": [
@@ -96,12 +96,12 @@ def _handle_resub_facts():
 
 
 def test_computes_source_import_path():
-    contract = build_contract(_handle_resub_facts())
+    contract = build_contract(_handle_renewal_facts())
     assert contract["test_file"]["source_import_path"] == "./client"
 
 
 def test_marks_contract_not_ready_when_framework_seam_is_missing():
-    contract = build_contract(_handle_resub_facts())
+    contract = build_contract(_handle_renewal_facts())
     assert contract["ready"] is False
     assert contract["gaps"] == [
         {
@@ -111,28 +111,28 @@ def test_marks_contract_not_ready_when_framework_seam_is_missing():
         },
         {
             "kind": "missing_test_seam",
-            "message": "client requires injection strategy 'set_test_seam' but no framework seam is available",
+            "message": "notifier requires injection strategy 'set_test_seam' but no framework seam is available",
             "owner": "framework",
         },
     ]
 
 
 def test_renders_module_mocks_and_source_import():
-    contract = build_contract(_handle_resub_facts())
+    contract = build_contract(_handle_renewal_facts())
     block = contract["scaffold"]["module_mocks_block"]
     assert "mock.module('../logger'" in block
     assert "const logger_event_spy = mock(() => undefined);" in block
-    assert "const streamSummaryManager_trackResub_spy = mock(() => undefined);" in block
+    assert "const metricsSummaryManager_trackRenewal_spy = mock(() => undefined);" in block
     assert "getLogger: () => ({" in block
     assert "log: {" in block
     assert "event: logger_event_spy" in block
     assert "info: logger_info_spy" in block
-    assert "trackResub: streamSummaryManager_trackResub_spy" in block
-    assert "const { handleResub } = await import('./client');" in block
+    assert "trackRenewal: metricsSummaryManager_trackRenewal_spy" in block
+    assert "const { processRenewal } = await import('./client');" in block
 
 
 def test_module_mock_spies_are_scoped_per_dependency():
-    facts = _handle_resub_facts()
+    facts = _handle_renewal_facts()
     facts["module_load_dependencies"] = [
         {
             "binding": "primaryLogger",
@@ -162,29 +162,29 @@ def test_module_mock_spies_are_scoped_per_dependency():
 
 
 def test_renders_arrange_act_and_assert_blocks():
-    contract = build_contract(_handle_resub_facts())
+    contract = build_contract(_handle_renewal_facts())
     scaffold = contract["scaffold"]
-    assert "const client_say_spy = mock(() => undefined);" in scaffold["arrange_block"]
+    assert "const notifier_send_spy = mock(() => undefined);" in scaffold["arrange_block"]
     assert "const channel = __todoValue('value_for_channel');" in scaffold["arrange_block"]
     assert "const expected_value = __todoValue('expected_assertion_value');" in scaffold["arrange_block"]
-    assert scaffold["act_block"] == "handleResub(channel, username, months);"
+    assert scaffold["act_block"] == "processRenewal(channel, username, months);"
     assert (
         scaffold["assert_block"]
-        == "expect(client_say_spy).toHaveBeenCalledWith(channel, expected_value);"
+        == "expect(notifier_send_spy).toHaveBeenCalledWith(channel, expected_value);"
     )
 
 
 def test_rendered_test_contains_minimal_template():
-    contract = build_contract(_handle_resub_facts())
+    contract = build_contract(_handle_renewal_facts())
     rendered = contract["scaffold"]["rendered_test"]
     assert "import { describe, expect, mock, test } from 'bun:test';" in rendered
-    assert "describe('handleResub'" in rendered
+    assert "describe('processRenewal'" in rendered
     assert "test('TODO behavior'" in rendered
-    assert "handleResub(channel, username, months);" in rendered
+    assert "processRenewal(channel, username, months);" in rendered
 
 
 def test_bun_scaffold_does_not_emit_cast_only_mock_returns():
-    contract = build_contract(_handle_resub_facts())
+    contract = build_contract(_handle_renewal_facts())
     rendered = contract["scaffold"]["rendered_test"]
     assert "mock(() => undefined)" in rendered
     assert "undefined as" not in rendered
@@ -192,7 +192,7 @@ def test_bun_scaffold_does_not_emit_cast_only_mock_returns():
 
 
 def test_bun_scaffold_uses_valid_todo_values():
-    contract = build_contract(_handle_resub_facts())
+    contract = build_contract(_handle_renewal_facts())
     rendered = contract["scaffold"]["rendered_test"]
     assert "const __todoValue = (slot: string) =>" in rendered
     assert "/* TODO */" not in rendered
@@ -200,23 +200,23 @@ def test_bun_scaffold_uses_valid_todo_values():
 
 
 def test_bun_scaffold_uses_first_param_not_hardcoded_channel_for_assertion():
-    facts = _handle_resub_facts()
+    facts = _handle_renewal_facts()
     facts["target"]["signature"] = "sendAlert(roomId: string, message: string): void"
     contract = build_contract(facts)
     assert (
         contract["scaffold"]["assert_block"]
-        == "expect(client_say_spy).toHaveBeenCalledWith(roomId, expected_value);"
+        == "expect(notifier_send_spy).toHaveBeenCalledWith(roomId, expected_value);"
     )
 
 
 def test_bun_scaffold_omits_mock_import_when_unused():
-    facts = _handle_resub_facts()
+    facts = _handle_renewal_facts()
     facts["module_load_dependencies"] = []
     facts["execution_dependencies"] = []
     facts["injection_plan"] = []
     facts["assertion_surface"] = {
         "kind": "return_value",
-        "binding": "handleResub",
+        "binding": "processRenewal",
         "member": "return",
     }
 
@@ -227,15 +227,15 @@ def test_bun_scaffold_omits_mock_import_when_unused():
 
 
 def test_renderer_uses_typescript_signature_parser_for_optional_params():
-    facts = _handle_resub_facts()
-    facts["target"]["signature"] = "handleResub(channel?: string, months: number): void"
+    facts = _handle_renewal_facts()
+    facts["target"]["signature"] = "processRenewal(channel?: string, months: number): void"
 
     contract = build_contract(facts)
     scaffold = contract["scaffold"]
 
     assert "const channel = __todoValue('value_for_channel');" in scaffold["arrange_block"]
     assert "const channel? = __todoValue('value_for_channel?');" not in scaffold["arrange_block"]
-    assert scaffold["act_block"] == "handleResub(channel, months);"
+    assert scaffold["act_block"] == "processRenewal(channel, months);"
 
 
 class TestPytestScaffoldModuleLoadDeps:

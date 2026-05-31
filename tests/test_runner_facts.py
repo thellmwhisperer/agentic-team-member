@@ -32,9 +32,9 @@ def _config():
 
 def _episode():
     return {
-        "source_file": "src/twitch/client.ts",
-        "target_symbol": "handleResub",
-        "test_file": "src/twitch/handleResub.test.ts",
+        "source_file": "src/events/client.ts",
+        "target_symbol": "processRenewal",
+        "test_file": "src/events/processRenewal.test.ts",
         "runner": "bun:test",
         "function_line_range": {"start": 10, "end": 20, "source": "definition"},
     }
@@ -42,7 +42,7 @@ def _episode():
 
 def test_build_runner_facts_reports_bun_test_import_and_commands(tmp_path):
     _write_file(tmp_path, "package.json", json.dumps({"scripts": {"typecheck": "tsc --noEmit"}}))
-    _write_file(tmp_path, "src/twitch/client.ts", "export function handleResub() {}\n")
+    _write_file(tmp_path, "src/events/client.ts", "export function processRenewal() {}\n")
 
     facts = build_runner_facts(str(tmp_path), _config(), episode=_episode())
 
@@ -50,62 +50,62 @@ def test_build_runner_facts_reports_bun_test_import_and_commands(tmp_path):
     assert facts.test_command == "bun test"
     assert facts.typecheck_command == "bun run typecheck"
     assert facts.test_api_import == 'import { beforeEach, describe, expect, mock, test } from "bun:test";'
-    assert facts.recommended_test_file == "src/twitch/handleResub.test.ts"
+    assert facts.recommended_test_file == "src/events/processRenewal.test.ts"
     assert facts.source_line_range == {"start": 10, "end": 20, "source": "definition"}
     assert "mockFn.mockClear()" in facts.to_prompt_section()
     assert "mock.module(...)" in facts.to_prompt_section()
-    assert "src/twitch/client.ts:10-20" in facts.to_prompt_section()
+    assert "src/events/client.ts:10-20" in facts.to_prompt_section()
     assert facts.nearby_tests == []
     assert facts.symbol_tests == []
 
 
 def test_build_runner_facts_discovers_existing_nearby_and_symbol_tests(tmp_path):
     _write_file(tmp_path, "package.json", json.dumps({"scripts": {"typecheck": "tsc --noEmit"}}))
-    _write_file(tmp_path, "src/twitch/client.ts", "export function handleResub() {}\n")
+    _write_file(tmp_path, "src/events/client.ts", "export function processRenewal() {}\n")
     _write_file(
         tmp_path,
-        "src/twitch/client.test.ts",
+        "src/events/client.test.ts",
         """
         import { test } from "bun:test";
-        import { handleResub } from "./client";
+        import { processRenewal } from "./client";
 
-        test("handleResub formats months", () => {
-          handleResub();
+        test("processRenewal formats months", () => {
+          processRenewal();
         });
         """,
     )
 
     facts = build_runner_facts(str(tmp_path), _config(), episode=_episode())
 
-    assert facts.nearby_tests == ["src/twitch/client.test.ts"]
-    assert facts.symbol_tests == ["src/twitch/client.test.ts"]
-    assert "nearby tests in src/twitch: src/twitch/client.test.ts" in facts.to_prompt_section()
+    assert facts.nearby_tests == ["src/events/client.test.ts"]
+    assert facts.symbol_tests == ["src/events/client.test.ts"]
+    assert "nearby tests in src/events: src/events/client.test.ts" in facts.to_prompt_section()
 
 
 def test_build_runner_facts_honors_directory_aware_patterns(tmp_path):
     _write_file(tmp_path, "package.json", json.dumps({"scripts": {"typecheck": "tsc --noEmit"}}))
-    _write_file(tmp_path, "src/twitch/client.ts", "export function handleResub() {}\n")
+    _write_file(tmp_path, "src/events/client.ts", "export function processRenewal() {}\n")
     _write_file(
         tmp_path,
-        "tests/twitch/handleResub.spec.ts",
+        "tests/events/processRenewal.spec.ts",
         """
-        import { handleResub } from "../../src/twitch/client";
-        handleResub();
+        import { processRenewal } from "../../src/events/client";
+        processRenewal();
         """,
     )
 
     facts = build_runner_facts(str(tmp_path), _config(), episode=_episode())
 
-    assert facts.symbol_tests == ["tests/twitch/handleResub.spec.ts"]
+    assert facts.symbol_tests == ["tests/events/processRenewal.spec.ts"]
 
 
 def test_build_runner_facts_excludes_build_artifact_directories_by_default(tmp_path):
     _write_file(tmp_path, "package.json", json.dumps({"scripts": {"typecheck": "tsc --noEmit"}}))
-    _write_file(tmp_path, "src/twitch/client.ts", "export function handleResub() {}\n")
-    _write_file(tmp_path, "src/twitch/client.test.ts", "handleResub();\n")
-    _write_file(tmp_path, "dist/client.test.ts", "handleResub();\n")
-    _write_file(tmp_path, ".git/objects/noise.test.ts", "handleResub();\n")
+    _write_file(tmp_path, "src/events/client.ts", "export function processRenewal() {}\n")
+    _write_file(tmp_path, "src/events/client.test.ts", "processRenewal();\n")
+    _write_file(tmp_path, "dist/client.test.ts", "processRenewal();\n")
+    _write_file(tmp_path, ".git/objects/noise.test.ts", "processRenewal();\n")
 
     facts = build_runner_facts(str(tmp_path), _config(), episode=_episode())
 
-    assert facts.symbol_tests == ["src/twitch/client.test.ts"]
+    assert facts.symbol_tests == ["src/events/client.test.ts"]

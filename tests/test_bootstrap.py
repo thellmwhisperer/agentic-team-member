@@ -74,7 +74,7 @@ def test_prepare_run_context_rejects_issue_before_environment_prep(tmp_path):
             repo=None,
             workdir=str(tmp_path),
             config={"prompt": {"system": "system"}, "timeouts": {"tool_execution": 10}},
-            load_issue_text=lambda _args, _repo: "## Expected behavior\nAdd `userstate: any`",
+            load_issue_text=lambda _args, _repo: "## Expected behavior\nAdd `eventPayload: any`",
             prepare_target_environment=fail_if_called,
             apply_mechanical_edits=lambda _edits, _workdir: 0,
             collect_pr_changed_files=lambda _workdir, _timeout: set(),
@@ -115,7 +115,7 @@ def test_prepare_run_context_logs_deprecated_manual_target_override(tmp_path, mo
     issue = """Bug: handleSearch replies with stale data
 
 ## Where
-`src/twitch/client.ts` -> `handleSearch()`
+`src/events/client.ts` -> `handleSearch()`
 
 ## Symptom
 The bot replies with stale data.
@@ -164,10 +164,10 @@ def test_prepare_run_context_uses_issue_hints_and_builds_messages(tmp_path, monk
     episode_calls = []
     mechanical_calls = []
     logged = []
-    issue = """Bug: handleResub reports 0 months
+    issue = """Bug: processRenewal reports 0 months
 
 ## Where
-`src/twitch/client.ts` -> `handleResub()`
+`src/events/client.ts` -> `processRenewal()`
 
 ## Symptom
 The bot reports 0 months.
@@ -178,9 +178,9 @@ The bot reports 0 months.
         return {
             "source_file": kwargs["source_path"],
             "target_symbol": kwargs["symbol"],
-            "test_file": "src/twitch/client.test.ts",
+            "test_file": "src/events/client.test.ts",
             "pre_test_source_edits": [
-                {"path": kwargs["source_path"], "old": "function handleResub", "new": "export function handleResub"},
+                {"path": kwargs["source_path"], "old": "function processRenewal", "new": "export function processRenewal"},
             ],
             "function_line_range": {"start": 7, "end": 12, "source": "definition"},
             "cookbook_text": "## Cookbook\n",
@@ -203,17 +203,17 @@ The bot reports 0 months.
         log=lambda event, data: logged.append((event, data)),
     )
 
-    assert context.source_path == "src/twitch/client.ts"
-    assert context.symbol == "handleResub"
+    assert context.source_path == "src/events/client.ts"
+    assert context.symbol == "processRenewal"
     assert context.baseline_changed_files == {"preexisting.ts"}
     assert episode_calls == [{
-        "source_path": "src/twitch/client.ts",
-        "symbol": "handleResub",
+        "source_path": "src/events/client.ts",
+        "symbol": "processRenewal",
         "project_root": str(tmp_path),
     }]
     assert mechanical_calls[0][1] == str(tmp_path)
     assert context.messages[0]["content"] == "system\n\n## Cookbook\n"
-    assert "Start with `handleResub` (lines 7-12) as a discovery hypothesis" in context.messages[1]["content"]
+    assert "Start with `processRenewal` (lines 7-12) as a discovery hypothesis" in context.messages[1]["content"]
     assert [event for event, _data in logged] == [
         "issue_intake",
         "run_baseline_dirty_files",
@@ -224,20 +224,20 @@ The bot reports 0 months.
 
 def test_prepare_run_context_injects_runner_facts_when_runner_config_exists(tmp_path, monkeypatch):
     logged = []
-    issue = """Bug: handleResub reports 0 months
+    issue = """Bug: processRenewal reports 0 months
 
 ## Where
-`src/twitch/client.ts` -> `handleResub()`
+`src/events/client.ts` -> `processRenewal()`
 """
     (tmp_path / "package.json").write_text('{"scripts":{"typecheck":"tsc --noEmit"}}')
-    (tmp_path / "src/twitch").mkdir(parents=True)
-    (tmp_path / "src/twitch/client.ts").write_text("export function handleResub() {}\n")
+    (tmp_path / "src/events").mkdir(parents=True)
+    (tmp_path / "src/events/client.ts").write_text("export function processRenewal() {}\n")
 
     def fake_episode(**kwargs):
         return {
             "source_file": kwargs["source_path"],
             "target_symbol": kwargs["symbol"],
-            "test_file": "src/twitch/handleResub.test.ts",
+            "test_file": "src/events/processRenewal.test.ts",
             "runner": "bun:test",
             "pre_test_source_edits": [],
             "function_line_range": {"start": 1, "end": 1, "source": "definition"},

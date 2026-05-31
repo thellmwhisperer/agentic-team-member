@@ -24,7 +24,12 @@ from agentic_tdd_runner.compiler import (
 )
 from agentic_tdd_runner.compiler.parser import _find_symbol_line_with_source
 from agentic_tdd_runner.languages import get_language
-from agentic_tdd_runner.repo_profile import load_repo_profile
+from agentic_tdd_runner.repo_profile import (
+    DependencyContractProfile,
+    EventFrameworkProfile,
+    RepoProfile,
+    load_repo_profile,
+)
 
 
 def _build_contract_for_symbol(
@@ -154,7 +159,7 @@ def _build_contract_for_symbol(
     callback_contract_facts = _discover_callback_contract_facts(
         source_text,
         symbol,
-        project_root=project_root,
+        repo_profile=repo_profile,
         registrations=callback_registrations,
     )
     repo_profile_facts = repo_profile.render_facts(
@@ -363,35 +368,54 @@ def _discover_callback_contract_facts(
     source_text: str,
     symbol: str,
     *,
-    project_root: str,
+    repo_profile: RepoProfile,
     registrations: list[dict],
 ) -> list[str]:
-    """Derive dependency-backed callback facts for known event frameworks."""
+    """Derive dependency-backed callback facts from the repo profile."""
     facts: list[str] = []
-    if not registrations:
+    if not registrations or repo_profile.is_empty:
         return facts
 
-    frameworks = _callback_framework_modules(source_text)
+    frameworks = _callback_framework_profiles(source_text, repo_profile)
+    contracts = {contract.id: contract for contract in repo_profile.dependency_contracts}
     for registration in registrations:
         event = _event_name_from_registration(registration.get("call", ""), symbol)
         if not event:
             continue
         for framework in frameworks:
-            if framework == "tmi.js":
-                facts.extend(_tmi_event_contract_facts(Path(project_root), event))
+            contract = contracts.get(framework.dependency_contract or "")
+            if contract is None:
+                continue
+            facts.extend(_profile_event_contract_facts(framework, contract, event))
     return _dedupe_preserve_order(facts)
 
 
-def _callback_framework_modules(source_text: str) -> list[str]:
-    modules: list[str] = []
-    import_patterns = [
-        r"from\s+['\"](?P<module>tmi\.js)['\"]",
-        r"require\(\s*['\"](?P<module>tmi\.js)['\"]\s*\)",
-    ]
-    for pattern in import_patterns:
-        if re.search(pattern, source_text):
-            modules.append("tmi.js")
-    return _dedupe_preserve_order(modules)
+def _callback_framework_profiles(
+    source_text: str,
+    repo_profile: RepoProfile,
+) -> list[EventFrameworkProfile]:
+    frameworks: list[EventFrameworkProfile] = []
+    for framework in repo_profile.event_frameworks:
+        if framework.kind != "callback_event":
+            continue
+        import_specs = framework.imports or (framework.module,)
+        if _source_imports_any_module(source_text, import_specs):
+            frameworks.append(framework)
+    return frameworks
+
+
+def _source_imports_any_module(source_text: str, import_specs: tuple[str, ...]) -> bool:
+    for spec in import_specs:
+        escaped = re.escape(spec)
+        patterns = (
+            rf"\bfrom\s+['\"]{escaped}['\"]",
+            rf"\bimport\b[^\n;]*\bfrom\s+['\"]{escaped}['\"]",
+            rf"\bimport\s+['\"]{escaped}['\"]",
+            rf"\brequire\(\s*['\"]{escaped}['\"]\s*\)",
+        )
+        if any(re.search(pattern, source_text) for pattern in patterns):
+            return True
+    return False
 
 
 def _event_name_from_registration(call: str, symbol: str) -> str | None:
@@ -404,129 +428,31 @@ def _event_name_from_registration(call: str, symbol: str) -> str | None:
     return match.group("event")
 
 
-def _tmi_event_contract_facts(project_root: Path, event: str) -> list[str]:
+def _profile_event_contract_facts(
+    framework: EventFrameworkProfile,
+    contract: DependencyContractProfile,
+    event_name: str,
+) -> list[str]:
     facts: list[str] = []
-    client_js = project_root / "node_modules" / "tmi.js" / "lib" / "client.js"
-    type_defs = project_root / "node_modules" / "@types" / "tmi.js" / "index.d.ts"
-
-    if client_js.is_file():
-        client_text = client_js.read_text(errors="ignore")
-        emit_args = _tmi_emit_args_for_event(client_text, event)
-        if emit_args:
-            facts.append(
-                f"tmi.js source emits `{event}({', '.join(emit_args)})`."
-            )
-            for index, arg_name in enumerate(emit_args, start=1):
-                tag_key = _tag_source_for_identifier(client_text, arg_name)
-                if tag_key:
-                    facts.append(
-                        f"Argument {index} is `{arg_name}`, derived from `tags['{tag_key}']`."
-                    )
-
-    if type_defs.is_file():
-        type_text = type_defs.read_text(errors="ignore")
-        signature = _event_type_signature(type_text, event)
-        if signature:
-            facts.append(f"tmi.js type declarations expose `{event}({signature})`.")
-            facts.extend(_typed_tag_facts(type_text, signature))
-
-    return facts
-
-
-def _tmi_emit_args_for_event(client_text: str, event: str) -> list[str]:
-    case_body = _case_body_for_event(client_text, event)
-    if not case_body:
-        return []
-
-    emit_match = re.search(r"\bthis\.emits\((?P<body>.*?)\);", case_body, re.DOTALL)
-    if not emit_match:
-        return []
-
-    arrays = re.findall(r"\[([^\[\]]+)\]", emit_match.group("body"), re.DOTALL)
-    for array_body in arrays:
-        if "'" in array_body or '"' in array_body:
+    for event in contract.events:
+        if event.name != event_name:
             continue
-        args = [
-            item.strip()
-            for item in array_body.replace("\n", " ").split(",")
-            if item.strip()
-        ]
-        if args:
-            return args
-    return []
-
-
-def _case_body_for_event(client_text: str, event: str) -> str:
-    pattern = re.compile(
-        rf"\bcase\s+['\"]{re.escape(event)}['\"]\s*:(?P<body>.*?)(?=\n\s*(?:case\s+['\"]|default\s*:)|\n\s*}}\s*$)",
-        re.DOTALL,
-    )
-    match = pattern.search(client_text)
-    return match.group("body") if match else ""
-
-
-def _tag_source_for_identifier(source_text: str, identifier: str) -> str:
-    if not re.match(r"^[A-Za-z_$][\w$]*$", identifier):
-        return ""
-    patterns = (
-        rf"\b(?:const|let|var)\s+{re.escape(identifier)}\b[^=]*=\s*.*?tags\[['\"](?P<tag>[^'\"]+)['\"]\]",
-        rf"\b{re.escape(identifier)}\b\s*=\s*.*?tags\[['\"](?P<tag>[^'\"]+)['\"]\]",
-    )
-    for line in source_text.splitlines():
-        for pattern in patterns:
-            match = re.search(pattern, line)
-            if match:
-                return match.group("tag")
-    return ""
-
-
-def _event_type_signature(type_text: str, event: str) -> str:
-    pattern = re.compile(
-        rf"\b{re.escape(event)}\s*\((?P<params>.*?)\)\s*:\s*[^;]+;",
-        re.DOTALL,
-    )
-    match = pattern.search(type_text)
-    if not match:
-        return ""
-    return re.sub(r"\s+", " ", match.group("params")).strip().rstrip(",")
-
-
-def _typed_tag_facts(type_text: str, signature: str) -> list[str]:
-    facts: list[str] = []
-    for param_name, type_name in _signature_param_types(signature):
-        tags = _tag_keys_for_type(type_text, type_name)
-        if tags:
-            facts.append(
-                f"The `{param_name}` argument type `{type_name}` exposes tags: "
-                + ", ".join(f"`{tag}`" for tag in tags)
-                + "."
-            )
+        arg_names = [_profile_arg_name(arg) for arg in event.args]
+        module = contract.module or framework.module
+        facts.append(f"{module} source emits `{event.name}({', '.join(arg_names)})`.")
+        arg_sources = dict(event.arg_sources)
+        for index, arg_name in enumerate(arg_names, start=1):
+            source = arg_sources.get(arg_name)
+            if source:
+                facts.append(f"Argument {index} is `{arg_name}`, derived from `{source}`.")
+        signature = ", ".join(arg for arg in event.args if ":" in arg)
+        if signature:
+            facts.append(f"{module} type declarations expose `{event.name}({signature})`.")
     return facts
 
 
-def _signature_param_types(signature: str) -> list[tuple[str, str]]:
-    pairs: list[tuple[str, str]] = []
-    for param in signature.split(","):
-        match = re.search(
-            r"\b(?P<name>[A-Za-z_$][\w$]*)\s*:\s*(?P<type>[A-Za-z_$][\w$]*)\b",
-            param,
-        )
-        if match:
-            pairs.append((match.group("name"), match.group("type")))
-    return pairs
-
-
-def _tag_keys_for_type(type_text: str, type_name: str) -> list[str]:
-    pattern = re.compile(
-        rf"\binterface\s+{re.escape(type_name)}\b\s*{{(?P<body>.*?)\n\s*}}",
-        re.DOTALL,
-    )
-    match = pattern.search(type_text)
-    if not match:
-        return []
-    body = match.group("body")
-    tags = re.findall(r"['\"](?P<tag>[^'\"]+)['\"]\??\s*:", body)
-    return sorted(tag for tag in set(tags) if "-" in tag)
+def _profile_arg_name(arg: str) -> str:
+    return arg.split(":", 1)[0].strip()
 
 
 def _dedupe_preserve_order(values: list[str]) -> list[str]:
