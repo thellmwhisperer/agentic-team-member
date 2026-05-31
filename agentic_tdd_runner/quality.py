@@ -169,6 +169,10 @@ def get_changed_files(workdir: str) -> list[str]:
     return sorted(files)
 
 
+# Sentinel returned by create_pr when the PR-time target-touch gate rejects the change.
+PR_TARGET_GATE_FAILED = "__pr_target_gate_failed__"
+
+
 def _normalize_repo_path(path: str) -> str:
     return PurePosixPath((path or "").strip().removeprefix("./")).as_posix()
 
