@@ -6,6 +6,8 @@ import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from agentic_tdd_runner.quality import detect_pr_target_violation
+
 MAX_UNTRACKED_PREVIEW_BYTES = 64 * 1024
 
 
@@ -301,6 +303,25 @@ def try_complete(
                 except OSError:
                     pass
         if config.get("pr", {}).get("enabled", False):
+            target_source = (episode or {}).get("source_file")
+            if target_source:
+                name_only = subprocess.run(
+                    [git_path, "diff", "--name-only"],
+                    cwd=workdir,
+                    capture_output=True,
+                    text=True,
+                    timeout=command_timeout,
+                )
+                changed_for_gate = [
+                    line.strip()
+                    for line in (name_only.stdout + "\n" + untracked.stdout).splitlines()
+                    if line.strip()
+                ]
+                target_violation = detect_pr_target_violation(changed_for_gate, episode)
+                if target_violation:
+                    emit(f"\n  [PR GATE] {target_violation}")
+                    log("pr_gate_fail", {"step": step, "reason": "target_not_touched"})
+                    return "gate_fail"
             emit("\n=== PR CREATION ===")
             pr_url = create_pr(messages, msg, test_file, step)
             if pr_url:
