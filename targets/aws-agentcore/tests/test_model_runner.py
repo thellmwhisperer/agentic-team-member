@@ -123,6 +123,26 @@ model = "local-model"
 
         self.assertIn("max_steps = 100", rendered)
 
+    def test_env_int_or_none_reads_positive_integer(self):
+        with patch.dict(os.environ, {"ATM_MAX_STEPS": "100"}, clear=True):
+            self.assertEqual(model_runner.env_int_or_none("ATM_MAX_STEPS"), 100)
+
+    def test_env_int_or_none_returns_none_for_blank_value(self):
+        with patch.dict(os.environ, {"ATM_MAX_STEPS": "  "}, clear=True):
+            self.assertIsNone(model_runner.env_int_or_none("ATM_MAX_STEPS"))
+
+    def test_env_int_or_none_rejects_invalid_integer_with_name(self):
+        with patch.dict(os.environ, {"ATM_MAX_STEPS": "abc"}, clear=True):
+            with self.assertRaisesRegex(ValueError, "ATM_MAX_STEPS.*abc"):
+                model_runner.env_int_or_none("ATM_MAX_STEPS")
+
+    def test_env_int_or_none_rejects_non_positive_integer(self):
+        for value in ("0", "-1"):
+            with self.subTest(value=value):
+                with patch.dict(os.environ, {"ATM_MAX_STEPS": value}, clear=True):
+                    with self.assertRaisesRegex(ValueError, "positive integer"):
+                        model_runner.env_int_or_none("ATM_MAX_STEPS")
+
     def test_configure_model_runner_writes_config_and_starts_proxy(self):
         source = """[agent]
 permission_driven = false
