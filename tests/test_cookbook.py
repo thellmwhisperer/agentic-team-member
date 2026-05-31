@@ -834,7 +834,7 @@ class TestRepoProfileGuidance:
         assert "getStreamSummaryManager (function_returns_object: startPeriodicSummaries, trackResub, generateFinalSummary)" in result
         assert "import expectation for module `../managers/stream-summary`" in result
 
-    def test_includes_profile_event_framework_without_tmi_specific_code_path(self, tmp_path):
+    def test_includes_profile_declared_event_framework(self, tmp_path):
         _write_file(tmp_path, ".atm/profile.toml", """\
             [[event_frameworks]]
             id = "event-bus"
