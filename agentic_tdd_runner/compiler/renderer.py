@@ -231,7 +231,7 @@ def _build_pytest_scaffold(contract):
                 spy_name = f"{binding}_{member}_spy"
                 arrange_lines.append(f"{spy_name} = Mock()")
                 arrange_lines.append(
-                    f"# TODO: exercise {binding} through a public caller/registration, module mock, or smallest pure helper using {spy_name}"
+                    f"# TODO: exercise {binding} through a public caller/registration, module mock, or smallest pure helper using {spy_name}."
                 )
                 todo_slots.append(f"inject_{binding}_seam")
 
