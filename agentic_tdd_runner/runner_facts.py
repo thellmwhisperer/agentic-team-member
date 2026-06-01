@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import fnmatch
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Any
 
 from agentic_tdd_runner.languages import get_language, plugins
 from agentic_tdd_runner.runner_authority import override_detected_runner
@@ -147,23 +147,27 @@ def build_runner_facts(
     )
 
 
-def _episode_value(episode: dict | None, key: str) -> str | None:
+def _episode_value(episode: Mapping[str, object] | None, key: str) -> str | None:
     if not episode:
         return None
     value = episode.get(key)
     return value if isinstance(value, str) and value else None
 
 
-def _configured_text(value: Any) -> str | None:
+def _configured_text(value: object) -> str | None:
     return value.strip() if isinstance(value, str) and value.strip() else None
 
 
-def _bootstrap_value(bootstrap: Any, key: str) -> str | None:
-    value = bootstrap.get(key) if isinstance(bootstrap, dict) else getattr(bootstrap, key, None)
+def _bootstrap_value(bootstrap: object, key: str) -> str | None:
+    value = (
+        bootstrap.get(key)
+        if isinstance(bootstrap, Mapping)
+        else getattr(bootstrap, key, None)
+    )
     return _configured_text(value)
 
 
-def _language_for_episode(episode: dict | None) -> object | None:
+def _language_for_episode(episode: Mapping[str, object] | None) -> object | None:
     for key in ("test_file", "source_file"):
         value = _episode_value(episode, key)
         if not value:
@@ -180,10 +184,10 @@ def _language_runner(language: object | None) -> str | None:
 
 
 def _test_runner(
-    runner_cfg: dict,
-    bootstrap: Any,
+    runner_cfg: Mapping[str, object],
+    bootstrap: object,
     language: object | None,
-    episode: dict | None,
+    episode: Mapping[str, object] | None,
     override_detected: bool,
 ) -> str:
     configured = _configured_text(runner_cfg.get("framework"))
@@ -203,8 +207,8 @@ def _language_for_runner(test_runner: str) -> object | None:
 
 
 def _test_command(
-    runner_cfg: dict,
-    bootstrap: Any,
+    runner_cfg: Mapping[str, object],
+    bootstrap: object,
     language: object | None,
     test_runner: str,
     override_detected: bool,
@@ -240,7 +244,10 @@ def _test_command(
     return ""
 
 
-def _language_command_template(language: object | None, runner_cfg: dict) -> str:
+def _language_command_template(
+    language: object | None,
+    runner_cfg: Mapping[str, object],
+) -> str:
     command_fn = getattr(language, "test_command_template", None)
     if callable(command_fn):
         command = command_fn({"runner": runner_cfg})
@@ -256,7 +263,10 @@ def _language_effective_command(language: object | None, test_runner: str) -> st
     return ""
 
 
-def _test_file_patterns(runner_cfg: dict, language: object | None) -> list[str]:
+def _test_file_patterns(
+    runner_cfg: Mapping[str, object],
+    language: object | None,
+) -> list[str]:
     configured = runner_cfg.get("test_file_patterns")
     if isinstance(configured, list) and configured:
         return [str(pattern) for pattern in configured if str(pattern)]
@@ -275,7 +285,7 @@ def _language_default_exclude_dirs(language: object | None) -> list[str]:
     return [str(path) for path in exclude_fn()]
 
 
-def _episode_line_range(episode: dict | None) -> dict | None:
+def _episode_line_range(episode: Mapping[str, object] | None) -> dict | None:
     if not episode:
         return None
     value = episode.get("function_line_range")
