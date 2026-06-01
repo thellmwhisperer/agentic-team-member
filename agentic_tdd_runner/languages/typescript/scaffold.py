@@ -52,7 +52,12 @@ def render_assertion(
 
 
 def is_mock_setup_line(line: str) -> bool:
-    return bool(re.search(r"\b(?:vi|jest)\.(?:fn|mock)\s*\(", line.strip()))
+    return bool(
+        re.search(
+            r"(?:\b(?:vi|jest)\.(?:fn|mock)|\bmock\.module)\s*\(",
+            line.strip(),
+        )
+    )
 
 
 def reusable_test_shapes(file_text: str) -> list[str]:
@@ -95,7 +100,7 @@ def _build_bun_scaffold(contract: dict) -> dict:
     )
 
     import_names = [target_name]
-    for binding, plan in injection_plan.items():
+    for plan in injection_plan.values():
         setter_name = plan.get("setter_name")
         if setter_name and setter_name not in import_names:
             import_names.append(setter_name)

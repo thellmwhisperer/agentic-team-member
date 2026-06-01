@@ -3,6 +3,7 @@ import inspect
 
 from agentic_tdd_runner.compiler import build_contract
 from agentic_tdd_runner.compiler import renderer
+from agentic_tdd_runner.compiler.scaffold_common import _safe_identifier
 from agentic_tdd_runner.languages.signature import parse_signature_params as _parse_signature_params
 
 
@@ -212,6 +213,20 @@ def test_bun_scaffold_uses_first_param_not_hardcoded_channel_for_assertion():
     )
 
 
+def test_bun_scaffold_renders_direct_call_assertion_via_language():
+    facts = _handle_renewal_facts()
+    facts["assertion_surface"] = {
+        "kind": "outbound_call",
+        "binding": "send",
+        "member": "send",
+        "assertion_shape": "toHaveBeenCalled(...)",
+    }
+
+    assert build_contract(facts)["scaffold"]["assert_block"] == (
+        "expect(send_spy).toHaveBeenCalledWith(expected_value);"
+    )
+
+
 def test_bun_scaffold_omits_mock_import_when_unused():
     facts = _handle_renewal_facts()
     facts["module_load_dependencies"] = []
@@ -361,6 +376,19 @@ class TestPytestScaffoldModuleLoadDeps:
         assert_usage = rendered.index("logger_info_spy.assert_called_with")
         assert spy_def < assert_usage
 
+    def test_pytest_renders_direct_call_assertion_via_language(self):
+        facts = self._pytest_facts()
+        facts["assertion_surface"] = {
+            "kind": "outbound_call",
+            "binding": "send",
+            "member": "send",
+            "assertion_shape": "toHaveBeenCalled(...)",
+        }
+
+        assert build_contract(facts)["scaffold"]["assert_block"] == (
+            "send_spy.assert_called_with(expected_value)"
+        )
+
 
 class TestBunScaffoldSpyBinding:
     """When assertion targets a module_load dep, the spy must be a named variable."""
@@ -444,3 +472,8 @@ class TestParseSignatureParams:
 
     def test_parenthesis_inside_string_default(self):
         assert _parse_signature_params('foo(pattern: str = ")")') == ["pattern"]
+
+
+class TestSafeIdentifier:
+    def test_numeric_identifiers_get_prefixed(self):
+        assert _safe_identifier("123") == "_123"

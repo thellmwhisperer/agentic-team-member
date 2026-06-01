@@ -143,14 +143,6 @@ class PythonLanguage(OptionalLanguageCapabilityDefaults):
     def render_module_mocks(self, contract: dict, *, declare_spies: bool = False) -> str:
         return scaffold.render_module_mocks(contract, declare_spies=declare_spies)
 
-    def render_scaffold_assertion(
-        self,
-        assertion_surface: dict,
-        *,
-        call_params: list[str] | None = None,
-    ) -> str:
-        return scaffold.render_assertion(assertion_surface, call_params=call_params)
-
     def reusable_test_shapes(self, file_text: str) -> list[str]:
         return scaffold.reusable_test_shapes(file_text)
 

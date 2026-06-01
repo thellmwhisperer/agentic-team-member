@@ -155,6 +155,39 @@ def test_quality_typescript_uses_language_mock_setup_detection(tmp_path):
     assert "notifier" in msg
 
 
+def test_quality_typescript_detects_bun_module_mock_setup(tmp_path):
+    test_file = tmp_path / "src" / "worker.test.ts"
+    test_file.parent.mkdir(parents=True)
+    repeated_setup = "mock.module('../logger', () => ({}));"
+    test_file.write_text("\n".join([
+        "test('one', () => {",
+        repeated_setup,
+        "});",
+        "test('two', () => {",
+        repeated_setup,
+        "});",
+    ]))
+
+    ok, msg = run_quality_checks(
+        "src/worker.test.ts",
+        workdir=str(tmp_path),
+        config={
+            "quality": {
+                "enabled": True,
+                "typescript": {"checks": [], "forbidden": []},
+            },
+            "timeouts": {"tool_execution": 10},
+        },
+        log=lambda _event, _data: None,
+        is_test_file_path=lambda path: path.endswith(".test.ts"),
+        detect_quality_tools_fn=lambda _lang_name: [],
+        get_changed_files_fn=lambda: ["src/worker.test.ts"],
+    )
+
+    assert ok is False
+    assert "Duplicated setup" in msg
+
+
 def test_quality_python_filters_changed_files_to_python_extensions(tmp_path):
     py_test = tmp_path / "tests" / "test_worker.py"
     ts_file = tmp_path / "src" / "worker.ts"

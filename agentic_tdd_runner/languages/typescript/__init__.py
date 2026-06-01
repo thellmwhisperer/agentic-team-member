@@ -597,14 +597,6 @@ class TypeScriptLanguage(OptionalLanguageCapabilityDefaults):
     def render_module_mocks(self, contract: dict, *, declare_spies: bool = False) -> str:
         return scaffold.render_module_mocks(contract, declare_spies=declare_spies)
 
-    def render_scaffold_assertion(
-        self,
-        assertion_surface: dict,
-        *,
-        call_params: list[str] | None = None,
-    ) -> str:
-        return scaffold.render_assertion(assertion_surface, call_params=call_params)
-
     def is_mock_setup_line(self, line: str) -> bool:
         return scaffold.is_mock_setup_line(line)
 
