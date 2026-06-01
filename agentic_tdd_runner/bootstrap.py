@@ -119,15 +119,17 @@ def prepare_run_context(
     )
 
     issue_text_for_model = issue_contract.model_text
-    from agentic_tdd_runner.recon import build_recon_cookbook
+    recon_cookbook = None
+    if _recon_enabled(config):
+        from agentic_tdd_runner.recon import build_recon_cookbook
 
-    recon_cookbook = build_recon_cookbook(
-        issue_text=issue_text_for_model,
-        project_root=workdir,
-        config=config,
-    )
-    if recon_cookbook.markdown:
-        log("cookbook", recon_cookbook.to_log_dict())
+        recon_cookbook = build_recon_cookbook(
+            issue_text=issue_text_for_model,
+            project_root=workdir,
+            config=config,
+        )
+        if recon_cookbook.markdown:
+            log("cookbook", recon_cookbook.to_log_dict())
 
     source_path = manual_source or issue_contract.source_hint
     symbol = manual_symbol or issue_contract.symbol_hint
@@ -136,6 +138,7 @@ def prepare_run_context(
         and symbol
         and not manual_source
         and discovery_enabled
+        and recon_cookbook
         and _matches_recon_anti_anchor(source_path, recon_cookbook.anti_anchor_paths)
     ):
         emit("[TARGET] Deprioritizing generic/shared issue hint; using discovery candidates")
@@ -168,7 +171,7 @@ def prepare_run_context(
         discovery_candidates=discovery_candidates,
         apply_pre_test_edits=apply_pre_test_edits,
     )
-    if episode and recon_cookbook.markdown:
+    if episode and recon_cookbook and recon_cookbook.markdown:
         episode["recon_cookbook_text"] = recon_cookbook.markdown
     if episode and config.get("runner"):
         from agentic_tdd_runner.runner_facts import build_runner_facts
@@ -195,6 +198,10 @@ def prepare_run_context(
         messages=messages,
         baseline_changed_files=baseline_changed_files,
     )
+
+
+def _recon_enabled(config: dict) -> bool:
+    return bool(((config.get("recon", {}) or {}).get("enabled", True)))
 
 
 def _matches_recon_anti_anchor(source_path: str, anti_anchor_paths: list[str]) -> bool:

@@ -303,7 +303,10 @@ def _hypotheses(issue_text: str, frameworks: list[str]) -> list[str]:
             "Client effect timing or stale closure.",
             "Server/client data ordering before render.",
         ])
-    if any(token in text for token in ("retry", "rate limit", "api")):
+    if (
+        any(token in text for token in ("retry", "rate limit"))
+        or re.search(r"\bapi\b", text)
+    ):
         hypotheses.extend([
             "API wrapper behavior at the external boundary.",
             "Backend/service layer translating the wrapper result.",

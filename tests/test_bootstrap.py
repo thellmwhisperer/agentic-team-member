@@ -325,6 +325,54 @@ def test_prepare_run_context_logs_and_prepends_recon_cookbook(tmp_path, monkeypa
     assert cookbook_payload["frameworks"] == ["Next.js"]
 
 
+def test_prepare_run_context_skips_recon_when_disabled(tmp_path, monkeypatch):
+    logged = []
+    issue = """Bug: processRenewal reports 0 months
+
+## Where
+`src/events/client.ts` -> `processRenewal()`
+"""
+
+    def fail_recon(**_kwargs):
+        raise AssertionError("recon should not run when disabled")
+
+    def fake_episode(**kwargs):
+        return {
+            "source_file": kwargs["source_path"],
+            "target_symbol": kwargs["symbol"],
+            "test_file": "src/events/processRenewal.test.ts",
+            "pre_test_source_edits": [],
+            "function_line_range": {"start": 1, "end": 1, "source": "definition"},
+            "cookbook_text": "## Target Cookbook\n",
+        }
+
+    monkeypatch.setattr("agentic_tdd_runner.recon.build_recon_cookbook", fail_recon)
+    monkeypatch.setattr("agentic_tdd_runner.cookbook.build_episode_context", fake_episode)
+    args = SimpleNamespace(issue="unused", source=None, symbol=None)
+
+    context = prepare_run_context(
+        args,
+        repo=None,
+        workdir=str(tmp_path),
+        config={
+            "prompt": {"system": "system"},
+            "timeouts": {"tool_execution": 10},
+            "recon": {"enabled": False},
+        },
+        load_issue_text=lambda _args, _repo: issue,
+        prepare_target_environment=lambda: None,
+        apply_mechanical_edits=lambda _edits, _workdir: 0,
+        collect_pr_changed_files=lambda _workdir, _timeout: set(),
+        discovery_enabled=True,
+        emit=lambda _msg: None,
+        log=lambda event, data: logged.append((event, data)),
+    )
+
+    assert "recon_cookbook_text" not in context.episode
+    assert not any(event == "cookbook" for event, _data in logged)
+    assert context.messages[0]["content"] == "system\n\n## Target Cookbook\n"
+
+
 def test_prepare_run_context_deprioritizes_generic_anchor_issue_hint(tmp_path, monkeypatch):
     episode_calls = []
     logged = []

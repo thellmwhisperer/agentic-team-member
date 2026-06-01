@@ -97,6 +97,23 @@ def test_recon_stays_empty_when_no_mechanical_facts_exist(tmp_path):
     assert cookbook.to_log_dict()["sections"] == []
 
 
+def test_recon_api_hypothesis_requires_api_word_boundary(tmp_path):
+    false_positive = build_recon_cookbook(
+        issue_text="Bug: the page rapidly capitalizes labels",
+        project_root=str(tmp_path),
+    )
+    true_positive = build_recon_cookbook(
+        issue_text="Bug: the API retries after rate limit",
+        project_root=str(tmp_path),
+    )
+
+    assert false_positive.hypotheses == []
+    assert true_positive.hypotheses == [
+        "API wrapper behavior at the external boundary.",
+        "Backend/service layer translating the wrapper result.",
+    ]
+
+
 def test_recon_bare_symbol_extraction_ignores_prose_capitalized_words(tmp_path):
     _write_file(
         tmp_path,

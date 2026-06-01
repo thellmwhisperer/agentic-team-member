@@ -48,6 +48,9 @@ timeout = 300
 [discovery]
 enabled = true
 
+[recon]
+enabled = true
+
 [prompt]
 system = """
 You are a senior software engineer fixing a bug.

@@ -318,6 +318,9 @@ timeout = 300
 [discovery]
 enabled = true
 
+[recon]
+enabled = true
+
 [quality]
 enabled = true
 max_fix_rounds = 3
