@@ -130,6 +130,32 @@ def test_apply_patch_ignores_unified_diff_line_headers(tmp_path):
     assert target.read_text() == "export function value() {\n  return 2;\n}\n"
 
 
+def test_apply_patch_accepts_empty_context_line_in_hunk(tmp_path):
+    target = tmp_path / "src" / "file.ts"
+    target.parent.mkdir()
+    target.write_text("const before = true;\n\nconst value = 1;\n")
+
+    result, _ = _execute_tool(
+        "apply_patch",
+        {
+            "patch": (
+                "*** Begin Patch\n"
+                "*** Update File: src/file.ts\n"
+                "@@\n"
+                " const before = true;\n"
+                "\n"
+                "-const value = 1;\n"
+                "+const value = 2;\n"
+                "*** End Patch"
+            )
+        },
+        tmp_path,
+    )
+
+    assert result == "OK: applied patch (updated src/file.ts)"
+    assert target.read_text() == "const before = true;\n\nconst value = 2;\n"
+
+
 def test_apply_patch_is_atomic_when_later_hunk_fails(tmp_path):
     src = tmp_path / "src"
     src.mkdir()
@@ -186,6 +212,63 @@ def test_apply_patch_adds_and_deletes_files(tmp_path):
     assert result == "OK: applied patch (added src/created.ts; deleted src/obsolete.ts)"
     assert created.read_text() == "export const created = true;\n"
     assert not obsolete.exists()
+
+
+def test_apply_patch_updates_and_moves_file(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    source = src / "source.ts"
+    destination = src / "destination.ts"
+    source.write_text("export const value = 1;\n")
+
+    result, _ = _execute_tool(
+        "apply_patch",
+        {
+            "patch": (
+                "*** Begin Patch\n"
+                "*** Update File: src/source.ts\n"
+                "*** Move to: src/destination.ts\n"
+                "@@\n"
+                "-export const value = 1;\n"
+                "+export const value = 2;\n"
+                "*** End Patch"
+            )
+        },
+        tmp_path,
+    )
+
+    assert result == "OK: applied patch (moved src/source.ts -> src/destination.ts)"
+    assert not source.exists()
+    assert destination.read_text() == "export const value = 2;\n"
+
+
+def test_apply_patch_rejects_move_when_destination_exists(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    source = src / "source.ts"
+    destination = src / "destination.ts"
+    source.write_text("export const value = 1;\n")
+    destination.write_text("export const existing = true;\n")
+
+    result, _ = _execute_tool(
+        "apply_patch",
+        {
+            "patch": (
+                "*** Begin Patch\n"
+                "*** Update File: src/source.ts\n"
+                "*** Move to: src/destination.ts\n"
+                "@@\n"
+                "-export const value = 1;\n"
+                "+export const value = 2;\n"
+                "*** End Patch"
+            )
+        },
+        tmp_path,
+    )
+
+    assert result == "ERROR: apply_patch failed: src/destination.ts already exists"
+    assert source.read_text() == "export const value = 1;\n"
+    assert destination.read_text() == "export const existing = true;\n"
 
 
 def test_apply_patch_rejects_deleting_directories_during_planning(tmp_path):
