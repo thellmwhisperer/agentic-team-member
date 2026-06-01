@@ -60,6 +60,29 @@ def permission_enabled(config: dict) -> bool:
     return bool((config or {}).get("agent", {}).get("permission_driven", False))
 
 
+def _language_for_permission_context(*, source_file: Any, test_file: Any) -> object | None:
+    for path in (test_file, source_file):
+        if not isinstance(path, str) or not path:
+            continue
+        language = get_language(path)
+        if language:
+            return language
+    return None
+
+
+def _language_capability(
+    language: object | None,
+    capability: str,
+    *args,
+    default,
+    **kwargs,
+):
+    fn = getattr(language, capability, None)
+    if callable(fn):
+        return fn(*args, **kwargs)
+    return default
+
+
 def build_permission_context(
     *,
     episode: dict | None,
@@ -73,6 +96,10 @@ def build_permission_context(
     cookbook_text = str(episode.get("cookbook_text") or "")
     contract_facts = _extract_callback_contract_facts(cookbook_text)
     repo_profile_facts = _extract_repo_profile_facts(cookbook_text)
+    runner = episode.get("runner") or runner_cfg.get("framework")
+    source_file = episode.get("source_file")
+    test_file = episode.get("test_file")
+    language = _language_for_permission_context(source_file=source_file, test_file=test_file)
     runner_facts = []
     runner_facts_text = str(episode.get("runner_facts_text") or "")
     for line in runner_facts_text.splitlines():
@@ -82,11 +109,12 @@ def build_permission_context(
     return {
         "phase": phase,
         "test_file_created": test_file_created,
-        "source_file": episode.get("source_file"),
-        "test_file": episode.get("test_file"),
+        "source_file": source_file,
+        "test_file": test_file,
         "source_import_path": episode.get("source_import_path"),
         "target_symbol": episode.get("target_symbol"),
-        "runner": episode.get("runner") or runner_cfg.get("framework"),
+        "runner": runner,
+        "language_name": getattr(language, "name", None),
         "test_command": runner_cfg.get("command"),
         "contract_facts": contract_facts,
         "repo_profile_facts": repo_profile_facts,
@@ -102,15 +130,26 @@ def build_permission_context(
             source_file=episode.get("source_file"),
             contract_facts=contract_facts + repo_profile_facts,
         ),
-        "referenced_type_shapes": _read_referenced_type_shapes(
+        "referenced_type_shapes": _language_capability(
+            language,
+            "referenced_type_shapes",
             workdir=workdir,
             contract_facts=contract_facts,
+            default=[],
         ),
-        "test_setup_read_paths": _read_test_setup_dependency_paths(
+        "test_setup_read_paths": _language_capability(
+            language,
+            "test_setup_dependency_paths",
             workdir=workdir,
-            test_file=episode.get("test_file"),
+            test_file=test_file,
+            default=[],
         ),
-        "source_mocks": _extract_mock_modules(cookbook_text),
+        "source_mocks": _language_capability(
+            language,
+            "extract_mock_modules",
+            cookbook_text,
+            default=[],
+        ),
         "module_mock_block": _extract_code_block_after(
             cookbook_text,
             "### Module Mocks (paste before source import)",
@@ -202,8 +241,14 @@ def answer_harness(args: dict, context: dict) -> PermissionReview:
             lines.append(type_shapes)
         skeleton = _build_regression_test_skeleton(context)
         if skeleton:
+            language = _language_for_permission_context(
+                source_file=context.get("source_file"),
+                test_file=context.get("test_file"),
+            )
+            code_fence_fn = getattr(language, "code_fence", None)
+            code_fence = code_fence_fn() if callable(code_fence_fn) else ""
             lines.append("Suggested regression test skeleton:")
-            lines.append("```ts")
+            lines.append(f"```{code_fence}")
             lines.append(skeleton)
             lines.append("```")
         return PermissionReview(
@@ -920,156 +965,6 @@ def _read_relevant_imports_snippet(
     return "\n".join(relevant[:6]).strip()
 
 
-def _read_referenced_type_shapes(
-    *,
-    workdir: str | None,
-    contract_facts: list[str],
-) -> list[dict[str, Any]]:
-    if not workdir:
-        return []
-
-    shapes: list[dict[str, Any]] = []
-    for module_name, type_names in _referenced_framework_types(contract_facts):
-        type_text = _read_module_type_declarations(Path(workdir), module_name)
-        if not type_text:
-            continue
-        for type_name in type_names:
-            shape = _extract_type_shape(type_text, type_name)
-            if shape:
-                shape["module"] = module_name
-                shapes.append(shape)
-    return shapes
-
-
-def _read_test_setup_dependency_paths(
-    *,
-    workdir: str | None,
-    test_file: Any,
-) -> list[str]:
-    if not workdir or not test_file:
-        return []
-
-    test_path = Path(workdir) / str(test_file)
-    try:
-        test_text = test_path.read_text()
-    except OSError:
-        return []
-
-    test_dir = posixpath.dirname(_normalize_permission_path(str(test_file)))
-    paths: set[str] = set()
-    for spec in _extract_mock_module_specs(test_text):
-        if not spec.startswith(("./", "../")):
-            continue
-        candidate_base = _normalize_permission_path(posixpath.join(test_dir, spec))
-        if not candidate_base or candidate_base.startswith("../") or "/../" in candidate_base:
-            continue
-        resolved = _resolve_repo_module_path(Path(workdir), candidate_base)
-        if resolved:
-            paths.add(resolved)
-    return sorted(paths)
-
-
-def _extract_mock_module_specs(test_text: str) -> list[str]:
-    return [
-        match.group("spec")
-        for match in re.finditer(
-            r"mock\.module\(\s*['\"](?P<spec>\.{1,2}/[^'\"]+)['\"]",
-            test_text,
-        )
-    ]
-
-
-def _resolve_repo_module_path(workdir: Path, candidate_base: str) -> str:
-    candidates = [
-        candidate_base,
-        *[f"{candidate_base}{suffix}" for suffix in (".ts", ".tsx", ".js", ".jsx", ".mts", ".cts")],
-        *[
-            posixpath.join(candidate_base, f"index{suffix}")
-            for suffix in (".ts", ".tsx", ".js", ".jsx", ".mts", ".cts")
-        ],
-    ]
-    for candidate in candidates:
-        if (workdir / candidate).is_file():
-            return candidate
-    return ""
-
-
-def _referenced_framework_types(contract_facts: list[str]) -> list[tuple[str, list[str]]]:
-    primitive_types = {"string", "number", "boolean", "void", "unknown", "object"}
-    refs: dict[str, set[str]] = {}
-    for fact in contract_facts:
-        match = re.search(
-            r"(?P<module>[\w@./-]+) type declarations expose `[^`]+\((?P<params>[^`]*)\)`",
-            fact,
-        )
-        if not match:
-            continue
-        names = refs.setdefault(match.group("module"), set())
-        for _param_name, type_name in _signature_param_types(match.group("params")):
-            if type_name not in primitive_types:
-                names.add(type_name)
-    return [
-        (module_name, sorted(type_names))
-        for module_name, type_names in sorted(refs.items())
-        if type_names
-    ]
-
-
-def _read_module_type_declarations(workdir: Path, module_name: str) -> str:
-    candidates = [
-        workdir / "node_modules" / "@types" / module_name / "index.d.ts",
-        workdir / "node_modules" / module_name / "index.d.ts",
-        workdir / "node_modules" / module_name / "types.d.ts",
-    ]
-    for candidate in candidates:
-        if candidate.is_file():
-            return candidate.read_text(errors="ignore")
-    return ""
-
-
-def _extract_type_shape(type_text: str, type_name: str) -> dict[str, Any]:
-    interface_match = re.search(
-        rf"\binterface\s+{re.escape(type_name)}\b[^\{{]*{{(?P<body>.*?)\n\s*}}",
-        type_text,
-        re.DOTALL,
-    )
-    if interface_match:
-        fields = _extract_type_fields(interface_match.group("body"))
-        return {"name": type_name, "kind": "interface", "fields": fields}
-
-    alias_match = re.search(
-        rf"\btype\s+{re.escape(type_name)}\s*=\s*(?P<body>[^;]+);",
-        type_text,
-        re.DOTALL,
-    )
-    if alias_match:
-        return {
-            "name": type_name,
-            "kind": "type",
-            "alias": re.sub(r"\s+", " ", alias_match.group("body")).strip(),
-            "fields": [],
-        }
-    return {}
-
-
-def _extract_type_fields(body: str) -> list[dict[str, str | bool]]:
-    fields: list[dict[str, str | bool]] = []
-    pattern = re.compile(
-        r"^\s*(?P<name>['\"][^'\"]+['\"]|[A-Za-z_$][\w$]*)"
-        r"(?P<optional>\?)?\s*:\s*(?P<type>[^;\n]+);?",
-        re.MULTILINE,
-    )
-    for match in pattern.finditer(body):
-        raw_name = match.group("name")
-        name = raw_name[1:-1] if raw_name.startswith(("'", '"')) else raw_name
-        fields.append({
-            "name": name,
-            "optional": bool(match.group("optional")),
-            "type": re.sub(r"\s+", " ", match.group("type")).strip(),
-        })
-    return fields
-
-
 def _format_type_shapes(shapes: list[dict[str, Any]]) -> str:
     lines: list[str] = []
     for shape in shapes:
@@ -1138,93 +1033,16 @@ def _extract_section_bullets(cookbook_text: str, section_title: str) -> list[str
     return facts
 
 
-def _extract_mock_modules(cookbook_text: str) -> list[str]:
-    modules: list[str] = []
-    for line in cookbook_text.splitlines():
-        stripped = line.strip()
-        if not stripped.startswith("mock.module("):
-            continue
-        modules.append(stripped)
-    return modules
-
-
 def _build_regression_test_skeleton(context: dict) -> str:
-    """Build a compact, executable first-test shape when deterministic facts are enough."""
-    facts = context.get("contract_facts") or []
-    mock_block = str(context.get("module_mock_block") or "").strip()
-    signature = str(context.get("source_signature") or "").strip()
-    target_symbol = str(context.get("target_symbol") or "").strip()
-    callback_params = _callback_params_from_contract_facts(facts)
-    if not (facts and mock_block and signature and target_symbol):
-        return ""
-
-    import_path = context.get("source_import_path") or "./client"
-    spy_names = _extract_spy_names(mock_block)
-    type_imports = _extract_type_imports_from_contract_facts(facts)
-    type_shapes = context.get("referenced_type_shapes") or []
-    fixture_lines = _build_callback_fixture_lines(
-        params=callback_params,
-        facts=facts,
-        type_shapes=type_shapes,
+    """Ask the active language plugin for a compact first-test shape."""
+    language = _language_for_permission_context(
+        source_file=context.get("source_file"),
+        test_file=context.get("test_file"),
     )
-    lines = [
-        'import { beforeEach, describe, expect, mock, test } from "bun:test";',
-    ]
-    for module_name, names in type_imports:
-        lines.append(f'import type {{ {", ".join(names)} }} from "{module_name}";')
-    lines.append("")
-    lines.extend(mock_block.splitlines())
-    lines.append("")
-
-    lines.extend([
-        f'type ClientModule = typeof import("{import_path}");',
-        f'type TargetHandler = ClientModule["{target_symbol}"];',
-    ])
-    if callback_params:
-        lines.extend([
-            "type CallbackContract = (",
-            *[
-                f"  {param_name}: {type_name},"
-                for param_name, type_name in callback_params
-            ],
-            ") => void;",
-        ])
-    else:
-        lines.append("type CallbackContract = TargetHandler;")
-    lines.extend([
-        "",
-        "let targetHandler: TargetHandler;",
-    ])
-    lines.extend([
-        "",
-        "beforeEach(async () => {",
-    ])
-    if spy_names:
-        lines.append(f"  for (const spy of [{', '.join(spy_names)}]) spy.mockClear();")
-    else:
-        lines.append("  // mockClear every *_spy from the cookbook here.")
-    lines.extend([
-        f'  const clientModule = await import("{import_path}");',
-        f"  targetHandler = clientModule.{target_symbol};",
-    ])
-    lines.extend([
-        "});",
-        "",
-        'test("covers the reported callback behavior", () => {',
-        "  // Arrange issue-grounded doubles; do not add production test-only setters.",
-    ])
-    if fixture_lines:
-        lines.extend(f"  {line}" if line else "" for line in fixture_lines)
-    else:
-        lines.append("  // Build typed callback arguments from the Callback Contract Evidence.")
-    lines.extend([
-        "  const callbackHandler: CallbackContract = targetHandler;",
-        "  callbackHandler(" + ", ".join(_callback_argument_names(callback_params)) + ");",
-        "  // Assert through the named *_spy variables and issue acceptance criteria.",
-        '  throw new Error("replace skeleton comments with the focused failing regression");',
-        "});",
-    ])
-    return "\n".join(lines)
+    skeleton_fn = getattr(language, "regression_test_skeleton", None)
+    if callable(skeleton_fn):
+        return str(skeleton_fn(context) or "")
+    return ""
 
 
 def _extract_code_block_after(cookbook_text: str, section_title: str) -> str:
@@ -1246,170 +1064,6 @@ def _extract_code_block_after(cookbook_text: str, section_title: str) -> str:
         if in_block:
             lines.append(line)
     return ""
-
-
-def _extract_spy_names(mock_block: str) -> list[str]:
-    names: list[str] = []
-    for line in mock_block.splitlines():
-        stripped = line.strip()
-        if not stripped.startswith("const ") or "_spy" not in stripped:
-            continue
-        name = stripped.removeprefix("const ").split("=", 1)[0].strip()
-        if name.endswith("_spy"):
-            names.append(name)
-    return names
-
-
-def _extract_type_imports_from_contract_facts(facts: list[str]) -> list[tuple[str, list[str]]]:
-    return _referenced_framework_types(facts)
-
-
-def _callback_params_from_contract_facts(facts: list[str]) -> list[tuple[str, str]]:
-    for fact in facts:
-        match = re.search(
-            r"[\w@./-]+ type declarations expose `[^`]+\((?P<params>[^`]*)\)`",
-            fact,
-        )
-        if match:
-            return _signature_param_types(match.group("params"))
-    return []
-
-
-def _signature_param_types(signature: str) -> list[tuple[str, str]]:
-    pairs: list[tuple[str, str]] = []
-    for param in signature.split(","):
-        match = re.search(
-            r"\b(?P<name>[A-Za-z_$][\w$]*)\s*:\s*(?P<type>[A-Za-z_$][\w$]*)\b",
-            param,
-        )
-        if match:
-            pairs.append((match.group("name"), match.group("type")))
-    return pairs
-
-
-def _callback_argument_names(params: list[tuple[str, str]]) -> list[str]:
-    return [name for name, _type_name in params]
-
-
-def _build_callback_fixture_lines(
-    *,
-    params: list[tuple[str, str]],
-    facts: list[str],
-    type_shapes: list[dict[str, Any]],
-) -> list[str]:
-    if not params:
-        return []
-
-    event_name = _event_name_from_contract_facts(facts)
-    runtime_names = _runtime_arg_names_from_contract_facts(facts)
-    shapes_by_name = {shape.get("name"): shape for shape in type_shapes}
-    lines: list[str] = []
-    for index, (param_name, type_name) in enumerate(params):
-        shape = shapes_by_name.get(type_name)
-        if shape and shape.get("fields"):
-            lines.extend(_fixture_object_lines(param_name, type_name, shape, event_name=event_name, facts=facts))
-            continue
-        runtime_name = runtime_names[index] if index < len(runtime_names) else param_name
-        lines.append(f"const {param_name}: {type_name} = {_sample_primitive_value(param_name, runtime_name, type_name, facts)};")
-    return lines
-
-
-def _fixture_object_lines(
-    param_name: str,
-    type_name: str,
-    shape: dict[str, Any],
-    *,
-    event_name: str,
-    facts: list[str],
-) -> list[str]:
-    fields = shape.get("fields") or []
-    selected = _select_fixture_fields(fields, facts)
-    if not selected:
-        selected = [field for field in fields if not field.get("optional")][:3]
-    if not selected:
-        selected = fields[:3]
-    lines = [f"const {param_name}: {type_name} = {{"]
-    for field in selected:
-        key = field["name"]
-        value = _sample_field_value(str(key), str(field.get("type") or ""), event_name=event_name)
-        rendered_key = key if re.match(r"^[A-Za-z_$][\w$]*$", str(key)) else f'"{key}"'
-        lines.append(f"  {rendered_key}: {value},")
-    lines.append("};")
-    return lines
-
-
-def _select_fixture_fields(fields: list[dict[str, Any]], facts: list[str]) -> list[dict[str, Any]]:
-    selected: list[dict[str, Any]] = []
-    fact_text = "\n".join(facts)
-    for field in fields:
-        name = str(field.get("name") or "")
-        if name and (
-            name in fact_text
-            or name == "message-type"
-        ):
-            selected.append(field)
-    if selected:
-        return selected
-    return [
-        field for field in fields
-        if _is_simple_fixture_field(str(field.get("type") or ""))
-    ][:3]
-
-
-def _is_simple_fixture_field(type_text: str) -> bool:
-    return any(token in type_text for token in ["string", "boolean", "number"]) or re.match(r"^[A-Za-z_$][\w$]*Plan\b", type_text)
-
-
-def _sample_primitive_value(param_name: str, runtime_name: str, type_name: str, facts: list[str]) -> str:
-    name = f"{param_name} {runtime_name}".lower()
-    if type_name == "string":
-        if "channel" in name:
-            return '"#channel"'
-        if "user" in name:
-            return '"username"'
-        if "message" in name or "msg" in name:
-            return '""'
-        return '""'
-    if type_name == "number":
-        return "1"
-    if type_name == "boolean":
-        return "false"
-    return "{}"
-
-
-def _sample_field_value(field_name: str, type_text: str, *, event_name: str) -> str:
-    if field_name == "message-type" and event_name:
-        return f'"{event_name}"'
-    if field_name == "planName":
-        return '"Tier 1"'
-    if field_name == "plan" or type_text.endswith("Plan"):
-        return '"1000"'
-    if "string" in type_text:
-        return '""'
-    if field_name == "prime" or "boolean" in type_text:
-        return "false"
-    if "number" in type_text:
-        return "1"
-    return '""'
-
-
-def _event_name_from_contract_facts(facts: list[str]) -> str:
-    for fact in facts:
-        match = re.search(r"\.on\(['\"](?P<event>[^'\"]+)['\"]", fact)
-        if match:
-            return match.group("event")
-        match = re.search(r"source emits `(?P<event>[^`(]+)\(", fact)
-        if match:
-            return match.group("event")
-    return ""
-
-
-def _runtime_arg_names_from_contract_facts(facts: list[str]) -> list[str]:
-    for fact in facts:
-        match = re.search(r"source emits `[^`(]+\((?P<params>[^`]*)\)`", fact)
-        if match:
-            return [part.strip() for part in match.group("params").split(",") if part.strip()]
-    return []
 
 
 def _bullet_block(lines: list[str]) -> str:

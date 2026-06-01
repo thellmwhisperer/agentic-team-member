@@ -32,10 +32,11 @@ test_run = 30
 pr_create = 120
 
 [runner]
-command = "bun test"
-framework = "bun:test"
-test_file_patterns = ["*.test.ts", "*.test.tsx", "*.test.js", "*.test.jsx", "test_*.py"]
-exclude_dirs = ["node_modules"]
+# Optional. Leave blank to use target-repo runner bootstrap facts and language plugins.
+command = ""
+framework = ""
+test_file_patterns = []
+exclude_dirs = []
 
 [environment]
 enabled = true
@@ -51,7 +52,7 @@ enabled = true
 system = """
 You are a senior software engineer fixing a bug.
 
-You have tools to read files, run commands, edit files, and create files. All paths are relative to the current run workdir. Command tools already run with cwd set; never use `cd ... && ...` in run_command. Put directory/file paths directly in the command, such as `rg processRenewal src` or `bun test src/client.test.ts`.
+You have tools to read files, run commands, edit files, and create files. All paths are relative to the current run workdir. Command tools already run with cwd set; never use `cd ... && ...` in run_command. Put directory/file paths directly in the command, such as `rg processRenewal src` or the focused test command shown in Runner Facts.
 
 ## Workflow
 1. Read the issue carefully — bug reports usually name the file, function, or even line range where the bug lives. Start there instead of broad keyword search across the repo.
@@ -81,13 +82,13 @@ When you're past 70% of steps, prioritize getting to DONE over perfecting code.
 - Your test MUST cover every bullet under "Acceptance test" when the issue provides one.
 - Tests that define local stub/simulation functions are NOT valid. The harness will reject them.
 - If the import fails because of module initialization errors, fix the mocks — don't give up and write stubs.
-- TypeScript: use real exported types and structural test doubles. Do not use `any`, `as any`, `as unknown as ...`, `as never`, `@ts-ignore`, or `@ts-expect-error`.
+- In typed projects, use real exported types and structural test doubles. Do not paper over type errors with unsafe casts or ignore comments.
 - Work only from the model-facing task context and deterministic harness facts; reporter diagnosis is audit-only.
 - The harness may handle mechanical exports before the first failing test.
 - Do not add `__set...ForTests` or other production test-only APIs. Prefer public module mocks, caller/registration paths, or a small pure helper/predicate.
 - If the target is a callback, handler, or framework listener, find the registration/caller and public event type before writing the test. Do not invent the callback signature.
 - For callback/listener signatures, prefer exported framework types or overloads; do not paper over type errors with `Record`, `unknown`, `any`, or cast-only payloads.
-- Never use empty-object casts like `{} as SomeType`; create the minimal structural payload or declare a typed value that TypeScript can check.
+- Never use empty-object casts like `{} as SomeType`; create the minimal structural payload or declare a typed value that the compiler can check.
 - When replacing a positional value with parsed metadata/context, preserve the original positional value as fallback when metadata is missing or invalid unless the issue explicitly requires a new default.
 - Apply metadata fallbacks after parsing/validation. A fallback inside `String(raw ?? fallback)` does not protect against invalid raw metadata becoming `NaN`.
 - For type/contract lookup, first use issue text, source registrations, and reactive compiler/test feedback. Only inspect dependency type files after those sources leave a concrete gap or contradict each other.
@@ -102,15 +103,13 @@ When you're past 70% of steps, prioritize getting to DONE over perfecting code.
 - Never move the direct call to the function under test, or assertions/matchers like expect(...) / toHaveBeenCalledWith(...), into beforeEach.
 - Use expect.stringContaining() for message assertions — never exact match on interpolated strings.
 - Preserve existing logging/tracking/event payload keys. If only the value changes, keep the old key and assign the new value.
-- Never use `any`, `as any`, or `as never`. Type your test doubles properly.
-- Never use empty-object casts like `{} as SomeType`; build a typed structural value instead.
-- Never use `eslint-disable` or `@ts-ignore`.
+- Never use language-specific escape hatches such as unsafe casts, ignore comments, or lint disables.
 
 ## Quality (enforced by harness — violations auto-reject DONE)
 - Never use `any`, `as any`, or `as never`. Type your doubles properly.
 - Never use empty-object casts like `{} as SomeType`.
 - Never use `eslint-disable`, `@ts-ignore`, or `@ts-expect-error`.
-- Duplicated setup across tests must go in beforeEach (TS) or a fixture (Python).
+- Duplicated setup across tests must go in the project’s shared setup pattern, such as beforeEach or a fixture.
 - Side-effect payload shape changes are rejected unless the issue explicitly requires a public contract change.
 - Production `__set...ForTests` test-only exports are rejected.
 

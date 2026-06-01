@@ -36,8 +36,11 @@ def test_runner_command_for_file(path: str, config: dict | None = None) -> str:
     from agentic_tdd_runner.languages import get_language
 
     lang = get_language(path)
-    if lang and lang.runner == "pytest":
-        return "python3 -m pytest"
+    command_fn = getattr(lang, "test_command_template", None) if lang else None
+    if callable(command_fn):
+        command = command_fn(config)
+        if command:
+            return command
     runner_config = (config or {}).get("runner", {}) or {}
     return effective_test_command_template(
         runner_config.get("bootstrap"),

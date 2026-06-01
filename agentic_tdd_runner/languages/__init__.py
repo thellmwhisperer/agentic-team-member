@@ -16,6 +16,25 @@ def get_language(file_path: str):
     return _registry.get(ext)
 
 
+def get_language_by_name(name: str):
+    for plugin in plugins():
+        if getattr(plugin, "name", None) == name:
+            return plugin
+    return None
+
+
+def plugins() -> list[object]:
+    seen: set[int] = set()
+    result: list[object] = []
+    for plugin in _registry.values():
+        ident = id(plugin)
+        if ident in seen:
+            continue
+        result.append(plugin)
+        seen.add(ident)
+    return result
+
+
 def supported_extensions() -> list[str]:
     return sorted(_registry.keys())
 

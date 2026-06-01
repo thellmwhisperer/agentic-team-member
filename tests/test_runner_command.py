@@ -15,6 +15,18 @@ def _write_package(path, payload):
     (path / "package.json").write_text(json.dumps(payload))
 
 
+def test_missing_runner_does_not_default_to_bun():
+    assert effective_test_command_template(None, None) == ""
+    assert runner_version_command(None) is None
+
+
+def test_builds_pytest_template_from_python_runner():
+    report = {"test_runner": "pytest"}
+
+    assert effective_test_command_template(report, "bun test") == "python3 -m pytest"
+    assert runner_version_command(report) == ["python3", "-m", "pytest", "--version"]
+
+
 def test_builds_bun_test_template_from_bootstrap_report(tmp_path):
     (tmp_path / "bun.lockb").write_text("")
     _write_package(tmp_path, {

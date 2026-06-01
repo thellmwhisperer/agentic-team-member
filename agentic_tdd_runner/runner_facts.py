@@ -3,13 +3,20 @@
 from __future__ import annotations
 
 import fnmatch
-import json
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from agentic_tdd_runner.languages import get_language, plugins
+from agentic_tdd_runner.runner_command import effective_test_command_template
 
-BUN_TEST_API_IMPORT = 'import { beforeEach, describe, expect, mock, test } from "bun:test";'
+
+GENERIC_TEST_FILE_PATTERNS = [
+    "test_*.py",
+    "*_test.py",
+    "*.test.*",
+    "*.spec.*",
+]
 
 
 @dataclass(frozen=True)
@@ -41,7 +48,7 @@ class RunnerFacts:
                 "Use them before inspecting project config."
             ),
             f"- test runner: {self.test_runner}",
-            f"- test command: {self.test_command}",
+            f"- test command: {self.test_command or 'not configured'}",
         ]
         if self.typecheck_command:
             lines.append(f"- typecheck command: {self.typecheck_command}")
@@ -89,21 +96,24 @@ def build_runner_facts(
     """Build a reusable deterministic fact report for the current run."""
     root = Path(project_root)
     runner_cfg = config.get("runner", {}) if isinstance(config, dict) else {}
-    test_runner = _episode_value(episode, "runner") or str(
-        runner_cfg.get("framework") or "unknown"
+    runner_cfg = runner_cfg if isinstance(runner_cfg, dict) else {}
+    bootstrap = runner_cfg.get("bootstrap") if isinstance(runner_cfg, dict) else None
+    language = _language_for_episode(episode)
+    test_runner = (
+        _episode_value(episode, "runner")
+        or _configured_text(runner_cfg.get("framework"))
+        or _bootstrap_value(bootstrap, "test_runner")
+        or _language_runner(language)
+        or "unknown"
     )
-    test_command = str(runner_cfg.get("command") or "bun test")
+    test_command = _test_command(runner_cfg, bootstrap, language, test_runner)
     source_file = _episode_value(episode, "source_file")
     target_symbol = _episode_value(episode, "target_symbol")
     recommended_test_file = _episode_value(episode, "test_file")
-    patterns = runner_cfg.get("test_file_patterns") or [
-        "*.test.ts",
-        "*.test.tsx",
-        "*.test.js",
-        "*.test.jsx",
-        "test_*.py",
-    ]
-    default_exclude_dirs = {"node_modules", ".git", ".next", ".turbo", "build", "coverage", "dist"}
+    patterns = _test_file_patterns(runner_cfg, language)
+    default_exclude_dirs = {".git", "build", "coverage", "dist"} | set(
+        _language_default_exclude_dirs(language)
+    )
     exclude_dirs = default_exclude_dirs | set(runner_cfg.get("exclude_dirs") or [])
 
     test_files = _discover_test_files(root, patterns, exclude_dirs)
@@ -113,15 +123,15 @@ def build_runner_facts(
     return RunnerFacts(
         test_runner=test_runner,
         test_command=test_command,
-        typecheck_command=_typecheck_command(root, config, test_runner),
-        test_api_import=_test_api_import(test_runner),
+        typecheck_command=_typecheck_command(root, config, language, test_runner),
+        test_api_import=_test_api_import(language, test_runner),
         recommended_test_file=recommended_test_file,
         source_file=source_file,
         target_symbol=target_symbol,
         nearby_tests=nearby_tests,
         symbol_tests=symbol_tests,
         source_line_range=_episode_line_range(episode),
-        test_api_facts=_test_api_facts(test_runner),
+        test_api_facts=_test_api_facts(language, test_runner),
     )
 
 
@@ -130,6 +140,85 @@ def _episode_value(episode: dict | None, key: str) -> str | None:
         return None
     value = episode.get(key)
     return value if isinstance(value, str) and value else None
+
+
+def _configured_text(value: Any) -> str | None:
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _bootstrap_value(bootstrap: Any, key: str) -> str | None:
+    value = bootstrap.get(key) if isinstance(bootstrap, dict) else getattr(bootstrap, key, None)
+    return _configured_text(value)
+
+
+def _language_for_episode(episode: dict | None) -> object | None:
+    for key in ("test_file", "source_file"):
+        value = _episode_value(episode, key)
+        if not value:
+            continue
+        language = get_language(value)
+        if language:
+            return language
+    return None
+
+
+def _language_runner(language: object | None) -> str | None:
+    runner = getattr(language, "runner", None)
+    return runner if isinstance(runner, str) and runner else None
+
+
+def _language_for_runner(test_runner: str) -> object | None:
+    for plugin in plugins():
+        supports_fn = getattr(plugin, "supports_test_runner", None)
+        if callable(supports_fn) and supports_fn(test_runner):
+            return plugin
+    return None
+
+
+def _test_command(
+    runner_cfg: dict,
+    bootstrap: Any,
+    language: object | None,
+    test_runner: str,
+) -> str:
+    configured = _configured_text(runner_cfg.get("command"))
+    if configured:
+        return configured
+
+    detected = effective_test_command_template(bootstrap, None)
+    if detected:
+        return detected
+
+    command_fn = getattr(language, "test_command_template", None)
+    if callable(command_fn):
+        command = command_fn({"runner": runner_cfg})
+        if command:
+            return command
+
+    runner_language = _language_for_runner(test_runner)
+    command_fn = getattr(runner_language, "effective_test_command_template", None)
+    if callable(command_fn):
+        return command_fn({"test_runner": test_runner}, None)
+    return ""
+
+
+def _test_file_patterns(runner_cfg: dict, language: object | None) -> list[str]:
+    configured = runner_cfg.get("test_file_patterns")
+    if isinstance(configured, list) and configured:
+        return [str(pattern) for pattern in configured if str(pattern)]
+    patterns_fn = getattr(language, "test_file_patterns", None)
+    if callable(patterns_fn):
+        patterns = patterns_fn()
+        if patterns:
+            return [str(pattern) for pattern in patterns if str(pattern)]
+    return list(GENERIC_TEST_FILE_PATTERNS)
+
+
+def _language_default_exclude_dirs(language: object | None) -> list[str]:
+    exclude_fn = getattr(language, "default_exclude_dirs", None)
+    if not callable(exclude_fn):
+        return []
+    return [str(path) for path in exclude_fn()]
 
 
 def _episode_line_range(episode: dict | None) -> dict | None:
@@ -146,13 +235,14 @@ def _episode_line_range(episode: dict | None) -> dict | None:
     return {"start": start, "end": end, "source": source}
 
 
-def _test_api_facts(test_runner: str) -> list[str]:
-    if test_runner != "bun:test":
-        return []
-    return [
-        "Bun mock functions reset call history with `mockFn.mockClear()`; do not use `.mock.reset()`.",
-        "When a module has import-time side effects, make `mock.module(...)` registrations happen before the target module is evaluated.",
-    ]
+def _test_api_facts(language: object | None, test_runner: str) -> list[str]:
+    facts_fn = getattr(language, "test_api_facts", None)
+    if not callable(facts_fn):
+        runner_language = _language_for_runner(test_runner)
+        facts_fn = getattr(runner_language, "test_api_facts", None)
+    if callable(facts_fn):
+        return list(facts_fn(test_runner))
+    return []
 
 
 def _discover_test_files(root: Path, patterns: list[str], exclude_dirs: set[str]) -> list[str]:
@@ -206,47 +296,26 @@ def _symbol_tests(root: Path, test_files: list[str], target_symbol: str | None) 
     return sorted(dict.fromkeys(matches))
 
 
-def _typecheck_command(root: Path, config: dict, test_runner: str) -> str | None:
-    environment = config.get("environment", {}) if isinstance(config, dict) else {}
-    if environment.get("run_typecheck") is False:
-        return None
-    scripts = _package_scripts(root)
-    if "typecheck" not in scripts:
-        return None
-    if test_runner == "bun:test" or _uses_bun(root):
-        return "bun run typecheck"
-    if (root / "pnpm-lock.yaml").exists():
-        return "pnpm typecheck"
-    if (root / "yarn.lock").exists():
-        return "yarn typecheck"
-    return "npm run typecheck"
+def _typecheck_command(
+    root: Path,
+    config: dict,
+    language: object | None,
+    test_runner: str,
+) -> str | None:
+    typecheck_fn = getattr(language, "typecheck_command", None)
+    if not callable(typecheck_fn):
+        runner_language = _language_for_runner(test_runner)
+        typecheck_fn = getattr(runner_language, "typecheck_command", None)
+    if callable(typecheck_fn):
+        return typecheck_fn(root, config, test_runner)
+    return None
 
 
-def _package_scripts(root: Path) -> dict[str, Any]:
-    package_json = root / "package.json"
-    try:
-        data = json.loads(package_json.read_text())
-    except (OSError, json.JSONDecodeError):
-        return {}
-    scripts = data.get("scripts")
-    return scripts if isinstance(scripts, dict) else {}
-
-
-def _uses_bun(root: Path) -> bool:
-    package_json = root / "package.json"
-    try:
-        data = json.loads(package_json.read_text())
-    except (OSError, json.JSONDecodeError):
-        data = {}
-    package_manager = data.get("packageManager") if isinstance(data, dict) else None
-    return (
-        (isinstance(package_manager, str) and package_manager.startswith("bun@"))
-        or (root / "bun.lock").exists()
-        or (root / "bun.lockb").exists()
-    )
-
-
-def _test_api_import(test_runner: str) -> str | None:
-    if test_runner == "bun:test":
-        return BUN_TEST_API_IMPORT
+def _test_api_import(language: object | None, test_runner: str) -> str | None:
+    import_fn = getattr(language, "test_api_import", None)
+    if not callable(import_fn):
+        runner_language = _language_for_runner(test_runner)
+        import_fn = getattr(runner_language, "test_api_import", None)
+    if callable(import_fn):
+        return import_fn(test_runner)
     return None

@@ -18,6 +18,37 @@ def _facts():
     )
 
 
+def _python_facts():
+    return RunnerFacts(
+        test_runner="pytest",
+        test_command="python3 -m pytest",
+        typecheck_command=None,
+        test_api_import=None,
+        recommended_test_file="tests/test_worker.py",
+        source_file="src/worker.py",
+        target_symbol="process",
+        nearby_tests=[],
+        symbol_tests=[],
+    )
+
+
+def test_router_does_not_apply_bun_answers_to_python_runner():
+    router = IntentRouter(_python_facts())
+    router.observe_tool_result(
+        "run_command",
+        {"command": "python3 -m pytest tests/test_worker.py"},
+        (
+            "tests/test_worker.py:4:1 - error TS2304: Cannot find name 'describe'.\n"
+            "Property 'reset' does not exist on type 'MockFunctionState<() => void>'.\n"
+        ),
+        applied=None,
+    )
+
+    decision = router.review_tool_call("read_file", {"path": "pyproject.toml"})
+
+    assert decision is None
+
+
 def test_router_answers_from_runner_facts_for_missing_bun_test_globals():
     router = IntentRouter(_facts())
     router.observe_tool_result(

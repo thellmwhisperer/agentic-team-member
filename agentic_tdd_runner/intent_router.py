@@ -2,28 +2,10 @@
 
 from __future__ import annotations
 
-import posixpath
-import re
-import shlex
 from dataclasses import dataclass
-from pathlib import PurePosixPath
 
-from agentic_tdd_runner.apply_patch import ApplyPatchError, apply_patch_touched_paths
+from agentic_tdd_runner.languages import get_language, plugins
 from agentic_tdd_runner.runner_facts import RunnerFacts
-
-
-_BUN_TEST_GLOBALS = {"beforeEach", "describe", "expect", "mock", "test"}
-_MISSING_NAME_RE = re.compile(
-    r"(?P<file>[^\s:(]+\.(?:test|spec)\.[tj]sx?)"
-    r"(?:\(\d+,\d+\)|:\d+:\d+)?(?:\s*-\s*|:\s*)error TS\d+:\s*"
-    r"Cannot find name ['\"](?P<name>[A-Za-z_]\w*)['\"]"
-)
-_BUN_MOCK_RESET_RE = re.compile(
-    r"(?P<file>[^\s:(]+\.test\.[tj]sx?)"
-    r"(?:\(\d+,\d+\)|:\d+:\d+)?(?:\s*-\s*|:\s*)error TS\d+:\s*"
-    r"Property ['\"]reset['\"] does not exist on type ['\"]?MockFunctionState",
-)
-_TEST_FILE_RE = re.compile(r"(?P<file>[^\s:]+\.test\.[tj]sx?)[:\s]")
 
 
 @dataclass(frozen=True)
@@ -46,111 +28,17 @@ class IntentRouter:
         self.pending_import_side_effect_file: str | None = None
 
     def review_tool_call(self, name: str, args: dict) -> RouterDecision | None:
-        if self.pending_import_side_effect_file:
-            if _is_edit_to_path(name, args, self.pending_import_side_effect_file):
-                return None
-            if _is_framework_lookup_or_premature_run(name, args) or _is_source_or_test_lookup(
-                name, args
-            ):
-                import_path = _import_path_from_test_to_source(
-                    self.pending_import_side_effect_file,
-                    self.runner_facts.source_file if self.runner_facts else None,
-                )
-                source_file = self.runner_facts.source_file if self.runner_facts else None
-                required_next = (
-                    f"Edit `{self.pending_import_side_effect_file}` so test mocks are registered "
-                    "before the target module is evaluated. Follow an existing sibling-test "
-                    "pattern if one already solves this; otherwise delay the target import."
-                )
-                message = (
-                    "IMPORT-TIME SIDE EFFECT ANSWER\n"
-                    "intent: fix_import_time_side_effect\n"
-                    "reason: the focused test failed while Bun was evaluating the target module, "
-                    "before the test body could run. This is an import-order problem in the test, "
-                    "not a reason to inspect provider/env/singleton modules.\n"
-                    f"answer: make `mock.module(...)` registrations happen before `{import_path}` "
-                    "is evaluated. Prefer the repo's existing mock/import pattern. If a static "
-                    "target import would be hoisted before mocks, delay that import, for example "
-                    f"with `await import('{import_path}')`.\n"
-                    "guardrail: Do not inspect provider/env/singleton modules; keep the fix "
-                    "in the test harness.\n"
-                    f"required_next: {required_next}"
-                )
-                return RouterDecision(
-                    event="intent_router_answered",
-                    message=message,
-                    data={
-                        "intent": "fix_import_time_side_effect",
-                        "pending_test_file": self.pending_import_side_effect_file,
-                        "source_file": source_file,
-                        "import_path": import_path,
-                        "required_next": required_next,
-                        "tool": name,
-                        "args": args,
-                    },
-                )
-
-        if self.pending_mock_api_file:
-            if _is_edit_to_path(name, args, self.pending_mock_api_file):
-                return None
-            if _is_framework_lookup_or_premature_run(name, args) or _is_source_or_test_lookup(name, args):
-                required_next = (
-                    f"Edit `{self.pending_mock_api_file}` and replace `.mock.reset()` "
-                    "with `.mockClear()`, then rerun the focused test."
-                )
-                message = (
-                    "RUNNER FACT ANSWER\n"
-                    "intent: fix_bun_mock_api\n"
-                    "reason: Bun mock call history is reset on the mock function, not through `.mock.reset()`.\n"
-                    "answer: use `mockFn.mockClear()`.\n"
-                    f"required_next: {required_next}"
-                )
-                return RouterDecision(
-                    event="intent_router_answered",
-                    message=message,
-                    data={
-                        "intent": "fix_bun_mock_api",
-                        "pending_test_file": self.pending_mock_api_file,
-                        "required_next": required_next,
-                        "tool": name,
-                        "args": args,
-                    },
-                )
-
-        if not (self.runner_facts and self.pending_test_file and self.pending_missing_globals):
+        support = _language_intent_router_support(self.runner_facts)
+        review_fn = getattr(support, "intent_router_review_tool_call", None)
+        if not callable(review_fn):
             return None
-        if _is_edit_to_path(name, args, self.pending_test_file):
+        payload = review_fn(self._state(), name, args, self.runner_facts)
+        if not payload:
             return None
-        if not self.runner_facts.test_api_import:
-            return None
-        if not _is_framework_lookup_or_premature_run(name, args):
-            return None
-        missing = ", ".join(sorted(self.pending_missing_globals))
-        required_next = (
-            f"Add `{self.runner_facts.test_api_import}` to "
-            f"`{self.pending_test_file}`, then rerun the focused test."
-        )
-        message = (
-            "RUNNER FACT ANSWER\n"
-            "intent: inspect_test_framework\n"
-            f"reason: `{missing}` are test API globals provided by "
-            f"{self.runner_facts.test_runner}; this is a missing import, not a project-config gap.\n"
-            f"answer: {self.runner_facts.test_api_import}\n"
-            "note: if that import is already present, keep the next fix in the same test file "
-            "and correct the local import/type issue before rerunning.\n"
-            f"required_next: {required_next}"
-        )
         return RouterDecision(
-            event="intent_router_answered",
-            message=message,
-            data={
-                "intent": "inspect_test_framework",
-                "pending_test_file": self.pending_test_file,
-                "missing_globals": sorted(self.pending_missing_globals),
-                "required_next": required_next,
-                "tool": name,
-                "args": args,
-            },
+            event=payload["event"],
+            message=payload["message"],
+            data=payload["data"],
         )
 
     def observe_tool_result(
@@ -161,214 +49,54 @@ class IntentRouter:
         *,
         applied: bool | None,
     ) -> None:
-        if applied is True and _is_edit_to_path(name, args, self.pending_test_file):
-            self.pending_test_file = None
-            self.pending_missing_globals.clear()
-        if applied is True and _is_edit_to_path(name, args, self.pending_mock_api_file):
-            self.pending_mock_api_file = None
-        if applied is True and _is_edit_to_path(
-            name, args, self.pending_import_side_effect_file
-        ):
-            self.pending_import_side_effect_file = None
+        support = _language_intent_router_support(self.runner_facts)
+        is_edit_to_path = getattr(support, "intent_router_is_edit_to_path", None)
+        if callable(is_edit_to_path):
+            if applied is True and is_edit_to_path(name, args, self.pending_test_file):
+                self.pending_test_file = None
+                self.pending_missing_globals.clear()
+            if applied is True and is_edit_to_path(name, args, self.pending_mock_api_file):
+                self.pending_mock_api_file = None
+            if applied is True and is_edit_to_path(
+                name, args, self.pending_import_side_effect_file
+            ):
+                self.pending_import_side_effect_file = None
 
-        test_file, missing = _parse_missing_test_globals(result)
-        if test_file and missing:
-            self.pending_test_file = test_file
-            self.pending_missing_globals = missing
+        observe_fn = getattr(support, "intent_router_observe_tool_result", None)
+        if not callable(observe_fn):
+            return
+        observations = observe_fn(name, args, result, self.runner_facts)
+        missing = observations.get("missing_globals") or {}
+        if missing.get("test_file") and missing.get("names"):
+            self.pending_test_file = missing["test_file"]
+            self.pending_missing_globals = set(missing["names"])
+        if observations.get("mock_api_file"):
+            self.pending_mock_api_file = observations["mock_api_file"]
+        if observations.get("import_side_effect_file"):
+            self.pending_import_side_effect_file = observations["import_side_effect_file"]
 
-        mock_api_file = _parse_bun_mock_reset_file(result)
-        if mock_api_file:
-            self.pending_mock_api_file = mock_api_file
-
-        import_side_effect_file = _parse_import_time_side_effect_file(
-            name, args, result, self.runner_facts
-        )
-        if import_side_effect_file:
-            self.pending_import_side_effect_file = import_side_effect_file
-
-
-def _parse_missing_test_globals(result: str) -> tuple[str | None, set[str]]:
-    hits: dict[str, set[str]] = {}
-    for match in _MISSING_NAME_RE.finditer(result or ""):
-        missing = match.group("name")
-        if missing not in _BUN_TEST_GLOBALS:
-            continue
-        path = _normalize_path(match.group("file"))
-        hits.setdefault(path, set()).add(missing)
-    if not hits:
-        return None, set()
-    test_file = sorted(hits, key=lambda path: (-len(hits[path]), path))[0]
-    return test_file, hits[test_file]
+    def _state(self) -> dict:
+        return {
+            "pending_test_file": self.pending_test_file,
+            "pending_missing_globals": set(self.pending_missing_globals),
+            "pending_mock_api_file": self.pending_mock_api_file,
+            "pending_import_side_effect_file": self.pending_import_side_effect_file,
+        }
 
 
-def _parse_bun_mock_reset_file(result: str) -> str | None:
-    match = _BUN_MOCK_RESET_RE.search(result or "")
-    return _normalize_path(match.group("file")) if match else None
-
-
-def _parse_import_time_side_effect_file(
-    name: str,
-    args: dict,
-    result: str,
-    runner_facts: RunnerFacts | None,
-) -> str | None:
-    output = result or ""
-    source_file = runner_facts.source_file if runner_facts else None
-    if not source_file or source_file not in output:
-        return None
-    if "loadAndEvaluateModule" not in output:
-        return None
-    if "Unhandled error between tests" not in output and "[Reactive test]" not in output:
-        return None
-    return (
-        _test_file_from_tool_result(name, args, output)
-        or runner_facts.recommended_test_file
-    )
-
-
-def _is_edit_to_path(name: str, args: dict, target_path: str | None) -> bool:
-    if not target_path:
-        return False
-    if name in {"create_file", "str_replace_editor"}:
-        return _normalize_path(args.get("path")) == _normalize_path(target_path)
-    if name == "apply_patch":
-        return _normalize_path(target_path) in _apply_patch_paths(args)
-    return False
-
-
-def _is_framework_lookup_or_premature_run(name: str, args: dict) -> bool:
-    if name == "read_file":
-        path = _normalize_path(args.get("path"))
-        if not path:
-            return False
-        filename = PurePosixPath(path).name
-        return (
-            "node_modules" in PurePosixPath(path).parts
-            or filename in {"package.json", "bunfig.toml"}
-            or filename.startswith("tsconfig")
-            or filename.startswith(("vitest.config", "jest.config"))
-        )
-
-    if name == "rg":
-        paths = args.get("path") or "."
-        if isinstance(paths, str):
-            paths = [paths]
-        return any("node_modules" in PurePosixPath(str(path)).parts for path in paths)
-
-    if name != "run_command":
-        return False
-    command = args.get("command", "")
-    if not isinstance(command, str):
-        return False
-    try:
-        parts = shlex.split(command)
-    except ValueError:
-        parts = command.split()
-    if not parts:
-        return False
-    executable = PurePosixPath(parts[0]).name
-    if executable in {"bun", "npm", "pnpm", "yarn"}:
-        return True
-    if any("node_modules" in PurePosixPath(part).parts for part in parts[1:]):
-        return True
-    if any(
-        PurePosixPath(part).name in {"package.json", "bunfig.toml"}
-        for part in parts[1:]
+def _language_intent_router_support(runner_facts: RunnerFacts | None) -> object | None:
+    for path in (
+        getattr(runner_facts, "recommended_test_file", None),
+        getattr(runner_facts, "source_file", None),
     ):
-        return True
-    if any(PurePosixPath(part).name.startswith("tsconfig") for part in parts[1:]):
-        return True
-    return False
-
-
-def _is_source_or_test_lookup(name: str, args: dict) -> bool:
-    if name in {"read_file", "rg"}:
-        return True
-    if name != "run_command":
-        return False
-    command = args.get("command", "")
-    if not isinstance(command, str):
-        return False
-    try:
-        parts = shlex.split(command)
-    except ValueError:
-        parts = command.split()
-    if not parts:
-        return False
-    return PurePosixPath(parts[0]).name in {
-        "grep",
-        "rg",
-        "cat",
-        "head",
-        "tail",
-        "sed",
-        "awk",
-    }
-
-
-def _test_file_from_tool_result(name: str, args: dict, result: str) -> str | None:
-    if name == "run_command":
-        command = args.get("command", "")
-        if isinstance(command, str):
-            try:
-                parts = shlex.split(command)
-            except ValueError:
-                parts = command.split()
-            for part in parts:
-                path = _normalize_path(part)
-                if _is_test_file_path(path):
-                    return path
-    if name in {"create_file", "str_replace_editor"}:
-        path = _normalize_path(args.get("path"))
-        if _is_test_file_path(path):
-            return path
-    if name == "apply_patch":
-        for path in _apply_patch_paths(args):
-            if _is_test_file_path(path):
-                return path
-    for match in _TEST_FILE_RE.finditer(result or ""):
-        path = _normalize_path(match.group("file"))
-        if _is_test_file_path(path):
-            return path
+        if isinstance(path, str) and path:
+            language = get_language(path)
+            if language:
+                return language
+    test_runner = getattr(runner_facts, "test_runner", None)
+    if isinstance(test_runner, str) and test_runner:
+        for plugin in plugins():
+            supports_fn = getattr(plugin, "supports_test_runner", None)
+            if callable(supports_fn) and supports_fn(test_runner):
+                return plugin
     return None
-
-
-def _apply_patch_paths(args: dict) -> tuple[str, ...]:
-    try:
-        return tuple(_normalize_path(path) for path in apply_patch_touched_paths(str(args.get("patch") or "")))
-    except ApplyPatchError:
-        return ()
-
-
-def _is_test_file_path(path: str | None) -> bool:
-    return bool(path and re.search(r"\.test\.[tj]sx?$", path))
-
-
-def _import_path_from_test_to_source(
-    test_file: str | None, source_file: str | None
-) -> str:
-    if not test_file or not source_file:
-        return "./target"
-    test_dir = PurePosixPath(_normalize_path(test_file)).parent.as_posix()
-    source_without_ext = _strip_source_extension(_normalize_path(source_file))
-    relative = posixpath.relpath(source_without_ext, test_dir or ".")
-    if not relative.startswith("."):
-        relative = f"./{relative}"
-    return relative
-
-
-def _strip_source_extension(path: str) -> str:
-    for suffix in (".tsx", ".ts", ".jsx", ".js", ".mjs", ".cjs"):
-        if path.endswith(suffix):
-            return path[: -len(suffix)]
-    return path
-
-
-def _normalize_path(path: str | None) -> str:
-    raw = str(path or "").strip()
-    if not raw:
-        return ""
-    normalized = posixpath.normpath(PurePosixPath(raw).as_posix())
-    if normalized == ".":
-        return ""
-    return normalized.removeprefix("./")

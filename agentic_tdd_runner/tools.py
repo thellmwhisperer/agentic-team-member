@@ -78,16 +78,19 @@ def is_blocked_dependency_contract_lookup(command: str, config: dict) -> bool:
         return False
     if runtime.get("allow_dependency_contract_lookup", False):
         return False
-    if "node_modules" not in command:
-        return False
     try:
         parts = shlex.split(command)
     except ValueError:
         parts = command.split()
     if not parts:
         return False
-    lookup_tools = {"rg", "grep", "find", "cat", "head", "tail", "sed", "awk", "ls"}
-    return parts[0] in lookup_tools or "node_modules/@types" in command
+    from agentic_tdd_runner.languages import plugins
+
+    for language in plugins():
+        lookup_fn = getattr(language, "is_dependency_contract_lookup", None)
+        if callable(lookup_fn) and lookup_fn(command, parts):
+            return True
+    return False
 
 
 def execute_tool(
@@ -541,24 +544,13 @@ def _is_test_run_command(command: str) -> bool:
     if not parts:
         return False
 
-    executable = Path(parts[0]).name
-    if executable in {"pytest"}:
-        return True
-    if executable.startswith("python") and "-m" in parts and "pytest" in parts:
-        return True
-    if executable == "bun" and len(parts) > 1 and parts[1] == "test":
-        return True
-    if _is_package_manager_test_command(executable, parts):
-        return True
-    return any(re.search(r"\.test\.[tj]sx?$|test_.*\.py$", part) for part in parts[1:])
+    from agentic_tdd_runner.languages import plugins
 
-
-def _is_package_manager_test_command(executable: str, parts: list[str]) -> bool:
-    if executable not in {"npm", "pnpm", "yarn"}:
-        return False
-    return (len(parts) >= 2 and parts[1] == "test") or (
-        len(parts) >= 3 and parts[1] == "run" and parts[2] == "test"
-    )
+    for language in plugins():
+        is_test_run = getattr(language, "is_test_run_command", None)
+        if callable(is_test_run) and is_test_run(command, parts):
+            return True
+    return False
 
 
 def reactive_forbidden_feedback(
@@ -583,7 +575,9 @@ def reactive_forbidden_feedback(
     )
 
     lang = get_language(path)
-    lang_name = lang.name if lang else "typescript"
+    if not lang:
+        return ""
+    lang_name = lang.name
     forbidden = quality_cfg.get(lang_name, {}).get("forbidden", [])
 
     full_path = Path(workdir) / path

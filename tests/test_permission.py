@@ -704,6 +704,65 @@ def test_write_test_grant_allows_reading_test_setup_dependencies(tmp_path):
     assert next_grant == "write_test"
 
 
+def test_permission_context_unknown_language_does_not_use_js_mock_or_type_helpers(tmp_path):
+    test_file = tmp_path / "spec" / "worker_spec.rb"
+    dependency = tmp_path / "spec" / "support" / "messages.rb"
+    test_file.parent.mkdir(parents=True)
+    dependency.parent.mkdir(parents=True)
+    test_file.write_text(
+        "\n".join([
+            "mock.module('./support/messages', () => ({}))",
+            "describe 'worker'",
+        ])
+    )
+    dependency.write_text("MESSAGES = {}\n")
+
+    context = permission.build_permission_context(
+        episode={
+            "source_file": "lib/worker.rb",
+            "test_file": "spec/worker_spec.rb",
+            "target_symbol": "perform",
+            "cookbook_text": (
+                "- event-bus type declarations expose "
+                "`perform(payload: Payload)`."
+            ),
+        },
+        config={},
+        phase="test",
+        test_file_created=True,
+        workdir=str(tmp_path),
+    )
+
+    assert context["language_name"] is None
+    assert context["referenced_type_shapes"] == []
+    assert context["test_setup_read_paths"] == []
+    assert context["source_mocks"] == []
+
+
+def test_permission_context_python_does_not_resolve_js_mock_module_specs(tmp_path):
+    test_file = tmp_path / "tests" / "test_worker.py"
+    dependency = tmp_path / "tests" / "messages.py"
+    test_file.parent.mkdir(parents=True)
+    test_file.write_text("mock.module('./messages', () => ({}))\n")
+    dependency.write_text("MESSAGES = {}\n")
+
+    context = permission.build_permission_context(
+        episode={
+            "source_file": "src/worker.py",
+            "test_file": "tests/test_worker.py",
+            "target_symbol": "perform",
+        },
+        config={},
+        phase="test",
+        test_file_created=True,
+        workdir=str(tmp_path),
+    )
+
+    assert context["language_name"] == "python"
+    assert context["test_setup_read_paths"] == []
+    assert context["source_mocks"] == []
+
+
 def test_permission_path_matching_normalizes_only_relative_path_syntax():
     assert permission._same_path("./src/events/processor.ts", "src/events/processor.ts")
     assert permission._same_path(
