@@ -223,7 +223,11 @@ def parse_apply_patch(patch_text: str) -> tuple[PatchOperation, ...]:
                         break
                     if current.startswith("@@") or _is_file_header(current):
                         break
-                    if not current or current[0] not in {" ", "-", "+"}:
+                    if current == "":
+                        hunk_lines.append(HunkLine(prefix=" ", text=""))
+                        index += 1
+                        continue
+                    if current[0] not in {" ", "-", "+"}:
                         raise ApplyPatchError(
                             f"hunk line for {path} must start with space, -, or +"
                         )
