@@ -11,7 +11,7 @@ from typing import Any
 from agentic_tdd_runner.apply_patch import ApplyPatchError, apply_patch_touched_paths
 from agentic_tdd_runner.languages import register
 from agentic_tdd_runner.languages.capabilities import OptionalLanguageCapabilityDefaults
-from agentic_tdd_runner.languages.typescript import paths, seams, syntax
+from agentic_tdd_runner.languages.typescript import paths, permission, profile, seams, syntax
 from agentic_tdd_runner.runner_authority import override_detected_runner
 from agentic_tdd_runner.test_command_templates import custom_test_command_template
 
@@ -572,6 +572,24 @@ class TypeScriptLanguage(OptionalLanguageCapabilityDefaults):
 
     def prepend_export(self, line: str) -> str:
         return seams.prepend_export(line)
+
+    def definition_symbol_from_line(self, line: str) -> str | None:
+        return permission.definition_symbol_from_line(line)
+
+    def looks_like_method_definition(self, line: str, symbol: str) -> bool:
+        return permission.looks_like_method_definition(line, symbol)
+
+    def relevant_import_declarations(self, source_text: str, needles: list[str]) -> list[str]:
+        return permission.relevant_import_declarations(source_text, needles)
+
+    def permission_write_test_conflict(self, args: dict, context: dict) -> str | None:
+        return permission.permission_write_test_conflict(args, context)
+
+    def profile_detectors(self) -> list[Any]:
+        return profile.profile_detectors()
+
+    def source_imports_spec(self, source_text: str, spec: str) -> bool:
+        return profile.source_imports_spec(source_text, spec)
 
 
 def _configured_test_command(command: str | None) -> str:

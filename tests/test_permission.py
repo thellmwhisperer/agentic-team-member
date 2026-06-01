@@ -116,6 +116,67 @@ def test_understand_contract_serves_target_body_when_question_asks_for_implement
     assert "Relevant existing imports" in review.message
 
 
+def test_python_permission_context_uses_python_imports_and_code_fence(tmp_path):
+    source = tmp_path / "src" / "worker.py"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "\n".join([
+            "from src.bus import bus",
+            "",
+            "def process_item(item):",
+            "    return bus.publish(item)",
+        ])
+    )
+
+    context = permission.build_permission_context(
+        episode={
+            "source_file": "src/worker.py",
+            "test_file": "tests/test_worker.py",
+            "target_symbol": "process_item",
+            "cookbook_text": "\n".join([
+                "### Callback Contract Evidence",
+                "- line 1: uses module `src.bus`.",
+            ]),
+        },
+        config={},
+        phase="fix",
+        test_file_created=True,
+        workdir=str(tmp_path),
+    )
+
+    review = permission.answer_harness(
+        {
+            "intent": "understand_contract",
+            "question": "What does process_item do internally?",
+        },
+        context,
+    )
+
+    assert context["source_imports"] == "from src.bus import bus"
+    assert "```python" in review.message
+    assert "```ts" not in review.message
+    assert "from src.bus import bus" in review.message
+
+
+def test_write_test_permission_does_not_apply_bun_conflict_to_python_context():
+    review = permission.review_tool_call(
+        "create_file",
+        {
+            "path": "tests/test_worker.py",
+            "content": 'mock.module("./service", () => ({}));',
+        },
+        grant="write_test",
+        context={
+            "source_file": "src/worker.py",
+            "test_file": "tests/test_worker.py",
+            "runner": "pytest",
+            "test_file_created": False,
+        },
+    )
+
+    assert review is None
+
+
 def test_informational_harness_answer_preserves_existing_grant():
     current = permission.merge_grant_after_harness_answer(
         "write_test",
@@ -439,7 +500,11 @@ def test_mentioned_symbols_use_identifier_boundaries():
         "}",
     ])
 
-    assert permission._mentioned_symbols_in_source(source, "src/router.ts mentions getUser") == ["getUser"]
+    assert permission._mentioned_symbols_in_source(
+        source,
+        "src/router.ts mentions getUser",
+        "src/router.ts",
+    ) == ["getUser"]
 
 
 def test_pending_target_challenge_blocks_non_challenge_harness_intent():

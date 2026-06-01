@@ -223,6 +223,29 @@ def test_render_facts_supports_inline_event_contracts(tmp_path):
     assert "argument `payload` comes from `message.payload`" in rendered
 
 
+def test_render_facts_filters_python_source_imports_via_language_capability(tmp_path):
+    path = _write_profile(tmp_path, """\
+        [[dependency_contracts]]
+        id = "python-bus"
+        module = "src.bus"
+        contract_mode = "inline"
+        import_specs = ["src.bus"]
+        events = [
+          { name = "item.ready", args = ["payload"] },
+        ]
+    """)
+    profile = read_repo_profile(path)
+
+    facts = profile.render_facts(
+        source_path="src/worker.py",
+        source_text="from src.bus import bus\n",
+    )
+
+    rendered = "\n".join(facts)
+    assert "dependency `python-bus` imports `src.bus`" in rendered
+    assert "dependency `python-bus` declares event `item.ready(payload)`" in rendered
+
+
 def test_render_facts_includes_import_expectations(tmp_path):
     path = _write_profile(tmp_path, """\
         [[import_expectations]]
