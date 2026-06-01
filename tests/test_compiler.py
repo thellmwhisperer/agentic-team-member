@@ -1,5 +1,8 @@
 """Tests for the compiler — contract building from analysis facts."""
+import inspect
+
 from agentic_tdd_runner.compiler import build_contract
+from agentic_tdd_runner.compiler import renderer
 from agentic_tdd_runner.languages.signature import parse_signature_params as _parse_signature_params
 
 
@@ -224,6 +227,27 @@ def test_bun_scaffold_omits_mock_import_when_unused():
 
     assert "import { describe, expect, test } from 'bun:test';" in rendered
     assert "import { describe, expect, mock, test } from 'bun:test';" not in rendered
+
+
+def test_unknown_language_never_receives_bun_scaffold():
+    facts = _handle_renewal_facts()
+    facts["target"]["source_path"] = "src/service.go"
+    facts["test_file"]["path"] = "src/service_test.go"
+    facts["test_file"]["runner"] = "bun:test"
+
+    scaffold = build_contract(facts)["scaffold"]
+
+    assert scaffold["rendered_test"] == ""
+    assert scaffold["module_mocks_block"] == ""
+    assert "unsupported_runner:bun:test" in scaffold["todo_slots"]
+
+
+def test_core_renderer_does_not_contain_runner_specific_scaffold_literals():
+    source = inspect.getsource(renderer)
+
+    assert "mock.module(" not in source
+    assert "bun:test" not in source
+    assert "pytest" not in source
 
 
 def test_renderer_uses_typescript_signature_parser_for_optional_params():

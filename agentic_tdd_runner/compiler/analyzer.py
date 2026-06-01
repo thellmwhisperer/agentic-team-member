@@ -4,6 +4,8 @@ import re
 from copy import deepcopy
 from pathlib import PurePosixPath
 
+from agentic_tdd_runner.languages import get_language
+
 _CALL_RE = re.compile(r"\b([A-Za-z_]\w*)\.([A-Za-z_]\w*)\s*\(")
 
 _ASSERTION_MEMBER_SCORES = {
@@ -391,14 +393,10 @@ def _build_pattern_files(pattern_files, tdd):
             content = tdd.read_file(path)["content"]
         except (FileNotFoundError, PermissionError, OSError, KeyError):
             content = ""
-        if "mock.module(" in content:
-            reusable_shapes.append("mock.module(...)")
-        if "mock(" in content:
-            reusable_shapes.append("mock(...)")
-        if ".assert_called_with(" in content or "assert_called_with(" in content:
-            reusable_shapes.append("assert_called_with(...)")
-        if "toHaveBeenCalledWith(" in content:
-            reusable_shapes.append("toHaveBeenCalledWith(...)")
+        lang = get_language(path)
+        shapes_fn = getattr(lang, "reusable_test_shapes", None)
+        if callable(shapes_fn):
+            reusable_shapes.extend(shapes_fn(content))
         built.append(
             {
                 "path": path,
@@ -445,5 +443,3 @@ def _dedupe_gaps(gaps):
 def _has_blocking_gaps(gaps):
     blocking_owners = {"framework", "compiler_pass"}
     return any(gap.get("owner") in blocking_owners for gap in gaps)
-
-
