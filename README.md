@@ -362,7 +362,12 @@ runner when it is one of the supported families:
 | `jest`          | package-manager wrapper + `jest --runInBand --watchman=false --coverage=false` |
 | `node:test`     | `node --test`          |
 
-Unknown, custom, or ambiguous runner facts fall back to `[runner].command`.
+Bootstrap facts are the source of truth once detected: prompts, cookbooks,
+permission grants, and focused verification commands must not reintroduce
+stale language defaults such as `bun test`. Custom package scripts derive a
+focused prefix from the script when possible, otherwise they use the package
+manager's test script entrypoint. Unknown or ambiguous runner facts fall back to
+`[runner].command`.
 For detected JS runners, environment prep also runs a lightweight version
 preflight (`bun --version`, `node --version`, or package-manager wrapper +
 `runner --version`) before the first model tool call. That catches missing local

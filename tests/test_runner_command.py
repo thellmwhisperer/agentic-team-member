@@ -73,15 +73,26 @@ def test_builds_node_test_template_from_bootstrap_report(tmp_path):
     assert runner_version_command(report) == ["node", "--version"]
 
 
-def test_falls_back_for_custom_bootstrap_report(tmp_path):
+def test_uses_package_script_for_custom_bootstrap_report(tmp_path):
     _write_package(tmp_path, {
         "scripts": {"test": "turbo run test --filter web"},
     })
 
     report = inspect_runner_bootstrap(tmp_path)
 
-    assert effective_test_command_template(report, "bun test") == "bun test"
+    assert effective_test_command_template(report, "bun test") == "npm test --"
     assert runner_version_command(report) is None
+
+
+def test_derives_custom_command_template_from_script_globs(tmp_path):
+    _write_package(tmp_path, {
+        "scripts": {"test": "tsx --test src/**/*.test.ts"},
+    })
+
+    report = inspect_runner_bootstrap(tmp_path)
+
+    assert report.test_runner == "custom"
+    assert effective_test_command_template(report, "bun test") == "tsx --test"
 
 
 def test_builds_package_manager_specific_runner_templates(tmp_path):

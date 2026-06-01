@@ -620,6 +620,101 @@ class TestBuildEpisodeContext:
         assert ctx["function_line_range"]["source"] == "fallback"
 
 
+class TestRunnerAuthority:
+    """Cookbook runner guidance follows detected runner facts, not language defaults."""
+
+    def test_generate_cookbook_does_not_emit_bun_for_node_test_bootstrap(self, tmp_path):
+        _write_file(tmp_path, "src/service.ts", """\
+            import { getLogger } from '../logger';
+
+            const logger = getLogger();
+
+            export function process(): void {
+              logger.info('start');
+            }
+        """)
+        config = {
+            "runner": {
+                "command": "bun test",
+                "framework": "bun:test",
+                "bootstrap": {
+                    "package_manager": "npm",
+                    "test_runner": "node:test",
+                    "test_command": "node --test src/**/*.test.ts",
+                },
+            },
+        }
+
+        result = generate_cookbook("src/service.ts", "process", str(tmp_path), config=config)
+
+        assert "bun:test" not in result
+        assert "bun test" not in result
+        assert "Bun Specifics" not in result
+        assert "mock.module(" not in result
+        assert "from 'bun:test'" not in result
+        assert "### Test Scaffold" not in result
+
+    def test_episode_context_uses_detected_runner_and_declines_bun_mocks(self, tmp_path):
+        from agentic_tdd_runner.cookbook import build_episode_context
+
+        _write_file(tmp_path, "src/service.ts", """\
+            import { getLogger } from '../logger';
+
+            const logger = getLogger();
+
+            export function process(): void {
+              logger.info('start');
+            }
+        """)
+        config = {
+            "runner": {
+                "command": "bun test",
+                "framework": "bun:test",
+                "bootstrap": {
+                    "package_manager": "npm",
+                    "test_runner": "node:test",
+                    "test_command": "node --test src/**/*.test.ts",
+                },
+            },
+        }
+
+        ctx = build_episode_context("src/service.ts", "process", str(tmp_path), config=config)
+
+        assert ctx["runner"] == "node:test"
+        assert ctx["mocks_text"] == ""
+        assert "bun:test" not in ctx["cookbook_text"]
+        assert "mock.module(" not in ctx["cookbook_text"]
+
+    def test_custom_runner_bootstrap_does_not_emit_bun_scaffold(self, tmp_path):
+        _write_file(tmp_path, "src/service.ts", """\
+            import { getLogger } from '../logger';
+
+            const logger = getLogger();
+
+            export function process(): void {
+              logger.info('start');
+            }
+        """)
+        config = {
+            "runner": {
+                "command": "bun test",
+                "framework": "bun:test",
+                "bootstrap": {
+                    "package_manager": "npm",
+                    "test_runner": "custom",
+                    "test_command": "tsx --test src/**/*.test.ts",
+                },
+            },
+        }
+
+        result = generate_cookbook("src/service.ts", "process", str(tmp_path), config=config)
+
+        assert "bun:test" not in result
+        assert "bun test" not in result
+        assert "mock.module(" not in result
+        assert "### Test Scaffold" not in result
+
+
 class TestRegressionScopeGuidance:
     """Cookbook should bound test count without making the agent myopic."""
 

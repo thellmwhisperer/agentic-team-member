@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import posixpath
 import shlex
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,7 @@ from agentic_tdd_runner.compiler.parser import (
 from agentic_tdd_runner.apply_patch import ApplyPatchError, apply_patch_touched_paths
 from agentic_tdd_runner.cookbook import _find_function_end
 from agentic_tdd_runner.languages import get_language
+from agentic_tdd_runner.runner_command import effective_test_command_template
 
 
 INTENTS = {
@@ -96,7 +98,19 @@ def build_permission_context(
     cookbook_text = str(episode.get("cookbook_text") or "")
     contract_facts = _extract_callback_contract_facts(cookbook_text)
     repo_profile_facts = _extract_repo_profile_facts(cookbook_text)
-    runner = episode.get("runner") or runner_cfg.get("framework")
+    runner_facts_obj = episode.get("runner_facts")
+    bootstrap = runner_cfg.get("bootstrap") if isinstance(runner_cfg, dict) else None
+    runner = (
+        _value_from(runner_facts_obj, "test_runner")
+        or _value_from(bootstrap, "test_runner")
+        or episode.get("runner")
+        or runner_cfg.get("framework")
+    )
+    test_command = (
+        _value_from(runner_facts_obj, "test_command")
+        or effective_test_command_template(bootstrap, None)
+        or runner_cfg.get("command")
+    )
     source_file = episode.get("source_file")
     test_file = episode.get("test_file")
     language = _language_for_permission_context(source_file=source_file, test_file=test_file)
@@ -115,7 +129,7 @@ def build_permission_context(
         "target_symbol": episode.get("target_symbol"),
         "runner": runner,
         "language_name": getattr(language, "name", None),
-        "test_command": runner_cfg.get("command"),
+        "test_command": test_command,
         "contract_facts": contract_facts,
         "repo_profile_facts": repo_profile_facts,
         "runner_facts": runner_facts,
@@ -155,6 +169,33 @@ def build_permission_context(
             "### Module Mocks (paste before source import)",
         ),
     }
+
+
+def _value_from(container: object, key: str) -> str | None:
+    value = container.get(key) if isinstance(container, Mapping) else getattr(container, key, None)
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _bun_test_guidance_conflict(args: dict, context: dict) -> PermissionReview | None:
+    runner = str(context.get("runner") or "").strip()
+    if not runner or runner == "bun:test":
+        return None
+
+    payload = _write_payload_text(args)
+    if "bun:test" not in payload and "mock.module(" not in payload:
+        return None
+    return PermissionReview(
+        allowed=False,
+        message=(
+            "PERMISSION DENIED: detected runner is "
+            f"`{runner}`, so do not create Bun-specific test scaffolding. "
+            "Use Runner Facts and the project test runner instead."
+        ),
+    )
+
+
+def _write_payload_text(args: dict) -> str:
+    return "\n".join(str(args.get(field) or "") for field in ("content", "new_str", "patch"))
 
 
 def answer_harness(args: dict, context: dict) -> PermissionReview:
@@ -368,8 +409,14 @@ def review_tool_call(
         ):
             return None
         if name in {"create_file", "str_replace_editor"} and _same_path(path, context.get("test_file")):
+            conflict = _bun_test_guidance_conflict(args, context)
+            if conflict:
+                return conflict
             return None
         if name == "apply_patch" and _patch_touches_only(args, context.get("test_file")):
+            conflict = _bun_test_guidance_conflict(args, context)
+            if conflict:
+                return conflict
             return None
     elif grant == "write_source":
         path = str(args.get("path") or "")

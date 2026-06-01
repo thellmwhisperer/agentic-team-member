@@ -136,6 +136,7 @@ def prepare_run_context(
         source_path,
         symbol,
         workdir=workdir,
+        config=config,
         apply_mechanical_edits=apply_mechanical_edits,
         emit=emit,
         log=log,
@@ -245,6 +246,7 @@ def build_episode_for_target(
     symbol: str | None,
     *,
     workdir: str,
+    config: dict | None = None,
     apply_mechanical_edits: Callable[[list[dict], str], int],
     emit: Callable[[str], None],
     log: Callable[[str, dict], None],
@@ -257,11 +259,15 @@ def build_episode_for_target(
 
     from agentic_tdd_runner.cookbook import build_episode_context
 
-    episode = build_episode_context(
-        source_path=source_path,
-        symbol=symbol,
-        project_root=workdir,
-    )
+    episode_kwargs = {
+        "source_path": source_path,
+        "symbol": symbol,
+        "project_root": workdir,
+    }
+    runner_config = (config or {}).get("runner", {}) if isinstance(config, dict) else {}
+    if isinstance(runner_config, dict) and runner_config.get("bootstrap"):
+        episode_kwargs["config"] = config
+    episode = build_episode_context(**episode_kwargs)
     if discovery_candidates:
         episode["discovery_candidates"] = [
             {
