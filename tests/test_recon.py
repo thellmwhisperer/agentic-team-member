@@ -3,6 +3,7 @@
 import json
 import textwrap
 
+import agentic_tdd_runner.recon as recon
 from agentic_tdd_runner.recon import build_recon_cookbook
 
 
@@ -94,3 +95,103 @@ def test_recon_stays_empty_when_no_mechanical_facts_exist(tmp_path):
 
     assert cookbook.markdown == ""
     assert cookbook.to_log_dict()["sections"] == []
+
+
+def test_recon_bare_symbol_extraction_ignores_prose_capitalized_words(tmp_path):
+    _write_file(
+        tmp_path,
+        "src/page.tsx",
+        """
+        import { ProductCard } from './common/ProductCard';
+
+        export function Page() {
+          return <ProductCard />;
+        }
+        """,
+    )
+    _write_file(
+        tmp_path,
+        "src/api.ts",
+        """
+        export const API = {};
+        export const Response = {};
+        """,
+    )
+
+    cookbook = build_recon_cookbook(
+        issue_text="The API Response says ProductCard flashes stale data.",
+        project_root=str(tmp_path),
+    )
+
+    assert [consumer.to_log_dict() for consumer in cookbook.candidate_consumers] == [
+        {"symbol": "ProductCard", "path": "src/page.tsx"},
+    ]
+
+
+def test_recon_does_not_treat_pyproject_as_python_framework_in_mixed_repo(tmp_path):
+    _write_file(
+        tmp_path,
+        "package.json",
+        json.dumps({"dependencies": {"next": "^16.0.0"}}),
+    )
+    _write_file(tmp_path, "pyproject.toml", "[tool.ruff]\n")
+
+    cookbook = build_recon_cookbook(
+        issue_text="Bug: page flashes stale data",
+        project_root=str(tmp_path),
+    )
+
+    assert cookbook.frameworks == ["Next.js"]
+    assert "Python" not in cookbook.markdown
+
+
+def test_recon_skips_non_utf8_source_files(tmp_path):
+    bad = tmp_path / "src" / "bad.ts"
+    bad.parent.mkdir(parents=True, exist_ok=True)
+    bad.write_bytes(b"\xff\xfe\xfa")
+
+    cookbook = build_recon_cookbook(
+        issue_text="Bug: BadThing flashes",
+        project_root=str(tmp_path),
+    )
+
+    assert cookbook.candidate_consumers == []
+
+
+def test_recon_walks_source_files_once_per_build(tmp_path, monkeypatch):
+    _write_file(
+        tmp_path,
+        "package.json",
+        json.dumps({
+            "dependencies": {"next": "^16.0.0"},
+            "devDependencies": {"jest": "^30.0.0"},
+        }),
+    )
+    consumer = _write_file(
+        tmp_path,
+        "app/page.tsx",
+        """
+        "use client";
+        import { ProductCard } from '../src/common/ProductCard';
+
+        export function Page() {
+          return <ProductCard />;
+        }
+        """,
+    )
+    test = _write_file(tmp_path, "app/page.test.tsx", "test('page', () => {});\n")
+    calls = []
+
+    def fake_source_files(root):
+        calls.append(root)
+        return [tmp_path / consumer, tmp_path / test]
+
+    monkeypatch.setattr(recon, "_source_files", fake_source_files)
+
+    cookbook = build_recon_cookbook(
+        issue_text="Bug: ProductCard flashes stale data.",
+        project_root=str(tmp_path),
+    )
+
+    assert len(calls) == 1
+    assert cookbook.candidate_consumers

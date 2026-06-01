@@ -12,7 +12,8 @@ from agentic_tdd_runner.languages import supported_extensions
 
 TEST_NAME_RE = re.compile(r"(^test[_\.-]|[_\.-](?:test|spec)\.)", re.IGNORECASE)
 ISSUE_PATH_RE = re.compile(r"`([^`]+\.[A-Za-z0-9]+)`|['\"]([^'\"]+\.[A-Za-z0-9]+)['\"]")
-ISSUE_SYMBOL_RE = re.compile(r"`([A-Za-z_$][\w$]*)\s*(?:\(\))?`|\b([A-Z][A-Za-z0-9_$]{2,})\b")
+BACKTICK_SYMBOL_RE = re.compile(r"`([A-Za-z_$][\w$]*)\s*(?:\(\))?`")
+BARE_IDENTIFIER_RE = re.compile(r"\b([A-Za-z_$][\w$]{2,})\b")
 GENERIC_ANCHOR_PARTS = {"common", "components", "shared", "ui", "utils"}
 EXCLUDE_DIRS = {
     ".atm",
@@ -94,16 +95,22 @@ def build_recon_cookbook(
     root = Path(project_root)
     package = _read_package(root)
     deps = _all_package_deps(package)
+    source_files = _source_files(root)
     frameworks = _detect_frameworks(root, deps)
     test_stack = _detect_test_stack(root, package, deps, config=config)
-    entry_points = _detect_entry_points(root, frameworks)
+    entry_points = _detect_entry_points(root, source_files, frameworks)
     issue_paths = _extract_issue_paths(issue_text)
     anti_anchor_paths = [
         path for path in issue_paths if _is_generic_anchor_path(path)
     ]
     symbols = _extract_issue_symbols(issue_text)
-    candidate_consumers = _candidate_consumers(root, symbols, exclude_paths=set(issue_paths))
-    example_tests = _example_tests_for_consumers(root, candidate_consumers)
+    candidate_consumers = _candidate_consumers(
+        root,
+        source_files,
+        symbols,
+        exclude_paths=set(issue_paths),
+    )
+    example_tests = _example_tests_for_consumers(root, source_files, candidate_consumers)
     hypotheses = _hypotheses(issue_text, frameworks)
     markdown = _render_markdown(
         frameworks=frameworks,
@@ -128,8 +135,8 @@ def build_recon_cookbook(
 
 def _read_package(root: Path) -> dict:
     try:
-        data = json.loads((root / "package.json").read_text())
-    except (OSError, json.JSONDecodeError):
+        data = json.loads((root / "package.json").read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         return {}
     return data if isinstance(data, dict) else {}
 
@@ -151,15 +158,7 @@ def _detect_frameworks(root: Path, deps: set[str]) -> list[str]:
         frameworks.append("Remix")
     if "@sveltejs/kit" in deps or (root / "svelte.config.js").is_file():
         frameworks.append("SvelteKit")
-    if "fastapi" in deps or (root / "pyproject.toml").is_file():
-        frameworks.append("Python")
-    if not frameworks and package_like_node_repo(root, deps):
-        frameworks.append("Node")
     return frameworks
-
-
-def package_like_node_repo(root: Path, deps: set[str]) -> bool:
-    return bool(deps or (root / "package.json").is_file())
 
 
 def _detect_test_stack(
@@ -189,14 +188,18 @@ def _detect_test_stack(
     return _dedupe(stack)
 
 
-def _detect_entry_points(root: Path, frameworks: list[str]) -> list[str]:
+def _detect_entry_points(
+    root: Path,
+    source_files: list[Path],
+    frameworks: list[str],
+) -> list[str]:
     entry_points = []
     if "Next.js" in frameworks:
         if (root / "app").is_dir():
             entry_points.append("Next.js App Router (`app/`)")
         if (root / "pages").is_dir():
             entry_points.append("Next.js Pages Router (`pages/`)")
-        client_files = _files_containing(root, '"use client"', limit=3)
+        client_files = _files_containing(root, source_files, '"use client"', limit=3)
         if client_files:
             entry_points.append("Client components: " + ", ".join(f"`{path}`" for path in client_files))
     return entry_points
@@ -214,14 +217,24 @@ def _extract_issue_paths(issue_text: str) -> list[str]:
 
 def _extract_issue_symbols(issue_text: str) -> list[str]:
     symbols = []
-    for match in ISSUE_SYMBOL_RE.finditer(issue_text):
-        symbol = match.group(1) or match.group(2)
+    for match in BACKTICK_SYMBOL_RE.finditer(issue_text):
+        symbol = match.group(1)
         if symbol in SYMBOL_STOPWORDS:
             continue
-        if "." in symbol or "/" in symbol:
+        symbols.append(symbol)
+    for match in BARE_IDENTIFIER_RE.finditer(issue_text):
+        symbol = match.group(1)
+        if symbol in SYMBOL_STOPWORDS or not _looks_like_bare_symbol(symbol):
             continue
         symbols.append(symbol)
     return _dedupe(symbols)
+
+
+def _looks_like_bare_symbol(symbol: str) -> bool:
+    has_lower = any(ch.islower() for ch in symbol)
+    has_upper = any(ch.isupper() for ch in symbol)
+    has_internal_upper = any(ch.isupper() for ch in symbol[1:])
+    return has_lower and has_upper and (symbol[0].islower() or has_internal_upper)
 
 
 def _is_generic_anchor_path(path: str) -> bool:
@@ -231,19 +244,19 @@ def _is_generic_anchor_path(path: str) -> bool:
 
 def _candidate_consumers(
     root: Path,
+    source_files: list[Path],
     symbols: list[str],
     *,
     exclude_paths: set[str],
 ) -> list[CandidateConsumer]:
     consumers: list[CandidateConsumer] = []
     seen: set[tuple[str, str]] = set()
-    for path in _source_files(root):
+    for path in source_files:
         rel = _normalize_path(str(path.relative_to(root)))
         if rel in exclude_paths or _is_test_path(rel):
             continue
-        try:
-            text = path.read_text()
-        except OSError:
+        text = _read_source_text(path)
+        if text is None:
             continue
         for symbol in symbols:
             if not re.search(rf"\b{re.escape(symbol)}\b", text):
@@ -258,9 +271,16 @@ def _candidate_consumers(
     return consumers
 
 
-def _example_tests_for_consumers(root: Path, consumers: list[CandidateConsumer]) -> list[str]:
+def _example_tests_for_consumers(
+    root: Path,
+    source_files: list[Path],
+    consumers: list[CandidateConsumer],
+) -> list[str]:
     tests = []
-    all_tests = [path for path in _source_files(root) if _is_test_path(str(path.relative_to(root)))]
+    all_tests = [
+        path for path in source_files
+        if _is_test_path(str(path.relative_to(root)))
+    ]
     for consumer in consumers:
         consumer_dir = PurePosixPath(consumer.path).parent
         for path in all_tests:
@@ -341,13 +361,17 @@ def _append_section(lines: list[str], title: str, values: list[str]) -> None:
     lines.append("")
 
 
-def _files_containing(root: Path, needle: str, *, limit: int) -> list[str]:
+def _files_containing(
+    root: Path,
+    source_files: list[Path],
+    needle: str,
+    *,
+    limit: int,
+) -> list[str]:
     matches = []
-    for path in _source_files(root):
-        try:
-            if needle not in path.read_text():
-                continue
-        except OSError:
+    for path in source_files:
+        text = _read_source_text(path)
+        if text is None or needle not in text:
             continue
         matches.append(_normalize_path(str(path.relative_to(root))))
         if len(matches) >= limit:
@@ -368,6 +392,13 @@ def _source_files(root: Path):
             continue
         files.append(path)
     return sorted(files)
+
+
+def _read_source_text(path: Path) -> str | None:
+    try:
+        return path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return None
 
 
 def _is_test_path(path: str) -> bool:
