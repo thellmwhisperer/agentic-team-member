@@ -214,6 +214,60 @@ def test_create_pr_stages_only_delta_after_baseline(tmp_path, monkeypatch):
     assert logged[-1][1]["url"] == "https://github.com/test/pr/1"
 
 
+def test_create_pr_stages_allowed_untracked_files_when_language_unknown(tmp_path, monkeypatch):
+    subprocess.run(["git", "init", "-b", "main"], cwd=tmp_path, capture_output=True, check=True)
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=tmp_path, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=tmp_path, capture_output=True)
+    (tmp_path / "service.rb").write_text("def perform\n  :old\nend\n")
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, capture_output=True, check=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=tmp_path, capture_output=True, check=True)
+    subprocess.run(["git", "update-ref", "refs/remotes/origin/main", "HEAD"], cwd=tmp_path, check=True)
+
+    baseline = collect_pr_changed_files(str(tmp_path), 10)
+    (tmp_path / "service.rb").write_text("def perform\n  :new\nend\n")
+    (tmp_path / "service_spec.rb").write_text("describe 'perform' do\nend\n")
+
+    add_commands = []
+    original_run = subprocess.run
+
+    def track_run(*args, **kwargs):
+        cmd = args[0] if args else kwargs.get("args", [])
+        if isinstance(cmd, list):
+            if len(cmd) > 1 and cmd[1] == "add":
+                add_commands.append(cmd)
+            if cmd[0] == "gh" or (cmd[0] == "git" and "push" in cmd):
+                return subprocess.CompletedProcess(cmd, 0, stdout="https://github.com/test/pr/1\n")
+        return original_run(*args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", track_run)
+
+    result = create_pr(
+        [],
+        {},
+        "service_spec.rb",
+        3,
+        workdir=str(tmp_path),
+        config={
+            "pr": {"base_branch": "main", "branch_prefix": "atm/fix-"},
+            "prompt": {"pr_prompt": "Generate PR"},
+            "timeouts": {"pr_create": 10},
+        },
+        emit=lambda _msg: None,
+        log=lambda _event, _data: None,
+        chat=lambda _messages, include_tools=True: {
+            "choices": [{"message": {"content": "PR_TITLE: fix\nPR_BODY: done"}}],
+        },
+        get_changed_files_fn=lambda: [],
+        baseline_changed_files=baseline,
+    )
+
+    assert result == "https://github.com/test/pr/1"
+    assert len(add_commands) == 1
+    staged_files = add_commands[0][3:]
+    assert "service.rb" in staged_files
+    assert "service_spec.rb" in staged_files
+
+
 def test_create_pr_gate_blocks_when_target_not_in_post_baseline_delta(tmp_path, monkeypatch):
     # Target was dirty BEFORE the run (baseline); the model's real delta touches a
     # different file. The gate must reject using the post-baseline set, not raw git

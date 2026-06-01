@@ -332,6 +332,56 @@ def test_prepare_run_context_passes_bootstrap_to_episode_cookbook(tmp_path, monk
     assert episode_calls[0]["config"] is config
 
 
+def test_prepare_run_context_passes_runner_config_to_episode_cookbook_without_bootstrap(tmp_path, monkeypatch):
+    episode_calls = []
+    issue = """Bug: processRenewal reports 0 months
+
+## Where
+`src/events/client.ts` -> `processRenewal()`
+"""
+    (tmp_path / "src/events").mkdir(parents=True)
+    (tmp_path / "src/events/client.ts").write_text("export function processRenewal() {}\n")
+
+    def fake_episode(**kwargs):
+        episode_calls.append(kwargs)
+        return {
+            "source_file": kwargs["source_path"],
+            "target_symbol": kwargs["symbol"],
+            "test_file": "src/events/processRenewal.test.ts",
+            "runner": "bun:test",
+            "pre_test_source_edits": [],
+            "function_line_range": {"start": 1, "end": 1, "source": "definition"},
+            "cookbook_text": "## Cookbook\n",
+        }
+
+    monkeypatch.setattr("agentic_tdd_runner.cookbook.build_episode_context", fake_episode)
+    args = SimpleNamespace(issue="unused", source=None, symbol=None)
+    config = {
+        "prompt": {"system": "system"},
+        "timeouts": {"tool_execution": 10},
+        "runner": {
+            "command": "npm test --",
+            "framework": "jest",
+        },
+    }
+
+    prepare_run_context(
+        args,
+        repo=None,
+        workdir=str(tmp_path),
+        config=config,
+        load_issue_text=lambda _args, _repo: issue,
+        prepare_target_environment=lambda: None,
+        apply_mechanical_edits=lambda _edits, _workdir: 0,
+        collect_pr_changed_files=lambda _workdir, _timeout: set(),
+        discovery_enabled=True,
+        emit=lambda _msg: None,
+        log=lambda _event, _data: None,
+    )
+
+    assert episode_calls[0]["config"] is config
+
+
 def test_prepare_run_context_handles_missing_source_symbol_attrs(tmp_path):
     args = SimpleNamespace(issue="unused")
 
