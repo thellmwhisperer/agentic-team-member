@@ -2,7 +2,7 @@
 from agentic_tdd_runner.languages import get_language, plugins, supported_extensions
 from agentic_tdd_runner.languages.capabilities import (
     LanguageCapabilities,
-    NeutralLanguageCapabilityDefaults,
+    OptionalLanguageCapabilityDefaults,
     validate_language_capability,
 )
 
@@ -134,7 +134,7 @@ class TestTypeScriptPlugin:
 
         for capability in required:
             assert getattr(type(lang), capability) is not getattr(
-                NeutralLanguageCapabilityDefaults,
+                OptionalLanguageCapabilityDefaults,
                 capability,
             )
 
