@@ -828,6 +828,53 @@ def test_write_test_grant_allows_reading_test_setup_dependencies(tmp_path):
     assert next_grant == "write_test"
 
 
+def test_write_test_grant_allows_reading_jest_setup_dependencies(tmp_path):
+    test_file = tmp_path / "src" / "http" / "routeRequest.test.ts"
+    dependency = tmp_path / "src" / "config" / "messages.ts"
+    test_file.parent.mkdir(parents=True)
+    dependency.parent.mkdir(parents=True)
+    test_file.write_text(
+        "\n".join([
+            "import { describe, expect, jest, test } from '@jest/globals';",
+            "jest.mock('../config/messages', () => ({",
+            "  getMessage: jest.fn(() => undefined),",
+            "}));",
+            "const { routeRequest } = require('./router');",
+        ])
+    )
+    dependency.write_text("export const getSystemPrompt = () => '';\n")
+
+    context = permission.build_permission_context(
+        episode={
+            "source_file": "src/http/router.ts",
+            "test_file": "src/http/routeRequest.test.ts",
+            "target_symbol": "routeRequest",
+            "runner": "jest",
+        },
+        config={"runner": {"framework": "jest"}},
+        phase="test",
+        test_file_created=True,
+        workdir=str(tmp_path),
+    )
+
+    review = permission.review_tool_call(
+        "read_file",
+        {"path": "src/config/messages.ts"},
+        grant="write_test",
+        context=context,
+    )
+    next_grant = permission.consume_grant(
+        "read_file",
+        {"path": "src/config/messages.ts"},
+        "write_test",
+        context,
+    )
+
+    assert "src/config/messages.ts" in context["test_setup_read_paths"]
+    assert review is None
+    assert next_grant == "write_test"
+
+
 def test_permission_context_unknown_language_does_not_use_js_mock_or_type_helpers(tmp_path):
     test_file = tmp_path / "spec" / "worker_spec.rb"
     dependency = tmp_path / "spec" / "support" / "messages.rb"

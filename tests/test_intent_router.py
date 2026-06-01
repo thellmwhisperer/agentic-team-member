@@ -18,6 +18,20 @@ def _facts():
     )
 
 
+def _jest_facts():
+    return RunnerFacts(
+        test_runner="jest",
+        test_command="npm exec -- jest --runInBand --watchman=false --coverage=false",
+        typecheck_command="npm run typecheck",
+        test_api_import='import { beforeEach, describe, expect, jest, test } from "@jest/globals";',
+        recommended_test_file="src/events/processRenewal.test.ts",
+        source_file="src/events/client.ts",
+        target_symbol="processRenewal",
+        nearby_tests=[],
+        symbol_tests=[],
+    )
+
+
 def _python_facts():
     return RunnerFacts(
         test_runner="pytest",
@@ -72,6 +86,44 @@ def test_router_answers_from_runner_facts_for_missing_bun_test_globals():
     assert 'import { beforeEach, describe, expect, mock, test } from "bun:test";' in decision.message
     assert "if that import is already present" in decision.message
     assert "src/events/processRenewal.test.ts" in decision.message
+
+
+def test_router_answers_from_runner_facts_for_missing_jest_globals():
+    router = IntentRouter(_jest_facts())
+    router.observe_tool_result(
+        "run_command",
+        {"command": "npm run typecheck"},
+        (
+            "[Reactive typecheck]\n"
+            "src/events/processRenewal.test.ts(4,1): error TS2304: Cannot find name 'describe'.\n"
+            "src/events/processRenewal.test.ts(5,3): error TS2304: Cannot find name 'jest'.\n"
+            "src/events/processRenewal.test.ts(6,3): error TS2304: Cannot find name 'expect'.\n"
+        ),
+        applied=None,
+    )
+
+    decision = router.review_tool_call("read_file", {"path": "jest.config.ts"})
+
+    assert decision is not None
+    assert decision.event == "intent_router_answered"
+    assert decision.data["intent"] == "inspect_test_framework"
+    assert 'import { beforeEach, describe, expect, jest, test } from "@jest/globals";' in decision.message
+    assert "src/events/processRenewal.test.ts" in decision.message
+
+
+def test_router_does_not_treat_jest_as_bun_global():
+    router = IntentRouter(_facts())
+    router.observe_tool_result(
+        "run_command",
+        {"command": "bun run typecheck"},
+        (
+            "[Reactive typecheck]\n"
+            "src/events/processRenewal.test.ts(5,3): error TS2304: Cannot find name 'jest'.\n"
+        ),
+        applied=None,
+    )
+
+    assert router.review_tool_call("read_file", {"path": "tsconfig.json"}) is None
 
 
 def test_router_matches_spec_files_and_pretty_tsc_missing_bun_globals():
