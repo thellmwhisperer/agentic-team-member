@@ -61,6 +61,19 @@ class TestRegistry:
         assert isinstance(get_language("file.py"), PythonLanguage)
         assert isinstance(get_language("file.ts"), TypeScriptLanguage)
 
+    def test_builtin_language_subcomponents_are_importable(self):
+        module_names = (
+            "agentic_tdd_runner.languages.typescript.syntax",
+            "agentic_tdd_runner.languages.typescript.paths",
+            "agentic_tdd_runner.languages.typescript.seams",
+            "agentic_tdd_runner.languages.python.syntax",
+            "agentic_tdd_runner.languages.python.paths",
+            "agentic_tdd_runner.languages.python.seams",
+        )
+
+        for module_name in module_names:
+            assert importlib.import_module(module_name)
+
 
 class TestTypeScriptPlugin:
     """TypeScript plugin parses imports and generates bun:test scaffolds."""
@@ -132,6 +145,30 @@ class TestTypeScriptPlugin:
         lang = get_language("file.ts")
         assert lang.is_exported("export function foo() {}", "foo") is True
         assert lang.is_exported("function foo() {}", "foo") is False
+
+    def test_syntax_submodule_parses_imports(self):
+        from agentic_tdd_runner.languages.typescript.syntax import parse_imports
+
+        imports = parse_imports("import client from './client';")
+
+        assert imports["client"]["source_module"] == "./client"
+        assert imports["client"]["import_kind"] == "default"
+
+    def test_paths_submodule_computes_test_path(self):
+        from agentic_tdd_runner.languages.typescript.paths import test_path
+
+        assert test_path("src/client.ts", "handleEvent") == "src/handleEvent.test.ts"
+
+    def test_seams_submodule_renders_setter(self):
+        from agentic_tdd_runner.languages.typescript.seams import render_seam_setter
+
+        result = render_seam_setter(
+            "client",
+            {"type_annotation": "Client", "observed_members": ["say"]},
+        )
+
+        assert "export function __setClientForTests" in result
+        assert "Pick<Client, 'say'>" in result
 
     def test_typescript_required_capabilities_are_not_neutral_defaults(self):
         lang = get_language("file.ts")
@@ -269,6 +306,27 @@ class Worker:
     def test_setter_name_convention(self):
         lang = get_language("file.py")
         assert lang.setter_name("client") == "__set_client_for_tests"
+
+    def test_syntax_submodule_parses_imports(self):
+        from agentic_tdd_runner.languages.python.syntax import parse_imports
+
+        imports = parse_imports("from src.logger import get_logger")
+
+        assert imports["get_logger"]["source_module"] == "src.logger"
+
+    def test_paths_submodule_computes_import_path(self):
+        from agentic_tdd_runner.languages.python.paths import import_path
+
+        assert import_path("tests/test_worker.py", "src/pkg/__init__.py") == "src.pkg"
+
+    def test_seams_submodule_renders_setter(self):
+        from agentic_tdd_runner.languages.python.seams import render_seam_setter
+
+        assert render_seam_setter("client", {}) == (
+            "def __set_client_for_tests(value):\n"
+            "    global client\n"
+            "    client = value\n"
+        )
 
     def test_python_capability_defaults_do_not_inherit_javascript_behavior(self, tmp_path):
         lang = get_language("file.py")
