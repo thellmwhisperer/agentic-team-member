@@ -77,7 +77,14 @@ class LanguageCapabilities(Protocol):
     def profile_detectors(self) -> list[Any]: ...
 
 
-class NeutralLanguageCapabilityDefaults:
+class OptionalLanguageCapabilityDefaults:
+    """No-op defaults only for optional language capabilities.
+
+    Core capabilities, such as parsing, path generation, and command templates,
+    must remain implemented by each language plugin so missing behavior fails the
+    contract validator instead of silently inheriting a neutral fallback.
+    """
+
     def is_dependency_contract_lookup(self, command: str, parts: list[str]) -> bool:
         return False
 
