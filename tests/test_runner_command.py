@@ -105,6 +105,15 @@ def test_custom_test_command_template_is_shared_for_package_scripts():
     assert custom_test_command_template(report) == "tsx --test"
 
 
+def test_custom_test_command_template_strips_bare_test_file_args():
+    assert custom_test_command_template({
+        "test_command": "jest foo.test.ts",
+    }) == "jest"
+    assert custom_test_command_template({
+        "test_command": "python3 -m pytest test_foo.py",
+    }) == "python3 -m pytest"
+
+
 def test_builds_package_manager_specific_runner_templates(tmp_path):
     (tmp_path / "pnpm-lock.yaml").write_text("")
     _write_package(tmp_path, {

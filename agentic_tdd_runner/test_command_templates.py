@@ -5,6 +5,18 @@ from __future__ import annotations
 import shlex
 from typing import Any
 
+TEST_FILE_SUFFIXES = (
+    ".js",
+    ".jsx",
+    ".ts",
+    ".tsx",
+    ".mjs",
+    ".cjs",
+    ".mts",
+    ".cts",
+    ".py",
+)
+
 
 def custom_test_command_template(report: Any) -> str:
     """Return a focused command prefix for custom package test scripts."""
@@ -35,12 +47,16 @@ def strip_test_file_args(command: str) -> str:
 def looks_like_test_path_arg(part: str) -> bool:
     if part.startswith("-") or "=" in part:
         return False
-    return (
+    looks_like_test_name = (
         ".test." in part
         or ".spec." in part
         or "test_" in part
         or "_test." in part
-    ) and any(ch in part for ch in ("/", "\\", "*"))
+    )
+    return looks_like_test_name and (
+        any(ch in part for ch in ("/", "\\", "*"))
+        or part.endswith(TEST_FILE_SUFFIXES)
+    )
 
 
 def package_test_script_command(package_manager: str | None) -> str:
