@@ -3,29 +3,32 @@ from __future__ import annotations
 
 from pathlib import PurePosixPath
 
-_registry: dict[str, object] = {}
+from agentic_tdd_runner.languages.capabilities import LanguageCapabilities
 
 
-def register(extensions: list[str], plugin):
+_registry: dict[str, LanguageCapabilities] = {}
+
+
+def register(extensions: list[str], plugin: LanguageCapabilities) -> None:
     for ext in extensions:
         _registry[ext] = plugin
 
 
-def get_language(file_path: str):
+def get_language(file_path: str) -> LanguageCapabilities | None:
     ext = PurePosixPath(file_path).suffix
     return _registry.get(ext)
 
 
-def get_language_by_name(name: str):
+def get_language_by_name(name: str) -> LanguageCapabilities | None:
     for plugin in plugins():
         if getattr(plugin, "name", None) == name:
             return plugin
     return None
 
 
-def plugins() -> list[object]:
+def plugins() -> list[LanguageCapabilities]:
     seen: set[int] = set()
-    result: list[object] = []
+    result: list[LanguageCapabilities] = []
     for plugin in _registry.values():
         ident = id(plugin)
         if ident in seen:

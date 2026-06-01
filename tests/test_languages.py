@@ -1,5 +1,6 @@
 """Tests for language plugin registry."""
-from agentic_tdd_runner.languages import get_language, supported_extensions
+from agentic_tdd_runner.languages import get_language, plugins, supported_extensions
+from agentic_tdd_runner.languages.capabilities import LanguageCapabilities
 
 
 class TestRegistry:
@@ -21,6 +22,14 @@ class TestRegistry:
         exts = supported_extensions()
         assert ".ts" in exts
         assert ".py" in exts
+
+    def test_registered_plugins_satisfy_language_capability_contract(self):
+        assert plugins()
+        for lang in plugins():
+            assert isinstance(lang, LanguageCapabilities)
+
+    def test_unknown_extension_has_no_language_capability(self):
+        assert get_language("README.md") is None
 
 
 class TestTypeScriptPlugin:
@@ -209,3 +218,41 @@ class Worker:
     def test_setter_name_convention(self):
         lang = get_language("file.py")
         assert lang.setter_name("client") == "__set_client_for_tests"
+
+    def test_python_capability_defaults_do_not_inherit_javascript_behavior(self, tmp_path):
+        lang = get_language("file.py")
+
+        assert lang.typecheck_command(tmp_path, {}, "pytest") is None
+        assert lang.is_dependency_contract_lookup(
+            "cat node_modules/@types/example/index.d.ts",
+            ["cat", "node_modules/@types/example/index.d.ts"],
+        ) is False
+        assert lang.referenced_type_shapes(
+            workdir=str(tmp_path),
+            contract_facts=["pkg type declarations expose `ready(payload: Payload)`"],
+        ) == []
+        assert lang.test_setup_dependency_paths(workdir=str(tmp_path), test_file="test_worker.py") == []
+        assert lang.extract_mock_modules("mock.module('./service', () => ({}));") == []
+        assert lang.regression_test_skeleton({"target_symbol": "process_item"}) == ""
+        assert lang.intent_router_observe_tool_result(
+            "run_command",
+            {"command": "python3 -m pytest"},
+            "ok",
+            {"test_runner": "pytest"},
+        ) == {}
+        assert lang.intent_router_review_tool_call(
+            {},
+            "read_file",
+            {"path": "package.json"},
+            {"test_runner": "pytest"},
+        ) is None
+        assert lang.intent_router_is_edit_to_path(
+            "str_replace_editor",
+            {"path": "test_worker.py"},
+            "test_worker.py",
+        ) is False
+        assert lang.intent_router_is_framework_lookup_or_premature_run(
+            "read_file",
+            {"path": "package.json"},
+        ) is False
+        assert lang.profile_detectors() == []
