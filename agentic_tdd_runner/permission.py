@@ -16,7 +16,7 @@ from agentic_tdd_runner.compiler.parser import (
 )
 from agentic_tdd_runner.apply_patch import ApplyPatchError, apply_patch_touched_paths
 from agentic_tdd_runner.cookbook import _find_function_end
-from agentic_tdd_runner.languages import get_language
+from agentic_tdd_runner.languages import get_language, supported_extensions
 from agentic_tdd_runner.runner_authority import override_detected_runner
 from agentic_tdd_runner.runner_command import effective_test_command_template
 
@@ -43,19 +43,6 @@ class PermissionReview:
 _SEARCH_RESULT_RE = re.compile(
     r"^(?:\./)?(?P<path>[^:\n]+):(?P<line>\d+):(?P<text>.*)$"
 )
-_CONTROL_FLOW_SYMBOLS = {
-    "if",
-    "else",
-    "for",
-    "while",
-    "switch",
-    "catch",
-    "do",
-    "try",
-    "finally",
-    "return",
-    "await",
-}
 _READ_ONLY_SHELL_COMMANDS = {"grep", "rg"}
 
 
@@ -180,26 +167,21 @@ def _value_from(container: object, key: str) -> str | None:
     return value.strip() if isinstance(value, str) and value.strip() else None
 
 
-def _bun_test_guidance_conflict(args: dict, context: dict) -> PermissionReview | None:
-    runner = str(context.get("runner") or "").strip()
-    if not runner or runner == "bun:test":
-        return None
-
-    payload = _write_payload_text(args)
-    if "bun:test" not in payload and "mock.module(" not in payload:
-        return None
-    return PermissionReview(
-        allowed=False,
-        message=(
-            "PERMISSION DENIED: detected runner is "
-            f"`{runner}`, so do not create Bun-specific test scaffolding. "
-            "Use Runner Facts and the project test runner instead."
-        ),
+def _write_test_permission_conflict(args: dict, context: dict) -> PermissionReview | None:
+    language = _language_for_permission_context(
+        source_file=context.get("source_file"),
+        test_file=context.get("test_file"),
     )
-
-
-def _write_payload_text(args: dict) -> str:
-    return "\n".join(str(args.get(field) or "") for field in ("content", "new_str", "patch"))
+    message = _language_capability(
+        language,
+        "permission_write_test_conflict",
+        args,
+        context,
+        default=None,
+    )
+    if not message:
+        return None
+    return PermissionReview(allowed=False, message=str(message))
 
 
 def answer_harness(args: dict, context: dict) -> PermissionReview:
@@ -330,13 +312,13 @@ def answer_harness(args: dict, context: dict) -> PermissionReview:
         snippet = context.get("source_snippet")
         if snippet:
             lines.append("Current target snippet for exact str_replace:")
-            lines.append("```ts")
+            lines.append(f"```{_code_fence_for_context(context)}")
             lines.append(str(snippet))
             lines.append("```")
         imports = context.get("source_imports")
         if imports:
             lines.append("Existing relevant imports; extend these if the edit needs callback types:")
-            lines.append("```ts")
+            lines.append(f"```{_code_fence_for_context(context)}")
             lines.append(str(imports))
             lines.append("```")
         contract_facts = context.get("contract_facts") or []
@@ -413,12 +395,12 @@ def review_tool_call(
         ):
             return None
         if name in {"create_file", "str_replace_editor"} and _same_path(path, context.get("test_file")):
-            conflict = _bun_test_guidance_conflict(args, context)
+            conflict = _write_test_permission_conflict(args, context)
             if conflict:
                 return conflict
             return None
         if name == "apply_patch" and _patch_touches_only(args, context.get("test_file")):
-            conflict = _bun_test_guidance_conflict(args, context)
+            conflict = _write_test_permission_conflict(args, context)
             if conflict:
                 return conflict
             return None
@@ -609,29 +591,15 @@ def _find_enclosing_symbol(source_text: str, line_no: int, source_path: str) -> 
     if not lines or line_no < 1 or line_no > len(lines):
         return None
     lang = get_language(source_path)
+    symbol_fn = getattr(lang, "definition_symbol_from_line", None)
+    if not callable(symbol_fn):
+        return None
     for index in range(line_no, 0, -1):
-        symbol = _definition_symbol_from_line(lines[index - 1])
+        symbol = symbol_fn(lines[index - 1])
         if not symbol:
             continue
         end = _find_function_end(source_text, index, lang=lang) or index
         if index <= line_no <= end:
-            return symbol
-    return None
-
-
-def _definition_symbol_from_line(line: str) -> str | None:
-    patterns = (
-        r"^\s*(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(",
-        r"^\s*(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=.*=>",
-        r"^\s*(?:async\s+)?def\s+([A-Za-z_][\w]*)\s*\(",
-        r"^\s*(?:public|private|protected|static|async|\s)*([A-Za-z_$][\w$]*)\s*\([^)]*\)\s*(?::[^{]+)?\{",
-    )
-    for pattern in patterns:
-        match = re.search(pattern, line)
-        if match:
-            symbol = match.group(1)
-            if symbol in _CONTROL_FLOW_SYMBOLS:
-                return None
             return symbol
     return None
 
@@ -730,7 +698,7 @@ def review_target_challenge(
             event="target_challenge_denied",
         )
 
-    start, source = _find_challenge_symbol_line(source_text, target_symbol)
+    start, source = _find_challenge_symbol_line(source_text, target_symbol, source_file)
     if source not in {"definition", "method"} or not start:
         return PermissionReview(
             allowed=False,
@@ -752,12 +720,18 @@ def review_target_challenge(
     )
 
 
-def _find_challenge_symbol_line(source_text: str, symbol: str) -> tuple[int | None, str | None]:
+def _find_challenge_symbol_line(
+    source_text: str,
+    symbol: str,
+    source_path: str,
+) -> tuple[int | None, str | None]:
     start, source = _find_symbol_line_with_source(source_text, symbol)
     if source == "definition" or not start:
         return start, source
     lines = source_text.splitlines()
-    if 1 <= start <= len(lines) and _looks_like_method_definition(lines[start - 1], symbol):
+    language = get_language(source_path)
+    method_fn = getattr(language, "looks_like_method_definition", None)
+    if 1 <= start <= len(lines) and callable(method_fn) and method_fn(lines[start - 1], symbol):
         return start, "method"
     return start, source
 
@@ -801,10 +775,7 @@ def _suggest_target_from_evidence(
     active_symbol: str,
     workdir: str,
 ) -> tuple[str, str] | None:
-    for match in re.finditer(
-        r"(?P<path>(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\.(?:ts|tsx|js|jsx|py))(?::(?P<line>\d+))?",
-        evidence,
-    ):
+    for match in re.finditer(_source_path_evidence_pattern(), evidence):
         source_file = _normalize_permission_path(match.group("path"))
         if (
             not source_file
@@ -823,20 +794,39 @@ def _suggest_target_from_evidence(
             target_symbol = _find_enclosing_symbol(source_text, line_no, source_file)
             if target_symbol and target_symbol != active_symbol:
                 return source_file, target_symbol
-        mentioned = _mentioned_symbols_in_source(source_text, evidence)
+        mentioned = _mentioned_symbols_in_source(source_text, evidence, source_file)
         for target_symbol in mentioned:
             if target_symbol != active_symbol:
                 return source_file, target_symbol
     return None
 
 
-def _mentioned_symbols_in_source(source_text: str, evidence: str) -> list[str]:
+def _source_path_evidence_pattern() -> str:
+    extensions = [
+        re.escape(extension.lstrip("."))
+        for extension in supported_extensions()
+        if extension.startswith(".")
+    ]
+    if not extensions:
+        return r"a\A"
+    extension_pattern = "|".join(sorted(extensions, key=len, reverse=True))
+    return (
+        r"(?P<path>(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+"
+        rf"\.(?:{extension_pattern}))(?::(?P<line>\d+))?"
+    )
+
+
+def _mentioned_symbols_in_source(source_text: str, evidence: str, source_path: str) -> list[str]:
+    language = get_language(source_path)
+    symbol_fn = getattr(language, "definition_symbol_from_line", None)
+    if not callable(symbol_fn):
+        return []
     symbols: list[str] = []
     for index, line in enumerate(source_text.splitlines(), start=1):
-        symbol = _definition_symbol_from_line(line)
+        symbol = symbol_fn(line)
         if not symbol or not _symbol_mentioned_in_evidence(symbol, evidence):
             continue
-        end = _find_function_end(source_text, index, lang=None) or index
+        end = _find_function_end(source_text, index, lang=language) or index
         if index <= end:
             symbols.append(symbol)
     return symbols
@@ -848,15 +838,6 @@ def _symbol_mentioned_in_evidence(symbol: str, evidence: str) -> bool:
 
 def _json_safe(text: str) -> str:
     return text.replace("\\", "\\\\").replace('"', '\\"')
-
-
-def _looks_like_method_definition(line: str, symbol: str) -> bool:
-    esc = re.escape(symbol)
-    patterns = (
-        rf"^\s*(?:public|private|protected|static|async|\s)*{esc}\s*\(",
-        rf"^\s*(?:async\s+)?def\s+{esc}\s*\(",
-    )
-    return any(re.search(pattern, line) for pattern in patterns)
 
 
 def _implementation_answer_block(args: dict, context: dict) -> str:
@@ -874,14 +855,14 @@ def _implementation_answer_block(args: dict, context: dict) -> str:
     imports = str(context.get("source_imports") or "").strip()
     lines = [
         "\nTarget implementation snippet supplied by the harness:",
-        "```ts",
+        f"```{_code_fence_for_context(context)}",
         snippet,
         "```",
     ]
     if imports:
         lines.extend([
             "Relevant existing imports:",
-            "```ts",
+            f"```{_code_fence_for_context(context)}",
             imports,
             "```",
         ])
@@ -904,6 +885,15 @@ def _asks_for_target_implementation(question: str) -> bool:
         "function do",
     )
     return any(term in lowered for term in implementation_terms)
+
+
+def _code_fence_for_context(context: dict) -> str:
+    language = _language_for_permission_context(
+        source_file=context.get("source_file"),
+        test_file=context.get("test_file"),
+    )
+    code_fence_fn = getattr(language, "code_fence", None)
+    return str(code_fence_fn() or "") if callable(code_fence_fn) else ""
 
 
 def _extract_callback_contract_facts(cookbook_text: str) -> list[str]:
@@ -1007,12 +997,9 @@ def _read_relevant_imports_snippet(
     if not needles:
         return ""
 
-    imports = _extract_import_declarations(source_text)
-    relevant = [
-        declaration
-        for declaration in imports
-        if any(needle in declaration for needle in needles)
-    ]
+    language = get_language(str(source_file))
+    relevant_fn = getattr(language, "relevant_import_declarations", None)
+    relevant = relevant_fn(source_text, needles) if callable(relevant_fn) else []
     return "\n".join(relevant[:6]).strip()
 
 
@@ -1048,25 +1035,6 @@ def _import_needles(contract_facts: list[str]) -> list[str]:
             imports_part = imports_part.split("; applies when", 1)[0]
             needles.extend(re.findall(r"`([^`]+)`", imports_part))
     return sorted(set(needles))
-
-
-def _extract_import_declarations(source_text: str) -> list[str]:
-    imports: list[str] = []
-    lines = source_text.splitlines()
-    index = 0
-    while index < len(lines):
-        line = lines[index]
-        if not line.lstrip().startswith("import "):
-            index += 1
-            continue
-
-        declaration = [line]
-        while ";" not in lines[index] and index + 1 < len(lines):
-            index += 1
-            declaration.append(lines[index])
-        imports.append("\n".join(declaration))
-        index += 1
-    return imports
 
 
 def _extract_section_bullets(cookbook_text: str, section_title: str) -> list[str]:

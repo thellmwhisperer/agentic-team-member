@@ -75,6 +75,11 @@ class LanguageCapabilities(Protocol):
     ) -> bool: ...
     def intent_router_is_framework_lookup_or_premature_run(self, name: str, args: dict) -> bool: ...
     def profile_detectors(self) -> list[Any]: ...
+    def definition_symbol_from_line(self, line: str) -> str | None: ...
+    def looks_like_method_definition(self, line: str, symbol: str) -> bool: ...
+    def relevant_import_declarations(self, source_text: str, needles: list[str]) -> list[str]: ...
+    def permission_write_test_conflict(self, args: dict, context: dict) -> str | None: ...
+    def source_imports_spec(self, source_text: str, spec: str) -> bool: ...
 
 
 class OptionalLanguageCapabilityDefaults:
@@ -144,6 +149,21 @@ class OptionalLanguageCapabilityDefaults:
 
     def profile_detectors(self) -> list[Any]:
         return []
+
+    def definition_symbol_from_line(self, line: str) -> str | None:
+        return None
+
+    def looks_like_method_definition(self, line: str, symbol: str) -> bool:
+        return False
+
+    def relevant_import_declarations(self, source_text: str, needles: list[str]) -> list[str]:
+        return []
+
+    def permission_write_test_conflict(self, args: dict, context: dict) -> str | None:
+        return None
+
+    def source_imports_spec(self, source_text: str, spec: str) -> bool:
+        return False
 
 
 def validate_language_capability(plugin: object) -> list[str]:
