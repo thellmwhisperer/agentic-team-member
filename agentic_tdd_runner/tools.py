@@ -575,10 +575,7 @@ def reactive_forbidden_feedback(
     )
 
     lang = get_language(path)
-    if not lang:
-        return ""
-    lang_name = lang.name
-    forbidden = quality_cfg.get(lang_name, {}).get("forbidden", [])
+    forbidden = quality_cfg.get(lang.name, {}).get("forbidden", []) if lang else []
 
     full_path = Path(workdir) / path
     try:

@@ -731,6 +731,31 @@ def test_reactive_forbidden_feedback_reports_test_quality_issues(tmp_path):
     assert "beforeEach" in result
 
 
+def test_reactive_forbidden_feedback_keeps_generic_setup_check_for_unknown_language(tmp_path):
+    target = tmp_path / "spec" / "service_spec.rb"
+    target.parent.mkdir()
+    repeated_setup = "notifier_send_spy = mock()"
+    target.write_text(
+        "\n".join([
+            "describe 'service' do",
+            repeated_setup,
+            repeated_setup,
+            "end",
+        ])
+    )
+
+    result = reactive_forbidden_feedback(
+        "spec/service_spec.rb",
+        workdir=str(tmp_path),
+        config={"quality": {"enabled": True}},
+        is_test_file_path=lambda path: path.endswith("_spec.rb"),
+    )
+
+    assert "[Reactive forbidden]" in result
+    assert "Duplicated setup" in result
+    assert "notifier_send_spy" in result
+
+
 def test_create_file_includes_reactive_forbidden_feedback(tmp_path, monkeypatch):
     def fake_run(command, **kwargs):
         return subprocess.CompletedProcess(command, 0, stdout="", stderr="")

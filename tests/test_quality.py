@@ -57,6 +57,39 @@ def test_quality_unknown_language_does_not_use_typescript_fallback(tmp_path):
     assert msg == "No quality checks configured for unknown language"
 
 
+def test_quality_unknown_language_keeps_duplicated_setup_check(tmp_path):
+    test_file = tmp_path / "tests" / "worker_spec.rb"
+    test_file.parent.mkdir(parents=True)
+    repeated_setup = "notifier_send_spy = mock()"
+    test_file.write_text("\n".join([
+        "describe 'worker' do",
+        repeated_setup,
+        repeated_setup,
+        "end",
+    ]))
+
+    ok, msg = run_quality_checks(
+        "tests/worker_spec.rb",
+        workdir=str(tmp_path),
+        config={
+            "quality": {
+                "enabled": True,
+                "typescript": {"checks": [], "forbidden": ["as any"]},
+            },
+            "timeouts": {"tool_execution": 10},
+        },
+        log=lambda _event, _data: None,
+        is_test_file_path=lambda path: path.endswith("_spec.rb"),
+        detect_quality_tools_fn=lambda _lang_name: [],
+        get_changed_files_fn=lambda: ["tests/worker_spec.rb"],
+    )
+
+    assert ok is False
+    assert "Duplicated setup" in msg
+    assert "notifier_send_spy" in msg
+    assert "as any" not in msg
+
+
 def test_quality_python_filters_changed_files_to_python_extensions(tmp_path):
     py_test = tmp_path / "tests" / "test_worker.py"
     ts_file = tmp_path / "src" / "worker.ts"

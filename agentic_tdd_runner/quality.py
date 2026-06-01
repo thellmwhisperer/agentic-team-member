@@ -129,22 +129,33 @@ def run_quality_checks(
         return True, "Quality checks disabled"
 
     lang = get_language(test_file)
-    if not lang:
-        return True, "No quality checks configured for unknown language"
-    lang_name = lang.name
-    lang_cfg = quality_cfg.get(lang_name, {})
     if detect_quality_tools_fn is None:
         detect_quality_tools_fn = lambda name: detect_quality_tools(name, workdir)
     if get_changed_files_fn is None:
         get_changed_files_fn = lambda: get_changed_files(workdir)
 
-    # Auto-detect tools from the project, fall back to config
-    checks = detect_quality_tools_fn(lang_name) or lang_cfg.get("checks", [])
-    forbidden = lang_cfg.get("forbidden", [])
-
     all_changed = get_changed_files_fn()
     if not all_changed:
         return True, "No changed files"
+
+    if not lang:
+        failures = _duplicated_setup_findings(
+            [f for f in all_changed if is_test_file_path(f)],
+            workdir,
+        )
+        if failures:
+            details = "\n\n".join(failures)
+            template = config.get("prompt", {}).get(
+                "quality_failed", "QUALITY CHECK FAILED:\n\n{details}",
+            )
+            return False, template.replace("{details}", details)
+        return True, "No quality checks configured for unknown language"
+
+    lang_name = lang.name
+    lang_cfg = quality_cfg.get(lang_name, {})
+    # Auto-detect tools from the project, fall back to config
+    checks = detect_quality_tools_fn(lang_name) or lang_cfg.get("checks", [])
+    forbidden = lang_cfg.get("forbidden", [])
 
     # Filter to files matching the active language's extensions
     extensions = lang.extensions
@@ -210,6 +221,14 @@ def run_quality_checks(
 
     # Detect duplicated setup lines in test files - report identifiers, not full lines
     test_files = [f for f in changed if is_test_file_path(f)]
+    failures.extend(
+        _duplicated_setup_findings(
+            test_files,
+            workdir,
+            config=config,
+            log=log,
+        )
+    )
     for f in test_files:
         full = os.path.join(workdir, f)
         if not os.path.isfile(full):
@@ -219,16 +238,6 @@ def run_quality_checks(
                 file_text = fh.read()
         except OSError:
             continue
-        setup_dupes, ambiguous_dupes = partition_duplicated_test_lines(file_text)
-        report_lines = list(setup_dupes)
-        if not report_lines and ambiguous_dupes:
-            judge_result = judge_duplicated_setup(
-                full, file_text, ambiguous_dupes, config=config, log=log,
-            )
-            if judge_result is True:
-                report_lines = list(ambiguous_dupes)
-        if report_lines:
-            failures.append(format_duplicated_setup_finding(f, report_lines))
         source_text_finding = detect_source_text_assertion_test(f, file_text)
         if source_text_finding:
             failures.append(source_text_finding)
@@ -252,6 +261,36 @@ def run_quality_checks(
         return False, template.replace("{details}", details)
 
     return True, "All quality checks passed"
+
+
+def _duplicated_setup_findings(
+    test_files: list[str],
+    workdir: str,
+    *,
+    config: dict | None = None,
+    log: Callable[[str, dict], None] | None = None,
+) -> list[str]:
+    findings: list[str] = []
+    for f in test_files:
+        full = os.path.join(workdir, f)
+        if not os.path.isfile(full):
+            continue
+        try:
+            with open(full, errors="replace") as fh:
+                file_text = fh.read()
+        except OSError:
+            continue
+        setup_dupes, ambiguous_dupes = partition_duplicated_test_lines(file_text)
+        report_lines = list(setup_dupes)
+        if not report_lines and ambiguous_dupes and config is not None and log is not None:
+            judge_result = judge_duplicated_setup(
+                full, file_text, ambiguous_dupes, config=config, log=log,
+            )
+            if judge_result is True:
+                report_lines = list(ambiguous_dupes)
+        if report_lines:
+            findings.append(format_duplicated_setup_finding(f, report_lines))
+    return findings
 
 
 def is_obvious_assert_line(line: str) -> bool:
