@@ -347,6 +347,18 @@ dependency-specific callback contracts from installed packages when no profile
 is present; repos that need those contracts should add a profile before relying
 on issue-only discovery.
 
+Generate or refresh a profile from repository evidence with:
+
+```bash
+python -m agentic_tdd_runner.atm profile generate --workdir /path/to/project
+python -m agentic_tdd_runner.atm profile update --workdir /path/to/project
+python -m agentic_tdd_runner.atm profile print --workdir /path/to/project
+```
+
+`generate` refuses to overwrite an existing profile, `update` rewrites it from
+the current repo state, and `print` renders the inferred profile to stdout
+without touching disk.
+
 The `[prompt]` and `[verification]` sections (system prompt template, max
 rejection rounds) are also configurable — see `config/agent.toml` for the full
 reference.
