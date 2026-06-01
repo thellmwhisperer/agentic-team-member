@@ -8,6 +8,7 @@ from agentic_tdd_runner.runner_command import (
     effective_test_command_template,
     runner_version_command,
 )
+from agentic_tdd_runner.test_command_templates import custom_test_command_template
 
 
 def _write_package(path, payload):
@@ -93,6 +94,15 @@ def test_derives_custom_command_template_from_script_globs(tmp_path):
 
     assert report.test_runner == "custom"
     assert effective_test_command_template(report, "bun test") == "tsx --test"
+
+
+def test_custom_test_command_template_is_shared_for_package_scripts():
+    report = {
+        "package_manager": "npm",
+        "test_command": "tsx --test src/**/*.test.ts",
+    }
+
+    assert custom_test_command_template(report) == "tsx --test"
 
 
 def test_builds_package_manager_specific_runner_templates(tmp_path):
