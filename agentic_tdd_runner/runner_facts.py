@@ -8,6 +8,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from agentic_tdd_runner.languages import get_language, plugins
+from agentic_tdd_runner.runner_authority import override_detected_runner
 from agentic_tdd_runner.runner_command import effective_test_command_template
 
 
@@ -115,14 +116,9 @@ def build_runner_facts(
     runner_cfg = runner_cfg if isinstance(runner_cfg, dict) else {}
     bootstrap = runner_cfg.get("bootstrap") if isinstance(runner_cfg, dict) else None
     language = _language_for_episode(episode)
-    test_runner = (
-        _bootstrap_value(bootstrap, "test_runner")
-        or _episode_value(episode, "runner")
-        or _configured_text(runner_cfg.get("framework"))
-        or _language_runner(language)
-        or "unknown"
-    )
-    test_command = _test_command(runner_cfg, bootstrap, language, test_runner)
+    override_detected = override_detected_runner(runner_cfg)
+    test_runner = _test_runner(runner_cfg, bootstrap, language, episode, override_detected)
+    test_command = _test_command(runner_cfg, bootstrap, language, test_runner, override_detected)
     source_file = _episode_value(episode, "source_file")
     target_symbol = _episode_value(episode, "target_symbol")
     recommended_test_file = _episode_value(episode, "test_file")
@@ -183,6 +179,21 @@ def _language_runner(language: object | None) -> str | None:
     return runner if isinstance(runner, str) and runner else None
 
 
+def _test_runner(
+    runner_cfg: dict,
+    bootstrap: Any,
+    language: object | None,
+    episode: dict | None,
+    override_detected: bool,
+) -> str:
+    configured = _configured_text(runner_cfg.get("framework"))
+    episode_runner = _episode_value(episode, "runner")
+    detected = _bootstrap_value(bootstrap, "test_runner")
+    if override_detected:
+        return configured or episode_runner or detected or _language_runner(language) or "unknown"
+    return detected or episode_runner or configured or _language_runner(language) or "unknown"
+
+
 def _language_for_runner(test_runner: str) -> object | None:
     for plugin in plugins():
         supports_fn = getattr(plugin, "supports_test_runner", None)
@@ -196,23 +207,50 @@ def _test_command(
     bootstrap: Any,
     language: object | None,
     test_runner: str,
+    override_detected: bool,
 ) -> str:
+    configured = _configured_text(runner_cfg.get("command"))
+    if override_detected and configured:
+        return configured
+    if override_detected:
+        command = _language_command_template(language, runner_cfg)
+        if command:
+            return command
+        runner_language = _language_for_runner(test_runner)
+        command = _language_effective_command(runner_language, test_runner)
+        if command:
+            return command
+        return ""
+
     detected = effective_test_command_template(bootstrap, None)
     if detected:
         return detected
 
-    configured = _configured_text(runner_cfg.get("command"))
     if configured:
         return configured
 
+    command = _language_command_template(language, runner_cfg)
+    if command:
+        return command
+
+    runner_language = _language_for_runner(test_runner)
+    command = _language_effective_command(runner_language, test_runner)
+    if command:
+        return command
+    return ""
+
+
+def _language_command_template(language: object | None, runner_cfg: dict) -> str:
     command_fn = getattr(language, "test_command_template", None)
     if callable(command_fn):
         command = command_fn({"runner": runner_cfg})
         if command:
             return command
+    return ""
 
-    runner_language = _language_for_runner(test_runner)
-    command_fn = getattr(runner_language, "effective_test_command_template", None)
+
+def _language_effective_command(language: object | None, test_runner: str) -> str:
+    command_fn = getattr(language, "effective_test_command_template", None)
     if callable(command_fn):
         return command_fn({"test_runner": test_runner}, None)
     return ""

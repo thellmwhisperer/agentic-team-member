@@ -837,6 +837,34 @@ def test_permission_context_uses_runner_facts_over_stale_bun_config(tmp_path):
     assert "PERMISSION DENIED" in blocked.message
 
 
+def test_permission_context_can_override_detected_runner_without_runner_facts(tmp_path):
+    context = permission.build_permission_context(
+        episode={
+            "source_file": "src/events/processor.ts",
+            "test_file": "src/events/processRenewal.test.ts",
+            "target_symbol": "processRenewal",
+        },
+        config={
+            "runner": {
+                "command": "bun test",
+                "framework": "bun:test",
+                "override_detected": True,
+                "bootstrap": {
+                    "package_manager": "npm",
+                    "test_runner": "node:test",
+                    "test_command": "node --test src/**/*.test.ts",
+                },
+            },
+        },
+        phase="test",
+        test_file_created=True,
+        workdir=str(tmp_path),
+    )
+
+    assert context["runner"] == "bun:test"
+    assert context["test_command"] == "bun test"
+
+
 def test_permission_path_matching_normalizes_only_relative_path_syntax():
     assert permission._same_path("./src/events/processor.ts", "src/events/processor.ts")
     assert permission._same_path(
