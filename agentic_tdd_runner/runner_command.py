@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import shlex
 from typing import Any
 
 from agentic_tdd_runner.languages import plugins
+from agentic_tdd_runner.test_command_templates import custom_test_command_template
 
 
 DEFAULT_CONFIGURED_TEST_COMMAND = ""
@@ -25,7 +25,7 @@ def effective_test_command_template(
     if not test_runner:
         return fallback
     if test_runner == "custom":
-        return _custom_test_command_template(report) or fallback
+        return custom_test_command_template(report) or fallback
 
     for plugin in plugins():
         if not _supports_test_runner(plugin, test_runner):
@@ -56,56 +56,6 @@ def _configured_test_command(command: str | None) -> str:
     if isinstance(command, str) and command.strip():
         return command.strip()
     return DEFAULT_CONFIGURED_TEST_COMMAND
-
-
-def _custom_test_command_template(report: Any) -> str:
-    test_command = _report_value(report, "test_command")
-    if not test_command:
-        return ""
-
-    derived = _strip_test_file_args(test_command)
-    if derived and derived != test_command:
-        return derived
-
-    package_script = _package_test_script_command(_report_value(report, "package_manager"))
-    return package_script or test_command
-
-
-def _strip_test_file_args(command: str) -> str:
-    try:
-        parts = shlex.split(command)
-    except ValueError:
-        return command
-    if not parts:
-        return ""
-
-    kept = [part for part in parts if not _looks_like_test_path_arg(part)]
-    if not kept:
-        return command
-    return shlex.join(kept)
-
-
-def _looks_like_test_path_arg(part: str) -> bool:
-    if part.startswith("-") or "=" in part:
-        return False
-    return (
-        ".test." in part
-        or ".spec." in part
-        or "test_" in part
-        or "_test." in part
-    ) and any(ch in part for ch in ("/", "\\", "*"))
-
-
-def _package_test_script_command(package_manager: str | None) -> str:
-    if package_manager == "npm":
-        return "npm test --"
-    if package_manager == "pnpm":
-        return "pnpm test"
-    if package_manager == "yarn":
-        return "yarn test"
-    if package_manager == "bun":
-        return "bun test"
-    return ""
 
 
 def _report_value(report: Any, key: str) -> str | None:

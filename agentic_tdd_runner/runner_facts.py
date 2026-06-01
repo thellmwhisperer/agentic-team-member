@@ -17,6 +17,22 @@ GENERIC_TEST_FILE_PATTERNS = [
     "*.test.*",
     "*.spec.*",
 ]
+BASE_EXCLUDE_DIRS = {
+    ".git",
+    ".hg",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".tox",
+    ".venv",
+    "build",
+    "coverage",
+    "dist",
+    "node_modules",
+    "vendor",
+    "venv",
+    "__pycache__",
+}
 
 
 @dataclass(frozen=True)
@@ -111,7 +127,7 @@ def build_runner_facts(
     target_symbol = _episode_value(episode, "target_symbol")
     recommended_test_file = _episode_value(episode, "test_file")
     patterns = _test_file_patterns(runner_cfg, language)
-    default_exclude_dirs = {".git", "build", "coverage", "dist"} | set(
+    default_exclude_dirs = BASE_EXCLUDE_DIRS | set(
         _language_default_exclude_dirs(language)
     )
     exclude_dirs = default_exclude_dirs | set(runner_cfg.get("exclude_dirs") or [])

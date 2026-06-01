@@ -178,3 +178,24 @@ def test_build_runner_facts_excludes_build_artifact_directories_by_default(tmp_p
     facts = build_runner_facts(str(tmp_path), _config(), episode=_episode())
 
     assert facts.symbol_tests == ["src/events/client.test.ts"]
+
+
+def test_build_runner_facts_excludes_dependency_dirs_for_unknown_language(tmp_path):
+    _write_file(tmp_path, "src/service.rb", "def perform; end\n")
+    _write_file(tmp_path, "src/service.spec.rb", "perform\n")
+    _write_file(tmp_path, "node_modules/pkg/service.spec.rb", "perform\n")
+    _write_file(tmp_path, ".venv/lib/service.spec.rb", "perform\n")
+    _write_file(tmp_path, "vendor/cache/service.spec.rb", "perform\n")
+    _write_file(tmp_path, "__pycache__/service.spec.rb", "perform\n")
+
+    facts = build_runner_facts(
+        str(tmp_path),
+        {"runner": {"test_file_patterns": ["*.spec.rb"]}},
+        episode={
+            "source_file": "src/service.rb",
+            "target_symbol": "perform",
+            "test_file": "src/service.spec.rb",
+        },
+    )
+
+    assert facts.symbol_tests == ["src/service.spec.rb"]
