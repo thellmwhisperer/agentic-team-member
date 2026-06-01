@@ -359,6 +359,11 @@ python -m agentic_tdd_runner.atm profile print --workdir /path/to/project
 the current repo state, and `print` renders the inferred profile to stdout
 without touching disk.
 
+Profile inference is detector-based. The current detector covers JS/TS package
+repositories and callback-event contracts backed by local dependency evidence;
+other ecosystems should add detectors without changing the core profile
+contract.
+
 The `[prompt]` and `[verification]` sections (system prompt template, max
 rejection rounds) are also configurable — see `config/agent.toml` for the full
 reference.

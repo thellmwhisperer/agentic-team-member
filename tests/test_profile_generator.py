@@ -8,7 +8,7 @@ from agentic_tdd_runner.profile_generator import (
     infer_repo_profile,
     render_repo_profile,
 )
-from agentic_tdd_runner.repo_profile import read_repo_profile
+from agentic_tdd_runner.repo_profile import RunnerProfile, read_repo_profile
 
 
 def _write(path, content):
@@ -125,6 +125,42 @@ def test_infers_callback_contract_from_dependency_not_handler_signature(tmp_path
     _write(path, rendered)
     reparsed = read_repo_profile(path)
     assert reparsed.dependency_contracts[0].events[0].args == event_contract.args
+
+
+def test_profile_generator_does_not_run_js_ts_detector_without_node_manifest(tmp_path):
+    _write(tmp_path / "pyproject.toml", "[project]\nname = 'service'\n")
+    _write(
+        tmp_path / "src" / "shadow.js",
+        """
+        import { bus } from '@example/event-bus';
+
+        export function registerHandlers() {
+          bus.on('renewal', processRenewal);
+        }
+        """,
+    )
+    _write(
+        tmp_path / "node_modules" / "@example" / "event-bus" / "package.json",
+        json.dumps({"main": "index.js"}),
+    )
+    _write(
+        tmp_path / "node_modules" / "@example" / "event-bus" / "index.js",
+        """
+        function dispatchRenewal(message) {
+          const channel = "#channel";
+          const username = message.user.name;
+          const retryCount = message.retry.count || 0;
+          bus.emit('renewal', channel, username, retryCount);
+        }
+        """,
+    )
+
+    profile = infer_repo_profile(tmp_path)
+
+    assert profile.runner == RunnerProfile()
+    assert profile.event_frameworks == ()
+    assert profile.dependency_contracts == ()
+    assert profile.import_expectations == ()
 
 
 def test_profile_print_does_not_write_profile(tmp_path, capsys):

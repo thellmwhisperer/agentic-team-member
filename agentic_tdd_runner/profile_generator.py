@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -20,7 +21,7 @@ from agentic_tdd_runner.repo_profile import (
 from agentic_tdd_runner.runner_bootstrap import inspect_runner_bootstrap
 
 
-SOURCE_SUFFIXES = {".ts", ".tsx", ".js", ".jsx", ".mts", ".cts"}
+JS_TS_SOURCE_SUFFIXES = {".ts", ".tsx", ".js", ".jsx", ".mts", ".cts"}
 SKIP_DIRS = {
     ".atm",
     ".git",
@@ -36,18 +37,37 @@ SKIP_DIRS = {
 }
 
 
+@dataclass(frozen=True)
+class ProfileFragments:
+    event_frameworks: tuple[EventFrameworkProfile, ...] = ()
+    dependency_contracts: tuple[DependencyContractProfile, ...] = ()
+    import_expectations: tuple[ImportExpectationProfile, ...] = ()
+
+
 def infer_repo_profile(project_root: str | Path) -> RepoProfile:
     root = Path(project_root).expanduser().resolve()
-    runner = _infer_runner(root)
-    source_files = _iter_source_files(root)
-    module_events = _registered_events_by_imported_module(root, source_files)
+    fragments = tuple(detector(root) for detector in (_infer_js_ts_profile_fragments,))
+    return RepoProfile(
+        runner=_infer_runner(root),
+        event_frameworks=tuple(item for fragment in fragments for item in fragment.event_frameworks),
+        dependency_contracts=tuple(item for fragment in fragments for item in fragment.dependency_contracts),
+        import_expectations=tuple(item for fragment in fragments for item in fragment.import_expectations),
+    )
+
+
+def _infer_js_ts_profile_fragments(root: Path) -> ProfileFragments:
+    if not _nearest_package_json(root):
+        return ProfileFragments()
+
+    source_files = _iter_js_ts_source_files(root)
+    module_events = _js_ts_registered_events_by_imported_module(root, source_files)
 
     frameworks: list[EventFrameworkProfile] = []
     contracts: list[DependencyContractProfile] = []
     import_expectations: list[ImportExpectationProfile] = []
     for module_name in sorted(module_events):
         contract_id = f"{_module_id(module_name)}-events"
-        events, contract_sources = _infer_dependency_events(
+        events, contract_sources = _infer_js_ts_dependency_events(
             root,
             module_name=module_name,
             event_names=sorted(module_events[module_name]),
@@ -82,8 +102,7 @@ def infer_repo_profile(project_root: str | Path) -> RepoProfile:
             ),
         )
 
-    return RepoProfile(
-        runner=runner,
+    return ProfileFragments(
         event_frameworks=tuple(frameworks),
         dependency_contracts=tuple(contracts),
         import_expectations=tuple(import_expectations),
@@ -185,7 +204,7 @@ def _infer_typecheck_command(root: Path, *, package_manager: str | None) -> str 
     return None
 
 
-def _registered_events_by_imported_module(
+def _js_ts_registered_events_by_imported_module(
     root: Path,
     source_files: list[Path],
 ) -> dict[str, set[str]]:
@@ -194,38 +213,38 @@ def _registered_events_by_imported_module(
         text = _read_text(source_file)
         if not text:
             continue
-        imports = _external_imports(text)
+        imports = _js_ts_external_imports(text)
         if not imports:
             continue
-        events = _registration_event_names(text)
+        events = _js_ts_callback_registration_event_names(text)
         if not events:
             continue
         for module_name in imports:
-            if not _has_dependency_type_or_source(root, module_name):
+            if not _has_node_dependency_type_or_source(root, module_name):
                 continue
             module_events.setdefault(module_name, set()).update(events)
     return module_events
 
 
-def _infer_dependency_events(
+def _infer_js_ts_dependency_events(
     root: Path,
     *,
     module_name: str,
     event_names: list[str],
 ) -> tuple[list[DependencyEventContract], list[str]]:
-    type_path, type_text = _read_module_types(root, module_name)
-    source_files = _read_module_sources(root, module_name)
+    type_path, type_text = _read_node_module_types(root, module_name)
+    source_files = _read_node_module_sources(root, module_name)
 
     events: list[DependencyEventContract] = []
     used_source_paths: set[Path] = set()
     for event_name in event_names:
-        typed_params = _extract_event_typed_params(type_text, event_name) if type_text else []
-        source_path, source_text, source_args = _first_source_event(source_files, event_name)
+        typed_params = _extract_typescript_event_typed_params(type_text, event_name) if type_text else []
+        source_path, source_text, source_args = _first_js_ts_source_event(source_files, event_name)
         if not typed_params and not source_args:
             continue
         if source_path:
             used_source_paths.add(source_path)
-        arg_sources = _extract_arg_sources(
+        arg_sources = _extract_js_ts_arg_sources(
             source_text,
             source_args,
             typed_params=typed_params,
@@ -267,7 +286,7 @@ def _merge_event_arg_names(
     return args
 
 
-def _extract_arg_sources(
+def _extract_js_ts_arg_sources(
     source_text: str,
     source_args: list[str],
     *,
@@ -300,7 +319,7 @@ def _normalize_source_expression(expression: str) -> str:
     return expr
 
 
-def _extract_event_typed_params(type_text: str, event_name: str) -> list[tuple[str, str]]:
+def _extract_typescript_event_typed_params(type_text: str, event_name: str) -> list[tuple[str, str]]:
     match = re.search(
         rf"^\s*{re.escape(event_name)}\s*\((?P<params>.*?)\)\s*:\s*[^;]+;",
         type_text,
@@ -308,10 +327,10 @@ def _extract_event_typed_params(type_text: str, event_name: str) -> list[tuple[s
     )
     if not match:
         return []
-    return _signature_param_types(match.group("params"))
+    return _typescript_signature_param_types(match.group("params"))
 
 
-def _signature_param_types(params: str) -> list[tuple[str, str]]:
+def _typescript_signature_param_types(params: str) -> list[tuple[str, str]]:
     pairs: list[tuple[str, str]] = []
     for param in params.split(","):
         match = re.search(
@@ -323,7 +342,7 @@ def _signature_param_types(params: str) -> list[tuple[str, str]]:
     return pairs
 
 
-def _extract_source_event_args(source_text: str, event_name: str) -> list[str]:
+def _extract_js_ts_source_event_args(source_text: str, event_name: str) -> list[str]:
     emits_match = re.search(
         rf"\.emits\(\s*\[(?P<events>[^\]]*['\"]{re.escape(event_name)}['\"][^\]]*)\]\s*,\s*\[\s*\[(?P<args>[^\]]+)\]\s*\]",
         source_text,
@@ -342,12 +361,12 @@ def _extract_source_event_args(source_text: str, event_name: str) -> list[str]:
     return []
 
 
-def _first_source_event(
+def _first_js_ts_source_event(
     source_files: list[tuple[Path, str]],
     event_name: str,
 ) -> tuple[Path | None, str, list[str]]:
     for path, source_text in source_files:
-        args = _extract_source_event_args(source_text, event_name)
+        args = _extract_js_ts_source_event_args(source_text, event_name)
         if args:
             return path, source_text, args
     return None, "", []
@@ -362,7 +381,7 @@ def _split_arg_names(args_text: str) -> list[str]:
     return names
 
 
-def _external_imports(source_text: str) -> set[str]:
+def _js_ts_external_imports(source_text: str) -> set[str]:
     modules: set[str] = set()
     for match in re.finditer(r"\bfrom\s+['\"](?P<module>[^'\"]+)['\"]", source_text):
         module = match.group("module")
@@ -379,7 +398,7 @@ def _external_imports(source_text: str) -> set[str]:
     return modules
 
 
-def _registration_event_names(source_text: str) -> set[str]:
+def _js_ts_callback_registration_event_names(source_text: str) -> set[str]:
     return {
         match.group("event")
         for match in re.finditer(
@@ -389,12 +408,12 @@ def _registration_event_names(source_text: str) -> set[str]:
     }
 
 
-def _has_dependency_type_or_source(root: Path, module_name: str) -> bool:
-    type_path, _type_text = _read_module_types(root, module_name)
-    return type_path is not None or bool(_read_module_sources(root, module_name))
+def _has_node_dependency_type_or_source(root: Path, module_name: str) -> bool:
+    type_path, _type_text = _read_node_module_types(root, module_name)
+    return type_path is not None or bool(_read_node_module_sources(root, module_name))
 
 
-def _read_module_types(root: Path, module_name: str) -> tuple[Path | None, str]:
+def _read_node_module_types(root: Path, module_name: str) -> tuple[Path | None, str]:
     types_module = _types_package_name(module_name)
     candidates = [
         root / "node_modules" / "@types" / types_module / "index.d.ts",
@@ -407,7 +426,7 @@ def _read_module_types(root: Path, module_name: str) -> tuple[Path | None, str]:
     return None, ""
 
 
-def _read_module_sources(root: Path, module_name: str) -> list[tuple[Path, str]]:
+def _read_node_module_sources(root: Path, module_name: str) -> list[tuple[Path, str]]:
     module_root = root / "node_modules" / module_name
     if not module_root.is_dir():
         return []
@@ -435,10 +454,10 @@ def _read_module_sources(root: Path, module_name: str) -> list[tuple[Path, str]]
     return sources
 
 
-def _iter_source_files(root: Path) -> list[Path]:
+def _iter_js_ts_source_files(root: Path) -> list[Path]:
     files: list[Path] = []
     for path in root.rglob("*"):
-        if not path.is_file() or path.suffix not in SOURCE_SUFFIXES:
+        if not path.is_file() or path.suffix not in JS_TS_SOURCE_SUFFIXES:
             continue
         if any(part in SKIP_DIRS for part in path.relative_to(root).parts):
             continue
