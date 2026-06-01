@@ -635,5 +635,10 @@ def _render_cookbook_text(contract: dict, lang) -> str:
         parts.append(rendered.rstrip())
         parts.append("```")
         parts.append("")
+    elif f"unsupported_runner:{runner or 'unknown'}" in scaffold.get("todo_slots", []):
+        parts.append("### Test Scaffold")
+        parts.append(f"- No test scaffold was emitted for runner `{runner or 'unknown'}`.")
+        parts.append("- Build the regression test from existing tests and runner facts.")
+        parts.append("")
 
     return "\n".join(parts)

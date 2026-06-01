@@ -652,7 +652,7 @@ class TestRunnerAuthority:
         assert "Bun Specifics" not in result
         assert "mock.module(" not in result
         assert "from 'bun:test'" not in result
-        assert "### Test Scaffold" not in result
+        assert "No test scaffold was emitted for runner `node:test`." in result
 
     def test_episode_context_uses_detected_runner_and_declines_bun_mocks(self, tmp_path):
         from agentic_tdd_runner.cookbook import build_episode_context
@@ -712,7 +712,7 @@ class TestRunnerAuthority:
         assert "bun:test" not in result
         assert "bun test" not in result
         assert "mock.module(" not in result
-        assert "### Test Scaffold" not in result
+        assert "No test scaffold was emitted for runner `custom`." in result
 
 
 class TestRegressionScopeGuidance:
