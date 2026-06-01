@@ -31,6 +31,7 @@ from agentic_tdd_runner.repo_profile import (
     RepoProfile,
     load_repo_profile,
 )
+from agentic_tdd_runner.runner_authority import override_detected_runner
 
 
 def _build_contract_for_symbol(
@@ -291,9 +292,13 @@ def _runner_for_contract(lang: LanguageCapabilities, config: dict | None) -> str
     runner_config = (config or {}).get("runner", {}) if isinstance(config, dict) else {}
     runner_config = runner_config if isinstance(runner_config, dict) else {}
     bootstrap = runner_config.get("bootstrap")
+    configured = _text_value(runner_config, "framework")
+    detected = _text_value(bootstrap, "test_runner")
+    if override_detected_runner(runner_config):
+        return configured or detected or str(getattr(lang, "runner", "") or "")
     return (
-        _text_value(bootstrap, "test_runner")
-        or _text_value(runner_config, "framework")
+        detected
+        or configured
         or str(getattr(lang, "runner", "") or "")
     )
 

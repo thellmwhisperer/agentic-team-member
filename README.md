@@ -305,6 +305,7 @@ pr_create = 120
 [runner]
 command = "bun test"
 framework = "bun:test"
+override_detected = false
 test_file_patterns = ["*.test.ts", "*.test.tsx", "*.test.js", "*.test.jsx", "test_*.py"]
 exclude_dirs = ["node_modules"]
 

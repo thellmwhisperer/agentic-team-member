@@ -29,6 +29,22 @@ def test_runner_command_for_file_uses_bootstrap_for_javascript_tests():
     assert command_for_file("src/math.test.ts", config) == "pnpm exec vitest run"
 
 
+def test_runner_command_for_file_can_override_detected_runner():
+    config = {
+        "runner": {
+            "command": "bun test",
+            "framework": "bun:test",
+            "override_detected": True,
+            "bootstrap": {
+                "package_manager": "pnpm",
+                "test_runner": "vitest",
+            },
+        },
+    }
+
+    assert command_for_file("src/math.test.ts", config) == "bun test"
+
+
 def test_runner_command_for_file_preserves_configured_fallback_for_custom_runner():
     config = {
         "runner": {

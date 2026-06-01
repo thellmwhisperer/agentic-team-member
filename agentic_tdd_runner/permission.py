@@ -17,6 +17,7 @@ from agentic_tdd_runner.compiler.parser import (
 from agentic_tdd_runner.apply_patch import ApplyPatchError, apply_patch_touched_paths
 from agentic_tdd_runner.cookbook import _find_function_end
 from agentic_tdd_runner.languages import get_language
+from agentic_tdd_runner.runner_authority import override_detected_runner
 from agentic_tdd_runner.runner_command import effective_test_command_template
 
 
@@ -100,14 +101,17 @@ def build_permission_context(
     repo_profile_facts = _extract_repo_profile_facts(cookbook_text)
     runner_facts_obj = episode.get("runner_facts")
     bootstrap = runner_cfg.get("bootstrap") if isinstance(runner_cfg, dict) else None
+    override_detected = override_detected_runner(runner_cfg)
     runner = (
         _value_from(runner_facts_obj, "test_runner")
+        or (runner_cfg.get("framework") if override_detected else None)
         or _value_from(bootstrap, "test_runner")
         or episode.get("runner")
         or runner_cfg.get("framework")
     )
     test_command = (
         _value_from(runner_facts_obj, "test_command")
+        or (runner_cfg.get("command") if override_detected else None)
         or effective_test_command_template(bootstrap, None)
         or runner_cfg.get("command")
     )

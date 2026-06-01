@@ -35,6 +35,9 @@ pr_create = 120
 # Optional. Leave blank to use target-repo runner bootstrap facts and language plugins.
 command = ""
 framework = ""
+# False means target-repo bootstrap facts override stale config values.
+# Set true only when the configured runner is intentionally authoritative.
+override_detected = false
 test_file_patterns = []
 exclude_dirs = []
 
