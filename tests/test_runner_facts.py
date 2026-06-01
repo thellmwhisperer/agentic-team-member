@@ -40,6 +40,51 @@ def _episode():
     }
 
 
+def test_build_runner_facts_without_runner_config_stays_unknown(tmp_path):
+    _write_file(tmp_path, "src/service.rb", "def perform; end\n")
+    _write_file(tmp_path, "src/service_spec.rb", "RSpec.describe 'service'\n")
+
+    facts = build_runner_facts(
+        str(tmp_path),
+        {"runner": {"test_file_patterns": []}},
+        episode={
+            "source_file": "src/service.rb",
+            "target_symbol": "perform",
+            "test_file": "src/service_spec.rb",
+        },
+    )
+
+    prompt = facts.to_prompt_section()
+    assert facts.test_runner == "unknown"
+    assert facts.test_command == ""
+    assert "bun" not in prompt
+    assert "typescript" not in prompt.lower()
+    assert "test command: not configured" in prompt
+
+
+def test_build_runner_facts_uses_python_runner_without_bun_defaults(tmp_path):
+    _write_file(tmp_path, "src/worker.py", "def process():\n    return True\n")
+    _write_file(tmp_path, "src/test_worker.py", "from src.worker import process\n")
+
+    facts = build_runner_facts(
+        str(tmp_path),
+        {"runner": {"test_file_patterns": []}},
+        episode={
+            "source_file": "src/worker.py",
+            "target_symbol": "process",
+            "test_file": "src/test_worker.py",
+            "runner": "pytest",
+        },
+    )
+
+    assert facts.test_runner == "pytest"
+    assert facts.test_command == "python3 -m pytest"
+    assert facts.test_api_import is None
+    assert facts.nearby_tests == ["src/test_worker.py"]
+    assert facts.symbol_tests == ["src/test_worker.py"]
+    assert "bun" not in facts.to_prompt_section()
+
+
 def test_build_runner_facts_reports_bun_test_import_and_commands(tmp_path):
     _write_file(tmp_path, "package.json", json.dumps({"scripts": {"typecheck": "tsc --noEmit"}}))
     _write_file(tmp_path, "src/events/client.ts", "export function processRenewal() {}\n")

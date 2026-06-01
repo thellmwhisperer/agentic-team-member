@@ -67,7 +67,7 @@
     "type": "function",
     "function": {
       "name": "rg",
-      "description": "Search code with ripgrep. Use this for quick symbol/text lookup before editing. It runs in the current run workdir and automatically searches explicitly requested ignored paths such as node_modules.",
+      "description": "Search code with ripgrep. Use this for quick symbol/text lookup before editing. It runs in the current run workdir and automatically searches explicitly requested ignored paths such as dependency or vendor directories.",
       "parameters": {
         "type": "object",
         "required": ["pattern"],
@@ -80,7 +80,7 @@
               { "type": "array", "items": { "type": "string" } }
             ]
           },
-          "glob": { "type": "string", "description": "Optional ripgrep glob, for example `*.ts` or `!node_modules`." },
+          "glob": { "type": "string", "description": "Optional ripgrep glob, for example `src/**` or `!vendor`." },
           "case_sensitive": { "type": "boolean", "description": "Set false to search case-insensitively." }
         }
       }
@@ -90,7 +90,7 @@
     "type": "function",
     "function": {
       "name": "run_command",
-      "description": "Run a shell command with cwd already set to the current run workdir and return stdout+stderr. Use paths relative to that cwd. Do not prefix commands with `cd ... &&`; put the directory or file path in the command itself, e.g. `rg term src` or `bun test src/file.test.ts`.",
+      "description": "Run a shell command with cwd already set to the current run workdir and return stdout+stderr. Use paths relative to that cwd. Do not prefix commands with `cd ... &&`; put the directory or file path in the command itself, e.g. `rg term src` or the focused test command shown in Runner Facts.",
       "parameters": {
         "type": "object",
         "required": ["command"],

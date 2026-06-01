@@ -183,7 +183,7 @@ def validate_command(command: str) -> None:
         if binary == "cd":
             raise ValueError(
                 "`cd` is not allowed; commands run with cwd already set. "
-                "Put the path directly in the command, e.g. `bun test src/file.test.ts`."
+                "Put the path directly in the command shown by Runner Facts."
             )
         if binary not in ALLOWED_COMMANDS:
             raise ValueError(
