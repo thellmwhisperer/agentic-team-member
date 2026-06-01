@@ -1,6 +1,10 @@
 """Tests for language plugin registry."""
 from agentic_tdd_runner.languages import get_language, plugins, supported_extensions
-from agentic_tdd_runner.languages.capabilities import LanguageCapabilities
+from agentic_tdd_runner.languages.capabilities import (
+    LanguageCapabilities,
+    NeutralLanguageCapabilityDefaults,
+    validate_language_capability,
+)
 
 
 class TestRegistry:
@@ -27,6 +31,16 @@ class TestRegistry:
         assert plugins()
         for lang in plugins():
             assert isinstance(lang, LanguageCapabilities)
+            assert validate_language_capability(lang) == []
+
+    def test_language_contract_validator_catches_signature_mismatch(self):
+        class BadPython(type(get_language("file.py"))):
+            def test_path(self, source_path: str) -> str:
+                return source_path
+
+        errors = validate_language_capability(BadPython())
+
+        assert any("signature mismatch for test_path" in error for error in errors)
 
     def test_unknown_extension_has_no_language_capability(self):
         assert get_language("README.md") is None
@@ -102,6 +116,27 @@ class TestTypeScriptPlugin:
         lang = get_language("file.ts")
         assert lang.is_exported("export function foo() {}", "foo") is True
         assert lang.is_exported("function foo() {}", "foo") is False
+
+    def test_typescript_required_capabilities_are_not_neutral_defaults(self):
+        lang = get_language("file.ts")
+        required = (
+            "is_dependency_contract_lookup",
+            "typecheck_command",
+            "referenced_type_shapes",
+            "test_setup_dependency_paths",
+            "extract_mock_modules",
+            "regression_test_skeleton",
+            "intent_router_observe_tool_result",
+            "intent_router_review_tool_call",
+            "intent_router_is_edit_to_path",
+            "intent_router_is_framework_lookup_or_premature_run",
+        )
+
+        for capability in required:
+            assert getattr(type(lang), capability) is not getattr(
+                NeutralLanguageCapabilityDefaults,
+                capability,
+            )
 
 
 class TestTypeScriptImportPath:

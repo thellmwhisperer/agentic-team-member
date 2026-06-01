@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
@@ -136,3 +137,57 @@ class NeutralLanguageCapabilityDefaults:
 
     def profile_detectors(self) -> list[Any]:
         return []
+
+
+def validate_language_capability(plugin: object) -> list[str]:
+    """Return contract mismatches that pytest can enforce without a typechecker."""
+    errors: list[str] = []
+    for attribute in ("name", "runner", "extensions"):
+        if not hasattr(plugin, attribute):
+            errors.append(f"missing attribute: {attribute}")
+    for method_name in language_capability_method_names():
+        expected = getattr(LanguageCapabilities, method_name)
+        actual = getattr(plugin, method_name, None)
+        if not callable(actual):
+            errors.append(f"missing method: {method_name}")
+            continue
+        expected_shape = _signature_shape(inspect.signature(expected), drop_self=True)
+        actual_shape = _signature_shape(inspect.signature(actual), drop_self=False)
+        if actual_shape != expected_shape:
+            errors.append(
+                f"signature mismatch for {method_name}: "
+                f"expected {expected_shape}, got {actual_shape}"
+            )
+    return errors
+
+
+def language_capability_method_names() -> tuple[str, ...]:
+    return tuple(
+        name
+        for name, value in LanguageCapabilities.__dict__.items()
+        if not name.startswith("_") and callable(value)
+    )
+
+
+def _signature_shape(signature: inspect.Signature, *, drop_self: bool) -> tuple:
+    params = list(signature.parameters.values())
+    if drop_self and params and params[0].name == "self":
+        params = params[1:]
+    return (
+        tuple(
+            (
+                param.name,
+                param.kind,
+                param.default is not inspect.Signature.empty,
+                _annotation_key(param.annotation),
+            )
+            for param in params
+        ),
+        _annotation_key(signature.return_annotation),
+    )
+
+
+def _annotation_key(annotation: Any) -> str:
+    if annotation is inspect.Signature.empty:
+        return ""
+    return str(annotation)
