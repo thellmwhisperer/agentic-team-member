@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from agentic_tdd_runner.languages import get_language, plugins
+
 
 PROFILE_RELATIVE_PATH = ".atm/profile.toml"
 SCHEMA_VERSION = "repo-profile.v1"
@@ -179,7 +181,11 @@ class RepoProfile:
 
         facts: list[str] = []
         for framework in self.event_frameworks:
-            if source_text is not None and not _source_imports_any(source_text, framework.imports):
+            if source_text is not None and not _source_imports_any(
+                source_text,
+                framework.imports,
+                source_path=source_path,
+            ):
                 continue
             registrations = ", ".join(framework.registrations) or "unspecified"
             sources = ", ".join(framework.contract_sources) or "profile"
@@ -196,7 +202,11 @@ class RepoProfile:
 
         seen_recipes: set[str] = set()
         for dep in self.dependency_contracts:
-            if source_text is not None and not _source_imports_any(source_text, dep.import_specs):
+            if source_text is not None and not _source_imports_any(
+                source_text,
+                dep.import_specs,
+                source_path=source_path,
+            ):
                 continue
             mode = f" contract mode `{dep.contract_mode}`;"
             effect = f" side effect `{dep.side_effect}`;" if dep.side_effect else ""
@@ -590,18 +600,26 @@ def _require_unique_ids(section: str, values: list[str]) -> None:
         seen.add(value)
 
 
-def _source_imports_any(source_text: str, imports: tuple[str, ...]) -> bool:
-    return any(_source_imports(source_text, spec) for spec in imports)
-
-
-def _source_imports(source_text: str, spec: str) -> bool:
-    escaped = re.escape(spec)
-    patterns = (
-        rf"\bfrom\s+['\"]{escaped}['\"]",
-        rf"\bimport\s+[^;\n]*\s+from\s+['\"]{escaped}['\"]",
-        rf"\brequire\(\s*['\"]{escaped}['\"]\s*\)",
-    )
-    return any(re.search(pattern, source_text) for pattern in patterns)
+def _source_imports_any(
+    source_text: str,
+    imports: tuple[str, ...],
+    *,
+    source_path: str | None,
+) -> bool:
+    candidates = []
+    if source_path:
+        language = get_language(source_path)
+        if language:
+            candidates.append(language)
+    if not candidates:
+        candidates.extend(plugins())
+    for language in candidates:
+        source_imports_spec = getattr(language, "source_imports_spec", None)
+        if not callable(source_imports_spec):
+            continue
+        if any(source_imports_spec(source_text, spec) for spec in imports):
+            return True
+    return False
 
 
 def _format_mock_export(export: MockExportRecipe) -> str:

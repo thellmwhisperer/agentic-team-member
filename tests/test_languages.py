@@ -66,9 +66,13 @@ class TestRegistry:
             "agentic_tdd_runner.languages.typescript.syntax",
             "agentic_tdd_runner.languages.typescript.paths",
             "agentic_tdd_runner.languages.typescript.seams",
+            "agentic_tdd_runner.languages.typescript.permission",
+            "agentic_tdd_runner.languages.typescript.profile",
             "agentic_tdd_runner.languages.python.syntax",
             "agentic_tdd_runner.languages.python.paths",
             "agentic_tdd_runner.languages.python.seams",
+            "agentic_tdd_runner.languages.python.permission",
+            "agentic_tdd_runner.languages.python.profile",
         )
 
         for module_name in module_names:
@@ -183,6 +187,12 @@ class TestTypeScriptPlugin:
             "intent_router_review_tool_call",
             "intent_router_is_edit_to_path",
             "intent_router_is_framework_lookup_or_premature_run",
+            "definition_symbol_from_line",
+            "looks_like_method_definition",
+            "relevant_import_declarations",
+            "permission_write_test_conflict",
+            "profile_detectors",
+            "source_imports_spec",
         )
 
         for capability in required:
@@ -203,6 +213,29 @@ class TestTypeScriptImportPath:
         lang = get_language("file.ts")
         assert lang.import_path("src/events/test.ts", "src/logger.ts") == "../logger"
 
+    def test_permission_submodule_helpers_are_typescript_owned(self):
+        lang = get_language("file.ts")
+
+        assert lang.definition_symbol_from_line(
+            "export function processRenewal(): void {",
+        ) == "processRenewal"
+        assert lang.looks_like_method_definition(
+            "  processRenewal(): void {",
+            "processRenewal",
+        ) is True
+        assert lang.relevant_import_declarations(
+            "import eventBus from '@example/event-bus';\nimport other from './other';",
+            ["@example/event-bus"],
+        ) == ["import eventBus from '@example/event-bus';"]
+        assert lang.permission_write_test_conflict(
+            {"content": 'import { test } from "bun:test";\nmock.module("./service", () => ({}));'},
+            {"runner": "jest"},
+        )
+        assert lang.source_imports_spec(
+            "import { queue } from '@example/job-queue';",
+            "@example/job-queue",
+        ) is True
+
 
 class TestPythonImportPath:
     """Python plugin computes dotted import paths."""
@@ -214,6 +247,21 @@ class TestPythonImportPath:
     def test_init_import_path(self):
         lang = get_language("file.py")
         assert lang.import_path("tests/test_foo.py", "src/pkg/__init__.py") == "src.pkg"
+
+    def test_permission_submodule_helpers_are_python_owned(self):
+        lang = get_language("file.py")
+
+        assert lang.definition_symbol_from_line("async def process_item(item):") == "process_item"
+        assert lang.looks_like_method_definition("    def process_item(self, item):", "process_item") is True
+        assert lang.relevant_import_declarations(
+            "from src.bus import bus\nimport os\n",
+            ["src.bus"],
+        ) == ["from src.bus import bus"]
+        assert lang.permission_write_test_conflict(
+            {"content": 'mock.module("./service", () => ({}));'},
+            {"runner": "pytest"},
+        ) is None
+        assert lang.source_imports_spec("from src.bus import bus", "src.bus") is True
 
 
 class TestPythonPlugin:
@@ -365,3 +413,4 @@ class Worker:
             {"path": "package.json"},
         ) is False
         assert lang.profile_detectors() == []
+        assert lang.source_imports_spec("from src.bus import bus", "@example/event-bus") is False
