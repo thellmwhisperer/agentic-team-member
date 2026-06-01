@@ -6,7 +6,7 @@ from pathlib import PurePosixPath
 from typing import Any
 
 from agentic_tdd_runner.languages import register
-from agentic_tdd_runner.languages.capabilities import NeutralLanguageCapabilityDefaults
+from agentic_tdd_runner.languages.capabilities import OptionalLanguageCapabilityDefaults
 from agentic_tdd_runner.languages.signature import parse_signature_params
 
 _PY_FROM_IMPORT_PAREN_RE = re.compile(
@@ -17,7 +17,7 @@ _PY_IMPORT_RE = re.compile(r"^import\s+(.+)$", re.MULTILINE)
 _TOP_LEVEL_PY_ASSIGN_RE = re.compile(r"^([A-Za-z_]\w*)(?:\s*:\s*[^=]+)?\s*=\s*(.+)\s*$")
 
 
-class PythonLanguage(NeutralLanguageCapabilityDefaults):
+class PythonLanguage(OptionalLanguageCapabilityDefaults):
     name = "python"
     runner = "pytest"
     extensions = [".py"]
