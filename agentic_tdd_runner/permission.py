@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 import posixpath
 import shlex
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -30,6 +30,8 @@ INTENTS = {
     "run_test",
     "done",
 }
+
+_METHOD_DEFINITION_SEARCH_WINDOW = 20
 
 
 @dataclass
@@ -731,9 +733,30 @@ def _find_challenge_symbol_line(
     lines = source_text.splitlines()
     language = get_language(source_path)
     method_fn = getattr(language, "looks_like_method_definition", None)
-    if 1 <= start <= len(lines) and callable(method_fn) and method_fn(lines[start - 1], symbol):
-        return start, "method"
+    if callable(method_fn):
+        method_start = _find_nearby_method_definition_line(lines, symbol, start, method_fn)
+        if method_start:
+            return method_start, "method"
     return start, source
+
+
+def _find_nearby_method_definition_line(
+    lines: list[str],
+    symbol: str,
+    start: int,
+    method_fn: Callable[[str, str], bool],
+) -> int | None:
+    if not 1 <= start <= len(lines):
+        return None
+    lower = max(1, start - _METHOD_DEFINITION_SEARCH_WINDOW)
+    upper = min(len(lines), start + _METHOD_DEFINITION_SEARCH_WINDOW)
+    for index in range(start, lower - 1, -1):
+        if method_fn(lines[index - 1], symbol):
+            return index
+    for index in range(start + 1, upper + 1):
+        if method_fn(lines[index - 1], symbol):
+            return index
+    return None
 
 
 def _target_challenge_retry_from_evidence(
