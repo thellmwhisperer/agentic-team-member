@@ -15,7 +15,7 @@ def import_path(test_path: str, source_path: str) -> str:
     target_parts = source_no_ext.parts
     start_parts = test_dir.parts
     common = 0
-    for left, right in zip(target_parts, start_parts):
+    for left, right in zip(target_parts, start_parts, strict=False):
         if left != right:
             break
         common += 1
