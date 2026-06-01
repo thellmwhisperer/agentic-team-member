@@ -61,6 +61,23 @@ def test_build_initial_messages_with_episode_injects_runner_facts():
     )
 
 
+def test_build_initial_messages_prepends_recon_before_target_cookbook():
+    messages = build_initial_messages(
+        base_system_prompt="system prompt",
+        issue_text_for_model="bug text",
+        episode=_episode(
+            recon_cookbook_text="## Recon Cookbook\nTrace consumers first.\n",
+        ),
+    )
+
+    assert messages[0]["content"] == (
+        "system prompt\n\n"
+        "## Recon Cookbook\nTrace consumers first.\n"
+        "\n\n"
+        "## Cookbook\nUse real imports.\n"
+    )
+
+
 def test_function_line_hint_only_uses_definition_ranges():
     assert function_line_hint(_episode()) == " (lines 12-34)"
     assert function_line_hint(_episode(function_line_range={"start": 1, "end": 2, "source": "fallback"})) == ""

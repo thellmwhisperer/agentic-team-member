@@ -2,6 +2,7 @@
 
 import subprocess
 from dataclasses import dataclass
+from pathlib import PurePosixPath
 from typing import Any, Callable
 
 from agentic_tdd_runner import prompts
@@ -118,8 +119,32 @@ def prepare_run_context(
     )
 
     issue_text_for_model = issue_contract.model_text
+    from agentic_tdd_runner.recon import build_recon_cookbook
+
+    recon_cookbook = build_recon_cookbook(
+        issue_text=issue_text_for_model,
+        project_root=workdir,
+        config=config,
+    )
+    if recon_cookbook.markdown:
+        log("cookbook", recon_cookbook.to_log_dict())
+
     source_path = manual_source or issue_contract.source_hint
     symbol = manual_symbol or issue_contract.symbol_hint
+    if (
+        source_path
+        and symbol
+        and not manual_source
+        and discovery_enabled
+        and _matches_recon_anti_anchor(source_path, recon_cookbook.anti_anchor_paths)
+    ):
+        emit("[TARGET] Deprioritizing generic/shared issue hint; using discovery candidates")
+        log(
+            "target_hint_deprioritized",
+            {"source": source_path, "symbol": symbol, "reason": "generic_anchor"},
+        )
+        source_path = None
+        symbol = None
     discovery_candidates: list[dict] = []
     if not (source_path and symbol) and discovery_enabled:
         discovery = discover_target_from_issue(
@@ -143,6 +168,8 @@ def prepare_run_context(
         discovery_candidates=discovery_candidates,
         apply_pre_test_edits=apply_pre_test_edits,
     )
+    if episode and recon_cookbook.markdown:
+        episode["recon_cookbook_text"] = recon_cookbook.markdown
     if episode and config.get("runner"):
         from agentic_tdd_runner.runner_facts import build_runner_facts
 
@@ -168,6 +195,16 @@ def prepare_run_context(
         messages=messages,
         baseline_changed_files=baseline_changed_files,
     )
+
+
+def _matches_recon_anti_anchor(source_path: str, anti_anchor_paths: list[str]) -> bool:
+    source = PurePosixPath(source_path)
+    source_without_suffix = source.with_suffix("")
+    for path in anti_anchor_paths:
+        anchor = PurePosixPath(path)
+        if source == anchor or source_without_suffix == anchor.with_suffix(""):
+            return True
+    return False
 
 
 def capture_run_baseline(

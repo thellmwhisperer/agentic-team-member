@@ -17,6 +17,9 @@ def build_system_prompt(
     if permission_driven:
         system_prompt = f"{system_prompt}\n\n{PERMISSION_DRIVEN_INSTRUCTIONS}"
     if episode:
+        recon_cookbook_text = episode.get("recon_cookbook_text")
+        if recon_cookbook_text:
+            system_prompt = f"{system_prompt}\n\n{recon_cookbook_text}"
         system_prompt = f"{system_prompt}\n\n{episode['cookbook_text']}"
         runner_facts_text = episode.get("runner_facts_text")
         if runner_facts_text:
