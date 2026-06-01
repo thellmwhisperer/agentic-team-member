@@ -714,6 +714,69 @@ class TestRunnerAuthority:
         assert "bun:test" not in ctx["cookbook_text"]
         assert "mock.module(" not in ctx["cookbook_text"]
 
+    def test_generate_cookbook_emits_jest_scaffold_for_jest_bootstrap(self, tmp_path):
+        _write_file(tmp_path, "src/service.ts", """\
+            import { getLogger } from '../logger';
+
+            const logger = getLogger();
+
+            export function process(): void {
+              logger.info('start');
+            }
+        """)
+        config = {
+            "runner": {
+                "command": "bun test",
+                "framework": "bun:test",
+                "bootstrap": {
+                    "package_manager": "npm",
+                    "test_runner": "jest",
+                    "test_command": "jest src/**/*.test.ts",
+                },
+            },
+        }
+
+        result = generate_cookbook("src/service.ts", "process", str(tmp_path), config=config)
+
+        assert "### Jest Specifics" in result
+        assert "jest.mock(" in result
+        assert "jest.fn(() => undefined)" in result
+        assert "import { describe, expect, jest, test } from '@jest/globals';" in result
+        assert "bun:test" not in result
+        assert "mock.module(" not in result
+        assert "No test scaffold was emitted" not in result
+
+    def test_episode_context_uses_jest_mocks_for_jest_bootstrap(self, tmp_path):
+        from agentic_tdd_runner.cookbook import build_episode_context
+
+        _write_file(tmp_path, "src/service.ts", """\
+            import { getLogger } from '../logger';
+
+            const logger = getLogger();
+
+            export function process(): void {
+              logger.info('start');
+            }
+        """)
+        config = {
+            "runner": {
+                "command": "bun test",
+                "framework": "bun:test",
+                "bootstrap": {
+                    "package_manager": "npm",
+                    "test_runner": "jest",
+                    "test_command": "jest src/**/*.test.ts",
+                },
+            },
+        }
+
+        ctx = build_episode_context("src/service.ts", "process", str(tmp_path), config=config)
+
+        assert ctx["runner"] == "jest"
+        assert "jest.mock(" in ctx["mocks_text"]
+        assert "jest.fn(() => undefined)" in ctx["mocks_text"]
+        assert "mock.module(" not in ctx["mocks_text"]
+
     def test_custom_runner_bootstrap_does_not_emit_bun_scaffold(self, tmp_path):
         _write_file(tmp_path, "src/service.ts", """\
             import { getLogger } from '../logger';
