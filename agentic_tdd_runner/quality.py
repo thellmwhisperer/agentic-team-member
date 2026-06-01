@@ -227,6 +227,7 @@ def run_quality_checks(
             workdir,
             config=config,
             log=log,
+            lang=lang,
         )
     )
     for f in test_files:
@@ -269,6 +270,7 @@ def _duplicated_setup_findings(
     *,
     config: dict | None = None,
     log: Callable[[str, dict], None] | None = None,
+    lang: object | None = None,
 ) -> list[str]:
     findings: list[str] = []
     for f in test_files:
@@ -280,7 +282,7 @@ def _duplicated_setup_findings(
                 file_text = fh.read()
         except OSError:
             continue
-        setup_dupes, ambiguous_dupes = partition_duplicated_test_lines(file_text)
+        setup_dupes, ambiguous_dupes = partition_duplicated_test_lines(file_text, lang=lang)
         report_lines = list(setup_dupes)
         if not report_lines and ambiguous_dupes and config is not None and log is not None:
             judge_result = judge_duplicated_setup(
@@ -374,11 +376,12 @@ def _is_production_source_text_path(path: str) -> bool:
     return not any(marker in filename for marker in _SOURCE_TEXT_READ_ALLOWED_FILE_MARKERS)
 
 
-def is_obvious_setup_line(line: str) -> bool:
+def is_obvious_setup_line(line: str, *, lang: object | None = None) -> bool:
     stripped = line.strip()
     if re.search(r"\b(mock|spyOn)\s*\(", stripped):
         return True
-    if re.search(r"\b(?:vi|jest)\.(?:fn|mock)\s*\(", stripped):
+    language_mock_setup = getattr(lang, "is_mock_setup_line", None)
+    if callable(language_mock_setup) and language_mock_setup(stripped):
         return True
     if re.search(r"__set[A-Za-z_]\w*\s*\(", stripped):
         return True
@@ -387,9 +390,9 @@ def is_obvious_setup_line(line: str) -> bool:
     return False
 
 
-def is_obvious_act_line(line: str) -> bool:
+def is_obvious_act_line(line: str, *, lang: object | None = None) -> bool:
     stripped = line.strip()
-    if is_obvious_assert_line(stripped) or is_obvious_setup_line(stripped):
+    if is_obvious_assert_line(stripped) or is_obvious_setup_line(stripped, lang=lang):
         return False
     if re.match(r"^(?:await\s+)?[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*\s*\(", stripped):
         return True
@@ -401,7 +404,11 @@ def is_obvious_act_line(line: str) -> bool:
     return False
 
 
-def partition_duplicated_test_lines(file_text: str) -> tuple[list[str], list[str]]:
+def partition_duplicated_test_lines(
+    file_text: str,
+    *,
+    lang: object | None = None,
+) -> tuple[list[str], list[str]]:
     from collections import Counter
 
     lines = [ln.strip() for ln in file_text.splitlines() if ln.strip() and len(ln.strip()) > 20]
@@ -412,9 +419,9 @@ def partition_duplicated_test_lines(file_text: str) -> tuple[list[str], list[str
     for line, count in counts.items():
         if count < 2:
             continue
-        if is_obvious_assert_line(line) or is_obvious_act_line(line):
+        if is_obvious_assert_line(line) or is_obvious_act_line(line, lang=lang):
             continue
-        if is_obvious_setup_line(line):
+        if is_obvious_setup_line(line, lang=lang):
             setup_dupes.append(line)
         elif count >= 3:
             ambiguous_dupes.append(line)

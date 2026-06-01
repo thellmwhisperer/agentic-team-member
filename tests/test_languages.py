@@ -68,11 +68,13 @@ class TestRegistry:
             "agentic_tdd_runner.languages.typescript.seams",
             "agentic_tdd_runner.languages.typescript.permission",
             "agentic_tdd_runner.languages.typescript.profile",
+            "agentic_tdd_runner.languages.typescript.scaffold",
             "agentic_tdd_runner.languages.python.syntax",
             "agentic_tdd_runner.languages.python.paths",
             "agentic_tdd_runner.languages.python.seams",
             "agentic_tdd_runner.languages.python.permission",
             "agentic_tdd_runner.languages.python.profile",
+            "agentic_tdd_runner.languages.python.scaffold",
         )
 
         for module_name in module_names:
@@ -193,6 +195,11 @@ class TestTypeScriptPlugin:
             "permission_write_test_conflict",
             "profile_detectors",
             "source_imports_spec",
+            "build_scaffold",
+            "render_module_mocks",
+            "is_mock_setup_line",
+            "reusable_test_shapes",
+            "scaffold_cookbook_guidance",
         )
 
         for capability in required:
