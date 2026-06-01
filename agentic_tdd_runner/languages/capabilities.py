@@ -80,6 +80,11 @@ class LanguageCapabilities(Protocol):
     def relevant_import_declarations(self, source_text: str, needles: list[str]) -> list[str]: ...
     def permission_write_test_conflict(self, args: dict, context: dict) -> str | None: ...
     def source_imports_spec(self, source_text: str, spec: str) -> bool: ...
+    def build_scaffold(self, contract: dict) -> dict: ...
+    def render_module_mocks(self, contract: dict, *, declare_spies: bool = False) -> str: ...
+    def is_mock_setup_line(self, line: str) -> bool: ...
+    def reusable_test_shapes(self, file_text: str) -> list[str]: ...
+    def scaffold_cookbook_guidance(self, contract: dict) -> list[str]: ...
 
 
 class OptionalLanguageCapabilityDefaults:
@@ -164,6 +169,30 @@ class OptionalLanguageCapabilityDefaults:
 
     def source_imports_spec(self, source_text: str, spec: str) -> bool:
         return False
+
+    def build_scaffold(self, contract: dict) -> dict:
+        runner = ((contract or {}).get("test_file") or {}).get("runner") or "unknown"
+        return {
+            "imports_block": "",
+            "module_mocks_block": "",
+            "arrange_block": "",
+            "act_block": "",
+            "assert_block": "",
+            "todo_slots": [f"unsupported_runner:{runner}"],
+            "rendered_test": "",
+        }
+
+    def render_module_mocks(self, contract: dict, *, declare_spies: bool = False) -> str:
+        return ""
+
+    def is_mock_setup_line(self, line: str) -> bool:
+        return False
+
+    def reusable_test_shapes(self, file_text: str) -> list[str]:
+        return []
+
+    def scaffold_cookbook_guidance(self, contract: dict) -> list[str]:
+        return []
 
 
 def validate_language_capability(plugin: object) -> list[str]:

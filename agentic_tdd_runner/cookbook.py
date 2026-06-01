@@ -233,7 +233,7 @@ def build_episode_context(
     resolved_test_path = contract["test_file"]["path"]
     source_import_path = contract["test_file"].get("source_import_path", "")
 
-    mocks_text = _render_module_mocks(contract.get("module_load_dependencies", [])) if runner == "bun:test" else ""
+    mocks_text = _render_module_mocks(contract)
 
     assertion_surface = contract.get("assertion_surface", {})
     assertion_hint = ""
@@ -517,10 +517,15 @@ def _render_cookbook_text(contract: dict, lang) -> str:
     parts.append("- Before the first failing test, apply only the mechanical exports listed below.")
     parts.append("- Do not add production `__set...ForTests` setters or other test-only APIs. Prefer a public caller/registration path, a module mock, or the smallest pure helper/predicate for the bug.")
     parts.append("- For module-load mocks, assert against the named `*_spy` variables emitted below; do not import and patch the mocked factory after importing the target.")
-    if contract["test_file"]["runner"] == "bun:test":
+    scaffold_guidance_fn = getattr(lang, "scaffold_cookbook_guidance", None)
+    scaffold_guidance = (
+        scaffold_guidance_fn(contract)
+        if callable(scaffold_guidance_fn)
+        else []
+    )
+    if scaffold_guidance:
         parts.append("")
-        parts.append("### Bun Specifics")
-        parts.append("- For Bun spies/mocks, use `mock(() => undefined)` for void placeholders; do not silence mock typing with cast-only returns.")
+        parts.extend(scaffold_guidance)
     parts.append("")
 
     callback_registrations = contract.get("callback_registrations", [])
@@ -561,16 +566,12 @@ def _render_cookbook_text(contract: dict, lang) -> str:
             parts.append(edit["new"])
             parts.append("")
 
-    # Module mocks (bun:test only — pytest uses unittest.mock in the scaffold)
+    # Module mocks are rendered by the active language capability.
     runner = contract["test_file"]["runner"]
-    mock_text = (
-        _render_module_mocks(contract.get("module_load_dependencies", []), declare_spies=True)
-        if runner == "bun:test"
-        else ""
-    )
+    mock_text = _render_module_mocks(contract, declare_spies=True)
     if mock_text:
         parts.append("### Module Mocks (paste before source import)")
-        parts.append("```ts")
+        parts.append(f"```{lang.code_fence()}")
         parts.append(mock_text)
         parts.append("```")
         parts.append("")

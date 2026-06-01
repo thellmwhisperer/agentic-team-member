@@ -11,7 +11,7 @@ from typing import Any
 from agentic_tdd_runner.apply_patch import ApplyPatchError, apply_patch_touched_paths
 from agentic_tdd_runner.languages import register
 from agentic_tdd_runner.languages.capabilities import OptionalLanguageCapabilityDefaults
-from agentic_tdd_runner.languages.typescript import paths, permission, profile, seams, syntax
+from agentic_tdd_runner.languages.typescript import paths, permission, profile, scaffold, seams, syntax
 from agentic_tdd_runner.runner_authority import override_detected_runner
 from agentic_tdd_runner.test_command_templates import custom_test_command_template
 
@@ -590,6 +590,29 @@ class TypeScriptLanguage(OptionalLanguageCapabilityDefaults):
 
     def source_imports_spec(self, source_text: str, spec: str) -> bool:
         return profile.source_imports_spec(source_text, spec)
+
+    def build_scaffold(self, contract: dict) -> dict:
+        return scaffold.build_scaffold(contract)
+
+    def render_module_mocks(self, contract: dict, *, declare_spies: bool = False) -> str:
+        return scaffold.render_module_mocks(contract, declare_spies=declare_spies)
+
+    def render_scaffold_assertion(
+        self,
+        assertion_surface: dict,
+        *,
+        call_params: list[str] | None = None,
+    ) -> str:
+        return scaffold.render_assertion(assertion_surface, call_params=call_params)
+
+    def is_mock_setup_line(self, line: str) -> bool:
+        return scaffold.is_mock_setup_line(line)
+
+    def reusable_test_shapes(self, file_text: str) -> list[str]:
+        return scaffold.reusable_test_shapes(file_text)
+
+    def scaffold_cookbook_guidance(self, contract: dict) -> list[str]:
+        return scaffold.cookbook_guidance(contract)
 
 
 def _configured_test_command(command: str | None) -> str:
