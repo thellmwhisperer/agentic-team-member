@@ -427,7 +427,7 @@ def create_pr(
 
         from agentic_tdd_runner.languages import get_language
         lang = get_language(test_file)
-        extensions = lang.extensions if lang else []
+        extensions = set(lang.extensions) if lang else None
         untracked = subprocess.run(
             ["git", "ls-files", "--others", "--exclude-standard"],
             cwd=workdir, env=command_env, capture_output=True, text=True, timeout=pr_timeout,
@@ -436,7 +436,7 @@ def create_pr(
             f.strip() for f in untracked.stdout.splitlines()
             if f.strip() and os.path.exists(os.path.join(workdir, f.strip()))
             and f.strip() in allowed_changed_files
-            and os.path.splitext(f.strip())[1] in extensions
+            and (extensions is None or os.path.splitext(f.strip())[1] in extensions)
         }
         changed = sorted(tracked_files | untracked_files)
         if changed:

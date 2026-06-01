@@ -265,7 +265,7 @@ def build_episode_for_target(
         "project_root": workdir,
     }
     runner_config = (config or {}).get("runner", {}) if isinstance(config, dict) else {}
-    if isinstance(runner_config, dict) and runner_config.get("bootstrap"):
+    if isinstance(runner_config, dict) and runner_config:
         episode_kwargs["config"] = config
     episode = build_episode_context(**episode_kwargs)
     if discovery_candidates:
