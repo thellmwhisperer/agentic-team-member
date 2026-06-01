@@ -51,7 +51,7 @@ def _build_pytest_scaffold(contract: dict) -> dict:
     params = _signature_params_for_target(target)
 
     import_names = [target_name]
-    for binding, plan in injection_plan.items():
+    for plan in injection_plan.values():
         setter_name = plan.get("setter_name")
         if setter_name and setter_name not in import_names:
             import_names.append(setter_name)

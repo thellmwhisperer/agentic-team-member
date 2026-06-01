@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from agentic_tdd_runner.compiler.scaffold_common import _empty_scaffold
-from agentic_tdd_runner.languages import get_language, plugins
+from agentic_tdd_runner.languages import get_language
 
 
 def _build_scaffold(contract: dict) -> dict:
@@ -22,21 +22,6 @@ def _render_module_mocks(
     render = getattr(lang, "render_module_mocks", None)
     if callable(render):
         return render(contract, declare_spies=declare_spies)
-    return ""
-
-
-def _render_assertion(
-    assertion_surface: dict,
-    *,
-    runner: str,
-    call_params: list[str] | None = None,
-) -> str:
-    for lang in plugins():
-        if not lang.supports_test_runner(runner):
-            continue
-        render = getattr(lang, "render_scaffold_assertion", None)
-        if callable(render):
-            return render(assertion_surface, call_params=call_params)
     return ""
 
 

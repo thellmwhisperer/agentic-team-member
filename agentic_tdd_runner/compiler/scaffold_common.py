@@ -16,7 +16,8 @@ def _empty_scaffold(reason: str) -> dict:
 
 
 def _safe_identifier(value: object) -> str:
-    return re.sub(r"\W+", "_", str(value)).strip("_") or "value"
+    sanitized = re.sub(r"\W+", "_", str(value)).strip("_") or "value"
+    return f"_{sanitized}" if sanitized[0].isdigit() else sanitized
 
 
 def _indent_block(text: str, spaces: int) -> str:

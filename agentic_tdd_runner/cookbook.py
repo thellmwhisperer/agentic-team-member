@@ -492,8 +492,10 @@ def _dedupe_preserve_order(values: list[str]) -> list[str]:
     return deduped
 
 
-def _render_cookbook_text(contract: dict, lang) -> str:
+def _render_cookbook_text(contract: dict, lang: LanguageCapabilities) -> str:
     """Render a contract as human-readable text for the agent's system prompt."""
+    if lang is None:
+        raise TypeError("lang must not be None")
     parts = []
     target = contract["target"]
     owner_class = target.get("owner_class")
