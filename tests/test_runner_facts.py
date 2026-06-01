@@ -104,6 +104,29 @@ def test_build_runner_facts_reports_bun_test_import_and_commands(tmp_path):
     assert facts.symbol_tests == []
 
 
+def test_build_runner_facts_reports_jest_import_and_commands(tmp_path):
+    _write_file(tmp_path, "package.json", json.dumps({"scripts": {"typecheck": "tsc --noEmit"}}))
+    _write_file(tmp_path, "src/events/client.ts", "export function processRenewal() {}\n")
+    config = _config()
+    config["runner"]["bootstrap"] = {
+        "package_manager": "npm",
+        "test_runner": "jest",
+        "test_runner_source": "package.json:scripts.test",
+        "test_command": "jest src/**/*.test.ts",
+    }
+
+    facts = build_runner_facts(str(tmp_path), config, episode=_episode())
+    prompt = facts.to_prompt_section()
+
+    assert facts.test_runner == "jest"
+    assert facts.test_command == "npm exec -- jest --runInBand --watchman=false --coverage=false"
+    assert facts.test_api_import == 'import { beforeEach, describe, expect, jest, test } from "@jest/globals";'
+    assert "Register `jest.mock(...)` before importing the target module" in prompt
+    assert "jest.fn(...)" in prompt
+    assert "bun:test" not in prompt
+    assert "mock.module(...)" not in prompt
+
+
 def test_build_runner_facts_prefers_bootstrap_over_stale_bun_config(tmp_path):
     _write_file(tmp_path, "package.json", json.dumps({"scripts": {"test": "node --test src/**/*.test.ts"}}))
     _write_file(tmp_path, "src/events/client.ts", "export function processRenewal() {}\n")

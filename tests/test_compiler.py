@@ -244,6 +244,60 @@ def test_bun_scaffold_omits_mock_import_when_unused():
     assert "import { describe, expect, mock, test } from 'bun:test';" not in rendered
 
 
+def test_jest_scaffold_renders_module_mocks_and_source_import():
+    facts = _handle_renewal_facts()
+    facts["test_file"]["runner"] = "jest"
+
+    block = build_contract(facts)["scaffold"]["module_mocks_block"]
+
+    assert "jest.mock('../logger'" in block
+    assert "mock.module(" not in block
+    assert "const mockLoggerEventSpy = jest.fn(() => undefined);" in block
+    assert "const logger_event_spy = mockLoggerEventSpy;" in block
+    assert "const mockMetricsSummaryManagerTrackRenewalSpy = jest.fn(() => undefined);" in block
+    assert "const metricsSummaryManager_trackRenewal_spy = mockMetricsSummaryManagerTrackRenewalSpy;" in block
+    assert "getLogger: () => ({" in block
+    assert "log: {" in block
+    assert "event: mockLoggerEventSpy" in block
+    assert "info: mockLoggerInfoSpy" in block
+    assert "trackRenewal: mockMetricsSummaryManagerTrackRenewalSpy" in block
+    assert "const { processRenewal } = require('./client');" in block
+
+
+def test_jest_scaffold_contains_minimal_template():
+    facts = _handle_renewal_facts()
+    facts["test_file"]["runner"] = "jest"
+
+    rendered = build_contract(facts)["scaffold"]["rendered_test"]
+
+    assert "import { describe, expect, jest, test } from '@jest/globals';" in rendered
+    assert "bun:test" not in rendered
+    assert "mock.module(" not in rendered
+    assert "jest.fn(() => undefined)" in rendered
+    assert "describe('processRenewal'" in rendered
+    assert "test('TODO behavior'" in rendered
+    assert "processRenewal(channel, username, months);" in rendered
+
+
+def test_jest_scaffold_omits_jest_import_when_unused():
+    facts = _handle_renewal_facts()
+    facts["test_file"]["runner"] = "jest"
+    facts["module_load_dependencies"] = []
+    facts["execution_dependencies"] = []
+    facts["injection_plan"] = []
+    facts["assertion_surface"] = {
+        "kind": "return_value",
+        "binding": "processRenewal",
+        "member": "return",
+    }
+
+    rendered = build_contract(facts)["scaffold"]["rendered_test"]
+
+    assert "import { describe, expect, test } from '@jest/globals';" in rendered
+    assert "import { describe, expect, jest, test } from '@jest/globals';" not in rendered
+    assert "jest.fn" not in rendered
+
+
 def test_unknown_language_never_receives_bun_scaffold():
     facts = _handle_renewal_facts()
     facts["target"]["source_path"] = "src/service.go"

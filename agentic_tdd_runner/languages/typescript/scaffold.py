@@ -13,16 +13,18 @@ from agentic_tdd_runner.languages.typescript.syntax import parse_signature_param
 
 def build_scaffold(contract: dict) -> dict:
     runner = contract["test_file"].get("runner")
-    if runner != "bun:test":
+    if runner not in {"bun:test", "jest"}:
         return _empty_scaffold(f"unsupported_runner:{runner or 'unknown'}")
-    return _build_bun_scaffold(contract)
+    return _build_ts_scaffold(contract, runner=runner)
 
 
 def render_module_mocks(contract: dict, *, declare_spies: bool = False) -> str:
-    if contract["test_file"].get("runner") != "bun:test":
+    runner = contract["test_file"].get("runner")
+    if runner not in {"bun:test", "jest"}:
         return ""
     return _render_module_mocks(
         contract.get("module_load_dependencies", []),
+        runner=runner,
         declare_spies=declare_spies,
     )
 
@@ -64,7 +66,11 @@ def reusable_test_shapes(file_text: str) -> list[str]:
     shapes = []
     if "mock.module(" in file_text:
         shapes.append("mock.module(...)")
-    if "mock(" in file_text:
+    if "jest.mock(" in file_text:
+        shapes.append("jest.mock(...)")
+    if "jest.fn(" in file_text:
+        shapes.append("jest.fn(...)")
+    if re.search(r"(?<!\.)\bmock\(", file_text):
         shapes.append("mock(...)")
     if "toHaveBeenCalledWith(" in file_text:
         shapes.append("toHaveBeenCalledWith(...)")
@@ -72,15 +78,26 @@ def reusable_test_shapes(file_text: str) -> list[str]:
 
 
 def cookbook_guidance(contract: dict) -> list[str]:
-    if contract["test_file"].get("runner") != "bun:test":
-        return []
-    return [
-        "### Bun Specifics",
-        "- For Bun spies/mocks, use `mock(() => undefined)` for void placeholders; do not silence mock typing with cast-only returns.",
-    ]
+    runner = contract["test_file"].get("runner")
+    if runner == "bun:test":
+        return [
+            "### Bun Specifics",
+            "- For Bun spies/mocks, use `mock(() => undefined)` for void placeholders; do not silence mock typing with cast-only returns.",
+        ]
+    if runner == "jest":
+        return [
+            "### Jest Specifics",
+            "- For Jest spies/mocks, use `jest.fn(() => undefined)` for void placeholders; do not silence mock typing with cast-only returns.",
+            (
+                "- Register `jest.mock(...)` before importing the target module. "
+                "If static imports are hoisted in this repo, delay the target import "
+                "or follow an existing sibling-test pattern."
+            ),
+        ]
+    return []
 
 
-def _build_bun_scaffold(contract: dict) -> dict:
+def _build_ts_scaffold(contract: dict, *, runner: str) -> dict:
     target = contract["target"]
     target_name = target["symbol"]
     source_import_path = contract["test_file"]["source_import_path"]
@@ -90,9 +107,14 @@ def _build_bun_scaffold(contract: dict) -> dict:
     assertion_surface = contract["assertion_surface"]
     params = _signature_params_for_target(target)
 
-    module_mocks_block = _render_module_mocks(module_load_dependencies, declare_spies=True)
-    imports_block = _render_bun_imports(
-        needs_mock=_bun_scaffold_needs_mock(
+    module_mocks_block = _render_module_mocks(
+        module_load_dependencies,
+        runner=runner,
+        declare_spies=True,
+    )
+    imports_block = _render_ts_imports(
+        runner=runner,
+        needs_mock=_scaffold_needs_mock(
             module_mocks_block,
             execution_dependencies,
             injection_plan,
@@ -105,9 +127,14 @@ def _build_bun_scaffold(contract: dict) -> dict:
         if setter_name and setter_name not in import_names:
             import_names.append(setter_name)
     if module_mocks_block:
+        source_import = (
+            f"const {{ {', '.join(import_names)} }} = require('{source_import_path}');"
+            if runner == "jest"
+            else f"const {{ {', '.join(import_names)} }} = await import('{source_import_path}');"
+        )
         module_mocks_block = (
             f"{module_mocks_block}\n\n"
-            f"const {{ {', '.join(import_names)} }} = await import('{source_import_path}');"
+            f"{source_import}"
         )
     else:
         module_mocks_block = f"import {{ {', '.join(import_names)} }} from '{source_import_path}';"
@@ -126,7 +153,7 @@ def _build_bun_scaffold(contract: dict) -> dict:
                 shape_lines = []
                 for member in observed:
                     spy_name = f"{binding}_{member}_spy"
-                    arrange_lines.append(f"const {spy_name} = {_render_ts_mock()};")
+                    arrange_lines.append(f"const {spy_name} = {_render_ts_mock(runner)};")
                     shape_lines.append(f"  {member}: {spy_name},")
                 if shape_lines:
                     arrange_lines.append(
@@ -139,7 +166,7 @@ def _build_bun_scaffold(contract: dict) -> dict:
             else:
                 member = observed[0] if observed else "value"
                 spy_name = f"{binding}_{member}_spy"
-                arrange_lines.append(f"const {spy_name} = {_render_ts_mock()};")
+                arrange_lines.append(f"const {spy_name} = {_render_ts_mock(runner)};")
                 arrange_lines.append(
                     f"// TODO: exercise {binding} through a public caller/registration, module mock, or smallest pure helper using {spy_name}."
                 )
@@ -193,7 +220,20 @@ def _render_bun_imports(*, needs_mock: bool) -> str:
     return f"import {{ {', '.join(imports)} }} from 'bun:test';"
 
 
-def _bun_scaffold_needs_mock(
+def _render_jest_imports(*, needs_mock: bool) -> str:
+    imports = ["describe", "expect", "test"]
+    if needs_mock:
+        imports.insert(2, "jest")
+    return f"import {{ {', '.join(imports)} }} from '@jest/globals';"
+
+
+def _render_ts_imports(*, runner: str, needs_mock: bool) -> str:
+    if runner == "jest":
+        return _render_jest_imports(needs_mock=needs_mock)
+    return _render_bun_imports(needs_mock=needs_mock)
+
+
+def _scaffold_needs_mock(
     module_mocks_block: str,
     execution_dependencies: list[dict],
     injection_plan: dict,
@@ -219,11 +259,25 @@ def _render_ts_todo_helper() -> str:
     )
 
 
-def _render_ts_mock() -> str:
+def _render_ts_mock(runner: str) -> str:
+    if runner == "jest":
+        return "jest.fn(() => undefined)"
     return "mock(() => undefined)"
 
 
-def _module_spy_extractions(dependencies: list[dict]) -> tuple[list[str], dict]:
+def _jest_mock_variable_name(binding: str, member: str) -> str:
+    raw = f"{binding}_{member}"
+    parts = [part for part in re.split(r"[^A-Za-z0-9]+", raw) if part]
+    if not parts:
+        return "mockModuleSpy"
+    return "mock" + "".join(part[:1].upper() + part[1:] for part in parts) + "Spy"
+
+
+def _module_spy_extractions(
+    dependencies: list[dict],
+    *,
+    runner: str,
+) -> tuple[list[str], dict]:
     spy_extractions = {}
     spy_decl_lines = []
     seen = set()
@@ -241,22 +295,30 @@ def _module_spy_extractions(dependencies: list[dict]) -> tuple[list[str], dict]:
                 if key in spy_extractions:
                     continue
                 spy_name = f"{binding}_{_safe_identifier(member)}_spy"
+                factory_ref = (
+                    _jest_mock_variable_name(binding, member)
+                    if runner == "jest"
+                    else spy_name
+                )
                 if spy_name not in seen:
-                    spy_decl_lines.append(f"const {spy_name} = {_render_ts_mock()};")
+                    spy_decl_lines.append(f"const {factory_ref} = {_render_ts_mock(runner)};")
+                    if factory_ref != spy_name:
+                        spy_decl_lines.append(f"const {spy_name} = {factory_ref};")
                     seen.add(spy_name)
-                spy_extractions[key] = spy_name
+                spy_extractions[key] = factory_ref
     return spy_decl_lines, spy_extractions
 
 
 def _render_module_mocks(
     dependencies: list[dict],
     *,
+    runner: str,
     spy_extractions: dict | None = None,
     declare_spies: bool = False,
 ) -> str:
     spy_decl_lines = []
     if declare_spies:
-        spy_decl_lines, discovered = _module_spy_extractions(dependencies)
+        spy_decl_lines, discovered = _module_spy_extractions(dependencies, runner=runner)
         merged_spies = dict(discovered)
         if spy_extractions:
             merged_spies.update(spy_extractions)
@@ -275,12 +337,20 @@ def _render_module_mocks(
             depth=2,
             spy_extractions=spy_extractions,
             dep_scope=module_path,
+            runner=runner,
         )
-        blocks.append(
-            f"mock.module('{module_path}', () => (\n"
-            f"{{\n{body}\n}}\n"
-            f"));"
-        )
+        if runner == "jest":
+            blocks.append(
+                f"jest.mock('{module_path}', () => (\n"
+                f"{{\n{body}\n}}\n"
+                f"));"
+            )
+        else:
+            blocks.append(
+                f"mock.module('{module_path}', () => (\n"
+                f"{{\n{body}\n}}\n"
+                f"));"
+            )
     rendered = "\n\n".join(blocks)
     if spy_decl_lines and rendered:
         return "\n".join(spy_decl_lines) + "\n\n" + rendered
@@ -294,6 +364,7 @@ def _render_module_shape(
     depth: int = 0,
     spy_extractions: dict | None = None,
     dep_scope: str | None = None,
+    runner: str,
 ) -> str:
     lines = []
     indent = " " * depth
@@ -306,6 +377,7 @@ def _render_module_shape(
             spy_extractions=spy_extractions,
             parent_key=key,
             dep_scope=dep_scope,
+            runner=runner,
         )
         lines.append(f"{indent}{key}: {rendered},")
     return "\n".join(lines)
@@ -320,6 +392,7 @@ def _render_binding_value(
     spy_extractions: dict | None = None,
     parent_key: str | None = None,
     dep_scope: str | None = None,
+    runner: str,
 ) -> str:
     indent = " " * depth
     inner_indent = " " * (depth + 2)
@@ -330,6 +403,7 @@ def _render_binding_value(
             depth=depth + 2,
             spy_extractions=spy_extractions,
             dep_scope=dep_scope,
+            runner=runner,
         )
         return f"{{\n{inner}\n{indent}}}"
     if isinstance(value, list):
@@ -338,7 +412,7 @@ def _render_binding_value(
             scoped_key = (dep_scope, lookup_key, member)
             if spy_extractions and scoped_key in spy_extractions:
                 return spy_extractions[scoped_key]
-            return _render_ts_mock()
+            return _render_ts_mock(runner)
 
         if render_hint == "module_object":
             members = "\n".join(
@@ -361,7 +435,7 @@ def _render_binding_value(
         )
         return f"{{\n{members}\n{indent}}}"
     if value == "function":
-        return _render_ts_mock()
+        return _render_ts_mock(runner)
     if value == "value":
         return "undefined"
     return repr(value)

@@ -1,4 +1,4 @@
-"""TypeScript / bun:test language plugin."""
+"""TypeScript / JavaScript language plugin."""
 from __future__ import annotations
 
 import json
@@ -16,10 +16,12 @@ from agentic_tdd_runner.runner_authority import override_detected_runner
 from agentic_tdd_runner.test_command_templates import custom_test_command_template
 
 BUN_TEST_API_IMPORT = 'import { beforeEach, describe, expect, mock, test } from "bun:test";'
+JEST_TEST_API_IMPORT = 'import { beforeEach, describe, expect, jest, test } from "@jest/globals";'
 TEST_FILE_PATTERNS = ["*.test.ts", "*.test.tsx", "*.test.js", "*.test.jsx"]
 TEST_RUNNERS = {"bun:test", "node:test", "vitest", "jest"}
 PACKAGE_MANAGERS = {"bun", "npm", "pnpm", "yarn"}
 _BUN_TEST_GLOBALS = {"beforeEach", "describe", "expect", "mock", "test"}
+_JEST_TEST_GLOBALS = {"beforeEach", "describe", "expect", "jest", "test"}
 _MISSING_NAME_RE = re.compile(
     r"(?P<file>[^\s:(]+\.(?:test|spec)\.[tj]sx?)"
     r"(?:\(\d+,\d+\)|:\d+:\d+)?(?:\s*-\s*|:\s*)error TS\d+:\s*"
@@ -142,15 +144,23 @@ class TypeScriptLanguage(OptionalLanguageCapabilityDefaults):
     def test_api_import(self, test_runner: str) -> str | None:
         if test_runner == "bun:test":
             return BUN_TEST_API_IMPORT
+        if test_runner == "jest":
+            return JEST_TEST_API_IMPORT
         return None
 
     def test_api_facts(self, test_runner: str) -> list[str]:
-        if test_runner != "bun:test":
-            return []
-        return [
-            "Bun mock functions reset call history with `mockFn.mockClear()`; do not use `.mock.reset()`.",
-            "When a module has import-time side effects, make `mock.module(...)` registrations happen before the target module is evaluated.",
-        ]
+        if test_runner == "bun:test":
+            return [
+                "Bun mock functions reset call history with `mockFn.mockClear()`; do not use `.mock.reset()`.",
+                "When a module has import-time side effects, make `mock.module(...)` registrations happen before the target module is evaluated.",
+            ]
+        if test_runner == "jest":
+            return [
+                "Jest mock functions reset call history with `mockFn.mockClear()`; do not use `.mock.reset()`.",
+                "Use `jest.fn(...)` for spies and `jest.mock(...)` for module-load mocks.",
+                "Register `jest.mock(...)` before importing the target module; follow existing sibling-test patterns for ESM/CJS.",
+            ]
+        return []
 
     def typecheck_command(self, root: Path, config: dict, test_runner: str) -> str | None:
         environment = config.get("environment", {}) if isinstance(config, dict) else {}
@@ -249,7 +259,7 @@ class TypeScriptLanguage(OptionalLanguageCapabilityDefaults):
 
         test_dir = posixpath.dirname(_normalize_path(str(test_file)))
         paths: set[str] = set()
-        for spec in _extract_bun_mock_module_specs(test_text):
+        for spec in _extract_mock_module_specs(test_text):
             if not spec.startswith(("./", "../")):
                 continue
             candidate_base = _normalize_path(posixpath.join(test_dir, spec))
@@ -264,11 +274,14 @@ class TypeScriptLanguage(OptionalLanguageCapabilityDefaults):
         modules: list[str] = []
         for line in cookbook_text.splitlines():
             stripped = line.strip()
-            if stripped.startswith("mock.module("):
+            if stripped.startswith(("mock.module(", "jest.mock(")):
                 modules.append(stripped)
         return modules
 
     def regression_test_skeleton(self, context: dict) -> str:
+        runner = _context_runner(context)
+        if runner not in {"bun:test", "jest"}:
+            return ""
         facts = context.get("contract_facts") or []
         mock_block = str(context.get("module_mock_block") or "").strip()
         signature = str(context.get("source_signature") or "").strip()
@@ -287,7 +300,7 @@ class TypeScriptLanguage(OptionalLanguageCapabilityDefaults):
             type_shapes=type_shapes,
         )
         lines = [
-            BUN_TEST_API_IMPORT,
+            JEST_TEST_API_IMPORT if runner == "jest" else BUN_TEST_API_IMPORT,
         ]
         for module_name, names in type_imports:
             lines.append(f'import type {{ {", ".join(names)} }} from "{module_name}";')
@@ -350,7 +363,10 @@ class TypeScriptLanguage(OptionalLanguageCapabilityDefaults):
     ) -> dict[str, Any]:
         observations: dict[str, Any] = {}
         if _report_value(runner_facts, "test_api_import"):
-            test_file, missing = _parse_missing_bun_test_globals(result)
+            test_file, missing = _parse_missing_test_globals(
+                result,
+                _report_value(runner_facts, "test_runner"),
+            )
             if test_file and missing:
                 observations["missing_globals"] = {
                     "test_file": test_file,
@@ -620,6 +636,14 @@ def _report_value(report: Any, key: str) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
+def _context_runner(context: dict) -> str:
+    runner = _report_value(context, "runner")
+    if runner:
+        return runner
+    runner_facts = context.get("runner_facts") if isinstance(context, dict) else None
+    return _report_value(runner_facts, "test_runner") or ""
+
+
 def _package_runner_command(
     package_manager: str | None,
     runner: str,
@@ -719,11 +743,11 @@ def _normalize_path(path: Any) -> str:
     return normalized.removeprefix("./")
 
 
-def _extract_bun_mock_module_specs(test_text: str) -> list[str]:
+def _extract_mock_module_specs(test_text: str) -> list[str]:
     return [
         match.group("spec")
         for match in re.finditer(
-            r"mock\.module\(\s*['\"](?P<spec>\.{1,2}/[^'\"]+)['\"]",
+            r"(?:mock\.module|jest\.mock)\(\s*['\"](?P<spec>\.{1,2}/[^'\"]+)['\"]",
             test_text,
         )
     ]
@@ -984,11 +1008,17 @@ def _runtime_arg_names_from_contract_facts(facts: list[str]) -> list[str]:
     return []
 
 
-def _parse_missing_bun_test_globals(result: str) -> tuple[str | None, set[str]]:
+def _parse_missing_test_globals(
+    result: str,
+    test_runner: str | None,
+) -> tuple[str | None, set[str]]:
+    runner_globals = _test_api_globals(test_runner)
+    if not runner_globals:
+        return None, set()
     hits: dict[str, set[str]] = {}
     for match in _MISSING_NAME_RE.finditer(result or ""):
         missing = match.group("name")
-        if missing not in _BUN_TEST_GLOBALS:
+        if missing not in runner_globals:
             continue
         path = _normalize_path(match.group("file"))
         hits.setdefault(path, set()).add(missing)
@@ -996,6 +1026,14 @@ def _parse_missing_bun_test_globals(result: str) -> tuple[str | None, set[str]]:
         return None, set()
     test_file = sorted(hits, key=lambda path: (-len(hits[path]), path))[0]
     return test_file, hits[test_file]
+
+
+def _test_api_globals(test_runner: str | None) -> set[str]:
+    if test_runner == "bun:test":
+        return _BUN_TEST_GLOBALS
+    if test_runner == "jest":
+        return _JEST_TEST_GLOBALS
+    return set()
 
 
 def _parse_bun_mock_reset_file(result: str) -> str | None:
