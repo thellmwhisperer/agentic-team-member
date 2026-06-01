@@ -6,9 +6,9 @@ suitable for injection into the agent's system prompt.
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from copy import deepcopy
 from pathlib import Path
-from typing import Any
 
 from agentic_tdd_runner.compiler import (
     _build_assertion_surface,
@@ -24,6 +24,7 @@ from agentic_tdd_runner.compiler import (
 )
 from agentic_tdd_runner.compiler.parser import _find_symbol_line_with_source
 from agentic_tdd_runner.languages import get_language
+from agentic_tdd_runner.languages.capabilities import LanguageCapabilities
 from agentic_tdd_runner.repo_profile import (
     DependencyContractProfile,
     EventFrameworkProfile,
@@ -40,7 +41,8 @@ def _build_contract_for_symbol(
     test_path: str | None = None,
     line_start: int | None = None,
     line_end: int | None = None,
-) -> tuple[dict, Any, list[dict]]:
+    config: dict | None = None,
+) -> tuple[dict, LanguageCapabilities, list[dict]]:
     """Shared pipeline: build contract + lang + seam edits for a symbol.
 
     Returns (contract, lang, seam_edits).
@@ -153,7 +155,7 @@ def _build_contract_for_symbol(
     )
 
     resolved_test_path = test_path or lang.test_path(source_path, symbol)
-    runner = lang.runner
+    runner = _runner_for_contract(lang, config)
 
     callback_registrations = _discover_callback_registrations(source_text, symbol)
     callback_contract_facts = _discover_callback_contract_facts(
@@ -201,11 +203,12 @@ def generate_cookbook(
     test_path: str | None = None,
     line_start: int | None = None,
     line_end: int | None = None,
+    config: dict | None = None,
 ) -> str:
     """Generate a text cookbook section for injection into the TDD agent's system prompt."""
     contract, lang, _seam_edits = _build_contract_for_symbol(
         source_path, symbol, project_root,
-        test_path=test_path, line_start=line_start, line_end=line_end,
+        test_path=test_path, line_start=line_start, line_end=line_end, config=config,
     )
     return _render_cookbook_text(contract, lang)
 
@@ -218,11 +221,12 @@ def build_episode_context(
     test_path: str | None = None,
     line_start: int | None = None,
     line_end: int | None = None,
+    config: dict | None = None,
 ) -> dict:
     """Return structured episode data for the phased runner."""
     contract, lang, seam_edits = _build_contract_for_symbol(
         source_path, symbol, project_root,
-        test_path=test_path, line_start=line_start, line_end=line_end,
+        test_path=test_path, line_start=line_start, line_end=line_end, config=config,
     )
     runner = contract["test_file"]["runner"]
     resolved_test_path = contract["test_file"]["path"]
@@ -273,13 +277,30 @@ def build_system_prompt(
     source_path: str | None = None,
     symbol: str | None = None,
     project_root: str | None = None,
+    config: dict | None = None,
 ) -> str:
     """Build a system prompt with an optional cookbook section injected."""
     if not source_path or not symbol or not project_root:
         return base_prompt
 
-    cookbook = generate_cookbook(source_path, symbol, project_root)
+    cookbook = generate_cookbook(source_path, symbol, project_root, config=config)
     return f"{base_prompt}\n\n{cookbook}"
+
+
+def _runner_for_contract(lang: LanguageCapabilities, config: dict | None) -> str:
+    runner_config = (config or {}).get("runner", {}) if isinstance(config, dict) else {}
+    runner_config = runner_config if isinstance(runner_config, dict) else {}
+    bootstrap = runner_config.get("bootstrap")
+    return (
+        _text_value(bootstrap, "test_runner")
+        or _text_value(runner_config, "framework")
+        or str(getattr(lang, "runner", "") or "")
+    )
+
+
+def _text_value(container: object, key: str) -> str | None:
+    value = container.get(key) if isinstance(container, Mapping) else getattr(container, key, None)
+    return value.strip() if isinstance(value, str) and value.strip() else None
 
 
 def _find_function_end(source_text: str, start_line: int | None, *, lang=None) -> int | None:

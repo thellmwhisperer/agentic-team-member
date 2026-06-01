@@ -15,7 +15,19 @@ def _build_scaffold(contract):
         return _build_bun_scaffold(contract)
     if runner == "pytest":
         return _build_pytest_scaffold(contract)
-    raise ValueError(f"unsupported runner: {runner}")
+    return _empty_scaffold(f"unsupported_runner:{runner or 'unknown'}")
+
+
+def _empty_scaffold(reason):
+    return {
+        "imports_block": "",
+        "module_mocks_block": "",
+        "arrange_block": "",
+        "act_block": "",
+        "assert_block": "",
+        "todo_slots": [reason],
+        "rendered_test": "",
+    }
 
 
 

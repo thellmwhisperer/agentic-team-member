@@ -1,5 +1,7 @@
 """Tests for permission-driven runtime gates."""
 
+from types import SimpleNamespace
+
 from agentic_tdd_runner import permission
 
 
@@ -518,6 +520,32 @@ def test_write_test_grant_allows_only_recommended_test_file():
     assert "PERMISSION DENIED" in blocked.message
 
 
+def test_write_test_grant_rejects_bun_test_file_under_non_bun_runner():
+    context = _context()
+    context.update({
+        "runner": "node:test",
+        "test_command": "node --test",
+        "runner_facts": [
+            "test runner: node:test",
+            "test command: node --test",
+        ],
+    })
+
+    blocked = permission.review_tool_call(
+        "create_file",
+        {
+            "path": "src/events/processRenewal.test.ts",
+            "content": "import { test, expect, mock } from 'bun:test';\nmock.module('../x', () => ({}));\n",
+        },
+        grant="write_test",
+        context=context,
+    )
+
+    assert blocked is not None
+    assert "PERMISSION DENIED" in blocked.message
+    assert "detected runner is `node:test`" in blocked.message
+
+
 def test_callback_skeleton_does_not_select_fields_by_semantic_aliases():
     context = _context()
     context["contract_facts"] = [
@@ -761,6 +789,52 @@ def test_permission_context_python_does_not_resolve_js_mock_module_specs(tmp_pat
     assert context["language_name"] == "python"
     assert context["test_setup_read_paths"] == []
     assert context["source_mocks"] == []
+
+
+def test_permission_context_uses_runner_facts_over_stale_bun_config(tmp_path):
+    context = permission.build_permission_context(
+        episode={
+            "source_file": "src/events/processor.ts",
+            "test_file": "src/events/processRenewal.test.ts",
+            "target_symbol": "processRenewal",
+            "runner": "bun:test",
+            "runner_facts": SimpleNamespace(
+                test_runner="node:test",
+                test_command="node --test",
+            ),
+        },
+        config={
+            "runner": {
+                "command": "bun test",
+                "framework": "bun:test",
+                "bootstrap": {
+                    "package_manager": "npm",
+                    "test_runner": "node:test",
+                    "test_command": "node --test src/**/*.test.ts",
+                },
+            },
+        },
+        phase="test",
+        test_file_created=True,
+        workdir=str(tmp_path),
+    )
+
+    assert context["runner"] == "node:test"
+    assert context["test_command"] == "node --test"
+    assert permission.review_tool_call(
+        "run_command",
+        {"command": "node --test src/events/processRenewal.test.ts"},
+        grant="run_test",
+        context=context,
+    ) is None
+    blocked = permission.review_tool_call(
+        "run_command",
+        {"command": "bun test src/events/processRenewal.test.ts"},
+        grant="run_test",
+        context=context,
+    )
+    assert blocked is not None
+    assert "PERMISSION DENIED" in blocked.message
 
 
 def test_permission_path_matching_normalizes_only_relative_path_syntax():

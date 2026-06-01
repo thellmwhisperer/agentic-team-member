@@ -100,9 +100,9 @@ def build_runner_facts(
     bootstrap = runner_cfg.get("bootstrap") if isinstance(runner_cfg, dict) else None
     language = _language_for_episode(episode)
     test_runner = (
-        _episode_value(episode, "runner")
+        _bootstrap_value(bootstrap, "test_runner")
+        or _episode_value(episode, "runner")
         or _configured_text(runner_cfg.get("framework"))
-        or _bootstrap_value(bootstrap, "test_runner")
         or _language_runner(language)
         or "unknown"
     )
@@ -181,13 +181,13 @@ def _test_command(
     language: object | None,
     test_runner: str,
 ) -> str:
-    configured = _configured_text(runner_cfg.get("command"))
-    if configured:
-        return configured
-
     detected = effective_test_command_template(bootstrap, None)
     if detected:
         return detected
+
+    configured = _configured_text(runner_cfg.get("command"))
+    if configured:
+        return configured
 
     command_fn = getattr(language, "test_command_template", None)
     if callable(command_fn):

@@ -43,6 +43,21 @@ def test_runner_command_for_file_preserves_configured_fallback_for_custom_runner
     assert command_for_file("src/math.test.ts", config) == "turbo run test --filter web"
 
 
+def test_runner_command_for_file_uses_custom_bootstrap_before_stale_bun():
+    config = {
+        "runner": {
+            "command": "bun test",
+            "bootstrap": {
+                "package_manager": "npm",
+                "test_runner": "custom",
+                "test_command": "tsx --test src/**/*.test.ts",
+            },
+        },
+    }
+
+    assert command_for_file("src/math.test.ts", config) == "tsx --test"
+
+
 def test_runner_command_for_file_keeps_pytest_for_python_tests():
     config = {
         "runner": {
