@@ -246,6 +246,37 @@ def test_target_challenge_accepts_class_method_target(tmp_path):
     assert "src/worker.ts::matchEndpoint" in review.message
 
 
+def test_target_challenge_accepts_class_method_after_earlier_symbol_mention(tmp_path):
+    source = tmp_path / "src" / "worker.ts"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "\n".join([
+            "export class Worker {",
+            "  describe(): string {",
+            "    return 'matchEndpoint handles task routes';",
+            "  }",
+            "  matchEndpoint(path: string): boolean {",
+            "    return path.includes('/api/tasks');",
+            "  }",
+            "}",
+        ])
+    )
+
+    review = permission.review_target_challenge(
+        {
+            "source_file": "src/worker.ts",
+            "target_symbol": "matchEndpoint",
+            "evidence": "the endpoint routing is implemented as a class method",
+        },
+        _context(),
+        workdir=str(tmp_path),
+    )
+
+    assert review.allowed is True
+    assert review.event == "target_challenge_accepted"
+    assert "src/worker.ts::matchEndpoint" in review.message
+
+
 def test_target_challenge_rejects_unreadable_or_missing_symbol(tmp_path):
     source = tmp_path / "src" / "http" / "router.ts"
     source.parent.mkdir(parents=True)

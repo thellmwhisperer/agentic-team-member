@@ -227,6 +227,13 @@ class TestTypeScriptImportPath:
             "import eventBus from '@example/event-bus';\nimport other from './other';",
             ["@example/event-bus"],
         ) == ["import eventBus from '@example/event-bus';"]
+        assert lang.relevant_import_declarations(
+            "\n".join([
+                "import eventBus from '@example/event-bus'",
+                "const setup = createSetup()",
+            ]),
+            ["@example/event-bus"],
+        ) == ["import eventBus from '@example/event-bus'"]
         assert lang.permission_write_test_conflict(
             {"content": 'import { test } from "bun:test";\nmock.module("./service", () => ({}));'},
             {"runner": "jest"},

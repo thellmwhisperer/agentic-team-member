@@ -83,8 +83,19 @@ def _extract_import_declarations(source_text: str) -> list[str]:
 
         declaration = [line]
         while ";" not in lines[index] and index + 1 < len(lines):
+            if not _looks_like_import_continuation(lines[index + 1]):
+                break
             index += 1
             declaration.append(lines[index])
         imports.append("\n".join(declaration))
         index += 1
     return imports
+
+
+def _looks_like_import_continuation(line: str) -> bool:
+    stripped = line.strip()
+    if not stripped:
+        return False
+    if line.startswith((" ", "\t")):
+        return True
+    return stripped.startswith(("{", "}", "*", ",", "from ", "as "))
