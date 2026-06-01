@@ -101,6 +101,42 @@ def test_router_allows_edit_to_pending_test_file_then_clears_gate():
     ) is None
 
 
+def test_router_allows_apply_patch_to_pending_test_file_then_clears_gate():
+    router = IntentRouter(_facts())
+    router.observe_tool_result(
+        "run_command",
+        {"command": "bun run typecheck"},
+        (
+            "[Reactive typecheck]\n"
+            "src/twitch/handleResub.test.ts(4,1): error TS2304: Cannot find name 'test'.\n"
+        ),
+        applied=None,
+    )
+
+    patch = (
+        "*** Begin Patch\n"
+        "*** Update File: src/twitch/handleResub.test.ts\n"
+        "@@\n"
+        "-import { handleResub } from \"./client\";\n"
+        "+import { test } from \"bun:test\";\n"
+        "+import { handleResub } from \"./client\";\n"
+        "*** End Patch"
+    )
+    assert router.review_tool_call("apply_patch", {"patch": patch}) is None
+
+    router.observe_tool_result(
+        "apply_patch",
+        {"patch": patch},
+        "OK: applied patch (updated src/twitch/handleResub.test.ts)",
+        applied=True,
+    )
+
+    assert router.review_tool_call(
+        "run_command",
+        {"command": "bun test src/twitch/handleResub.test.ts"},
+    ) is None
+
+
 def test_router_matches_pretty_tsc_missing_bun_globals():
     router = IntentRouter(_facts())
     router.observe_tool_result(

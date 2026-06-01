@@ -173,6 +173,43 @@ def test_successful_edit_clears_pending_forbidden_pattern_when_feedback_is_clean
     assert review is None
 
 
+def test_successful_apply_patch_clears_pending_forbidden_pattern():
+    reviewer = BugStateReviewer(
+        {
+            "state_reviewer": {"enabled": True},
+        },
+        contract_evidence_available=False,
+    )
+    reviewer.observe_tool_result(
+        "create_file",
+        {"path": "src/twitch/handleResub.test.ts"},
+        "[Reactive forbidden]\n  src/twitch/handleResub.test.ts:110 '{} as'",
+        applied=True,
+    )
+    patch = (
+        "*** Begin Patch\n"
+        "*** Update File: src/twitch/handleResub.test.ts\n"
+        "@@\n"
+        "-{} as SubMethods\n"
+        "+methods\n"
+        "*** End Patch"
+    )
+    reviewer.observe_tool_result(
+        "apply_patch",
+        {"patch": patch},
+        "OK: applied patch (updated src/twitch/handleResub.test.ts)",
+        applied=True,
+    )
+
+    review = reviewer.review_tool_call(
+        "rg",
+        {"pattern": "SubMethods", "path": "node_modules/tmi.js"},
+        allow_dependency_contract_lookup=True,
+    )
+
+    assert review is None
+
+
 def test_successful_edit_clears_pending_forbidden_pattern_with_normalized_path():
     reviewer = BugStateReviewer(
         {
