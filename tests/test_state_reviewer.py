@@ -7,7 +7,56 @@ from agentic_tdd_runner.state_reviewer import (
 from agentic_tdd_runner.runner_facts import RunnerFacts
 
 
+def _ts_runner_facts():
+    return RunnerFacts(
+        test_runner="bun:test",
+        test_command="bun test",
+        typecheck_command="bun run typecheck",
+        test_api_import='import { beforeEach, describe, expect, mock, test } from "bun:test";',
+        recommended_test_file="src/events/processRenewal.test.ts",
+        source_file="src/events/client.ts",
+        target_symbol="processRenewal",
+        nearby_tests=[],
+        symbol_tests=[],
+    )
+
+
+def _python_runner_facts():
+    return RunnerFacts(
+        test_runner="pytest",
+        test_command="python3 -m pytest",
+        typecheck_command=None,
+        test_api_import=None,
+        recommended_test_file="tests/test_worker.py",
+        source_file="src/worker.py",
+        target_symbol="process",
+        nearby_tests=[],
+        symbol_tests=[],
+    )
+
+
 def test_blocks_dependency_lookup_when_contract_is_already_known():
+    reviewer = BugStateReviewer(
+        {
+            "state_reviewer": {"enabled": True},
+        },
+        contract_evidence_available=True,
+        runner_facts=_ts_runner_facts(),
+    )
+
+    review = reviewer.review_tool_call(
+        "run_command",
+        {"command": 'rg "DeliveryOptions" node_modules/@example/event-bus'},
+        allow_dependency_contract_lookup=False,
+    )
+
+    assert review is not None
+    assert review.event == "state_review_blocked"
+    assert "CONTRACT" in review.message
+    assert "already has concrete contract evidence" in review.message
+
+
+def test_dependency_lookup_without_language_context_is_not_treated_as_js():
     reviewer = BugStateReviewer(
         {
             "state_reviewer": {"enabled": True},
@@ -21,10 +70,25 @@ def test_blocks_dependency_lookup_when_contract_is_already_known():
         allow_dependency_contract_lookup=False,
     )
 
-    assert review is not None
-    assert review.event == "state_review_blocked"
-    assert "CONTRACT" in review.message
-    assert "already has concrete contract evidence" in review.message
+    assert review is None
+
+
+def test_python_dependency_lookup_does_not_inherit_node_modules_contract_rule():
+    reviewer = BugStateReviewer(
+        {
+            "state_reviewer": {"enabled": True},
+        },
+        contract_evidence_available=True,
+        runner_facts=_python_runner_facts(),
+    )
+
+    review = reviewer.review_tool_call(
+        "run_command",
+        {"command": 'rg "DeliveryOptions" node_modules/@example/event-bus'},
+        allow_dependency_contract_lookup=False,
+    )
+
+    assert review is None
 
 
 def test_reviewer_routes_known_runner_fact_answers_before_tool_execution():
@@ -294,6 +358,7 @@ def test_blocks_dependency_lookup_after_repair_budget_is_spent():
             "state_reviewer": {"enabled": True, "max_dependency_contract_lookups": 1},
         },
         contract_evidence_available=True,
+        runner_facts=_ts_runner_facts(),
     )
     reviewer.observe_tool_result(
         "rg",

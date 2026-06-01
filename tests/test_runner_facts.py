@@ -223,7 +223,7 @@ def test_build_runner_facts_excludes_build_artifact_directories_by_default(tmp_p
     assert facts.symbol_tests == ["src/events/client.test.ts"]
 
 
-def test_build_runner_facts_excludes_dependency_dirs_for_unknown_language(tmp_path):
+def test_build_runner_facts_does_not_inherit_js_dependency_dirs_for_unknown_language(tmp_path):
     _write_file(tmp_path, "src/service.rb", "def perform; end\n")
     _write_file(tmp_path, "src/service.spec.rb", "perform\n")
     _write_file(tmp_path, "node_modules/pkg/service.spec.rb", "perform\n")
@@ -241,4 +241,7 @@ def test_build_runner_facts_excludes_dependency_dirs_for_unknown_language(tmp_pa
         },
     )
 
-    assert facts.symbol_tests == ["src/service.spec.rb"]
+    assert facts.symbol_tests == [
+        "node_modules/pkg/service.spec.rb",
+        "src/service.spec.rb",
+    ]

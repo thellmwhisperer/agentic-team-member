@@ -43,3 +43,13 @@ def test_build_command_env_accepts_loaded_tooling_config(monkeypatch):
 def test_validate_command_rejects_cd_chains():
     with pytest.raises(ValueError, match="cwd already set"):
         validate_command("cd apps/web && bun test src/client.test.ts")
+
+
+def test_validate_command_can_scope_tooling_to_project_commands():
+    with pytest.raises(ValueError, match="not allowed"):
+        validate_command("bun test src/client.test.ts", project_commands={"python3", "pytest"})
+
+    validate_command(
+        "bun test src/client.test.ts",
+        project_commands={"bun", "node", "npm", "npx", "pnpm", "yarn"},
+    )

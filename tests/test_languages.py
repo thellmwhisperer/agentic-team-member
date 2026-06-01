@@ -68,12 +68,14 @@ class TestRegistry:
             "agentic_tdd_runner.languages.typescript.seams",
             "agentic_tdd_runner.languages.typescript.permission",
             "agentic_tdd_runner.languages.typescript.profile",
+            "agentic_tdd_runner.languages.typescript.project",
             "agentic_tdd_runner.languages.typescript.scaffold",
             "agentic_tdd_runner.languages.python.syntax",
             "agentic_tdd_runner.languages.python.paths",
             "agentic_tdd_runner.languages.python.seams",
             "agentic_tdd_runner.languages.python.permission",
             "agentic_tdd_runner.languages.python.profile",
+            "agentic_tdd_runner.languages.python.project",
             "agentic_tdd_runner.languages.python.scaffold",
         )
 
@@ -180,6 +182,15 @@ class TestTypeScriptPlugin:
         lang = get_language("file.ts")
         required = (
             "is_dependency_contract_lookup",
+            "detect_project_type",
+            "inspect_runner_bootstrap",
+            "project_manifest",
+            "project_package_manager",
+            "project_should_install",
+            "project_install_command",
+            "project_preflight_commands",
+            "ensure_project_test_config",
+            "shell_project_commands",
             "typecheck_command",
             "referenced_type_shapes",
             "test_setup_dependency_paths",
@@ -394,10 +405,19 @@ class Worker:
         lang = get_language("file.py")
 
         assert lang.typecheck_command(tmp_path, {}, "pytest") is None
+        assert lang.detect_project_type(tmp_path) is None
+        assert lang.inspect_runner_bootstrap(tmp_path) is None
+        assert lang.project_manifest(tmp_path) == {}
+        assert lang.project_package_manager(tmp_path, {}, None) is None
+        assert lang.project_should_install(tmp_path, "auto") is False
+        assert lang.project_install_command(tmp_path, None, None) is None
+        assert lang.project_preflight_commands(tmp_path, {}, {}, None, None) == []
+        assert lang.ensure_project_test_config(tmp_path, None) is None
         assert lang.is_dependency_contract_lookup(
             "cat node_modules/@types/example/index.d.ts",
             ["cat", "node_modules/@types/example/index.d.ts"],
         ) is False
+        assert {"python3", "pytest"}.issubset(lang.shell_project_commands())
         assert lang.referenced_type_shapes(
             workdir=str(tmp_path),
             contract_facts=["pkg type declarations expose `ready(payload: Payload)`"],

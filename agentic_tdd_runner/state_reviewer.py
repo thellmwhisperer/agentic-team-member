@@ -10,6 +10,7 @@ from pathlib import PurePosixPath
 
 from agentic_tdd_runner.apply_patch import ApplyPatchError, apply_patch_touched_paths
 from agentic_tdd_runner.intent_router import IntentRouter
+from agentic_tdd_runner.languages import get_language
 from agentic_tdd_runner.runner_facts import RunnerFacts
 
 
@@ -111,7 +112,7 @@ class BugStateReviewer:
                 data={"tool": name, "args": args, "source_file": source_file},
             )
 
-        if is_dependency_contract_lookup(name, args):
+        if is_dependency_contract_lookup(name, args, self.runner_facts):
             if self.contract_evidence_available and not allow_dependency_contract_lookup:
                 return self._blocked(
                     phase="CONTRACT",
@@ -171,7 +172,7 @@ class BugStateReviewer:
         elif result_points_at_source(result, self.runner_facts):
             self.target_source_read = False
 
-        if is_dependency_contract_lookup(name, args):
+        if is_dependency_contract_lookup(name, args, self.runner_facts):
             self.dependency_contract_lookup_count += 1
 
         forbidden_file, patterns = parse_reactive_forbidden(result)
@@ -347,17 +348,27 @@ def result_points_at_source(result: str, runner_facts: RunnerFacts | None) -> bo
     )
 
 
-def is_dependency_contract_lookup(name: str, args: dict) -> bool:
+def is_dependency_contract_lookup(
+    name: str,
+    args: dict,
+    runner_facts: RunnerFacts | None = None,
+) -> bool:
+    language = get_language(runner_facts.source_file if runner_facts else "")
+    lookup_fn = getattr(language, "is_dependency_contract_lookup", None)
+    if not callable(lookup_fn):
+        return False
+
     if name == "rg":
         paths = args.get("path") or "."
         if isinstance(paths, str):
             paths = [paths]
-        return any("node_modules" in PurePosixPath(str(path)).parts for path in paths)
+        command = "rg " + " ".join(str(path) for path in paths)
+        return lookup_fn(command, ["rg", *[str(path) for path in paths]])
 
     if name != "run_command":
         return False
     command = args.get("command", "")
-    if not isinstance(command, str) or "node_modules" not in command:
+    if not isinstance(command, str):
         return False
     try:
         parts = shlex.split(command)
@@ -365,8 +376,7 @@ def is_dependency_contract_lookup(name: str, args: dict) -> bool:
         parts = command.split()
     if not parts:
         return False
-    lookup_tools = {"rg", "grep", "find", "cat", "head", "tail", "sed", "awk", "ls"}
-    return PurePosixPath(parts[0]).name in lookup_tools or "node_modules/@types" in command
+    return lookup_fn(command, parts)
 
 
 def parse_reactive_forbidden(result: str) -> tuple[str | None, list[str]]:

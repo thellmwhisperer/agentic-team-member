@@ -11,7 +11,7 @@ from typing import Any
 from agentic_tdd_runner.apply_patch import ApplyPatchError, apply_patch_touched_paths
 from agentic_tdd_runner.languages import register
 from agentic_tdd_runner.languages.capabilities import OptionalLanguageCapabilityDefaults
-from agentic_tdd_runner.languages.typescript import paths, permission, profile, scaffold, seams, syntax
+from agentic_tdd_runner.languages.typescript import paths, permission, profile, project, scaffold, seams, syntax
 from agentic_tdd_runner.runner_authority import override_detected_runner
 from agentic_tdd_runner.test_command_templates import custom_test_command_template
 
@@ -140,6 +140,56 @@ class TypeScriptLanguage(OptionalLanguageCapabilityDefaults):
             return False
         lookup_tools = {"rg", "grep", "find", "cat", "head", "tail", "sed", "awk", "ls"}
         return parts[0] in lookup_tools or "node_modules/@types" in command
+
+    def detect_project_type(self, root: Path) -> str | None:
+        return project.detect_project_type(root)
+
+    def inspect_runner_bootstrap(self, root: Path) -> Any | None:
+        return project.inspect_project_runner_bootstrap(root)
+
+    def project_manifest(self, root: Path) -> dict:
+        return project.project_manifest(root)
+
+    def project_package_manager(
+        self,
+        root: Path,
+        manifest: dict,
+        bootstrap: Any | None,
+    ) -> str | None:
+        return project.project_package_manager(root, manifest, bootstrap)
+
+    def project_should_install(self, root: Path, install_mode: str) -> bool:
+        return project.project_should_install(root, install_mode)
+
+    def project_install_command(
+        self,
+        root: Path,
+        package_manager: str | None,
+        bootstrap: Any | None,
+    ) -> list[str] | None:
+        return project.project_install_command(root, package_manager, bootstrap)
+
+    def project_preflight_commands(
+        self,
+        root: Path,
+        manifest: dict,
+        env_cfg: dict,
+        package_manager: str | None,
+        bootstrap: Any | None,
+    ) -> list[list[str]]:
+        return project.project_preflight_commands(
+            root,
+            manifest,
+            env_cfg,
+            package_manager,
+            bootstrap,
+        )
+
+    def ensure_project_test_config(self, root: Path, bootstrap: Any | None) -> Path | None:
+        return project.ensure_project_test_config(root, bootstrap)
+
+    def shell_project_commands(self) -> set[str]:
+        return project.shell_project_commands()
 
     def test_api_import(self, test_runner: str) -> str | None:
         if test_runner == "bun:test":

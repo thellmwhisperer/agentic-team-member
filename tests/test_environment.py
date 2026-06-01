@@ -63,6 +63,62 @@ class TestPrepareEnvironment:
         assert ["bun", "--version"] in calls
         assert ["bun", "run", "typecheck"] in calls
 
+    def test_python_project_does_not_inspect_javascript_runner_bootstrap(self, tmp_path, monkeypatch):
+        (tmp_path / "pyproject.toml").write_text("[project]\nname = 'worker'\n")
+        calls = []
+
+        def fake_run(root, command, timeout, config=None):
+            calls.append(command)
+            if command[:2] == ["git", "rev-parse"]:
+                return _completed(command, stdout="true\n")
+            if command[:2] == ["git", "status"]:
+                return _completed(command)
+            return _completed(command, stdout="ok")
+
+        monkeypatch.setattr("agentic_tdd_runner.environment._run", fake_run)
+        monkeypatch.setattr(
+            "agentic_tdd_runner.languages.typescript.project.inspect_runner_bootstrap",
+            lambda _root: (_ for _ in ()).throw(AssertionError("JS bootstrap should not run")),
+        )
+
+        report = prepare_environment(str(tmp_path), {
+            "environment": {"install": "auto", "run_typecheck": True},
+            "timeouts": {"tool_execution": 60},
+        })
+
+        assert report.project_type == "python"
+        assert report.runner_bootstrap is None
+        assert all("bun" not in command and "npm" not in command for command in calls)
+
+    def test_unknown_project_does_not_inspect_javascript_runner_bootstrap(self, tmp_path, monkeypatch):
+        calls = []
+
+        def fake_run(root, command, timeout, config=None):
+            calls.append(command)
+            if command[:2] == ["git", "rev-parse"]:
+                return _completed(command, stdout="true\n")
+            if command[:2] == ["git", "status"]:
+                return _completed(command)
+            return _completed(command, stdout="ok")
+
+        monkeypatch.setattr("agentic_tdd_runner.environment._run", fake_run)
+        monkeypatch.setattr(
+            "agentic_tdd_runner.languages.typescript.project.inspect_runner_bootstrap",
+            lambda _root: (_ for _ in ()).throw(AssertionError("JS bootstrap should not run")),
+        )
+
+        report = prepare_environment(str(tmp_path), {
+            "environment": {"install": "auto", "run_typecheck": True},
+            "timeouts": {"tool_execution": 60},
+        })
+
+        assert report.project_type == "unknown"
+        assert report.runner_bootstrap is None
+        assert calls == [
+            ["git", "rev-parse", "--is-inside-work-tree"],
+            ["git", "status", "--porcelain"],
+        ]
+
     def test_records_runner_bootstrap_and_uses_detected_package_manager(self, tmp_path, monkeypatch):
         (tmp_path / "pnpm-lock.yaml").write_text("")
         package_dir = tmp_path / "apps" / "web"
@@ -249,7 +305,10 @@ class TestPrepareEnvironment:
             raise OSError("disk full")
 
         monkeypatch.setattr("agentic_tdd_runner.environment._run", fake_run)
-        monkeypatch.setattr("agentic_tdd_runner.environment.ensure_generated_test_config", fail_config_write)
+        monkeypatch.setattr(
+            "agentic_tdd_runner.languages.typescript.project.ensure_generated_test_config",
+            fail_config_write,
+        )
 
         with pytest.raises(EnvironmentPrepError, match="could not generate test config shim: disk full") as exc:
             prepare_environment(str(tmp_path), {

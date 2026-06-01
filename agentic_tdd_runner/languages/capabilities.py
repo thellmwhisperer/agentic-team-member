@@ -26,6 +26,32 @@ class LanguageCapabilities(Protocol):
     def runner_version_command(self, report: Any) -> list[str] | None: ...
     def is_test_run_command(self, command: str, parts: list[str]) -> bool: ...
     def is_dependency_contract_lookup(self, command: str, parts: list[str]) -> bool: ...
+    def detect_project_type(self, root: Path) -> str | None: ...
+    def inspect_runner_bootstrap(self, root: Path) -> Any | None: ...
+    def project_manifest(self, root: Path) -> dict: ...
+    def project_package_manager(
+        self,
+        root: Path,
+        manifest: dict,
+        bootstrap: Any | None,
+    ) -> str | None: ...
+    def project_should_install(self, root: Path, install_mode: str) -> bool: ...
+    def project_install_command(
+        self,
+        root: Path,
+        package_manager: str | None,
+        bootstrap: Any | None,
+    ) -> list[str] | None: ...
+    def project_preflight_commands(
+        self,
+        root: Path,
+        manifest: dict,
+        env_cfg: dict,
+        package_manager: str | None,
+        bootstrap: Any | None,
+    ) -> list[list[str]]: ...
+    def ensure_project_test_config(self, root: Path, bootstrap: Any | None) -> Path | None: ...
+    def shell_project_commands(self) -> set[str]: ...
     def test_api_import(self, test_runner: str) -> str | None: ...
     def test_api_facts(self, test_runner: str) -> list[str]: ...
     def typecheck_command(self, root: Path, config: dict, test_runner: str) -> str | None: ...
@@ -97,6 +123,50 @@ class OptionalLanguageCapabilityDefaults:
 
     def is_dependency_contract_lookup(self, command: str, parts: list[str]) -> bool:
         return False
+
+    def detect_project_type(self, root: Path) -> str | None:
+        return None
+
+    def inspect_runner_bootstrap(self, root: Path) -> Any | None:
+        return None
+
+    def project_manifest(self, root: Path) -> dict:
+        return {}
+
+    def project_package_manager(
+        self,
+        root: Path,
+        manifest: dict,
+        bootstrap: Any | None,
+    ) -> str | None:
+        return None
+
+    def project_should_install(self, root: Path, install_mode: str) -> bool:
+        return False
+
+    def project_install_command(
+        self,
+        root: Path,
+        package_manager: str | None,
+        bootstrap: Any | None,
+    ) -> list[str] | None:
+        return None
+
+    def project_preflight_commands(
+        self,
+        root: Path,
+        manifest: dict,
+        env_cfg: dict,
+        package_manager: str | None,
+        bootstrap: Any | None,
+    ) -> list[list[str]]:
+        return []
+
+    def ensure_project_test_config(self, root: Path, bootstrap: Any | None) -> Path | None:
+        return None
+
+    def shell_project_commands(self) -> set[str]:
+        return set()
 
     def typecheck_command(self, root: Path, config: dict, test_runner: str) -> str | None:
         return None

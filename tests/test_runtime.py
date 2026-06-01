@@ -1234,9 +1234,26 @@ def test_state_reviewer_blocks_tool_execution_and_returns_scoped_feedback(tmp_pa
             "timings": {},
         }
 
+    episode = {
+        "runner_facts": RunnerFacts(
+            test_runner="bun:test",
+            test_command="bun test",
+            typecheck_command="bun run typecheck",
+            test_api_import='import { beforeEach, describe, expect, mock, test } from "bun:test";',
+            recommended_test_file="src/events/processRenewal.test.ts",
+            source_file="src/events/client.ts",
+            target_symbol="processRenewal",
+            nearby_tests=[],
+            symbol_tests=[],
+        ),
+        "source_file": "src/events/client.ts",
+        "target_symbol": "processRenewal",
+        "test_file": "src/events/processRenewal.test.ts",
+    }
+
     result = runtime.run_agent_loop(
         messages=[],
-        episode=None,
+        episode=episode,
         issue_text="callback contract: use eventPayload['event-total-count']",
         config=config,
         workdir=str(tmp_path),

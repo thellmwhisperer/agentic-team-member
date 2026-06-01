@@ -17,14 +17,19 @@ DEFAULT_COMMAND_PATH_DIRS = (
     "/sbin",
 )
 
-ALLOWED_COMMANDS = frozenset({
+UNIVERSAL_COMMANDS = frozenset({
     "git", "grep", "rg", "find", "ls", "cat", "head", "tail", "wc",
-    "bun", "node", "npm", "npx", "pnpm", "yarn", "deno",
-    "python", "python3", "pip", "pip3", "pytest",
     "echo", "sort", "uniq", "diff", "tr", "cut", "tee",
     "sed", "awk", "xargs", "dirname", "basename",
     "tree", "file", "which", "true", "false", "test", "env",
 })
+
+DEFAULT_PROJECT_COMMANDS = frozenset({
+    "bun", "node", "npm", "npx", "pnpm", "yarn", "deno",
+    "python", "python3", "pip", "pip3", "pytest",
+})
+
+ALLOWED_COMMANDS = UNIVERSAL_COMMANDS | DEFAULT_PROJECT_COMMANDS
 
 # Flags that allow arbitrary code execution on otherwise safe binaries.
 BLOCKED_FLAGS = {
@@ -160,7 +165,11 @@ def has_shell_command_substitution(command: str) -> bool:
     return False
 
 
-def validate_command(command: str) -> None:
+def validate_command(
+    command: str,
+    *,
+    project_commands: set[str] | frozenset[str] | None = None,
+) -> None:
     """Validate that all commands in a pipeline/chain use allowed binaries."""
     if not command or not command.strip():
         raise ValueError("empty command")
@@ -169,6 +178,11 @@ def validate_command(command: str) -> None:
         raise ValueError("newlines not allowed in commands")
     if has_shell_command_substitution(command):
         raise ValueError("command substitution is not allowed")
+    allowed_commands = (
+        ALLOWED_COMMANDS
+        if project_commands is None
+        else UNIVERSAL_COMMANDS | frozenset(project_commands)
+    )
     for part in split_shell_segments(command):
         part = part.strip()
         if not part:
@@ -185,10 +199,10 @@ def validate_command(command: str) -> None:
                 "`cd` is not allowed; commands run with cwd already set. "
                 "Put the path directly in the command shown by Runner Facts."
             )
-        if binary not in ALLOWED_COMMANDS:
+        if binary not in allowed_commands:
             raise ValueError(
                 f"command '{binary}' is not allowed. "
-                f"Allowed: {', '.join(sorted(ALLOWED_COMMANDS))}"
+                f"Allowed: {', '.join(sorted(allowed_commands))}"
             )
         blocked = BLOCKED_FLAGS.get(binary, set())
         if blocked:
@@ -202,7 +216,7 @@ def validate_command(command: str) -> None:
                 if "=" in token:
                     continue
                 wrapped = os.path.basename(token)
-                if wrapped not in ALLOWED_COMMANDS:
+                if wrapped not in allowed_commands:
                     raise ValueError(
                         f"command '{wrapped}' (via env) is not allowed"
                     )

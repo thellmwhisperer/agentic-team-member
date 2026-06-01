@@ -84,13 +84,55 @@ def is_blocked_dependency_contract_lookup(command: str, config: dict) -> bool:
         parts = command.split()
     if not parts:
         return False
-    from agentic_tdd_runner.languages import plugins
+    from agentic_tdd_runner.languages import get_language
 
-    for language in plugins():
-        lookup_fn = getattr(language, "is_dependency_contract_lookup", None)
-        if callable(lookup_fn) and lookup_fn(command, parts):
-            return True
-    return False
+    permission_context = runtime.get("permission_context", {})
+    source_file = (
+        permission_context.get("source_file")
+        if isinstance(permission_context, dict)
+        else None
+    )
+    language = get_language(str(source_file or ""))
+    lookup_fn = getattr(language, "is_dependency_contract_lookup", None)
+    return bool(lookup_fn(command, parts)) if callable(lookup_fn) else False
+
+
+def _validate_command_for_runtime(
+    validate_command: Callable[[str], None],
+    command: str,
+    config: dict,
+) -> None:
+    project_commands = _project_commands_from_runtime(config)
+    if project_commands is None:
+        validate_command(command)
+        return
+    try:
+        validate_command(command, project_commands=project_commands)
+    except TypeError:
+        validate_command(command)
+
+
+def _project_commands_from_runtime(config: dict) -> set[str] | None:
+    runtime = (config or {}).get("_runtime", {})
+    if not isinstance(runtime, dict) or "_runtime" not in (config or {}):
+        return None
+    permission_context = runtime.get("permission_context", {})
+    source_file = (
+        permission_context.get("source_file")
+        if isinstance(permission_context, dict)
+        else None
+    )
+    if not source_file:
+        return set()
+
+    from agentic_tdd_runner.languages import get_language
+
+    language = get_language(str(source_file))
+    commands_fn = getattr(language, "shell_project_commands", None)
+    if not callable(commands_fn):
+        return set()
+    commands = commands_fn()
+    return set(commands) if isinstance(commands, set) else set()
 
 
 def execute_tool(
@@ -134,7 +176,10 @@ def execute_tool(
             paths = rg_paths_from_args(args)
             for path in paths:
                 resolve_repo_path(path)
-            command = build_rg_command(args)
+            command = build_rg_command(
+                args,
+                ignored_dirs=_ignored_dirs_from_runtime(config),
+            )
             command_text = shlex.join(command)
             set_last_run_exit_code(None)
             if is_blocked_dependency_contract_lookup(command_text, config):
@@ -150,7 +195,7 @@ def execute_tool(
                     "feedback. Dependency lookup is allowed again after reactive "
                     "feedback contradicts the known contract."
                 )
-            validate_command(command_text)
+            _validate_command_for_runtime(validate_command, command_text, config)
             result = subprocess.run(
                 command,
                 shell=False,
@@ -183,7 +228,7 @@ def execute_tool(
                     "feedback. Dependency lookup is allowed again after reactive "
                     "feedback contradicts the known contract."
                 )
-            validate_command(args["command"])
+            _validate_command_for_runtime(validate_command, args["command"], config)
             result = subprocess.run(
                 args["command"],
                 shell=True,
@@ -373,18 +418,21 @@ def rg_paths_from_args(args: dict) -> list[str]:
     return paths or ["."]
 
 
-def rg_needs_no_ignore(paths: list[str]) -> bool:
+def rg_needs_no_ignore(
+    paths: list[str],
+    *,
+    ignored_dirs: set[str] | None = None,
+) -> bool:
     """Return true when the caller explicitly targets commonly ignored paths."""
     ignored_parts = {
         ".git",
-        ".next",
-        ".turbo",
         "build",
         "coverage",
         "dist",
-        "node_modules",
         "vendor",
     }
+    if ignored_dirs:
+        ignored_parts.update(ignored_dirs)
     for path in paths:
         if path == ".":
             continue
@@ -394,7 +442,11 @@ def rg_needs_no_ignore(paths: list[str]) -> bool:
     return False
 
 
-def build_rg_command(args: dict) -> list[str]:
+def build_rg_command(
+    args: dict,
+    *,
+    ignored_dirs: set[str] | None = None,
+) -> list[str]:
     """Build a safe ripgrep argv from model-supplied args."""
     pattern = args.get("pattern") or args.get("query") or args.get("term")
     if not isinstance(pattern, str) or not pattern.strip():
@@ -404,7 +456,7 @@ def build_rg_command(args: dict) -> list[str]:
     command = ["rg", "--line-number", "--no-heading"]
     if args.get("case_sensitive") is False:
         command.append("--ignore-case")
-    if rg_needs_no_ignore(paths):
+    if rg_needs_no_ignore(paths, ignored_dirs=ignored_dirs):
         command.append("--no-ignore")
     glob = args.get("glob")
     if isinstance(glob, str) and glob.strip():
@@ -412,6 +464,25 @@ def build_rg_command(args: dict) -> list[str]:
     command.append(pattern)
     command.extend(paths)
     return command
+
+
+def _ignored_dirs_from_runtime(config: dict) -> set[str]:
+    runtime = (config or {}).get("_runtime", {})
+    permission_context = runtime.get("permission_context", {})
+    source_file = (
+        permission_context.get("source_file")
+        if isinstance(permission_context, dict)
+        else None
+    )
+    if not source_file:
+        return set()
+
+    from agentic_tdd_runner.languages import get_language
+
+    language = get_language(str(source_file))
+    dirs_fn = getattr(language, "default_exclude_dirs", None)
+    dirs = dirs_fn() if callable(dirs_fn) else []
+    return {str(item) for item in dirs if isinstance(item, str) and item}
 
 
 def reactive_typecheck_feedback(

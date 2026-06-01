@@ -15,7 +15,7 @@ def effective_test_command_template(
     report: Any,
     configured_command: str | None = None,
 ) -> str:
-    """Return the focused-test command prefix for a discovered JS runner.
+    """Return the focused-test command prefix for a discovered runner.
 
     The caller appends the test file path. Unknown, custom, or ambiguous runner
     facts deliberately fall back to the configured command instead of guessing.
@@ -38,7 +38,7 @@ def effective_test_command_template(
 
 
 def runner_version_command(report: Any) -> list[str] | None:
-    """Return a presence-check command that proves the detected JS runner is invocable."""
+    """Return a presence-check command that proves the detected runner is invocable."""
     test_runner = _report_value(report, "test_runner")
     if not test_runner or test_runner == "custom":
         return None

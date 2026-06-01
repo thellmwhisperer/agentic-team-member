@@ -29,7 +29,6 @@ BASE_EXCLUDE_DIRS = {
     "build",
     "coverage",
     "dist",
-    "node_modules",
     "vendor",
     "venv",
     "__pycache__",

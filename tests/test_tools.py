@@ -5,6 +5,7 @@ from pathlib import Path
 import subprocess
 
 from agentic_tdd_runner.paths import resolve_repo_path
+from agentic_tdd_runner.shell import validate_command
 from agentic_tdd_runner.tools import (
     build_rg_command,
     execute_tool,
@@ -466,6 +467,7 @@ def test_blocks_node_modules_contract_lookup_when_contract_evidence_exists(tmp_p
         "_runtime": {
             "block_dependency_contract_lookup": True,
             "allow_dependency_contract_lookup": False,
+            "permission_context": {"source_file": "src/events/client.ts"},
         },
     }
 
@@ -504,6 +506,7 @@ def test_allows_node_modules_contract_lookup_after_reactive_feedback(tmp_path, m
         "_runtime": {
             "block_dependency_contract_lookup": True,
             "allow_dependency_contract_lookup": True,
+            "permission_context": {"source_file": "src/events/client.ts"},
         },
     }
 
@@ -523,11 +526,91 @@ def test_dependency_contract_lookup_guard_ignores_non_dependency_commands():
         "_runtime": {
             "block_dependency_contract_lookup": True,
             "allow_dependency_contract_lookup": False,
+            "permission_context": {"source_file": "src/events/client.ts"},
         }
     }
 
     assert is_blocked_dependency_contract_lookup("bun test src/file.test.ts", config) is False
     assert is_blocked_dependency_contract_lookup("rg processRenewal src", config) is False
+
+
+def test_dependency_contract_lookup_guard_ignores_node_modules_without_language_context():
+    config = {
+        "_runtime": {
+            "block_dependency_contract_lookup": True,
+            "allow_dependency_contract_lookup": False,
+        }
+    }
+
+    assert (
+        is_blocked_dependency_contract_lookup(
+            'rg "renewal" node_modules/@types/@example/event-bus/index.d.ts',
+            config,
+        )
+        is False
+    )
+
+
+def test_dependency_contract_lookup_guard_ignores_node_modules_for_python_context():
+    config = {
+        "_runtime": {
+            "block_dependency_contract_lookup": True,
+            "allow_dependency_contract_lookup": False,
+            "permission_context": {"source_file": "src/worker.py"},
+        }
+    }
+
+    assert (
+        is_blocked_dependency_contract_lookup(
+            'rg "renewal" node_modules/@types/@example/event-bus/index.d.ts',
+            config,
+        )
+        is False
+    )
+
+
+def test_run_command_rejects_project_tooling_without_language_context(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "agentic_tdd_runner.tools.subprocess.run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("should not run")),
+    )
+    config = {
+        "timeouts": {"tool_execution": 10, "test_run": 10},
+        "_runtime": {},
+    }
+
+    result, exit_codes = _execute_tool(
+        "run_command",
+        {"command": "bun test src/file.test.ts"},
+        tmp_path,
+        config=config,
+        validate_command=validate_command,
+    )
+
+    assert result.startswith("ERROR: ValueError: command 'bun' is not allowed")
+    assert exit_codes == [None]
+
+
+def test_run_command_rejects_javascript_tooling_for_python_context(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "agentic_tdd_runner.tools.subprocess.run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("should not run")),
+    )
+    config = {
+        "timeouts": {"tool_execution": 10, "test_run": 10},
+        "_runtime": {"permission_context": {"source_file": "src/worker.py"}},
+    }
+
+    result, exit_codes = _execute_tool(
+        "run_command",
+        {"command": "bun test src/file.test.ts"},
+        tmp_path,
+        config=config,
+        validate_command=validate_command,
+    )
+
+    assert result.startswith("ERROR: ValueError: command 'bun' is not allowed")
+    assert exit_codes == [None]
 
 
 def test_rg_tool_respects_dependency_contract_lookup_guard(tmp_path, monkeypatch):
@@ -540,6 +623,7 @@ def test_rg_tool_respects_dependency_contract_lookup_guard(tmp_path, monkeypatch
         "_runtime": {
             "block_dependency_contract_lookup": True,
             "allow_dependency_contract_lookup": False,
+            "permission_context": {"source_file": "src/events/client.ts"},
         },
     }
 
@@ -599,6 +683,28 @@ def test_rg_tool_searches_explicit_ignored_directories(tmp_path, monkeypatch):
             "RenewalEventPayload",
             "node_modules/@example/event-bus",
         ]
+        return subprocess.CompletedProcess(command, 1, stdout="", stderr="")
+
+    monkeypatch.setattr("agentic_tdd_runner.tools.subprocess.run", fake_run)
+    config = {
+        "timeouts": {"tool_execution": 10, "test_run": 10},
+        "_runtime": {"permission_context": {"source_file": "src/client.ts"}},
+    }
+
+    result, exit_codes = _execute_tool(
+        "rg",
+        {"pattern": "RenewalEventPayload", "path": "node_modules/@example/event-bus"},
+        tmp_path,
+        config=config,
+    )
+
+    assert result == "(no matches)"
+    assert exit_codes == [None, 1]
+
+
+def test_rg_tool_does_not_treat_node_modules_as_special_without_language_context(tmp_path, monkeypatch):
+    def fake_run(command, **kwargs):
+        assert "--no-ignore" not in command
         return subprocess.CompletedProcess(command, 1, stdout="", stderr="")
 
     monkeypatch.setattr("agentic_tdd_runner.tools.subprocess.run", fake_run)

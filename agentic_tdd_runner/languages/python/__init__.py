@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from typing import Any
 
 from agentic_tdd_runner.languages import register
 from agentic_tdd_runner.languages.capabilities import OptionalLanguageCapabilityDefaults
-from agentic_tdd_runner.languages.python import paths, permission, profile, scaffold, seams, syntax
+from agentic_tdd_runner.languages.python import paths, permission, profile, project, scaffold, seams, syntax
 
 
 class PythonLanguage(OptionalLanguageCapabilityDefaults):
@@ -44,6 +45,12 @@ class PythonLanguage(OptionalLanguageCapabilityDefaults):
         if test_runner == "pytest":
             return ["python3", "-m", "pytest", "--version"]
         return None
+
+    def detect_project_type(self, root: Path) -> str | None:
+        return project.detect_project_type(root)
+
+    def shell_project_commands(self) -> set[str]:
+        return project.shell_project_commands()
 
     def is_test_run_command(self, command: str, parts: list[str]) -> bool:
         from pathlib import Path

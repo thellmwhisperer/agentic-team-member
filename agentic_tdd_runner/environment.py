@@ -5,17 +5,12 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import shlex
 import subprocess
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from agentic_tdd_runner.runner_bootstrap import (
-    RunnerBootstrapReport,
-    ensure_generated_test_config,
-    inspect_runner_bootstrap,
-)
-from agentic_tdd_runner.runner_command import runner_version_command
+from agentic_tdd_runner.languages import plugins
+from agentic_tdd_runner.runner_bootstrap import RunnerBootstrapReport
 from agentic_tdd_runner.shell import build_command_env
 
 
@@ -130,33 +125,45 @@ def prepare_environment(workdir: str, config: dict) -> EnvironmentReport:
     if not root.is_dir():
         _fail(report, f"workdir is not a directory: {root}")
 
-    report.runner_bootstrap = inspect_runner_bootstrap(root)
+    project_language, project_type = detect_project(root)
+    report.project_type = project_type
+    inspect_bootstrap = getattr(project_language, "inspect_runner_bootstrap", None)
+    if callable(inspect_bootstrap):
+        report.runner_bootstrap = inspect_bootstrap(root)
     _preflight_recommended_tools(report, config)
     _require_git_worktree(root, report, timeout=timeout, config=config)
 
     if bool(env_cfg.get("require_clean", True)):
         _require_clean_worktree(root, report, timeout=timeout, config=config)
 
-    project_type = detect_project_type(root)
-    report.project_type = project_type
-
     if project_type == "javascript":
-        pkg = _read_package_json(root)
-        package_manager = report.runner_bootstrap.package_manager or detect_package_manager(root, pkg)
+        pkg = _project_manifest(project_language, root)
+        package_manager = _project_package_manager(
+            project_language,
+            root,
+            pkg,
+            report.runner_bootstrap,
+        )
         report.package_manager = package_manager
 
         install_mode = str(env_cfg.get("install", "auto"))
         if install_mode not in {"auto", "always", "never"}:
             _fail(report, f"invalid environment.install value: {install_mode}")
 
-        if install_mode != "never" and _should_install_javascript(root, install_mode):
-            install_cmd = install_command_for_javascript(
+        if install_mode != "never" and _project_should_install(
+            project_language,
+            root,
+            install_mode,
+        ):
+            install_cmd = _project_install_command(
+                project_language,
                 root,
                 package_manager,
-                lockfile=report.runner_bootstrap.lockfile if report.runner_bootstrap else None,
+                report.runner_bootstrap,
             )
-            report.install_command = install_cmd
-            _run_step(root, report, "install_dependencies", install_cmd, timeout=timeout, config=config)
+            if install_cmd:
+                report.install_command = install_cmd
+                _run_step(root, report, "install_dependencies", install_cmd, timeout=timeout, config=config)
         else:
             report.steps.append(PrepStep(
                 name="install_dependencies",
@@ -164,12 +171,16 @@ def prepare_environment(workdir: str, config: dict) -> EnvironmentReport:
                 reason="dependencies already present" if install_mode != "never" else "disabled",
             ))
 
-        _ensure_generated_test_config(root, report)
+        _ensure_project_test_config(root, report, project_language)
 
-        preflight_commands = javascript_preflight_commands(root, pkg, env_cfg, package_manager=package_manager)
-        version_command = runner_version_command(report.runner_bootstrap)
-        if version_command:
-            preflight_commands.insert(0, version_command)
+        preflight_commands = _project_preflight_commands(
+            project_language,
+            root,
+            pkg,
+            env_cfg,
+            package_manager,
+            report.runner_bootstrap,
+        )
         report.preflight_commands = preflight_commands
         for index, command in enumerate(preflight_commands, start=1):
             _run_step(root, report, f"preflight_{index}", command, timeout=timeout, config=config)
@@ -191,96 +202,75 @@ def prepare_environment(workdir: str, config: dict) -> EnvironmentReport:
     return report
 
 
+def detect_project(root: Path) -> tuple[object | None, str]:
+    for language in plugins():
+        detect = getattr(language, "detect_project_type", None)
+        project_type = detect(root) if callable(detect) else None
+        if isinstance(project_type, str) and project_type:
+            return language, project_type
+    return None, "unknown"
+
+
 def detect_project_type(root: Path) -> str:
-    if (root / "package.json").is_file():
-        return "javascript"
-    if (root / "pyproject.toml").is_file() or (root / "requirements.txt").is_file():
-        return "python"
-    return "unknown"
+    return detect_project(root)[1]
 
 
-def detect_package_manager(root: Path, pkg: dict | None = None) -> str:
-    if pkg:
-        pm_field = str(pkg.get("packageManager", ""))
-        if pm_field:
-            name = pm_field.split("@", 1)[0]
-            if name in {"pnpm", "yarn", "bun", "npm"}:
-                return name
-
-    lockfiles = {
-        "pnpm-lock.yaml": "pnpm",
-        "yarn.lock": "yarn",
-        "bun.lock": "bun",
-        "bun.lockb": "bun",
-        "package-lock.json": "npm",
-        "npm-shrinkwrap.json": "npm",
-    }
-    for filename, package_manager in lockfiles.items():
-        if (root / filename).is_file():
-            return package_manager
-    return "npm"
+def _project_manifest(language: object | None, root: Path) -> dict:
+    manifest = getattr(language, "project_manifest", None)
+    if not callable(manifest):
+        return {}
+    value = manifest(root)
+    return value if isinstance(value, dict) else {}
 
 
-def install_command_for_javascript(
+def _project_package_manager(
+    language: object | None,
     root: Path,
-    package_manager: str,
-    *,
-    lockfile: str | None = None,
-) -> list[str]:
-    if package_manager == "bun":
-        command = ["bun", "install"]
-        if _has_lockfile(root, lockfile, "bun.lock", "bun.lockb"):
-            command.append("--frozen-lockfile")
-        return command
-    if package_manager == "pnpm":
-        command = ["pnpm", "install"]
-        if _has_lockfile(root, lockfile, "pnpm-lock.yaml"):
-            command.append("--frozen-lockfile")
-        return command
-    if package_manager == "yarn":
-        command = ["yarn", "install"]
-        if _has_lockfile(root, lockfile, "yarn.lock"):
-            command.append("--frozen-lockfile")
-        return command
-    if _has_lockfile(root, lockfile, "package-lock.json", "npm-shrinkwrap.json"):
-        return ["npm", "ci"]
-    return ["npm", "install"]
+    manifest: dict,
+    bootstrap: RunnerBootstrapReport | None,
+) -> str | None:
+    package_manager = getattr(language, "project_package_manager", None)
+    if not callable(package_manager):
+        return None
+    value = package_manager(root, manifest, bootstrap)
+    return value if isinstance(value, str) and value else None
 
 
-def _has_lockfile(root: Path, lockfile: str | None, *filenames: str) -> bool:
-    if any((root / filename).is_file() for filename in filenames):
-        return True
-    if not lockfile:
-        return False
-    return Path(lockfile).name in filenames
-
-
-def javascript_preflight_commands(
+def _project_should_install(
+    language: object | None,
     root: Path,
-    pkg: dict,
+    install_mode: str,
+) -> bool:
+    should_install = getattr(language, "project_should_install", None)
+    return bool(should_install(root, install_mode)) if callable(should_install) else False
+
+
+def _project_install_command(
+    language: object | None,
+    root: Path,
+    package_manager: str | None,
+    bootstrap: RunnerBootstrapReport | None,
+) -> list[str] | None:
+    install_command = getattr(language, "project_install_command", None)
+    if not callable(install_command):
+        return None
+    command = install_command(root, package_manager, bootstrap)
+    return command if isinstance(command, list) and command else None
+
+
+def _project_preflight_commands(
+    language: object | None,
+    root: Path,
+    manifest: dict,
     env_cfg: dict,
-    *,
-    package_manager: str | None = None,
+    package_manager: str | None,
+    bootstrap: RunnerBootstrapReport | None,
 ) -> list[list[str]]:
-    commands: list[list[str]] = []
-    package_manager = package_manager or detect_package_manager(root, pkg)
-    scripts = pkg.get("scripts", {}) if isinstance(pkg.get("scripts", {}), dict) else {}
-    deps = _all_javascript_dependencies(pkg)
-
-    if bool(env_cfg.get("run_typecheck", True)):
-        if "typecheck" in scripts:
-            commands.append([package_manager, "run", "typecheck"])
-        elif "typescript" in deps:
-            commands.append(["npx", "tsc", "--noEmit"])
-
-    test_command = env_cfg.get("preflight_test_command")
-    if test_command:
-        if isinstance(test_command, str):
-            commands.append(shlex.split(test_command))
-        elif isinstance(test_command, list):
-            commands.append([str(part) for part in test_command])
-
-    return commands
+    preflight = getattr(language, "project_preflight_commands", None)
+    if not callable(preflight):
+        return []
+    commands = preflight(root, manifest, env_cfg, package_manager, bootstrap)
+    return commands if isinstance(commands, list) else []
 
 
 def recommended_tools_from_config(config: dict) -> list[str]:
@@ -305,28 +295,6 @@ def recommended_tools_from_config(config: dict) -> list[str]:
             tools.append(name)
             seen.add(name)
     return tools
-
-
-def _read_package_json(root: Path) -> dict:
-    try:
-        return json.loads((root / "package.json").read_text())
-    except (OSError, json.JSONDecodeError):
-        return {}
-
-
-def _all_javascript_dependencies(pkg: dict) -> set[str]:
-    deps: set[str] = set()
-    for key in ("dependencies", "devDependencies", "peerDependencies", "optionalDependencies"):
-        value = pkg.get(key, {})
-        if isinstance(value, dict):
-            deps.update(str(name) for name in value)
-    return deps
-
-
-def _should_install_javascript(root: Path, install_mode: str) -> bool:
-    if install_mode == "always":
-        return True
-    return not (root / "node_modules").is_dir()
 
 
 def _preflight_recommended_tools(report: EnvironmentReport, config: dict) -> None:
@@ -474,11 +442,18 @@ def _run_step(
         _fail(report, f"environment step failed: {' '.join(command)}")
 
 
-def _ensure_generated_test_config(root: Path, report: EnvironmentReport) -> None:
+def _ensure_project_test_config(
+    root: Path,
+    report: EnvironmentReport,
+    language: object | None,
+) -> None:
     if not report.runner_bootstrap:
         return
+    ensure_config = getattr(language, "ensure_project_test_config", None)
+    if not callable(ensure_config):
+        return
     try:
-        shim_path = ensure_generated_test_config(report.runner_bootstrap)
+        shim_path = ensure_config(root, report.runner_bootstrap)
     except OSError as exc:
         report.steps.append(PrepStep(name="test_config_shim", returncode=None, stderr=str(exc)))
         _fail(report, f"could not generate test config shim: {exc}")
