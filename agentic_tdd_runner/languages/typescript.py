@@ -10,6 +10,7 @@ from typing import Any
 
 from agentic_tdd_runner.apply_patch import ApplyPatchError, apply_patch_touched_paths
 from agentic_tdd_runner.languages import register
+from agentic_tdd_runner.languages.capabilities import NeutralLanguageCapabilityDefaults
 from agentic_tdd_runner.languages.signature import parse_signature_params
 
 _TS_NAMED_IMPORT_RE = re.compile(
@@ -46,7 +47,7 @@ _BUN_MOCK_RESET_RE = re.compile(
 _TEST_FILE_RE = re.compile(r"(?P<file>[^\s:]+\.test\.[tj]sx?)[:\s]")
 
 
-class TypeScriptLanguage:
+class TypeScriptLanguage(NeutralLanguageCapabilityDefaults):
     name = "typescript"
     runner = "bun:test"
     extensions = [".ts", ".tsx", ".js", ".jsx"]
