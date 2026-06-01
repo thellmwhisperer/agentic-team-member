@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-import shlex
 from typing import Any
 
+from agentic_tdd_runner.languages import plugins
 
-DEFAULT_CONFIGURED_TEST_COMMAND = "bun test"
+
+DEFAULT_CONFIGURED_TEST_COMMAND = ""
 
 
 def effective_test_command_template(
@@ -23,22 +24,13 @@ def effective_test_command_template(
     if not test_runner or test_runner == "custom":
         return fallback
 
-    if test_runner == "bun:test":
-        return "bun test"
-    if test_runner == "node:test":
-        return "node --test"
-    if test_runner == "vitest":
-        return _package_runner_command(
-            _report_value(report, "package_manager"),
-            "vitest",
-            ["run"],
-        )
-    if test_runner == "jest":
-        return _package_runner_command(
-            _report_value(report, "package_manager"),
-            "jest",
-            _jest_runner_args(report),
-        )
+    for plugin in plugins():
+        if not _supports_test_runner(plugin, test_runner):
+            continue
+        command_fn = getattr(plugin, "effective_test_command_template", None)
+        if callable(command_fn):
+            command = command_fn(report, configured_command)
+            return command or fallback
     return fallback
 
 
@@ -48,23 +40,12 @@ def runner_version_command(report: Any) -> list[str] | None:
     if not test_runner or test_runner == "custom":
         return None
 
-    if test_runner == "bun:test":
-        return ["bun", "--version"]
-    if test_runner == "node:test":
-        # node:test ships with node itself; --version validates both.
-        return ["node", "--version"]
-    if test_runner == "vitest":
-        return _package_runner_argv(
-            _report_value(report, "package_manager"),
-            "vitest",
-            ["--version"],
-        )
-    if test_runner == "jest":
-        return _package_runner_argv(
-            _report_value(report, "package_manager"),
-            "jest",
-            ["--version"],
-        )
+    for plugin in plugins():
+        if not _supports_test_runner(plugin, test_runner):
+            continue
+        version_fn = getattr(plugin, "runner_version_command", None)
+        if callable(version_fn):
+            return version_fn(report)
     return None
 
 
@@ -81,31 +62,6 @@ def _report_value(report: Any, key: str) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
-def _package_runner_command(
-    package_manager: str | None,
-    runner: str,
-    runner_args: list[str],
-) -> str:
-    return shlex.join(_package_runner_argv(package_manager, runner, runner_args))
-
-
-def _jest_runner_args(report: Any) -> list[str]:
-    args = ["--runInBand", "--watchman=false", "--coverage=false"]
-    test_config_path = _report_value(report, "test_config_path")
-    if test_config_path:
-        args.extend(["--config", test_config_path])
-    return args
-
-
-def _package_runner_argv(
-    package_manager: str | None,
-    runner: str,
-    runner_args: list[str],
-) -> list[str]:
-    if package_manager == "pnpm":
-        return ["pnpm", "exec", runner, *runner_args]
-    if package_manager == "yarn":
-        return ["yarn", runner, *runner_args]
-    if package_manager == "bun":
-        return ["bun", "x", runner, *runner_args]
-    return ["npm", "exec", "--", runner, *runner_args]
+def _supports_test_runner(plugin: object, test_runner: str) -> bool:
+    supports_fn = getattr(plugin, "supports_test_runner", None)
+    return callable(supports_fn) and bool(supports_fn(test_runner))

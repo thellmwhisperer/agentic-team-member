@@ -57,6 +57,10 @@ def test_runner_command_for_file_keeps_pytest_for_python_tests():
     assert command_for_file("tests/test_math.py", config) == "python3 -m pytest"
 
 
+def test_runner_command_for_file_unknown_language_does_not_default_to_bun():
+    assert command_for_file("spec/worker_spec.rb", {"runner": {}}) == ""
+
+
 def _pretend_git(monkeypatch):
     monkeypatch.setattr(
         "agentic_tdd_runner.paths.shutil.which",

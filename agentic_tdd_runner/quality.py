@@ -39,114 +39,15 @@ _SOURCE_TEXT_READ_ALLOWED_FILE_MARKERS = (
 )
 
 
-def detect_package_manager(workdir: str, pkg: dict | None = None) -> str:
-    """Detect the package manager. Checks packageManager field first, then lockfiles."""
-    if pkg:
-        pm_field = pkg.get("packageManager", "")
-        if pm_field:
-            name = pm_field.split("@")[0]
-            if name in ("pnpm", "yarn", "bun", "npm"):
-                return name
-    lockfiles = {
-        "pnpm-lock.yaml": "pnpm",
-        "yarn.lock": "yarn",
-        "bun.lock": "bun",
-    }
-    for filename, pm in lockfiles.items():
-        if os.path.isfile(os.path.join(workdir, filename)):
-            return pm
-    return "npm"
-
-
-def package_exec_prefix(package_manager: str) -> str:
-    """Return the package-manager command prefix for direct binary execution."""
-    return {
-        "npm": "npx",
-        "pnpm": "pnpm exec",
-        "yarn": "yarn",
-        "bun": "bunx",
-    }.get(package_manager, "npx")
-
-
 def detect_quality_tools(lang_name: str, workdir: str) -> list[dict]:
-    """Detect quality tools from the target project's config files.
+    """Detect quality tools by delegating to the active language plugin."""
+    from agentic_tdd_runner.languages import get_language_by_name
 
-    Reads package.json (TypeScript) or pyproject.toml (Python) to discover
-    which lint/format/typecheck tools are actually installed.
-    """
-    checks = []
-
-    if lang_name == "typescript":
-        pkg_path = os.path.join(workdir, "package.json")
-        if os.path.isfile(pkg_path):
-            import json as _json
-            try:
-                with open(pkg_path) as f:
-                    pkg = _json.load(f)
-            except (OSError, ValueError):
-                return checks
-
-            scripts = pkg.get("scripts", {})
-            dev_deps = pkg.get("devDependencies", {})
-            deps = pkg.get("dependencies", {})
-            all_deps = {**deps, **dev_deps}
-            pm = detect_package_manager(workdir, pkg)
-            exec_prefix = package_exec_prefix(pm)
-
-            # Typecheck: use scripts.typecheck if defined, else tsc
-            if "typecheck" in scripts:
-                checks.append({"name": "typecheck", "command": f"{pm} run typecheck"})
-            elif "typescript" in all_deps:
-                checks.append({"name": "typecheck", "command": f"{exec_prefix} tsc --noEmit"})
-
-            # Lint: biome vs eslint
-            if any(k.startswith("@biomejs/biome") for k in all_deps):
-                checks.append({
-                    "name": "lint",
-                    "command": f"{exec_prefix} biome check {{changed_files}}",
-                    "fix": f"{exec_prefix} biome check {{changed_files}} --fix",
-                })
-            elif "eslint" in all_deps:
-                checks.append({
-                    "name": "lint",
-                    "command": f"{exec_prefix} eslint {{changed_files}}",
-                    "fix": f"{exec_prefix} eslint {{changed_files}} --fix",
-                })
-
-            # Format: biome already covers format, else prettier
-            has_biome = any(k.startswith("@biomejs/biome") for k in all_deps)
-            if not has_biome and "prettier" in all_deps:
-                checks.append({
-                    "name": "format",
-                    "command": f"{exec_prefix} prettier --check {{changed_files}}",
-                    "fix": f"{exec_prefix} prettier --write {{changed_files}}",
-                })
-
-    elif lang_name == "python":
-        pyproject_path = os.path.join(workdir, "pyproject.toml")
-        has_ruff = False
-        if os.path.isfile(pyproject_path):
-            try:
-                with open(pyproject_path, "rb") as f:
-                    import tomllib
-                    pyproject = tomllib.load(f)
-                has_ruff = "ruff" in pyproject.get("tool", {})
-            except (OSError, ValueError):
-                pass
-
-        if has_ruff:
-            checks.append({
-                "name": "lint",
-                "command": "python3 -m ruff check {changed_files}",
-                "fix": "python3 -m ruff check {changed_files} --fix",
-            })
-            checks.append({
-                "name": "format",
-                "command": "python3 -m ruff format --check {changed_files}",
-                "fix": "python3 -m ruff format {changed_files}",
-            })
-
-    return checks
+    language = get_language_by_name(lang_name)
+    detect_fn = getattr(language, "detect_quality_tools", None)
+    if callable(detect_fn):
+        return list(detect_fn(workdir))
+    return []
 
 
 def get_changed_files(workdir: str) -> list[str]:
@@ -206,7 +107,7 @@ def format_duplicated_setup_finding(path: str, report_lines: list[str]) -> str:
     id_list = ", ".join(dict.fromkeys(identifiers)) if identifiers else "shared setup"
     return (
         f"[Duplicated setup] {path}: {len(report_lines)} repeated lines. "
-        f"Move to beforeEach (TS) or fixture (Python): {id_list}"
+        f"Move to the project's shared setup pattern, such as beforeEach or a fixture: {id_list}"
     )
 
 
@@ -228,7 +129,9 @@ def run_quality_checks(
         return True, "Quality checks disabled"
 
     lang = get_language(test_file)
-    lang_name = lang.name if lang else "typescript"
+    if not lang:
+        return True, "No quality checks configured for unknown language"
+    lang_name = lang.name
     lang_cfg = quality_cfg.get(lang_name, {})
     if detect_quality_tools_fn is None:
         detect_quality_tools_fn = lambda name: detect_quality_tools(name, workdir)
@@ -244,7 +147,7 @@ def run_quality_checks(
         return True, "No changed files"
 
     # Filter to files matching the active language's extensions
-    extensions = lang.extensions if lang else [".ts", ".tsx", ".js", ".jsx"]
+    extensions = lang.extensions
     changed = [f for f in all_changed if os.path.splitext(f)[1] in extensions]
     if not changed:
         return True, "No changed files matching language"

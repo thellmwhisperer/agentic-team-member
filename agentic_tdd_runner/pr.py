@@ -427,7 +427,7 @@ def create_pr(
 
         from agentic_tdd_runner.languages import get_language
         lang = get_language(test_file)
-        extensions = lang.extensions if lang else [".ts", ".tsx", ".js", ".jsx"]
+        extensions = lang.extensions if lang else []
         untracked = subprocess.run(
             ["git", "ls-files", "--others", "--exclude-standard"],
             cwd=workdir, env=command_env, capture_output=True, text=True, timeout=pr_timeout,
