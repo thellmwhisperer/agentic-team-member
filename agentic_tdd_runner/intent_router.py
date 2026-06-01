@@ -8,6 +8,7 @@ import shlex
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 
+from agentic_tdd_runner.apply_patch import ApplyPatchError, apply_patch_touched_paths
 from agentic_tdd_runner.runner_facts import RunnerFacts
 
 
@@ -226,9 +227,13 @@ def _parse_import_time_side_effect_file(
 
 
 def _is_edit_to_path(name: str, args: dict, target_path: str | None) -> bool:
-    if not target_path or name not in {"create_file", "str_replace_editor"}:
+    if not target_path:
         return False
-    return _normalize_path(args.get("path")) == _normalize_path(target_path)
+    if name in {"create_file", "str_replace_editor"}:
+        return _normalize_path(args.get("path")) == _normalize_path(target_path)
+    if name == "apply_patch":
+        return _normalize_path(target_path) in _apply_patch_paths(args)
+    return False
 
 
 def _is_framework_lookup_or_premature_run(name: str, args: dict) -> bool:
@@ -317,11 +322,22 @@ def _test_file_from_tool_result(name: str, args: dict, result: str) -> str | Non
         path = _normalize_path(args.get("path"))
         if _is_test_file_path(path):
             return path
+    if name == "apply_patch":
+        for path in _apply_patch_paths(args):
+            if _is_test_file_path(path):
+                return path
     for match in _TEST_FILE_RE.finditer(result or ""):
         path = _normalize_path(match.group("file"))
         if _is_test_file_path(path):
             return path
     return None
+
+
+def _apply_patch_paths(args: dict) -> tuple[str, ...]:
+    try:
+        return tuple(_normalize_path(path) for path in apply_patch_touched_paths(str(args.get("patch") or "")))
+    except ApplyPatchError:
+        return ()
 
 
 def _is_test_file_path(path: str | None) -> bool:

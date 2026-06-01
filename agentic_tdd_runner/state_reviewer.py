@@ -8,6 +8,7 @@ import shlex
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 
+from agentic_tdd_runner.apply_patch import ApplyPatchError, apply_patch_touched_paths
 from agentic_tdd_runner.intent_router import IntentRouter
 from agentic_tdd_runner.runner_facts import RunnerFacts
 
@@ -179,24 +180,26 @@ class BugStateReviewer:
             self.pending_forbidden_patterns = patterns
             return
 
-        edited_path = (
-            str(args.get("path") or "")
-            if name in {"create_file", "str_replace_editor"}
-            else ""
-        )
+        edited_paths = _edited_paths(name, args)
         if (
             applied is True
-            and normalize_review_path(edited_path)
-            and normalize_review_path(edited_path) == normalize_review_path(self.pending_forbidden_file)
+            and any(
+                normalize_review_path(path) == normalize_review_path(self.pending_forbidden_file)
+                for path in edited_paths
+                if normalize_review_path(path)
+            )
         ):
             self.pending_forbidden_file = None
             self.pending_forbidden_patterns = []
 
         if (
             applied is True
-            and normalize_review_path(edited_path)
             and self.runner_facts
-            and normalize_review_path(edited_path) == normalize_review_path(self.runner_facts.source_file)
+            and any(
+                normalize_review_path(path) == normalize_review_path(self.runner_facts.source_file)
+                for path in edited_paths
+                if normalize_review_path(path)
+            )
         ):
             self.target_source_read = False
 
@@ -250,6 +253,22 @@ def normalize_review_path(path: str | None) -> str:
     if normalized == ".":
         return ""
     return normalized.removeprefix("./")
+
+
+def _edited_paths(name: str, args: dict) -> tuple[str, ...]:
+    if name in {"create_file", "str_replace_editor"}:
+        path = normalize_review_path(args.get("path"))
+        return (path,) if path else ()
+    if name == "apply_patch":
+        try:
+            return tuple(
+                normalize_review_path(path)
+                for path in apply_patch_touched_paths(str(args.get("patch") or ""))
+                if normalize_review_path(path)
+            )
+        except ApplyPatchError:
+            return ()
+    return ()
 
 
 def is_pending_forbidden_file_lookup(name: str, args: dict, pending_file: str) -> bool:

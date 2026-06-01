@@ -13,6 +13,7 @@ from agentic_tdd_runner.compiler.parser import (
     _extract_target_snippet,
     _find_symbol_line_with_source,
 )
+from agentic_tdd_runner.apply_patch import ApplyPatchError, apply_patch_touched_paths
 from agentic_tdd_runner.cookbook import _find_function_end
 from agentic_tdd_runner.languages import get_language
 
@@ -323,11 +324,15 @@ def review_tool_call(
             return None
         if name in {"create_file", "str_replace_editor"} and _same_path(path, context.get("test_file")):
             return None
+        if name == "apply_patch" and _patch_touches_only(args, context.get("test_file")):
+            return None
     elif grant == "write_source":
         path = str(args.get("path") or "")
         if name == "read_file" and _same_path(path, context.get("source_file")):
             return None
         if name == "str_replace_editor" and _same_path(path, context.get("source_file")):
+            return None
+        if name == "apply_patch" and _patch_touches_only(args, context.get("source_file")):
             return None
     elif grant == "run_test":
         if name == "run_command" and _looks_like_focused_test_command(
@@ -556,6 +561,8 @@ def consume_grant(
         path = str((args or {}).get("path") or "")
         target = (context or {}).get("test_file") if grant == "write_test" else (context or {}).get("source_file")
         if name in {"read_file", "create_file", "str_replace_editor"} and _same_path(path, target):
+            return grant
+        if name == "apply_patch" and _patch_touches_only(args or {}, target):
             return grant
         if (
             grant == "write_test"
@@ -1421,6 +1428,16 @@ def _same_path(left: str | None, right: str | None) -> bool:
 
 def _path_in_list(path: str | None, candidates: list[str]) -> bool:
     return any(_same_path(path, candidate) for candidate in candidates)
+
+
+def _patch_touches_only(args: dict, target: str | None) -> bool:
+    if not target:
+        return False
+    try:
+        paths = apply_patch_touched_paths(str(args.get("patch") or ""))
+    except ApplyPatchError:
+        return False
+    return bool(paths) and all(_same_path(path, target) for path in paths)
 
 
 def _normalize_permission_path(path: str) -> str:

@@ -581,6 +581,83 @@ def test_write_grants_allow_read_only_exploration_for_resync():
     )
 
 
+def test_write_grants_allow_apply_patch_only_for_granted_target():
+    context = _context()
+    test_patch = (
+        "*** Begin Patch\n"
+        f"*** Update File: {context['test_file']}\n"
+        "@@\n"
+        "-expect(result).toBe(false);\n"
+        "+expect(result).toBe(true);\n"
+        "*** End Patch"
+    )
+    source_patch = (
+        "*** Begin Patch\n"
+        f"*** Update File: {context['source_file']}\n"
+        "@@\n"
+        "-const result = false;\n"
+        "+const result = true;\n"
+        "*** End Patch"
+    )
+
+    allowed_test = permission.review_tool_call(
+        "apply_patch",
+        {"patch": test_patch},
+        grant="write_test",
+        context=context,
+    )
+    blocked_source_under_test = permission.review_tool_call(
+        "apply_patch",
+        {"patch": source_patch},
+        grant="write_test",
+        context=context,
+    )
+    allowed_source = permission.review_tool_call(
+        "apply_patch",
+        {"patch": source_patch},
+        grant="write_source",
+        context=context,
+    )
+
+    assert allowed_test is None
+    assert allowed_source is None
+    assert blocked_source_under_test is not None
+    assert "PERMISSION DENIED" in blocked_source_under_test.message
+
+
+def test_consume_grant_preserves_apply_patch_for_granted_target_only():
+    context = _context()
+    test_patch = (
+        "*** Begin Patch\n"
+        f"*** Update File: {context['test_file']}\n"
+        "@@\n"
+        "-expect(result).toBe(false);\n"
+        "+expect(result).toBe(true);\n"
+        "*** End Patch"
+    )
+    source_patch = (
+        "*** Begin Patch\n"
+        f"*** Update File: {context['source_file']}\n"
+        "@@\n"
+        "-const result = false;\n"
+        "+const result = true;\n"
+        "*** End Patch"
+    )
+
+    assert permission.consume_grant(
+        "apply_patch",
+        {"patch": test_patch},
+        "write_test",
+        context,
+    ) == "write_test"
+    assert permission.consume_grant(
+        "apply_patch",
+        {"patch": source_patch},
+        "write_test",
+        context,
+    ) is None
+
+
 def test_write_test_grant_allows_reading_test_setup_dependencies(tmp_path):
     test_file = tmp_path / "src" / "http" / "routeRequest.test.ts"
     dependency = tmp_path / "src" / "config" / "messages.ts"

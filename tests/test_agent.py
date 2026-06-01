@@ -2540,7 +2540,9 @@ class TestExecuteToolReactiveChecks:
     def test_tool_applied_status_marks_edit_success_and_failure(self):
         assert _tool_applied_status("str_replace_editor", "OK: replaced in src/file.ts") is True
         assert _tool_applied_status("create_file", "OK: created src/file.test.ts") is True
+        assert _tool_applied_status("apply_patch", "OK: applied patch (updated src/file.ts)") is True
         assert _tool_applied_status("str_replace_editor", "ERROR: old_str not found") is False
+        assert _tool_applied_status("apply_patch", "ERROR: apply_patch failed") is False
         assert _tool_applied_status("read_file", "contents") is None
 
     def test_str_replace_editor_appends_reactive_typecheck_failure(self, tmp_path, monkeypatch):

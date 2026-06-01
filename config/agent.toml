@@ -115,7 +115,7 @@ When you're past 70% of steps, prioritize getting to DONE over perfecting code.
 - Production `__set...ForTests` test-only exports are rejected.
 
 ## Other rules
-- Read before editing — you need the exact text for str_replace_editor.
+- Read before editing. Prefer apply_patch with focused context for edits; use str_replace_editor for small exact replacements or resync fallback.
 - Make minimal changes. Don't refactor unrelated code.
 - If a test fails, read the error carefully and fix it. Don't give up.
 - When the test passes, say DONE. Don't keep exploring.
