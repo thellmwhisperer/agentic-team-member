@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -213,16 +214,17 @@ def _js_ts_registered_events_by_imported_module(
         text = _read_text(source_file)
         if not text:
             continue
-        imports = _js_ts_external_imports(text)
-        if not imports:
+        bindings = _js_ts_import_bindings(text)
+        if not bindings:
             continue
-        events = _js_ts_callback_registration_event_names(text)
-        if not events:
-            continue
-        for module_name in imports:
+        resolved_bindings = _js_ts_resolved_bindings(text, bindings)
+        for target, event_name in _js_ts_callback_registrations(text):
+            module_name = resolved_bindings.get(_js_ts_root_identifier(target))
+            if not module_name:
+                continue
             if not _has_node_dependency_type_or_source(root, module_name):
                 continue
-            module_events.setdefault(module_name, set()).update(events)
+            module_events.setdefault(module_name, set()).add(event_name)
     return module_events
 
 
@@ -381,31 +383,113 @@ def _split_arg_names(args_text: str) -> list[str]:
     return names
 
 
-def _js_ts_external_imports(source_text: str) -> set[str]:
-    modules: set[str] = set()
-    for match in re.finditer(r"\bfrom\s+['\"](?P<module>[^'\"]+)['\"]", source_text):
-        module = match.group("module")
-        if _is_external_module(module):
-            modules.add(module)
-    for match in re.finditer(r"\bimport\s*\(\s*['\"](?P<module>[^'\"]+)['\"]\s*\)", source_text):
-        module = match.group("module")
-        if _is_external_module(module):
-            modules.add(module)
-    for match in re.finditer(r"\brequire\(\s*['\"](?P<module>[^'\"]+)['\"]\s*\)", source_text):
-        module = match.group("module")
-        if _is_external_module(module):
-            modules.add(module)
-    return modules
+def _js_ts_import_bindings(source_text: str) -> dict[str, str]:
+    bindings: dict[str, str] = {}
+    identifier = r"[A-Za-z_$][\w$]*"
+
+    for match in re.finditer(
+        rf"\bimport\s+(?P<default>{identifier})\s*,\s*\{{(?P<named>[^}}]+)\}}\s*from\s*['\"](?P<module>[^'\"]+)['\"]",
+        source_text,
+        re.DOTALL,
+    ):
+        _add_js_ts_binding(bindings, match.group("default"), match.group("module"))
+        _add_js_ts_named_bindings(bindings, match.group("named"), match.group("module"))
+    for match in re.finditer(
+        rf"\bimport\s+\{{(?P<named>[^}}]+)\}}\s*from\s*['\"](?P<module>[^'\"]+)['\"]",
+        source_text,
+        re.DOTALL,
+    ):
+        _add_js_ts_named_bindings(bindings, match.group("named"), match.group("module"))
+    for match in re.finditer(
+        rf"\bimport\s+\*\s+as\s+(?P<name>{identifier})\s+from\s*['\"](?P<module>[^'\"]+)['\"]",
+        source_text,
+    ):
+        _add_js_ts_binding(bindings, match.group("name"), match.group("module"))
+    for match in re.finditer(
+        rf"\bimport\s+(?P<name>{identifier})\s+from\s*['\"](?P<module>[^'\"]+)['\"]",
+        source_text,
+    ):
+        _add_js_ts_binding(bindings, match.group("name"), match.group("module"))
+    for match in re.finditer(
+        rf"\b(?:const|let|var)\s+(?P<name>{identifier})\s*=\s*require\(\s*['\"](?P<module>[^'\"]+)['\"]\s*\)",
+        source_text,
+    ):
+        _add_js_ts_binding(bindings, match.group("name"), match.group("module"))
+    for match in re.finditer(
+        r"\b(?:const|let|var)\s+\{(?P<named>[^}]+)\}\s*=\s*require\(\s*['\"](?P<module>[^'\"]+)['\"]\s*\)",
+        source_text,
+        re.DOTALL,
+    ):
+        _add_js_ts_named_bindings(bindings, match.group("named"), match.group("module"), alias_separator=":")
+    return bindings
 
 
-def _js_ts_callback_registration_event_names(source_text: str) -> set[str]:
-    return {
-        match.group("event")
+def _add_js_ts_named_bindings(
+    bindings: dict[str, str],
+    names_text: str,
+    module_name: str,
+    *,
+    alias_separator: str = " as ",
+) -> None:
+    for raw in names_text.split(","):
+        item = raw.strip()
+        if not item:
+            continue
+        if item.startswith("type "):
+            item = item[5:].strip()
+        if alias_separator in item:
+            _export_name, local_name = [piece.strip() for piece in item.split(alias_separator, 1)]
+        else:
+            local_name = item
+        _add_js_ts_binding(bindings, local_name, module_name)
+
+
+def _add_js_ts_binding(bindings: dict[str, str], local_name: str, module_name: str) -> None:
+    if not _is_external_module(module_name):
+        return
+    if re.match(r"^[A-Za-z_$][\w$]*$", local_name):
+        bindings[local_name] = module_name
+
+
+def _js_ts_resolved_bindings(source_text: str, bindings: dict[str, str]) -> dict[str, str]:
+    resolved = dict(bindings)
+    identifier = r"[A-Za-z_$][\w$]*"
+    assignment_re = re.compile(
+        rf"\b(?:const|let|var)\s+(?P<name>{identifier})\s*=\s*(?:new\s+)?(?P<source>{identifier})\b"
+    )
+    typed_binding_re = re.compile(
+        rf"\b(?:const|let|var)\s+(?P<name>{identifier})\s*:\s*(?P<source>{identifier})\s*\."
+    )
+    changed = True
+    while changed:
+        changed = False
+        for match in typed_binding_re.finditer(source_text):
+            source_module = resolved.get(match.group("source"))
+            if source_module and resolved.get(match.group("name")) != source_module:
+                resolved[match.group("name")] = source_module
+                changed = True
+        for match in assignment_re.finditer(source_text):
+            source_module = resolved.get(match.group("source"))
+            if source_module and resolved.get(match.group("name")) != source_module:
+                resolved[match.group("name")] = source_module
+                changed = True
+    return resolved
+
+
+def _js_ts_callback_registrations(source_text: str) -> list[tuple[str, str]]:
+    identifier = r"[A-Za-z_$][\w$]*"
+    target = rf"{identifier}(?:\s*\.\s*{identifier})*"
+    return [
+        (re.sub(r"\s+", "", match.group("target")), match.group("event"))
         for match in re.finditer(
-            r"\.\s*(?:on|once)\(\s*['\"](?P<event>[^'\"]+)['\"]\s*,",
+            rf"(?P<target>{target})\s*\.\s*(?:on|once)\(\s*['\"](?P<event>[^'\"]+)['\"]\s*,",
             source_text,
         )
-    }
+    ]
+
+
+def _js_ts_root_identifier(target: str) -> str:
+    return target.split(".", 1)[0]
 
 
 def _has_node_dependency_type_or_source(root: Path, module_name: str) -> bool:
@@ -456,12 +540,13 @@ def _read_node_module_sources(root: Path, module_name: str) -> list[tuple[Path, 
 
 def _iter_js_ts_source_files(root: Path) -> list[Path]:
     files: list[Path] = []
-    for path in root.rglob("*"):
-        if not path.is_file() or path.suffix not in JS_TS_SOURCE_SUFFIXES:
-            continue
-        if any(part in SKIP_DIRS for part in path.relative_to(root).parts):
-            continue
-        files.append(path)
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [name for name in dirnames if name not in SKIP_DIRS]
+        base = Path(dirpath)
+        for filename in filenames:
+            path = base / filename
+            if path.suffix in JS_TS_SOURCE_SUFFIXES:
+                files.append(path)
     return sorted(files)
 
 
@@ -501,7 +586,7 @@ def _all_dependencies(pkg: dict[str, Any]) -> set[str]:
 
 
 def _module_id(module_name: str) -> str:
-    name = module_name.rsplit("/", 1)[-1]
+    name = module_name
     if name.endswith(".js"):
         name = name[:-3]
     return re.sub(r"[^A-Za-z0-9]+", "-", name).strip("-") or "dependency"
