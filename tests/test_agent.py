@@ -4752,6 +4752,7 @@ class TestDiscoveryIntegration:
                 "cookbook_text": "## Mock Cookbook\n",
             }
 
+        config = self._make_config()
         args = SimpleNamespace(
             issue="bug text",
             source=None,
@@ -4760,7 +4761,7 @@ class TestDiscoveryIntegration:
             config="unused.toml",
             log_dir=str(tmp_path),
         )
-        monkeypatch.setattr("agentic_tdd_runner.config.load_config", lambda path: self._make_config())
+        monkeypatch.setattr("agentic_tdd_runner.config.load_config", lambda path: config)
         monkeypatch.setattr("agentic_tdd_runner.agent.parse_args", lambda: args)
         monkeypatch.setattr("agentic_tdd_runner.agent.init_log", lambda: str(tmp_path / "agent.jsonl"))
         monkeypatch.setattr("agentic_tdd_runner.agent.emit", lambda msg: None)
@@ -4794,6 +4795,7 @@ class TestDiscoveryIntegration:
                 "source_path": "src/http/router.ts",
                 "symbol": "routeRequest",
                 "project_root": str(tmp_path),
+                "config": config,
             }
         ]
         user_msg = next(m for m in captured[0] if m["role"] == "user")
@@ -4845,6 +4847,7 @@ The service reports 0 months.
 1. Export processRenewal so it can be tested
 2. Read cumulative months from the renewal eventPayload
 """
+        config = self._make_config()
         args = SimpleNamespace(
             issue=issue,
             source=None,
@@ -4870,7 +4873,7 @@ The service reports 0 months.
                 "cookbook_text": "## Mock Cookbook\n",
             }
 
-        monkeypatch.setattr("agentic_tdd_runner.config.load_config", lambda path: self._make_config())
+        monkeypatch.setattr("agentic_tdd_runner.config.load_config", lambda path: config)
         monkeypatch.setattr("agentic_tdd_runner.agent.parse_args", lambda: args)
         monkeypatch.setattr("agentic_tdd_runner.agent.init_log", lambda: str(tmp_path / "agent.jsonl"))
         monkeypatch.setattr("agentic_tdd_runner.agent.emit", lambda msg: None)
@@ -4892,6 +4895,7 @@ The service reports 0 months.
                 "source_path": "src/events/client.ts",
                 "symbol": "processRenewal",
                 "project_root": str(tmp_path),
+                "config": config,
             }
         ]
         user_msg = next(m for m in captured[0] if m["role"] == "user")
