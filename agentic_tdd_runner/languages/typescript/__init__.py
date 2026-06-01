@@ -12,6 +12,7 @@ from agentic_tdd_runner.apply_patch import ApplyPatchError, apply_patch_touched_
 from agentic_tdd_runner.languages import register
 from agentic_tdd_runner.languages.capabilities import OptionalLanguageCapabilityDefaults
 from agentic_tdd_runner.languages.typescript import paths, seams, syntax
+from agentic_tdd_runner.runner_authority import override_detected_runner
 from agentic_tdd_runner.test_command_templates import custom_test_command_template
 
 BUN_TEST_API_IMPORT = 'import { beforeEach, describe, expect, mock, test } from "bun:test";'
@@ -82,6 +83,15 @@ class TypeScriptLanguage(OptionalLanguageCapabilityDefaults):
     def test_command_template(self, config: dict | None = None) -> str:
         runner_config = ((config or {}).get("runner", {}) or {})
         configured = _configured_test_command(runner_config.get("command"))
+        if override_detected_runner(runner_config):
+            configured_runner = _report_value(runner_config, "framework")
+            if configured:
+                return configured
+            if configured_runner:
+                return self.effective_test_command_template(
+                    {"test_runner": configured_runner},
+                    None,
+                )
         detected = self.effective_test_command_template(
             runner_config.get("bootstrap"),
             configured,

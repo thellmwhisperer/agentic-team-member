@@ -7,6 +7,7 @@ import shutil
 import subprocess
 from pathlib import Path, PurePosixPath
 
+from agentic_tdd_runner.runner_authority import override_detected_runner
 from agentic_tdd_runner.runner_command import effective_test_command_template
 
 GIT_COMMAND_TIMEOUT_SECONDS = 10
@@ -42,6 +43,8 @@ def test_runner_command_for_file(path: str, config: dict | None = None) -> str:
         if command:
             return command
     runner_config = (config or {}).get("runner", {}) or {}
+    if override_detected_runner(runner_config) and runner_config.get("command"):
+        return str(runner_config.get("command"))
     return effective_test_command_template(
         runner_config.get("bootstrap"),
         runner_config.get("command"),
