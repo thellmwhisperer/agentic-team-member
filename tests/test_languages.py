@@ -1,4 +1,6 @@
 """Tests for language plugin registry."""
+import importlib
+
 from agentic_tdd_runner.languages import get_language, plugins, supported_extensions
 from agentic_tdd_runner.languages.capabilities import (
     LanguageCapabilities,
@@ -44,6 +46,20 @@ class TestRegistry:
 
     def test_unknown_extension_has_no_language_capability(self):
         assert get_language("README.md") is None
+
+    def test_builtin_language_modules_are_packages(self):
+        typescript_module = importlib.import_module("agentic_tdd_runner.languages.typescript")
+        python_module = importlib.import_module("agentic_tdd_runner.languages.python")
+
+        assert hasattr(typescript_module, "__path__")
+        assert hasattr(python_module, "__path__")
+
+    def test_direct_language_class_imports_still_work(self):
+        from agentic_tdd_runner.languages.python import PythonLanguage
+        from agentic_tdd_runner.languages.typescript import TypeScriptLanguage
+
+        assert isinstance(get_language("file.py"), PythonLanguage)
+        assert isinstance(get_language("file.ts"), TypeScriptLanguage)
 
 
 class TestTypeScriptPlugin:
