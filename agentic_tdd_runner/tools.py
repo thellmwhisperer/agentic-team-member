@@ -7,12 +7,16 @@ import subprocess
 from collections.abc import Callable, MutableMapping
 from pathlib import Path
 
+from agentic_tdd_runner.apply_patch import (
+    ApplyPatchError,
+    apply_patch_to_workdir,
+)
 from agentic_tdd_runner.shell import build_command_env
 
 
 def tool_applied_status(name: str, result: str) -> bool | None:
     """Return whether a mutating tool call actually changed files."""
-    if name not in {"str_replace_editor", "create_file"}:
+    if name not in {"str_replace_editor", "create_file", "apply_patch"}:
         return None
     return result.startswith("OK:")
 
@@ -270,6 +274,43 @@ def execute_tool(
                     is_test_file_path=is_test_file_path,
                 )
             )
+
+        if name == "apply_patch":
+            try:
+                outcome = apply_patch_to_workdir(
+                    args["patch"],
+                    workdir=workdir,
+                    resolve_repo_path=resolve_repo_path,
+                )
+            except ApplyPatchError as e:
+                return f"ERROR: apply_patch failed: {e}"
+
+            for rel_path in (*outcome.changed_paths, *outcome.deleted_paths):
+                file_read_cache.pop(resolve_repo_path(rel_path), None)
+
+            result = f"OK: applied patch ({'; '.join(outcome.summary)})"
+            for rel_path in outcome.changed_paths:
+                result += reactive_typecheck_feedback(
+                    rel_path,
+                    workdir=workdir,
+                    config=config,
+                    detect_quality_tools=detect_quality_tools,
+                    typecheck_ownership_hint=typecheck_ownership_hint,
+                )
+                result += reactive_test_feedback(
+                    rel_path,
+                    workdir=workdir,
+                    config=config,
+                    is_test_file_path=is_test_file_path,
+                    test_runner_command_for_file=test_runner_command_for_file,
+                )
+                result += reactive_forbidden_feedback(
+                    rel_path,
+                    workdir=workdir,
+                    config=config,
+                    is_test_file_path=is_test_file_path,
+                )
+            return result
 
         return f"ERROR: unknown tool {name}"
 

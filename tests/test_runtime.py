@@ -36,6 +36,21 @@ def test_has_contract_evidence_matches_model_facing_contract_text():
     assert runtime.has_contract_evidence(issue_text, episode=None) is True
 
 
+def test_edited_test_file_detects_apply_patch_test_path():
+    patch = (
+        "*** Begin Patch\n"
+        "*** Add File: src/twitch/handleResub.test.ts\n"
+        "+test('regression', () => {});\n"
+        "*** End Patch"
+    )
+
+    assert runtime._edited_test_file(
+        "apply_patch",
+        {"patch": patch},
+        lambda path: path.endswith(".test.ts"),
+    )
+
+
 def test_reporter_hypothesis_and_callback_registration_do_not_block_contract_lookup():
     issue_text = """Bug: processRenewal reports 0 months
 

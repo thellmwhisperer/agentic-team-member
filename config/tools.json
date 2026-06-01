@@ -103,8 +103,22 @@
   {
     "type": "function",
     "function": {
+      "name": "apply_patch",
+      "description": "Apply a Codex-style multi-file patch. Use this for code edits when exact string replacement would be brittle. The patch must start with *** Begin Patch and end with *** End Patch. File headers are *** Add File: <path>, *** Update File: <path>, and *** Delete File: <path>. Update hunks start with @@ and use space for context, - for removed lines, and + for added lines.",
+      "parameters": {
+        "type": "object",
+        "required": ["patch"],
+        "properties": {
+          "patch": { "type": "string", "description": "Patch text using the Codex apply_patch format" }
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
       "name": "str_replace_editor",
-      "description": "Replace an exact string in a file with new content. old_str must match exactly (including whitespace). Use for editing source code.",
+      "description": "Replace an exact string in a file with new content. old_str must match exactly (including whitespace). Use for small exact edits after reading the file, or as a fallback if apply_patch cannot locate the hunk.",
       "parameters": {
         "type": "object",
         "required": ["path", "old_str", "new_str"],

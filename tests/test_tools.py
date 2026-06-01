@@ -74,6 +74,208 @@ def test_str_replace_invalidates_read_cache(tmp_path):
     assert target.read_text() == "const x = 2;\n"
 
 
+def test_apply_patch_updates_file_with_context_and_invalidates_cache(tmp_path):
+    target = tmp_path / "src" / "file.ts"
+    target.parent.mkdir()
+    target.write_text("export function value() {\n  return 1;\n}\n")
+    cache: dict[Path, int] = {}
+
+    _execute_tool("read_file", {"path": "src/file.ts"}, tmp_path, cache=cache)
+    result, _ = _execute_tool(
+        "apply_patch",
+        {
+            "patch": (
+                "*** Begin Patch\n"
+                "*** Update File: src/file.ts\n"
+                "@@ export function value\n"
+                " export function value() {\n"
+                "-  return 1;\n"
+                "+  return 2;\n"
+                " }\n"
+                "*** End Patch"
+            )
+        },
+        tmp_path,
+        cache=cache,
+    )
+
+    assert result == "OK: applied patch (updated src/file.ts)"
+    assert cache == {}
+    assert target.read_text() == "export function value() {\n  return 2;\n}\n"
+
+
+def test_apply_patch_ignores_unified_diff_line_headers(tmp_path):
+    target = tmp_path / "src" / "file.ts"
+    target.parent.mkdir()
+    target.write_text("export function value() {\n  return 1;\n}\n")
+
+    result, _ = _execute_tool(
+        "apply_patch",
+        {
+            "patch": (
+                "*** Begin Patch\n"
+                "*** Update File: src/file.ts\n"
+                "@@ -1,3 +1,3 @@ export function value\n"
+                " export function value() {\n"
+                "-  return 1;\n"
+                "+  return 2;\n"
+                " }\n"
+                "*** End Patch"
+            )
+        },
+        tmp_path,
+    )
+
+    assert result == "OK: applied patch (updated src/file.ts)"
+    assert target.read_text() == "export function value() {\n  return 2;\n}\n"
+
+
+def test_apply_patch_is_atomic_when_later_hunk_fails(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    first = src / "a.ts"
+    second = src / "b.ts"
+    first.write_text("const a = 1;\n")
+    second.write_text("const b = 1;\n")
+
+    result, _ = _execute_tool(
+        "apply_patch",
+        {
+            "patch": (
+                "*** Begin Patch\n"
+                "*** Update File: src/a.ts\n"
+                "@@\n"
+                "-const a = 1;\n"
+                "+const a = 2;\n"
+                "*** Update File: src/b.ts\n"
+                "@@\n"
+                "-const missing = 1;\n"
+                "+const b = 2;\n"
+                "*** End Patch"
+            )
+        },
+        tmp_path,
+    )
+
+    assert result.startswith("ERROR: apply_patch failed:")
+    assert first.read_text() == "const a = 1;\n"
+    assert second.read_text() == "const b = 1;\n"
+
+
+def test_apply_patch_adds_and_deletes_files(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    obsolete = src / "obsolete.ts"
+    created = src / "created.ts"
+    obsolete.write_text("export const old = true;\n")
+
+    result, _ = _execute_tool(
+        "apply_patch",
+        {
+            "patch": (
+                "*** Begin Patch\n"
+                "*** Add File: src/created.ts\n"
+                "+export const created = true;\n"
+                "*** Delete File: src/obsolete.ts\n"
+                "*** End Patch"
+            )
+        },
+        tmp_path,
+    )
+
+    assert result == "OK: applied patch (added src/created.ts; deleted src/obsolete.ts)"
+    assert created.read_text() == "export const created = true;\n"
+    assert not obsolete.exists()
+
+
+def test_apply_patch_rejects_deleting_directories_during_planning(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+
+    result, _ = _execute_tool(
+        "apply_patch",
+        {
+            "patch": (
+                "*** Begin Patch\n"
+                "*** Delete File: src\n"
+                "*** End Patch"
+            )
+        },
+        tmp_path,
+    )
+
+    assert result == "ERROR: apply_patch failed: src is not a file"
+    assert src.is_dir()
+
+
+def test_apply_patch_rejects_ambiguous_hunk(tmp_path):
+    target = tmp_path / "src" / "file.ts"
+    target.parent.mkdir()
+    target.write_text("const value = 1;\n\nconst value = 1;\n")
+
+    result, _ = _execute_tool(
+        "apply_patch",
+        {
+            "patch": (
+                "*** Begin Patch\n"
+                "*** Update File: src/file.ts\n"
+                "@@\n"
+                "-const value = 1;\n"
+                "+const value = 2;\n"
+                "*** End Patch"
+            )
+        },
+        tmp_path,
+    )
+
+    assert result == "ERROR: apply_patch failed: hunk for src/file.ts matched 2 locations; add more context"
+    assert target.read_text() == "const value = 1;\n\nconst value = 1;\n"
+
+
+def test_apply_patch_rejects_paths_outside_repo(tmp_path):
+    outside_name = f"outside-{tmp_path.name}.ts"
+    result, _ = _execute_tool(
+        "apply_patch",
+        {
+            "patch": (
+                "*** Begin Patch\n"
+                f"*** Add File: ../{outside_name}\n"
+                "+export const outside = true;\n"
+                "*** End Patch"
+            )
+        },
+        tmp_path,
+    )
+
+    assert result == "ERROR: apply_patch failed: file path must stay inside the repository"
+    assert not (tmp_path.parent / outside_name).exists()
+
+
+def test_apply_patch_includes_reactive_test_feedback(tmp_path, monkeypatch):
+    def fake_run(command, **_kwargs):
+        assert command == ["bun", "test", "src/new.test.ts"]
+        return subprocess.CompletedProcess(command, 1, stdout="expected true\n", stderr="")
+
+    monkeypatch.setattr("agentic_tdd_runner.tools.subprocess.run", fake_run)
+
+    result, _ = _execute_tool(
+        "apply_patch",
+        {
+            "patch": (
+                "*** Begin Patch\n"
+                "*** Add File: src/new.test.ts\n"
+                "+test('fails first', () => expect(false).toBe(true));\n"
+                "*** End Patch"
+            )
+        },
+        tmp_path,
+    )
+
+    assert result.startswith("OK: applied patch (added src/new.test.ts)")
+    assert "[Reactive test] failed" in result
+    assert "expected true" in result
+
+
 def test_str_replace_old_str_not_found_returns_current_excerpt(tmp_path):
     target = tmp_path / "src" / "file.ts"
     target.parent.mkdir()
@@ -552,6 +754,8 @@ def test_str_replace_editor_includes_reactive_forbidden_feedback(tmp_path, monke
 def test_tool_status_and_loop_signature_helpers():
     assert tool_applied_status("str_replace_editor", "OK: replaced in src/file.ts") is True
     assert tool_applied_status("str_replace_editor", "ERROR: old_str not found") is False
+    assert tool_applied_status("apply_patch", "OK: applied patch (updated src/file.ts)") is True
+    assert tool_applied_status("apply_patch", "ERROR: apply_patch failed") is False
     assert tool_applied_status("read_file", "contents") is None
     assert tool_loop_signature("read_file", {"path": "src/file.ts"}) == "read_file:src/file.ts"
     assert tool_loop_signature("rg", {"pattern": "foo", "path": "src"}) == "rg:foo:src:"

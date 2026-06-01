@@ -7,6 +7,7 @@ from collections.abc import Callable
 from agentic_tdd_runner import completion as _completion
 from agentic_tdd_runner import llm as _llm
 from agentic_tdd_runner import permission as _permission
+from agentic_tdd_runner.apply_patch import ApplyPatchError, apply_patch_touched_paths
 from agentic_tdd_runner.state_reviewer import BugStateReviewer
 
 
@@ -56,10 +57,15 @@ def thinking_phase(
 
 
 def _edited_test_file(name: str, args: dict, is_test_file_path: Callable[[str], bool]) -> bool:
-    if name not in {"create_file", "str_replace_editor"}:
-        return False
-    path = str((args or {}).get("path") or "")
-    return bool(path and is_test_file_path(path))
+    if name in {"create_file", "str_replace_editor"}:
+        path = str((args or {}).get("path") or "")
+        return bool(path and is_test_file_path(path))
+    if name == "apply_patch":
+        try:
+            return any(is_test_file_path(path) for path in apply_patch_touched_paths(str((args or {}).get("patch") or "")))
+        except ApplyPatchError:
+            return False
+    return False
 
 
 def _build_rerouted_episode(
