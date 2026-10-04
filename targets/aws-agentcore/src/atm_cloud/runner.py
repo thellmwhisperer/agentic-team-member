@@ -37,23 +37,17 @@ class RunResult:
 
 
 class MemoryClient(Protocol):
-    def query(self, **kwargs: Any) -> Any:
-        ...
-
     def store(self, **kwargs: Any) -> Any:
         ...
 
 
 class Harness(Protocol):
-    def run(self, job: AtmJob, context: Any) -> CommandResult:
+    def run(self, job: AtmJob) -> CommandResult:
         ...
 
 
 class NoopMemoryClient:
     """Memory adapter used when optional durable memory is not configured."""
-
-    def query(self, **kwargs: Any) -> Any:
-        return {"items": [], "skipped": True}
 
     def store(self, **kwargs: Any) -> Any:
         return {"skipped": True}
@@ -77,7 +71,7 @@ class SubprocessAtmHarness:
         self.timeout = timeout
         self.github_token = github_token
 
-    def run(self, job: AtmJob, context: Any) -> CommandResult:
+    def run(self, job: AtmJob) -> CommandResult:
         run_nonce = os.environ.get("ATM_RUN_NONCE") or f"{job.run_id}-{int(time.time())}"
         workdir = os.environ.get("ATM_TARGET_WORKDIR", f"/tmp/atm-agentcore/runs/{run_nonce}")
         run_root = os.environ.get("ATM_RUN_ROOT", f"/tmp/atm-agentcore/worktrees/{run_nonce}")
@@ -260,23 +254,6 @@ class AtmCloudRunner:
 
     def run(self, job: AtmJob) -> RunResult:
         events: list[RunEvent] = []
-        try:
-            context = self.memory.query(
-                query=f"latest handoff for {job.repo}",
-                project=job.roca_project,
-                limit=5,
-            )
-            events.append(RunEvent("memory_context", "succeeded", {"project": job.roca_project}))
-        except Exception as exc:
-            context = {"items": []}
-            events.append(
-                RunEvent(
-                    "memory_context",
-                    "failed",
-                    {"project": job.roca_project, "error": str(exc)},
-                )
-            )
-
         if job.mode == "dry_run":
             command = CommandResult(
                 exit_code=0,
@@ -287,7 +264,7 @@ class AtmCloudRunner:
             events.append(RunEvent("dry_run", "succeeded", {"repo": job.repo}))
         else:
             try:
-                command = self.harness.run(job, context)
+                command = self.harness.run(job)
                 command = _with_extracted_pr_url(command)
                 harness_status = "succeeded" if command.exit_code == 0 else "failed"
                 events.append(

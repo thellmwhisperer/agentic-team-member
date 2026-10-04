@@ -9,12 +9,7 @@ from atm_cloud.runner import SubprocessAtmHarness, _extract_pr_url, _run_log_dir
 
 class FakeMemory:
     def __init__(self):
-        self.queries = []
         self.stores = []
-
-    def query(self, **kwargs):
-        self.queries.append(kwargs)
-        return {"items": [{"id": 1, "content": "previous handoff"}]}
 
     def store(self, **kwargs):
         self.stores.append(kwargs)
@@ -26,15 +21,9 @@ class FakeHarness:
         self.result = result
         self.calls = []
 
-    def run(self, job, context):
-        self.calls.append((job, context))
+    def run(self, job):
+        self.calls.append(job)
         return self.result
-
-
-class FailingQueryMemory(FakeMemory):
-    def query(self, **kwargs):
-        self.queries.append(kwargs)
-        raise RuntimeError("roca query unavailable")
 
 
 class FailingStoreMemory(FakeMemory):
@@ -47,13 +36,13 @@ class FailingHarness:
     def __init__(self):
         self.calls = []
 
-    def run(self, job, context):
-        self.calls.append((job, context))
+    def run(self, job):
+        self.calls.append(job)
         raise RuntimeError("harness timed out")
 
 
 class AtmCloudRunnerTest(unittest.TestCase):
-    def test_successful_run_reads_context_and_stores_handoff(self):
+    def test_successful_run_stores_handoff(self):
         memory = FakeMemory()
         harness = FakeHarness(
             CommandResult(
@@ -69,9 +58,7 @@ class AtmCloudRunnerTest(unittest.TestCase):
         result = runner.run(job)
 
         self.assertEqual(result.status, "succeeded")
-        self.assertEqual([event.phase for event in result.events], ["memory_context", "atm_harness", "memory_handoff"])
-        self.assertEqual(memory.queries[0]["project"], "acme/repo")
-        self.assertEqual(harness.calls[0][1]["items"][0]["content"], "previous handoff")
+        self.assertEqual([event.phase for event in result.events], ["atm_harness", "memory_handoff"])
         self.assertIn("succeeded", memory.stores[0]["content"])
         self.assertEqual(memory.stores[0]["metadata"]["pr_url"], "https://github.com/acme/repo/pull/5")
 
@@ -114,20 +101,6 @@ class AtmCloudRunnerTest(unittest.TestCase):
         self.assertEqual(memory.stores[0]["metadata"]["pr_url"], "https://github.com/acme/repo/pull/7")
         self.assertIn("PR: https://github.com/acme/repo/pull/7.", memory.stores[0]["content"])
 
-    def test_memory_query_failure_uses_empty_context_and_continues(self):
-        memory = FailingQueryMemory()
-        harness = FakeHarness(CommandResult(exit_code=0, stdout="ok", stderr=""))
-        runner = AtmCloudRunner(memory=memory, harness=harness)
-        job = AtmJob.from_dict({"repo": "acme/repo", "issue_number": 12})
-
-        result = runner.run(job)
-
-        self.assertEqual(result.status, "succeeded")
-        self.assertEqual(result.events[0].phase, "memory_context")
-        self.assertEqual(result.events[0].status, "failed")
-        self.assertEqual(harness.calls[0][1], {"items": []})
-        self.assertIn("roca query unavailable", result.events[0].metadata["error"])
-
     def test_harness_exception_returns_deterministic_failure(self):
         memory = FakeMemory()
         harness = FailingHarness()
@@ -138,8 +111,8 @@ class AtmCloudRunnerTest(unittest.TestCase):
 
         self.assertEqual(result.status, "failed")
         self.assertEqual(result.command.exit_code, 1)
-        self.assertEqual(result.events[1].phase, "atm_harness")
-        self.assertEqual(result.events[1].status, "failed")
+        self.assertEqual(result.events[0].phase, "atm_harness")
+        self.assertEqual(result.events[0].status, "failed")
         self.assertEqual(result.command.metadata["exception"], "RuntimeError")
         self.assertIn("harness timed out", memory.stores[0]["content"])
 
@@ -166,7 +139,7 @@ class AtmCloudRunnerTest(unittest.TestCase):
         result = runner.run(job)
 
         self.assertEqual(result.status, "succeeded")
-        self.assertEqual([event.phase for event in result.events], ["memory_context", "dry_run", "memory_handoff"])
+        self.assertEqual([event.phase for event in result.events], ["dry_run", "memory_handoff"])
         self.assertEqual(harness.calls, [])
         self.assertTrue(memory.stores[0]["metadata"]["dry_run"])
 
@@ -181,7 +154,7 @@ class AtmCloudRunnerTest(unittest.TestCase):
                 python="/missing/python",
                 module="custom.atm",
                 repo_root="/tmp/repo",
-            ).run(job, {})
+            ).run(job)
 
         self.assertEqual(harness.module, "custom.atm")
 
@@ -196,7 +169,7 @@ class AtmCloudRunnerTest(unittest.TestCase):
                     run.return_value.returncode = 0
                     run.return_value.stdout = ""
                     run.return_value.stderr = ""
-                    result = harness.run(job, {})
+                    result = harness.run(job)
 
         self.assertEqual(result.exit_code, 0)
         command = result.metadata["command"]
@@ -221,7 +194,7 @@ class AtmCloudRunnerTest(unittest.TestCase):
                 run.return_value.returncode = 0
                 run.return_value.stdout = ""
                 run.return_value.stderr = ""
-                harness.run(job, {})
+                harness.run(job)
 
         env = run.call_args.kwargs["env"]
         self.assertEqual(env["GH_TOKEN"], "secret-token")
@@ -237,7 +210,7 @@ class AtmCloudRunnerTest(unittest.TestCase):
                 run.return_value.returncode = 0
                 run.return_value.stdout = ""
                 run.return_value.stderr = ""
-                result = harness.run(job, {})
+                result = harness.run(job)
 
         command = result.metadata["command"]
         self.assertIn("--config", command)
@@ -258,7 +231,7 @@ class AtmCloudRunnerTest(unittest.TestCase):
                 run.return_value.returncode = 0
                 run.return_value.stdout = ""
                 run.return_value.stderr = ""
-                result = harness.run(job, {})
+                result = harness.run(job)
 
         command = result.metadata["command"]
         self.assertIn("--config", command)
