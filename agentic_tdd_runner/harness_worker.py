@@ -22,7 +22,8 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from agentic_tdd_runner import quality, verification
+from agentic_tdd_runner import quality
+from agentic_tdd_runner import judge as follow_up_judge, verification
 from agentic_tdd_runner.config import load_config
 from agentic_tdd_runner.environment import (
     EnvironmentPrepError,
@@ -366,14 +367,15 @@ def follow_up_tests_on_disk(workdir: str) -> dict[int, str]:
 
 
 def validate_follow_ups(report: dict | None, workdir: str, config: dict, log, *,
-                        base_sha: str | None = None, issue_text: str = "") -> list[dict]:
+                        base_sha: str | None = None, issue_text: str = "", issue: dict | None = None) -> list[dict]:
     """A follow-up is a pair: the declared entry and the red test on disk. Either half alone is
     recorded as rejected; a test found on disk without a declaration is still validated, because
     the test is the evidence and the declaration is only its label.
 
     `accepted` means the red test proves a gap. `chainable` means it may become the next unit of
-    this run: accepted, its test calls code that already exists in the base commit, and it cites
-    a criterion that is in the issue. Slop fails one of the last two."""
+    this run: accepted, its test calls code that already exists in the base commit, it cites
+    a criterion that is in the issue, and the judge (if enabled) says it serves the issue rather
+    than widening it. Slop fails one of the last three."""
     items = (report or {}).get("follow_ups")
     declared = [i if isinstance(i, dict) else {} for i in (items if isinstance(items, list) else [])]
     on_disk = follow_up_tests_on_disk(workdir)
@@ -405,8 +407,17 @@ def validate_follow_ups(report: dict | None, workdir: str, config: dict, log, *,
             crit_ok, crit_msg = criterion_in_issue(record["criterion"], issue_text)
             if not crit_ok:
                 reasons.append(crit_msg)
+            if not reasons:
+                # Only a follow-up that passed the mechanical gates is worth a judge call.
+                verdict = follow_up_judge.judge_follow_up(issue or {"title": "", "body": issue_text}, record, config)
+                record["judge"] = verdict
+                if not verdict["ok"]:
+                    reasons.append(verdict["reason"])
+                elif verdict.get("enabled"):
+                    record["chain_reason_judge"] = verdict["reason"]
             record["chainable"] = not reasons
-            record["chain_reason"] = "; ".join(reasons) if reasons else "red test, base symbols and criterion all check out"
+            record["chain_reason"] = "; ".join(reasons) if reasons else (
+                "red test, base symbols and criterion all check out" + (f"; {record['chain_reason_judge']}" if record.get("chain_reason_judge") else ""))
         if not record["accepted"]:
             log("follow_up_rejected", record)
         elif not record["chainable"]:
@@ -813,7 +824,8 @@ def main(argv: list[str] | None = None) -> int:
         full_tests_ok = run_command(test_cmd, worktree, config, timeout)
         typecheck_ok = run_command(typecheck_cmd, worktree, config, timeout)
         scope_ok, scope_msg = check_scope(worktree, unit_base, config, unit_scope)
-        follow_ups = validate_follow_ups(harness_report, worktree, config, log, base_sha=unit_base, issue_text=issue_text)
+        follow_ups = validate_follow_ups(harness_report, worktree, config, log, base_sha=unit_base, issue_text=issue_text,
+                                         issue={"title": title, "body": body})
         for f in follow_ups:
             f["unit"] = number
         passed = (verified and quality_ok and gate_ok and scope_ok
