@@ -657,7 +657,8 @@ def summarize_event(event) -> str | None:
                 parts.append(f"[tool] {block.get('name')}: {_snippet(json.dumps(block.get('arguments', {})), 120)}")
         return " | ".join(parts) or None
     if kind in ("message_update", "message_start", "message_end", "turn_start", "turn_end", "agent_start",
-                "agent_end", "agent_settled", "session"):
+                "agent_end", "agent_settled", "session", "tool_execution_start", "tool_execution_update",
+                "tool_execution_end"):
         return None  # pi bookkeeping, and user/custom message_end
     if item.get("type") == "file_change":
         return f"[edit] {[c.get('path') for c in item.get('changes') or []]}"
