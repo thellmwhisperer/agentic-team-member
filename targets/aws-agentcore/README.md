@@ -212,5 +212,5 @@ PYTHONPATH=. pytest -p no:cacheprovider targets/aws-agentcore/tests
 ```
 
 These tests validate job parsing, subprocess command construction, optional
-memory behavior, secret loading, log humanization, and Bedrock proxy request
+memory behavior, secret loading, and Bedrock proxy request
 translation without deploying AWS resources.
