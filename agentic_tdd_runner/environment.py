@@ -380,8 +380,13 @@ def _default_run_worktree_path(repo_root: Path, run_root: str | None) -> Path:
     import time
 
     stamp = time.strftime("%Y%m%d-%H%M%S")
-    root = Path(run_root).expanduser().resolve() if run_root else repo_root / ".worktree"
-    return root / f"atm-run-{stamp}"
+    if run_root:
+        candidate = Path(run_root).expanduser()
+        # A relative --run-root belongs to the target repo, not to the caller's cwd.
+        root = candidate if candidate.is_absolute() else repo_root / candidate
+    else:
+        root = repo_root / ".worktree"
+    return root.resolve() / f"atm-run-{stamp}"
 
 
 def _require_git_worktree(

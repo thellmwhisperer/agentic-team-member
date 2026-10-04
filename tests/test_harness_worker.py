@@ -386,3 +386,20 @@ def test_follow_up_test_on_disk_without_declaration_is_still_validated(tmp_path,
     assert fu["accepted"] is True and fu["declared"] is False and fu["on_disk"] is True
     assert fu["red_test"] == "tests/test_mul_neg.py"
     assert "not declared" in fu["reason"]
+
+
+def test_relative_run_root_resolves_against_target_repo(tmp_path, monkeypatch):
+    from agentic_tdd_runner.environment import _default_run_worktree_path
+
+    repo = tmp_path / "target"
+    repo.mkdir()
+    elsewhere = tmp_path / "caller"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+
+    relative = _default_run_worktree_path(repo, ".worktrees")
+    absolute = _default_run_worktree_path(repo, str(tmp_path / "runs"))
+
+    assert relative.parent == (repo / ".worktrees").resolve()
+    assert absolute.parent == (tmp_path / "runs").resolve()
+    assert not str(relative).startswith(str(elsewhere.resolve()))

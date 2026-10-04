@@ -62,7 +62,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run claude/codex on an issue inside an ATM run worktree")
     parser.add_argument("--repo", required=True, help="Existing git repo to fix")
     parser.add_argument("--base-ref", default="main")
-    parser.add_argument("--run-root", help="Directory for run worktrees (default: REPO/.worktree)")
+    parser.add_argument("--run-root", help="Directory for run worktrees; a relative path is taken from REPO (default: REPO/.worktree)")
     parser.add_argument("--issue-number", type=int)
     parser.add_argument("--github-repo", help="owner/repo for --issue-number")
     parser.add_argument("--issue-file", help="File with the issue text (first line is the title)")
