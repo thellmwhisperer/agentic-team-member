@@ -856,7 +856,6 @@ def _extract_routes(snippet: str) -> list[dict]:
 
     for raw_line in snippet.splitlines():
         line = raw_line.rstrip()
-        stripped = line.strip()
         current_depth = brace_depth
 
         if current_depth == 1:

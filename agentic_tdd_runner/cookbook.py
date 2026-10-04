@@ -18,7 +18,6 @@ from agentic_tdd_runner.compiler import (
     _enrich_module_load_dependencies,
     _extract_signature,
     _extract_target_snippet,
-    _observed_members,
     _render_module_mocks,
     build_contract,
 )
