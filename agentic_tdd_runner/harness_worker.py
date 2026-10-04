@@ -362,10 +362,12 @@ def make_logger(path: str, harness: str):
 def harness_command(args, worktree: str, brief: str, schema_path: str, last_msg_path: str) -> tuple[list[str], str | None]:
     """Return argv and the stdin payload."""
     if args.harness == "claude":
-        # --include-partial-messages is what keeps the thinking text in the stream; without it
-        # the assistant events carry empty thinking blocks.
+        # In -p mode the CLI sends thinking display "omitted" unless told otherwise, so Opus returns
+        # empty thinking blocks. "summarized" is what the TUI uses (showThinkingSummaries) and the
+        # richest mode the API offers for Opus 5.5; there is no "full" display. Verified 4-oct-2026.
         cmd = [args.harness_bin or "claude", "-p", "--output-format", "stream-json", "--verbose",
-               "--include-partial-messages", "--permission-mode", "acceptEdits",
+               "--include-partial-messages", "--thinking-display", "summarized",
+               "--permission-mode", "acceptEdits",
                "--allowedTools", "Read", "Edit", "Write", "Bash", "Glob", "Grep"]
         if args.model:
             cmd += ["--model", args.model]
