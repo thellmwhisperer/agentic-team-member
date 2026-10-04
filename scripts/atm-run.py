@@ -114,16 +114,18 @@ def save_patch(out: Path) -> None:
     report = out / "report.json"
     if not report.exists():
         return
-    clone = Path(json.loads(report.read_text()).get("worktree") or "")
+    r = json.loads(report.read_text())
+    clone = Path(r.get("worktree") or "")
     if not (clone / ".git").exists():
         return
+    # Units after the first are committed in the clone, so the patch is base..working tree, not HEAD..working tree.
+    base = r.get("base_sha") or "HEAD"
     subprocess.run(["git", "add", "-A", "-N", "--", ".", ":!.atm", ":!.tmp"], cwd=clone, check=False, capture_output=True)
-    diff = subprocess.run(["git", "diff", "--binary", "--", ".", ":!.atm", ":!.tmp"], cwd=clone, capture_output=True, text=True)
+    diff = subprocess.run(["git", "diff", "--binary", base, "--", ".", ":!.atm", ":!.tmp"], cwd=clone, capture_output=True, text=True)
     (out / "patch.diff").write_text(diff.stdout)
-    for extra in ("follow-ups",):
-        src = clone / ".atm" / extra
-        if src.is_dir():
-            shutil.copytree(src, out / f"clone-atm-{extra}", dirs_exist_ok=True)
+    atm = clone / ".atm"
+    if atm.is_dir():
+        shutil.copytree(atm, out / "clone-atm", dirs_exist_ok=True)
     print(f"[LAUNCH] patch saved: {out / 'patch.diff'} ({len(diff.stdout.splitlines())} lines)")
 
 
@@ -192,17 +194,27 @@ def verdict(label: str) -> str:
     accepted = [f for f in r.get("follow_ups", []) if f.get("accepted")]
     rejected = [f for f in r.get("follow_ups", []) if not f.get("accepted")]
     passed = (out / "exit.txt").read_text().strip() == "0" if (out / "exit.txt").exists() else None
+    units = r.get("units") or []
     lines = [
         f"{label}: {'PASS' if passed else 'FAIL' if passed is False else 'report present'} "
-        f"harness={r.get('harness')} model={r.get('model') or 'default'} {r.get('duration_seconds')}s",
+        f"harness={r.get('harness')} model={r.get('model') or 'default'} {r.get('duration_seconds')}s "
+        f"units={len(units) or 1}/{r.get('max_units', '-')}",
         f"  bug fixed:   {'yes' if ok.get('ok') else 'no'} ({ok.get('message', '')})",
         f"  changed:     {', '.join(r.get('changed_files') or []) or 'nothing'}",
-        f"  clone:       {r.get('worktree')}",
-        f"  follow-ups:  {len(accepted)} accepted, {len(rejected)} rejected",
+        f"  clone:       {r.get('worktree')}{'  (deleted, patch.diff kept)' if not Path(r.get('worktree') or '/nonexistent').exists() else ''}",
+        f"  follow-ups:  {len(accepted)} accepted and left, {len(rejected)} rejected, "
+        f"{sum(1 for f in r.get('follow_ups', []) if f.get('chained_as_unit'))} chained",
     ]
+    for u in units:
+        lines.append(f"  unit {u['unit']}: {'PASS' if u.get('passed') else 'FAIL'} test={u.get('test_file')} "
+                     f"changed={', '.join(u.get('changed_files') or []) or 'nothing'}")
+    for f in r.get("follow_ups", []):
+        if f.get("chained_as_unit"):
+            lines.append(f"    > unit {f['chained_as_unit']} <- {f.get('title', '')[:100]}")
     for f in accepted:
         lines.append(f"    + {f.get('title', '')[:110]}")
         lines.append(f"      paths={', '.join(f.get('paths') or [])} red_test={f.get('red_test')}")
+        lines.append(f"      not chained: {f.get('chain_reason', 'chaining not evaluated')}")
     for f in rejected:
         lines.append(f"    - {f.get('title', '')[:110]} ({f.get('reason')})")
     return "\n".join(lines)
