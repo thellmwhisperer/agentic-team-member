@@ -181,6 +181,8 @@ Fix this issue.
 
 ## FOLLOW-UPS
 - {FOLLOW_UP_RULE}
+- A follow-up is a pair: the test file on disk AND its entry in the report. Write the test file first,
+  then declare it. One half without the other is discarded.
 - The red test must fail today, on behavior, when run from its `red_test` path.
 
 ## REPORT
@@ -301,15 +303,42 @@ def follow_up_verdict(index: int, rel: str, workdir: str, config: dict) -> tuple
     return True, f"red test fails on behavior (exit {code})"
 
 
+def follow_up_tests_on_disk(workdir: str) -> dict[int, str]:
+    """Red tests the agent wrote under .atm/follow-ups/<n>/<rel>, declared or not."""
+    found: dict[int, str] = {}
+    root = Path(workdir) / ".atm" / "follow-ups"
+    if not root.is_dir():
+        return found
+    for slot in sorted(root.iterdir()):
+        if not slot.name.isdigit():
+            continue
+        tests = [p for p in slot.rglob("*") if p.is_file()]
+        if len(tests) == 1:
+            found[int(slot.name)] = tests[0].relative_to(slot).as_posix()
+    return found
+
+
 def validate_follow_ups(report: dict | None, workdir: str, config: dict, log) -> list[dict]:
+    """A follow-up is a pair: the declared entry and the red test on disk. Either half alone is
+    recorded as rejected; a test found on disk without a declaration is still validated, because
+    the test is the evidence and the declaration is only its label."""
     items = (report or {}).get("follow_ups")
+    declared = [i if isinstance(i, dict) else {} for i in (items if isinstance(items, list) else [])]
+    on_disk = follow_up_tests_on_disk(workdir)
     records = []
-    for index, item in enumerate(items if isinstance(items, list) else [], start=1):
-        item = item if isinstance(item, dict) else {}
-        rel = item.get("red_test")
+    for index in sorted(set(range(1, len(declared) + 1)) | set(on_disk)):
+        item = declared[index - 1] if index <= len(declared) else None
+        rel = item.get("red_test") if item else None
         rel = rel.removeprefix("./") if isinstance(rel, str) else ""
-        record = {"title": item.get("title"), "paths": item.get("paths"), "red_test": rel}
+        if not rel and index in on_disk:
+            rel = on_disk[index]
+        record = {"title": item.get("title") if item else None, "paths": item.get("paths") if item else [],
+                  "red_test": rel, "declared": item is not None, "on_disk": index in on_disk}
+        if item is None:
+            record["title"] = f"undeclared follow-up {index}: {rel}"
         record["accepted"], record["reason"] = follow_up_verdict(index, rel, workdir, config)
+        if record["accepted"] and item is None:
+            record["reason"] += " (test found on disk, not declared in the report)"
         if not record["accepted"]:
             log("follow_up_rejected", record)
         records.append(record)
