@@ -920,41 +920,11 @@ def _code_fence_for_context(context: dict) -> str:
 
 
 def _extract_callback_contract_facts(cookbook_text: str) -> list[str]:
-    facts: list[str] = []
-    in_section = False
-    for line in cookbook_text.splitlines():
-        stripped = line.strip()
-        if stripped == "### Callback Contract Evidence":
-            in_section = True
-            continue
-        if in_section and stripped.startswith("### "):
-            break
-        if not in_section or not stripped.startswith("- "):
-            continue
-        body = stripped[2:]
-        if body.startswith("Before writing"):
-            continue
-        facts.append(body)
-    return facts
+    return [f for f in _extract_section_bullets(cookbook_text, "### Callback Contract Evidence") if not f.startswith("Before writing")]
 
 
 def _extract_repo_profile_facts(cookbook_text: str) -> list[str]:
-    facts: list[str] = []
-    in_section = False
-    for line in cookbook_text.splitlines():
-        stripped = line.strip()
-        if stripped == "### Repo Profile Facts":
-            in_section = True
-            continue
-        if in_section and stripped.startswith("### "):
-            break
-        if not in_section or not stripped.startswith("- "):
-            continue
-        body = stripped[2:]
-        if body.startswith("Stable repo facts"):
-            continue
-        facts.append(body)
-    return facts
+    return [f for f in _extract_section_bullets(cookbook_text, "### Repo Profile Facts") if not f.startswith("Stable repo facts")]
 
 
 def _extract_source_signature(cookbook_text: str) -> str:
