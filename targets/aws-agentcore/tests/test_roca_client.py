@@ -18,20 +18,6 @@ class FakeHttp:
 
 
 class RocaMcpClientTest(unittest.TestCase):
-    def test_query_uses_mcp_tools_call(self):
-        http = FakeHttp()
-        client = RocaMcpClient("https://roca.example/mcp", "secret", http=http)
-
-        result = client.query(query="latest handoff", project="aws", limit=3)
-
-        self.assertEqual(result, {"ok": True})
-        url, payload, headers = http.requests[0]
-        self.assertEqual(url, "https://roca.example/mcp")
-        self.assertEqual(headers["authorization"], "Bearer secret")
-        self.assertEqual(payload["method"], "tools/call")
-        self.assertEqual(payload["params"]["name"], "roca_query")
-        self.assertEqual(payload["params"]["arguments"]["project"], "aws")
-
     def test_store_uses_roca_store_tool(self):
         http = FakeHttp()
         client = RocaMcpClient("https://roca.example/mcp", "secret", http=http)

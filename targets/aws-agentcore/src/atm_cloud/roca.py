@@ -33,12 +33,6 @@ class RocaMcpClient:
         self.http = http or UrlLibHttp()
         self._next_id = 1
 
-    def query(self, *, query: str, project: str | None = None, limit: int = 5) -> Any:
-        arguments: dict[str, Any] = {"query": query, "limit": limit}
-        if project:
-            arguments["project"] = project
-        return self._call_tool("roca_query", arguments)
-
     def store(
         self,
         *,
