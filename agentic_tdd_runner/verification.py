@@ -99,6 +99,30 @@ def single_test_argv(test_file: str, config: dict) -> list[str]:
     return [*shlex.split(run_cmd), test_file]
 
 
+def snapshot_worktree(workdir: str) -> str | None:
+    """Park every change (tracked and untracked) in a dangling stash commit and leave the
+    worktree at HEAD. The commit is never stored under refs/stash: that stack is shared by all
+    worktrees of a repo, and two concurrent runs popping it swap their work (seen 4-oct-2026).
+    Returns the commit SHA, or None when there was nothing to park."""
+    subprocess.run(["git", "add", "-A"], cwd=workdir, capture_output=True)
+    created = subprocess.run(["git", "stash", "create"], cwd=workdir, capture_output=True, text=True)
+    sha = (created.stdout or "").strip() or None
+    if sha:
+        subprocess.run(["git", "reset", "--hard", "-q", "HEAD"], cwd=workdir, capture_output=True)
+    else:
+        subprocess.run(["git", "reset", "-q"], cwd=workdir, capture_output=True)
+    return sha
+
+
+def restore_worktree(workdir: str, sha: str | None) -> bool:
+    """Bring back what snapshot_worktree parked. Files come back unstaged, as the agent left them."""
+    if not sha:
+        return True
+    applied = subprocess.run(["git", "stash", "apply", "--index", "-q", sha], cwd=workdir, capture_output=True)
+    subprocess.run(["git", "reset", "-q"], cwd=workdir, capture_output=True)
+    return applied.returncode == 0
+
+
 def verify_red_green(
     test_file: str,
     *,
@@ -125,14 +149,7 @@ def verify_red_green(
         tmp.close()
         shutil.copy2(test_full, test_backup)
 
-    stash_result = subprocess.run(
-        ["git", "stash", "--include-untracked"],
-        cwd=workdir,
-        capture_output=True,
-        text=True,
-    )
-    stash_output = (stash_result.stdout or "") + (stash_result.stderr or "")
-    did_stash = stash_result.returncode == 0 and "No local changes to save" not in stash_output
+    parked = snapshot_worktree(workdir)
     mechanical_paths = mechanical_edit_paths(mechanical_edits, workdir)
 
     test_argv = single_test_argv(test_file, config)
@@ -192,8 +209,8 @@ def verify_red_green(
                 cwd=workdir,
                 capture_output=True,
             )
-        if did_stash:
-            subprocess.run(["git", "stash", "pop"], cwd=workdir, capture_output=True)
+        if not restore_worktree(workdir, parked):
+            emit("  [RED] WARNING: could not restore the parked worktree")
 
     emit("  [GREEN] Running test WITH fix...")
     try:

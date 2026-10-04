@@ -404,3 +404,60 @@ def test_relative_run_root_resolves_against_target_repo(tmp_path, monkeypatch):
     assert relative.parent == (repo / ".worktrees").resolve()
     assert absolute.parent == (tmp_path / "runs").resolve()
     assert not str(relative).startswith(str(elsewhere.resolve()))
+
+
+def test_snapshot_parks_and_restores_without_touching_the_shared_stash(tmp_path):
+    from agentic_tdd_runner import verification
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "a.py").write_text("x = 1\n")
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "init")
+    (repo / "a.py").write_text("x = 2\n")
+    (repo / "new_test.py").write_text("def test(): pass\n")
+    (repo / ".atm" / "follow-ups" / "1").mkdir(parents=True)
+    (repo / ".atm" / "follow-ups" / "1" / "red_test.py").write_text("assert False\n")
+
+    def status():
+        return subprocess.run(["git", "status", "--porcelain", "-uall"], cwd=repo, capture_output=True, text=True).stdout
+
+    def stash_list():
+        return subprocess.run(["git", "stash", "list"], cwd=repo, capture_output=True, text=True).stdout
+
+    before = status()
+    sha = verification.snapshot_worktree(str(repo))
+    assert sha
+    assert status() == ""
+    assert (repo / "a.py").read_text() == "x = 1\n"
+    assert not (repo / ".atm").exists()
+    assert stash_list() == ""
+
+    assert verification.restore_worktree(str(repo), sha)
+    assert status() == before
+    assert (repo / "a.py").read_text() == "x = 2\n"
+    assert (repo / ".atm" / "follow-ups" / "1" / "red_test.py").read_text() == "assert False\n"
+    assert stash_list() == ""
+
+
+
+def test_verdict_is_void_when_the_worktree_changes_during_verification(tmp_path, monkeypatch):
+    monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
+    argv, artifacts, log_dir = _setup(tmp_path, FIXING_HARNESS)
+    from agentic_tdd_runner import verification
+
+    real = verification.verify_red_green
+
+    def swapped(test_file, *, workdir, **kw):
+        ok, msg = real(test_file, workdir=workdir, **kw)
+        # Another run's stash lands here, as the shared stash stack did on 4-oct-2026.
+        (Path(workdir) / "calc.py").write_text("def add(a, b):\n    return a + b + 0\n\n\ndef mul(a, b):\n    return a * b\n")
+        return ok, msg
+
+    monkeypatch.setattr(verification, "verify_red_green", swapped)
+    assert harness_worker.main(argv) == 1
+    report = json.loads((artifacts / "report.json").read_text())
+    assert report["verified"]["ok"] is False
+    assert "WORKTREE CHANGED" in report["verified"]["message"]
+    assert any(isinstance(e["event"], dict) and e["event"].get("type") == "atm.verify_worktree_changed" for e in _log_events(log_dir))
