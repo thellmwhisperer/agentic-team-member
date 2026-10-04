@@ -3,13 +3,11 @@
   "context": {
     "atmStackName": "AtmAgentCoreStack",
     "atmRuntimeName": "atm-agentcore-runner",
-    "atmGatewayName": "atm-agentcore-github",
     "atmRunnerModelId": "REPLACE_WITH_BEDROCK_MODEL_ID",
     "atmBranchPrefix": "atm-agentcore/",
     "githubTokenSecretName": "atm-agentcore/github-token",
     "rocaTokenSecretName": "",
     "rocaMcpUrl": "",
-    "githubRepoAllowlist": "owner/repo",
     "npmScope": "",
     "atmPermissionDriven": false
   }

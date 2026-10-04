@@ -18,7 +18,7 @@ targets/aws-agentcore/
   Dockerfile           AgentCore runtime image; build with monorepo root context
   Makefile             local test, smoke, and docker build helpers
   cdk.json             example CDK context with placeholders
-  infrastructure/      CDK app, AgentCore runtime, Gateway, IAM, Lambda wiring
+  infrastructure/      CDK app, AgentCore runtime, IAM wiring
   runtime/             AgentCore entrypoint and Bedrock OpenAI-compatible proxy
   scripts/             local packaging smoke checks; no deploy
   src/atm_cloud/       job contract, optional memory client, runner adapters
@@ -136,8 +136,6 @@ Required context/env values for a real deployment:
 - Bedrock model id: `-c atmRunnerModelId=<model-id>` or `ATM_BEDROCK_MODEL_ID`.
 - GitHub token secret name: `-c githubTokenSecretName=<secret-name>` or
   `GITHUB_TOKEN_SECRET_NAME`.
-- repo allowlist: `-c githubRepoAllowlist=owner/repo,owner/other` or
-  `GITHUB_REPO_ALLOWLIST`.
 
 Optional context/env values:
 
@@ -147,8 +145,6 @@ Optional context/env values:
 - branch prefix: `-c atmBranchPrefix=atm-agentcore/` or `ATM_BRANCH_PREFIX`.
 - runtime name: `-c atmRuntimeName=<runtime-name>` or
   `ATM_AGENTCORE_RUNTIME_NAME`.
-- Gateway name: `-c atmGatewayName=<gateway-name>` or
-  `ATM_AGENTCORE_GATEWAY_NAME`.
 - GitHub Packages npm scope: `-c npmScope=@owner` or `ATM_NPM_SCOPE`.
   When omitted, package auth is disabled.
 - permission-driven flow: `-c atmPermissionDriven=true` or
@@ -156,8 +152,7 @@ Optional context/env values:
 
 The stack references the GitHub and optional Roca secrets by name; it does not
 create personal placeholder secrets. Create and populate those secrets in your
-AWS account before deploying. `GITHUB_REPO_ALLOWLIST` fails closed in the
-Gateway Lambda if omitted or empty.
+AWS account before deploying.
 
 ## Bedrock Proxy
 
@@ -197,11 +192,6 @@ For GitHub issue intake and PR creation, provide either:
 
 - `GITHUB_TOKEN`
 - or `GITHUB_TOKEN_SECRET_ARN`
-
-Required for AgentCore Gateway tools:
-
-- `GITHUB_REPO_ALLOWLIST`: comma-separated `owner/repo` allowlist. Gateway
-  calls fail closed when this is unset or empty.
 
 Optional controls:
 

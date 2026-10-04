@@ -15,7 +15,6 @@ class InfrastructureTest(unittest.TestCase):
             "infrastructure/__init__.py",
             "infrastructure/app.py",
             "infrastructure/atm_agentcore_stack.py",
-            "infrastructure/gateway/github-tools.json",
         ]
 
         for relative_path in expected:
@@ -28,7 +27,6 @@ class InfrastructureTest(unittest.TestCase):
         context = cdk_json["context"]
         self.assertEqual(context["atmStackName"], "AtmAgentCoreStack")
         self.assertEqual(context["atmRunnerModelId"], "REPLACE_WITH_BEDROCK_MODEL_ID")
-        self.assertEqual(context["githubRepoAllowlist"], "owner/repo")
         self.assertEqual(context["npmScope"], "")
         self.assertEqual(context["githubTokenSecretName"], "atm-agentcore/github-token")
         self.assertEqual(context["rocaTokenSecretName"], "")
@@ -44,9 +42,6 @@ class InfrastructureTest(unittest.TestCase):
         self.assertIn('directory=str(repo_root)', stack)
         self.assertIn('file="targets/aws-agentcore/Dockerfile"', stack)
         self.assertIn('"targets/aws-agentcore/cdk.out"', stack)
-        self.assertIn("log_group=logs.LogGroup", stack)
-        self.assertIn("RemovalPolicy", stack)
-        self.assertIn("removal_policy=RemovalPolicy.DESTROY", stack)
         self.assertNotIn("log_retention=", stack)
         self.assertIn("resources=[runtime_image.repository.repository_arn]", stack)
         self.assertIn("env_value = os.environ.get(env_var)", stack)
@@ -59,29 +54,6 @@ class InfrastructureTest(unittest.TestCase):
         self.assertNotIn("/Volumes/", stack)
         self.assertNotIn("llm-whisperer", stack)
         self.assertNotIn("872364107658", stack)
-
-    def test_gateway_tool_schema_names_match_dispatch_allowlist(self):
-        schema = json.loads((TARGET_ROOT / "infrastructure" / "gateway" / "github-tools.json").read_text())
-
-        names = {tool["name"] for tool in schema}
-
-        self.assertEqual(
-            names,
-            {
-                "github_get_issue",
-                "github_create_branch",
-                "github_commit_files",
-                "github_open_pr",
-                "github_comment_issue",
-            },
-        )
-        for tool in schema:
-            self.assertIn("inputSchema", tool)
-            self.assertEqual(tool["inputSchema"]["type"], "object")
-            self.assertIs(tool["inputSchema"]["additionalProperties"], False)
-        commit_files = next(tool for tool in schema if tool["name"] == "github_commit_files")
-        file_item_schema = commit_files["inputSchema"]["properties"]["files"]["items"]
-        self.assertIs(file_item_schema["additionalProperties"], False)
 
     def test_makefile_exposes_synth_but_not_deploy(self):
         makefile = (TARGET_ROOT / "Makefile").read_text()
