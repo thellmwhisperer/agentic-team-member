@@ -86,6 +86,19 @@ def mechanical_edit_paths(mechanical_edits: list[dict] | None, workdir: str) -> 
     return paths
 
 
+def single_test_argv(test_file: str, config: dict) -> list[str]:
+    """Argv that runs one test file.
+
+    A command template may name the test file or its directory itself (Go tests run by
+    package: `go test {test_dir}`); otherwise the test file is appended.
+    """
+    run_cmd = test_runner_command_for_file(test_file, config)
+    if "{test_file}" in run_cmd or "{test_dir}" in run_cmd:
+        test_dir = "./" + os.path.dirname(test_file) if os.path.dirname(test_file) else "./"
+        return shlex.split(run_cmd.format(test_file=test_file, test_dir=test_dir))
+    return [*shlex.split(run_cmd), test_file]
+
+
 def verify_red_green(
     test_file: str,
     *,
@@ -97,7 +110,6 @@ def verify_red_green(
     mechanical_edits: list[dict] | None = None,
 ) -> tuple[bool, str]:
     """Verify red-green: test fails without fix, passes with fix."""
-    run_cmd = test_runner_command_for_file(test_file, config)
     test_timeout = config["timeouts"]["test_run"]
 
     emit("\n=== RED-GREEN VERIFICATION ===")
@@ -123,15 +135,7 @@ def verify_red_green(
     did_stash = stash_result.returncode == 0 and "No local changes to save" not in stash_output
     mechanical_paths = mechanical_edit_paths(mechanical_edits, workdir)
 
-    # A command template may name the test file or its directory itself (Go tests run by
-    # package: `go test {test_dir}`); otherwise the test file is appended, as before.
-    if "{test_file}" in run_cmd or "{test_dir}" in run_cmd:
-        test_dir = "./" + os.path.dirname(test_file) if os.path.dirname(test_file) else "./"
-        run_argv = shlex.split(run_cmd.format(test_file=test_file, test_dir=test_dir))
-        test_args: list[str] = []
-    else:
-        run_argv = shlex.split(run_cmd)
-        test_args = [test_file]
+    test_argv = single_test_argv(test_file, config)
 
     red_result = None
     red_passed = False
@@ -156,7 +160,7 @@ def verify_red_green(
         emit("  [RED] Running test WITHOUT fix...")
         try:
             red_result = subprocess.run(
-                [*run_argv, *test_args],
+                test_argv,
                 cwd=workdir, capture_output=True, text=True, timeout=test_timeout,
             )
             red_passed = red_result.returncode == 0
@@ -194,7 +198,7 @@ def verify_red_green(
     emit("  [GREEN] Running test WITH fix...")
     try:
         green_result = subprocess.run(
-            [*run_argv, *test_args],
+            test_argv,
             cwd=workdir, capture_output=True, text=True, timeout=test_timeout,
         )
         green_passed = green_result.returncode == 0

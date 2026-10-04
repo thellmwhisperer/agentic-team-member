@@ -7,9 +7,12 @@ runner bootstrap, red/green oracle, quality checks) and hands the edit work to
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import json
 import os
+import re
 import shlex
+import shutil
 import signal
 import subprocess
 import sys
@@ -39,8 +42,18 @@ REPORT_SCHEMA = {
         "changed_files": {"type": "array", "items": {"type": "string"}},
         "summary": {"type": "string"},
         "commands_run": {"type": "array", "items": {"type": "string"}},
+        "follow_ups": {"type": "array", "items": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "paths": {"type": "array", "items": {"type": "string"}},
+                "red_test": {"type": "string"},
+            },
+            "required": ["title", "paths", "red_test"],
+            "additionalProperties": False,
+        }},
     },
-    "required": ["test_file", "changed_files", "summary", "commands_run"],
+    "required": ["test_file", "changed_files", "summary", "commands_run", "follow_ups"],
     "additionalProperties": False,
 }
 
@@ -61,6 +74,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--artifact-dir")
     parser.add_argument("--harness-bin", help="Override the harness executable")
     parser.add_argument("--dry-run", action="store_true", help="Prepare and print the brief only")
+    parser.add_argument("--scope", action="append", default=[], metavar="GLOB",
+                        help="Repo-relative glob the diff may touch (repeatable; default: derived from the issue)")
     args = parser.parse_args(argv)
     if not args.issue_file and not (args.issue_number and args.github_repo):
         parser.error("give --issue-file or both --issue-number and --github-repo")
@@ -120,9 +135,16 @@ def scan_forbidden(workdir: str, changed: list[str], forbidden: list[str]) -> li
     return hits
 
 
-def build_brief(*, title, body, worktree, base_ref, test_cmd, typecheck_cmd, forbidden) -> str:
+SCOPE_RULE = ("If the fix needs a change outside SCOPE, do not make it. Finish the unit inside SCOPE "
+              "and report the rest under follow_ups, each with a failing test that proves the gap.")
+FOLLOW_UP_RULE = "A follow-up without a red test is discarded. Do not weaken or skip existing tests to make one."
+
+
+def build_brief(*, title, body, worktree, base_ref, test_cmd, typecheck_cmd, forbidden, scope=None) -> str:
     patterns = ", ".join(f"`{p}`" for p in forbidden) or "none configured"
     typecheck_line = f"`{typecheck_cmd}`" if typecheck_cmd else "none detected"
+    allowed = (", ".join(f"`{p}`" for p in scope) + " (test files are always allowed)") if scope else \
+        "open (no restriction beyond this repository)"
     return f"""# Bug fix brief
 
 ## GOAL
@@ -135,6 +157,8 @@ Fix this issue.
 ## SCOPE
 - Repository: `{worktree}` (git worktree at `{base_ref}`).
 - Only edit files under that directory. No files outside it.
+- Allowed paths: {allowed}
+- {SCOPE_RULE}
 
 ## ACCEPTANCE
 1. Write a failing test that reproduces the bug before changing source. The test must call the
@@ -155,9 +179,16 @@ Fix this issue.
 - Deleting, skipping or weakening existing tests.
 - `sleep` in tests.
 
+## FOLLOW-UPS
+- {FOLLOW_UP_RULE}
+- The red test must fail today, on behavior, when run from its `red_test` path.
+
 ## REPORT
 Your final message must be ONLY this JSON object, nothing else:
-{{"test_file": "<repo-relative path of the regression test>", "changed_files": ["<path>"], "summary": "<one paragraph>", "commands_run": ["<command>"]}}
+{{"test_file": "<repo-relative path of the regression test>", "changed_files": ["<path>"], "summary": "<one paragraph>", "commands_run": ["<command>"], "follow_ups": [{{"title": "<gap>", "paths": ["<path outside SCOPE>"], "red_test": "<repo-relative path where the test would live>"}}]}}
+Use `"follow_ups": []` when there are none. Write each follow-up's red test under
+`.atm/follow-ups/<n>/<red_test>` (n is its 1-based position in follow_ups), never at `<red_test>` itself,
+so this unit's test suite never sees it.
 """
 
 
@@ -174,6 +205,115 @@ def red_failed_on_missing_module(red_output: str) -> str | None:
         if marker in lowered:
             return marker
     return None
+
+
+ATM_DIR = ".atm/"
+PATH_TOKEN = re.compile(r"[\w./-]+")
+BACKTICK_IDENT = re.compile(r"`([A-Za-z_][A-Za-z0-9_]*)`")
+
+
+def is_atm_path(path: str) -> bool:
+    return path == ".atm" or path.startswith(ATM_DIR)
+
+
+def definition_patterns(name: str) -> list[str]:
+    """Top-level definitions of `name` in Go, TS/JS and Python, as git grep -E patterns."""
+    n = re.escape(name)
+    return [rf"^func (\([^)]*\) )?{n}\(", rf"^(export )?(async )?function {n}\(",
+            rf"^(export )?const {n} =", rf"^(async )?def {n}\("]
+
+
+def derive_scope(text: str, worktree: str) -> list[str]:
+    """Tracked paths the issue names, plus files defining the identifiers it backticks."""
+    tracked = set(git_lines(worktree, "ls-files"))
+    paths = {t for t in (tok.rstrip(".,:;").removeprefix("./") for tok in PATH_TOKEN.findall(text)) if t in tracked}
+    for name in sorted(set(BACKTICK_IDENT.findall(text))):
+        args = [arg for pattern in definition_patterns(name) for arg in ("-e", pattern)]
+        paths.update(git_lines(worktree, "grep", "-l", "-E", *args))
+    return sorted(p for p in paths if not is_atm_path(p))
+
+
+def resolve_scope(globs: list[str], title: str, body: str, worktree: str) -> tuple[str, list[str]]:
+    if globs:
+        return "flag", list(globs)
+    paths = derive_scope(f"{title}\n{body}", worktree)
+    return ("issue", paths) if paths else ("open", [])
+
+
+def check_scope(workdir: str, base_sha: str, config: dict, globs: list[str]) -> tuple[bool, str]:
+    """Every touched non-test file outside .atm/ must match a SCOPE glob; empty globs mean open."""
+    if not globs:
+        return True, "scope open"
+    touched = set(git_lines(workdir, "diff", "--name-only", base_sha))
+    touched |= set(git_lines(workdir, "ls-files", "--others", "--exclude-standard"))
+    outside = sorted(p for p in touched if not is_test_file_path(p, config) and not is_atm_path(p)
+                     and not any(fnmatch.fnmatch(p, g) for g in globs))
+    if outside:
+        return False, "outside SCOPE: " + ", ".join(outside)
+    return True, "inside SCOPE: " + ", ".join(globs)
+
+
+def run_test_file(rel: str, workdir: str, config: dict) -> tuple[int | None, str]:
+    """Run one test file the way the red/green phase does."""
+    timeout = config.get("timeouts", {}).get("test_run", 300)
+    try:
+        result = subprocess.run(verification.single_test_argv(rel, config), cwd=workdir,
+                                capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return None, f"timeout after {timeout}s"
+    except OSError as exc:
+        return None, str(exc)
+    return result.returncode, result.stdout + result.stderr
+
+
+def follow_up_verdict(index: int, rel: str, workdir: str, config: dict) -> tuple[bool, str]:
+    """Copy the red test into place, run it, remove it. Accept only a behavioral failure."""
+    if not rel or is_atm_path(rel) or not is_test_file_path(rel, config):
+        return False, f"red_test {rel!r} is not a test file path outside .atm/"
+    source = Path(workdir) / ".atm" / "follow-ups" / str(index) / rel
+    try:
+        target = resolve_repo_path(rel, workdir)
+    except ValueError as exc:
+        return False, str(exc)
+    if not source.is_file():
+        return False, f"no red test at .atm/follow-ups/{index}/{rel}"
+    if target.exists():
+        return False, f"{rel} already exists; a red test may not replace a file"
+    missing, parent = [], target.parent
+    while not parent.exists():
+        missing.append(parent)
+        parent = parent.parent
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        shutil.copy2(source, target)
+        code, output = run_test_file(rel, workdir, config)
+    finally:
+        target.unlink(missing_ok=True)
+        for directory in missing:
+            directory.rmdir()
+    if code is None:
+        return False, f"red test could not run: {output}"
+    if code == 0:
+        return False, "red test passed; it proves no gap"
+    marker = red_failed_on_missing_module(output)
+    if marker:
+        return False, f"red test fails on a missing module ({marker}), not on behavior"
+    return True, f"red test fails on behavior (exit {code})"
+
+
+def validate_follow_ups(report: dict | None, workdir: str, config: dict, log) -> list[dict]:
+    items = (report or {}).get("follow_ups")
+    records = []
+    for index, item in enumerate(items if isinstance(items, list) else [], start=1):
+        item = item if isinstance(item, dict) else {}
+        rel = item.get("red_test")
+        rel = rel.removeprefix("./") if isinstance(rel, str) else ""
+        record = {"title": item.get("title"), "paths": item.get("paths"), "red_test": rel}
+        record["accepted"], record["reason"] = follow_up_verdict(index, rel, workdir, config)
+        if not record["accepted"]:
+            log("follow_up_rejected", record)
+        records.append(record)
+    return records
 
 
 def make_logger(path: str, harness: str):
@@ -341,7 +481,7 @@ def pick_test_file(report: dict | None, workdir: str, config: dict) -> str | Non
         except ValueError:
             pass
     added = git_lines(workdir, "ls-files", "--others", "--exclude-standard")
-    tests = sorted(p for p in added if is_test_file_path(p, config))
+    tests = sorted(p for p in added if is_test_file_path(p, config) and not is_atm_path(p))
     return tests[0] if tests else None
 
 
@@ -398,8 +538,10 @@ def main(argv: list[str] | None = None) -> int:
     test_cmd, typecheck_cmd = detect_commands(worktree, env_report)
     lang_key = quality_lang_key(worktree, env_report.project_type)
     forbidden = config.get("quality", {}).get(lang_key, {}).get("forbidden", [])
+    scope_source, scope = resolve_scope(args.scope, title, body, worktree)
+    log("scope", {"source": scope_source, "paths": scope})
     brief = build_brief(title=title, body=body, worktree=worktree, base_ref=args.base_ref,
-                        test_cmd=test_cmd, typecheck_cmd=typecheck_cmd, forbidden=forbidden)
+                        test_cmd=test_cmd, typecheck_cmd=typecheck_cmd, forbidden=forbidden, scope=scope)
     brief_path = artifact_dir / "brief.md"
     brief_path.write_text(brief)
     log("prepared", {"worktree": worktree, "base_sha": base_sha, "test_command": test_cmd,
@@ -426,7 +568,7 @@ def main(argv: list[str] | None = None) -> int:
     log("harness_done", {k: v for k, v in run.items() if k != "final_text"} | {"report": harness_report,
                                                                                 "report_parse_error": parse_error})
 
-    changed = quality.get_changed_files(worktree)
+    changed = [p for p in quality.get_changed_files(worktree) if not is_atm_path(p)]
     test_file = pick_test_file(harness_report, worktree, config)
     if test_file:
         red_outputs: list[str] = []
@@ -449,7 +591,7 @@ def main(argv: list[str] | None = None) -> int:
         verified, verify_msg = False, "no test file found"
     quality_ok, quality_msg = quality.run_quality_checks(
         test_file or (changed[0] if changed else ""), workdir=worktree, config=config, log=log,
-        is_test_file_path=lambda p: is_test_file_path(p, config),
+        is_test_file_path=lambda p: is_test_file_path(p, config), get_changed_files_fn=lambda: changed,
     )
     if quality_ok and lang_key not in QUALITY_LANG.values():
         hits = scan_forbidden(worktree, changed, forbidden)
@@ -460,6 +602,11 @@ def main(argv: list[str] | None = None) -> int:
     timeout = int(config.get("environment", {}).get("timeout", 300))
     full_tests_ok = run_command(test_cmd, worktree, config, timeout)
     typecheck_ok = run_command(typecheck_cmd, worktree, config, timeout)
+    scope_ok, scope_msg = check_scope(worktree, base_sha, config, scope)
+    follow_ups = validate_follow_ups(harness_report, worktree, config, log)
+    accepted = [f for f in follow_ups if f["accepted"]]
+    if accepted:
+        (artifact_dir / "follow-ups.json").write_text(json.dumps(accepted, indent=2))
 
     result = {
         "harness": args.harness, "model": args.model, "base_ref": args.base_ref, "worktree": worktree,
@@ -467,6 +614,7 @@ def main(argv: list[str] | None = None) -> int:
         "verified": {"ok": verified, "message": verify_msg},
         "quality_ok": {"ok": quality_ok, "message": quality_msg},
         "gate_ok": {"ok": gate_ok, "message": gate_msg},
+        "scope_ok": {"ok": scope_ok, "message": scope_msg}, "follow_ups": follow_ups,
         "full_tests_ok": full_tests_ok, "typecheck_ok": typecheck_ok,
         "duration_seconds": run["duration_seconds"], "timed_out": run["timed_out"],
         "harness_exit_code": run["exit_code"], "report_parse_error": parse_error,
@@ -474,7 +622,7 @@ def main(argv: list[str] | None = None) -> int:
     (artifact_dir / "report.json").write_text(json.dumps(result, indent=2))
     log("report", result)
     log_fh.close()
-    passed = verified and quality_ok and gate_ok and full_tests_ok is not False and typecheck_ok is not False
+    passed = verified and quality_ok and gate_ok and scope_ok and full_tests_ok is not False and typecheck_ok is not False
     print("\n=== HARNESS WORKER SUMMARY ===")
     print(f"harness:    {args.harness} model={args.model or 'default'} exit={run['exit_code']}")
     print(f"duration:   {run['duration_seconds']}s timed_out={run['timed_out']}")
@@ -484,6 +632,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"red/green:  {'PASS' if verified else 'FAIL'} {_snippet(verify_msg, 100)}")
     print(f"quality:    {'PASS' if quality_ok else 'FAIL'} {_snippet(quality_msg, 100)}")
     print(f"gate:       {'PASS' if gate_ok else 'FAIL'} {gate_msg}")
+    print(f"scope:      {'PASS' if scope_ok else 'FAIL'} {_snippet(scope_msg, 100)}")
+    print(f"follow-ups: {len(accepted)} accepted, {len(follow_ups) - len(accepted)} rejected")
     print(f"full tests: {full_tests_ok} typecheck: {typecheck_ok}")
     print(f"RESULT:     {'PASS' if passed else 'FAIL'} report={artifact_dir / 'report.json'}")
     return 0 if passed else 1
