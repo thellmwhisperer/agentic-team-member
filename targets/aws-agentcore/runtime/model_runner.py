@@ -7,10 +7,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-try:
-    import tomllib
-except ModuleNotFoundError:  # pragma: no cover - local macOS Python 3.9 fallback
-    tomllib = None
+import tomllib
 
 DEFAULT_PROXY_HOST = "127.0.0.1"
 DEFAULT_PROXY_PORT = 11435
@@ -233,20 +230,9 @@ def _copy_referenced_tools_file(source: Path, target: Path) -> None:
 
 
 def _read_tools_ref(source: Path) -> str:
-    if tomllib is not None:
-        with source.open("rb") as handle:
-            config = tomllib.load(handle)
-        tools_config = config.get("tools", {}) or {}
-        if isinstance(tools_config, dict):
-            return str(tools_config.get("file", "tools.json"))
-        return "tools.json"
-
-    current_section = ""
-    for line in source.read_text().splitlines():
-        stripped = line.strip()
-        if stripped.startswith("[") and stripped.endswith("]"):
-            current_section = stripped.strip("[]")
-            continue
-        if current_section == "tools" and stripped.startswith("file") and "=" in stripped:
-            return stripped.split("=", 1)[1].strip().strip('"')
+    with source.open("rb") as handle:
+        config = tomllib.load(handle)
+    tools_config = config.get("tools", {}) or {}
+    if isinstance(tools_config, dict):
+        return str(tools_config.get("file", "tools.json"))
     return "tools.json"
