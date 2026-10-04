@@ -643,3 +643,84 @@ def test_criterion_and_symbol_gates_in_isolation(tmp_path):
     in_base, elsewhere = harness_worker.symbols_defined_in_base(
         "from calc import add\ndef test_x():\n    assert add(1, 2) == 3\n    only_in_tests()\n    brand_new()\n", str(repo), sha)
     assert in_base == ["add"] and elsewhere == ["brand_new", "only_in_tests"]
+
+
+def test_judge_gate_in_isolation(monkeypatch, tmp_path):
+    from agentic_tdd_runner import judge
+    issue = {"title": "t", "body": "b"}
+    fu = {"title": "gap", "paths": ["a.go"], "criterion": "c"}
+    assert judge.judge_follow_up(issue, fu, {}) == {"enabled": False, "ok": True, "reason": "judge disabled"}
+    cfg = {"follow_ups": {"judge": {"enabled": True, "threshold": 0.6, "api_key_file": str(tmp_path / "nokey")}}}
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    closed = judge.judge_follow_up(issue, fu, cfg)
+    assert closed["ok"] is False and "no API key" in closed["reason"]
+    monkeypatch.setenv("TYPESAFE_API_KEY", "k")
+    calls = []
+
+    def fake_post(url, body, key, timeout):
+        calls.append((url, body, key))
+        return {"model": "jev-1.13.0", "answers": {"serves": {"type": "noul", "noul": 0.81},
+                                                   "fit": {"type": "choice", "choice": "within",
+                                                           "probabilities": {"within": 0.9, "adjacent": 0.1, "outside": 0.0}}}}
+
+    v = judge.judge_follow_up(issue, fu, cfg, post=fake_post)
+    assert v["ok"] is True and v["serves"] == 0.81 and v["fit"] == "within" and v["model"] == "jev-1.13.0"
+    assert calls[0][2] == "k" and calls[0][1]["state"]["follow_up"]["title"] == "gap"
+    assert set(calls[0][1]["questions"]) == {"serves", "fit"}
+    low = judge.judge_follow_up(issue, fu, cfg, post=lambda *a: {"answers": {"serves": {"noul": 0.12}, "fit": {"choice": "adjacent"}}})
+    assert low["ok"] is False and "below threshold" in low["reason"]
+
+    def boom(*a):
+        raise OSError("down")
+
+    failed = judge.judge_follow_up(issue, fu, cfg, post=boom)
+    assert failed["ok"] is False and "judge call failed" in failed["reason"]
+
+
+def _judge_config(tmp_path, argv):
+    config_path = Path(argv[argv.index("--config") + 1])
+    config_path.write_text(config_path.read_text() + '\n[follow_ups.judge]\nenabled = true\nthreshold = 0.6\n')
+
+
+def test_judge_below_threshold_keeps_the_follow_up_but_does_not_chain(tmp_path, monkeypatch):
+    monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
+    argv, artifacts, _ = _setup(tmp_path, _chain_harness())
+    _judge_config(tmp_path, argv)
+    seen = []
+    monkeypatch.setattr(harness_worker.follow_up_judge, "judge_follow_up",
+                        lambda issue, fu, config, **kw: (seen.append((issue, fu["title"])) or
+                                                         {"enabled": True, "ok": False, "serves": 0.1, "fit": "adjacent",
+                                                          "threshold": 0.6, "reason": "judge: serves=0.10 fit=adjacent threshold=0.60 (below threshold)"}))
+    assert harness_worker.main(argv) == 0
+    report = json.loads((artifacts / "report.json").read_text())
+    assert len(report["units"]) == 1
+    (fu,) = report["follow_ups"]
+    assert fu["accepted"] is True and fu["chainable"] is False
+    assert fu["judge"]["serves"] == 0.1 and "below threshold" in fu["chain_reason"]
+    assert seen == [({"title": "add returns the difference", "body": "add(2, 3) returns -1 instead of 5."}, "mul drops the sign")]
+
+
+def test_judge_above_threshold_chains(tmp_path, monkeypatch):
+    monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
+    argv, artifacts, _ = _setup(tmp_path, _chain_harness())
+    _judge_config(tmp_path, argv)
+    monkeypatch.setattr(harness_worker.follow_up_judge, "judge_follow_up",
+                        lambda issue, fu, config, **kw: {"enabled": True, "ok": True, "serves": 0.8, "fit": "within",
+                                                         "threshold": 0.6, "reason": "judge: serves=0.80 fit=within threshold=0.60"})
+    assert harness_worker.main(argv) == 0
+    report = json.loads((artifacts / "report.json").read_text())
+    assert len(report["units"]) == 2
+    (fu,) = report["units"][0]["follow_ups"]
+    assert fu["chained_as_unit"] == 2 and "judge: serves=0.80" in fu["chain_reason"]
+
+
+def test_judge_is_not_called_for_follow_ups_that_fail_the_mechanical_gates(tmp_path, monkeypatch):
+    monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
+    argv, artifacts, _ = _setup(tmp_path, _chain_harness("multiplication must preserve negative signs always"))
+    _judge_config(tmp_path, argv)
+    monkeypatch.setattr(harness_worker.follow_up_judge, "judge_follow_up",
+                        lambda *a, **kw: (_ for _ in ()).throw(AssertionError("judge must not run")))
+    assert harness_worker.main(argv) == 0
+    report = json.loads((artifacts / "report.json").read_text())
+    (fu,) = report["follow_ups"]
+    assert fu["chainable"] is False and "judge" not in fu
