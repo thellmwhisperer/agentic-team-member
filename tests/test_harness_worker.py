@@ -265,6 +265,7 @@ def test_claude_command_keeps_thinking_and_summary_skips_partials():
     args = SimpleNamespace(harness="claude", harness_bin=None, model=None)
     cmd, _ = harness_worker.harness_command(args, "/w", "brief", "/s.json", "/m.txt")
     assert "--include-partial-messages" in cmd
+    assert cmd[cmd.index("--thinking-display") + 1] == "summarized"
     assert harness_worker.summarize_event({"type": "stream_event", "event": {}}) is None
 
 
