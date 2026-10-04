@@ -2,7 +2,6 @@
 
 import json
 import os
-from pathlib import Path
 import subprocess
 
 import pytest
@@ -10,8 +9,6 @@ import pytest
 from agentic_tdd_runner import environment
 from agentic_tdd_runner.environment import (
     EnvironmentPrepError,
-    WorktreePrepError,
-    prepare_run_worktree,
     prepare_environment,
     recommended_tools_from_config,
 )
@@ -349,104 +346,6 @@ class TestPrepareEnvironment:
         assert ["bun", "install", "--frozen-lockfile"] not in calls
         install_step = next(step for step in report.steps if step.name == "install_dependencies")
         assert install_step.skipped is True
-
-    def test_prepare_run_worktree_creates_detached_worktree_from_repo(self, tmp_path, monkeypatch):
-        repo = tmp_path / "repo"
-        destination = tmp_path / "run"
-        repo.mkdir()
-        calls = []
-
-        def fake_run(root, command, timeout, config=None):
-            calls.append((root, command))
-            if command[:2] == ["git", "rev-parse"]:
-                return _completed(command, stdout=str(repo) + "\n")
-            if command[:3] == ["git", "worktree", "add"]:
-                return _completed(command)
-            return _completed(command, returncode=1, stderr="unexpected")
-
-        monkeypatch.setattr("agentic_tdd_runner.environment._run", fake_run)
-
-        report = prepare_run_worktree(
-            str(repo),
-            workdir=str(destination),
-            base_ref="origin/main",
-            run_root=str(tmp_path),
-        )
-
-        assert report.workdir == str(destination.resolve())
-        assert report.base_ref == "origin/main"
-        assert ["git", "worktree", "add", "--detach", str(destination.resolve()), "origin/main"] in [
-            command for _root, command in calls
-        ]
-
-    def test_prepare_run_worktree_defaults_to_repo_local_worktree_dir(self, tmp_path, monkeypatch):
-        repo = tmp_path / "repo"
-        repo.mkdir()
-        calls = []
-
-        def fake_run(root, command, timeout, config=None):
-            calls.append((root, command))
-            if command[:2] == ["git", "rev-parse"]:
-                return _completed(command, stdout=str(repo) + "\n")
-            if command[:3] == ["git", "worktree", "add"]:
-                return _completed(command)
-            return _completed(command, returncode=1, stderr="unexpected")
-
-        monkeypatch.setattr("agentic_tdd_runner.environment._run", fake_run)
-
-        report = prepare_run_worktree(str(repo), base_ref="origin/main")
-
-        assert report.workdir.startswith(str((repo / ".worktree").resolve()))
-        assert report.workdir.endswith(Path(report.workdir).name)
-        assert Path(report.workdir).name.startswith("atm-run-")
-        assert ["git", "worktree", "add", "--detach", report.workdir, "origin/main"] in [
-            command for _root, command in calls
-        ]
-
-    def test_prepare_run_worktree_defaults_to_main_ref(self, tmp_path, monkeypatch):
-        repo = tmp_path / "repo"
-        repo.mkdir()
-        calls = []
-
-        def fake_run(root, command, timeout, config=None):
-            calls.append((root, command))
-            if command[:2] == ["git", "rev-parse"]:
-                return _completed(command, stdout=str(repo) + "\n")
-            if command[:3] == ["git", "worktree", "add"]:
-                return _completed(command)
-            return _completed(command, returncode=1, stderr="unexpected")
-
-        monkeypatch.setattr("agentic_tdd_runner.environment._run", fake_run)
-
-        report = prepare_run_worktree(str(repo))
-
-        assert report.base_ref == "main"
-        assert ["git", "worktree", "add", "--detach", report.workdir, "main"] in [
-            command for _root, command in calls
-        ]
-
-    def test_prepare_run_worktree_rejects_file_destination(self, tmp_path, monkeypatch):
-        repo = tmp_path / "repo"
-        destination = tmp_path / "run"
-        repo.mkdir()
-        destination.write_text("not a directory")
-
-        def fake_run(root, command, timeout, config=None):
-            if command[:2] == ["git", "rev-parse"]:
-                return _completed(command, stdout=str(repo) + "\n")
-            raise AssertionError(f"Unexpected command: {command!r}")
-
-        monkeypatch.setattr("agentic_tdd_runner.environment._run", fake_run)
-
-        with pytest.raises(WorktreePrepError, match="not a directory"):
-            prepare_run_worktree(str(repo), workdir=str(destination))
-
-    def test_prepare_run_worktree_rejects_file_repo(self, tmp_path):
-        repo = tmp_path / "repo-file"
-        repo.write_text("not a directory")
-
-        with pytest.raises(WorktreePrepError, match="repo is not a directory"):
-            prepare_run_worktree(str(repo))
 
     def test_dirty_worktree_fails_before_install(self, tmp_path, monkeypatch):
         _write_js_project(tmp_path)

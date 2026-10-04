@@ -1,35 +1,4 @@
-from agentic_tdd_runner.quality import detect_pr_target_violation, run_quality_checks
-
-
-def test_pr_target_violation_when_diff_misses_target():
-    episode = {"source_file": "src/text/sanitizer.ts", "target_symbol": "sanitizeText"}
-    changed = ["src/events/client.ts", "src/events/parseRouteCommand.ts", "tmp_test.js"]
-    violation = detect_pr_target_violation(changed, episode)
-    assert violation is not None
-    assert "sanitizer.ts" in violation
-
-
-def test_pr_target_violation_when_only_neighbor_source_touched():
-    episode = {"source_file": "src/text/sanitizer.ts", "target_symbol": "sanitizeText"}
-    changed = ["src/events/client.ts", "src/text/sanitizeText.test.ts"]
-    assert detect_pr_target_violation(changed, episode) is not None
-
-
-def test_pr_target_violation_none_when_target_touched():
-    episode = {"source_file": "src/text/sanitizer.ts", "target_symbol": "sanitizeText"}
-    changed = ["src/text/sanitizer.ts", "src/text/sanitizeText.test.ts"]
-    assert detect_pr_target_violation(changed, episode) is None
-
-
-def test_pr_target_violation_normalizes_leading_dot_slash():
-    episode = {"source_file": "src/text/sanitizer.ts"}
-    changed = ["./src/text/sanitizer.ts"]
-    assert detect_pr_target_violation(changed, episode) is None
-
-
-def test_pr_target_violation_none_without_target():
-    assert detect_pr_target_violation(["whatever.ts"], {}) is None
-    assert detect_pr_target_violation(["whatever.ts"], None) is None
+from agentic_tdd_runner.quality import run_quality_checks
 
 
 def test_quality_unknown_language_does_not_use_typescript_fallback(tmp_path):

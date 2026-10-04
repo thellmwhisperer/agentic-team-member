@@ -79,45 +79,6 @@ class WorktreePrepError(RuntimeError):
     """Raised when an isolated run worktree cannot be created."""
 
 
-def prepare_run_worktree(
-    repo: str,
-    *,
-    workdir: str | None = None,
-    base_ref: str | None = None,
-    run_root: str | None = None,
-) -> WorktreeReport:
-    """Create an isolated detached worktree for a run."""
-    repo_root = _resolve_git_repo(repo)
-    ref = base_ref or "main"
-    destination = Path(workdir).resolve() if workdir else _default_run_worktree_path(repo_root, run_root)
-
-    if destination.exists():
-        if not destination.is_dir():
-            raise WorktreePrepError(f"worktree destination is not a directory: {destination}")
-        if any(destination.iterdir()):
-            raise WorktreePrepError(f"worktree destination is not empty: {destination}")
-
-    destination.parent.mkdir(parents=True, exist_ok=True)
-
-    command = ["git", "worktree", "add", "--detach", str(destination), ref]
-    try:
-        result = _run(repo_root, command, timeout=120)
-    except FileNotFoundError as exc:
-        raise WorktreePrepError("git is unavailable") from exc
-    except subprocess.TimeoutExpired as exc:
-        raise WorktreePrepError(f"worktree creation timed out: {destination}") from exc
-    if result.returncode != 0:
-        detail = (result.stderr or result.stdout or "").strip()
-        raise WorktreePrepError(f"worktree creation failed: {detail}")
-
-    return WorktreeReport(
-        repo=str(repo_root),
-        workdir=str(destination),
-        base_ref=ref,
-        command=command,
-    )
-
-
 def prepare_run_clone(
     repo: str,
     *,
