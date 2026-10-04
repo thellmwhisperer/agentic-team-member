@@ -114,7 +114,9 @@ Fix this issue.
 - Only edit files under that directory. No files outside it.
 
 ## ACCEPTANCE
-1. Write a failing test that reproduces the bug before changing source.
+1. Write a failing test that reproduces the bug before changing source. The test must call the
+   existing code path the issue describes (the function or handler that misbehaves today), not only
+   a new helper you create: with the fix removed, the test must fail on behavior, not on a missing module.
 2. Fix the source.
 3. The test passes.
 4. The full test command passes.
@@ -134,6 +136,21 @@ Fix this issue.
 Your final message must be ONLY this JSON object, nothing else:
 {{"test_file": "<repo-relative path of the regression test>", "changed_files": ["<path>"], "summary": "<one paragraph>", "commands_run": ["<command>"]}}
 """
+
+
+MISSING_MODULE_MARKERS = (
+    "cannot find module", "module not found", "could not resolve", "cannot find package",
+    "no module named", "modulenotfounderror", "failed to resolve import",
+)
+
+
+def red_failed_on_missing_module(red_output: str) -> str | None:
+    """A red phase that fails because a new module is absent proves nothing about the bug."""
+    lowered = red_output.lower()
+    for marker in MISSING_MODULE_MARKERS:
+        if marker in lowered:
+            return marker
+    return None
 
 
 def make_logger(path: str, harness: str):
@@ -384,10 +401,22 @@ def main(argv: list[str] | None = None) -> int:
     changed = quality.get_changed_files(worktree)
     test_file = pick_test_file(harness_report, worktree, config)
     if test_file:
+        red_outputs: list[str] = []
+
+        def log_capturing_red(name: str, data: dict) -> None:
+            if name == "verify":
+                red_outputs.append(str(data.get("red_output_full") or data.get("red_output", "")))
+            log(name, data)
+
         verified, verify_msg = verification.verify_red_green(
-            test_file, workdir=worktree, config=config, emit=print, log=log,
+            test_file, workdir=worktree, config=config, emit=print, log=log_capturing_red,
             apply_mechanical_edits=lambda edits, wd: 0,
         )
+        invalid_red = red_failed_on_missing_module(red_outputs[-1] if red_outputs else "")
+        if verified and invalid_red:
+            verified = False
+            verify_msg = f"INVALID RED: without the fix the test fails on a missing module ({invalid_red}), not on behavior"
+            log("verify_invalid_red", {"test_file": test_file, "marker": invalid_red})
     else:
         verified, verify_msg = False, "no test file found"
     quality_ok, quality_msg = quality.run_quality_checks(

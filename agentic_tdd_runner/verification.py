@@ -212,6 +212,7 @@ def verify_red_green(
         "red_passed": red_passed,
         "green_passed": green_passed,
         "red_output": red_output,
+        "red_output_full": red_output_full,
         "green_output": green_output,
     })
 
