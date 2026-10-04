@@ -393,7 +393,8 @@ def summarize_event(event) -> str | None:
     if kind == "system":
         if event.get("subtype") in ("thinking_tokens", "hook_started", "hook_response"):
             return None  # bookkeeping noise; the JSONL log keeps it
-        return f"[{event.get('subtype', 'system')}] model={event.get('model', '?')}"
+        label = f"[{event.get('subtype', 'system')}]"
+        return f"{label} model={event['model']}" if event.get("model") else label
     if kind in ("assistant", "user"):
         parts = []
         for block in (event.get("message") or {}).get("content") or []:
