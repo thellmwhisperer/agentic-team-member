@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import re
 from copy import deepcopy
-from pathlib import PurePosixPath
 
-from agentic_tdd_runner.languages import get_language
 
 _CALL_RE = re.compile(r"\b([A-Za-z_]\w*)\.([A-Za-z_]\w*)\s*\(")
 
@@ -380,32 +378,6 @@ def _required_shape_members(required_shape):
         elif isinstance(value, dict):
             members.extend(_required_shape_members(value))
     return sorted(set(members))
-
-
-
-def _build_pattern_files(pattern_files, tdd):
-    built = []
-    for entry in pattern_files:
-        path = entry["path"] if isinstance(entry, dict) else entry
-        why = entry.get("why_selected") if isinstance(entry, dict) else None
-        reusable_shapes = []
-        try:
-            content = tdd.read_file(path)["content"]
-        except (FileNotFoundError, PermissionError, OSError, KeyError):
-            content = ""
-        lang = get_language(path)
-        shapes_fn = getattr(lang, "reusable_test_shapes", None)
-        if callable(shapes_fn):
-            reusable_shapes.extend(shapes_fn(content))
-        built.append(
-            {
-                "path": path,
-                "why_selected": why or "pattern from P1 handoff",
-                "reusable_shapes": reusable_shapes,
-                "non_reusable_noise": [],
-            }
-        )
-    return built
 
 
 
