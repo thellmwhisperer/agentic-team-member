@@ -4,7 +4,6 @@ import textwrap
 
 from agentic_tdd_runner.discovery import (
     build_semantic_index,
-    discover_target,
     load_or_build_semantic_index,
     rank_targets,
     write_semantic_index,
@@ -221,13 +220,14 @@ class TestDiscoverTarget:
             """,
         )
 
-        target = discover_target(
+        target = rank_targets(
             issue_text=(
                 "Router only responds when the /api/tasks endpoint "
                 "appears as the first segment of the request path"
             ),
             project_root=str(tmp_path),
-        )
+            limit=1,
+        )[0]
 
         assert target is not None
         assert target["source_path"] == "src/http/router.ts"
@@ -264,10 +264,11 @@ class TestDiscoverTarget:
             """,
         )
 
-        target = discover_target(
+        target = rank_targets(
             issue_text="Action timers duplicate on reconnect and send duplicate messages",
             project_root=str(tmp_path),
-        )
+            limit=1,
+        )[0]
 
         assert target is not None
         assert target["source_path"] == "src/roles/RoleManager.ts"
