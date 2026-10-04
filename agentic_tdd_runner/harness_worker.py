@@ -15,7 +15,6 @@ import shlex
 import shutil
 import signal
 import subprocess
-import sys
 import textwrap
 import threading
 import time
@@ -28,7 +27,6 @@ from agentic_tdd_runner.config import load_config
 from agentic_tdd_runner.environment import (
     EnvironmentPrepError,
     WorktreePrepError,
-    detect_project_type,
     javascript_preflight_commands,
     prepare_environment,
     prepare_run_clone,
