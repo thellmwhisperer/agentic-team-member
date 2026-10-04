@@ -133,14 +133,16 @@ def prepare_run_clone(
     source repo (so `origin/integration` means what it means there) and fetched by SHA."""
     repo_root = _resolve_git_repo(repo)
     ref = base_ref or "main"
-    destination = Path(workdir).resolve() if workdir else _default_run_worktree_path(repo_root, run_root)
-
-    if destination.exists():
-        if not destination.is_dir():
-            raise WorktreePrepError(f"clone destination is not a directory: {destination}")
-        if any(destination.iterdir()):
-            raise WorktreePrepError(f"clone destination is not empty: {destination}")
-    destination.parent.mkdir(parents=True, exist_ok=True)
+    if workdir:
+        destination = Path(workdir).resolve()
+        if destination.exists():
+            if not destination.is_dir():
+                raise WorktreePrepError(f"clone destination is not a directory: {destination}")
+            if any(destination.iterdir()):
+                raise WorktreePrepError(f"clone destination is not empty: {destination}")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+    else:
+        destination = _claim_run_dir(repo_root, run_root)
 
     try:
         resolved = _run(repo_root, ["git", "rev-parse", "--verify", f"{ref}^{{commit}}"], timeout=30)
@@ -454,6 +456,23 @@ def _default_run_worktree_path(repo_root: Path, run_root: str | None) -> Path:
         n += 1
         path = root / f"atm-run-{stamp}-{n}"
     return path
+
+
+def _claim_run_dir(repo_root: Path, run_root: str | None) -> Path:
+    """Reserve a fresh run directory atomically: mkdir either succeeds or the name is taken.
+
+    Checking `exists()` and cloning later is a race: two workers launched in the same
+    second both saw nothing and both chose the same name (4-oct-2026, Opus and Codex)."""
+    import os
+
+    while True:
+        path = _default_run_worktree_path(repo_root, run_root)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            os.mkdir(path)
+        except FileExistsError:
+            continue
+        return path
 
 
 def _require_git_worktree(
