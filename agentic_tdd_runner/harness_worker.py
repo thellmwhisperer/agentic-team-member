@@ -639,7 +639,7 @@ def summarize_event(event) -> str | None:
     if isinstance(part, dict):  # opencode
         if kind == "text":
             return f"[text] {_snippet(part.get('text', ''))}"
-        if kind == "tool":
+        if kind in ("tool", "tool_use"):  # opencode 1.18 emits tool_use with part.type == "tool"
             state = part.get("state") or {}
             return f"[tool] {part.get('tool')} ({state.get('status', '')}): {_snippet(json.dumps(state.get('input', {})), 120)}"
         return None
