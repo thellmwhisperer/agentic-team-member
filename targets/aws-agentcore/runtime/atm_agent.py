@@ -8,7 +8,6 @@ import tempfile
 from pathlib import Path
 from urllib.parse import urlparse
 
-from atm_cloud.github_gateway import load_github_token
 from atm_cloud.job import AtmJob
 from atm_cloud.roca import RocaMcpClient
 from atm_cloud.runner import AtmCloudRunner, NoopMemoryClient, SubprocessAtmHarness
@@ -126,6 +125,23 @@ def configure_git_identity_from_env() -> None:
     os.environ.setdefault("GIT_COMMITTER_EMAIL", email)
     subprocess.run(["git", "config", "--global", "user.name", name], check=False)
     subprocess.run(["git", "config", "--global", "user.email", email], check=False)
+
+
+def load_github_token() -> str:
+    token = os.environ.get("GITHUB_TOKEN")
+    if token:
+        return token
+    secret_arn = os.environ.get("GITHUB_TOKEN_SECRET_ARN")
+    if not secret_arn:
+        raise KeyError("GITHUB_TOKEN or GITHUB_TOKEN_SECRET_ARN")
+    import boto3
+
+    raw = boto3.client("secretsmanager").get_secret_value(SecretId=secret_arn)["SecretString"]
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return raw
+    return parsed.get("token") or next(iter(parsed.values()))
 
 
 def load_roca_token() -> str:

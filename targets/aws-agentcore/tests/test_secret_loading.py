@@ -7,11 +7,11 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from atm_cloud.github_gateway import load_github_token
 from runtime.atm_agent import (
     configure_github_auth_from_env,
     configure_git_https_auth,
     configure_github_packages_auth,
+    load_github_token,
     load_roca_token,
 )
 
