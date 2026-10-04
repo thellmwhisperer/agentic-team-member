@@ -8,7 +8,12 @@ import subprocess
 from pathlib import Path, PurePosixPath
 
 from agentic_tdd_runner.runner_authority import override_detected_runner
-from agentic_tdd_runner.runner_command import effective_test_command_template
+from agentic_tdd_runner.languages import language_for
+from agentic_tdd_runner.runner_command import (
+    _configured_test_command,
+    effective_test_command_template,
+    js_test_command_template,
+)
 
 GIT_COMMAND_TIMEOUT_SECONDS = 10
 
@@ -34,21 +39,30 @@ def is_test_file_path(path: str, config: dict | None = None) -> bool:
 
 
 def test_runner_command_for_file(path: str, config: dict | None = None) -> str:
-    from agentic_tdd_runner.languages import get_language
-
-    lang = get_language(path)
-    command_fn = getattr(lang, "test_command_template", None) if lang else None
-    if callable(command_fn):
-        command = command_fn(config)
-        if command:
-            return command
     runner_config = (config or {}).get("runner", {}) or {}
+    language = language_for(path)
+    if language == "python":
+        return "python3 -m pytest"
+    if language == "typescript":
+        return _js_test_command(runner_config)
     if override_detected_runner(runner_config) and runner_config.get("command"):
         return str(runner_config.get("command"))
     return effective_test_command_template(
         runner_config.get("bootstrap"),
         runner_config.get("command"),
     )
+
+
+def _js_test_command(runner_config: dict) -> str:
+    configured = _configured_test_command(runner_config.get("command"))
+    if override_detected_runner(runner_config):
+        configured_runner = runner_config.get("framework")
+        if configured:
+            return configured
+        if isinstance(configured_runner, str) and configured_runner:
+            return js_test_command_template({"test_runner": configured_runner}, None)
+    detected = js_test_command_template(runner_config.get("bootstrap"), configured)
+    return detected or configured or "bun test"
 
 
 def _git_status_entry_step(status_code: str) -> int:

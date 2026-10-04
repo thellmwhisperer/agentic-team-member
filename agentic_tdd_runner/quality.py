@@ -11,6 +11,8 @@ from pathlib import Path, PurePosixPath
 
 import requests
 
+from agentic_tdd_runner import languages
+
 
 _TEST_ONLY_SETTER_EXPORT_RE = re.compile(
     r"\bexport\s+(?:async\s+)?function\s+__set[A-Za-z0-9_]*ForTests\b"
@@ -40,14 +42,7 @@ _SOURCE_TEXT_READ_ALLOWED_FILE_MARKERS = (
 
 
 def detect_quality_tools(lang_name: str, workdir: str) -> list[dict]:
-    """Detect quality tools by delegating to the active language plugin."""
-    from agentic_tdd_runner.languages import get_language_by_name
-
-    language = get_language_by_name(lang_name)
-    detect_fn = getattr(language, "detect_quality_tools", None)
-    if callable(detect_fn):
-        return list(detect_fn(workdir))
-    return []
+    return languages.detect_quality_tools(lang_name, workdir)
 
 
 def get_changed_files(workdir: str) -> list[str]:
@@ -122,13 +117,11 @@ def run_quality_checks(
     get_changed_files_fn: Callable[[], list[str]] | None = None,
 ) -> tuple[bool, str]:
     """Run quality checks on changed files. Returns (passed, message)."""
-    from agentic_tdd_runner.languages import get_language
-
     quality_cfg = config.get("quality", {})
     if not quality_cfg.get("enabled", False):
         return True, "Quality checks disabled"
 
-    lang = get_language(test_file)
+    lang = languages.language_for(test_file)
     if detect_quality_tools_fn is None:
         detect_quality_tools_fn = lambda name: detect_quality_tools(name, workdir)
     if get_changed_files_fn is None:
@@ -151,14 +144,14 @@ def run_quality_checks(
             return False, template.replace("{details}", details)
         return True, "No quality checks configured for unknown language"
 
-    lang_name = lang.name
+    lang_name = lang
     lang_cfg = quality_cfg.get(lang_name, {})
     # Auto-detect tools from the project, fall back to config
     checks = detect_quality_tools_fn(lang_name) or lang_cfg.get("checks", [])
     forbidden = lang_cfg.get("forbidden", [])
 
     # Filter to files matching the active language's extensions
-    extensions = lang.extensions
+    extensions = languages.EXTENSIONS[lang]
     changed = [f for f in all_changed if os.path.splitext(f)[1] in extensions]
     if not changed:
         return True, "No changed files matching language"
@@ -270,7 +263,7 @@ def _duplicated_setup_findings(
     *,
     config: dict | None = None,
     log: Callable[[str, dict], None] | None = None,
-    lang: object | None = None,
+    lang: str | None = None,
 ) -> list[str]:
     findings: list[str] = []
     for f in test_files:
@@ -376,12 +369,11 @@ def _is_production_source_text_path(path: str) -> bool:
     return not any(marker in filename for marker in _SOURCE_TEXT_READ_ALLOWED_FILE_MARKERS)
 
 
-def is_obvious_setup_line(line: str, *, lang: object | None = None) -> bool:
+def is_obvious_setup_line(line: str, *, lang: str | None = None) -> bool:
     stripped = line.strip()
     if re.search(r"\b(mock|spyOn)\s*\(", stripped):
         return True
-    language_mock_setup = getattr(lang, "is_mock_setup_line", None)
-    if callable(language_mock_setup) and language_mock_setup(stripped):
+    if lang == "typescript" and languages.JS_MOCK_SETUP_RE.search(stripped):
         return True
     if re.search(r"__set[A-Za-z_]\w*\s*\(", stripped):
         return True
@@ -390,7 +382,7 @@ def is_obvious_setup_line(line: str, *, lang: object | None = None) -> bool:
     return False
 
 
-def is_obvious_act_line(line: str, *, lang: object | None = None) -> bool:
+def is_obvious_act_line(line: str, *, lang: str | None = None) -> bool:
     stripped = line.strip()
     if is_obvious_assert_line(stripped) or is_obvious_setup_line(stripped, lang=lang):
         return False
@@ -407,7 +399,7 @@ def is_obvious_act_line(line: str, *, lang: object | None = None) -> bool:
 def partition_duplicated_test_lines(
     file_text: str,
     *,
-    lang: object | None = None,
+    lang: str | None = None,
 ) -> tuple[list[str], list[str]]:
     from collections import Counter
 
