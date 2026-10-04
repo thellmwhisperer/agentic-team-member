@@ -71,6 +71,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--issue-file", help="File with the issue text (first line is the title)")
     parser.add_argument("--harness", choices=["claude", "codex"], default="claude")
     parser.add_argument("--model")
+    parser.add_argument("--effort", choices=["low", "medium", "high", "xhigh", "max"],
+                        help="Reasoning effort: claude --effort, codex model_reasoning_effort (codex has no xhigh/max)")
     parser.add_argument("--timeout", type=int, default=1800)
     parser.add_argument("--config", default="config/agent.toml")
     parser.add_argument("--log-dir")
@@ -531,11 +533,16 @@ def harness_command(args, worktree: str, brief: str, schema_path: str, last_msg_
                "--allowedTools", "Read", "Edit", "Write", "Bash", "Glob", "Grep"]
         if args.model:
             cmd += ["--model", args.model]
+        if args.effort:
+            cmd += ["--effort", args.effort]
         return cmd, brief
     cmd = [args.harness_bin or "codex", "exec", "--json", "-C", worktree, "--sandbox", "workspace-write",
            "--output-schema", schema_path, "-o", last_msg_path]
     if args.model:
         cmd += ["-c", f"model={json.dumps(args.model)}"]
+    if args.effort:
+        # Without this Codex inherits ~/.codex/config.toml, which ran every run of 4-oct at "low".
+        cmd += ["-c", f"model_reasoning_effort={json.dumps(args.effort)}"]
     return cmd + [brief], None
 
 
@@ -877,7 +884,7 @@ def main(argv: list[str] | None = None) -> int:
     last = units[-1]
     passed = failed_unit is None
     result = {
-        "harness": args.harness, "model": args.model, "base_ref": args.base_ref, "base_sha": base_sha,
+        "harness": args.harness, "model": args.model, "effort": args.effort, "base_ref": args.base_ref, "base_sha": base_sha,
         "head_sha": git_lines(worktree, "rev-parse", "HEAD")[0], "worktree": worktree,
         "brief": str(brief_path), "log": str(log_path), "changed_files": changed_all, "test_file": units[0]["test_file"],
         "verified": {"ok": all(u["verified"]["ok"] for u in units),
@@ -894,7 +901,7 @@ def main(argv: list[str] | None = None) -> int:
     log("report", result)
     log_fh.close()
     print("\n=== HARNESS WORKER SUMMARY ===")
-    print(f"harness:    {args.harness} model={args.model or 'default'} exit={last['harness_exit_code']}")
+    print(f"harness:    {args.harness} model={args.model or 'default'} effort={args.effort or 'default'} exit={last['harness_exit_code']}")
     print(f"duration:   {result['duration_seconds']}s timed_out={result['timed_out']} units={len(units)}/{max_units}")
     print(f"worktree:   {worktree}")
     for u in units:
