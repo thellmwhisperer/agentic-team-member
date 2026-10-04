@@ -758,7 +758,7 @@ pathlib.Path("tests/test_add.py").write_text("from calc import add\\n\\n\\ndef t
 calc = pathlib.Path("calc.py")
 calc.write_text(calc.read_text().replace("a - b", "a + b"))
 print(json.dumps({"type": "step_start", "part": {"id": "p1"}}), flush=True)
-print(json.dumps({"type": "tool", "part": {"tool": "edit", "state": {"status": "completed", "input": {"filePath": "calc.py"}}}}), flush=True)
+print(json.dumps({"type": "tool_use", "part": {"type": "tool", "tool": "edit", "state": {"status": "completed", "input": {"filePath": "calc.py"}}}}), flush=True)
 report = {"test_file": "tests/test_add.py", "changed_files": ["calc.py", "tests/test_add.py"], "summary": "fixed", "commands_run": [], "follow_ups": []}
 print(json.dumps({"type": "text", "part": {"text": "Done.\\n" + json.dumps(report)}}), flush=True)
 print(json.dumps({"type": "step_finish", "part": {"reason": "stop"}}), flush=True)
