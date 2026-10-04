@@ -727,12 +727,12 @@ def test_judge_is_not_called_for_follow_ups_that_fail_the_mechanical_gates(tmp_p
 
 
 def test_effort_reaches_both_harnesses():
-    args = harness_worker.parse_args(["--repo", "r", "--harness", "claude", "--effort", "high"])
+    args = harness_worker.parse_args(["--repo", "r", "--issue-file", "i.md", "--harness", "claude", "--effort", "high"])
     cmd, _ = harness_worker.harness_command(args, "/wt", "brief", "/s.json", "/m.txt")
     assert cmd[cmd.index("--effort") + 1] == "high"
-    args = harness_worker.parse_args(["--repo", "r", "--harness", "codex", "--model", "gpt-6.1-sol", "--effort", "high"])
+    args = harness_worker.parse_args(["--repo", "r", "--issue-file", "i.md", "--harness", "codex", "--model", "gpt-6.1-sol", "--effort", "high"])
     cmd, _ = harness_worker.harness_command(args, "/wt", "brief", "/s.json", "/m.txt")
     assert 'model="gpt-6.1-sol"' in cmd and 'model_reasoning_effort="high"' in cmd
-    args = harness_worker.parse_args(["--repo", "r", "--harness", "codex"])
+    args = harness_worker.parse_args(["--repo", "r", "--issue-file", "i.md", "--harness", "codex"])
     cmd, _ = harness_worker.harness_command(args, "/wt", "brief", "/s.json", "/m.txt")
     assert not any("model_reasoning_effort" in c for c in cmd)

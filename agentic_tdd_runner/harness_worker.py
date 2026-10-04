@@ -533,14 +533,14 @@ def harness_command(args, worktree: str, brief: str, schema_path: str, last_msg_
                "--allowedTools", "Read", "Edit", "Write", "Bash", "Glob", "Grep"]
         if args.model:
             cmd += ["--model", args.model]
-        if args.effort:
+        if getattr(args, "effort", None):
             cmd += ["--effort", args.effort]
         return cmd, brief
     cmd = [args.harness_bin or "codex", "exec", "--json", "-C", worktree, "--sandbox", "workspace-write",
            "--output-schema", schema_path, "-o", last_msg_path]
     if args.model:
         cmd += ["-c", f"model={json.dumps(args.model)}"]
-    if args.effort:
+    if getattr(args, "effort", None):
         # Without this Codex inherits ~/.codex/config.toml, which ran every run of 4-oct at "low".
         cmd += ["-c", f"model_reasoning_effort={json.dumps(args.effort)}"]
     return cmd + [brief], None
