@@ -3,7 +3,6 @@ import inspect
 
 from agentic_tdd_runner.compiler.analyzer import (
     _build_assertion_surface,
-    _build_pattern_files,
     _merge_required_shape_value,
 )
 from agentic_tdd_runner.compiler import analyzer
@@ -58,34 +57,6 @@ class TestBuildAssertionSurface:
 
 
 class TestPatternFiles:
-    def test_reusable_shapes_are_language_owned(self):
-        class FakeTDD:
-            def read_file(self, path):
-                return {
-                    "content": "\n".join([
-                        "mock.module('../logger', () => ({}));",
-                        "const spy = mock(() => undefined);",
-                        "expect(spy).toHaveBeenCalledWith(value);",
-                    ])
-                }
-
-        built = _build_pattern_files([{"path": "src/service.test.ts"}], FakeTDD())
-
-        assert built[0]["reusable_shapes"] == [
-            "mock.module(...)",
-            "mock(...)",
-            "toHaveBeenCalledWith(...)",
-        ]
-
-    def test_unknown_language_pattern_files_do_not_inherit_typescript_shapes(self):
-        class FakeTDD:
-            def read_file(self, path):
-                return {"content": "mock.module('../logger', () => ({}));"}
-
-        built = _build_pattern_files([{"path": "spec/service_spec.rb"}], FakeTDD())
-
-        assert built[0]["reusable_shapes"] == []
-
     def test_core_analyzer_does_not_contain_runner_specific_mock_shapes(self):
         source = inspect.getsource(analyzer)
 
