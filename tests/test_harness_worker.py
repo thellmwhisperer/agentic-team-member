@@ -473,6 +473,7 @@ def test_summary_prints_the_whole_thinking_and_hides_token_bookkeeping():
     assert "First I read the hook." in out and "Then I write the red test." in out
     assert harness_worker.summarize_event({"type": "system", "subtype": "thinking_tokens"}) is None
     assert harness_worker.summarize_event({"type": "system", "subtype": "init", "model": "m"}) == "[init] model=m"
+    assert harness_worker.summarize_event({"type": "system", "subtype": "status"}) == "[status]"
 
 
 def test_run_clone_is_a_separate_repo_detached_at_the_source_base_ref(tmp_path):
