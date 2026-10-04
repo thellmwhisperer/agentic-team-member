@@ -68,6 +68,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--github-repo", help="owner/repo for --issue-number")
     parser.add_argument("--issue-file", help="File with the issue text (first line is the title)")
     parser.add_argument("--harness", choices=["claude", "codex", "opencode", "pi"], default="claude")
+    parser.add_argument("--harness-arg", action="append", default=[], metavar="ARG",
+                        help="Extra argument appended to the harness command, before the brief (repeatable), e.g. --harness-arg=--provider --harness-arg=bonsai-mlx")
     parser.add_argument("--env", action="append", default=[], metavar="KEY=VALUE",
                         help="Extra environment for the harness process (repeatable), e.g. OPENCODE_CONFIG=...")
     parser.add_argument("--model")
@@ -542,7 +544,17 @@ def make_logger(path: str, harness: str):
 
 
 def harness_command(args, worktree: str, brief: str, schema_path: str, last_msg_path: str) -> tuple[list[str], str | None]:
-    """Return argv and the stdin payload."""
+    """Return argv and the stdin payload. `--harness-arg` values go right before the brief."""
+    cmd, stdin = _harness_command(args, worktree, brief, schema_path, last_msg_path)
+    extra = list(getattr(args, "harness_arg", None) or [])
+    if not extra:
+        return cmd, stdin
+    if stdin is not None:
+        return cmd + extra, stdin
+    return cmd[:-1] + extra + cmd[-1:], stdin
+
+
+def _harness_command(args, worktree: str, brief: str, schema_path: str, last_msg_path: str) -> tuple[list[str], str | None]:
     if args.harness == "claude":
         # In -p mode the CLI sends thinking display "omitted" unless told otherwise, so Opus returns
         # empty thinking blocks. "summarized" is what the TUI uses (showThinkingSummaries) and the

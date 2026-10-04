@@ -808,3 +808,13 @@ def test_env_flag_reaches_the_harness_process(tmp_path, monkeypatch):
     args = harness_worker.parse_args(["--repo", "r", "--issue-file", "i.md", "--harness", "pi", "--effort", "high", "--model", "ollama/q"])
     cmd, stdin = harness_worker.harness_command(args, "/wt", "brief", "/s.json", "/m.txt")
     assert stdin is None and cmd[-1] == "brief" and cmd[cmd.index("--thinking") + 1] == "high" and "--no-session" in cmd
+
+
+def test_harness_arg_lands_before_the_brief():
+    args = harness_worker.parse_args(["--repo", "r", "--issue-file", "i.md", "--harness", "pi", "--model", "/m",
+                                      "--harness-arg=--provider", "--harness-arg=bonsai-mlx", "--harness-arg=-e", "--harness-arg=/x/p.ts"])
+    cmd, _ = harness_worker.harness_command(args, "/wt", "the brief", "/s", "/m")
+    assert cmd[-5:] == ["--provider", "bonsai-mlx", "-e", "/x/p.ts", "the brief"]
+    args = harness_worker.parse_args(["--repo", "r", "--issue-file", "i.md", "--harness", "claude", "--harness-arg=--verbose-x"])
+    cmd, stdin = harness_worker.harness_command(args, "/wt", "the brief", "/s", "/m")
+    assert cmd[-1] == "--verbose-x" and stdin == "the brief"
