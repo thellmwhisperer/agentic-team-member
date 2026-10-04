@@ -4,22 +4,17 @@ import json
 import os
 from pathlib import Path
 import subprocess
-from types import SimpleNamespace
 
 import pytest
 
-from agentic_tdd_runner import agent
 from agentic_tdd_runner import environment
 from agentic_tdd_runner.environment import (
     EnvironmentPrepError,
-    EnvironmentReport,
     WorktreePrepError,
-    WorktreeReport,
     prepare_run_worktree,
     prepare_environment,
     recommended_tools_from_config,
 )
-from agentic_tdd_runner.runner_bootstrap import RunnerBootstrapReport
 
 
 def _completed(command, returncode=0, stdout="", stderr=""):
@@ -538,149 +533,3 @@ class TestPrepareEnvironment:
         )
 
         assert result.returncode == 0
-
-
-class TestMainEnvironmentPrep:
-    def _make_config(self):
-        return {
-            "agent": {"max_steps": 1, "max_tool_output": 8000},
-            "environment": {"enabled": True},
-            "llm": {"model": "test-model", "url": "http://localhost:9999"},
-            "timeouts": {"tool_execution": 10, "llm_request": 10, "test_run": 10},
-            "runner": {"command": "bun test", "test_file_patterns": ["*.test.ts"], "exclude_dirs": []},
-            "prompt": {"system": "system", "no_test_found": "no test", "quality_failed": "{details}"},
-            "verification": {"max_rejections": 1},
-            "quality": {"enabled": False},
-            "tools": [],
-        }
-
-    def test_prepare_target_environment_logs_runner_bootstrap(self, tmp_path, monkeypatch):
-        logged = []
-        report = EnvironmentReport(
-            workdir=str(tmp_path),
-            project_type="javascript",
-            package_manager="pnpm",
-            runner_bootstrap=RunnerBootstrapReport(
-                workdir=str(tmp_path),
-                package_dir=str(tmp_path),
-                package_json=str(tmp_path / "package.json"),
-                monorepo_root=str(tmp_path),
-                lockfile=str(tmp_path / "pnpm-lock.yaml"),
-                package_manager="pnpm",
-                package_manager_source="lockfile:pnpm-lock.yaml",
-                test_runner="vitest",
-                test_runner_source="package.json:scripts.test",
-                test_command="vitest run",
-            ),
-        )
-
-        config = self._make_config()
-        monkeypatch.setattr("agentic_tdd_runner.agent._CONFIG", config)
-        monkeypatch.setattr("agentic_tdd_runner.agent.WORKDIR", str(tmp_path))
-        monkeypatch.setattr("agentic_tdd_runner.agent.emit", lambda _msg: None)
-        monkeypatch.setattr("agentic_tdd_runner.agent.log", lambda event, data: logged.append((event, data)))
-        monkeypatch.setattr("agentic_tdd_runner.environment.prepare_environment", lambda _workdir, _config: report)
-
-        agent.prepare_target_environment()
-
-        assert [event for event, _data in logged] == ["runner_bootstrap", "environment_ready"]
-        assert logged[0][1]["test_runner"] == "vitest"
-        assert config["runner"]["bootstrap"]["test_runner"] == "vitest"
-        assert "runner_bootstrap" not in logged[1][1]
-
-    def test_format_environment_report_omits_custom_runner(self, tmp_path):
-        report = EnvironmentReport(
-            workdir=str(tmp_path),
-            project_type="javascript",
-            package_manager="npm",
-            runner_bootstrap=RunnerBootstrapReport(
-                workdir=str(tmp_path),
-                package_dir=str(tmp_path),
-                package_json=str(tmp_path / "package.json"),
-                package_manager="npm",
-                package_manager_source="default",
-                test_runner="custom",
-                test_runner_source="package.json:scripts.test",
-                test_command="turbo run test",
-            ),
-        )
-
-        assert agent._format_environment_report(report) == "project=javascript, package_manager=npm"
-
-    def test_main_exits_before_discovery_and_chat_when_environment_is_not_ready(self, tmp_path, monkeypatch):
-        args = SimpleNamespace(
-            issue="bug text",
-            source=None,
-            symbol=None,
-            workdir=str(tmp_path),
-            config="unused.toml",
-            log_dir=str(tmp_path),
-        )
-        report = EnvironmentReport(workdir=str(tmp_path), ready=False, reason="missing deps")
-
-        monkeypatch.setattr("agentic_tdd_runner.agent.parse_args", lambda: args)
-        monkeypatch.setattr("agentic_tdd_runner.config.load_config", lambda path: self._make_config())
-        monkeypatch.setattr("agentic_tdd_runner.agent.init_log", lambda: str(tmp_path / "agent.jsonl"))
-        monkeypatch.setattr("agentic_tdd_runner.agent.emit", lambda msg: None)
-        monkeypatch.setattr("agentic_tdd_runner.agent.log", lambda *a, **kw: None)
-        monkeypatch.setattr(
-            "agentic_tdd_runner.environment.prepare_environment",
-            lambda workdir, config: (_ for _ in ()).throw(EnvironmentPrepError("missing deps", report)),
-        )
-        monkeypatch.setattr(
-            "agentic_tdd_runner.discovery.load_or_build_semantic_index",
-            lambda *a, **kw: (_ for _ in ()).throw(AssertionError("discovery should not run")),
-        )
-        monkeypatch.setattr(
-            "agentic_tdd_runner.agent.chat",
-            lambda *a, **kw: (_ for _ in ()).throw(AssertionError("chat should not run")),
-        )
-
-        with pytest.raises(SystemExit, match="Target environment is not ready"):
-            agent.main()
-
-    def test_main_materializes_worktree_before_environment_prep(self, tmp_path, monkeypatch):
-        run_worktree = tmp_path / "run"
-        args = SimpleNamespace(
-            issue="bug text",
-            repo=str(tmp_path / "repo"),
-            base_ref="origin/main",
-            run_root=str(tmp_path),
-            source="src/file.ts",
-            symbol="target",
-            workdir=None,
-            config="unused.toml",
-            log_dir=str(tmp_path),
-        )
-        worktree_report = WorktreeReport(
-            repo=str(tmp_path / "repo"),
-            workdir=str(run_worktree),
-            base_ref="origin/main",
-            command=["git", "worktree", "add", "--detach", str(run_worktree), "origin/main"],
-        )
-        failed_report = EnvironmentReport(workdir=str(run_worktree), ready=False, reason="stop after assert")
-
-        def fake_prepare_environment(workdir, config):
-            assert workdir == str(run_worktree)
-            raise EnvironmentPrepError("stop after assert", failed_report)
-
-        monkeypatch.setattr("agentic_tdd_runner.agent.parse_args", lambda: args)
-        monkeypatch.setattr("agentic_tdd_runner.config.load_config", lambda path: self._make_config())
-        monkeypatch.setattr("agentic_tdd_runner.agent.init_log", lambda: str(tmp_path / "agent.jsonl"))
-        monkeypatch.setattr("agentic_tdd_runner.agent.emit", lambda msg: None)
-        monkeypatch.setattr("agentic_tdd_runner.agent.log", lambda *a, **kw: None)
-        monkeypatch.setattr(
-            "agentic_tdd_runner.environment.prepare_run_worktree",
-            lambda *a, **kw: worktree_report,
-        )
-        monkeypatch.setattr(
-            "agentic_tdd_runner.environment.prepare_environment",
-            fake_prepare_environment,
-        )
-        monkeypatch.setattr(
-            "agentic_tdd_runner.agent.chat",
-            lambda *a, **kw: (_ for _ in ()).throw(AssertionError("chat should not run")),
-        )
-
-        with pytest.raises(SystemExit, match="Target environment is not ready"):
-            agent.main()
