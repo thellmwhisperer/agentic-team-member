@@ -513,3 +513,8 @@ def test_run_clone_is_a_separate_repo_detached_at_the_source_base_ref(tmp_path):
         assert "origin/nope" in str(exc)
     else:
         raise AssertionError("an unknown base ref must be refused before cloning")
+
+    # A second run in the same second gets its own directory, never the first one's.
+    second = prepare_run_clone(str(source), base_ref="origin/integration", run_root=str(tmp_path / "runs"))
+    assert Path(second.workdir) != clone
+    assert Path(second.workdir).parent == clone.parent
