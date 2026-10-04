@@ -76,7 +76,6 @@ def test_parses_structured_repo_profile(tmp_path):
 
     profile = read_repo_profile(path)
 
-    assert profile.runner.test_command == "bun test"
     assert profile.event_frameworks[0].module == "@example/job-queue"
     assert profile.event_frameworks[0].kind == "callback_event"
     assert profile.event_frameworks[0].registrations == ("on", "once")

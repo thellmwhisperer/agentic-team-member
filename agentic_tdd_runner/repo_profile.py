@@ -28,7 +28,6 @@ _TOP_LEVEL_KEYS = {
     "test_seams",
 }
 _PROFILE_KEYS = {"schema_version"}
-_RUNNER_KEYS = {"test_runner", "test_command", "typecheck_command"}
 _EVENT_FRAMEWORK_KEYS = {
     "id",
     "kind",
@@ -68,13 +67,6 @@ _KNOWN_MOCK_EXPORT_KINDS = {
 
 class RepoProfileError(ValueError):
     """Raised when `.atm/profile.toml` is present but invalid."""
-
-
-@dataclass(frozen=True)
-class RunnerProfile:
-    test_runner: str | None = None
-    test_command: str | None = None
-    typecheck_command: str | None = None
 
 
 @dataclass(frozen=True)
@@ -140,7 +132,6 @@ class TestSeamProfile:
 @dataclass(frozen=True)
 class RepoProfile:
     path: Path | None = None
-    runner: RunnerProfile = field(default_factory=RunnerProfile)
     event_frameworks: tuple[EventFrameworkProfile, ...] = field(default_factory=tuple)
     dependency_contracts: tuple[DependencyContractProfile, ...] = field(default_factory=tuple)
     mock_recipes: tuple[MockRecipeProfile, ...] = field(default_factory=tuple)
@@ -151,7 +142,6 @@ class RepoProfile:
     def is_empty(self) -> bool:
         return not any(
             (
-                self.runner != RunnerProfile(),
                 self.event_frameworks,
                 self.dependency_contracts,
                 self.mock_recipes,
@@ -287,7 +277,6 @@ def parse_repo_profile(data: dict[str, Any], *, path: Path | None = None) -> Rep
             f"profile.schema_version must be `{SCHEMA_VERSION}` when set"
         )
 
-    runner = _parse_runner(data.get("runner"))
     event_frameworks = tuple(
         _parse_event_framework(entry, index)
         for index, entry in enumerate(_table_list(data.get("event_frameworks"), "event_frameworks"), start=1)
@@ -333,22 +322,11 @@ def parse_repo_profile(data: dict[str, Any], *, path: Path | None = None) -> Rep
 
     return RepoProfile(
         path=path,
-        runner=runner,
         event_frameworks=event_frameworks,
         dependency_contracts=dependency_contracts,
         mock_recipes=mock_recipes,
         import_expectations=import_expectations,
         test_seams=test_seams,
-    )
-
-
-def _parse_runner(raw: Any) -> RunnerProfile:
-    table = _table(raw, "runner", default={})
-    _reject_unknown_keys(table, _RUNNER_KEYS, "runner")
-    return RunnerProfile(
-        test_runner=_optional_text(table, "test_runner", "runner"),
-        test_command=_optional_text(table, "test_command", "runner"),
-        typecheck_command=_optional_text(table, "typecheck_command", "runner"),
     )
 
 
