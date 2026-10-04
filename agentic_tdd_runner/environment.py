@@ -446,7 +446,14 @@ def _default_run_worktree_path(repo_root: Path, run_root: str | None) -> Path:
         root = candidate if candidate.is_absolute() else repo_root / candidate
     else:
         root = repo_root / ".worktree"
-    return root.resolve() / f"atm-run-{stamp}"
+    root = root.resolve()
+    path = root / f"atm-run-{stamp}"
+    # Two runs in the same second (parallel workers, a test) must not share a directory.
+    n = 1
+    while path.exists():
+        n += 1
+        path = root / f"atm-run-{stamp}-{n}"
+    return path
 
 
 def _require_git_worktree(
