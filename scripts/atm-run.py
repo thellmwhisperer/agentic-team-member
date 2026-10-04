@@ -75,6 +75,8 @@ def worker_command(args, launch: dict, out: Path) -> list[str]:
         cmd += ["--model", args.model]
     if args.effort:
         cmd += ["--effort", args.effort]
+    for kv in args.env:
+        cmd += ["--env", kv]
     if args.timeout:
         cmd += ["--timeout", str(args.timeout)]
     return cmd
@@ -170,6 +172,8 @@ def launch_in_pane(args) -> int:
         inner += ["--model", args.model]
     if args.effort:
         inner += ["--effort", args.effort]
+    for kv in args.env:
+        inner += ["--env", kv]
     if args.timeout:
         inner += ["--timeout", str(args.timeout)]
     # A pane stuck in a tail/pager swallows typed text: interrupt whatever is in the foreground first.
@@ -274,7 +278,8 @@ def main(argv: list[str] | None = None) -> int:
     r = sub.add_parser("run", help="launch one run under a fresh label")
     r.add_argument("--config", required=True)
     r.add_argument("--label", required=True, help="output directory name under .tmp/harness-worker; must be new")
-    r.add_argument("--harness", choices=["claude", "codex"], required=True)
+    r.add_argument("--harness", choices=["claude", "codex", "opencode", "pi"], required=True)
+    r.add_argument("--env", action="append", default=[], metavar="KEY=VALUE", help="passed to the worker as --env")
     r.add_argument("--model")
     r.add_argument("--effort", choices=["low", "medium", "high", "xhigh", "max"])
     r.add_argument("--timeout", type=int)
