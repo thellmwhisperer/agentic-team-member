@@ -539,6 +539,21 @@ def run_command(command: str | None, workdir: str, config: dict, timeout: int) -
     return result.returncode == 0
 
 
+def worktree_fingerprint(workdir: str) -> str:
+    """Hash of every change in the worktree: tracked diff plus untracked file contents."""
+    import hashlib
+    h = hashlib.sha256()
+    status = subprocess.run(["git", "status", "--porcelain", "-uall"], cwd=workdir, capture_output=True, text=True).stdout
+    h.update(status.encode())
+    h.update(subprocess.run(["git", "diff", "HEAD", "--binary"], cwd=workdir, capture_output=True).stdout)
+    for line in sorted(status.splitlines()):
+        if line.startswith("??"):
+            path = Path(workdir) / line[3:]
+            if path.is_file():
+                h.update(line.encode()); h.update(path.read_bytes())
+    return h.hexdigest()
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     # Stale .pyc files survive same-size edits restored within one second by the
@@ -609,10 +624,15 @@ def main(argv: list[str] | None = None) -> int:
                 red_outputs.append(str(data.get("red_output_full") or data.get("red_output", "")))
             log(name, data)
 
+        before = worktree_fingerprint(worktree)
         verified, verify_msg = verification.verify_red_green(
             test_file, workdir=worktree, config=config, emit=print, log=log_capturing_red,
             apply_mechanical_edits=lambda edits, wd: 0,
         )
+        if worktree_fingerprint(worktree) != before:
+            # The verdict is about code that is no longer what the agent left: never trust it.
+            verified, verify_msg = False, "WORKTREE CHANGED DURING VERIFICATION: the red/green verdict is void"
+            log("verify_worktree_changed", {"test_file": test_file})
         invalid_red = red_failed_on_missing_module(red_outputs[-1] if red_outputs else "")
         if verified and invalid_red:
             verified = False
