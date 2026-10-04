@@ -144,6 +144,24 @@ def scan_forbidden(workdir: str, changed: list[str], forbidden: list[str]) -> li
 SCOPE_RULE = ("If the fix needs a change outside SCOPE, do not make it. Finish the unit inside SCOPE "
               "and report the rest under follow_ups, each with a failing test that proves the gap.")
 FOLLOW_UP_RULE = "A follow-up without a red test is discarded. Do not weaken or skip existing tests to make one."
+# House style, 4-oct-2026: the ponytail skill (github.com/DietrichGebert/ponytail, MIT), condensed so the brief
+# carries it whatever the harness. If the skill is installed, the agent loads it too; the brief is the floor.
+PONYTAIL = """## STYLE: ponytail (full)
+You are a lazy senior developer. Lazy means efficient, not careless. The best code is the code never written.
+If a `ponytail` skill is installed in this harness, load it. Either way, follow this:
+- Understand first, then be lazy: read every file the change touches and trace the real flow end to end
+  before writing. Laziness that skips comprehension ships a confident wrong fix.
+- Bug fix = root cause, not symptom. Before you edit, grep every caller of the function you are about to
+  touch. One guard in the shared function beats a guard in each caller; patching only the path the issue
+  names leaves every sibling caller broken. Callers outside SCOPE go to follow-ups, with their red test.
+- The ladder, stop at the first rung that holds: does it need to exist? already in this codebase? stdlib?
+  native platform feature? installed dependency? one line? only then the minimum that works.
+- No unrequested abstractions, no scaffolding for later, deletion over addition, fewest files, shortest
+  working diff. Boring over clever.
+- Never simplify away validation at trust boundaries, error handling that prevents data loss, security,
+  accessibility, or anything the issue asks for.
+- A deliberate shortcut with a known ceiling gets a `ponytail:` comment naming the ceiling and the upgrade path.
+"""
 
 
 def build_brief(*, title, body, worktree, base_ref, test_cmd, typecheck_cmd, forbidden, scope=None) -> str:
@@ -179,6 +197,7 @@ Fix this issue.
 - Tests: `{test_cmd or "not detected"}`
 - Typecheck: {typecheck_line}
 
+{PONYTAIL}
 ## FORBIDDEN
 - These patterns in changed files: {patterns}
 - `git commit`, `git push`, `git rebase`, any `gh` command.
@@ -465,6 +484,7 @@ pass without changing it, stop and say so in `summary`.
 - Tests: `{test_cmd or "not detected"}`
 - Typecheck: {typecheck_line}
 
+{PONYTAIL}
 ## FORBIDDEN
 - These patterns in changed files: {patterns}
 - `git commit`, `git push`, `git rebase`, any `gh` command.
