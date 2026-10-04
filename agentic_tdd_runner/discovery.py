@@ -470,12 +470,6 @@ def rank_targets(
     return scored[: max(0, limit)]
 
 
-def discover_target(issue_text: str, project_root: str, *, index: dict | None = None) -> dict | None:
-    """Return the best candidate target for an issue, or None if no signal exists."""
-    ranked = rank_targets(issue_text=issue_text, project_root=project_root, index=index, limit=1)
-    return ranked[0] if ranked else None
-
-
 def _candidates_for_file(source_path: str, source_text: str, lang, test_files: list[dict]) -> list[dict]:
     if lang.name == "typescript":
         return _typescript_candidates(source_path, source_text, test_files)
@@ -1105,22 +1099,6 @@ def _has_local_file_reader_signal(candidate_tokens: set[str]) -> bool:
     )
 
 
-def _candidate_token_set(candidate: dict) -> set[str]:
-    tokens: set[str] = set()
-    for key in (
-        "path_tokens",
-        "symbol_tokens",
-        "string_tokens",
-        "terms",
-        "domains",
-        "calls",
-        "observables",
-    ):
-        for item in candidate.get(key, []):
-            tokens.update(_normalize_tokens(str(item)))
-    return tokens
-
-
 def _score_candidate(candidate: dict, issue_tokens: set[str], *, issue_shape: str | None = None) -> int:
     path_overlap = len(issue_tokens & set(candidate["path_tokens"]))
     symbol_overlap = len(issue_tokens & set(candidate["symbol_tokens"]))
@@ -1129,7 +1107,7 @@ def _score_candidate(candidate: dict, issue_tokens: set[str], *, issue_shape: st
     score = (path_overlap * 3) + (symbol_overlap * 5) + (string_overlap * 6) + term_overlap
 
     if issue_shape == "api_retry":
-        candidate_tokens = set(candidate.get("rank_tokens") or _candidate_token_set(candidate))
+        candidate_tokens = set(candidate["rank_tokens"])
         api_boundary_signal = candidate_tokens & _API_BOUNDARY_TOKENS
         if api_boundary_signal:
             score += min(
