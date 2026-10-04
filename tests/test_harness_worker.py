@@ -371,3 +371,18 @@ def test_follow_ups_without_a_behavioral_red_are_rejected(tmp_path, monkeypatch)
     assert not (artifacts / "follow-ups.json").exists()
     rejected = [e["event"] for e in _log_events(log_dir) if e["event"].get("type") == "atm.follow_up_rejected"]
     assert len(rejected) == 2
+
+
+def test_follow_up_test_on_disk_without_declaration_is_still_validated(tmp_path, monkeypatch):
+    monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
+    # Same fake as the accepted case, but the report declares no follow-ups.
+    harness = _follow_up_harness([("tests/test_mul_neg.py", MUL_NEG_TEST)]).replace(
+        '"follow_ups": follow_ups}', '"follow_ups": []}')
+    assert '"follow_ups": []}' in harness
+    argv, artifacts, log_dir = _setup(tmp_path, harness)
+    assert harness_worker.main(argv) == 0
+    report = json.loads((artifacts / "report.json").read_text())
+    (fu,) = report["follow_ups"]
+    assert fu["accepted"] is True and fu["declared"] is False and fu["on_disk"] is True
+    assert fu["red_test"] == "tests/test_mul_neg.py"
+    assert "not declared" in fu["reason"]
