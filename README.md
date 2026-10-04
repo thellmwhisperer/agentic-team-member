@@ -271,9 +271,8 @@ agentic_tdd_runner/languages/
   signature.py    # Shared helpers for parsing parameter lists
 ```
 
-Each plugin implements: `parse_imports`, `parse_assignments`,
-`parse_signature_params`, `test_path`, `setter_name`, `is_exported`,
-`import_path`, `render_seam_setter`, `prepend_export`.
+Each plugin implements: `parse_imports`, `parse_assignments`, `test_path`,
+`is_exported`, `import_path`, `prepend_export`.
 
 ---
 

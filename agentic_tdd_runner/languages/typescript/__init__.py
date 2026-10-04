@@ -568,20 +568,11 @@ class TypeScriptLanguage(OptionalLanguageCapabilityDefaults):
     def parse_assignments(self, source_text: str) -> dict:
         return syntax.parse_assignments(source_text)
 
-    def parse_signature_params(self, signature: str) -> list[str]:
-        return syntax.parse_signature_params(signature)
-
     def test_path(self, source_path: str, symbol: str) -> str:
         return paths.test_path(source_path, symbol)
 
-    def setter_name(self, binding: str) -> str:
-        return seams.setter_name(binding)
-
     def is_exported(self, source_text: str, symbol: str) -> bool:
         return seams.is_exported(source_text, symbol)
-
-    def render_seam_setter(self, binding: str, assignment: dict) -> str:
-        return seams.render_seam_setter(binding, assignment)
 
     def import_path(self, test_path: str, source_path: str) -> str:
         return paths.import_path(test_path, source_path)
@@ -600,9 +591,6 @@ class TypeScriptLanguage(OptionalLanguageCapabilityDefaults):
 
     def permission_write_test_conflict(self, args: dict, context: dict) -> str | None:
         return permission.permission_write_test_conflict(args, context)
-
-    def profile_detectors(self) -> list[Any]:
-        return profile.profile_detectors()
 
     def source_imports_spec(self, source_text: str, spec: str) -> bool:
         return profile.source_imports_spec(source_text, spec)

@@ -2,11 +2,6 @@
 from __future__ import annotations
 
 import re
-from typing import Any
-
-
-def profile_detectors() -> list[Any]:
-    return []
 
 
 def source_imports_spec(source_text: str, spec: str) -> bool:

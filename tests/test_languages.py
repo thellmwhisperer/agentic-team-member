@@ -97,15 +97,17 @@ class TestTypeScriptPlugin:
         assert assigns["logger"]["called_symbol"] == "getLogger"
 
     def test_parses_optional_signature_param_name(self):
-        lang = get_language("file.ts")
-        assert lang.parse_signature_params("update(name?: string, count = 1)") == [
+        from agentic_tdd_runner.languages.typescript.syntax import parse_signature_params
+
+        assert parse_signature_params("update(name?: string, count = 1)") == [
             "name",
             "count",
         ]
 
     def test_parses_rest_signature_param_name(self):
-        lang = get_language("file.ts")
-        assert lang.parse_signature_params("collect(...items: string[])") == ["items"]
+        from agentic_tdd_runner.languages.typescript.syntax import parse_signature_params
+
+        assert parse_signature_params("collect(...items: string[])") == ["items"]
 
     def test_runner_is_bun(self):
         lang = get_language("file.ts")
@@ -114,38 +116,6 @@ class TestTypeScriptPlugin:
     def test_test_path_convention(self):
         lang = get_language("file.ts")
         assert lang.test_path("src/events/client.ts", "processRenewal") == "src/events/processRenewal.test.ts"
-
-    def test_setter_name_convention(self):
-        lang = get_language("file.ts")
-        assert lang.setter_name("client") == "__setClientForTests"
-
-    def test_seam_setter_uses_type_annotation(self):
-        lang = get_language("file.ts")
-        assignment = {"kind": "let", "type_annotation": "EventBusClient", "rhs": "undefined", "line": "let client: EventBusClient;"}
-        result = lang.render_seam_setter("client", assignment)
-        assert "any" not in result
-        assert "EventBusClient" in result
-
-    def test_seam_setter_uses_pick_for_observed_members(self):
-        lang = get_language("file.ts")
-        assignment = {
-            "kind": "let",
-            "type_annotation": "EventBusClient",
-            "observed_members": ["say"],
-            "rhs": "undefined",
-            "line": "let client: EventBusClient;",
-        }
-        result = lang.render_seam_setter("client", assignment)
-        assert "any" not in result
-        assert "value: Pick<EventBusClient, 'say'>" in result
-        assert "client = value as EventBusClient;" in result
-
-    def test_seam_setter_without_annotation_uses_typeof(self):
-        lang = get_language("file.ts")
-        assignment = {"kind": "let", "type_annotation": None, "rhs": "undefined", "line": "let client;"}
-        result = lang.render_seam_setter("client", assignment)
-        assert "any" not in result
-        assert "typeof client" in result
 
     def test_detects_export(self):
         lang = get_language("file.ts")
@@ -165,17 +135,6 @@ class TestTypeScriptPlugin:
 
         assert test_path("src/client.ts", "handleEvent") == "src/handleEvent.test.ts"
 
-    def test_seams_submodule_renders_setter(self):
-        from agentic_tdd_runner.languages.typescript.seams import render_seam_setter
-
-        result = render_seam_setter(
-            "client",
-            {"type_annotation": "Client", "observed_members": ["say"]},
-        )
-
-        assert "export function __setClientForTests" in result
-        assert "Pick<Client, 'say'>" in result
-
     def test_typescript_required_capabilities_are_not_neutral_defaults(self):
         lang = get_language("file.ts")
         required = (
@@ -193,7 +152,6 @@ class TestTypeScriptPlugin:
             "looks_like_method_definition",
             "relevant_import_declarations",
             "permission_write_test_conflict",
-            "profile_detectors",
             "source_imports_spec",
             "build_scaffold",
             "render_module_mocks",
@@ -315,8 +273,9 @@ class TestPythonPlugin:
         assert assigns["name"]["called_symbol"] is None
 
     def test_parses_python_signature_params(self):
-        lang = get_language("file.py")
-        assert lang.parse_signature_params("process(self, item, /, *, verbose=False)") == [
+        from agentic_tdd_runner.languages.python.syntax import parse_signature_params
+
+        assert parse_signature_params("process(self, item, /, *, verbose=False)") == [
             "item",
             "verbose",
         ]
@@ -365,10 +324,6 @@ class Worker:
         lang = get_language("file.py")
         assert lang.test_path("src/worker.py", "process_item") == "src/test_process_item.py"
 
-    def test_setter_name_convention(self):
-        lang = get_language("file.py")
-        assert lang.setter_name("client") == "__set_client_for_tests"
-
     def test_syntax_submodule_parses_imports(self):
         from agentic_tdd_runner.languages.python.syntax import parse_imports
 
@@ -380,15 +335,6 @@ class Worker:
         from agentic_tdd_runner.languages.python.paths import import_path
 
         assert import_path("tests/test_worker.py", "src/pkg/__init__.py") == "src.pkg"
-
-    def test_seams_submodule_renders_setter(self):
-        from agentic_tdd_runner.languages.python.seams import render_seam_setter
-
-        assert render_seam_setter("client", {}) == (
-            "def __set_client_for_tests(value):\n"
-            "    global client\n"
-            "    client = value\n"
-        )
 
     def test_python_capability_defaults_do_not_inherit_javascript_behavior(self, tmp_path):
         lang = get_language("file.py")
@@ -426,5 +372,4 @@ class Worker:
             "read_file",
             {"path": "package.json"},
         ) is False
-        assert lang.profile_detectors() == []
         assert lang.source_imports_spec("from src.bus import bus", "@example/event-bus") is False
