@@ -16,6 +16,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import textwrap
 import threading
 import time
 from datetime import datetime, timezone
@@ -29,7 +30,7 @@ from agentic_tdd_runner.environment import (
     detect_project_type,
     javascript_preflight_commands,
     prepare_environment,
-    prepare_run_worktree,
+    prepare_run_clone,
 )
 from agentic_tdd_runner.paths import is_test_file_path, resolve_repo_path
 from agentic_tdd_runner.shell import build_command_env
@@ -62,7 +63,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run claude/codex on an issue inside an ATM run worktree")
     parser.add_argument("--repo", required=True, help="Existing git repo to fix")
     parser.add_argument("--base-ref", default="main")
-    parser.add_argument("--run-root", help="Directory for run worktrees; a relative path is taken from REPO (default: REPO/.worktree)")
+    parser.add_argument("--run-root", help="Directory for run clones; a relative path is taken from REPO (default: REPO/.worktree)")
     parser.add_argument("--issue-number", type=int)
     parser.add_argument("--github-repo", help="owner/repo for --issue-number")
     parser.add_argument("--issue-file", help="File with the issue text (first line is the title)")
@@ -390,13 +391,18 @@ def summarize_event(event) -> str | None:
     if kind == "stream_event":
         return None  # partial chunks are logged, not printed
     if kind == "system":
+        if event.get("subtype") in ("thinking_tokens", "hook_started", "hook_response"):
+            return None  # bookkeeping noise; the JSONL log keeps it
         return f"[{event.get('subtype', 'system')}] model={event.get('model', '?')}"
     if kind in ("assistant", "user"):
         parts = []
         for block in (event.get("message") or {}).get("content") or []:
             if not isinstance(block, dict):
                 continue
-            if block.get("type") == "text":
+            if block.get("type") == "thinking" and block.get("thinking", "").strip():
+                # The whole summarized thinking, not a snippet: this is what tells us what the agent is doing.
+                parts.append("[thinking]\n" + textwrap.indent(block["thinking"].strip(), "    "))
+            elif block.get("type") == "text":
                 parts.append(f"[text] {_snippet(block.get('text', ''))}")
             elif block.get("type") == "tool_use":
                 inp = block.get("input") or {}
@@ -571,7 +577,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         title, body = load_issue(args)
-        wt = prepare_run_worktree(args.repo, base_ref=args.base_ref, run_root=args.run_root)
+        wt = prepare_run_clone(args.repo, base_ref=args.base_ref, run_root=args.run_root)
         env_report = prepare_environment(wt.workdir, config)
     except (WorktreePrepError, EnvironmentPrepError, subprocess.CalledProcessError, OSError) as exc:
         log("prepare_failed", {"error": str(exc)})
