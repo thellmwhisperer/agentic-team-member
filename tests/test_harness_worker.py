@@ -736,3 +736,14 @@ def test_effort_reaches_both_harnesses():
     args = harness_worker.parse_args(["--repo", "r", "--issue-file", "i.md", "--harness", "codex"])
     cmd, _ = harness_worker.harness_command(args, "/wt", "brief", "/s.json", "/m.txt")
     assert not any("model_reasoning_effort" in c for c in cmd)
+
+
+def test_both_briefs_carry_the_ponytail_style(tmp_path, capsys, monkeypatch):
+    monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
+    argv, artifacts, _ = _setup(tmp_path, _chain_harness())
+    assert harness_worker.main(argv) == 0
+    for name in ("brief.md", "brief-unit-2.md"):
+        text = (artifacts / name).read_text()
+        assert "## STYLE: ponytail (full)" in text, name
+        assert "grep every caller of the function" in text, name
+        assert text.index("## STYLE: ponytail") < text.index("## FORBIDDEN"), name
