@@ -25,13 +25,9 @@ from agentic_tdd_runner.paths import (
     test_runner_command_for_file as _test_runner_command_for_file_impl,
 )
 from agentic_tdd_runner.shell import (
-    has_shell_command_substitution as _has_shell_command_substitution,
-    split_shell_segments as _split_shell_segments,
     validate_command as _validate_command,
 )
 from agentic_tdd_runner.verification import (
-    is_invalid_red_phase_failure as _is_invalid_red_phase_failure,
-    mechanical_edit_paths as _mechanical_edit_paths_impl,
     verification_infra_error as _verification_infra_error,
     verify_red_green as _verify_red_green_impl,
 )
@@ -124,18 +120,6 @@ def _compact_messages_after_quality_failure(messages: list[dict], quality_msg: s
     )
 
 
-def _quality_retry_feedback_message(quality_msg: str, test_file: str) -> dict:
-    return _completion.quality_retry_feedback_message(quality_msg, test_file)
-
-
-def _llm_context_window_tokens() -> int:
-    return _completion.llm_context_window_tokens(_CONFIG or {})
-
-
-def _coerce_int(value) -> int | None:
-    return _completion.coerce_int(value)
-
-
 def _should_compact_after_quality_failure(last_usage: dict | None) -> tuple[bool, dict]:
     return _completion.should_compact_after_quality_failure(_CONFIG or {}, last_usage)
 
@@ -183,26 +167,6 @@ def execute_tool(name: str, args: dict) -> str:
     )
 
 
-def _reactive_typecheck_feedback(path: str) -> str:
-    return _tools.reactive_typecheck_feedback(
-        path,
-        workdir=WORKDIR,
-        config=_CONFIG,
-        detect_quality_tools=detect_quality_tools,
-        typecheck_ownership_hint=_typecheck_ownership_hint,
-    )
-
-
-def _reactive_test_feedback(path: str) -> str:
-    return _tools.reactive_test_feedback(
-        path,
-        workdir=WORKDIR,
-        config=_CONFIG,
-        is_test_file_path=_is_test_file_path,
-        test_runner_command_for_file=_test_runner_command_for_file,
-    )
-
-
 def _is_test_file_path(path: str) -> bool:
     return _is_test_file_path_impl(path, _CONFIG)
 
@@ -228,10 +192,6 @@ def find_test_file(hint: str | None = None) -> str | None:
     return _find_test_file_impl(hint, WORKDIR, _CONFIG)
 
 
-def _mechanical_edit_paths(mechanical_edits: list[dict] | None, workdir: str) -> list[str]:
-    return _mechanical_edit_paths_impl(mechanical_edits, workdir)
-
-
 def verify_red_green(test_file: str, mechanical_edits: list[dict] | None = None) -> tuple[bool, str]:
     return _verify_red_green_impl(
         test_file,
@@ -242,10 +202,6 @@ def verify_red_green(test_file: str, mechanical_edits: list[dict] | None = None)
         apply_mechanical_edits=apply_mechanical_edits,
         mechanical_edits=mechanical_edits,
     )
-
-
-def _detect_package_manager(pkg: dict | None = None) -> str:
-    return _quality.detect_package_manager(WORKDIR, pkg)
 
 
 def detect_quality_tools(lang_name: str) -> list[dict]:
@@ -272,92 +228,20 @@ def _is_obvious_assert_line(line: str) -> bool:
     return _quality.is_obvious_assert_line(line)
 
 
-def _is_obvious_setup_line(line: str) -> bool:
-    return _quality.is_obvious_setup_line(line)
-
-
 def _is_obvious_act_line(line: str) -> bool:
     return _quality.is_obvious_act_line(line)
-
-
-def _partition_duplicated_test_lines(file_text: str) -> tuple[list[str], list[str]]:
-    return _quality.partition_duplicated_test_lines(file_text)
 
 
 def _typecheck_ownership_hint(check_name: str, raw_output: str, changed_files: list[str]) -> str | None:
     return _quality.typecheck_ownership_hint(check_name, raw_output, changed_files)
 
 
-def _extract_side_effect_call(line: str) -> tuple[str, tuple[str, ...]] | None:
-    return _quality.extract_side_effect_call(line)
-
-
-def _extract_object_literal_keys(body: str) -> tuple[str, ...]:
-    return _quality.extract_object_literal_keys(body)
-
-
-def _detect_side_effect_shape_changes(changed_files: list[str]) -> list[str]:
-    return _quality.detect_side_effect_shape_changes(changed_files, WORKDIR, _is_test_file_path)
-
-
-def _find_matching_brace(text: str, open_index: int) -> int:
-    return _quality.find_matching_brace(text, open_index)
-
-
-def _extract_param_names(params_text: str) -> list[str]:
-    return _quality.extract_param_names(params_text)
-
-
-def _iter_function_bodies(text: str):
-    return _quality.iter_function_bodies(text)
-
-
-def _body_parses_external_metadata(body: str) -> bool:
-    return _quality.body_parses_external_metadata(body)
-
-
-def _body_has_invalid_metadata_fallback(body: str, original_param: str) -> bool:
-    return _quality.body_has_invalid_metadata_fallback(body, original_param)
-
-
-def _detect_parsed_metadata_without_original_fallback(changed_files: list[str]) -> list[str]:
-    return _quality.detect_parsed_metadata_without_original_fallback(
-        changed_files, WORKDIR, _is_test_file_path,
-    )
-
-
-def _detect_empty_object_type_assertions(changed_files: list[str]) -> list[str]:
-    return _quality.detect_empty_object_type_assertions(changed_files, WORKDIR)
-
-
 def _build_duplicated_setup_judge_prompt(file_path: str, file_text: str, duplicated_lines: list[str]) -> str:
     return _quality.build_duplicated_setup_judge_prompt(file_path, file_text, duplicated_lines)
 
 
-def _judge_duplicated_setup(file_path: str, file_text: str, duplicated_lines: list[str]) -> bool | None:
-    return _quality.judge_duplicated_setup(
-        file_path,
-        file_text,
-        duplicated_lines,
-        config=_CONFIG,
-        log=log,
-    )
-
-
 def _parse_pr_content(content: str) -> tuple[str | None, str | None]:
     return _pr.parse_pr_content(content)
-
-
-def _build_pr_fallback(test_file: str, step: int) -> tuple[str, str]:
-    return _pr.build_pr_fallback(test_file, step, _get_changed_files())
-
-
-def _resolve_pr_base_ref(base_branch: str, command_timeout: int) -> str | None:
-    return _pr.resolve_pr_base_ref(base_branch, command_timeout, WORKDIR)
-
-
-def _check_pr_base_hygiene(base_branch: str, command_timeout: int) -> tuple[bool, str]:
-    return _pr.check_pr_base_hygiene(base_branch, command_timeout, WORKDIR)
 
 
 def create_pr(messages: list, last_msg: dict, test_file: str, step: int) -> str | None:
