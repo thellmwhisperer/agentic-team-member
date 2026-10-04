@@ -73,6 +73,8 @@ def worker_command(args, launch: dict, out: Path) -> list[str]:
         cmd += ["--scope", str(glob)]
     if args.model:
         cmd += ["--model", args.model]
+    if args.effort:
+        cmd += ["--effort", args.effort]
     if args.timeout:
         cmd += ["--timeout", str(args.timeout)]
     return cmd
@@ -88,7 +90,7 @@ def cmd_run(args) -> int:
     out.mkdir(parents=True)
     cmd = worker_command(args, launch, out)
     (out / "command.txt").write_text(" ".join(cmd) + "\n")
-    print(f"[LAUNCH] label={args.label} harness={args.harness} model={args.model or 'default'}")
+    print(f"[LAUNCH] label={args.label} harness={args.harness} model={args.model or 'default'} effort={args.effort or 'default'}")
     print(f"[LAUNCH] out={out}")
     print(f"[LAUNCH] {' '.join(cmd)}", flush=True)
     with (out / "stdout.txt").open("w", buffering=1) as sink:  # line-buffered: the file is readable while the run lives
@@ -166,6 +168,8 @@ def launch_in_pane(args) -> int:
              "--label", args.label, "--harness", args.harness]
     if args.model:
         inner += ["--model", args.model]
+    if args.effort:
+        inner += ["--effort", args.effort]
     if args.timeout:
         inner += ["--timeout", str(args.timeout)]
     # A pane stuck in a tail/pager swallows typed text: interrupt whatever is in the foreground first.
@@ -197,7 +201,7 @@ def verdict(label: str) -> str:
     units = r.get("units") or []
     lines = [
         f"{label}: {'PASS' if passed else 'FAIL' if passed is False else 'report present'} "
-        f"harness={r.get('harness')} model={r.get('model') or 'default'} {r.get('duration_seconds')}s "
+        f"harness={r.get('harness')} model={r.get('model') or 'default'} effort={r.get('effort') or 'default'} {r.get('duration_seconds')}s "
         f"units={len(units) or 1}/{r.get('max_units', '-')}",
         f"  bug fixed:   {'yes' if ok.get('ok') else 'no'} ({ok.get('message', '')})",
         f"  changed:     {', '.join(r.get('changed_files') or []) or 'nothing'}",
@@ -272,6 +276,7 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--label", required=True, help="output directory name under .tmp/harness-worker; must be new")
     r.add_argument("--harness", choices=["claude", "codex"], required=True)
     r.add_argument("--model")
+    r.add_argument("--effort", choices=["low", "medium", "high", "xhigh", "max"])
     r.add_argument("--timeout", type=int)
     r.add_argument("--pane", help="herdr pane id; launch there and verify [PREPARE] appears")
     r.add_argument("--wait", type=int, default=30, help="seconds to wait for [PREPARE] with --pane")
