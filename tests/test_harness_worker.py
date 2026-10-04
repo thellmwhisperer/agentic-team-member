@@ -747,3 +747,64 @@ def test_both_briefs_carry_the_ponytail_style(tmp_path, capsys, monkeypatch):
         assert "## STYLE: ponytail (full)" in text, name
         assert "grep every caller of the function" in text, name
         assert text.index("## STYLE: ponytail") < text.index("## FORBIDDEN"), name
+
+
+OPENCODE_HARNESS = """
+import json, pathlib, sys
+assert sys.argv[1:3] == ["run", "--pure"] and "--format" in sys.argv and "--dir" in sys.argv
+brief = sys.argv[-1]
+assert "add returns the difference" in brief
+pathlib.Path("tests/test_add.py").write_text("from calc import add\\n\\n\\ndef test_add_sums():\\n    assert add(2, 3) == 5\\n")
+calc = pathlib.Path("calc.py")
+calc.write_text(calc.read_text().replace("a - b", "a + b"))
+print(json.dumps({"type": "step_start", "part": {"id": "p1"}}), flush=True)
+print(json.dumps({"type": "tool", "part": {"tool": "edit", "state": {"status": "completed", "input": {"filePath": "calc.py"}}}}), flush=True)
+report = {"test_file": "tests/test_add.py", "changed_files": ["calc.py", "tests/test_add.py"], "summary": "fixed", "commands_run": [], "follow_ups": []}
+print(json.dumps({"type": "text", "part": {"text": "Done.\\n" + json.dumps(report)}}), flush=True)
+print(json.dumps({"type": "step_finish", "part": {"reason": "stop"}}), flush=True)
+"""
+
+PI_HARNESS = """
+import json, pathlib, sys
+assert sys.argv[1:3] == ["-p", "--mode"] and "--no-skills" in sys.argv and "--no-extensions" in sys.argv
+brief = sys.argv[-1]
+assert "add returns the difference" in brief
+pathlib.Path("tests/test_add.py").write_text("from calc import add\\n\\n\\ndef test_add_sums():\\n    assert add(2, 3) == 5\\n")
+calc = pathlib.Path("calc.py")
+calc.write_text(calc.read_text().replace("a - b", "a + b"))
+print(json.dumps({"type": "session", "id": "s"}), flush=True)
+print(json.dumps({"type": "message_update", "assistantMessageEvent": {"type": "text_delta", "delta": "D"}}), flush=True)
+report = {"test_file": "tests/test_add.py", "changed_files": ["calc.py", "tests/test_add.py"], "summary": "fixed", "commands_run": [], "follow_ups": []}
+print(json.dumps({"type": "message_end", "message": {"role": "assistant", "content": [
+    {"type": "thinking", "thinking": "trace the flow"}, {"type": "text", "text": "Done.\\n" + json.dumps(report)}]}}), flush=True)
+print(json.dumps({"type": "agent_end"}), flush=True)
+"""
+
+
+def test_opencode_harness_fix_passes_the_gates(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
+    argv, artifacts, _ = _setup(tmp_path, OPENCODE_HARNESS)
+    assert harness_worker.main([*argv, "--harness", "opencode", "--model", "ollama/qwen3.8:27b-mlx"]) == 0
+    report = json.loads((artifacts / "report.json").read_text())
+    assert report["harness"] == "opencode" and report["verified"]["ok"] is True
+    out = capsys.readouterr().out
+    assert "[tool] edit (completed)" in out and "[text] Done." in out
+
+
+def test_pi_harness_fix_passes_the_gates_and_prints_thinking(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
+    argv, artifacts, _ = _setup(tmp_path, PI_HARNESS)
+    assert harness_worker.main([*argv, "--harness", "pi", "--model", "ollama/qwen3.8:27b-mlx", "--effort", "low"]) == 0
+    report = json.loads((artifacts / "report.json").read_text())
+    assert report["harness"] == "pi" and report["verified"]["ok"] is True
+    out = capsys.readouterr().out
+    assert "[thinking]" in out and "trace the flow" in out and "[text] Done." in out
+
+
+def test_env_flag_reaches_the_harness_process(tmp_path, monkeypatch):
+    harness = OPENCODE_HARNESS.replace('brief = sys.argv[-1]', 'import os; assert os.environ["OPENCODE_CONFIG"] == "/x/opencode.json"; brief = sys.argv[-1]')
+    argv, artifacts, _ = _setup(tmp_path, harness)
+    assert harness_worker.main([*argv, "--harness", "opencode", "--env", "OPENCODE_CONFIG=/x/opencode.json"]) == 0
+    args = harness_worker.parse_args(["--repo", "r", "--issue-file", "i.md", "--harness", "pi", "--effort", "high", "--model", "ollama/q"])
+    cmd, stdin = harness_worker.harness_command(args, "/wt", "brief", "/s.json", "/m.txt")
+    assert stdin is None and cmd[-1] == "brief" and cmd[cmd.index("--thinking") + 1] == "high" and "--no-session" in cmd

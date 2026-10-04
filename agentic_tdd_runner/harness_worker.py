@@ -67,7 +67,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--issue-number", type=int)
     parser.add_argument("--github-repo", help="owner/repo for --issue-number")
     parser.add_argument("--issue-file", help="File with the issue text (first line is the title)")
-    parser.add_argument("--harness", choices=["claude", "codex"], default="claude")
+    parser.add_argument("--harness", choices=["claude", "codex", "opencode", "pi"], default="claude")
+    parser.add_argument("--env", action="append", default=[], metavar="KEY=VALUE",
+                        help="Extra environment for the harness process (repeatable), e.g. OPENCODE_CONFIG=...")
     parser.add_argument("--model")
     parser.add_argument("--effort", choices=["low", "medium", "high", "xhigh", "max"],
                         help="Reasoning effort: claude --effort, codex model_reasoning_effort (codex has no xhigh/max)")
@@ -554,13 +556,31 @@ def harness_command(args, worktree: str, brief: str, schema_path: str, last_msg_
         if getattr(args, "effort", None):
             cmd += ["--effort", args.effort]
         return cmd, brief
-    cmd = [args.harness_bin or "codex", "exec", "--json", "-C", worktree, "--sandbox", "workspace-write",
-           "--output-schema", schema_path, "-o", last_msg_path]
+    if args.harness == "codex":
+        cmd = [args.harness_bin or "codex", "exec", "--json", "-C", worktree, "--sandbox", "workspace-write",
+               "--output-schema", schema_path, "-o", last_msg_path]
+        if args.model:
+            cmd += ["-c", f"model={json.dumps(args.model)}"]
+        if getattr(args, "effort", None):
+            # Without this Codex inherits ~/.codex/config.toml, which ran every run of 4-oct at "low".
+            cmd += ["-c", f"model_reasoning_effort={json.dumps(args.effort)}"]
+        return cmd + [brief], None
+    if args.harness == "opencode":
+        # --pure: no external plugins. The user's global AGENTS.md and skills still load unless
+        # OPENCODE_CONFIG / OPENCODE_CONFIG_DIR point elsewhere (pass them with --env): with them in,
+        # the prompt to a local 27B was 43k tokens, nine minutes before the first answer (4-oct-2026).
+        cmd = [args.harness_bin or "opencode", "run", "--pure", "--format", "json", "--dir", worktree]
+        if args.model:
+            cmd += ["-m", args.model]
+        return cmd + [brief], None
+    # pi: bare on purpose. Extensions, skills, prompt templates and context files multiplied the
+    # prompt by 27 on a local model; the brief is the whole context the unit needs.
+    cmd = [args.harness_bin or "pi", "-p", "--mode", "json", "--no-extensions", "--no-skills",
+           "--no-prompt-templates", "--no-context-files", "--no-session"]
     if args.model:
-        cmd += ["-c", f"model={json.dumps(args.model)}"]
+        cmd += ["--model", args.model]
     if getattr(args, "effort", None):
-        # Without this Codex inherits ~/.codex/config.toml, which ran every run of 4-oct at "low".
-        cmd += ["-c", f"model_reasoning_effort={json.dumps(args.effort)}"]
+        cmd += ["--thinking", args.effort]
     return cmd + [brief], None
 
 
@@ -603,6 +623,30 @@ def summarize_event(event) -> str | None:
         return f"[text] {_snippet(item.get('text', ''))}"
     if item.get("type") == "command_execution":
         return f"[tool] shell ({kind}): {_snippet(item.get('command', ''), 120)}"
+    part = event.get("part")
+    if isinstance(part, dict):  # opencode
+        if kind == "text":
+            return f"[text] {_snippet(part.get('text', ''))}"
+        if kind == "tool":
+            state = part.get("state") or {}
+            return f"[tool] {part.get('tool')} ({state.get('status', '')}): {_snippet(json.dumps(state.get('input', {})), 120)}"
+        return None
+    message = event.get("message")
+    if kind == "message_end" and isinstance(message, dict) and message.get("role") == "assistant":  # pi
+        parts = []
+        for block in message.get("content") or []:
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") == "thinking" and block.get("thinking", "").strip():
+                parts.append("[thinking]\n" + textwrap.indent(block["thinking"].strip(), "    "))
+            elif block.get("type") == "text" and block.get("text", "").strip():
+                parts.append(f"[text] {_snippet(block['text'])}")
+            elif block.get("type") == "toolCall":
+                parts.append(f"[tool] {block.get('name')}: {_snippet(json.dumps(block.get('arguments', {})), 120)}")
+        return " | ".join(parts) or None
+    if kind in ("message_update", "message_start", "message_end", "turn_start", "turn_end", "agent_start",
+                "agent_end", "agent_settled", "session"):
+        return None  # pi bookkeeping, and user/custom message_end
     if item.get("type") == "file_change":
         return f"[edit] {[c.get('path') for c in item.get('changes') or []]}"
     return f"[{kind or 'event'}]"
@@ -616,12 +660,20 @@ def final_text(event, harness: str) -> str | None:
     item = event.get("item") or {}
     if harness == "codex" and item.get("type") == "agent_message":
         return item.get("text")
+    if harness == "opencode" and event.get("type") == "text":
+        return (event.get("part") or {}).get("text")
+    if harness == "pi" and event.get("type") == "message_end":
+        message = event.get("message") or {}
+        if message.get("role") == "assistant":
+            texts = [b.get("text", "") for b in message.get("content") or [] if isinstance(b, dict) and b.get("type") == "text"]
+            return "\n".join(t for t in texts if t) or None
     return None
 
 
-def run_harness(cmd, stdin_text, *, cwd, timeout, harness, write) -> dict:
+def run_harness(cmd, stdin_text, *, cwd, timeout, harness, write, extra_env: dict | None = None) -> dict:
     env = os.environ.copy()
     env.pop("CLAUDE_CODE_CHILD_SESSION", None)
+    env.update(extra_env or {})
     start = time.monotonic()
     proc = subprocess.Popen(
         cmd, cwd=cwd, env=env, text=True, bufsize=1, start_new_session=True,
@@ -801,7 +853,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[HARNESS] unit {number} {args.harness} timeout={args.timeout}s log={log_path}")
         log("unit_started", {"unit": number, "base_sha": unit_base, "scope": unit_scope})
         try:
-            run = run_harness(cmd, stdin_text, cwd=worktree, timeout=args.timeout, harness=args.harness, write=write)
+            run = run_harness(cmd, stdin_text, cwd=worktree, timeout=args.timeout, harness=args.harness, write=write,
+                              extra_env=dict(kv.split("=", 1) for kv in args.env if "=" in kv))
         except OSError as exc:
             run = {"exit_code": None, "timed_out": False, "duration_seconds": 0, "final_text": None}
             log("harness_failed", {"error": str(exc)})
