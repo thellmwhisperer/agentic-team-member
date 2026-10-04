@@ -84,6 +84,37 @@ time.sleep(60)
 """
 
 
+SCOPE_BREAKING_HARNESS = FIXING_HARNESS.replace(
+    'print("not json noise", flush=True)',
+    'pathlib.Path("other.py").write_text("def other():\\n    return 2\\n")',
+)
+
+FOLLOW_UP_HARNESS = """
+import json, pathlib, sys
+sys.stdin.read()
+pathlib.Path("tests/test_add.py").write_text("from calc import add\\n\\n\\ndef test_add_sums():\\n    assert add(2, 3) == 5\\n")
+calc = pathlib.Path("calc.py")
+calc.write_text(calc.read_text().replace("a - b", "a + b"))
+follow_ups = []
+for n, (rel, source) in enumerate(RED_TESTS, start=1):
+    path = pathlib.Path(".atm/follow-ups", str(n), rel)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(source)
+    follow_ups.append({"title": f"gap {n}", "paths": ["calc.py"], "red_test": rel})
+report = {"test_file": "tests/test_add.py", "changed_files": ["calc.py", "tests/test_add.py"],
+          "summary": "fixed add", "commands_run": [], "follow_ups": follow_ups}
+print(json.dumps({"type": "result", "subtype": "success", "result": json.dumps(report)}), flush=True)
+"""
+
+MUL_NEG_TEST = "from calc import mul\n\n\ndef test_mul_negative():\n    assert mul(-1, 1) == -1\n"
+PASSING_TEST = "from calc import mul\n\n\ndef test_mul_positive():\n    assert mul(2, 3) == 6\n"
+MISSING_MODULE_TEST = "from nowhere import thing\n\n\ndef test_thing():\n    assert thing() == 1\n"
+
+
+def _follow_up_harness(red_tests):
+    return FOLLOW_UP_HARNESS.replace("RED_TESTS", repr(red_tests))
+
+
 def _git(cwd, *args):
     subprocess.run(
         ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "core.hooksPath=/dev/null", *args],
@@ -91,12 +122,13 @@ def _git(cwd, *args):
     )
 
 
-def _setup(tmp_path, harness_source):
+def _setup(tmp_path, harness_source, issue_text="add(2, 3) returns -1 instead of 5."):
     repo = tmp_path / "target"
     (repo / "tests").mkdir(parents=True)
     (repo / "pyproject.toml").write_text('[project]\nname = "calc"\nversion = "0"\n\n[tool.pytest.ini_options]\n')
     (repo / ".gitignore").write_text("__pycache__/\n.pytest_cache/\n.worktree/\n")
-    (repo / "calc.py").write_text("def add(a, b):\n    return a - b\n\n\ndef mul(a, b):\n    return a * b\n")
+    (repo / "calc.py").write_text("def add(a, b):\n    return a - b\n\n\ndef mul(a, b):\n    return abs(a * b)\n")
+    (repo / "other.py").write_text("def other():\n    return 1\n")
     (repo / "tests" / "test_mul.py").write_text("from calc import mul\n\n\ndef test_mul():\n    assert mul(2, 3) == 6\n")
     _git(repo, "init", "-q", "-b", "main")
     _git(repo, "add", ".")
@@ -107,7 +139,7 @@ def _setup(tmp_path, harness_source):
     (config_dir / "agent.toml").write_text(CONFIG_TOML)
     (config_dir / "tools.json").write_text("[]")
     issue = tmp_path / "issue.md"
-    issue.write_text("# add returns the difference\n\nadd(2, 3) returns -1 instead of 5.\n")
+    issue.write_text(f"# add returns the difference\n\n{issue_text}\n")
     harness = tmp_path / "fake_harness.py"
     harness.write_text(f"#!{sys.executable}\n" + textwrap.dedent(harness_source))
     harness.chmod(0o755)
@@ -253,3 +285,89 @@ def test_red_green_command_template_can_name_the_test_dir(tmp_path, monkeypatch)
                                   log=lambda n, d: None, apply_mechanical_edits=lambda e, w: 0)
     test_runs = [a for a in seen if a[:2] == ["go", "test"]]
     assert test_runs and all(a == ["go", "test", "./pkg"] for a in test_runs)
+
+
+def _scope_event(log_dir):
+    events = [e["event"] for e in _log_events(log_dir) if isinstance(e["event"], dict)]
+    (event,) = [e for e in events if e.get("type") == "atm.scope"]
+    return event
+
+
+def test_scope_flag_rejects_changes_outside_scope(tmp_path, monkeypatch):
+    monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
+    argv, artifacts, log_dir = _setup(tmp_path, SCOPE_BREAKING_HARNESS)
+    assert harness_worker.main([*argv, "--scope", "calc.py"]) == 1
+    report = json.loads((artifacts / "report.json").read_text())
+    assert report["scope_ok"]["ok"] is False
+    assert report["scope_ok"]["message"] == "outside SCOPE: other.py"
+    assert report["verified"]["ok"] is True  # the fix itself is fine; SCOPE alone fails the run
+    assert _scope_event(log_dir)["source"] == "flag"
+    brief = (artifacts / "brief.md").read_text()
+    assert "`calc.py`" in brief
+    assert harness_worker.SCOPE_RULE in brief
+
+
+def test_scope_derived_from_issue_text(tmp_path, monkeypatch):
+    monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
+    argv, artifacts, log_dir = _setup(tmp_path, FIXING_HARNESS, issue_text="add(2, 3) in calc.py returns -1.")
+    assert harness_worker.main(argv) == 0
+    event = _scope_event(log_dir)
+    assert (event["source"], event["paths"]) == ("issue", ["calc.py"])
+    report = json.loads((artifacts / "report.json").read_text())
+    assert report["scope_ok"]["ok"] is True
+    assert report["follow_ups"] == []
+    assert not (artifacts / "follow-ups.json").exists()
+
+
+def test_scope_open_when_issue_names_nothing(tmp_path, monkeypatch):
+    monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
+    argv, artifacts, log_dir = _setup(tmp_path, FIXING_HARNESS)
+    assert harness_worker.main(argv) == 0
+    event = _scope_event(log_dir)
+    assert (event["source"], event["paths"]) == ("open", [])
+    assert "Allowed paths: open" in (artifacts / "brief.md").read_text()
+    assert json.loads((artifacts / "report.json").read_text())["scope_ok"] == {"ok": True, "message": "scope open"}
+
+
+def test_derive_scope_finds_backticked_definitions(tmp_path):
+    repo = tmp_path / "r"
+    (repo / "pkg").mkdir(parents=True)
+    (repo / "pkg" / "s.go").write_text("package pkg\n\nfunc (s *S) Load(x int) int { return x }\n")
+    (repo / "web.ts").write_text("export const render = () => 1\n")
+    (repo / "lib.py").write_text("def helper():\n    return 1\n")
+    (repo / "uses.py").write_text("from lib import helper\nhelper()\n")
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "add", ".")
+    text = "`Load` breaks, `render` too, `helper` and `missing`; see lib.py, pkg/nope.go."
+    assert harness_worker.derive_scope(text, str(repo)) == ["lib.py", "pkg/s.go", "web.ts"]
+
+
+def test_follow_up_with_behavioral_red_test_is_accepted(tmp_path, monkeypatch):
+    monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
+    argv, artifacts, _ = _setup(tmp_path, _follow_up_harness([("tests/test_mul_neg.py", MUL_NEG_TEST)]))
+    assert harness_worker.main(argv) == 0
+    report = json.loads((artifacts / "report.json").read_text())
+    (follow_up,) = report["follow_ups"]
+    assert follow_up["accepted"] is True, follow_up
+    assert follow_up["red_test"] == "tests/test_mul_neg.py"
+    assert json.loads((artifacts / "follow-ups.json").read_text()) == [follow_up]
+    worktree = Path(report["worktree"])
+    assert not (worktree / "tests" / "test_mul_neg.py").exists()
+    assert report["full_tests_ok"] is True
+    after = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"], cwd=worktree,
+                           capture_output=True, text=True, timeout=120)
+    assert after.returncode == 0, after.stdout + after.stderr
+
+
+def test_follow_ups_without_a_behavioral_red_are_rejected(tmp_path, monkeypatch):
+    monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
+    red_tests = [("tests/test_mul_pos.py", PASSING_TEST), ("tests/test_thing.py", MISSING_MODULE_TEST)]
+    argv, artifacts, log_dir = _setup(tmp_path, _follow_up_harness(red_tests))
+    assert harness_worker.main(argv) == 0  # a rejected follow-up does not fail the run
+    report = json.loads((artifacts / "report.json").read_text())
+    passing, missing = report["follow_ups"]
+    assert passing["accepted"] is False and "passed" in passing["reason"]
+    assert missing["accepted"] is False and "missing module" in missing["reason"]
+    assert not (artifacts / "follow-ups.json").exists()
+    rejected = [e["event"] for e in _log_events(log_dir) if e["event"].get("type") == "atm.follow_up_rejected"]
+    assert len(rejected) == 2
