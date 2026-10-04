@@ -99,10 +99,62 @@ def cmd_run(args) -> int:
             sys.stdout.flush()
             sink.write(line)
         code = proc.wait()
+    save_patch(out)
     (out / "exit.txt").write_text(f"{code}\n")
     print(f"\n[LAUNCH] worker exit={code}")
     print(verdict(args.label))
     return code
+
+
+def save_patch(out: Path) -> None:
+    """Copy the run's work out of its clone: tracked edits and new files, as one patch.
+
+    The clone is disposable once this exists. Written after the worker ends, so the patch is
+    the final state the verifier judged, follow-up tests included."""
+    report = out / "report.json"
+    if not report.exists():
+        return
+    clone = Path(json.loads(report.read_text()).get("worktree") or "")
+    if not (clone / ".git").exists():
+        return
+    subprocess.run(["git", "add", "-A", "-N", "--", ".", ":!.atm", ":!.tmp"], cwd=clone, check=False, capture_output=True)
+    diff = subprocess.run(["git", "diff", "--binary", "--", ".", ":!.atm", ":!.tmp"], cwd=clone, capture_output=True, text=True)
+    (out / "patch.diff").write_text(diff.stdout)
+    for extra in ("follow-ups",):
+        src = clone / ".atm" / extra
+        if src.is_dir():
+            shutil.copytree(src, out / f"clone-atm-{extra}", dirs_exist_ok=True)
+    print(f"[LAUNCH] patch saved: {out / 'patch.diff'} ({len(diff.stdout.splitlines())} lines)")
+
+
+def clones_in_use() -> dict[Path, str]:
+    """Clone path -> label, for every run under .tmp/harness-worker that has not finished.
+
+    A run is finished when exit.txt exists (launched here) or when report.json exists and its
+    clone already has a patch.diff beside it. Anything else is live or unaccounted for."""
+    live: dict[Path, str] = {}
+    if not RUNS.exists():
+        return live
+    for d in RUNS.iterdir():
+        if not d.is_dir() or d.name.startswith("_"):
+            continue
+        finished = (d / "exit.txt").exists() or ((d / "report.json").exists() and (d / "patch.diff").exists())
+        if finished:
+            continue
+        clone = None
+        if (d / "report.json").exists():
+            clone = json.loads((d / "report.json").read_text()).get("worktree")
+        else:
+            for log in d.glob("worker-*.jsonl"):
+                for line in log.open():
+                    if '"atm.prepared"' in line:
+                        clone = json.loads(line)["event"].get("worktree")
+                        break
+                if clone:
+                    break
+        if clone:
+            live[Path(clone).resolve()] = d.name
+    return live
 
 
 def launch_in_pane(args) -> int:
@@ -181,8 +233,12 @@ def cmd_clean(args) -> int:
     if not targets:
         print(f"nothing to clean under {root}")
         return 0
+    live = clones_in_use()
     for t in targets:
         kind = "worktree" if t.resolve() in worktrees else "clone"
+        if t.resolve() in live:
+            print(f"keeping {kind} (run {live[t.resolve()]} has not finished): {t}")
+            continue
         print(f"{'would remove' if not args.yes else 'removing'} {kind}: {t}")
         if not args.yes:
             continue
