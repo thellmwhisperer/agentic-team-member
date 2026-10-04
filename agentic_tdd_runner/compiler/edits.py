@@ -35,10 +35,3 @@ def _build_pre_test_source_edits(target, source_text, *, exported_hint, seam_edi
             return edits
     return edits
 
-
-def _setter_name(binding, source_path):
-    """Backward-compatible wrapper — delegates to language plugin."""
-    lang = get_language(source_path)
-    if lang:
-        return lang.setter_name(binding)
-    return f"__set{binding[:1].upper()}{binding[1:]}ForTests"
