@@ -518,3 +518,128 @@ def test_run_clone_is_a_separate_repo_detached_at_the_source_base_ref(tmp_path):
     second = prepare_run_clone(str(source), base_ref="origin/integration", run_root=str(tmp_path / "runs"))
     assert Path(second.workdir) != clone
     assert Path(second.workdir).parent == clone.parent
+
+
+CHAIN_HARNESS = """
+import json, pathlib, sys
+brief = sys.stdin.read()
+calc = pathlib.Path("calc.py")
+if "# Follow-up unit 2" in brief:
+    assert "tests/test_mul_neg.py" in brief and "already applied and committed" in brief
+    assert "a + b" in calc.read_text()  # unit 1 is in place
+    calc.write_text(calc.read_text().replace("abs(a * b)", "a * b"))
+    report = {"test_file": "tests/test_mul_neg.py", "changed_files": ["calc.py"], "summary": "mul kept the sign",
+              "commands_run": [], "follow_ups": []}
+else:
+    pathlib.Path("tests/test_add.py").write_text("from calc import add\\n\\n\\ndef test_add_sums():\\n    assert add(2, 3) == 5\\n")
+    calc.write_text(calc.read_text().replace("a - b", "a + b"))
+    red = pathlib.Path(".atm/follow-ups/1/tests/test_mul_neg.py")
+    red.parent.mkdir(parents=True, exist_ok=True)
+    red.write_text(MUL_NEG_TEST)
+    report = {"test_file": "tests/test_add.py", "changed_files": ["calc.py", "tests/test_add.py"], "summary": "fixed add",
+              "commands_run": [], "follow_ups": [{"title": "mul drops the sign", "paths": ["calc.py"],
+                                                  "red_test": "tests/test_mul_neg.py", "criterion": CRITERION}]}
+print(json.dumps({"type": "result", "subtype": "success", "result": json.dumps(report)}), flush=True)
+"""
+
+
+def _chain_harness(criterion="add(2, 3) returns -1 instead of 5."):
+    return CHAIN_HARNESS.replace("MUL_NEG_TEST", repr(MUL_NEG_TEST)).replace("CRITERION", repr(criterion))
+
+
+def test_chainable_follow_up_becomes_unit_two_in_the_same_clone(tmp_path, monkeypatch):
+    monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
+    argv, artifacts, log_dir = _setup(tmp_path, _chain_harness())
+    assert harness_worker.main(argv) == 0
+    report = json.loads((artifacts / "report.json").read_text())
+    assert [u["unit"] for u in report["units"]] == [1, 2]
+    assert all(u["passed"] for u in report["units"])
+    one, two = report["units"]
+    assert one["committed_as"] and one["committed_as"] != report["base_sha"]
+    assert two["base_sha"] == one["committed_as"] and two["test_file"] == "tests/test_mul_neg.py"
+    assert two["scope"] == ["calc.py"] and two["verified"]["ok"] is True
+    (fu,) = one["follow_ups"]
+    assert fu["chainable"] is True and fu["chained_as_unit"] == 2 and fu["symbols_in_base"] == ["mul"]
+    assert report["head_sha"] == one["committed_as"]  # the last unit stays uncommitted, like a single-unit run
+    assert not (artifacts / "follow-ups.json").exists()  # nothing left over: the only follow-up was chained
+    assert (artifacts / "brief-unit-2.md").read_text().startswith("# Follow-up unit 2")
+    worktree = Path(report["worktree"])
+    assert (worktree / "tests" / "test_mul_neg.py").is_file()
+    assert (worktree / ".atm" / "units" / "1" / "follow-ups" / "1" / "tests" / "test_mul_neg.py").is_file()
+    assert "calc.py" in report["changed_files"] and "tests/test_add.py" in report["changed_files"]
+    after = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"], cwd=worktree,
+                           capture_output=True, text=True, timeout=120)
+    assert after.returncode == 0, after.stdout + after.stderr
+    staged = [e["event"] for e in _log_events(log_dir) if e["event"].get("type") == "atm.unit_staged"]
+    assert staged == [{"type": "atm.unit_staged", "unit": 2, "red_test": "tests/test_mul_neg.py", "from_follow_up": 1}]
+
+
+def test_follow_up_whose_criterion_is_not_in_the_issue_is_not_chained(tmp_path, monkeypatch):
+    monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
+    argv, artifacts, _ = _setup(tmp_path, _chain_harness("multiplication must preserve negative signs always"))
+    assert harness_worker.main(argv) == 0
+    report = json.loads((artifacts / "report.json").read_text())
+    assert len(report["units"]) == 1
+    (fu,) = report["follow_ups"]
+    assert fu["accepted"] is True and fu["chainable"] is False
+    assert "criterion not found in the issue" in fu["chain_reason"]
+    assert json.loads((artifacts / "follow-ups.json").read_text()) == [fu]
+
+
+def test_follow_up_without_criterion_is_accepted_but_not_chained(tmp_path, monkeypatch):
+    monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
+    argv, artifacts, _ = _setup(tmp_path, _follow_up_harness([("tests/test_mul_neg.py", MUL_NEG_TEST)]))
+    assert harness_worker.main(argv) == 0
+    report = json.loads((artifacts / "report.json").read_text())
+    (fu,) = report["follow_ups"]
+    assert fu["accepted"] is True and fu["chainable"] is False and "no criterion" in fu["chain_reason"]
+    assert len(report["units"]) == 1
+
+
+HELPER_ONLY_RED = "from helpers import new_thing\n\n\ndef test_new_thing():\n    assert new_thing() == 2\n"
+
+
+def test_follow_up_test_that_calls_only_new_code_is_not_chained(tmp_path, monkeypatch):
+    monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
+    harness = CHAIN_HARNESS.replace(
+        "red.write_text(MUL_NEG_TEST)",
+        'pathlib.Path("helpers.py").write_text("def new_thing():\\n    return 1\\n"); red.write_text(HELPER_ONLY_RED)',
+    ).replace("HELPER_ONLY_RED", repr(HELPER_ONLY_RED)).replace("CRITERION", repr("add(2, 3) returns -1 instead of 5."))
+    assert "HELPER_ONLY_RED" not in harness and "new_thing" in harness
+    argv, artifacts, _ = _setup(tmp_path, harness)
+    assert harness_worker.main(argv) == 0
+    report = json.loads((artifacts / "report.json").read_text())
+    (fu,) = report["follow_ups"]
+    assert fu["accepted"] is True, fu  # the red test does fail on behavior
+    assert fu["chainable"] is False and "no symbol defined in the base commit" in fu["chain_reason"]
+    assert fu["symbols_in_base"] == [] and fu["symbols_elsewhere"] == ["new_thing"]
+    assert len(report["units"]) == 1
+
+
+def test_max_units_caps_the_chain(tmp_path, monkeypatch):
+    monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
+    argv, artifacts, _ = _setup(tmp_path, _chain_harness())
+    assert harness_worker.main([*argv, "--max-units", "1"]) == 0
+    report = json.loads((artifacts / "report.json").read_text())
+    assert len(report["units"]) == 1
+    (fu,) = report["follow_ups"]
+    assert fu["chainable"] is True and "chained_as_unit" not in fu
+    assert json.loads((artifacts / "follow-ups.json").read_text()) == [fu]
+
+
+def test_criterion_and_symbol_gates_in_isolation(tmp_path):
+    ok, msg = harness_worker.criterion_in_issue("Claude hook install and uninstall edit the resolved target",
+                                                "## Acceptance\n- Claude hook install and uninstall edit the resolved regular-file target.")
+    assert ok, msg
+    assert harness_worker.criterion_in_issue("short", "short")[0] is False
+    assert harness_worker.criterion_in_issue(None, "anything at all here")[0] is False
+    assert harness_worker.criterion_in_issue("the moon is made of cheese and nobody knows", "install the hook")[0] is False
+    repo = tmp_path / "r"
+    repo.mkdir()
+    (repo / "calc.py").write_text("def add(a, b):\n    return a + b\n")
+    (repo / "test_calc.py").write_text("def only_in_tests():\n    pass\n")
+    _git(repo, "init", "-q", "-b", "main"); _git(repo, "add", "."); _git(repo, "commit", "-q", "-m", "i")
+    sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True).stdout.strip()
+    in_base, elsewhere = harness_worker.symbols_defined_in_base(
+        "from calc import add\ndef test_x():\n    assert add(1, 2) == 3\n    only_in_tests()\n    brand_new()\n", str(repo), sha)
+    assert in_base == ["add"] and elsewhere == ["brand_new", "only_in_tests"]

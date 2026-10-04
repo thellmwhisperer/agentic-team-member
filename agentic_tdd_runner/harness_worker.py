@@ -49,8 +49,9 @@ REPORT_SCHEMA = {
                 "title": {"type": "string"},
                 "paths": {"type": "array", "items": {"type": "string"}},
                 "red_test": {"type": "string"},
+                "criterion": {"type": "string"},
             },
-            "required": ["title", "paths", "red_test"],
+            "required": ["title", "paths", "red_test", "criterion"],
             "additionalProperties": False,
         }},
     },
@@ -75,6 +76,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--artifact-dir")
     parser.add_argument("--harness-bin", help="Override the harness executable")
     parser.add_argument("--dry-run", action="store_true", help="Prepare and print the brief only")
+    parser.add_argument("--max-units", type=int, help="Chain accepted follow-ups as further units in the same clone, up to this many units (config [harness_worker] max_units, default 3)")
     parser.add_argument("--scope", action="append", default=[], metavar="GLOB",
                         help="Repo-relative glob the diff may touch (repeatable; default: derived from the issue)")
     args = parser.parse_args(argv)
@@ -186,9 +188,13 @@ Fix this issue.
   then declare it. One half without the other is discarded.
 - The red test must fail today, on behavior, when run from its `red_test` path.
 
+- Each follow-up names `criterion`: one sentence copied verbatim from this issue's acceptance
+  criteria that the gap violates. A follow-up whose criterion is not in the issue is not chained.
+- The red test must call code that exists in the repository today, not only helpers you add.
+
 ## REPORT
 Your final message must be ONLY this JSON object, nothing else:
-{{"test_file": "<repo-relative path of the regression test>", "changed_files": ["<path>"], "summary": "<one paragraph>", "commands_run": ["<command>"], "follow_ups": [{{"title": "<gap>", "paths": ["<path outside SCOPE>"], "red_test": "<repo-relative path where the test would live>"}}]}}
+{{"test_file": "<repo-relative path of the regression test>", "changed_files": ["<path>"], "summary": "<one paragraph>", "commands_run": ["<command>"], "follow_ups": [{{"title": "<gap>", "paths": ["<path outside SCOPE>"], "red_test": "<repo-relative path where the test would live>", "criterion": "<sentence copied from the issue>"}}]}}
 Use `"follow_ups": []` when there are none. Write each follow-up's red test under
 `.atm/follow-ups/<n>/<red_test>` (n is its 1-based position in follow_ups), never at `<red_test>` itself,
 so this unit's test suite never sees it.
@@ -304,6 +310,46 @@ def follow_up_verdict(index: int, rel: str, workdir: str, config: dict) -> tuple
     return True, f"red test fails on behavior (exit {code})"
 
 
+DEFINITION = re.compile(r"\b(?:async\s+def|def|func\s*\([^)]*\)|func|function|class|type|fn)\s+[A-Za-z_]\w*")
+CALL_IDENT = re.compile(r"(?<![\w.])([A-Za-z_][A-Za-z0-9_]*)\s*\(")
+NOT_SYMBOLS = frozenset("if for while switch return func def class fn print len range make new append cap panic "
+                        "recover delete copy string int bool byte error assert expect require describe it test "
+                        "Run Fatalf Fatal Errorf Error Helper Cleanup TempDir Setenv Skip Skipf Logf".split())
+SOURCE_EXCLUDES = (":!*_test.go", ":!*test_*.py", ":!*_test.py", ":!*.test.*", ":!*.spec.*", ":!.atm/*")
+
+
+def symbols_defined_in_base(test_source: str, workdir: str, base_sha: str) -> tuple[list[str], list[str]]:
+    """Identifiers the test calls, split into those defined in the base commit's production
+    source and the rest. A test whose every call is to code this run invented proves nothing
+    about the repository as it was."""
+    # Definitions inside the test are not calls: `def test_x(`, `func TestX(`, `func (s *S) helper(`.
+    body = DEFINITION.sub(" ", test_source)
+    names = sorted({n for n in CALL_IDENT.findall(body) if n not in NOT_SYMBOLS and len(n) > 2})
+    in_base, elsewhere = [], []
+    for name in names:
+        args = [arg for pattern in definition_patterns(name) for arg in ("-e", pattern)]
+        hits = git_lines(workdir, "grep", "-l", "-E", *args, base_sha, "--", ".", *SOURCE_EXCLUDES)
+        (in_base if hits else elsewhere).append(name)
+    return in_base, elsewhere
+
+
+def criterion_in_issue(criterion, issue_text: str) -> tuple[bool, str]:
+    """The follow-up's criterion must be a sentence of the issue, compared loosely: lowercase,
+    punctuation dropped, and at least three quarters of its words (4+ letters) present in order
+    of nothing, just present. Short or missing criteria are refused."""
+    if not isinstance(criterion, str) or len(criterion.strip()) < 20:
+        return False, "no criterion cited (one sentence from the issue, 20+ characters)"
+    words = [w for w in re.sub(r"[^a-z0-9 ]+", " ", criterion.lower()).split() if len(w) >= 4]
+    body = set(re.sub(r"[^a-z0-9 ]+", " ", issue_text.lower()).split())
+    if not words:
+        return False, "criterion has no content words"
+    present = [w for w in words if w in body]
+    share = len(present) / len(words)
+    if share < 0.75:
+        return False, f"criterion not found in the issue ({len(present)}/{len(words)} words)"
+    return True, f"criterion found in the issue ({len(present)}/{len(words)} words)"
+
+
 def follow_up_tests_on_disk(workdir: str) -> dict[int, str]:
     """Red tests the agent wrote under .atm/follow-ups/<n>/<rel>, declared or not."""
     found: dict[int, str] = {}
@@ -319,10 +365,15 @@ def follow_up_tests_on_disk(workdir: str) -> dict[int, str]:
     return found
 
 
-def validate_follow_ups(report: dict | None, workdir: str, config: dict, log) -> list[dict]:
+def validate_follow_ups(report: dict | None, workdir: str, config: dict, log, *,
+                        base_sha: str | None = None, issue_text: str = "") -> list[dict]:
     """A follow-up is a pair: the declared entry and the red test on disk. Either half alone is
     recorded as rejected; a test found on disk without a declaration is still validated, because
-    the test is the evidence and the declaration is only its label."""
+    the test is the evidence and the declaration is only its label.
+
+    `accepted` means the red test proves a gap. `chainable` means it may become the next unit of
+    this run: accepted, its test calls code that already exists in the base commit, and it cites
+    a criterion that is in the issue. Slop fails one of the last two."""
     items = (report or {}).get("follow_ups")
     declared = [i if isinstance(i, dict) else {} for i in (items if isinstance(items, list) else [])]
     on_disk = follow_up_tests_on_disk(workdir)
@@ -333,17 +384,114 @@ def validate_follow_ups(report: dict | None, workdir: str, config: dict, log) ->
         rel = rel.removeprefix("./") if isinstance(rel, str) else ""
         if not rel and index in on_disk:
             rel = on_disk[index]
-        record = {"title": item.get("title") if item else None, "paths": item.get("paths") if item else [],
+        record = {"index": index, "title": item.get("title") if item else None,
+                  "paths": item.get("paths") if item else [],
                   "red_test": rel, "declared": item is not None, "on_disk": index in on_disk}
         if item is None:
             record["title"] = f"undeclared follow-up {index}: {rel}"
+        record["criterion"] = item.get("criterion") if item else None
         record["accepted"], record["reason"] = follow_up_verdict(index, rel, workdir, config)
         if record["accepted"] and item is None:
             record["reason"] += " (test found on disk, not declared in the report)"
+        record["chainable"], record["chain_reason"] = False, "red test does not prove a gap"
+        if record["accepted"]:
+            reasons = []
+            source = Path(workdir) / ".atm" / "follow-ups" / str(index) / rel
+            if base_sha:
+                in_base, elsewhere = symbols_defined_in_base(source.read_text(errors="replace"), workdir, base_sha)
+                record["symbols_in_base"], record["symbols_elsewhere"] = in_base, elsewhere
+                if not in_base:
+                    reasons.append("the test calls no symbol defined in the base commit")
+            crit_ok, crit_msg = criterion_in_issue(record["criterion"], issue_text)
+            if not crit_ok:
+                reasons.append(crit_msg)
+            record["chainable"] = not reasons
+            record["chain_reason"] = "; ".join(reasons) if reasons else "red test, base symbols and criterion all check out"
         if not record["accepted"]:
             log("follow_up_rejected", record)
+        elif not record["chainable"]:
+            log("follow_up_not_chainable", record)
         records.append(record)
     return records
+
+
+def build_unit_brief(*, number, follow_up, issue_title, issue_body, worktree, test_cmd, typecheck_cmd, forbidden) -> str:
+    patterns = ", ".join(f"`{p}`" for p in forbidden) or "none configured"
+    typecheck_line = f"`{typecheck_cmd}`" if typecheck_cmd else "none detected"
+    allowed = ", ".join(f"`{p}`" for p in follow_up.get("paths") or []) or "none"
+    return f"""# Follow-up unit {number}
+
+## GOAL
+The previous unit of this run is already applied and committed at HEAD. This unit closes one gap it
+reported, proven by a red test that already exists and fails today:
+
+- Gap: {follow_up.get("title")}
+- Issue criterion it serves: "{follow_up.get("criterion")}"
+- Red test: `{follow_up.get("red_test")}` (already on disk; it is this unit's `test_file`)
+
+Make that test pass by fixing the source. Do not edit the red test: it is the contract. If it cannot
+pass without changing it, stop and say so in `summary`.
+
+### Original issue, for context
+#### {issue_title}
+
+{issue_body}
+
+## SCOPE
+- Repository: `{worktree}`.
+- Only edit files under that directory. No files outside it.
+- Allowed paths: {allowed} (test files are always allowed)
+- {SCOPE_RULE}
+
+## ACCEPTANCE
+1. `{follow_up.get("red_test")}` passes, unchanged.
+2. The full test command passes.
+3. Typecheck passes, if the repo has one.
+
+## VERIFY
+- Tests: `{test_cmd or "not detected"}`
+- Typecheck: {typecheck_line}
+
+## FORBIDDEN
+- These patterns in changed files: {patterns}
+- `git commit`, `git push`, `git rebase`, any `gh` command.
+- Deleting, skipping or weakening existing tests, including the red test.
+- `sleep` in tests.
+
+## FOLLOW-UPS
+- {FOLLOW_UP_RULE}
+- Same contract as the first unit: red test under `.atm/follow-ups/<n>/<red_test>`, declared in the
+  report with `criterion` copied from the issue.
+
+## REPORT
+Your final message must be ONLY this JSON object, nothing else:
+{{"test_file": "{follow_up.get("red_test")}", "changed_files": ["<path>"], "summary": "<one paragraph>", "commands_run": ["<command>"], "follow_ups": []}}
+"""
+
+
+def commit_unit(worktree: str, number: int, title: str) -> str:
+    """Record a passed unit in the clone so the next unit's red/green runs against it."""
+    subprocess.run(["git", "add", "-A", "--", ".", ":!.atm"], cwd=worktree, check=True, capture_output=True)
+    subprocess.run(["git", "-c", "user.name=atm", "-c", "user.email=atm@localhost", "-c", "core.hooksPath=/dev/null",
+                    "commit", "-q", "--no-verify", "-m", f"atm unit {number}: {title}"[:200]],
+                   cwd=worktree, check=True, capture_output=True)
+    return git_lines(worktree, "rev-parse", "HEAD")[0]
+
+
+def stage_follow_up_as_unit(worktree: str, follow_up: dict, unit_number: int, log) -> str:
+    """Move the chained follow-up's red test into place and park this unit's .atm/follow-ups so the
+    next unit starts with an empty slot list. Returns the red test's repo-relative path."""
+    rel = follow_up["red_test"]
+    index = follow_up["index"]
+    source = Path(worktree) / ".atm" / "follow-ups" / str(index) / rel
+    target = resolve_repo_path(rel, worktree)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, target)
+    parked = Path(worktree) / ".atm" / "units" / str(unit_number - 1)
+    parked.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(Path(worktree) / ".atm" / "follow-ups"), str(parked / "follow-ups"))
+    log("unit_staged", {"unit": unit_number, "red_test": rel, "from_follow_up": index})
+    return rel
 
 
 def make_logger(path: str, harness: str):
@@ -608,91 +756,147 @@ def main(argv: list[str] | None = None) -> int:
     if args.harness == "codex":
         schema_path.write_text(json.dumps(REPORT_SCHEMA, indent=2))
     last_msg_path = artifact_dir / "last-message.txt"
-    cmd, stdin_text = harness_command(args, worktree, brief, str(schema_path), str(last_msg_path))
-    print(f"[HARNESS] {args.harness} timeout={args.timeout}s log={log_path}")
-    try:
-        run = run_harness(cmd, stdin_text, cwd=worktree, timeout=args.timeout, harness=args.harness, write=write)
-    except OSError as exc:
-        run = {"exit_code": None, "timed_out": False, "duration_seconds": 0, "final_text": None}
-        log("harness_failed", {"error": str(exc)})
-    if args.harness == "codex" and last_msg_path.is_file():
-        run["final_text"] = last_msg_path.read_text() or run["final_text"]
-    harness_report, parse_error = extract_report(run["final_text"])
-    log("harness_done", {k: v for k, v in run.items() if k != "final_text"} | {"report": harness_report,
-                                                                                "report_parse_error": parse_error})
-
-    changed = [p for p in quality.get_changed_files(worktree) if not is_atm_path(p)]
-    test_file = pick_test_file(harness_report, worktree, config)
-    if test_file:
-        red_outputs: list[str] = []
-
-        def log_capturing_red(name: str, data: dict) -> None:
-            if name == "verify":
-                red_outputs.append(str(data.get("red_output_full") or data.get("red_output", "")))
-            log(name, data)
-
-        before = worktree_fingerprint(worktree)
-        verified, verify_msg = verification.verify_red_green(
-            test_file, workdir=worktree, config=config, emit=print, log=log_capturing_red,
-            apply_mechanical_edits=lambda edits, wd: 0,
-        )
-        if worktree_fingerprint(worktree) != before:
-            # The verdict is about code that is no longer what the agent left: never trust it.
-            verified, verify_msg = False, "WORKTREE CHANGED DURING VERIFICATION: the red/green verdict is void"
-            log("verify_worktree_changed", {"test_file": test_file})
-        invalid_red = red_failed_on_missing_module(red_outputs[-1] if red_outputs else "")
-        if verified and invalid_red:
-            verified = False
-            verify_msg = f"INVALID RED: without the fix the test fails on a missing module ({invalid_red}), not on behavior"
-            log("verify_invalid_red", {"test_file": test_file, "marker": invalid_red})
-    else:
-        verified, verify_msg = False, "no test file found"
-    quality_ok, quality_msg = quality.run_quality_checks(
-        test_file or (changed[0] if changed else ""), workdir=worktree, config=config, log=log,
-        is_test_file_path=lambda p: is_test_file_path(p, config), get_changed_files_fn=lambda: changed,
-    )
-    if quality_ok and lang_key not in QUALITY_LANG.values():
-        hits = scan_forbidden(worktree, changed, forbidden)
-        if hits:
-            quality_ok, quality_msg = False, "forbidden patterns: " + "; ".join(hits[:5])
-            log("quality_forbidden", {"hits": hits})
-    gate_ok, gate_msg = check_gate(worktree, base_sha, config)
+    issue_text = f"{title}\n{body}"
+    max_units = args.max_units or int(config.get("harness_worker", {}).get("max_units", 3))
     timeout = int(config.get("environment", {}).get("timeout", 300))
-    full_tests_ok = run_command(test_cmd, worktree, config, timeout)
-    typecheck_ok = run_command(typecheck_cmd, worktree, config, timeout)
-    scope_ok, scope_msg = check_scope(worktree, base_sha, config, scope)
-    follow_ups = validate_follow_ups(harness_report, worktree, config, log)
-    accepted = [f for f in follow_ups if f["accepted"]]
+
+    def run_unit(number: int, unit_brief: str, unit_scope: list[str], unit_base: str, forced_test: str | None) -> dict:
+        cmd, stdin_text = harness_command(args, worktree, unit_brief, str(schema_path), str(last_msg_path))
+        print(f"[HARNESS] unit {number} {args.harness} timeout={args.timeout}s log={log_path}")
+        log("unit_started", {"unit": number, "base_sha": unit_base, "scope": unit_scope})
+        try:
+            run = run_harness(cmd, stdin_text, cwd=worktree, timeout=args.timeout, harness=args.harness, write=write)
+        except OSError as exc:
+            run = {"exit_code": None, "timed_out": False, "duration_seconds": 0, "final_text": None}
+            log("harness_failed", {"error": str(exc)})
+        if args.harness == "codex" and last_msg_path.is_file():
+            run["final_text"] = last_msg_path.read_text() or run["final_text"]
+        harness_report, parse_error = extract_report(run["final_text"])
+        log("harness_done", {k: v for k, v in run.items() if k != "final_text"} | {"unit": number, "report": harness_report,
+                                                                                    "report_parse_error": parse_error})
+        changed = [p for p in quality.get_changed_files(worktree) if not is_atm_path(p)]
+        test_file = forced_test or pick_test_file(harness_report, worktree, config)
+        if test_file:
+            red_outputs: list[str] = []
+
+            def log_capturing_red(name: str, data: dict) -> None:
+                if name == "verify":
+                    red_outputs.append(str(data.get("red_output_full") or data.get("red_output", "")))
+                log(name, data)
+
+            before = worktree_fingerprint(worktree)
+            verified, verify_msg = verification.verify_red_green(
+                test_file, workdir=worktree, config=config, emit=print, log=log_capturing_red,
+                apply_mechanical_edits=lambda edits, wd: 0,
+            )
+            if worktree_fingerprint(worktree) != before:
+                # The verdict is about code that is no longer what the agent left: never trust it.
+                verified, verify_msg = False, "WORKTREE CHANGED DURING VERIFICATION: the red/green verdict is void"
+                log("verify_worktree_changed", {"test_file": test_file})
+            invalid_red = red_failed_on_missing_module(red_outputs[-1] if red_outputs else "")
+            if verified and invalid_red:
+                verified = False
+                verify_msg = f"INVALID RED: without the fix the test fails on a missing module ({invalid_red}), not on behavior"
+                log("verify_invalid_red", {"test_file": test_file, "marker": invalid_red})
+        else:
+            verified, verify_msg = False, "no test file found"
+        quality_ok, quality_msg = quality.run_quality_checks(
+            test_file or (changed[0] if changed else ""), workdir=worktree, config=config, log=log,
+            is_test_file_path=lambda p: is_test_file_path(p, config), get_changed_files_fn=lambda: changed,
+        )
+        if quality_ok and lang_key not in QUALITY_LANG.values():
+            hits = scan_forbidden(worktree, changed, forbidden)
+            if hits:
+                quality_ok, quality_msg = False, "forbidden patterns: " + "; ".join(hits[:5])
+                log("quality_forbidden", {"hits": hits})
+        gate_ok, gate_msg = check_gate(worktree, unit_base, config)
+        full_tests_ok = run_command(test_cmd, worktree, config, timeout)
+        typecheck_ok = run_command(typecheck_cmd, worktree, config, timeout)
+        scope_ok, scope_msg = check_scope(worktree, unit_base, config, unit_scope)
+        follow_ups = validate_follow_ups(harness_report, worktree, config, log, base_sha=unit_base, issue_text=issue_text)
+        for f in follow_ups:
+            f["unit"] = number
+        passed = (verified and quality_ok and gate_ok and scope_ok
+                  and full_tests_ok is not False and typecheck_ok is not False)
+        unit = {
+            "unit": number, "base_sha": unit_base, "scope": unit_scope, "changed_files": changed, "test_file": test_file,
+            "verified": {"ok": verified, "message": verify_msg},
+            "quality_ok": {"ok": quality_ok, "message": quality_msg},
+            "gate_ok": {"ok": gate_ok, "message": gate_msg},
+            "scope_ok": {"ok": scope_ok, "message": scope_msg}, "follow_ups": follow_ups,
+            "full_tests_ok": full_tests_ok, "typecheck_ok": typecheck_ok,
+            "duration_seconds": run["duration_seconds"], "timed_out": run["timed_out"],
+            "harness_exit_code": run["exit_code"], "report_parse_error": parse_error, "passed": passed,
+        }
+        log("unit_done", unit)
+        return unit
+
+    units: list[dict] = []
+    unit_brief, unit_scope, unit_base, forced_test = brief, scope, base_sha, None
+    while True:
+        number = len(units) + 1
+        unit = run_unit(number, unit_brief, unit_scope, unit_base, forced_test)
+        units.append(unit)
+        if not unit["passed"] or number >= max_units:
+            break
+        chainable = [f for f in unit["follow_ups"] if f.get("chainable")]
+        if not chainable:
+            break
+        nxt = chainable[0]
+        unit_base = commit_unit(worktree, number, title if number == 1 else str(units[-1].get("title") or "follow-up"))
+        unit["committed_as"] = unit_base
+        forced_test = stage_follow_up_as_unit(worktree, nxt, number + 1, log)
+        nxt["chained_as_unit"] = number + 1
+        unit_scope = list(nxt.get("paths") or [])
+        unit_brief = build_unit_brief(number=number + 1, follow_up=nxt, issue_title=title, issue_body=body,
+                                      worktree=worktree, test_cmd=test_cmd, typecheck_cmd=typecheck_cmd, forbidden=forbidden)
+        (artifact_dir / f"brief-unit-{number + 1}.md").write_text(unit_brief)
+        units[-1]["title"] = nxt.get("title")
+        print(f"[CHAIN] follow-up {nxt['index']} of unit {number} becomes unit {number + 1}: {nxt.get('title')!r} scope={unit_scope}")
+
+    all_follow_ups = [f for u in units for f in u["follow_ups"]]
+    accepted = [f for f in all_follow_ups if f["accepted"] and not f.get("chained_as_unit")]
     if accepted:
         (artifact_dir / "follow-ups.json").write_text(json.dumps(accepted, indent=2))
-
+    changed_all = sorted({p for u in units for p in u["changed_files"]} | {
+        p for u in units if u.get("committed_as") for p in git_lines(worktree, "diff", "--name-only", base_sha, u["committed_as"])
+        if not is_atm_path(p)})
+    failed_unit = next((u for u in units if not u["passed"]), None)
+    last = units[-1]
+    passed = failed_unit is None
     result = {
-        "harness": args.harness, "model": args.model, "base_ref": args.base_ref, "worktree": worktree,
-        "brief": str(brief_path), "log": str(log_path), "changed_files": changed, "test_file": test_file,
-        "verified": {"ok": verified, "message": verify_msg},
-        "quality_ok": {"ok": quality_ok, "message": quality_msg},
-        "gate_ok": {"ok": gate_ok, "message": gate_msg},
-        "scope_ok": {"ok": scope_ok, "message": scope_msg}, "follow_ups": follow_ups,
-        "full_tests_ok": full_tests_ok, "typecheck_ok": typecheck_ok,
-        "duration_seconds": run["duration_seconds"], "timed_out": run["timed_out"],
-        "harness_exit_code": run["exit_code"], "report_parse_error": parse_error,
+        "harness": args.harness, "model": args.model, "base_ref": args.base_ref, "base_sha": base_sha,
+        "head_sha": git_lines(worktree, "rev-parse", "HEAD")[0], "worktree": worktree,
+        "brief": str(brief_path), "log": str(log_path), "changed_files": changed_all, "test_file": units[0]["test_file"],
+        "verified": {"ok": all(u["verified"]["ok"] for u in units),
+                     "message": (failed_unit or last)["verified"]["message"]},
+        "quality_ok": {"ok": all(u["quality_ok"]["ok"] for u in units), "message": (failed_unit or last)["quality_ok"]["message"]},
+        "gate_ok": {"ok": all(u["gate_ok"]["ok"] for u in units), "message": (failed_unit or last)["gate_ok"]["message"]},
+        "scope_ok": {"ok": all(u["scope_ok"]["ok"] for u in units), "message": (failed_unit or last)["scope_ok"]["message"]},
+        "follow_ups": all_follow_ups, "units": units, "max_units": max_units,
+        "full_tests_ok": last["full_tests_ok"], "typecheck_ok": last["typecheck_ok"],
+        "duration_seconds": sum(u["duration_seconds"] for u in units), "timed_out": any(u["timed_out"] for u in units),
+        "harness_exit_code": last["harness_exit_code"], "report_parse_error": last["report_parse_error"],
     }
     (artifact_dir / "report.json").write_text(json.dumps(result, indent=2))
     log("report", result)
     log_fh.close()
-    passed = verified and quality_ok and gate_ok and scope_ok and full_tests_ok is not False and typecheck_ok is not False
     print("\n=== HARNESS WORKER SUMMARY ===")
-    print(f"harness:    {args.harness} model={args.model or 'default'} exit={run['exit_code']}")
-    print(f"duration:   {run['duration_seconds']}s timed_out={run['timed_out']}")
+    print(f"harness:    {args.harness} model={args.model or 'default'} exit={last['harness_exit_code']}")
+    print(f"duration:   {result['duration_seconds']}s timed_out={result['timed_out']} units={len(units)}/{max_units}")
     print(f"worktree:   {worktree}")
-    print(f"changed:    {', '.join(changed) or 'none'}")
-    print(f"test_file:  {test_file or 'none'} (report parse: {parse_error or 'ok'})")
-    print(f"red/green:  {'PASS' if verified else 'FAIL'} {_snippet(verify_msg, 100)}")
-    print(f"quality:    {'PASS' if quality_ok else 'FAIL'} {_snippet(quality_msg, 100)}")
-    print(f"gate:       {'PASS' if gate_ok else 'FAIL'} {gate_msg}")
-    print(f"scope:      {'PASS' if scope_ok else 'FAIL'} {_snippet(scope_msg, 100)}")
-    print(f"follow-ups: {len(accepted)} accepted, {len(follow_ups) - len(accepted)} rejected")
-    print(f"full tests: {full_tests_ok} typecheck: {typecheck_ok}")
+    for u in units:
+        print(f"unit {u['unit']}:     {'PASS' if u['passed'] else 'FAIL'} test={u['test_file'] or 'none'} "
+              f"changed={', '.join(u['changed_files']) or 'none'}")
+        print(f"            red/green {'PASS' if u['verified']['ok'] else 'FAIL'} {_snippet(u['verified']['message'], 90)}")
+        print(f"            quality {'PASS' if u['quality_ok']['ok'] else 'FAIL'} gate {'PASS' if u['gate_ok']['ok'] else 'FAIL'} "
+              f"scope {'PASS' if u['scope_ok']['ok'] else 'FAIL'} full={u['full_tests_ok']} typecheck={u['typecheck_ok']}")
+        for f in u["follow_ups"]:
+            state = (f"chained as unit {f['chained_as_unit']}" if f.get("chained_as_unit")
+                     else "accepted, not chained: " + f.get("chain_reason", "") if f["accepted"]
+                     else "rejected: " + f.get("reason", ""))
+            print(f"            follow-up {f['index']}: {state}")
+    print(f"changed:    {', '.join(changed_all) or 'none'}")
     print(f"RESULT:     {'PASS' if passed else 'FAIL'} report={artifact_dir / 'report.json'}")
     return 0 if passed else 1
 
