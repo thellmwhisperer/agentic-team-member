@@ -226,3 +226,30 @@ def test_go_repo_gets_go_commands_and_forbidden_scan(tmp_path):
     assert harness_worker.quality_lang_key(str(repo), "unknown") == "go"
     hits = harness_worker.scan_forbidden(str(repo), ["a.go", "missing.go"], ["//nolint", "t.Skip("])
     assert hits == ["a.go:3 '//nolint'"]
+
+
+def test_claude_command_keeps_thinking_and_summary_skips_partials():
+    from types import SimpleNamespace
+    args = SimpleNamespace(harness="claude", harness_bin=None, model=None)
+    cmd, _ = harness_worker.harness_command(args, "/w", "brief", "/s.json", "/m.txt")
+    assert "--include-partial-messages" in cmd
+    assert harness_worker.summarize_event({"type": "stream_event", "event": {}}) is None
+
+
+def test_red_green_command_template_can_name_the_test_dir(tmp_path, monkeypatch):
+    from agentic_tdd_runner import verification
+    seen = []
+
+    def fake_run(argv, **kwargs):
+        seen.append(list(argv))
+        return SimpleNamespace(returncode=1 if len(seen) == 1 else 0, stdout="", stderr="")
+
+    from types import SimpleNamespace
+    monkeypatch.setattr(verification.subprocess, "run", lambda argv, **kw: fake_run(argv, **kw))
+    config = {"timeouts": {"test_run": 5}, "runner": {"command": "go test {test_dir}", "override_detected": True}}
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "x_test.go").write_text("package pkg\n")
+    verification.verify_red_green("pkg/x_test.go", workdir=str(tmp_path), config=config, emit=lambda s: None,
+                                  log=lambda n, d: None, apply_mechanical_edits=lambda e, w: 0)
+    test_runs = [a for a in seen if a[:2] == ["go", "test"]]
+    assert test_runs and all(a == ["go", "test", "./pkg"] for a in test_runs)
