@@ -3,7 +3,7 @@ import textwrap
 
 import pytest
 
-from agentic_tdd_runner.cookbook import generate_cookbook
+from agentic_tdd_runner.cookbook import build_episode_context
 
 
 # ── Fixtures ────────────────────────────────────────────────────────
@@ -32,7 +32,7 @@ class TestMinimalTsFunction:
               logger.info(`Hello ${name}`);
             }
         """)
-        result = generate_cookbook("src/utils.ts", "greet", str(tmp_path))
+        result = build_episode_context("src/utils.ts", "greet", str(tmp_path))["cookbook_text"]
         assert "mock.module(" in result
         assert "../logger" in result
 
@@ -46,7 +46,7 @@ class TestMinimalTsFunction:
               logger.info(`Hello ${name}`);
             }
         """)
-        result = generate_cookbook("src/utils.ts", "greet", str(tmp_path))
+        result = build_episode_context("src/utils.ts", "greet", str(tmp_path))["cookbook_text"]
         assert "describe(" in result or "test(" in result
         assert "greet" in result
 
@@ -60,7 +60,7 @@ class TestMinimalTsFunction:
               logger.info(`Hello ${name}`);
             }
         """)
-        result = generate_cookbook("src/utils.ts", "greet", str(tmp_path))
+        result = build_episode_context("src/utils.ts", "greet", str(tmp_path))["cookbook_text"]
         # Test file at src/utils.test.ts imports from ./utils
         assert "./utils" in result or "../utils" in result or "src/utils" in result
 
@@ -74,7 +74,7 @@ class TestUnexportedFunction:
               return 'hidden';
             }
         """)
-        result = generate_cookbook("src/internal.ts", "secret", str(tmp_path))
+        result = build_episode_context("src/internal.ts", "secret", str(tmp_path))["cookbook_text"]
         assert "export" in result
         assert "function secret" in result
 
@@ -93,7 +93,7 @@ class TestFactoryDependency:
               logger.response('ok', 'done');
             }
         """)
-        result = generate_cookbook("src/service.ts", "process", str(tmp_path))
+        result = build_episode_context("src/service.ts", "process", str(tmp_path))["cookbook_text"]
         assert "mock.module(" in result
         assert "getLogger" in result
         # Factory shape: getLogger returns object with observed members
@@ -114,7 +114,7 @@ class TestBunMockHygiene:
               logger.info('start');
             }
         """)
-        result = generate_cookbook("src/service.ts", "process", str(tmp_path))
+        result = build_episode_context("src/service.ts", "process", str(tmp_path))["cookbook_text"]
 
         assert "mock(() => undefined)" in result
         assert "undefined as" not in result
@@ -133,7 +133,7 @@ class TestModuleLocalMutable:
               transport.send(channel, msg);
             }
         """)
-        result = generate_cookbook("src/notifier.ts", "sendMessage", str(tmp_path))
+        result = build_episode_context("src/notifier.ts", "sendMessage", str(tmp_path))["cookbook_text"]
         assert "transport" in result
         assert "set" in result.lower() or "seam" in result.lower() or "inject" in result.lower()
 
@@ -153,7 +153,7 @@ class TestAssertionSurfaceScoring:
               client.say(channel, 'hello');
             }
         """)
-        result = generate_cookbook("src/handler.ts", "handle", str(tmp_path))
+        result = build_episode_context("src/handler.ts", "handle", str(tmp_path))["cookbook_text"]
         # Assertion should be on client.say, not logger.info
         assert "say" in result
         assert "toHaveBeenCalledWith" in result or "assert_called" in result
@@ -172,7 +172,7 @@ class TestPythonSource:
                 logger.info(f"Processing {item}")
                 return item.upper()
         """)
-        result = generate_cookbook("src/worker.py", "process_item", str(tmp_path))
+        result = build_episode_context("src/worker.py", "process_item", str(tmp_path))["cookbook_text"]
         assert "def test_" in result or "pytest" in result.lower()
         assert "mock.module(" not in result  # bun-only
 
@@ -186,7 +186,7 @@ class TestNoDependencies:
               return a + b;
             }
         """)
-        result = generate_cookbook("src/math.ts", "add", str(tmp_path))
+        result = build_episode_context("src/math.ts", "add", str(tmp_path))["cookbook_text"]
         assert "mock.module(" not in result
         assert "add" in result
         assert "describe(" in result or "test(" in result
@@ -201,7 +201,7 @@ class TestAssertionPrefersReturnOverParamCall:
               return item.toUpperCase();
             }
         """)
-        result = generate_cookbook("src/utils.ts", "process", str(tmp_path))
+        result = build_episode_context("src/utils.ts", "process", str(tmp_path))["cookbook_text"]
         # Should NOT generate a spy on item.toUpperCase
         assert "item_toUpperCase_spy" not in result
         # Should use return value assertion
@@ -222,7 +222,7 @@ class TestDiscoverDependenciesExcludesTarget:
               return name.toUpperCase();
             };
         """)
-        result = generate_cookbook("src/handler.ts", "process", str(tmp_path))
+        result = build_episode_context("src/handler.ts", "process", str(tmp_path))["cookbook_text"]
         assert "__setProcessForTests" not in result
 
 
@@ -236,7 +236,7 @@ class TestDirectCallableScaffold:
             def process(item):
                 send(item)
         """)
-        result = generate_cookbook("src/notifier.py", "process", str(tmp_path))
+        result = build_episode_context("src/notifier.py", "process", str(tmp_path))["cookbook_text"]
         assert "send_spy" in result
         # spy must be defined before assertion
         lines = result.splitlines()
@@ -258,7 +258,7 @@ class TestDirectImportWithMembers:
                 logger.info(item)
                 return item.upper()
         """)
-        result = generate_cookbook("src/worker.py", "process", str(tmp_path))
+        result = build_episode_context("src/worker.py", "process", str(tmp_path))["cookbook_text"]
         # Should NOT patch individual members like patch('pkg.info')
         assert "patch('pkg.info'" not in result
         # Should patch the object: patch('pkg.logger', ...)
@@ -274,7 +274,7 @@ class TestDirectImportWithMembers:
                 logger.info(item)
                 return item.upper()
         """)
-        result = generate_cookbook("src/worker.py", "process", str(tmp_path))
+        result = build_episode_context("src/worker.py", "process", str(tmp_path))["cookbook_text"]
         # Must NOT use return_value — logger is an object, not a factory
         assert "return_value" not in result
         # Must use direct Mock(info=spy)
@@ -290,7 +290,7 @@ class TestVarExportMechanical:
               return item;
             };
         """)
-        result = generate_cookbook("src/handler.ts", "process", str(tmp_path))
+        result = build_episode_context("src/handler.ts", "process", str(tmp_path))["cookbook_text"]
         assert "export" in result
 
 
@@ -303,7 +303,7 @@ class TestPythonClassMethod:
                 def add(self, a, b):
                     return a + b
         """)
-        result = generate_cookbook("src/calc.py", "add", str(tmp_path))
+        result = build_episode_context("src/calc.py", "add", str(tmp_path))["cookbook_text"]
         assert "Calculator" in result
         assert "method" in result.lower()
 
@@ -313,7 +313,7 @@ class TestPythonClassMethod:
                 def add(self, a, b):
                     return a + b
         """)
-        result = generate_cookbook("src/calc.py", "add", str(tmp_path))
+        result = build_episode_context("src/calc.py", "add", str(tmp_path))["cookbook_text"]
         # Scaffold must import the class, not the bare method
         assert "import Calculator" in result, "scaffold must import the class"
         assert "import add" not in result, "scaffold must not import the bare method"
@@ -335,7 +335,7 @@ class TestArrowFunctionSignature:
               return name.toUpperCase();
             };
         """)
-        result = generate_cookbook("src/handler.ts", "process", str(tmp_path))
+        result = build_episode_context("src/handler.ts", "process", str(tmp_path))["cookbook_text"]
         # Scaffold should have the params, not just process()
         assert "name" in result
         assert "age" in result
@@ -358,7 +358,7 @@ class TestModuleLevelDepsIncluded:
               logger.event('start');
             }
         """)
-        result = generate_cookbook("src/service.ts", "process", str(tmp_path))
+        result = build_episode_context("src/service.ts", "process", str(tmp_path))["cookbook_text"]
         # Factory calls at module level need mocking (they execute on import)
         assert "../logger" in result  # used in function + factory call
         assert "./token" in result    # factory call at module level
@@ -384,7 +384,7 @@ class TestMultiLineSignatureDetection:
               const response = 'hello';
             }
         """)
-        result = generate_cookbook("src/handler.ts", "processRenewal", str(tmp_path))
+        result = build_episode_context("src/handler.ts", "processRenewal", str(tmp_path))["cookbook_text"]
         assert "mock.module(" in result
         assert "../logger" in result
         assert "logger" in result
@@ -405,7 +405,7 @@ class TestCookbookGuardrails:
               client.say(channel, `${username} lleva ${months} meses`);
             }
         """)
-        result = generate_cookbook("src/handler.ts", "processRenewal", str(tmp_path))
+        result = build_episode_context("src/handler.ts", "processRenewal", str(tmp_path))["cookbook_text"]
         assert "Do not change the target's runtime signature just to fit the test scaffold." in result
         assert "Write the first failing test against the real callable contract from source." in result
         assert "For callbacks, handlers, and framework listeners: preserve the production contract" in result
@@ -418,7 +418,7 @@ class TestSingleParamArrowFunction:
         _write_file(tmp_path, "src/utils.ts", """\
             export const double = x => x * 2;
         """)
-        result = generate_cookbook("src/utils.ts", "double", str(tmp_path))
+        result = build_episode_context("src/utils.ts", "double", str(tmp_path))["cookbook_text"]
         assert "x" in result
         assert "double" in result
 
@@ -431,7 +431,7 @@ class TestPythonReturnValueScaffold:
             def process(item):
                 return item.upper()
         """)
-        result = generate_cookbook("src/worker.py", "process", str(tmp_path))
+        result = build_episode_context("src/worker.py", "process", str(tmp_path))["cookbook_text"]
         assert "result = result =" not in result
 
 
@@ -453,49 +453,6 @@ class TestFindFunctionEndPython:
         end = _find_function_end(source, 2)
         assert end is not None
         assert end <= 5  # must stop before or at subtract
-
-
-class TestBuildSystemPrompt:
-    """build_system_prompt injects cookbook into the base prompt."""
-
-    def test_injects_cookbook_section(self, tmp_path):
-        from agentic_tdd_runner.cookbook import build_system_prompt
-
-        _write_file(tmp_path, "src/service.ts", """\
-            import { getLogger } from '../logger';
-
-            const logger = getLogger();
-
-            export function process(): void {
-              logger.event('start');
-            }
-        """)
-        base = "You are a senior software engineer."
-        issue = "Fix the bug in process()"
-        prompt = build_system_prompt(
-            base_prompt=base,
-            issue_text=issue,
-            source_path="src/service.ts",
-            symbol="process",
-            project_root=str(tmp_path),
-        )
-        # Base prompt preserved
-        assert "senior software engineer" in prompt
-        # Cookbook injected
-        assert "Mock Cookbook" in prompt
-        assert "mock.module(" in prompt
-        assert "../logger" in prompt
-
-    def test_returns_base_when_no_source(self):
-        from agentic_tdd_runner.cookbook import build_system_prompt
-
-        base = "You are a senior software engineer."
-        prompt = build_system_prompt(
-            base_prompt=base,
-            issue_text="Fix the bug",
-        )
-        assert prompt == base
-        assert "Mock Cookbook" not in prompt
 
 
 class TestBuildEpisodeContext:
@@ -645,7 +602,7 @@ class TestRunnerAuthority:
             },
         }
 
-        result = generate_cookbook("src/service.ts", "process", str(tmp_path), config=config)
+        result = build_episode_context("src/service.ts", "process", str(tmp_path), config=config)["cookbook_text"]
 
         assert "bun:test" not in result
         assert "bun test" not in result
@@ -677,7 +634,7 @@ class TestRunnerAuthority:
             },
         }
 
-        result = generate_cookbook("src/service.ts", "process", str(tmp_path), config=config)
+        result = build_episode_context("src/service.ts", "process", str(tmp_path), config=config)["cookbook_text"]
 
         assert "### Bun Specifics" in result
         assert "### Module Mocks" in result
@@ -736,7 +693,7 @@ class TestRunnerAuthority:
             },
         }
 
-        result = generate_cookbook("src/service.ts", "process", str(tmp_path), config=config)
+        result = build_episode_context("src/service.ts", "process", str(tmp_path), config=config)["cookbook_text"]
 
         assert "### Jest Specifics" in result
         assert "jest.mock(" in result
@@ -799,7 +756,7 @@ class TestRunnerAuthority:
             },
         }
 
-        result = generate_cookbook("src/service.ts", "process", str(tmp_path), config=config)
+        result = build_episode_context("src/service.ts", "process", str(tmp_path), config=config)["cookbook_text"]
 
         assert "bun:test" not in result
         assert "bun test" not in result
@@ -816,7 +773,7 @@ class TestRegressionScopeGuidance:
               return streak;
             }
         """)
-        result = generate_cookbook("src/math.ts", "chooseMonths", str(tmp_path))
+        result = build_episode_context("src/math.ts", "chooseMonths", str(tmp_path))["cookbook_text"]
 
         assert "Write one focused regression test first" in result
         assert "Add up to two evidence-backed extra tests" in result
@@ -828,7 +785,7 @@ class TestRegressionScopeGuidance:
               return streak;
             }
         """)
-        result = generate_cookbook("src/math.ts", "chooseMonths", str(tmp_path))
+        result = build_episode_context("src/math.ts", "chooseMonths", str(tmp_path))["cookbook_text"]
 
         assert "contrastive fixtures" in result
         assert "issue or source shows competing inputs" in result
@@ -850,7 +807,7 @@ class TestCallbackContractGuidance:
 
             queue.on('job.completed', processJob);
         """)
-        result = generate_cookbook("src/events/processor.ts", "processJob", str(tmp_path))
+        result = build_episode_context("src/events/processor.ts", "processJob", str(tmp_path))["cookbook_text"]
 
         assert "### Callback Contract Evidence" in result
         assert "issue-provided callback contract" in result
@@ -893,7 +850,7 @@ class TestCallbackContractGuidance:
             queue.on('job.completed', processJob);
         """)
 
-        result = generate_cookbook("src/events/processor.ts", "processJob", str(tmp_path))
+        result = build_episode_context("src/events/processor.ts", "processJob", str(tmp_path))["cookbook_text"]
 
         assert "@example/job-queue source emits `job.completed(jobId, payload, metadata)`" in result
         assert "Argument 2 is `payload`, derived from `message.payload`." in result
@@ -934,7 +891,7 @@ class TestCallbackContractGuidance:
             bus.on('alert.created', handleAlert);
         """)
 
-        result = generate_cookbook("src/events/alerts.ts", "handleAlert", str(tmp_path))
+        result = build_episode_context("src/events/alerts.ts", "handleAlert", str(tmp_path))["cookbook_text"]
 
         assert "bus.on('alert.created', handleAlert)" in result
         assert "@example/event-bus source emits `alert.created(alertId, metadata, message)`" in result
@@ -951,7 +908,7 @@ class TestCallbackContractGuidance:
 
             bus.on('event', handleEvent);
         """)
-        result = generate_cookbook("src/events.ts", "handleEvent", str(tmp_path))
+        result = build_episode_context("src/events.ts", "handleEvent", str(tmp_path))["cookbook_text"]
 
         assert "use exported framework types or overloads" in result
         assert "empty-object casts" in result
@@ -998,7 +955,7 @@ class TestRepoProfileGuidance:
             }
         """)
 
-        result = generate_cookbook("src/jobs/processor.ts", "processJob", str(tmp_path))
+        result = build_episode_context("src/jobs/processor.ts", "processJob", str(tmp_path))["cookbook_text"]
 
         assert "### Repo Profile Facts" in result
         assert "dependency `metrics-reporter` imports `src/metrics/reporter.ts`" in result
@@ -1028,7 +985,7 @@ class TestRepoProfileGuidance:
             bus.subscribe('message', handleEvent);
         """)
 
-        result = generate_cookbook("src/events.ts", "handleEvent", str(tmp_path))
+        result = build_episode_context("src/events.ts", "handleEvent", str(tmp_path))["cookbook_text"]
 
         assert "event framework `event-bus` (callback_event) uses module `@example/event-bus`" in result
         assert "registrations: on, subscribe" in result
@@ -1050,7 +1007,7 @@ class TestRepoProfileGuidance:
             }
         """)
 
-        result = generate_cookbook("src/events.ts", "handleEvent", str(tmp_path))
+        result = build_episode_context("src/events.ts", "handleEvent", str(tmp_path))["cookbook_text"]
 
         assert "import expectation for module `pkg-0`" in result
         assert "import expectation for module `pkg-13`" in result

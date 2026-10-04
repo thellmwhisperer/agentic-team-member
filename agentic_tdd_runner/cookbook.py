@@ -196,24 +196,6 @@ def _build_contract_for_symbol(
     return contract, lang, seam_edits
 
 
-def generate_cookbook(
-    source_path: str,
-    symbol: str,
-    project_root: str,
-    *,
-    test_path: str | None = None,
-    line_start: int | None = None,
-    line_end: int | None = None,
-    config: dict | None = None,
-) -> str:
-    """Generate a text cookbook section for injection into the TDD agent's system prompt."""
-    contract, lang, _seam_edits = _build_contract_for_symbol(
-        source_path, symbol, project_root,
-        test_path=test_path, line_start=line_start, line_end=line_end, config=config,
-    )
-    return _render_cookbook_text(contract, lang)
-
-
 def build_episode_context(
     source_path: str,
     symbol: str,
@@ -269,23 +251,6 @@ def build_episode_context(
         "function_line_range": function_line_range,
         "cookbook_text": _render_cookbook_text(contract, lang),
     }
-
-
-def build_system_prompt(
-    base_prompt: str,
-    issue_text: str,
-    *,
-    source_path: str | None = None,
-    symbol: str | None = None,
-    project_root: str | None = None,
-    config: dict | None = None,
-) -> str:
-    """Build a system prompt with an optional cookbook section injected."""
-    if not source_path or not symbol or not project_root:
-        return base_prompt
-
-    cookbook = generate_cookbook(source_path, symbol, project_root, config=config)
-    return f"{base_prompt}\n\n{cookbook}"
 
 
 def _runner_for_contract(lang: LanguageCapabilities, config: dict | None) -> str:
