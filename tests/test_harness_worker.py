@@ -461,3 +461,54 @@ def test_verdict_is_void_when_the_worktree_changes_during_verification(tmp_path,
     assert report["verified"]["ok"] is False
     assert "WORKTREE CHANGED" in report["verified"]["message"]
     assert any(isinstance(e["event"], dict) and e["event"].get("type") == "atm.verify_worktree_changed" for e in _log_events(log_dir))
+
+
+def test_summary_prints_the_whole_thinking_and_hides_token_bookkeeping():
+    event = {"type": "assistant", "message": {"content": [
+        {"type": "thinking", "thinking": "First I read the hook.\nThen I write the red test."},
+        {"type": "text", "text": "Done."},
+    ]}}
+    out = harness_worker.summarize_event(event)
+    assert "[thinking]" in out
+    assert "First I read the hook." in out and "Then I write the red test." in out
+    assert harness_worker.summarize_event({"type": "system", "subtype": "thinking_tokens"}) is None
+    assert harness_worker.summarize_event({"type": "system", "subtype": "init", "model": "m"}) == "[init] model=m"
+
+
+def test_run_clone_is_a_separate_repo_detached_at_the_source_base_ref(tmp_path):
+    from agentic_tdd_runner.environment import prepare_run_clone, WorktreePrepError
+
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "a.txt").write_text("1\n")
+    _git(source, "init", "-q", "-b", "main")
+    _git(source, "add", ".")
+    _git(source, "commit", "-q", "-m", "one")
+    base = subprocess.run(["git", "rev-parse", "HEAD"], cwd=source, capture_output=True, text=True).stdout.strip()
+    # The source carries a remote-tracking ref and a stash entry, like la-roca does.
+    _git(source, "update-ref", "refs/remotes/origin/integration", base)
+    (source / "a.txt").write_text("2\n")
+    _git(source, "stash", "-q")
+    assert subprocess.run(["git", "stash", "list"], cwd=source, capture_output=True, text=True).stdout
+
+    report = prepare_run_clone(str(source), base_ref="origin/integration", run_root=str(tmp_path / "runs"))
+    clone = Path(report.workdir)
+
+    assert clone.parent == (tmp_path / "runs").resolve()
+    assert (clone / ".git").is_dir()  # a real repo, not a worktree pointer file
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=clone, capture_output=True, text=True).stdout.strip()
+    assert head == base
+    assert (clone / "a.txt").read_text() == "1\n"
+    assert subprocess.run(["git", "stash", "list"], cwd=clone, capture_output=True, text=True).stdout == ""
+    assert subprocess.run(["git", "status", "--porcelain"], cwd=clone, capture_output=True, text=True).stdout == ""
+    # A stash in the clone never reaches the source, and vice versa.
+    (clone / "a.txt").write_text("clone\n")
+    _git(clone, "stash", "-q")
+    assert subprocess.run(["git", "stash", "list"], cwd=source, capture_output=True, text=True).stdout.count("\n") == 1
+
+    try:
+        prepare_run_clone(str(source), base_ref="origin/nope", run_root=str(tmp_path / "runs"))
+    except WorktreePrepError as exc:
+        assert "origin/nope" in str(exc)
+    else:
+        raise AssertionError("an unknown base ref must be refused before cloning")

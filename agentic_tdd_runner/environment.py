@@ -118,6 +118,66 @@ def prepare_run_worktree(
     )
 
 
+def prepare_run_clone(
+    repo: str,
+    *,
+    workdir: str | None = None,
+    base_ref: str | None = None,
+    run_root: str | None = None,
+) -> WorktreeReport:
+    """Create an isolated local clone for a run, detached at the base ref's commit.
+
+    A clone shares nothing with the source repo or with other runs: its own stash stack,
+    index, HEAD and refs. Worktrees share all of those, and two concurrent runs on worktrees
+    swapped their work through the stash stack (4-oct-2026). The base ref is resolved in the
+    source repo (so `origin/integration` means what it means there) and fetched by SHA."""
+    repo_root = _resolve_git_repo(repo)
+    ref = base_ref or "main"
+    destination = Path(workdir).resolve() if workdir else _default_run_worktree_path(repo_root, run_root)
+
+    if destination.exists():
+        if not destination.is_dir():
+            raise WorktreePrepError(f"clone destination is not a directory: {destination}")
+        if any(destination.iterdir()):
+            raise WorktreePrepError(f"clone destination is not empty: {destination}")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        resolved = _run(repo_root, ["git", "rev-parse", "--verify", f"{ref}^{{commit}}"], timeout=30)
+    except FileNotFoundError as exc:
+        raise WorktreePrepError("git is unavailable") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise WorktreePrepError(f"base ref resolution timed out: {ref}") from exc
+    if resolved.returncode != 0:
+        detail = (resolved.stderr or resolved.stdout or "").strip()
+        raise WorktreePrepError(f"base ref {ref!r} not found in {repo_root}: {detail}")
+    base_sha = resolved.stdout.strip()
+
+    steps = [
+        (repo_root, ["git", "clone", "-q", "--local", "--no-checkout", str(repo_root), str(destination)]),
+        (destination, ["git", "fetch", "-q", str(repo_root), base_sha]),
+        (destination, ["git", "checkout", "-q", "--detach", base_sha]),
+    ]
+    command: list[str] = []
+    for cwd, command in steps:
+        try:
+            result = _run(cwd, command, timeout=300)
+        except FileNotFoundError as exc:
+            raise WorktreePrepError("git is unavailable") from exc
+        except subprocess.TimeoutExpired as exc:
+            raise WorktreePrepError(f"clone step timed out: {' '.join(command)}") from exc
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "").strip()
+            raise WorktreePrepError(f"clone failed at {' '.join(command[:2])}: {detail}")
+
+    return WorktreeReport(
+        repo=str(repo_root),
+        workdir=str(destination),
+        base_ref=ref,
+        command=["git", "clone", "--local", "--no-checkout", str(repo_root), str(destination), "@", base_sha],
+    )
+
+
 def prepare_environment(workdir: str, config: dict) -> EnvironmentReport:
     """Prepare the target repository before any model call is made."""
     root = Path(workdir).resolve()
