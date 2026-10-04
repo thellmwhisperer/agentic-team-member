@@ -191,7 +191,7 @@ def verdict(label: str) -> str:
         return f"{label}: {state} ({out})"
     r = json.loads(report.read_text())
     ok = r.get("verified") or {}
-    accepted = [f for f in r.get("follow_ups", []) if f.get("accepted")]
+    accepted = [f for f in r.get("follow_ups", []) if f.get("accepted") and not f.get("chained_as_unit")]
     rejected = [f for f in r.get("follow_ups", []) if not f.get("accepted")]
     passed = (out / "exit.txt").read_text().strip() == "0" if (out / "exit.txt").exists() else None
     units = r.get("units") or []
