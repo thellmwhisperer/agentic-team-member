@@ -63,6 +63,18 @@ pathlib.Path("helpers.py").write_text("def helper():\\n    return 1\\n")
 print(json.dumps({"type": "result", "subtype": "success", "result": "I added a helper."}), flush=True)
 """
 
+NEW_MODULE_HARNESS = """
+import json, pathlib, sys
+sys.stdin.read()
+pathlib.Path("calc2.py").write_text("def add(a, b):\\n    return a + b\\n")
+pathlib.Path("tests/test_add2.py").write_text("from calc2 import add\\n\\n\\ndef test_add_sums():\\n    assert add(2, 3) == 5\\n")
+calc = pathlib.Path("calc.py")
+calc.write_text(calc.read_text().replace("a - b", "a + b"))
+report = {"test_file": "tests/test_add2.py", "changed_files": ["calc.py", "calc2.py", "tests/test_add2.py"],
+          "summary": "moved add to a new module", "commands_run": []}
+print(json.dumps({"type": "result", "subtype": "success", "result": json.dumps(report)}), flush=True)
+"""
+
 SLEEPING_HARNESS = """
 import json, subprocess, sys, time
 sys.stdin.read()
@@ -157,6 +169,24 @@ def test_helper_only_change_fails_verification_and_gate(tmp_path, monkeypatch):
     assert report["gate_ok"]["ok"] is False
     assert report["test_file"] is None
     assert report["report_parse_error"] == "no JSON object in final message"
+
+
+def test_red_that_fails_on_missing_module_is_not_verified(tmp_path, monkeypatch):
+    monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
+    argv, artifacts, log_dir = _setup(tmp_path, NEW_MODULE_HARNESS)
+    assert harness_worker.main(argv) == 1
+    report = json.loads((artifacts / "report.json").read_text())
+    assert report["verified"]["ok"] is False
+    assert "INVALID RED" in report["verified"]["message"]
+    assert report["gate_ok"]["ok"] is True  # calc.py was touched; the gate is not the problem here
+    assert any(e["event"].get("type") == "atm.verify_invalid_red" for e in _log_events(log_dir))
+
+
+def test_brief_demands_a_behavioral_red(tmp_path, capsys, monkeypatch):
+    argv, artifacts, _ = _setup(tmp_path, FIXING_HARNESS)
+    assert harness_worker.main(argv + ["--dry-run"]) == 0
+    brief = (artifacts / "brief.md").read_text()
+    assert "not on a missing module" in brief
 
 
 def test_harness_timeout_kills_process_group(tmp_path, monkeypatch):
