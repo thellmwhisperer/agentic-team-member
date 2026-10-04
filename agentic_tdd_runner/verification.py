@@ -123,7 +123,15 @@ def verify_red_green(
     did_stash = stash_result.returncode == 0 and "No local changes to save" not in stash_output
     mechanical_paths = mechanical_edit_paths(mechanical_edits, workdir)
 
-    run_argv = shlex.split(run_cmd)
+    # A command template may name the test file or its directory itself (Go tests run by
+    # package: `go test {test_dir}`); otherwise the test file is appended, as before.
+    if "{test_file}" in run_cmd or "{test_dir}" in run_cmd:
+        test_dir = "./" + os.path.dirname(test_file) if os.path.dirname(test_file) else "./"
+        run_argv = shlex.split(run_cmd.format(test_file=test_file, test_dir=test_dir))
+        test_args: list[str] = []
+    else:
+        run_argv = shlex.split(run_cmd)
+        test_args = [test_file]
 
     red_result = None
     red_passed = False
@@ -148,7 +156,7 @@ def verify_red_green(
         emit("  [RED] Running test WITHOUT fix...")
         try:
             red_result = subprocess.run(
-                [*run_argv, test_file],
+                [*run_argv, *test_args],
                 cwd=workdir, capture_output=True, text=True, timeout=test_timeout,
             )
             red_passed = red_result.returncode == 0
@@ -186,7 +194,7 @@ def verify_red_green(
     emit("  [GREEN] Running test WITH fix...")
     try:
         green_result = subprocess.run(
-            [*run_argv, test_file],
+            [*run_argv, *test_args],
             cwd=workdir, capture_output=True, text=True, timeout=test_timeout,
         )
         green_passed = green_result.returncode == 0

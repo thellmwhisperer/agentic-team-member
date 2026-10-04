@@ -193,8 +193,10 @@ def make_logger(path: str, harness: str):
 def harness_command(args, worktree: str, brief: str, schema_path: str, last_msg_path: str) -> tuple[list[str], str | None]:
     """Return argv and the stdin payload."""
     if args.harness == "claude":
+        # --include-partial-messages is what keeps the thinking text in the stream; without it
+        # the assistant events carry empty thinking blocks.
         cmd = [args.harness_bin or "claude", "-p", "--output-format", "stream-json", "--verbose",
-               "--permission-mode", "acceptEdits",
+               "--include-partial-messages", "--permission-mode", "acceptEdits",
                "--allowedTools", "Read", "Edit", "Write", "Bash", "Glob", "Grep"]
         if args.model:
             cmd += ["--model", args.model]
@@ -214,6 +216,8 @@ def summarize_event(event) -> str | None:
     if not isinstance(event, dict):
         return f"[raw] {_snippet(event)}" if str(event).strip() else None
     kind = event.get("type", "")
+    if kind == "stream_event":
+        return None  # partial chunks are logged, not printed
     if kind == "system":
         return f"[{event.get('subtype', 'system')}] model={event.get('model', '?')}"
     if kind in ("assistant", "user"):
