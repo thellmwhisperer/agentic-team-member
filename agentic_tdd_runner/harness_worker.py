@@ -49,6 +49,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run claude/codex on an issue inside an ATM run worktree")
     parser.add_argument("--repo", required=True, help="Existing git repo to fix")
     parser.add_argument("--base-ref", default="main")
+    parser.add_argument("--run-root", help="Directory for run worktrees (default: REPO/.worktree)")
     parser.add_argument("--issue-number", type=int)
     parser.add_argument("--github-repo", help="owner/repo for --issue-number")
     parser.add_argument("--issue-file", help="File with the issue text (first line is the title)")
@@ -94,7 +95,29 @@ def detect_commands(workdir: str, env_report) -> tuple[str | None, str | None]:
         return test_cmd, (shlex.join(typecheck[0]) if typecheck else None)
     if env_report.project_type == "python":
         return "python3 -m pytest", None
+    if (root / "go.mod").is_file():
+        return "go test ./...", "go vet ./..."
     return None, None
+
+
+def quality_lang_key(workdir: str, project_type: str) -> str:
+    if (Path(workdir) / "go.mod").is_file():
+        return "go"
+    return QUALITY_LANG.get(project_type, "")
+
+
+def scan_forbidden(workdir: str, changed: list[str], forbidden: list[str]) -> list[str]:
+    """Forbidden-pattern hits in changed files, for languages ATM's quality module does not know."""
+    hits = []
+    for rel in changed:
+        path = Path(workdir) / rel
+        if not path.is_file():
+            continue
+        for number, line in enumerate(path.read_text(errors="replace").splitlines(), start=1):
+            for pattern in forbidden:
+                if pattern in line:
+                    hits.append(f"{rel}:{number} {pattern!r}")
+    return hits
 
 
 def build_brief(*, title, body, worktree, base_ref, test_cmd, typecheck_cmd, forbidden) -> str:
@@ -358,7 +381,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         title, body = load_issue(args)
-        wt = prepare_run_worktree(args.repo, base_ref=args.base_ref)
+        wt = prepare_run_worktree(args.repo, base_ref=args.base_ref, run_root=args.run_root)
         env_report = prepare_environment(wt.workdir, config)
     except (WorktreePrepError, EnvironmentPrepError, subprocess.CalledProcessError, OSError) as exc:
         log("prepare_failed", {"error": str(exc)})
@@ -369,7 +392,8 @@ def main(argv: list[str] | None = None) -> int:
         config.setdefault("runner", {})["bootstrap"] = env_report.runner_bootstrap.to_log_dict()
     base_sha = git_lines(worktree, "rev-parse", "HEAD")[0]
     test_cmd, typecheck_cmd = detect_commands(worktree, env_report)
-    forbidden = config.get("quality", {}).get(QUALITY_LANG.get(env_report.project_type, ""), {}).get("forbidden", [])
+    lang_key = quality_lang_key(worktree, env_report.project_type)
+    forbidden = config.get("quality", {}).get(lang_key, {}).get("forbidden", [])
     brief = build_brief(title=title, body=body, worktree=worktree, base_ref=args.base_ref,
                         test_cmd=test_cmd, typecheck_cmd=typecheck_cmd, forbidden=forbidden)
     brief_path = artifact_dir / "brief.md"
@@ -423,6 +447,11 @@ def main(argv: list[str] | None = None) -> int:
         test_file or (changed[0] if changed else ""), workdir=worktree, config=config, log=log,
         is_test_file_path=lambda p: is_test_file_path(p, config),
     )
+    if quality_ok and lang_key not in QUALITY_LANG.values():
+        hits = scan_forbidden(worktree, changed, forbidden)
+        if hits:
+            quality_ok, quality_msg = False, "forbidden patterns: " + "; ".join(hits[:5])
+            log("quality_forbidden", {"hits": hits})
     gate_ok, gate_msg = check_gate(worktree, base_sha, config)
     timeout = int(config.get("environment", {}).get("timeout", 300))
     full_tests_ok = run_command(test_cmd, worktree, config, timeout)

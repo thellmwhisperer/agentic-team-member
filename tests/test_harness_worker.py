@@ -213,3 +213,16 @@ def test_extract_report_takes_last_top_level_object():
     report, error = harness_worker.extract_report(text)
     assert error is None
     assert report["test_file"] == "t.py"
+
+
+def test_go_repo_gets_go_commands_and_forbidden_scan(tmp_path):
+    from types import SimpleNamespace
+    repo = tmp_path / "gorepo"
+    repo.mkdir()
+    (repo / "go.mod").write_text("module example.com/x\n\ngo 1.22\n")
+    (repo / "a.go").write_text("package x\n\nfunc A() int { return 1 } //nolint\n")
+    env_report = SimpleNamespace(project_type="unknown", package_manager=None, runner_bootstrap=None)
+    assert harness_worker.detect_commands(str(repo), env_report) == ("go test ./...", "go vet ./...")
+    assert harness_worker.quality_lang_key(str(repo), "unknown") == "go"
+    hits = harness_worker.scan_forbidden(str(repo), ["a.go", "missing.go"], ["//nolint", "t.Skip("])
+    assert hits == ["a.go:3 '//nolint'"]
