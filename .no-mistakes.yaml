@@ -1,3 +1,11 @@
 commands:
   test: python3 -m pytest -q
   lint: uvx ruff check .
+review:
+  path_instructions:
+    - path: "agentic_tdd_runner/**"
+      instructions: |
+        Generated branch names carry a timestamp to the second and every run works in its own clone,
+        so they are unique by construction. Do not add uuid, nonce or random suffixes to them, and do
+        not add tests for concurrency cases the design rules out. When a hardening is speculative,
+        report it as a note and change nothing.
