@@ -7,6 +7,8 @@ import sys
 import textwrap
 from pathlib import Path
 
+import pytest
+
 from agentic_tdd_runner import harness_worker
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -972,3 +974,21 @@ def test_scan_forbidden_reports_only_lines_added_since_base(tmp_path):
     (repo / "b.py").write_text(f"import re  # {marker}\n")
     hits = harness_worker.scan_forbidden(str(repo), ["a.py", "b.py"], [marker])
     assert hits == [f"a.py:3 {marker!r}", f"b.py:1 {marker!r}"]
+
+
+@pytest.mark.parametrize("gitignore", [".atm/\n", ""])
+def test_commit_unit_never_stages_atm_even_when_ignored(tmp_path, gitignore):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / ".gitignore").write_text(gitignore)
+    (repo / "a.py").write_text("x = 1\n")
+    _git(repo, "init", "-q")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "base")
+    (repo / "a.py").write_text("x = 2\n")
+    (repo / ".atm" / "follow-ups" / "1").mkdir(parents=True)
+    (repo / ".atm" / "follow-ups" / "1" / "test_gap.py").write_text("def test_gap():\n    assert False\n")
+    harness_worker.commit_unit(str(repo), 1, "fix")
+    files = subprocess.run(["git", "show", "--name-only", "--format=", "HEAD"], cwd=repo, capture_output=True,
+                           text=True, check=True).stdout.split()
+    assert files == ["a.py"]
