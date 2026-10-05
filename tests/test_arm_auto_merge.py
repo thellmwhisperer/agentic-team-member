@@ -44,6 +44,9 @@ def run_script(tmp_path, body, labels=""):
     "## Summary\nx\n\n## Risk Assessment\n🚨 High: x\n",
     "## Summary\nx\n",
     "## Risk Assessment\n\n",
+    "## Risk Assessment Notes\nLow: not the assessment\n\n## Risk Assessment\n🚨 High: x\n",
+    "## Risk Assessment\n\n## Low-priority tests\nThis section is not the risk level.\n",
+    "## Risk Assessment\n\n## Risk Assessment\nLow: not the first assessment\n",
 ])
 def test_high_or_unknown_risk_without_label_does_not_arm(tmp_path, body):
     stdout, merges = run_script(tmp_path, body)

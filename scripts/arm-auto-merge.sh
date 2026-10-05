@@ -5,7 +5,8 @@
 set -eu
 level=$(gh pr view "$1" --repo "$GITHUB_REPOSITORY" --json body --jq .body | awk '
   { sub(/\r$/, "") }
-  /^## Risk Assessment/ { found = 1; next }
+  !found && /^## Risk Assessment[[:space:]]*$/ { found = 1; next }
+  found && /^#+[[:space:]]/ { exit }
   found && NF { if (match($0, /[A-Za-z]+/)) print substr($0, RSTART, RLENGTH); exit }')
 case "$level" in
   Low|Medium) ;;
