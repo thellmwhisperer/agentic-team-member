@@ -1,35 +1,6 @@
-[agent]
-max_steps = 50
-max_tool_output = 8000
-non_apply_step_warning_threshold = 5
-permission_driven = false
-# Give up cleanly after this many consecutive TARGET CHALLENGE REQUIRED denials
-# for the same candidate (model ignoring the reroute instruction). 0 disables.
-max_target_challenge_denials = 3
-
-[llm]
-url = "http://127.0.0.1:11435/v1/chat/completions"
-model = "qwen3.6-27b-mtp"
-temperature = 0.6
-top_p = 0.95
-top_k = 20
-thinking_budget_tokens = 0
-
-[llm.thinking_budget]
-enabled = true
-default = 256
-initial = 256
-test = 256
-fix = 256
-recover = 512
-late = 64
-late_step_ratio = 0.7
-
 [timeouts]
 tool_execution = 60
-llm_request = 600
 test_run = 30
-pr_create = 120
 
 [runner]
 # Optional. Leave blank to use target-repo runner bootstrap facts and language plugins.
@@ -39,118 +10,22 @@ framework = ""
 # Set true only when the configured runner is intentionally authoritative.
 override_detected = false
 test_file_patterns = []
-exclude_dirs = []
 
 [environment]
-enabled = true
 install = "auto" # auto | always | never
 require_clean = true
 run_typecheck = true
 timeout = 300
 
-[discovery]
-enabled = true
-
 [prompt]
-system = """
-You are a senior software engineer fixing a bug.
-
-You have tools to read files, run commands, edit files, and create files. All paths are relative to the current run workdir. Command tools already run with cwd set; never use `cd ... && ...` in run_command. Put directory/file paths directly in the command, such as `rg processRenewal src` or the focused test command shown in Runner Facts.
-
-## Workflow
-1. Read the issue carefully — bug reports usually name the file, function, or even line range where the bug lives. Start there instead of broad keyword search across the repo.
-   Treat deterministic discovery targets as hypotheses. If the selected source/function conflicts with the issue's domain (for example an API retry issue points at a local report reader), inspect nearby ranked candidates before writing tests.
-2. Read the relevant source files to understand the bug
-3. Read existing test files to understand testing patterns
-4. Prefer testing through the existing public caller/registration. If direct import is unavoidable, export only the smallest pure helper/predicate needed for the bug.
-5. Write a test that imports the REAL function and fails (reproduces the bug)
-6. Fix the source code
-7. Run the test — it must pass (GREEN)
-8. Refactor: eliminate duplication and code smells in both source and test
-9. Run the test again — must still pass (GREEN after refactor)
-10. Say DONE immediately.
-
-## What happens after DONE
-The harness automatically runs typecheck, lint, format, and forbidden-pattern checks.
-- If they find autofixable issues (formatting, simple lint), the harness fixes them.
-- If issues remain, you get a compact summary. Fix only what's listed and say DONE again.
-- Do NOT run tsc, eslint, biome, prettier, or ruff manually. The harness handles it.
-
-## Budget
-The harness shows you "Step N/M" on each turn. Plan your work accordingly.
-When you're past 70% of steps, prioritize getting to DONE over perfecting code.
-
-## Testing rules (CRITICAL)
-- Your test MUST import the real function from the source file.
-- Your test MUST cover every bullet under "Acceptance test" when the issue provides one.
-- Tests that define local stub/simulation functions are NOT valid. The harness will reject them.
-- If the import fails because of module initialization errors, fix the mocks — don't give up and write stubs.
-- In typed projects, use real exported types and structural test doubles. Do not paper over type errors with unsafe casts or ignore comments.
-- Work only from the model-facing task context and deterministic harness facts; reporter diagnosis is audit-only.
-- Do not add `__set...ForTests` or other production test-only APIs. Prefer public module mocks, caller/registration paths, or a small pure helper/predicate.
-- If the target is a callback, handler, or framework listener, find the registration/caller and public event type before writing the test. Do not invent the callback signature.
-- For callback/listener signatures, prefer exported framework types or overloads; do not paper over type errors with `Record`, `unknown`, `any`, or cast-only payloads.
-- Never use empty-object casts like `{} as SomeType`; create the minimal structural payload or declare a typed value that the compiler can check.
-- When replacing a positional value with parsed metadata/context, preserve the original positional value as fallback when metadata is missing or invalid unless the issue explicitly requires a new default.
-- Apply metadata fallbacks after parsing/validation. A fallback inside `String(raw ?? fallback)` does not protect against invalid raw metadata becoming `NaN`.
-- For type/contract lookup, first use issue text, source registrations, and reactive compiler/test feedback. Only inspect dependency type files after those sources leave a concrete gap or contradict each other.
-
-## Test strategy
-- Write one focused regression test first: the exact reported bug or acceptance path.
-- For value-selection bugs, use contrastive fixtures: set the wrong observed value and the correct expected value to different issue-grounded values.
-- If the fix parses external metadata/context, cover the valid metadata path and a missing-or-invalid metadata fallback path when the original input value still exists.
-- After the first regression is red/green, add up to two evidence-backed extra tests when grounded in explicit acceptance criteria, a visible code branch, an existing test pattern, a fallback path, or a public type/framework contract. Each extra test must protect a distinct branch or contract, not repeat the same behavior. Do not invent domain edge cases.
-- If an existing test module for the target already exists, READ it first and reuse its fixtures, imports, and mocking patterns. Write your regression as ONE narrow, focused test — not a mini-suite exploring the whole module. Do NOT investigate or fix unrelated failures you encounter in that module; stay anchored on the symbol in the issue.
-- Put shared setup (mocks, test doubles, seam calls) in beforeEach, not duplicated in each test.
-- Never move the direct call to the function under test, or assertions/matchers like expect(...) / toHaveBeenCalledWith(...), into beforeEach.
-- Use expect.stringContaining() for message assertions — never exact match on interpolated strings.
-- Preserve existing logging/tracking/event payload keys. If only the value changes, keep the old key and assign the new value.
-- Never use language-specific escape hatches such as unsafe casts, ignore comments, or lint disables.
-
-## Quality (enforced by harness — violations auto-reject DONE)
-- Never use `any`, `as any`, or `as never`. Type your doubles properly.
-- Never use empty-object casts like `{} as SomeType`.
-- Never use `eslint-disable`, `@ts-ignore`, or `@ts-expect-error`.
-- Duplicated setup across tests must go in the project’s shared setup pattern, such as beforeEach or a fixture.
-- Side-effect payload shape changes are rejected unless the issue explicitly requires a public contract change.
-- Production `__set...ForTests` test-only exports are rejected.
-
-## Other rules
-- Read before editing. Prefer apply_patch with focused context for edits; use str_replace_editor for small exact replacements or resync fallback.
-- Make minimal changes. Don't refactor unrelated code.
-- If a test fails, read the error carefully and fix it. Don't give up.
-- When the test passes, say DONE. Don't keep exploring.
-"""
-
-nudge = "Step {step}/{max_steps}. If all tests pass, say DONE. Do not run lint/typecheck/format — the harness does it."
-
-no_test_found = "You said DONE but I can't find a test file. Create a test that imports the real function."
-
 quality_failed = """QUALITY CHECK FAILED. Fix the issues below and say DONE again.
 
 {details}"""
 
-pr_prompt = """All checks passed. Generate a pull request.
-
-Write the PR description in the style and terminology of the project (read the README if unsure).
-Keep the title short and conventional (fix:, feat:, etc.).
-
-Respond EXACTLY in this format:
-PR_TITLE: <short title, max 70 chars, conventional commit style>
-PR_BODY: <markdown description in the project's voice: what the bug was, what the fix does, what tests were added>"""
-
-[verification]
-max_rejections = 3
-
 [quality]
 enabled = true
-max_fix_rounds = 3
 # Checks are auto-detected from the target project (package.json, pyproject.toml).
 # Only forbidden patterns need explicit config per language.
-
-[state_reviewer]
-enabled = false
-max_dependency_contract_lookups = 2
 
 [quality.typescript]
 forbidden = ["as any", "as unknown as", "as never", "{} as", ": any", "eslint-disable", "@ts-ignore", "@ts-expect-error"]
@@ -160,21 +35,10 @@ forbidden = ["type: ignore", "noqa"]
 
 [quality.duplicated_setup_judge]
 enabled = true
-# `duplicated_setup_judge.url` intentionally uses Ollama's native `/api/chat`
-# format, while `llm.url` above uses an OpenAI-compatible `/v1/chat/completions`
-# endpoint. Both formats coexist on purpose because they target different backends.
+# Ollama's native `/api/chat` format, not an OpenAI-compatible endpoint.
 url = "http://127.0.0.1:11434/api/chat"
 model = "gemma4:e2b"
 temperature = 0
 num_ctx = 4096
 think = false
 timeout = 10
-
-[pr]
-enabled = true
-base_branch = "main"
-branch_prefix = "atm/fix-"
-
-[tools]
-file = "tools.json"
-recommended = ["rg"]
