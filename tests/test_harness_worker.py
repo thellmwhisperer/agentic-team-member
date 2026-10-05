@@ -41,6 +41,10 @@ recommended = []
 FIXING_HARNESS = """
 import json, pathlib, sys
 brief = sys.stdin.read()
+if brief.startswith("# Ponytail pass"):
+    print(json.dumps({"type": "result", "subtype": "success", "result": json.dumps({
+        "findings": [], "summary": "No cuts found"})}), flush=True)
+    raise SystemExit(0)
 assert "add returns the difference" in brief
 print(json.dumps({"type": "system", "subtype": "init", "model": "fake"}), flush=True)
 pathlib.Path("tests/test_add.py").write_text("from calc import add\\n\\n\\ndef test_add_sums():\\n    assert add(2, 3) == 5\\n")
