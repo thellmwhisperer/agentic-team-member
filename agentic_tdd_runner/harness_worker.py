@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
+import importlib.util
 import json
 import os
 import re
@@ -629,18 +630,103 @@ def stage_follow_up_as_unit(worktree: str, follow_up: dict, unit_number: int, lo
     return rel
 
 
-def make_logger(path: str, harness: str):
-    fh = open(path, "a", encoding="utf-8")
+ELAPSED_EVERY = 30  # seconds a step may stay silent before it gets an elapsed line
+MONITOR_TIMEOUT = 5
 
-    def write(event) -> None:
-        entry = {"ts": datetime.now(timezone.utc).isoformat(), "harness": harness, "event": event}
-        fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
-        fh.flush()
 
-    def log(name: str, data: dict) -> None:
-        write({"type": f"atm.{name}", **data})
+def load_renderer():
+    """scripts/tail-run.py's Renderer: the one renderer, for the log file and for the worker's own stdout."""
+    path = Path(__file__).resolve().parent.parent / "scripts" / "tail-run.py"
+    spec = importlib.util.spec_from_file_location("tail_run", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.Renderer
 
-    return write, log, fh
+
+class RunLog:
+    """The run's JSONL log, each event rendered as it is written. Every step writes a start event before it
+    runs and an end event after; both run `monitor` ([monitor].command). A step silent for ELAPSED_EVERY
+    seconds gets an elapsed event, so a long step is never mistaken for a stuck run."""
+
+    def __init__(self, path: str, harness: str, *, render=None, monitor: str = "", label: str = "", report: str = ""):
+        self.fh = open(path, "a", encoding="utf-8")
+        self.harness, self.render, self.monitor = harness, render, monitor
+        self.monitor_env = {"ATM_LABEL": label, "ATM_REPORT": report}
+        self.lock = threading.RLock()
+        self.steps: list[tuple[str, float]] = []  # open steps, innermost last
+        self.ticker: threading.Thread | None = None
+        self.quiet_since = time.monotonic()
+
+    def write(self, event) -> None:
+        entry = {"ts": datetime.now(timezone.utc).isoformat(), "harness": self.harness, "event": event}
+        with self.lock:
+            self.fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            self.fh.flush()
+            self.quiet_since = time.monotonic()
+            if self.render:
+                self.render(event)
+                sys.stdout.flush()
+
+    def log(self, name: str, data: dict) -> None:
+        self.write({"type": f"atm.{name}", **data})
+
+    def begin(self, name: str) -> None:
+        with self.lock:
+            self.steps.append((name, time.monotonic()))
+            self.log("step", {"step": name, "state": "started"})
+            if self.ticker is None:
+                self.ticker = threading.Thread(target=self._tick_while_open, daemon=True)
+                self.ticker.start()
+        self._notify(name, "started", 0)
+
+    def end(self, ok: bool) -> None:
+        with self.lock:
+            name, started = self.steps.pop()
+            duration = round(time.monotonic() - started, 2)
+            state = "passed" if ok else "failed"
+            self.log("step", {"step": name, "state": state, "duration_seconds": duration})
+        self._notify(name, state, duration)
+
+    def step(self, name: str, fn, *args, ok=None, **kwargs):
+        """fn(*args, **kwargs) as one step; it failed if it raised or if ok(result) is false."""
+        self.begin(name)
+        try:
+            result = fn(*args, **kwargs)
+        except BaseException:
+            self.end(False)
+            raise
+        self.end(ok is None or bool(ok(result)))
+        return result
+
+    def tick(self, now: float) -> None:
+        with self.lock:
+            if now - self.quiet_since >= ELAPSED_EVERY:
+                name, started = self.steps[-1]
+                self.log("step_elapsed", {"step": name, "elapsed_seconds": round(now - started)})
+                self.quiet_since = now
+
+    def _tick_while_open(self) -> None:
+        while True:
+            time.sleep(1)
+            with self.lock:
+                if not self.steps:
+                    self.ticker = None
+                    return
+                self.tick(time.monotonic())
+
+    def _notify(self, step: str, state: str, duration: float) -> None:
+        if not self.monitor:
+            return
+        env = os.environ | self.monitor_env | {"ATM_STEP": step, "ATM_STATE": state, "ATM_DURATION": str(duration)}
+        try:
+            subprocess.run(self.monitor, shell=True, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL, timeout=MONITOR_TIMEOUT)
+        except (subprocess.TimeoutExpired, OSError):
+            pass  # the monitor watches the run; it never stops it
+
+    def close(self) -> None:
+        with self.lock:
+            self.fh.close()
 
 
 def harness_command(args, worktree: str, brief: str, schema_path: str, last_msg_path: str) -> tuple[list[str], str | None]:
@@ -1052,6 +1138,10 @@ def main(argv: list[str] | None = None) -> int:
     config = load_config(args.config)
     # The recommended-tools preflight serves ATM's own tool loop; the harness brings its own tools.
     config.setdefault("tooling", {})["recommended"] = []
+    monitor = str(config.get("monitor", {}).get("command") or "").strip()
+    if not monitor and not sys.stdout.isatty():
+        print("no monitor: stdout is not a terminal and [monitor].command is empty", file=sys.stderr)
+        return 2
     artifact_dir = Path(args.artifact_dir).resolve()
     log_dir = Path(args.log_dir).resolve()
     if args.label:
@@ -1066,16 +1156,21 @@ def main(argv: list[str] | None = None) -> int:
     started = [sys.executable, "-m", "agentic_tdd_runner.harness_worker", *(sys.argv[1:] if argv is None else argv)]
     (artifact_dir / "command.txt").write_text(f"cd {shlex.quote(os.getcwd())} && {shlex.join(started)}\n")
     log_path = log_dir / f"worker-{datetime.now().strftime('%Y%m%d-%H%M%S')}.jsonl"
-    write, log, log_fh = make_logger(str(log_path), args.harness)
+    renderer = load_renderer()(log_path)
+    renderer.harness = args.harness
+    run_log = RunLog(str(log_path), args.harness, render=renderer.render, monitor=monitor,
+                     label=args.label or artifact_dir.name, report=str(artifact_dir / "report.json"))
+    write, log = run_log.write, run_log.log
 
+    run_log.begin("prepare")
     try:
         title, body = load_issue(args)
         closes = None if args.issue_file else args.issue_number  # load_issue read it from GitHub
         wt = prepare_run_clone(args.repo, base_ref=args.base_ref, run_root=args.run_root)
         env_report = prepare_environment(wt.workdir, config)
     except (WorktreePrepError, EnvironmentPrepError, subprocess.CalledProcessError, OSError) as exc:
+        run_log.end(False)
         log("prepare_failed", {"error": str(exc)})
-        print(f"[PREPARE] FAILED: {exc}")
         return 2
     worktree = wt.workdir
     if env_report.runner_bootstrap:
@@ -1092,7 +1187,7 @@ def main(argv: list[str] | None = None) -> int:
     brief_path.write_text(brief)
     log("prepared", {"worktree": worktree, "base_sha": base_sha, "test_command": test_cmd,
                      "typecheck_command": typecheck_cmd, "environment": env_report.to_log_dict()})
-    print(f"[PREPARE] worktree={worktree} base={args.base_ref}@{base_sha[:10]} tests={test_cmd!r}")
+    run_log.end(True)
     if args.dry_run:
         print(brief)
         return 0
@@ -1117,6 +1212,10 @@ def main(argv: list[str] | None = None) -> int:
             run["final_text"] = last_msg_path.read_text() or run["final_text"]
         return run, *extract_report(run["final_text"])
 
+    def agent_step(name: str, harness_brief: str, schema: dict):
+        return run_log.step(name, call_harness, harness_brief, schema,
+                            ok=lambda r: r[0]["exit_code"] == 0 and not r[0]["timed_out"])
+
     def red_green(test_file: str | None) -> tuple[bool, str]:
         if not test_file:
             return False, "no test file found"
@@ -1127,10 +1226,26 @@ def main(argv: list[str] | None = None) -> int:
                 red_outputs.append(str(data.get("red_output_full") or data.get("red_output", "")))
             log(name, data)
 
+        def halves(line: str) -> None:
+            """verify_red_green announces each half before it runs it and prints its outcome after:
+            those lines open and close the red and green halves as steps."""
+            match = re.match(r"\s*\[(RED|GREEN)\] (Running|exit=|TIMEOUT|INFRA)", line)
+            if not match:
+                return
+            name = f"{match[1].lower()} half"
+            if match[2] == "Running":
+                run_log.begin(name)
+            else:
+                run_log.end("(good)" in line)
+
         before = worktree_fingerprint(worktree)
-        verified, verify_msg = verification.verify_red_green(
-            test_file, workdir=worktree, config=config, emit=print, log=log_capturing_red,
-        )
+        try:
+            verified, verify_msg = verification.verify_red_green(
+                test_file, workdir=worktree, config=config, emit=halves, log=log_capturing_red,
+            )
+        finally:
+            while run_log.steps and run_log.steps[-1][0] in ("red half", "green half"):
+                run_log.end(False)  # a half verify_red_green left without an outcome line
         if worktree_fingerprint(worktree) != before:
             # The verdict is about code that is no longer what the agent left: never trust it.
             log("verify_worktree_changed", {"test_file": test_file})
@@ -1141,22 +1256,30 @@ def main(argv: list[str] | None = None) -> int:
             return False, f"INVALID RED: without the fix the test fails on a missing module ({invalid_red}), not on behavior"
         return verified, verify_msg
 
+    def command_step(name: str, command: str | None) -> tuple[bool | None, str | None]:
+        """run_command as a step; no command, no step."""
+        if not command:
+            return None, None
+        return run_log.step(name, run_command, command, worktree, config, timeout, log, ok=lambda r: r[0])
+
     def run_checks(test_file: str | None, changed: list[str], check_scope_globs: list[str], base: str) -> dict:
         """Every gate after red/green, against `base`; `ok` is the conjunction."""
-        quality_ok, quality_msg = quality.run_quality_checks(
+        quality_ok, quality_msg = run_log.step(
+            "quality", quality.run_quality_checks,
             test_file or (changed[0] if changed else ""), workdir=worktree, config=config, log=log,
             is_test_file_path=lambda p: is_test_file_path(p, config), get_changed_files_fn=lambda: changed,
-            base_ref=base,
+            base_ref=base, ok=lambda r: r[0],
         )
         if quality_ok and lang_key not in QUALITY_LANG.values():
-            hits = scan_forbidden(worktree, changed, forbidden, base)
+            hits = run_log.step("forbidden scan", scan_forbidden, worktree, changed, forbidden, base, ok=lambda h: not h)
             if hits:
                 quality_ok, quality_msg = False, "forbidden patterns: " + "; ".join(hits[:5])
                 log("quality_forbidden", {"hits": hits})
-        gate_ok, gate_msg = check_gate(worktree, base, config)
-        full_tests_ok, full_tests_tail = run_command(test_cmd, worktree, config, timeout, log)
-        typecheck_ok, typecheck_tail = run_command(typecheck_cmd, worktree, config, timeout, log)
-        scope_ok, scope_msg = check_scope(worktree, base, config, check_scope_globs)
+        gate_ok, gate_msg = run_log.step("gate", check_gate, worktree, base, config, ok=lambda r: r[0])
+        full_tests_ok, full_tests_tail = command_step("full suite", test_cmd)
+        typecheck_ok, typecheck_tail = command_step("typecheck", typecheck_cmd)
+        scope_ok, scope_msg = run_log.step("scope", check_scope, worktree, base, config, check_scope_globs,
+                                           ok=lambda r: r[0])
         return {
             "ok": quality_ok and gate_ok and scope_ok and full_tests_ok is not False and typecheck_ok is not False,
             "quality_ok": {"ok": quality_ok, "message": quality_msg}, "gate_ok": {"ok": gate_ok, "message": gate_msg},
@@ -1165,17 +1288,16 @@ def main(argv: list[str] | None = None) -> int:
         }
 
     def run_unit(number: int, unit_brief: str, unit_scope: list[str], unit_base: str, forced_test: str | None) -> dict:
-        print(f"[HARNESS] unit {number} {args.harness} timeout={args.timeout}s log={log_path}")
         log("unit_started", {"unit": number, "base_sha": unit_base, "scope": unit_scope})
-        run, harness_report, parse_error = call_harness(unit_brief, REPORT_SCHEMA)
+        run, harness_report, parse_error = agent_step(f"agent unit {number}", unit_brief, REPORT_SCHEMA)
         log("harness_done", {k: v for k, v in run.items() if k != "final_text"} | {"unit": number, "report": harness_report,
                                                                                     "report_parse_error": parse_error})
         changed = [p for p in quality.get_changed_files(worktree) if not is_atm_path(p)]
         test_file = forced_test or pick_test_file(harness_report, worktree, config)
         verified, verify_msg = red_green(test_file)
         checks = run_checks(test_file, changed, unit_scope, unit_base)
-        follow_ups = validate_follow_ups(harness_report, worktree, config, log, base_sha=unit_base, issue_text=issue_text,
-                                         issue={"title": title, "body": body})
+        follow_ups = run_log.step("follow-up validation", validate_follow_ups, harness_report, worktree, config, log,
+                                  base_sha=unit_base, issue_text=issue_text, issue={"title": title, "body": body})
         for f in follow_ups:
             f["unit"] = number
         unit = {
@@ -1188,19 +1310,36 @@ def main(argv: list[str] | None = None) -> int:
         log("unit_done", unit)
         return unit
 
+    def recheck(units: list[dict], head: str, run_files: list[str]) -> list[str]:
+        """Every gate of the run against the ponytail-cut worktree; the failures, none when it holds."""
+        # With HEAD at the base commit the clone looks like one unit holding the whole run.
+        subprocess.run(["git", "reset", "-q", base_sha], cwd=worktree, check=True, capture_output=True)
+        try:
+            failed = [f"unit {u['unit']} red/green: {msg}" for u in units
+                      for ok, msg in [red_green(u["test_file"])] if not ok]
+            changed = [p for p in quality.get_changed_files(worktree) if not is_atm_path(p)]
+            checks = run_checks(units[0]["test_file"], changed, run_files, base_sha)
+            failed += [f"{name} failed: {checks[name]['message']}" for name in ("quality_ok", "gate_ok", "scope_ok")
+                       if not checks[name]["ok"]]
+            failed += [f"{name} failed" for name in ("full_tests_ok", "typecheck_ok") if checks[name] is False]
+            lint_ok, _ = run_command(lint_command(worktree), worktree, config, timeout, log)
+            failed += ["lint failed"] if lint_ok is False else []
+        finally:
+            subprocess.run(["git", "reset", "-q", head], cwd=worktree, check=True, capture_output=True)
+        return failed
+
     def ponytail_pass(units: list[dict]) -> dict:
         """One harness call that may only cut the run's diff, gated like a unit; anything short of a shorter,
         fully green diff brings the pre-ponytail worktree back."""
         head = git_lines(worktree, "rev-parse", "HEAD")[0]
-        before = snapshot_commit(worktree)
+        before = run_log.step("ponytail snapshot", snapshot_commit, worktree)
         run_files = git_lines(worktree, "diff", "--name-only", base_sha, before, "--", ".", ":!.atm")
         diff = subprocess.run(["git", "diff", base_sha, before, "--", ".", ":!.atm"], cwd=worktree,
                               capture_output=True, text=True).stdout
         pony_brief = build_ponytail_brief(title=title, body=body, worktree=worktree, diff=diff, test_cmd=test_cmd)
         (artifact_dir / "brief-ponytail.md").write_text(pony_brief)
-        print(f"[PONYTAIL] {args.harness} timeout={args.timeout}s", flush=True)
         log("ponytail_started", {"head": head, "snapshot": before})
-        run, pony_report, parse_error = call_harness(pony_brief, PONYTAIL_SCHEMA)
+        run, pony_report, parse_error = agent_step("ponytail agent", pony_brief, PONYTAIL_SCHEMA)
         log("harness_done", {k: v for k, v in run.items() if k != "final_text"} | {"unit": "ponytail", "report": pony_report,
                                                                                     "report_parse_error": parse_error})
         findings = [f for f in (pony_report or {}).get("findings") or [] if isinstance(f, dict)]
@@ -1220,21 +1359,8 @@ def main(argv: list[str] | None = None) -> int:
         elif record["net_lines_after"] >= record["net_lines_before"]:
             reason = "did not reduce the run's net added lines"
         else:
-            # With HEAD at the base commit the clone looks like one unit holding the whole run.
-            subprocess.run(["git", "reset", "-q", base_sha], cwd=worktree, check=True, capture_output=True)
-            try:
-                failed = [f"unit {u['unit']} red/green: {msg}" for u in units
-                          for ok, msg in [red_green(u["test_file"])] if not ok]
-                changed = [p for p in quality.get_changed_files(worktree) if not is_atm_path(p)]
-                checks = run_checks(units[0]["test_file"], changed, run_files, base_sha)
-                failed += [f"{name} failed: {checks[name]['message']}" for name in ("quality_ok", "gate_ok", "scope_ok")
-                           if not checks[name]["ok"]]
-                failed += [f"{name} failed" for name in ("full_tests_ok", "typecheck_ok") if checks[name] is False]
-                lint_ok, _ = run_command(lint_command(worktree), worktree, config, timeout, log)
-                failed += ["lint failed"] if lint_ok is False else []
-            finally:
-                subprocess.run(["git", "reset", "-q", head], cwd=worktree, check=True, capture_output=True)
-            reason = "; ".join(failed)
+            reason = "; ".join(run_log.step("ponytail re-checks", recheck, units, head, run_files,
+                                            ok=lambda failed: not failed))
         if reason:  # throw away everything since the snapshot, new files included, and bring the snapshot back
             subprocess.run(["git", "add", "-A"], cwd=worktree, capture_output=True)
             subprocess.run(["git", "reset", "--hard", "-q", head], cwd=worktree, capture_output=True)
@@ -1258,8 +1384,8 @@ def main(argv: list[str] | None = None) -> int:
         if not chainable:
             break
         nxt = chainable[0]
-        unit_base = commit_unit(worktree, number, title if number == 1 else str(units[-1].get("title") or "follow-up"),
-                                closes)
+        unit_base = run_log.step("commit", commit_unit, worktree, number,
+                                 title if number == 1 else str(units[-1].get("title") or "follow-up"), closes)
         unit["committed_as"] = unit_base
         forced_test = stage_follow_up_as_unit(worktree, nxt, number + 1, log)
         nxt["chained_as_unit"] = number + 1
@@ -1299,12 +1425,12 @@ def main(argv: list[str] | None = None) -> int:
         result["ponytail"] = ponytail
     delivery = None
     if passed and not args.no_deliver:
-        print(f"[DELIVER] no-mistakes in {worktree}", flush=True)
-        delivery = result["delivery"] = deliver(worktree, args.repo, title, len(units), artifact_dir, closes)
+        delivery = result["delivery"] = run_log.step("delivery", deliver, worktree, args.repo, title, len(units),
+                                                     artifact_dir, closes, ok=lambda d: d["pr_url"] and not d.get("error"))
         log("delivery", delivery)
     (artifact_dir / "report.json").write_text(json.dumps(result, indent=2))
     log("report", result)
-    log_fh.close()
+    run_log.close()
     print("\n=== HARNESS WORKER SUMMARY ===")
     print(f"harness:    {args.harness} model={args.model or 'default'} effort={args.effort or 'default'} exit={last['harness_exit_code']}")
     print(f"duration:   {result['duration_seconds']}s timed_out={result['timed_out']} units={len(units)}/{max_units}")

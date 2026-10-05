@@ -1,0 +1,18 @@
+schema: 1
+id: T-PONYTAIL-20261005-232019-2
+status: accepted
+category: alien_code
+title: "Removed the `self.steps and` guard in `RunLog.tick`. Its only callers are the ticker thread, which c"
+created_at: 2026-10-05
+incident:
+  pattern: "Removed the `self.steps and` guard in `RunLog.tick`. Its only callers are the ticker thread, which checks under the lock that a step is open, and the test, which opens a step first. So the guard checked a state that cannot happen."
+  what_went_wrong: "An ATM run wrote it and ATM's ponytail pass cut it before delivery."
+  root_cause: "The coding agent wrote more than the issue needed."
+  rule_established: "Cut by the ponytail pass; it does not come back."
+  evidence:
+    - family: speculative_hardening
+      example: "Removed the `self.steps and` guard in `RunLog.tick`. Its only callers are the ticker thread, which checks under the lock that a step is open, and the test, which opens a step first. So the guard checked a state that cannot happen."
+      artifact: agentic_tdd_runner/harness_worker.py
+match:
+  family: speculative_hardening
+  artifact: agentic_tdd_runner/harness_worker.py

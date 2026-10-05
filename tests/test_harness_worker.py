@@ -36,6 +36,9 @@ enabled = false
 [tools]
 file = "tools.json"
 recommended = []
+
+[monitor]
+command = "true"
 """
 
 FIXING_HARNESS = """
@@ -1291,3 +1294,73 @@ def test_commit_unit_never_stages_atm_even_when_ignored(tmp_path, gitignore):
     files = subprocess.run(["git", "show", "--name-only", "--format=", "HEAD"], cwd=repo, capture_output=True,
                            text=True, check=True).stdout.split()
     assert files == ["a.py"]
+
+
+def test_full_suite_says_it_started_before_it_runs_and_how_it_ended_after(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
+    real = harness_worker.run_command
+
+    def pytest_prints(command, *args, **kwargs):
+        if command == "python3 -m pytest":
+            print("PYTEST OUTPUT")
+        return real(command, *args, **kwargs)
+
+    monkeypatch.setattr(harness_worker, "run_command", pytest_prints)
+    argv, _, log_dir = _setup(tmp_path, FIXING_HARNESS)
+    assert harness_worker.main(argv) == 0
+    out = capsys.readouterr().out
+    assert "▶ full suite" in out and "✓ full suite" in out
+    assert out.index("▶ full suite") < out.index("PYTEST OUTPUT") < out.index("✓ full suite")
+    assert "▶ red half" in out and "✓ red half" in out and "▶ green half" in out and "✓ green half" in out
+
+    steps = [e for e in (entry["event"] for entry in _log_events(log_dir))
+             if isinstance(e, dict) and e.get("type") == "atm.step"]
+    names = {e["step"] for e in steps}
+    for name in ("prepare", "agent unit 1", "red half", "green half", "quality", "gate", "scope", "full suite",
+                 "follow-up validation", "ponytail snapshot", "ponytail agent"):
+        assert name in names, name
+    open_steps = []
+    for e in steps:  # every end closes the innermost started step: nothing ends without its start first
+        if e["state"] == "started":
+            open_steps.append(e["step"])
+        else:
+            assert open_steps.pop() == e["step"] and e["state"] in ("passed", "failed")
+    assert open_steps == []
+
+
+def test_monitor_command_runs_at_every_start_and_end_with_the_step_in_its_environment(tmp_path, monkeypatch):
+    monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
+    argv, artifacts, _ = _setup(tmp_path, FIXING_HARNESS)
+    seen = tmp_path / "monitor.txt"
+    config = Path(argv[argv.index("--config") + 1])
+    config.write_text(CONFIG_TOML.replace(
+        'command = "true"',
+        f'command = \'echo "$ATM_LABEL|$ATM_STEP|$ATM_STATE|$ATM_DURATION|$ATM_REPORT" >> {seen}; exit 7\''))
+    assert harness_worker.main([*argv, "--label", "mon"]) == 0  # the monitor's exit code is ignored
+    rows = [line.split("|") for line in seen.read_text().splitlines()]
+    assert {row[0] for row in rows} == {"mon"}
+    assert {row[4] for row in rows} == {str(artifacts.resolve() / "report.json")}
+    assert ["full suite", "started", "0"] in [row[1:4] for row in rows]
+    (ended,) = [row for row in rows if row[1] == "full suite" and row[2] != "started"]
+    assert ended[2] == "passed" and float(ended[3]) >= 0
+
+
+def test_worker_refuses_to_start_when_nobody_can_watch_it(tmp_path, monkeypatch, capsys):
+    argv, artifacts, _ = _setup(tmp_path, FIXING_HARNESS)
+    Path(argv[argv.index("--config") + 1]).write_text(CONFIG_TOML.replace('command = "true"', 'command = ""'))
+    assert harness_worker.main(argv) == 2
+    assert "no monitor: stdout is not a terminal and [monitor].command is empty" in capsys.readouterr().err
+    assert not artifacts.exists()
+
+
+def test_a_silent_step_gets_one_elapsed_line_every_30_seconds(tmp_path, capsys):
+    events = []
+    run_log = harness_worker.RunLog(str(tmp_path / "worker-1.jsonl"), "claude", render=events.append)
+    run_log.begin("full suite")
+    t0 = run_log.quiet_since
+    for offset in (29, 30, 45, 60, 89, 90):
+        run_log.tick(t0 + offset)
+    elapsed = [e["elapsed_seconds"] for e in events if e["type"] == "atm.step_elapsed"]
+    assert elapsed == [30, 60, 90]
+    run_log.end(True)
+    assert [e["state"] for e in events if e["type"] == "atm.step"] == ["started", "passed"]
