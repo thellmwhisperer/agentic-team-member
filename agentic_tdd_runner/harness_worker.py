@@ -891,7 +891,9 @@ def worktree_fingerprint(workdir: str) -> str:
     for rel in sorted(paths - {b""}):
         path = Path(workdir) / os.fsdecode(rel)
         h.update(rel + b"\0")
-        if path.is_file():
+        if path.is_symlink():
+            h.update(b"symlink\0" + os.fsencode(os.readlink(path)))
+        elif path.is_file():
             h.update(str(path.stat().st_mode & 0o111).encode() + b"\0")
             h.update(path.read_bytes())
         else:
