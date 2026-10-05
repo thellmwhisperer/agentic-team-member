@@ -477,7 +477,7 @@ in the TOML config.
 
 `python3 -m agentic_tdd_runner.harness_worker` (or `scripts/atm-run.py run`)
 hands the fix to a coding agent CLI and judges it. When every unit passes,
-delivery is the default (`--deliver no-mistakes`):
+delivery runs by default:
 
 1. `.no-mistakes.yaml` is copied from the source repo into the clone if the
    source has it (tracked or ignored) and the clone does not.
