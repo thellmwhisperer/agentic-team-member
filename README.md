@@ -143,7 +143,7 @@ key. The worker reads these tables:
 |---|---|
 | `[timeouts]` | `test_run` (one test file, required), `tool_execution` (each quality tool) |
 | `[runner]` | `command`, `framework`, `override_detected`, `test_file_patterns`: override the detected test runner |
-| `[environment]` | `enabled`, `install` (`auto`, `always`, `never`), `require_clean`, `run_typecheck`, `timeout` |
+| `[environment]` | `install` (`auto`, `always`, `never`), `require_clean`, `run_typecheck`, `timeout` |
 | `[quality]` | `enabled`; `[quality.python]`, `[quality.typescript]`, `[quality.go]`: `forbidden` patterns |
 | `[quality.duplicated_setup_judge]` | Local Ollama model that flags duplicated test setup; errors do not fail the run |
 | `[prompt]` | `quality_failed`: template for the quality failure message |

@@ -816,8 +816,8 @@ def main(argv: list[str] | None = None) -> int:
     # red/green stash, which makes the oracle run the wrong code.
     os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
     config = load_config(args.config)
-    # The recommended-tools preflight serves ATM's own tool loop; the harness brings its own tools.
-    config.setdefault("tooling", {})["recommended"] = []
+    # The worker does not preflight [tools].recommended: the harness brings its own tools.
+    config.setdefault("tools", {})["recommended"] = []
     artifact_dir = Path(args.artifact_dir).resolve()
     log_dir = Path(args.log_dir).resolve()
     artifact_dir.mkdir(parents=True, exist_ok=True)
@@ -889,7 +889,6 @@ def main(argv: list[str] | None = None) -> int:
             before = worktree_fingerprint(worktree)
             verified, verify_msg = verification.verify_red_green(
                 test_file, workdir=worktree, config=config, emit=print, log=log_capturing_red,
-                apply_mechanical_edits=lambda edits, wd: 0,
             )
             if worktree_fingerprint(worktree) != before:
                 # The verdict is about code that is no longer what the agent left: never trust it.

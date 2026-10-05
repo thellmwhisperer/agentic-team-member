@@ -279,7 +279,7 @@ class TestPrepareEnvironment:
         run_config = {
             "environment": {"install": "never", "run_typecheck": False},
             "timeouts": {"tool_execution": 60},
-            "tooling": {"recommended": ["rg"], "path_dirs": ["/opt/homebrew/bin"]},
+            "tools": {"recommended": ["rg"], "path_dirs": ["/opt/homebrew/bin"]},
         }
 
         report = prepare_environment(str(tmp_path), run_config)
@@ -319,7 +319,7 @@ class TestPrepareEnvironment:
 
     def test_recommended_tools_from_config_normalizes_and_dedupes(self):
         assert recommended_tools_from_config({
-            "tooling": {"recommended": ["rg", "/opt/homebrew/bin/rg", "", 123]},
+            "tools": {"recommended": ["rg", "/opt/homebrew/bin/rg", "", 123]},
         }) == ["rg"]
 
     def test_javascript_project_skips_install_when_node_modules_exists(self, tmp_path, monkeypatch):
@@ -428,7 +428,7 @@ class TestPrepareEnvironment:
             tmp_path,
             ["rg", "--version"],
             timeout=3,
-            config={"tooling": {"path_dirs": ["/opt/homebrew/bin"]}},
+            config={"tools": {"path_dirs": ["/opt/homebrew/bin"]}},
         )
 
         assert result.returncode == 0

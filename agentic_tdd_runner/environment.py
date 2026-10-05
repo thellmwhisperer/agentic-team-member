@@ -307,9 +307,7 @@ def javascript_preflight_commands(
 
 
 def recommended_tools_from_config(config: dict) -> list[str]:
-    tools_cfg = config.get("tooling")
-    if not isinstance(tools_cfg, dict):
-        tools_cfg = config.get("tools", {}) or {}
+    tools_cfg = config.get("tools", {}) or {}
     if not isinstance(tools_cfg, dict):
         return []
     configured = tools_cfg.get("recommended", [])
