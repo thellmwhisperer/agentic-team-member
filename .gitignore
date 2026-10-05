@@ -13,3 +13,4 @@ cdk.out/
 .tmp/
 .workspace/
 *.local.toml
+.venv/
