@@ -891,7 +891,11 @@ def worktree_fingerprint(workdir: str) -> str:
     for rel in sorted(paths - {b""}):
         path = Path(workdir) / os.fsdecode(rel)
         h.update(rel + b"\0")
-        h.update(path.read_bytes() if path.is_file() else b"\0deleted\0")
+        if path.is_file():
+            h.update(str(path.stat().st_mode & 0o111).encode() + b"\0")
+            h.update(path.read_bytes())
+        else:
+            h.update(b"\0deleted\0")
     return h.hexdigest()
 
 
