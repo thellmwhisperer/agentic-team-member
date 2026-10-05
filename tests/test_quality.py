@@ -184,3 +184,56 @@ def test_quality_python_filters_changed_files_to_python_extensions(tmp_path):
 
     assert ok is True
     assert msg == "All quality checks passed"
+
+
+def _committed_repo(tmp_path, rel, text):
+    import subprocess
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "core.hooksPath=/dev/null"]
+    path = tmp_path / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    subprocess.run([*git, "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run([*git, "add", "."], cwd=tmp_path, check=True)
+    subprocess.run([*git, "commit", "-q", "-m", "base"], cwd=tmp_path, check=True)
+
+
+def _python_forbidden_check(tmp_path, changed):
+    return run_quality_checks(
+        changed[0],
+        workdir=str(tmp_path),
+        config={
+            "quality": {"enabled": True, "python": {"checks": [], "forbidden": [MARKER]}},
+            "timeouts": {"tool_execution": 10},
+        },
+        log=lambda _event, _data: None,
+        is_test_file_path=lambda path: path.startswith("tests/test_"),
+        detect_quality_tools_fn=lambda _lang_name: [],
+        get_changed_files_fn=lambda: changed,
+    )
+
+
+MARKER = "no" + "qa"  # spelled apart so this file never carries the forbidden pattern itself
+
+
+def test_quality_forbidden_ignores_patterns_already_on_the_base_commit(tmp_path):
+    _committed_repo(tmp_path, "tests/test_worker.py", f"import os  # {MARKER}\n")
+    with (tmp_path / "tests" / "test_worker.py").open("a") as fh:
+        fh.write("\n\ndef test_worker():\n    assert os\n")
+
+    ok, msg = _python_forbidden_check(tmp_path, ["tests/test_worker.py"])
+
+    assert ok is True, msg
+
+
+def test_quality_forbidden_reports_added_lines_and_new_files_with_line_numbers(tmp_path):
+    _committed_repo(tmp_path, "tests/test_worker.py", f"import os  # {MARKER}\n")
+    with (tmp_path / "tests" / "test_worker.py").open("a") as fh:
+        fh.write(f"import sys  # {MARKER}\n")
+    (tmp_path / "tests" / "test_new.py").write_text(f"x = 1\ny = 2  # {MARKER}\n")
+
+    ok, msg = _python_forbidden_check(tmp_path, ["tests/test_worker.py", "tests/test_new.py"])
+
+    assert ok is False
+    assert f"tests/test_worker.py:2 '{MARKER}'" in msg
+    assert f"tests/test_worker.py:1 '{MARKER}'" not in msg
+    assert f"tests/test_new.py:2 '{MARKER}'" in msg
