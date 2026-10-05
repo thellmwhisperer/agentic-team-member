@@ -49,9 +49,11 @@ write the failing test first, then the fix.
 
 ### High-risk PRs
 
-Every PR to `main` arms auto-merge when it opens, except when the
-level after `## Risk Assessment` in the PR body is High or cannot be
-read. Those PRs wait for the `risk-reviewed` label.
+For non-draft PRs from this repository targeting `main`, auto-merge
+is armed when the PR opens, reopens, or becomes ready for review if
+the first risk word on the first nonblank line under the exact
+`## Risk Assessment` heading is Low or Medium. High or unreadable risk
+levels wait for the `risk-reviewed` label.
 
 Before adding the label, whoever launched the run writes one PR
 comment that starts with `Risk reviewed:` and has one line per review
@@ -63,7 +65,7 @@ Risk reviewed:
 ```
 
 The label is the switch; the comment is the record. Adding the label
-arms auto-merge at once.
+triggers the workflow to arm auto-merge for eligible PRs.
 
 ## What ATM does and does not accept
 
