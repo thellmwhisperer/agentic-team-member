@@ -278,65 +278,10 @@ Each plugin implements: `parse_imports`, `parse_assignments`, `test_path`,
 
 ## Configuration
 
-Per-run configuration in TOML. The canonical checked-in config lives at
-`config/agent.toml`; local model or strategy overrides should use ignored
-`*.local.toml` files.
-
-```toml
-[agent]
-max_steps = 50
-max_tool_output = 8000
-non_apply_step_warning_threshold = 5
-
-[llm]
-url = "http://127.0.0.1:11435/v1/chat/completions"
-model = "qwen3.6-27b-mtp"
-temperature = 0.6
-top_p = 0.95
-top_k = 20
-
-[timeouts]
-tool_execution = 60
-llm_request = 600
-test_run = 30
-pr_create = 120
-
-[runner]
-command = "bun test"
-framework = "bun:test"
-override_detected = false
-test_file_patterns = ["*.test.ts", "*.test.tsx", "*.test.js", "*.test.jsx", "test_*.py"]
-exclude_dirs = ["node_modules"]
-
-[environment]
-enabled = true
-install = "auto"          # auto | always | never
-require_clean = true
-run_typecheck = true
-timeout = 300
-
-[discovery]
-enabled = true
-
-[quality]
-enabled = true
-max_fix_rounds = 3
-
-[quality.typescript]
-forbidden = ["as any", "as unknown as", "as never", "{} as", ": any", "eslint-disable", "@ts-ignore", "@ts-expect-error"]
-
-[quality.python]
-forbidden = ["type: ignore", "noqa"]
-
-[pr]
-enabled = true
-base_branch = "main"
-branch_prefix = "atm/fix-"
-
-[tools]
-file = "tools.json"
-recommended = ["rg"]
-```
+Per-run configuration is loaded directly from TOML. The authoritative set of
+checked-in defaults is [`config/agent.toml`](config/agent.toml); local overrides
+should use ignored `*.local.toml` files. The former separate `tools.json` file
+is no longer used.
 
 ### Repository profile
 
@@ -347,9 +292,9 @@ dependency-specific callback contracts from installed packages when no profile
 is present; repos that need those contracts should add a profile before relying
 on issue-only discovery.
 
-The `[prompt]` and `[verification]` sections (system prompt template, max
-rejection rounds) are also configurable — see `config/agent.toml` for the full
-reference.
+The `[prompt].quality_failed` message is configurable in `config/agent.toml`.
+Verification behavior is defined by the runner, not by a `[verification]`
+configuration section.
 
 With environment prep enabled, ATM inspects the nearest `package.json` and
 lockfile before the model starts. For focused JS test runs it uses the detected
