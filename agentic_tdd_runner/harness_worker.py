@@ -796,17 +796,16 @@ def run_command(command: str | None, workdir: str, config: dict, timeout: int) -
 
 
 def worktree_fingerprint(workdir: str) -> str:
-    """Hash of every change in the worktree: tracked diff plus untracked file contents."""
+    """Hash of the content of every path that differs from HEAD, tracked or untracked.
+    Staging is ignored: restore_worktree unstages everything, and that is not a change."""
     import hashlib
     h = hashlib.sha256()
-    status = subprocess.run(["git", "status", "--porcelain", "-uall"], cwd=workdir, capture_output=True, text=True).stdout
-    h.update(status.encode())
-    h.update(subprocess.run(["git", "diff", "HEAD", "--binary"], cwd=workdir, capture_output=True).stdout)
-    for line in sorted(status.splitlines()):
-        if line.startswith("??"):
-            path = Path(workdir) / line[3:]
-            if path.is_file():
-                h.update(line.encode()); h.update(path.read_bytes())
+    git = lambda *a: subprocess.run(["git", *a, "-z"], cwd=workdir, capture_output=True).stdout.split(b"\0")
+    paths = set(git("diff", "HEAD", "--name-only", "--no-renames")) | set(git("ls-files", "--others", "--exclude-standard"))
+    for rel in sorted(paths - {b""}):
+        path = Path(workdir) / os.fsdecode(rel)
+        h.update(rel + b"\0")
+        h.update(path.read_bytes() if path.is_file() else b"\0deleted\0")
     return h.hexdigest()
 
 

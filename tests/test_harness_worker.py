@@ -441,6 +441,42 @@ def test_snapshot_parks_and_restores_without_touching_the_shared_stash(tmp_path)
     assert stash_list() == ""
 
 
+def test_fingerprint_ignores_staging_and_survives_snapshot_restore(tmp_path):
+    from agentic_tdd_runner import verification
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "a.py").write_text("x = 1\n")
+    (repo / "b.py").write_text("y = 1\n")
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "init")
+    # The agent stages a deletion and an addition, as atm-3-config-opus did on #98 (5-oct-2026).
+    _git(repo, "rm", "-q", "b.py")
+    (repo / "c.py").write_text("z = 1\n")
+    _git(repo, "add", "c.py")
+
+    before = harness_worker.worktree_fingerprint(str(repo))
+    _git(repo, "reset", "-q")
+    assert harness_worker.worktree_fingerprint(str(repo)) == before
+
+    _git(repo, "add", "-A")
+    sha = verification.snapshot_worktree(str(repo))
+    assert verification.restore_worktree(str(repo), sha)
+    assert harness_worker.worktree_fingerprint(str(repo)) == before
+
+    (repo / "c.py").write_text("z = 2\n")
+    assert harness_worker.worktree_fingerprint(str(repo)) != before
+    (repo / "c.py").write_text("z = 1\n")
+    (repo / "a.py").write_text("x = 2\n")
+    assert harness_worker.worktree_fingerprint(str(repo)) != before
+    (repo / "a.py").write_text("x = 1\n")
+    (repo / "a.py").unlink()
+    assert harness_worker.worktree_fingerprint(str(repo)) != before
+    (repo / "a.py").write_text("x = 1\n")
+    (repo / "d.py").write_text("")
+    assert harness_worker.worktree_fingerprint(str(repo)) != before
+
 
 def test_verdict_is_void_when_the_worktree_changes_during_verification(tmp_path, monkeypatch):
     monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
