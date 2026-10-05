@@ -48,8 +48,3 @@ def test_renders_worker_and_agent_events_and_stops_at_report(tmp_path, capsys):
     assert "follow-up 1: rejected: gap" in out
     assert "=== RESULT: PASS === units=1/3" in out
 
-
-def test_no_follow_prints_an_unfinished_run_and_exits(tmp_path, capsys):
-    log = write_log(tmp_path / "worker-1.jsonl", [{"type": "atm.unit_started", "unit": 1, "base_sha": "abc", "scope": []}])
-    assert tail_run.main(["--no-follow", str(log)]) == 0
-    assert "=== unit 1 started === base=abc scope=open" in capsys.readouterr().out

@@ -4,7 +4,6 @@
     tail-run.py                          newest run under .tmp/harness-worker
     tail-run.py .tmp/harness-worker/X    newest worker-*.jsonl in that run directory
     tail-run.py path/worker-....jsonl    that log
-    tail-run.py --no-follow              print what is there and exit
 
 Agent events are rendered the way the worker prints them live. ATM's own events
 (`atm.*`) get one line each, more for a finished unit. Following stops when the run
@@ -126,7 +125,7 @@ def render(entry) -> list[str]:
     return [f"  {summary}"]
 
 
-def follow(log: Path, keep_following: bool) -> int:
+def follow(log: Path) -> int:
     finished = log.parent / "exit.txt"
     pending = ""
     with log.open(encoding="utf-8", errors="replace") as fh:
@@ -150,7 +149,7 @@ def follow(log: Path, keep_following: bool) -> int:
                 if isinstance(event, dict) and event.get("type") in END_EVENTS:
                     return 0
                 continue
-            if not keep_following or finished.exists():
+            if finished.exists():
                 return 0
             time.sleep(0.5)
 
@@ -158,7 +157,6 @@ def follow(log: Path, keep_following: bool) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("path", nargs="?", help=f"worker-*.jsonl or a run directory (default: newest under {RUNS})")
-    parser.add_argument("--no-follow", action="store_true", help="print the log as it is now and exit")
     args = parser.parse_args(argv)
     where = Path(args.path) if args.path else RUNS
     log = newest_log(where)
@@ -167,7 +165,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     print(f"Following: {log}\n", flush=True)
     try:
-        return follow(log, keep_following=not args.no_follow)
+        return follow(log)
     except KeyboardInterrupt:
         return 130
 

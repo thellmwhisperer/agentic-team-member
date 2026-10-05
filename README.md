@@ -126,7 +126,6 @@ Files named `*.local.toml` are ignored by git.
 ```bash
 python3 scripts/tail-run.py                              # newest run under .tmp/harness-worker
 python3 scripts/tail-run.py .tmp/harness-worker/opus-1   # one run directory, or a worker-*.jsonl
-python3 scripts/tail-run.py --no-follow                  # print what is there and exit
 ```
 
 It prints the agent's thinking, text and tool calls, and ATM's own events: scope, unit
