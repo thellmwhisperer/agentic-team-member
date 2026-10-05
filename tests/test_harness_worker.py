@@ -281,9 +281,7 @@ def test_label_names_the_run_directory_and_is_refused_once_used(tmp_path, monkey
     assert command.rstrip().endswith("--no-deliver --label same")
 
     capsys.readouterr()
-    with pytest.raises(SystemExit) as exit_info:
-        harness_worker.main(argv)
-    assert exit_info.value.code == 2
+    assert harness_worker.main(argv) == 2
     assert f"label already used: {run}" in capsys.readouterr().err
 
 
