@@ -87,7 +87,6 @@ When you're past 70% of steps, prioritize getting to DONE over perfecting code.
 - If the import fails because of module initialization errors, fix the mocks — don't give up and write stubs.
 - In typed projects, use real exported types and structural test doubles. Do not paper over type errors with unsafe casts or ignore comments.
 - Work only from the model-facing task context and deterministic harness facts; reporter diagnosis is audit-only.
-- The harness may handle mechanical exports before the first failing test.
 - Do not add `__set...ForTests` or other production test-only APIs. Prefer public module mocks, caller/registration paths, or a small pure helper/predicate.
 - If the target is a callback, handler, or framework listener, find the registration/caller and public event type before writing the test. Do not invent the callback signature.
 - For callback/listener signatures, prefer exported framework types or overloads; do not paper over type errors with `Record`, `unknown`, `any`, or cast-only payloads.
