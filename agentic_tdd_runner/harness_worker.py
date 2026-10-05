@@ -82,6 +82,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--harness-bin", help="Override the harness executable")
     parser.add_argument("--dry-run", action="store_true", help="Prepare and print the brief only")
     parser.add_argument("--max-units", type=int, help="Chain accepted follow-ups as further units in the same clone, up to this many units (config [harness_worker] max_units, default 3)")
+    parser.add_argument("--deliver", choices=["no-mistakes", "none"], default="no-mistakes",
+                        help="After a green verdict, commit the clone on an atm/ branch and run no-mistakes there, "
+                             "which opens the PR (default). 'none' stops at the verdict")
     parser.add_argument("--scope", action="append", default=[], metavar="GLOB",
                         help="Repo-relative glob the diff may touch (repeatable; default: derived from the issue)")
     args = parser.parse_args(argv)
@@ -511,6 +514,90 @@ def commit_unit(worktree: str, number: int, title: str) -> str:
                     "commit", "-q", "--no-verify", "-m", f"atm unit {number}: {title}"[:200]],
                    cwd=worktree, check=True, capture_output=True)
     return git_lines(worktree, "rev-parse", "HEAD")[0]
+
+
+NO_MISTAKES_CONFIG = ".no-mistakes.yaml"
+PR_URL = re.compile(r"https://github\.com/[\w.-]+/[\w.-]+/pull/\d+")
+RUN_ID = re.compile(r'\b(?:run|id): "?([0-9A-HJKMNP-TV-Z]{26})\b')  # `run: "01M..."` from axi run, `id: "01M..."` from axi status
+HEAD_SHA = re.compile(r'\bhead_sha: "?([0-9a-f]{40})\b')
+# ponytail: axi run returns when --wait elapses even if the pipeline goes on (default 8m; review alone took 8.6 min
+# on 5-oct-2026). Two hours covers every run seen so far; a longer one ends as exit 3 and `axi status` has the rest.
+NO_MISTAKES_WAIT = "2h"
+
+
+def terminal():
+    """The pane's terminal, for the no-mistakes TUI: under atm-run.py the worker's stdout is a pipe.
+    None without a controlling terminal (CI), and then there is no TUI to show."""
+    try:
+        return open("/dev/tty", "r+b", buffering=0)
+    except OSError:
+        return None
+
+
+def deliver(worktree: str, source_repo: str, title: str, unit_number: int, artifact_dir: Path) -> dict:
+    """Hand the green clone to no-mistakes: its config, a branch with the work committed, the source repo's
+    origin, then `axi run --yes` with `attach` showing the TUI in this pane until the run ends. The PR is
+    no-mistakes' job; ATM records what `axi status` says at the end."""
+    result = {"tool": "no-mistakes", "branch": None, "head_sha": None, "run_id": None, "pr_url": None}
+    top = git_lines(source_repo, "rev-parse", "--show-toplevel")
+    origin = git_lines(source_repo, "remote", "get-url", "origin")
+    if not top or not origin:
+        return result | {"error": f"{source_repo} has no origin remote"}
+    local = Path(top[0], origin[0])  # a relative origin URL is relative to the source repo, not to the clone
+    remote = str(local.resolve()) if local.exists() else origin[0]
+    config_src, config_dst = Path(top[0], NO_MISTAKES_CONFIG), Path(worktree, NO_MISTAKES_CONFIG)
+    if config_src.is_file() and not config_dst.exists():
+        shutil.copy2(config_src, config_dst)
+        exclude = Path(worktree, ".git", "info", "exclude")
+        exclude.parent.mkdir(parents=True, exist_ok=True)
+        with exclude.open("a") as fh:  # the source's local config, never part of the PR
+            fh.write(f"\n/{NO_MISTAKES_CONFIG}\n")
+    slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:40] or "fix"
+    result["branch"] = f"atm/{slug}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    try:
+        subprocess.run(["git", "checkout", "-q", "-b", result["branch"]], cwd=worktree, check=True, capture_output=True)
+        if git_lines(worktree, "status", "--porcelain", "--", ".", ":!.atm"):
+            commit_unit(worktree, unit_number, title)
+        subprocess.run(["git", "remote", "set-url", "origin", remote], cwd=worktree, check=True, capture_output=True)
+    except subprocess.CalledProcessError as exc:
+        return result | {"error": f"branch preparation failed: {(exc.stderr or b'').decode(errors='replace').strip()}"}
+    run_log = artifact_dir / "no-mistakes-run.txt"
+    term, attach = terminal(), None
+    try:
+        with run_log.open("w") as sink:
+            run = subprocess.Popen(["no-mistakes", "axi", "run", "--yes", "--intent", title, "--wait", NO_MISTAKES_WAIT],
+                                   cwd=worktree, stdin=subprocess.DEVNULL, stdout=sink, stderr=subprocess.STDOUT)
+            while True:
+                if term and (attach is None or attach.poll() is not None):
+                    # ponytail: re-opened while the run lives, because attach exits at once when the daemon has not
+                    # registered the run yet, and when the human quits the TUI. At most one start per second.
+                    attach = subprocess.Popen(["no-mistakes", "attach"], cwd=worktree, stdin=term, stdout=term, stderr=term)
+                try:
+                    result["exit_code"] = run.wait(timeout=1)
+                    break
+                except subprocess.TimeoutExpired:
+                    pass
+    except OSError as exc:
+        return result | {"error": f"no-mistakes did not start: {exc}"}
+    finally:
+        if attach:
+            try:
+                attach.wait(timeout=5)  # the TUI may close itself at the end of the run; if not, it is closed here
+            except subprocess.TimeoutExpired:
+                attach.terminate()
+                attach.wait()
+        if term:
+            term.close()
+    status = subprocess.run(["no-mistakes", "axi", "status"], cwd=worktree, capture_output=True, text=True)
+    text = status.stdout + status.stderr
+    (artifact_dir / "no-mistakes-status.txt").write_text(text)
+    output = run_log.read_text(errors="replace")
+    run_id = RUN_ID.search(text) or RUN_ID.search(output)
+    pr = PR_URL.search(text) or PR_URL.search(output)
+    head = HEAD_SHA.search(text)
+    result.update(run_id=run_id.group(1) if run_id else None, pr_url=pr.group(0) if pr else None,
+                  head_sha=head.group(1) if head else git_lines(worktree, "rev-parse", "HEAD")[0])
+    return result
 
 
 def stage_follow_up_as_unit(worktree: str, follow_up: dict, unit_number: int, log) -> str:
@@ -981,6 +1068,11 @@ def main(argv: list[str] | None = None) -> int:
         "duration_seconds": sum(u["duration_seconds"] for u in units), "timed_out": any(u["timed_out"] for u in units),
         "harness_exit_code": last["harness_exit_code"], "report_parse_error": last["report_parse_error"],
     }
+    delivery = None
+    if passed and args.deliver == "no-mistakes":
+        print(f"[DELIVER] no-mistakes in {worktree}", flush=True)
+        delivery = result["delivery"] = deliver(worktree, args.repo, title, len(units), artifact_dir)
+        log("delivery", delivery)
     (artifact_dir / "report.json").write_text(json.dumps(result, indent=2))
     log("report", result)
     log_fh.close()
@@ -1000,8 +1092,13 @@ def main(argv: list[str] | None = None) -> int:
                      else "rejected: " + f.get("reason", ""))
             print(f"            follow-up {f['index']}: {state}")
     print(f"changed:    {', '.join(changed_all) or 'none'}")
+    if delivery:
+        print(f"delivery:   branch={delivery['branch']} run={delivery['run_id']} pr={delivery['pr_url'] or 'none'} "
+              f"{delivery.get('error', '')}")
     print(f"RESULT:     {'PASS' if passed else 'FAIL'} report={artifact_dir / 'report.json'}")
-    return 0 if passed else 1
+    if not passed:
+        return 1
+    return 3 if delivery and not delivery["pr_url"] else 0
 
 
 if __name__ == "__main__":
