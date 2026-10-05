@@ -200,7 +200,7 @@ Fix this issue.
 
 {PONYTAIL}
 ## FORBIDDEN
-- These patterns in changed files: {patterns}
+- These patterns on lines added since this unit's base commit: {patterns}
 - `git commit`, `git push`, `git rebase`, any `gh` command.
 - Deleting, skipping or weakening existing tests.
 - `sleep` in tests.
@@ -487,7 +487,7 @@ pass without changing it, stop and say so in `summary`.
 
 {PONYTAIL}
 ## FORBIDDEN
-- These patterns in changed files: {patterns}
+- These patterns on lines added since this unit's base commit: {patterns}
 - `git commit`, `git push`, `git rebase`, any `gh` command.
 - Deleting, skipping or weakening existing tests, including the red test.
 - `sleep` in tests.
