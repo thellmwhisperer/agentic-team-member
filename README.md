@@ -463,8 +463,8 @@ the standard library, a native feature or an existing helper. ATM keeps the cut
 only if the run's net added lines go down and every gate still passes: each
 unit's red test fails without the run's changes and passes with them, then the
 full test command, typecheck, quality, gate, scope (the files the run already
-touched) and the target's lint (`commands.lint` in `.no-mistakes.yaml`, when
-ATM can read it). Otherwise ATM restores the pre-ponytail worktree.
+touched) and the target's lint (`[delivery].lint_command`, when set).
+Otherwise ATM restores the pre-ponytail worktree.
 `report.json` gets `ponytail`: `findings`, `net_lines_before`,
 `net_lines_after`, `kept`, `reason` and `tombstones`. When the target has
 `.slop/`, each finding of a kept cut that names an existing file becomes a
@@ -473,33 +473,36 @@ standing slopslint tombstone in `.slop/tombstones/`, committed with the cut.
 ATM excludes `.atm/` from Git in each run clone, so follow-up files there do
 not make delivery dirty when the target repository lacks that ignore rule.
 
-After the ponytail pass, delivery runs by default:
+After the ponytail pass, delivery is the command in `[delivery].command`:
 
 1. The clone's work is committed on `atm/<slug>-<timestamp>` and the clone's
    `origin` points at the source repo's `origin`. When the issue came from
-   `--issue-number`, the unit commit message ends with `Closes #<n>`, so
-   merging the PR closes the issue.
-2. `no-mistakes init` initializes the clone before the gate run starts.
-   If initialization fails, delivery records the error and does not start the
-   run.
-3. `no-mistakes axi run --yes --intent "<issue title>"` runs in the clone, and
-   `no-mistakes attach` shows its TUI in the same terminal until the run ends.
-   `--yes` resolves gates only while `axi run` lives, so after each call
-   `no-mistakes axi status` is read and, while the run has no outcome,
-   `axi run --yes` runs again, at most 6 times (12 hours). A protected-path
-   refusal gate, which `--yes` cannot resolve, stops delivery at once.
-4. `report.json` gets `delivery`: `branch`, `head_sha`, `run_id`, `pr_url`,
-   `drives` (how many `axi run` calls were attempted, once delivery reaches that step),
-   and `error` if delivery fails.
+   `--issue-number`, the unit commit message ends with `Closes #<n>`.
+2. The command runs in the clone through the shell, with `ATM_TITLE`,
+   `ATM_ISSUE` (empty with `--issue-file`), `ATM_BRANCH`, `ATM_CLONE` and
+   `ATM_REPORT` in its environment. Its stdout and stderr go to the pane and
+   to `delivery-output.txt`. ATM does not read them: whether a PR is open or a
+   gate is waiting is in that output.
+3. `report.json` gets `delivery`: `command`, `branch`, `exit_code`,
+   `duration_seconds`, `output` (the path of that file), and `error` if the
+   branch could not be prepared.
 
-`--no-deliver` stops at the verdict and leaves the work uncommitted in the clone.
+For example, with no-mistakes:
+`command = 'no-mistakes init && no-mistakes axi run --intent "$ATM_TITLE" ${ATM_ISSUE:+--closes "$ATM_ISSUE"} --wait 2h'`.
+`--closes` puts the closing reference in the PR body, so the issue closes when
+the PR merges. Without `--yes`, `axi run` returns at a gate, and the agent that
+launched ATM answers it with `axi respond`.
+
+With no `[delivery].command`, `report.json` has
+`delivery: {"skipped": "no [delivery].command"}` and the work stays
+uncommitted in the clone.
 
 | Exit code | Meaning                                                    |
 | --------- | ---------------------------------------------------------- |
-| `0`       | Every unit passed (and, with delivery, a PR exists)        |
+| `0`       | Every unit passed and delivery, if any, exited 0           |
 | `1`       | A unit failed; nothing is delivered                        |
 | `2`       | Preparation failed (issue, clone or environment)           |
-| `3`       | Every unit passed, but delivery failed or produced no PR    |
+| `4`       | Every unit passed, but delivery exited non-zero            |
 
 ---
 

@@ -85,7 +85,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--harness-bin", help="Override the harness executable")
     parser.add_argument("--dry-run", action="store_true", help="Prepare and print the brief only")
     parser.add_argument("--max-units", type=int, help="Chain accepted follow-ups as further units in the same clone, up to this many units (config [harness_worker] max_units, default 3)")
-    parser.add_argument("--no-deliver", action="store_true", help="Skip no-mistakes delivery after a green verdict")
     parser.add_argument("--scope", action="append", default=[], metavar="GLOB",
                         help="Repo-relative glob the diff may touch (repeatable; default: derived from the issue)")
     args = parser.parse_args(argv)
@@ -518,33 +517,12 @@ def commit_unit(worktree: str, number: int, title: str, closes: int | None = Non
     return git_lines(worktree, "rev-parse", "HEAD")[0]
 
 
-PR_URL = re.compile(r"https://github\.com/[\w.-]+/[\w.-]+/pull/\d+")
-RUN_ID = re.compile(r'\b(?:run|id): "?([0-9A-HJKMNP-TV-Z]{26})\b')  # `run: "01M..."` from axi run, `id: "01M..."` from axi status
-HEAD_SHA = re.compile(r'\bhead_sha: "?([0-9a-f]{40})\b')
-# ponytail: axi run returns when --wait elapses even if the pipeline goes on (default 8m; review alone took 8.6 min
-# on 5-oct-2026). Two hours covers every run seen so far; a longer one ends as exit 3 and is driven again below.
-NO_MISTAKES_WAIT = "2h"
-# `--yes` resolves gates only while its `axi run` lives, so delivery drives the run again until it ends. 6 x 2h = 12h.
-NO_MISTAKES_MAX_DRIVES = 6
-FINAL = re.compile(r'^\s*(?:outcome|status): "?(?:checks-passed|passed|passed-with-skips|failed|cancelled|completed)\b',
-                   re.M)
-
-
-def terminal():
-    """The pane's terminal, for the no-mistakes TUI, even when the worker's stdout goes to a file.
-    None without a controlling terminal (CI), and then there is no TUI to show."""
-    try:
-        return open("/dev/tty", "r+b", buffering=0)
-    except OSError:
-        return None
-
-
-def deliver(worktree: str, source_repo: str, title: str, unit_number: int, artifact_dir: Path,
+def deliver(worktree: str, source_repo: str, title: str, unit_number: int, artifact_dir: Path, command: str,
             closes: int | None = None) -> dict:
-    """Hand the green clone to no-mistakes: a branch with the work committed, the source repo's
-    origin, then `axi run --yes`, again while `axi status` shows no outcome, with `attach` showing the TUI in
-    this pane until the run ends. The PR is no-mistakes' job; ATM records what `axi status` says at the end."""
-    result = {"tool": "no-mistakes", "branch": None, "head_sha": None, "run_id": None, "pr_url": None}
+    """Commit the green clone on a branch, point its origin at the source repo's, then run `command`
+    ([delivery].command) in it. Its output goes to the pane and to delivery-output.txt; what it means is its business."""
+    output = artifact_dir / "delivery-output.txt"
+    result = {"command": command, "branch": None, "exit_code": None, "duration_seconds": 0, "output": str(output)}
     origin = git_lines(source_repo, "remote", "get-url", "origin")
     if not origin:
         return result | {"error": f"{source_repo} has no origin remote"}
@@ -557,60 +535,18 @@ def deliver(worktree: str, source_repo: str, title: str, unit_number: int, artif
         subprocess.run(["git", "remote", "set-url", "origin", origin[0]], cwd=worktree, check=True, capture_output=True)
     except subprocess.CalledProcessError as exc:
         return result | {"error": f"branch preparation failed: {(exc.stderr or b'').decode(errors='replace').strip()}"}
-    try:  # a fresh clone is unknown to no-mistakes; init registers it, and on a registered repo it only refreshes
-        init = subprocess.run(["no-mistakes", "init"], cwd=worktree, capture_output=True, text=True)
-    except OSError as exc:
-        return result | {"error": f"no-mistakes did not start: {exc}"}
-    if init.returncode:
-        return result | {"error": f"no-mistakes init failed: {(init.stdout + init.stderr).strip()}"}
-    run_log = artifact_dir / "no-mistakes-run.txt"
-    term, attach = terminal(), None
-    try:
-        with run_log.open("w") as sink:
-            for result["drives"] in range(1, NO_MISTAKES_MAX_DRIVES + 1):
-                run = subprocess.Popen(["no-mistakes", "axi", "run", "--yes", "--intent", title, "--wait", NO_MISTAKES_WAIT],
-                                       cwd=worktree, stdin=subprocess.DEVNULL, stdout=sink, stderr=subprocess.STDOUT)
-                while True:
-                    if term and (attach is None or attach.poll() is not None):
-                        # ponytail: re-opened while the run lives, because attach exits at once when the daemon has not
-                        # registered the run yet, and when the human quits the TUI. At most one start per second.
-                        attach = subprocess.Popen(["no-mistakes", "attach"], cwd=worktree, stdin=term, stdout=term, stderr=term)
-                    try:
-                        result["exit_code"] = run.wait(timeout=1)
-                        break
-                    except subprocess.TimeoutExpired:
-                        pass
-                status = subprocess.run(["no-mistakes", "axi", "status"], cwd=worktree, capture_output=True, text=True)
-                text = status.stdout + status.stderr
-                output = run_log.read_text(errors="replace")
-                if status.returncode:
-                    detail = text.strip() or f"exit code {status.returncode}"
-                    result["error"] = f"no-mistakes status failed: {detail}"
-                    break
-                if "protected-path-refusal" in text + output:
-                    result["error"] = "no-mistakes stopped at a protected-path refusal gate that --yes cannot resolve"
-                    break
-                if FINAL.search(text + output) or not RUN_ID.search(text):  # ended, or there is no run to drive
-                    break
-            else:
-                result["error"] = f"no-mistakes run had no outcome after {NO_MISTAKES_MAX_DRIVES} drives"
-    except OSError as exc:
-        return result | {"error": f"no-mistakes did not start: {exc}"}
-    finally:
-        if attach:
-            try:
-                attach.wait(timeout=5)  # the TUI may close itself at the end of the run; if not, it is closed here
-            except subprocess.TimeoutExpired:
-                attach.terminate()
-                attach.wait()
-        if term:
-            term.close()
-    (artifact_dir / "no-mistakes-status.txt").write_text(text)
-    run_id = RUN_ID.search(text) or RUN_ID.search(output)
-    pr = PR_URL.search(text) or PR_URL.search(output)
-    head = HEAD_SHA.search(text)
-    result.update(run_id=run_id.group(1) if run_id else None, pr_url=pr.group(0) if pr else None,
-                  head_sha=head.group(1) if head else git_lines(worktree, "rev-parse", "HEAD")[0])
+    env = os.environ | {"ATM_TITLE": title, "ATM_ISSUE": str(closes or ""), "ATM_BRANCH": result["branch"],
+                        "ATM_CLONE": worktree, "ATM_REPORT": str(artifact_dir / "report.json")}
+    start = time.monotonic()
+    with output.open("w") as sink:
+        proc = subprocess.Popen(command, shell=True, cwd=worktree, env=env, text=True, bufsize=1,
+                                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        for line in iter(proc.stdout.readline, ""):
+            sink.write(line)
+            sys.stdout.write(line)
+            sys.stdout.flush()
+        result["exit_code"] = proc.wait()
+    result["duration_seconds"] = round(time.monotonic() - start, 2)
     return result
 
 
@@ -1077,18 +1013,6 @@ def net_added_lines(workdir: str, base: str, snapshot: str) -> int:
     return sum(int(added) - int(deleted) for added, deleted, _ in rows if added != "-")
 
 
-def lint_command(workdir: str) -> str | None:
-    """The target's lint: `commands.lint` of its tracked .no-mistakes.yaml, run by sh."""
-    path = Path(workdir, ".no-mistakes.yaml")
-    match = re.search(r"^\s+lint:\s*(.+)$", path.read_text(), re.M) if path.is_file() else None
-    if not match:
-        return None
-    command = match.group(1).strip()
-    if len(command) >= 2 and command[0] == command[-1] and command[0] in "\"'":
-        command = command[1:-1].replace("''", "'") if command[0] == "'" else json.loads(command)
-    return f"sh -c {shlex.quote(command)}"
-
-
 def write_tombstones(workdir: str, findings: list[dict]) -> list[str]:
     """One standing slopslint tombstone per kept ponytail finding, when the target has .slop/."""
     if not Path(workdir, ".slop").is_dir():
@@ -1327,7 +1251,8 @@ def main(argv: list[str] | None = None) -> int:
             failed += [f"{name} failed: {checks[name]['message']}" for name in ("quality_ok", "gate_ok", "scope_ok")
                        if not checks[name]["ok"]]
             failed += [f"{name} failed" for name in ("full_tests_ok", "typecheck_ok") if checks[name] is False]
-            lint_ok, _ = run_command(lint_command(worktree), worktree, config, timeout, log)
+            lint = str(config.get("delivery", {}).get("lint_command") or "").strip()
+            lint_ok, _ = run_command(lint and f"sh -c {shlex.quote(lint)}", worktree, config, timeout, log)
             failed += ["lint failed"] if lint_ok is False else []
         finally:
             subprocess.run(["git", "reset", "-q", head], cwd=worktree, check=True, capture_output=True)
@@ -1428,10 +1353,13 @@ def main(argv: list[str] | None = None) -> int:
     }
     if ponytail:
         result["ponytail"] = ponytail
-    delivery = None
-    if passed and not args.no_deliver:
+    delivery, delivery_command = None, str(config.get("delivery", {}).get("command") or "").strip()
+    if passed and not delivery_command:
+        result["delivery"] = {"skipped": "no [delivery].command"}
+    elif passed:
+        (artifact_dir / "report.json").write_text(json.dumps(result, indent=2))  # ATM_REPORT, for the command
         delivery = result["delivery"] = run_log.step("delivery", deliver, worktree, args.repo, title, len(units),
-                                                     artifact_dir, closes, ok=lambda d: d["pr_url"] and not d.get("error"))
+                                                     artifact_dir, delivery_command, closes, ok=lambda d: d["exit_code"] == 0)
         log("delivery", delivery)
     (artifact_dir / "report.json").write_text(json.dumps(result, indent=2))
     log("report", result)
@@ -1459,12 +1387,12 @@ def main(argv: list[str] | None = None) -> int:
         saved = ponytail["net_lines_before"] - ponytail["net_lines_after"] if ponytail["kept"] else 0
         print(f"ponytail:   {'kept' if ponytail['kept'] else 'discarded'}, {saved} net lines saved ({ponytail['reason']})")
     if delivery:
-        print(f"delivery:   branch={delivery['branch']} run={delivery['run_id']} pr={delivery['pr_url'] or 'none'} "
+        print(f"delivery:   exit={delivery['exit_code']} branch={delivery['branch']} output={delivery['output']} "
               f"{delivery.get('error', '')}")
     print(f"RESULT:     {'PASS' if passed else 'FAIL'} report={artifact_dir / 'report.json'}")
     if not passed:
         return 1
-    return 3 if delivery and (delivery.get("error") or not delivery["pr_url"]) else 0
+    return 4 if delivery and delivery["exit_code"] != 0 else 0
 
 
 if __name__ == "__main__":
