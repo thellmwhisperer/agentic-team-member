@@ -415,8 +415,8 @@ discovery).
 | `AGENT_LOG_DIR` / `ATM_LOG_DIR` | Default log directory when `--log-dir` is not passed |
 | `AGENT_WORKDIR`                | Default project root                                  |
 
-Everything else (model URL, model name, step budgets, tool output cap) lives
-in the TOML config.
+The harness worker takes the model from `--model`, not from the TOML config;
+see [Configuration](#configuration) for what the TOML holds.
 
 ### Harness worker: delivery and exit codes
 
