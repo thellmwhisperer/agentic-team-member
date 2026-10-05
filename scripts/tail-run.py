@@ -35,7 +35,7 @@ def is_worker_log(path: Path) -> bool:
 
 def newest_log(path: Path) -> Path | None:
     if path.is_file():
-        # Any other file has no terminal event and no exit.txt beside it: follow() would never return.
+        # Other files may lack the worker's terminal event and leave follow() waiting forever.
         return path if is_worker_log(path) else None
     logs = list(path.glob("worker-*.jsonl")) + list(path.glob("*/worker-*.jsonl")) if path.is_dir() else []
     return max(logs, key=lambda p: p.stat().st_mtime) if logs else None
