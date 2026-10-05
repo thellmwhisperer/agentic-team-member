@@ -88,7 +88,35 @@ class Renderer:
             summary = summarize_event(event)
             if summary:
                 print(dim(f"  {self.strip(summary)}"))
+            outcome = self.tool_outcome(kind, event)
+            if outcome:
+                print(f"    {outcome}")
         return False
+
+    def tool_outcome(self, kind, event) -> str | None:
+        item = event.get("item") or {}
+        part = event.get("part") or {}
+        if item.get("type") == "command_execution" and kind.endswith("completed"):
+            code = item.get("exit_code")
+            output = _snippet(self.strip(item.get("aggregated_output") or ""), 120)
+            status = green(f"✓ exit {code}") if code == 0 else red(f"✗ exit {code}")
+            return f"{status}  {output}".rstrip()
+        if isinstance(part, dict) and part.get("type") == "tool":
+            state = part.get("state") or {}
+            status = state.get("status")
+            if status in ("completed", "error"):
+                success = status == "completed"
+                mark = green("✓ completed") if success else red("✗ failed")
+                output = _snippet(self.strip(state.get("output") or state.get("error") or ""), 120)
+                return f"{mark}  {output}".rstrip()
+        if kind == "tool_execution_end":
+            result = event.get("result") or {}
+            failed = bool(result.get("isError"))
+            mark = red("✗ failed") if failed else green("✓ completed")
+            content = result.get("content") or []
+            output = " ".join(c.get("text", "") for c in content if isinstance(c, dict))
+            return f"{event.get('toolName') or 'tool'}  {mark}  {_snippet(self.strip(output), 120)}".rstrip()
+        return None
 
     def on_atm_prepared(self, e):
         self.clone = e.get("worktree") or ""

@@ -13,11 +13,11 @@ SOURCE = "/src/repo"
 CLONE = f"{SOURCE}/.worktrees/atm-run-1"
 
 
-def _write_run(tmp_path: Path, events: list[dict]) -> Path:
+def _write_run(tmp_path: Path, events: list[dict], harness: str = "claude") -> Path:
     run = tmp_path / "run"
-    run.mkdir()
+    run.mkdir(parents=True)
     log = run / "worker-20261005T120000.jsonl"
-    log.write_text("".join(json.dumps({"ts": "t", "harness": "claude", "event": e}) + "\n" for e in events))
+    log.write_text("".join(json.dumps({"ts": "t", "harness": harness, "event": e}) + "\n" for e in events))
     return run
 
 
@@ -132,3 +132,20 @@ def test_tail_refuses_a_path_that_is_not_a_worker_log(tmp_path):
         proc = subprocess.run(args, capture_output=True, text=True, timeout=30)
         assert proc.returncode == 1
         assert "worker-*.jsonl" in proc.stderr
+
+
+def test_tail_shows_tool_outcomes_for_codex_opencode_and_pi(tmp_path):
+    cases = [
+        ("codex", {"type": "item.completed", "item": {"type": "command_execution", "command": "pytest",
+                  "exit_code": 2, "aggregated_output": "2 failed"}}, "✗ exit 2"),
+        ("opencode", {"type": "tool_use", "part": {"type": "tool", "tool": "bash", "state": {
+                       "status": "completed", "input": {"command": "pytest"}, "output": "2 passed"}}},
+         "✓ completed  2 passed"),
+        ("pi", {"type": "tool_execution_end", "toolName": "bash", "result": {"isError": True,
+                "content": [{"type": "text", "text": "command failed"}]}}, "bash  ✗ failed  command failed"),
+    ]
+    for harness, event, outcome in cases:
+        run = _write_run(tmp_path / harness, [event, REPORT], harness)
+        proc = _tail(str(next(run.glob("worker-*.jsonl"))))
+        assert proc.returncode == 0, proc.stderr
+        assert outcome in proc.stdout
