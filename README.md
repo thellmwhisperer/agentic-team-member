@@ -483,9 +483,12 @@ delivery runs by default:
    source has it (tracked or ignored) and the clone does not.
 2. The clone's work is committed on `atm/<slug>-<timestamp>` and the clone's
    `origin` points at the source repo's `origin`.
-3. `no-mistakes axi run --yes --intent "<issue title>"` runs in the clone, and
+3. `no-mistakes init` initializes the clone before the gate run starts.
+   If initialization fails, delivery records the error and does not start the
+   run.
+4. `no-mistakes axi run --yes --intent "<issue title>"` runs in the clone, and
    `no-mistakes attach` shows its TUI in the same terminal until the run ends.
-4. `no-mistakes axi status` is read and `report.json` gets `delivery`:
+5. `no-mistakes axi status` is read and `report.json` gets `delivery`:
    `branch`, `head_sha`, `run_id` and `pr_url`.
 
 `--deliver none` stops at the verdict and leaves the work uncommitted in the clone.
