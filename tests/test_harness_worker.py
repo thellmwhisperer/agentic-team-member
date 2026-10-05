@@ -124,7 +124,7 @@ def _git(cwd, *args):
     )
 
 
-def _setup(tmp_path, harness_source, issue_text="add(2, 3) returns -1 instead of 5.", deliver="none"):
+def _setup(tmp_path, harness_source, issue_text="add(2, 3) returns -1 instead of 5.", deliver=False):
     repo = tmp_path / "target"
     (repo / "tests").mkdir(parents=True)
     (repo / "pyproject.toml").write_text('[project]\nname = "calc"\nversion = "0"\n\n[tool.pytest.ini_options]\n')
@@ -150,8 +150,8 @@ def _setup(tmp_path, harness_source, issue_text="add(2, 3) returns -1 instead of
         "--repo", str(repo), "--issue-file", str(issue), "--config", str(config_dir / "agent.toml"),
         "--artifact-dir", str(artifacts), "--log-dir", str(tmp_path / "logs"), "--harness-bin", str(harness),
     ]
-    if deliver:  # the verdict tests stop at the verdict; the delivery tests pass deliver=None for the default
-        argv += ["--deliver", deliver]
+    if not deliver:  # the verdict tests stop at the verdict; the delivery tests pass deliver=True for the default
+        argv += ["--no-deliver"]
     return argv, artifacts, tmp_path / "logs"
 
 
@@ -277,7 +277,7 @@ def test_go_repo_gets_go_commands_and_forbidden_scan(tmp_path):
     env_report = SimpleNamespace(project_type="unknown", package_manager=None, runner_bootstrap=None)
     assert harness_worker.detect_commands(str(repo), env_report) == ("go test ./...", "go vet ./...")
     assert harness_worker.quality_lang_key(str(repo), "unknown") == "go"
-    hits = harness_worker.scan_forbidden(str(repo), ["a.go", "missing.go"], ["//nolint", "t.Skip("])
+    hits = harness_worker.scan_forbidden(str(repo), ["a.go", "missing.go"], ["//nolint", "t.Skip("], "HEAD")
     assert hits == ["a.go:3 '//nolint'"]
 
 
@@ -934,7 +934,7 @@ elif args == ["attach"]:
 
 def _delivery_setup(tmp_path, monkeypatch, harness=FIXING_HARNESS):
     monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
-    argv, artifacts, _ = _setup(tmp_path, harness, deliver=None)
+    argv, artifacts, _ = _setup(tmp_path, harness, deliver=True)
     source = tmp_path / "target"
     _git(source, "remote", "add", "origin", "https://github.com/owner/calc.git")
     (source / ".no-mistakes.yaml").write_text("agent: claude\n")
@@ -966,7 +966,7 @@ def test_green_run_delivers_through_no_mistakes_by_default(tmp_path, monkeypatch
     assert delivery["head_sha"] == head and head != report["base_sha"]
     committed = subprocess.run(["git", "show", "--name-only", "--format=", "HEAD"], cwd=clone, capture_output=True, text=True).stdout.split()
     assert sorted(committed) == ["calc.py", "tests/test_add.py"]
-    assert (Path(clone) / ".no-mistakes.yaml").read_text() == "agent: claude\n"
+    assert not (Path(clone) / ".no-mistakes.yaml").exists()
     origin = subprocess.run(["git", "remote", "get-url", "origin"], cwd=clone, capture_output=True, text=True).stdout.strip()
     assert origin == "https://github.com/owner/calc.git"
     lines = calls.read_text().splitlines()
@@ -1017,9 +1017,9 @@ def test_failed_no_mistakes_init_is_recorded_and_exits_3(tmp_path, monkeypatch):
     assert calls.read_text().splitlines() == ["init"]
 
 
-def test_deliver_none_stops_at_the_verdict(tmp_path, monkeypatch):
+def test_no_deliver_stops_at_the_verdict(tmp_path, monkeypatch):
     argv, artifacts, calls, _ = _delivery_setup(tmp_path, monkeypatch)
-    assert harness_worker.main([*argv, "--deliver", "none"]) == 0
+    assert harness_worker.main([*argv, "--no-deliver"]) == 0
     assert "delivery" not in json.loads((artifacts / "report.json").read_text())
     assert not calls.exists()
 
@@ -1049,7 +1049,7 @@ def test_scan_forbidden_reports_only_lines_added_since_base(tmp_path):
     with (repo / "a.py").open("a") as fh:
         fh.write(f"x = 1\nimport sys  # {marker}\n")
     (repo / "b.py").write_text(f"import re  # {marker}\n")
-    hits = harness_worker.scan_forbidden(str(repo), ["a.py", "b.py"], [marker])
+    hits = harness_worker.scan_forbidden(str(repo), ["a.py", "b.py"], [marker], "HEAD")
     assert hits == [f"a.py:3 {marker!r}", f"b.py:1 {marker!r}"]
 
 
