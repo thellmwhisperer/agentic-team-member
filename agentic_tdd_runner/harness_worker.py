@@ -518,7 +518,7 @@ def commit_unit(worktree: str, number: int, title: str, closes: int | None = Non
 
 
 def deliver(worktree: str, source_repo: str, title: str, unit_number: int, artifact_dir: Path, command: str,
-            closes: int | None = None) -> dict:
+            config: dict, report: dict, closes: int | None = None) -> dict:
     """Commit the green clone on a branch, point its origin at the source repo's, then run `command`
     ([delivery].command) in it. Its output goes to the pane and to delivery-output.txt; what it means is its business."""
     output = artifact_dir / "delivery-output.txt"
@@ -535,8 +535,10 @@ def deliver(worktree: str, source_repo: str, title: str, unit_number: int, artif
         subprocess.run(["git", "remote", "set-url", "origin", origin[0]], cwd=worktree, check=True, capture_output=True)
     except subprocess.CalledProcessError as exc:
         return result | {"error": f"branch preparation failed: {(exc.stderr or b'').decode(errors='replace').strip()}"}
-    env = os.environ | {"ATM_TITLE": title, "ATM_ISSUE": str(closes or ""), "ATM_BRANCH": result["branch"],
-                        "ATM_CLONE": worktree, "ATM_REPORT": str(artifact_dir / "report.json")}
+    report["head_sha"] = git_lines(worktree, "rev-parse", "HEAD")[0]
+    (artifact_dir / "report.json").write_text(json.dumps(report, indent=2))
+    env = build_command_env(config) | {"ATM_TITLE": title, "ATM_ISSUE": str(closes or ""), "ATM_BRANCH": result["branch"],
+                                      "ATM_CLONE": worktree, "ATM_REPORT": str(artifact_dir / "report.json")}
     start = time.monotonic()
     with output.open("w") as sink:
         proc = subprocess.Popen(command, shell=True, cwd=worktree, env=env, text=True, bufsize=1,
@@ -1359,7 +1361,8 @@ def main(argv: list[str] | None = None) -> int:
     elif passed:
         (artifact_dir / "report.json").write_text(json.dumps(result, indent=2))  # ATM_REPORT, for the command
         delivery = result["delivery"] = run_log.step("delivery", deliver, worktree, args.repo, title, len(units),
-                                                     artifact_dir, delivery_command, closes, ok=lambda d: d["exit_code"] == 0)
+                                                     artifact_dir, delivery_command, config, result, closes,
+                                                     ok=lambda d: d["exit_code"] == 0)
         log("delivery", delivery)
     (artifact_dir / "report.json").write_text(json.dumps(result, indent=2))
     log("report", result)
