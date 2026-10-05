@@ -448,8 +448,8 @@ When every unit passes, delivery runs by default:
    `axi run --yes` runs again, at most 6 times (12 hours). A protected-path
    refusal gate, which `--yes` cannot resolve, stops delivery at once.
 4. `report.json` gets `delivery`: `branch`, `head_sha`, `run_id`, `pr_url`,
-   `drives` (how many `axi run` calls were made) and, when delivery stopped
-   at the limit or at a protected-path refusal, `error`.
+   `drives` (how many `axi run` calls were attempted, once delivery reaches that step),
+   and `error` if delivery fails.
 
 `--no-deliver` stops at the verdict and leaves the work uncommitted in the clone.
 
@@ -458,7 +458,7 @@ When every unit passes, delivery runs by default:
 | `0`       | Every unit passed (and, with delivery, a PR exists)        |
 | `1`       | A unit failed; nothing is delivered                        |
 | `2`       | Preparation failed (issue, clone or environment)           |
-| `3`       | Every unit passed, but delivery ended without a PR         |
+| `3`       | Every unit passed, but delivery failed or produced no PR    |
 
 ---
 
