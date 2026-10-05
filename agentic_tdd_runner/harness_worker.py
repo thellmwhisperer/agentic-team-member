@@ -82,9 +82,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--harness-bin", help="Override the harness executable")
     parser.add_argument("--dry-run", action="store_true", help="Prepare and print the brief only")
     parser.add_argument("--max-units", type=int, help="Chain accepted follow-ups as further units in the same clone, up to this many units (config [harness_worker] max_units, default 3)")
-    parser.add_argument("--deliver", choices=["no-mistakes", "none"], default="no-mistakes",
-                        help="After a green verdict, commit the clone on an atm/ branch and run no-mistakes there, "
-                             "which opens the PR (default). 'none' stops at the verdict")
+    parser.add_argument("--deliver", choices=["none"],
+                        help="Skip no-mistakes delivery after a green verdict")
     parser.add_argument("--scope", action="append", default=[], metavar="GLOB",
                         help="Repo-relative glob the diff may touch (repeatable; default: derived from the issue)")
     args = parser.parse_args(argv)
@@ -1069,7 +1068,7 @@ def main(argv: list[str] | None = None) -> int:
         "harness_exit_code": last["harness_exit_code"], "report_parse_error": last["report_parse_error"],
     }
     delivery = None
-    if passed and args.deliver == "no-mistakes":
+    if passed and args.deliver != "none":
         print(f"[DELIVER] no-mistakes in {worktree}", flush=True)
         delivery = result["delivery"] = deliver(worktree, args.repo, title, len(units), artifact_dir)
         log("delivery", delivery)

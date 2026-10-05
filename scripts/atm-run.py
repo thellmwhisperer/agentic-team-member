@@ -83,7 +83,9 @@ def worker_command(args, launch: dict, out: Path) -> list[str]:
         cmd += ["--harness-arg", a]
     if args.timeout:
         cmd += ["--timeout", str(args.timeout)]
-    return cmd + ["--deliver", args.deliver]
+    if args.deliver == "none":
+        cmd += ["--deliver", "none"]
+    return cmd
 
 
 def cmd_run(args) -> int:
@@ -182,7 +184,8 @@ def launch_in_pane(args) -> int:
         inner += ["--harness-arg", a]
     if args.timeout:
         inner += ["--timeout", str(args.timeout)]
-    inner += ["--deliver", args.deliver]
+    if args.deliver == "none":
+        inner += ["--deliver", "none"]
     # A pane stuck in a tail/pager swallows typed text: interrupt whatever is in the foreground first.
     subprocess.run(["herdr", "pane", "send-keys", pane, "C-c"], check=False)
     time.sleep(0.5)
@@ -302,9 +305,8 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--model")
     r.add_argument("--effort", choices=["low", "medium", "high", "xhigh", "max"])
     r.add_argument("--timeout", type=int)
-    r.add_argument("--deliver", choices=["no-mistakes", "none"], default="no-mistakes",
-                   help="after a green verdict, run no-mistakes in the clone with its TUI in this pane (default); "
-                        "'none' stops at the verdict")
+    r.add_argument("--deliver", choices=["none"],
+                   help="skip no-mistakes delivery after a green verdict")
     r.add_argument("--pane", help="herdr pane id; launch there and verify [PREPARE] appears")
     r.add_argument("--wait", type=int, default=30, help="seconds to wait for [PREPARE] with --pane")
     r.set_defaults(fn=cmd_run)
