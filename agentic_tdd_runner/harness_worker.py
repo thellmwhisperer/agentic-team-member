@@ -811,7 +811,8 @@ def worktree_fingerprint(workdir: str) -> str:
         if line.startswith("??"):
             path = Path(workdir) / line[3:]
             if path.is_file():
-                h.update(line.encode()); h.update(path.read_bytes())
+                h.update(line.encode())
+                h.update(path.read_bytes())
     return h.hexdigest()
 
 
