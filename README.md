@@ -421,8 +421,7 @@ see [Configuration](#configuration) for what the TOML holds.
 ### Harness worker: delivery and exit codes
 
 `python3 -m agentic_tdd_runner.harness_worker` (or `scripts/atm-run.py run`)
-hands the fix to a coding agent CLI and judges it. When every unit passes,
-delivery runs by default:
+hands the fix to a coding agent CLI and judges it.
 
 Under `scripts/atm-run.py run` (with or without `--pane`) the terminal shows
 the run as `scripts/atm-run.py tail` renders it: phases, numbered tool calls
@@ -432,6 +431,8 @@ plain copy of that rendering go to `stdout.txt` in the run directory.
 
 ATM excludes `.atm/` from Git in each run clone, so follow-up files there do
 not make delivery dirty when the target repository lacks that ignore rule.
+
+When every unit passes, delivery runs by default:
 
 1. The clone's work is committed on `atm/<slug>-<timestamp>` and the clone's
    `origin` points at the source repo's `origin`. When the issue came from
