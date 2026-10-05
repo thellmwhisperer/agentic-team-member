@@ -1,16 +1,16 @@
 # Contributing to ATM
 
 Thanks for considering a contribution. ATM is a small project and the
-highest-leverage contributions right now are concrete: a failing
-real-world issue that exercises a weak row of the [coverage matrix](docs/code-shape-coverage.md),
-or a fix that moves a row from `weak` to `partial` to `strong`.
+highest-leverage contributions right now are concrete: a real-world issue
+where a gate passed a bad fix or rejected a good one, with the run that
+shows it.
 
 ## Filing an issue
 
 - **Bug**: include the smallest reproducer you can — the issue text you
   fed to ATM, the relevant lines of the JSONL log, and what you
-  expected vs. what you observed. Mention your model (Qwen 3.5 27B,
-  4B, etc.), runner (`llama-server`, Ollama), and your local OS.
+  expected vs. what you observed. Mention the agent (`--harness`),
+  its version and model, and your local OS.
 - **Feature request / coverage gap**: describe the code shape, point
   at a public example if possible, and explain what the runner does
   wrong today.
@@ -20,10 +20,10 @@ or a fix that moves a row from `weak` to `partial` to `strong`.
 ```bash
 git clone https://github.com/<your-fork>/agentic-team-member.git
 cd agentic-team-member
-pip install -e '.[dev]' || pip install 'requests>=2.31,<3'
+python3 -m pip install 'pytest>=9.0,<10' 'requests>=2.31,<3'
 ```
 
-You also need a local LLM server running a tool-calling GGUF model.
+A real run also needs an agent CLI (`claude`, `codex`, `opencode` or `pi`).
 See [README → Requirements](README.md#requirements).
 
 ## Running the test suite
@@ -49,11 +49,10 @@ write the failing test first, then the fix.
 
 ## What ATM does and does not accept
 
-- **Yes**: bug fixes, new language plugins, new cookbook shapes,
-  coverage-lifting changes, doc improvements, test improvements.
-- **Probably yes, but discuss first**: new top-level skills
-  (`migrate`, `refactor`), changes to the verify contract,
-  changes to discovery scoring.
+- **Yes**: bug fixes, support for another agent CLI or test runner,
+  doc improvements, test improvements.
+- **Probably yes, but discuss first**: changes to the gates, the
+  follow-up contract or the report format.
 - **No (without prior discussion)**: large refactors, vendoring,
   switching test framework, adding heavy dependencies.
 
