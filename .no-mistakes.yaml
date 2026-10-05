@@ -16,3 +16,5 @@ review:
       instructions: |
         Never delete or weaken a test that the linked issue's acceptance criteria or red test ask for,
         even when it looks heuristic. If such a test seems unreliable, report it as a note and change nothing.
+auto_fix:
+  review: 0  # the reviewer only reports; the agent that launched ATM answers every finding (Javi, 5-oct-2026)
