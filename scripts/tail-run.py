@@ -129,6 +129,9 @@ class Renderer:
     def on_atm_unit_started(self, e):
         self.phase(f"AGENT  unit {e.get('unit')} {self.harness}")
 
+    def on_atm_ponytail_started(self, _):
+        self.phase(f"AGENT  ponytail {self.harness}")
+
     def on_assistant(self, e):
         for block in (e.get("message") or {}).get("content") or []:
             kind = block.get("type") if isinstance(block, dict) else None
@@ -225,6 +228,11 @@ class Renderer:
                   ("full suite", r.get("full_tests_ok")), ("typecheck", r.get("typecheck_ok"))]
         print("  checks     " + "   ".join(f"{mark(ok)} {name}{' n/a' if ok is None else ''}" for name, ok in checks))
         print(f"  changed    {', '.join(r.get('changed_files') or []) or 'none'}")
+        pony = r.get("ponytail")
+        if pony:
+            saved = pony["net_lines_before"] - pony["net_lines_after"] if pony["kept"] else 0
+            print(f"  ponytail   {mark(True) + ' kept' if pony['kept'] else mark(None) + ' discarded'}  "
+                  f"{saved} net lines saved  {pony.get('reason')}")
         verdict = green("✓ RESULT") + "  " + green("PASS") if passed else red("✗ RESULT") + "  " + red("FAIL")
         print(f"\n{verdict}  report={shown(self.log.parent / 'report.json')}")
         return True

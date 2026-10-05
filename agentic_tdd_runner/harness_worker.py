@@ -921,6 +921,123 @@ def worktree_fingerprint(workdir: str) -> str:
     return h.hexdigest()
 
 
+# slopslint v0.3.0's families for a standing (non-duplication, non-orphan) tombstone.
+SLOP_FAMILIES = ("agent_artifact_in_repo", "documented_as_convention", "environment_layout_coupling", "format_churn",
+                 "inline_foreign_language", "mock_heavy_test", "runtime_dependency", "self_validating_test",
+                 "speculative_feature", "speculative_hardening", "subprocess_foreign_interpreter", "test_weakening")
+PONYTAIL_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "findings": {"type": "array", "items": {
+            "type": "object",
+            "properties": {"file": {"type": "string"}, "family": {"type": "string"}, "finding": {"type": "string"}},
+            "required": ["file", "family", "finding"],
+            "additionalProperties": False,
+        }},
+        "summary": {"type": "string"},
+    },
+    "required": ["findings", "summary"],
+    "additionalProperties": False,
+}
+
+
+def build_ponytail_brief(*, title, body, worktree, diff, test_cmd) -> str:
+    return f"""# Ponytail pass
+
+## GOAL
+The run below fixed this issue and passed every gate. Review its diff against the base commit for
+over-engineering and cut what the fix does not need. If nothing is worth cutting, change nothing.
+
+### {title}
+
+{body}
+
+## RULES
+If a `ponytail-review` skill is installed in this harness, load it. Either way, follow this:
+- You may only cut: delete, shrink, replace with the standard library, a native platform feature or a
+  helper that already exists in this repository. No new behaviour, no new files.
+- Only touch files in the diff, in `{worktree}`.
+- Hunt: code for cases nobody has, reinvented standard library, unrequested abstractions or indirection,
+  options with one value, parameters nobody passes, checks for states that cannot happen, parsing whose
+  only output is cosmetic, functions nothing calls.
+- Keep: validation at trust boundaries, error handling that prevents data loss, security, accessibility,
+  anything the issue asks for, and every test. Do not delete, skip or weaken a test.
+- Every test must still pass: `{test_cmd or "not detected"}`. ATM re-runs every gate and throws the pass
+  away if one fails or if the diff does not get shorter.
+- FORBIDDEN: `git commit`, `git push`, `git rebase`, any `gh` command.
+
+## DIFF
+```diff
+{diff}```
+
+## REPORT
+Your final message must be ONLY this JSON object, nothing else, one finding per cut you made:
+{{"findings": [{{"file": "<repo-relative path you cut in>", "family": "<one of: {', '.join(SLOP_FAMILIES)}>", "finding": "<one line: what you cut and what replaces it>"}}], "summary": "<one paragraph>"}}
+"""
+
+
+def snapshot_commit(workdir: str) -> str:
+    """The whole worktree (tracked and untracked, .atm/ excluded) as a dangling commit; the worktree is not touched."""
+    subprocess.run(["git", "add", "-A"], cwd=workdir, capture_output=True)
+    sha = subprocess.run(["git", "stash", "create"], cwd=workdir, capture_output=True, text=True).stdout.strip()
+    subprocess.run(["git", "reset", "-q"], cwd=workdir, capture_output=True)
+    return sha or git_lines(workdir, "rev-parse", "HEAD")[0]
+
+
+def net_added_lines(workdir: str, base: str, snapshot: str) -> int:
+    rows = (line.split("\t") for line in git_lines(workdir, "diff", "--numstat", base, snapshot, "--", ".", ":!.atm"))
+    return sum(int(added) - int(deleted) for added, deleted, _ in rows if added != "-")
+
+
+def lint_command(workdir: str) -> str | None:
+    """The target's lint: `commands.lint` of its tracked .no-mistakes.yaml, run by sh."""
+    path = Path(workdir, ".no-mistakes.yaml")
+    # ponytail: one plain one-line value; a quoted or block scalar would reach sh as is and fail the pass, never pass it.
+    match = re.search(r"^\s+lint:\s*(.+)$", path.read_text(), re.M) if path.is_file() else None
+    return f"sh -c {shlex.quote(match.group(1).strip())}" if match else None
+
+
+def write_tombstones(workdir: str, findings: list[dict]) -> list[str]:
+    """One standing slopslint tombstone per kept ponytail finding, when the target has .slop/."""
+    if not Path(workdir, ".slop").is_dir():
+        return []
+    stamp, written = datetime.now(), []
+    for n, finding in enumerate(findings, start=1):
+        artifact = str(finding.get("file") or "").removeprefix("./")
+        try:
+            if not artifact or not resolve_repo_path(artifact, workdir).is_file():
+                continue  # slopslint refuses an artifact that is not a file in the repo
+        except ValueError:
+            continue
+        family = finding.get("family") if finding.get("family") in SLOP_FAMILIES else "speculative_feature"
+        example = str(finding.get("finding") or "cut by the ponytail pass")
+        tid = f"T-PONYTAIL-{stamp:%Y%m%d-%H%M%S}-{n}"
+        q = json.dumps  # a JSON string is a valid YAML scalar
+        rel = f".slop/tombstones/{tid}.yml"
+        Path(workdir, rel).parent.mkdir(parents=True, exist_ok=True)
+        Path(workdir, rel).write_text(f"""schema: 1
+id: {tid}
+status: accepted
+category: alien_code
+title: {q(_snippet(example, 100))}
+created_at: {stamp:%Y-%m-%d}
+incident:
+  pattern: {q(example)}
+  what_went_wrong: "An ATM run wrote it and ATM's ponytail pass cut it before delivery."
+  root_cause: "The coding agent wrote more than the issue needed."
+  rule_established: "Cut by the ponytail pass; it does not come back."
+  evidence:
+    - family: {family}
+      example: {q(example)}
+      artifact: {artifact}
+match:
+  family: {family}
+  artifact: {artifact}
+""")
+        written.append(rel)
+    return written
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     # Stale .pyc files survive same-size edits restored within one second by the
@@ -966,17 +1083,15 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     schema_path = artifact_dir / "report.schema.json"
-    if args.harness == "codex":
-        schema_path.write_text(json.dumps(REPORT_SCHEMA, indent=2))
     last_msg_path = artifact_dir / "last-message.txt"
     issue_text = f"{title}\n{body}"
     max_units = args.max_units or int(config.get("harness_worker", {}).get("max_units", 3))
     timeout = int(config.get("environment", {}).get("timeout", 300))
 
-    def run_unit(number: int, unit_brief: str, unit_scope: list[str], unit_base: str, forced_test: str | None) -> dict:
-        cmd, stdin_text = harness_command(args, worktree, unit_brief, str(schema_path), str(last_msg_path))
-        print(f"[HARNESS] unit {number} {args.harness} timeout={args.timeout}s log={log_path}")
-        log("unit_started", {"unit": number, "base_sha": unit_base, "scope": unit_scope})
+    def call_harness(harness_brief: str, schema: dict) -> tuple[dict, dict | None, str | None]:
+        if args.harness == "codex":
+            schema_path.write_text(json.dumps(schema, indent=2))
+        cmd, stdin_text = harness_command(args, worktree, harness_brief, str(schema_path), str(last_msg_path))
         try:
             run = run_harness(cmd, stdin_text, cwd=worktree, timeout=args.timeout, harness=args.harness, write=write,
                               extra_env=dict(kv.split("=", 1) for kv in args.env if "=" in kv))
@@ -985,67 +1100,128 @@ def main(argv: list[str] | None = None) -> int:
             log("harness_failed", {"error": str(exc)})
         if args.harness == "codex" and last_msg_path.is_file():
             run["final_text"] = last_msg_path.read_text() or run["final_text"]
-        harness_report, parse_error = extract_report(run["final_text"])
+        return run, *extract_report(run["final_text"])
+
+    def red_green(test_file: str | None) -> tuple[bool, str]:
+        if not test_file:
+            return False, "no test file found"
+        red_outputs: list[str] = []
+
+        def log_capturing_red(name: str, data: dict) -> None:
+            if name == "verify":
+                red_outputs.append(str(data.get("red_output_full") or data.get("red_output", "")))
+            log(name, data)
+
+        before = worktree_fingerprint(worktree)
+        verified, verify_msg = verification.verify_red_green(
+            test_file, workdir=worktree, config=config, emit=print, log=log_capturing_red,
+        )
+        if worktree_fingerprint(worktree) != before:
+            # The verdict is about code that is no longer what the agent left: never trust it.
+            log("verify_worktree_changed", {"test_file": test_file})
+            return False, "WORKTREE CHANGED DURING VERIFICATION: the red/green verdict is void"
+        invalid_red = red_failed_on_missing_module(red_outputs[-1] if red_outputs else "")
+        if verified and invalid_red:
+            log("verify_invalid_red", {"test_file": test_file, "marker": invalid_red})
+            return False, f"INVALID RED: without the fix the test fails on a missing module ({invalid_red}), not on behavior"
+        return verified, verify_msg
+
+    def run_checks(test_file: str | None, changed: list[str], check_scope_globs: list[str], base: str) -> dict:
+        """Every gate after red/green, against `base`; `ok` is the conjunction."""
+        quality_ok, quality_msg = quality.run_quality_checks(
+            test_file or (changed[0] if changed else ""), workdir=worktree, config=config, log=log,
+            is_test_file_path=lambda p: is_test_file_path(p, config), get_changed_files_fn=lambda: changed,
+            base_ref=base,
+        )
+        if quality_ok and lang_key not in QUALITY_LANG.values():
+            hits = scan_forbidden(worktree, changed, forbidden, base)
+            if hits:
+                quality_ok, quality_msg = False, "forbidden patterns: " + "; ".join(hits[:5])
+                log("quality_forbidden", {"hits": hits})
+        gate_ok, gate_msg = check_gate(worktree, base, config)
+        full_tests_ok, full_tests_tail = run_command(test_cmd, worktree, config, timeout, log)
+        typecheck_ok, typecheck_tail = run_command(typecheck_cmd, worktree, config, timeout, log)
+        scope_ok, scope_msg = check_scope(worktree, base, config, check_scope_globs)
+        return {
+            "ok": quality_ok and gate_ok and scope_ok and full_tests_ok is not False and typecheck_ok is not False,
+            "quality_ok": {"ok": quality_ok, "message": quality_msg}, "gate_ok": {"ok": gate_ok, "message": gate_msg},
+            "scope_ok": {"ok": scope_ok, "message": scope_msg}, "full_tests_ok": full_tests_ok,
+            "typecheck_ok": typecheck_ok, "full_tests_tail": full_tests_tail, "typecheck_tail": typecheck_tail,
+        }
+
+    def run_unit(number: int, unit_brief: str, unit_scope: list[str], unit_base: str, forced_test: str | None) -> dict:
+        print(f"[HARNESS] unit {number} {args.harness} timeout={args.timeout}s log={log_path}")
+        log("unit_started", {"unit": number, "base_sha": unit_base, "scope": unit_scope})
+        run, harness_report, parse_error = call_harness(unit_brief, REPORT_SCHEMA)
         log("harness_done", {k: v for k, v in run.items() if k != "final_text"} | {"unit": number, "report": harness_report,
                                                                                     "report_parse_error": parse_error})
         changed = [p for p in quality.get_changed_files(worktree) if not is_atm_path(p)]
         test_file = forced_test or pick_test_file(harness_report, worktree, config)
-        if test_file:
-            red_outputs: list[str] = []
-
-            def log_capturing_red(name: str, data: dict) -> None:
-                if name == "verify":
-                    red_outputs.append(str(data.get("red_output_full") or data.get("red_output", "")))
-                log(name, data)
-
-            before = worktree_fingerprint(worktree)
-            verified, verify_msg = verification.verify_red_green(
-                test_file, workdir=worktree, config=config, emit=print, log=log_capturing_red,
-            )
-            if worktree_fingerprint(worktree) != before:
-                # The verdict is about code that is no longer what the agent left: never trust it.
-                verified, verify_msg = False, "WORKTREE CHANGED DURING VERIFICATION: the red/green verdict is void"
-                log("verify_worktree_changed", {"test_file": test_file})
-            invalid_red = red_failed_on_missing_module(red_outputs[-1] if red_outputs else "")
-            if verified and invalid_red:
-                verified = False
-                verify_msg = f"INVALID RED: without the fix the test fails on a missing module ({invalid_red}), not on behavior"
-                log("verify_invalid_red", {"test_file": test_file, "marker": invalid_red})
-        else:
-            verified, verify_msg = False, "no test file found"
-        quality_ok, quality_msg = quality.run_quality_checks(
-            test_file or (changed[0] if changed else ""), workdir=worktree, config=config, log=log,
-            is_test_file_path=lambda p: is_test_file_path(p, config), get_changed_files_fn=lambda: changed,
-            base_ref=unit_base,
-        )
-        if quality_ok and lang_key not in QUALITY_LANG.values():
-            hits = scan_forbidden(worktree, changed, forbidden, unit_base)
-            if hits:
-                quality_ok, quality_msg = False, "forbidden patterns: " + "; ".join(hits[:5])
-                log("quality_forbidden", {"hits": hits})
-        gate_ok, gate_msg = check_gate(worktree, unit_base, config)
-        full_tests_ok, full_tests_tail = run_command(test_cmd, worktree, config, timeout, log)
-        typecheck_ok, typecheck_tail = run_command(typecheck_cmd, worktree, config, timeout, log)
-        scope_ok, scope_msg = check_scope(worktree, unit_base, config, unit_scope)
+        verified, verify_msg = red_green(test_file)
+        checks = run_checks(test_file, changed, unit_scope, unit_base)
         follow_ups = validate_follow_ups(harness_report, worktree, config, log, base_sha=unit_base, issue_text=issue_text,
                                          issue={"title": title, "body": body})
         for f in follow_ups:
             f["unit"] = number
-        passed = (verified and quality_ok and gate_ok and scope_ok
-                  and full_tests_ok is not False and typecheck_ok is not False)
         unit = {
             "unit": number, "base_sha": unit_base, "scope": unit_scope, "changed_files": changed, "test_file": test_file,
-            "verified": {"ok": verified, "message": verify_msg},
-            "quality_ok": {"ok": quality_ok, "message": quality_msg},
-            "gate_ok": {"ok": gate_ok, "message": gate_msg},
-            "scope_ok": {"ok": scope_ok, "message": scope_msg}, "follow_ups": follow_ups,
-            "full_tests_ok": full_tests_ok, "typecheck_ok": typecheck_ok,
-            "full_tests_tail": full_tests_tail, "typecheck_tail": typecheck_tail,
+            "verified": {"ok": verified, "message": verify_msg}, "follow_ups": follow_ups,
+            **{k: v for k, v in checks.items() if k != "ok"},
             "duration_seconds": run["duration_seconds"], "timed_out": run["timed_out"],
-            "harness_exit_code": run["exit_code"], "report_parse_error": parse_error, "passed": passed,
+            "harness_exit_code": run["exit_code"], "report_parse_error": parse_error, "passed": verified and checks["ok"],
         }
         log("unit_done", unit)
         return unit
+
+    def ponytail_pass(units: list[dict]) -> dict:
+        """One harness call that may only cut the run's diff, gated like a unit; anything short of a shorter,
+        fully green diff brings the pre-ponytail worktree back."""
+        head = git_lines(worktree, "rev-parse", "HEAD")[0]
+        before = snapshot_commit(worktree)
+        run_files = git_lines(worktree, "diff", "--name-only", base_sha, before, "--", ".", ":!.atm")
+        diff = subprocess.run(["git", "diff", base_sha, before, "--", ".", ":!.atm"], cwd=worktree,
+                              capture_output=True, text=True).stdout
+        pony_brief = build_ponytail_brief(title=title, body=body, worktree=worktree, diff=diff, test_cmd=test_cmd)
+        (artifact_dir / "brief-ponytail.md").write_text(pony_brief)
+        print(f"[PONYTAIL] {args.harness} timeout={args.timeout}s", flush=True)
+        log("ponytail_started", {"head": head, "snapshot": before})
+        run, pony_report, parse_error = call_harness(pony_brief, PONYTAIL_SCHEMA)
+        log("harness_done", {k: v for k, v in run.items() if k != "final_text"} | {"unit": "ponytail", "report": pony_report,
+                                                                                    "report_parse_error": parse_error})
+        findings = [f for f in (pony_report or {}).get("findings") or [] if isinstance(f, dict)]
+        after = snapshot_commit(worktree)
+        record = {"findings": findings, "net_lines_before": net_added_lines(worktree, base_sha, before),
+                  "net_lines_after": net_added_lines(worktree, base_sha, after), "kept": False, "tombstones": []}
+        if git_lines(worktree, "rev-parse", "HEAD") != [head]:
+            reason = "harness moved HEAD (created commits)"
+        elif record["net_lines_after"] >= record["net_lines_before"]:
+            reason = "did not reduce the run's net added lines"
+        else:
+            # With HEAD at the base commit the clone looks like one unit holding the whole run.
+            subprocess.run(["git", "reset", "-q", base_sha], cwd=worktree, check=True, capture_output=True)
+            try:
+                failed = [f"unit {u['unit']} red/green: {msg}" for u in units
+                          for ok, msg in [red_green(u["test_file"])] if not ok]
+                changed = [p for p in quality.get_changed_files(worktree) if not is_atm_path(p)]
+                checks = run_checks(units[0]["test_file"], changed, run_files, base_sha)
+                failed += [f"{name} failed: {checks[name]['message']}" for name in ("quality_ok", "gate_ok", "scope_ok")
+                           if not checks[name]["ok"]]
+                failed += [f"{name} failed" for name in ("full_tests_ok", "typecheck_ok") if checks[name] is False]
+                lint_ok, _ = run_command(lint_command(worktree), worktree, config, timeout, log)
+                failed += ["lint failed"] if lint_ok is False else []
+            finally:
+                subprocess.run(["git", "reset", "-q", head], cwd=worktree, check=True, capture_output=True)
+            reason = "; ".join(failed)
+        if reason:  # throw away everything since the snapshot, new files included, and bring the snapshot back
+            subprocess.run(["git", "add", "-A"], cwd=worktree, capture_output=True)
+            subprocess.run(["git", "reset", "--hard", "-q", head], cwd=worktree, capture_output=True)
+            verification.restore_worktree(worktree, before)
+        else:
+            record["kept"], reason = True, "shorter diff, every gate passed"
+            record["tombstones"] = write_tombstones(worktree, findings)
+        record["reason"] = reason
+        log("ponytail", record)
+        return record
 
     units: list[dict] = []
     unit_brief, unit_scope, unit_base, forced_test = brief, scope, base_sha, None
@@ -1081,6 +1257,7 @@ def main(argv: list[str] | None = None) -> int:
     failed_unit = next((u for u in units if not u["passed"]), None)
     last = units[-1]
     passed = failed_unit is None
+    ponytail = ponytail_pass(units) if passed else None
     result = {
         "harness": args.harness, "model": args.model, "effort": args.effort, "base_ref": args.base_ref, "base_sha": base_sha,
         "head_sha": git_lines(worktree, "rev-parse", "HEAD")[0], "worktree": worktree,
@@ -1095,6 +1272,8 @@ def main(argv: list[str] | None = None) -> int:
         "duration_seconds": sum(u["duration_seconds"] for u in units), "timed_out": any(u["timed_out"] for u in units),
         "harness_exit_code": last["harness_exit_code"], "report_parse_error": last["report_parse_error"],
     }
+    if ponytail:
+        result["ponytail"] = ponytail
     delivery = None
     if passed and not args.no_deliver:
         print(f"[DELIVER] no-mistakes in {worktree}", flush=True)
@@ -1122,6 +1301,9 @@ def main(argv: list[str] | None = None) -> int:
                      else "rejected: " + f.get("reason", ""))
             print(f"            follow-up {f['index']}: {state}")
     print(f"changed:    {', '.join(changed_all) or 'none'}")
+    if ponytail:
+        saved = ponytail["net_lines_before"] - ponytail["net_lines_after"] if ponytail["kept"] else 0
+        print(f"ponytail:   {'kept' if ponytail['kept'] else 'discarded'}, {saved} net lines saved ({ponytail['reason']})")
     if delivery:
         print(f"delivery:   branch={delivery['branch']} run={delivery['run_id']} pr={delivery['pr_url'] or 'none'} "
               f"{delivery.get('error', '')}")
