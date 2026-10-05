@@ -18,3 +18,5 @@ review:
         even when it looks heuristic. If such a test seems unreliable, report it as a note and change nothing.
 auto_fix:
   review: 0  # the reviewer only reports; the agent that launched ATM answers every finding (Javi, 5-oct-2026)
+ci:
+  rerun_transient: 1  # a check GitHub cancels without a verdict (no runner in 15 min, PR 131) is re-run once before anyone is asked
