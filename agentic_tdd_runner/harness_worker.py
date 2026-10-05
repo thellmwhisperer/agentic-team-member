@@ -519,8 +519,12 @@ PR_URL = re.compile(r"https://github\.com/[\w.-]+/[\w.-]+/pull/\d+")
 RUN_ID = re.compile(r'\b(?:run|id): "?([0-9A-HJKMNP-TV-Z]{26})\b')  # `run: "01M..."` from axi run, `id: "01M..."` from axi status
 HEAD_SHA = re.compile(r'\bhead_sha: "?([0-9a-f]{40})\b')
 # ponytail: axi run returns when --wait elapses even if the pipeline goes on (default 8m; review alone took 8.6 min
-# on 5-oct-2026). Two hours covers every run seen so far; a longer one ends as exit 3 and `axi status` has the rest.
+# on 5-oct-2026). Two hours covers every run seen so far; a longer one ends as exit 3 and is driven again below.
 NO_MISTAKES_WAIT = "2h"
+# `--yes` resolves gates only while its `axi run` lives, so delivery drives the run again until it ends. 6 x 2h = 12h.
+NO_MISTAKES_MAX_DRIVES = 6
+FINAL = re.compile(r'^\s*(?:outcome|status): "?(?:checks-passed|passed|passed-with-skips|failed|cancelled|completed)\b',
+                   re.M)
 
 
 def terminal():
@@ -535,8 +539,8 @@ def terminal():
 def deliver(worktree: str, source_repo: str, title: str, unit_number: int, artifact_dir: Path,
             closes: int | None = None) -> dict:
     """Hand the green clone to no-mistakes: a branch with the work committed, the source repo's
-    origin, then `axi run --yes` with `attach` showing the TUI in this pane until the run ends. The PR is
-    no-mistakes' job; ATM records what `axi status` says at the end."""
+    origin, then `axi run --yes`, again while `axi status` shows no outcome, with `attach` showing the TUI in
+    this pane until the run ends. The PR is no-mistakes' job; ATM records what `axi status` says at the end."""
     result = {"tool": "no-mistakes", "branch": None, "head_sha": None, "run_id": None, "pr_url": None}
     origin = git_lines(source_repo, "remote", "get-url", "origin")
     if not origin:
@@ -560,18 +564,29 @@ def deliver(worktree: str, source_repo: str, title: str, unit_number: int, artif
     term, attach = terminal(), None
     try:
         with run_log.open("w") as sink:
-            run = subprocess.Popen(["no-mistakes", "axi", "run", "--yes", "--intent", title, "--wait", NO_MISTAKES_WAIT],
-                                   cwd=worktree, stdin=subprocess.DEVNULL, stdout=sink, stderr=subprocess.STDOUT)
-            while True:
-                if term and (attach is None or attach.poll() is not None):
-                    # ponytail: re-opened while the run lives, because attach exits at once when the daemon has not
-                    # registered the run yet, and when the human quits the TUI. At most one start per second.
-                    attach = subprocess.Popen(["no-mistakes", "attach"], cwd=worktree, stdin=term, stdout=term, stderr=term)
-                try:
-                    result["exit_code"] = run.wait(timeout=1)
+            for result["drives"] in range(1, NO_MISTAKES_MAX_DRIVES + 1):
+                run = subprocess.Popen(["no-mistakes", "axi", "run", "--yes", "--intent", title, "--wait", NO_MISTAKES_WAIT],
+                                       cwd=worktree, stdin=subprocess.DEVNULL, stdout=sink, stderr=subprocess.STDOUT)
+                while True:
+                    if term and (attach is None or attach.poll() is not None):
+                        # ponytail: re-opened while the run lives, because attach exits at once when the daemon has not
+                        # registered the run yet, and when the human quits the TUI. At most one start per second.
+                        attach = subprocess.Popen(["no-mistakes", "attach"], cwd=worktree, stdin=term, stdout=term, stderr=term)
+                    try:
+                        result["exit_code"] = run.wait(timeout=1)
+                        break
+                    except subprocess.TimeoutExpired:
+                        pass
+                status = subprocess.run(["no-mistakes", "axi", "status"], cwd=worktree, capture_output=True, text=True)
+                text = status.stdout + status.stderr
+                output = run_log.read_text(errors="replace")
+                if "protected-path-refusal" in text + output:
+                    result["error"] = "no-mistakes stopped at a protected-path refusal gate that --yes cannot resolve"
                     break
-                except subprocess.TimeoutExpired:
-                    pass
+                if FINAL.search(text + output) or not RUN_ID.search(text):  # ended, or there is no run to drive
+                    break
+            else:
+                result["error"] = f"no-mistakes run had no outcome after {NO_MISTAKES_MAX_DRIVES} drives"
     except OSError as exc:
         return result | {"error": f"no-mistakes did not start: {exc}"}
     finally:
@@ -583,10 +598,7 @@ def deliver(worktree: str, source_repo: str, title: str, unit_number: int, artif
                 attach.wait()
         if term:
             term.close()
-    status = subprocess.run(["no-mistakes", "axi", "status"], cwd=worktree, capture_output=True, text=True)
-    text = status.stdout + status.stderr
     (artifact_dir / "no-mistakes-status.txt").write_text(text)
-    output = run_log.read_text(errors="replace")
     run_id = RUN_ID.search(text) or RUN_ID.search(output)
     pr = PR_URL.search(text) or PR_URL.search(output)
     head = HEAD_SHA.search(text)

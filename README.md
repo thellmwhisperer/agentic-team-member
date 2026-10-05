@@ -443,8 +443,13 @@ When every unit passes, delivery runs by default:
    run.
 3. `no-mistakes axi run --yes --intent "<issue title>"` runs in the clone, and
    `no-mistakes attach` shows its TUI in the same terminal until the run ends.
-4. `no-mistakes axi status` is read and `report.json` gets `delivery`:
-   `branch`, `head_sha`, `run_id` and `pr_url`.
+   `--yes` resolves gates only while `axi run` lives, so after each call
+   `no-mistakes axi status` is read and, while the run has no outcome,
+   `axi run --yes` runs again, at most 6 times (12 hours). A protected-path
+   refusal gate, which `--yes` cannot resolve, stops delivery at once.
+4. `report.json` gets `delivery`: `branch`, `head_sha`, `run_id`, `pr_url`,
+   `drives` (how many `axi run` calls were made) and, when delivery stopped
+   at the limit or at a protected-path refusal, `error`.
 
 `--no-deliver` stops at the verdict and leaves the work uncommitted in the clone.
 
