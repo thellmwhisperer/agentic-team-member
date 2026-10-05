@@ -476,6 +476,9 @@ def test_fingerprint_ignores_staging_and_survives_snapshot_restore(tmp_path):
     (repo / "a.py").write_text("x = 1\n")
     (repo / "d.py").write_text("")
     assert harness_worker.worktree_fingerprint(str(repo)) != before
+    (repo / "d.py").unlink()
+    (repo / "a.py").chmod(0o755)
+    assert harness_worker.worktree_fingerprint(str(repo)) != before
 
 
 def test_verdict_is_void_when_the_worktree_changes_during_verification(tmp_path, monkeypatch):
