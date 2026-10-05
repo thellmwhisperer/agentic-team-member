@@ -482,7 +482,9 @@ delivery runs by default:
 1. `.no-mistakes.yaml` is copied from the source repo into the clone if the
    source has it (tracked or ignored) and the clone does not.
 2. The clone's work is committed on `atm/<slug>-<timestamp>` and the clone's
-   `origin` points at the source repo's `origin`.
+   `origin` points at the source repo's `origin`. When the issue came from
+   `--issue-number`, the unit commit message ends with `Closes #<n>`, so
+   merging the PR closes the issue.
 3. `no-mistakes init` initializes the clone before the gate run starts.
    If initialization fails, delivery records the error and does not start the
    run.
