@@ -931,6 +931,8 @@ elif args[:2] == ["axi", "run"]:
     print('run: "01M45YGAMAHEKN66DQGKV4AF30"')
     print("outcome: passed")
 elif args[:2] == ["axi", "status"]:
+    if os.environ.get("FAKE_NM_STATUS_FAIL"):
+        sys.exit("status temporarily unavailable")
     ran = os.path.exists(os.environ["FAKE_NM_LOG"] + ".ran")
     print("run:")
     print('  id: "01M45YGAMAHEKN66DQGKV4AF30"')
@@ -939,7 +941,7 @@ elif args[:2] == ["axi", "status"]:
     if not ran:
         print("  awaiting_agent: parked 2h0m0s")
     print("  head_sha: " + git("rev-parse", "HEAD"))
-    if not os.environ.get("FAKE_NM_NO_PR") and ran:
+    if not os.environ.get("FAKE_NM_NO_PR") and (ran or gate == "never"):
         print("  pr: https://github.com/owner/calc/pull/7")
     if gate == "protected":
         print("gate: protected-path-refusal")
@@ -1036,6 +1038,26 @@ def test_delivery_stops_driving_at_the_ceiling(tmp_path, monkeypatch):
     assert delivery["drives"] == harness_worker.NO_MISTAKES_MAX_DRIVES
     assert f"{harness_worker.NO_MISTAKES_MAX_DRIVES} drives" in delivery["error"]
     assert sum(c.startswith("axi run --yes") for c in calls.read_text().splitlines()) == harness_worker.NO_MISTAKES_MAX_DRIVES
+
+
+def test_delivery_reports_status_failure_while_run_is_active(tmp_path, monkeypatch):
+    argv, artifacts, calls, _ = _delivery_setup(tmp_path, monkeypatch)
+    monkeypatch.setenv("FAKE_NM_GATE", "once")
+    monkeypatch.setenv("FAKE_NM_STATUS_FAIL", "1")
+    assert harness_worker.main(argv) == 3
+    delivery = json.loads((artifacts / "report.json").read_text())["delivery"]
+    assert "status failed: status temporarily unavailable" in delivery["error"]
+    assert delivery["drives"] == 1
+    assert sum(c.startswith("axi run --yes") for c in calls.read_text().splitlines()) == 1
+
+
+def test_delivery_error_with_a_pr_exits_3(tmp_path, monkeypatch):
+    argv, artifacts, _, _ = _delivery_setup(tmp_path, monkeypatch)
+    monkeypatch.setenv("FAKE_NM_GATE", "never")
+    assert harness_worker.main(argv) == 3
+    delivery = json.loads((artifacts / "report.json").read_text())["delivery"]
+    assert delivery["pr_url"] == "https://github.com/owner/calc/pull/7"
+    assert "error" in delivery
 
 
 def test_delivery_stops_at_a_protected_path_refusal(tmp_path, monkeypatch):
