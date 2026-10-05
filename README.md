@@ -425,26 +425,28 @@ CLI and judges it. `--label NAME` writes the run to `.tmp/harness-worker/NAME`
 and exits 2 if that directory already exists; without it the directory is a
 timestamp. `command.txt` there holds the exact command, to repeat the run.
 
-Every step of a run writes a start event to the log before it runs and an end
-event after, with a timestamp: `prepare`, `agent unit N`, `red half` and
+The worker writes timestamped start and end events for these named steps:
+`prepare`, `agent unit N`, `red half` and
 `green half` of the verification, `quality`, `forbidden scan`, `gate`,
 `full suite`, `typecheck`, `scope`, `follow-up validation`, `ponytail snapshot`,
-`ponytail agent`, `ponytail re-checks`, `commit` and `delivery`. A step with no
+`ponytail agent`, `ponytail re-checks`, `commit` and `delivery`. Some setup and
+verification work between these steps has no separate event. A step with no
 command (no typecheck, say) does not run and writes nothing.
 
 The worker renders its log live on its own stdout with the renderer in
 `scripts/tail-run.py`: `▶ <step>` when a step starts, `✓ <step> <duration>` or
 `✗ <step> <duration>` when it ends, between them the agent's numbered tool
 calls, the red/green block and, at the end, the checks line and `RESULT`. A step
-silent for 30 s gets one line every 30 s (`… full suite 1m30s`), so a long step
-does not look like a stuck run. `scripts/tail-run.py --label NAME` renders a
-log file the same way, from another pane.
+with no visible output for 30 s gets an elapsed line (`… full suite 1m30s`),
+repeated every 30 s while it stays quiet. `scripts/tail-run.py --label NAME`
+renders a log file the same way, from another pane.
 
 `[monitor].command` in `agent.toml` is a shell line ATM runs at every step
 start and end, with `ATM_LABEL`, `ATM_STEP`, `ATM_STATE` (`started`, `passed`,
 `failed`), `ATM_DURATION` (seconds) and `ATM_REPORT` (the run's `report.json`)
-in the environment. Its output is discarded, its exit code ignored, and it is
-killed after 5 s. A launcher binds itself to the run with it, for example
+in the environment. Its output is discarded and its exit code ignored. ATM
+times out the shell after 5 s; child processes may keep running. A launcher
+binds itself to the run with it, for example
 `herdr pane report-agent --state "$ATM_STATE"` or a script that wakes the
 launching agent; ATM knows no tool by name.
 
