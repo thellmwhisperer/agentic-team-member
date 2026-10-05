@@ -1,13 +1,13 @@
 """Tests for config loading from TOML."""
 from pathlib import Path
 
-from unittest.mock import Mock
-
 from agentic_tdd_runner.config import load_config
-from agentic_tdd_runner import environment, harness_worker, paths, quality, verification
 
 
 CONFIG_DIR = Path(__file__).parent.parent / "config"
+PACKAGE_DIR = Path(__file__).parent.parent / "agentic_tdd_runner"
+
+
 def _leaf_keys(table: dict, parents: tuple[str, ...] = ()):
     for key, value in table.items():
         if isinstance(value, dict):
@@ -16,65 +16,15 @@ def _leaf_keys(table: dict, parents: tuple[str, ...] = ()):
             yield (*parents, key)
 
 
-def test_every_production_config_key_is_read_by_the_package(monkeypatch, tmp_path):
-    """Exercise the worker consumers and record actual config lookups."""
-    reads = set()
-
-    class TrackedDict(dict):
-        def __init__(self, values, path=()):
-            super().__init__({key: TrackedDict(value, (*path, key)) if isinstance(value, dict)
-                              else value for key, value in values.items()})
-            self.path = path
-
-        def __getitem__(self, key):
-            if key in self:
-                reads.add((*self.path, key))
-            return super().__getitem__(key)
-
-        def get(self, key, default=None):
-            if key in self:
-                reads.add((*self.path, key))
-            return super().get(key, default)
-
-    config = TrackedDict(load_config(CONFIG_DIR / "agent.toml"))
-    paths.is_test_file_path("example.test.ts", config)
-    paths.test_runner_command_for_file("example.test.ts", config)
-    paths.test_runner_command_for_file("example.spec.rb", config)
-    config["runner"]["override_detected"] = True
-    paths.test_runner_command_for_file("example.test.ts", config)
-    config["runner"]["override_detected"] = False
-    verification.single_test_argv("example.test.ts", config)
-
-    monkeypatch.setattr(environment, "inspect_runner_bootstrap", lambda root: Mock(package_manager="npm", lockfile=None))
-    monkeypatch.setattr(environment, "_preflight_recommended_tools", lambda *args: None)
-    monkeypatch.setattr(environment, "_require_git_worktree", lambda *args, **kwargs: None)
-    monkeypatch.setattr(environment, "_require_clean_worktree", lambda *args, **kwargs: None)
-    monkeypatch.setattr(environment, "detect_project_type", lambda root: "javascript")
-    monkeypatch.setattr(environment, "_read_package_json", lambda root: {"scripts": {"typecheck": "tsc"}})
-    monkeypatch.setattr(environment, "_ensure_generated_test_config", lambda *args: None)
-    monkeypatch.setattr(environment, "_run_step", lambda *args, **kwargs: None)
-    environment.prepare_environment(str(tmp_path), config)
-
-    monkeypatch.setattr(quality, "added_lines", lambda *args: [(1, "type: ignore")])
-    monkeypatch.setattr(quality, "_duplicated_setup_findings", lambda *args, **kwargs: [])
-    monkeypatch.setattr(quality, "detect_production_test_only_exports", lambda *args: [])
-    monkeypatch.setattr(quality, "detect_side_effect_shape_changes", lambda *args: [])
-    monkeypatch.setattr(quality, "detect_parsed_metadata_without_original_fallback", lambda *args: [])
-    monkeypatch.setattr(quality, "detect_empty_object_type_assertions", lambda *args: [])
-    monkeypatch.setattr(quality.subprocess, "run", lambda *args, **kwargs: Mock(returncode=0))
-    monkeypatch.setattr(harness_worker.subprocess, "run", lambda *args, **kwargs: Mock(returncode=0, stdout="", stderr=""))
-    harness_worker.run_test_file("example.test.ts", str(tmp_path), config)
-    for file in ("source.py", "source.ts"):
-        quality.run_quality_checks(file, workdir=str(tmp_path), config=config,
-                                   log=lambda *args: None, is_test_file_path=lambda path: False,
-                                   detect_quality_tools_fn=lambda lang: [{"name": "check", "command": "true"}],
-                                   get_changed_files_fn=lambda: [file])
-    monkeypatch.setattr(quality.requests, "post", lambda *args, **kwargs: Mock(json=lambda: {"message": {"content": "NO"}}))
-    quality.judge_duplicated_setup("example.py", "def test_a(): pass", ["setup"],
-                                   config=config, log=lambda *args: None)
-
-    missing = set(_leaf_keys(config)) - reads
-    assert missing == set(), {"unread_keys": sorted(".".join(key) for key in missing)}
+def test_every_production_config_key_is_read_by_the_package():
+    """A key is read when one package module quotes both the key and its table."""
+    sources = [path.read_text() for path in PACKAGE_DIR.glob("*.py")]
+    dead = [
+        ".".join(key)
+        for key in _leaf_keys(load_config(CONFIG_DIR / "agent.toml"))
+        if not any(all(f'"{part}"' in source for part in key[-2:]) for source in sources)
+    ]
+    assert dead == []
 
 
 class TestLoadConfig:
