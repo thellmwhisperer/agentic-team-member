@@ -12,3 +12,7 @@ review:
         The delivery step bounds `no-mistakes axi run` with a fixed --wait ceiling on purpose (see its
         ponytail comment): a longer run ends as exit 3 and `axi status` has the rest. Do not replace that
         ceiling with polling loops, and never add a loop without an upper bound.
+    - path: "tests/**"
+      instructions: |
+        Never delete or weaken a test that the linked issue's acceptance criteria or red test ask for,
+        even when it looks heuristic. If such a test seems unreliable, report it as a note and change nothing.
