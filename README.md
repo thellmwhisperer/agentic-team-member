@@ -128,6 +128,8 @@ python3 scripts/tail-run.py                              # newest run under .tmp
 python3 scripts/tail-run.py .tmp/harness-worker/opus-1   # one run directory, or a worker-*.jsonl
 ```
 
+An explicit file path must name a `worker-*.jsonl` log; other files are refused with an error.
+
 It prints the agent's thinking, text and tool calls, and ATM's own events: scope, unit
 start and end, red/green result, rejected follow-ups and the final result. It stops when
 the run writes its report. The worker prints the same agent stream on stdout, and
