@@ -429,10 +429,26 @@ with their outcome, the checks line and `RESULT` last. The worker does not
 print the agent's stream itself; its own lines, the launcher's verdict and a
 plain copy of that rendering go to `stdout.txt` in the run directory.
 
+When every unit passes, ATM runs a ponytail pass, then delivery.
+
+The ponytail pass is one more harness call, with no flag to skip it. Its brief
+is the ponytail-review rules applied to the run's diff against the base commit
+(`brief-ponytail.md`). The agent may only cut: delete, shrink, or replace with
+the standard library, a native feature or an existing helper. ATM keeps the cut
+only if the run's net added lines go down and every gate still passes: each
+unit's red test fails without the run's changes and passes with them, then the
+full test command, typecheck, quality, gate, scope (the files the run already
+touched) and the target's lint (`commands.lint` of its tracked
+`.no-mistakes.yaml`). Otherwise ATM restores the pre-ponytail worktree.
+`report.json` gets `ponytail`: `findings`, `net_lines_before`,
+`net_lines_after`, `kept`, `reason` and `tombstones`. When the target has
+`.slop/`, each finding of a kept cut becomes a standing slopslint tombstone in
+`.slop/tombstones/`, committed with the cut.
+
 ATM excludes `.atm/` from Git in each run clone, so follow-up files there do
 not make delivery dirty when the target repository lacks that ignore rule.
 
-When every unit passes, delivery runs by default:
+After the ponytail pass, delivery runs by default:
 
 1. The clone's work is committed on `atm/<slug>-<timestamp>` and the clone's
    `origin` points at the source repo's `origin`. When the issue came from
