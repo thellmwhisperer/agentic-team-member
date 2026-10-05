@@ -32,7 +32,6 @@ forbidden = ["type: ignore", "noqa"]
 enabled = false
 
 [tools]
-file = "tools.json"
 recommended = []
 """
 
@@ -137,7 +136,6 @@ def _setup(tmp_path, harness_source, issue_text="add(2, 3) returns -1 instead of
     config_dir = tmp_path / "config"
     config_dir.mkdir()
     (config_dir / "agent.toml").write_text(CONFIG_TOML)
-    (config_dir / "tools.json").write_text("[]")
     issue = tmp_path / "issue.md"
     issue.write_text(f"# add returns the difference\n\n{issue_text}\n")
     harness = tmp_path / "fake_harness.py"
@@ -283,7 +281,7 @@ def test_red_green_command_template_can_name_the_test_dir(tmp_path, monkeypatch)
     (tmp_path / "pkg").mkdir()
     (tmp_path / "pkg" / "x_test.go").write_text("package pkg\n")
     verification.verify_red_green("pkg/x_test.go", workdir=str(tmp_path), config=config, emit=lambda s: None,
-                                  log=lambda n, d: None, apply_mechanical_edits=lambda e, w: 0)
+                                  log=lambda n, d: None)
     test_runs = [a for a in seen if a[:2] == ["go", "test"]]
     assert test_runs and all(a == ["go", "test", "./pkg"] for a in test_runs)
 
