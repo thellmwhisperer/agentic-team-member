@@ -1,50 +1,273 @@
-"""The shipped worker config loads and every table in it has a reader."""
-import shutil
+"""Tests for config loading from TOML + JSON."""
+import json
 from pathlib import Path
 
-from agentic_tdd_runner import judge
 from agentic_tdd_runner.config import load_config
 
-CONFIG = Path(__file__).parent.parent / "config" / "agent.toml"
+
+CONFIG_DIR = Path(__file__).parent.parent / "config"
 
 
-def test_production_config_loads_alone(tmp_path):
-    """A copy with nothing beside it loads: the worker needs no tools.json."""
-    copy = tmp_path / "agent.toml"
-    shutil.copy(CONFIG, copy)
-    assert load_config(copy) == load_config(CONFIG)
+class TestProductionConfig:
+    """The shipped config/agent.toml loads without errors."""
+
+    def test_production_toml_loads(self):
+        prod = CONFIG_DIR / "agent.toml"
+        cfg = load_config(prod)
+        assert len(cfg["tools"]) > 0
+        assert "system" in cfg["prompt"]
+        assert "Never move the direct call to the function under test" in cfg["prompt"]["system"]
+
+    def test_production_agent_permission_driven_disabled_by_default(self):
+        prod = CONFIG_DIR / "agent.toml"
+        cfg = load_config(prod)
+        assert cfg["agent"]["permission_driven"] is False
+
+    def test_production_prompt_does_not_enable_permission_mode_by_default(self):
+        prod = CONFIG_DIR / "agent.toml"
+        cfg = load_config(prod)
+        system = cfg["prompt"]["system"]
+        assert "ask_harness" not in system
+        assert "Permission-driven mode is active" not in system
+
+    def test_system_prompt_tells_agent_to_use_issue_location_hints(self):
+        """Bug reports often name the file/function/lines. Without an explicit
+        nudge, models default to broad keyword search and waste exploration
+        steps on large files (observed on roca-madre's 1500-line server.py)."""
+        prod = CONFIG_DIR / "agent.toml"
+        cfg = load_config(prod)
+        system = cfg["prompt"]["system"].lower()
+        assert "issue" in system, "prompt must reference the issue as a source"
+        assert "discovery targets as hypotheses" in system
+        assert "broad keyword search" in system, (
+            "prompt must explicitly steer the agent away from broad keyword search "
+            "and toward the location described in the issue"
+        )
+
+    def test_system_prompt_tells_agent_not_to_cd_inside_run_command(self):
+        """The harness already controls cwd. Chaining `cd x && y` wastes a tool
+        call because the shell validator rejects `cd` as an executable."""
+        prod = CONFIG_DIR / "agent.toml"
+        cfg = load_config(prod)
+        system = cfg["prompt"]["system"].lower()
+        assert "cwd" in system
+        assert "cd" in system
+        assert any(marker in system for marker in ("never", "do not", "don't"))
+        assert "relative" in system or "directly" in system
+
+    def test_run_command_tool_description_explains_cwd_and_cd_rejection(self):
+        prod = CONFIG_DIR / "agent.toml"
+        cfg = load_config(prod)
+        run_command = next(
+            tool["function"]
+            for tool in cfg["tools"]
+            if tool["function"]["name"] == "run_command"
+        )
+        description = run_command["description"].lower()
+        assert "cwd already set" in description
+        assert "cd" in description
+        assert any(marker in description for marker in ("do not", "never", "don't"))
+        assert "relative" in description or "directly" in description
+
+    def test_ask_harness_schema_requires_target_challenge_fields_conditionally(self):
+        prod = CONFIG_DIR / "agent.toml"
+        cfg = load_config(prod)
+        ask_harness = next(
+            tool["function"]
+            for tool in cfg["tools"]
+            if tool["function"]["name"] == "ask_harness"
+        )
+        parameters = ask_harness["parameters"]
+        assert parameters["if"]["properties"]["intent"]["const"] == "challenge_target"
+        assert parameters["then"]["required"] == [
+            "source_file",
+            "target_symbol",
+            "evidence",
+        ]
+
+    def test_system_prompt_tells_agent_to_reuse_fixtures_and_write_narrow_regression(self):
+        """Observed on the Python run (agent-20260419-000440.jsonl): after
+        opening an existing test module, the agent expanded into a broad
+        mini-suite and got pulled into investigating unrelated failures in the
+        same file. Prompt must tell the agent to borrow fixtures/patterns from
+        the existing module but write its regression as a narrow, focused test
+        — not an ambient exploration of the whole module's behavior."""
+        prod = CONFIG_DIR / "agent.toml"
+        cfg = load_config(prod)
+        system = cfg["prompt"]["system"].lower()
+        assert "reuse" in system or "borrow" in system, (
+            "prompt must steer the agent toward reusing existing fixtures/patterns"
+        )
+        assert "narrow" in system, (
+            "prompt must tell the agent to write a NARROW regression test, not a mini-suite"
+        )
+
+    def test_system_prompt_bounds_extra_tests_to_grounded_evidence(self):
+        """Runs should start with the reported regression, then add more cases
+        only when the issue/code/types give evidence. This keeps useful edge
+        coverage without letting the model invent a broad suite."""
+        prod = CONFIG_DIR / "agent.toml"
+        cfg = load_config(prod)
+        system = cfg["prompt"]["system"].lower()
+        assert "one focused regression test first" in system
+        assert "contrastive fixtures" in system
+        assert "add up to two evidence-backed extra tests" in system
+        assert "distinct branch or contract" in system
+        assert "do not invent domain edge cases" in system
+        assert "do not invent the callback signature" in system
 
 
-def test_production_config_has_only_tables_the_code_reads():
-    assert set(load_config(CONFIG)) == {
-        "timeouts", "runner", "environment", "prompt", "quality", "tools", "harness_worker", "follow_ups",
-    }
-    assert set(load_config(CONFIG)["prompt"]) == {"quality_failed"}
+class TestLoadConfig:
+    """load_config reads agent.toml + tools.json into a unified config dict."""
+
+    def test_loads_llm_settings(self, tmp_path):
+        _write_config(tmp_path)
+        cfg = load_config(tmp_path / "agent.toml")
+        assert cfg["llm"]["model"] == "test-model"
+        assert cfg["llm"]["temperature"] == 0.6
+
+    def test_production_configures_bounded_dynamic_thinking(self):
+        prod = CONFIG_DIR / "agent.toml"
+        cfg = load_config(prod)
+        assert cfg["llm"]["thinking_budget_tokens"] == 0
+        budget = cfg["llm"]["thinking_budget"]
+        assert budget["enabled"] is True
+        assert budget["default"] == 256
+        assert budget["recover"] > budget["default"]
+        assert budget["late"] < budget["default"]
+
+    def test_production_ships_state_reviewer_disabled_by_default(self):
+        prod = CONFIG_DIR / "agent.toml"
+        cfg = load_config(prod)
+        assert cfg["state_reviewer"]["enabled"] is False
+        assert cfg["state_reviewer"]["max_dependency_contract_lookups"] >= 2
+
+    def test_loads_system_prompt(self, tmp_path):
+        _write_config(tmp_path)
+        cfg = load_config(tmp_path / "agent.toml")
+        assert "senior software engineer" in cfg["prompt"]["system"]
+
+    def test_loads_tools_from_json(self, tmp_path):
+        _write_config(tmp_path)
+        cfg = load_config(tmp_path / "agent.toml")
+        assert len(cfg["tools"]) == 2
+        assert cfg["tools"][0]["function"]["name"] == "read_file"
+        assert cfg["tooling"]["recommended"] == ["rg"]
+
+    def test_production_preserves_tooling_settings(self):
+        prod = CONFIG_DIR / "agent.toml"
+        cfg = load_config(prod)
+        assert cfg["tooling"]["recommended"] == ["rg"]
+
+    def test_loads_agent_settings(self, tmp_path):
+        _write_config(tmp_path)
+        cfg = load_config(tmp_path / "agent.toml")
+        assert cfg["agent"]["max_steps"] == 30
+        assert cfg["agent"]["max_tool_output"] == 4000
+
+    def test_production_agent_non_apply_warning_threshold(self):
+        prod = CONFIG_DIR / "agent.toml"
+        cfg = load_config(prod)
+        assert cfg["agent"]["non_apply_step_warning_threshold"] == 5
+
+    def test_loads_nudge_and_messages(self, tmp_path):
+        _write_config(tmp_path)
+        cfg = load_config(tmp_path / "agent.toml")
+        assert "DONE" in cfg["prompt"]["nudge"]
+        assert "test file" in cfg["prompt"]["no_test_found"]
+
+    def test_loads_verification_settings(self, tmp_path):
+        _write_config(tmp_path)
+        cfg = load_config(tmp_path / "agent.toml")
+        assert cfg["verification"]["max_rejections"] == 3
+
+    def test_quality_section_optional(self, tmp_path):
+        """Config without [quality] loads fine (backward compat)."""
+        _write_config(tmp_path)
+        cfg = load_config(tmp_path / "agent.toml")
+        # No quality section in minimal config → empty dict or missing
+        assert cfg.get("quality", {}).get("enabled", False) is False
+
+    def test_production_quality_section(self):
+        """Production config has quality section with expected structure."""
+        prod = CONFIG_DIR / "agent.toml"
+        cfg = load_config(prod)
+        assert cfg["quality"]["enabled"] is True
+        assert cfg["quality"]["max_fix_rounds"] == 3
+        assert "as any" in cfg["quality"]["typescript"]["forbidden"]
+        assert "as never" in cfg["quality"]["typescript"]["forbidden"]
+        assert "{} as" in cfg["quality"]["typescript"]["forbidden"]
+        assert ": any" in cfg["quality"]["typescript"]["forbidden"]
+        assert "type: ignore" in cfg["quality"]["python"]["forbidden"]
+        assert "Do not add `__set...ForTests`" in cfg["prompt"]["system"]
+
+    def test_production_pr_section(self):
+        """Production config has pr section."""
+        prod = CONFIG_DIR / "agent.toml"
+        cfg = load_config(prod)
+        assert cfg["pr"]["enabled"] is True
+        assert cfg["pr"]["base_branch"] == "main"
+        assert cfg["timeouts"]["pr_create"] == 120
+
+    def test_tools_path_relative_to_toml(self, tmp_path):
+        """tools.json path in TOML is relative to the TOML file's directory."""
+        sub = tmp_path / "nested"
+        sub.mkdir()
+        _write_config(sub)
+        cfg = load_config(sub / "agent.toml")
+        assert len(cfg["tools"]) == 2
 
 
-def test_production_timeouts_cover_verification_and_quality():
-    timeouts = load_config(CONFIG)["timeouts"]
-    assert timeouts["test_run"] > 0  # verification.verify_red_green indexes it directly
-    assert timeouts["tool_execution"] > 0  # so does quality.run_quality_checks
+def _write_config(directory: Path):
+    """Write minimal agent.toml + tools.json for testing."""
+    directory.mkdir(parents=True, exist_ok=True)
 
+    toml = directory / "agent.toml"
+    toml.write_text("""\
+[agent]
+max_steps = 30
+max_tool_output = 4000
 
-def test_production_quality_section():
-    cfg = load_config(CONFIG)
-    assert cfg["quality"]["enabled"] is True
-    for pattern in ("as any", "as never", "{} as", ": any"):
-        assert pattern in cfg["quality"]["typescript"]["forbidden"]
-    assert "type: ignore" in cfg["quality"]["python"]["forbidden"]
-    assert "{details}" in cfg["prompt"]["quality_failed"]
+[llm]
+url = "http://localhost:9999/v1/chat/completions"
+model = "test-model"
+temperature = 0.6
+top_p = 0.95
+top_k = 20
 
+[prompt]
+system = \"\"\"
+You are a senior software engineer fixing a bug.
+\"\"\"
 
-def test_production_worker_defaults_match_the_code():
-    cfg = load_config(CONFIG)
-    assert cfg["harness_worker"]["max_units"] == 3  # harness_worker.main falls back to 3
-    assert cfg["follow_ups"]["judge"] == judge.DEFAULTS
-    assert judge.settings(cfg)["enabled"] is False
+nudge = "Continue. If all tests pass, say DONE."
 
+no_test_found = "You said DONE but I can't find a test file."
 
-def test_tools_table_is_returned_as_written(tmp_path):
-    toml = tmp_path / "agent.toml"
-    toml.write_text('[tools]\nrecommended = ["rg"]\npath_dirs = ["/x"]\n')
-    assert load_config(toml)["tools"] == {"recommended": ["rg"], "path_dirs": ["/x"]}
+[verification]
+max_rejections = 3
+
+[tools]
+file = "tools.json"
+recommended = ["rg"]
+""")
+
+    tools = directory / "tools.json"
+    tools.write_text(json.dumps([
+        {
+            "type": "function",
+            "function": {
+                "name": "read_file",
+                "description": "Read a file.",
+                "parameters": {"type": "object", "required": ["path"], "properties": {"path": {"type": "string"}}}
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "run_command",
+                "description": "Run a command.",
+                "parameters": {"type": "object", "required": ["command"], "properties": {"command": {"type": "string"}}}
+            }
+        },
+    ]))

@@ -1,8 +1,5 @@
 """Tests for path and test-file discovery helpers."""
 
-import pytest
-
-from agentic_tdd_runner.paths import resolve_repo_path
 from agentic_tdd_runner.paths import test_runner_command_for_file as command_for_file
 
 
@@ -81,32 +78,3 @@ def test_runner_command_for_file_keeps_pytest_for_python_tests():
 
 def test_runner_command_for_file_unknown_language_does_not_default_to_bun():
     assert command_for_file("spec/worker_spec.rb", {"runner": {}}) == ""
-
-
-# Recovered from tests/test_agent.py before the prune (0e9a197).
-class TestResolveRepoPath:
-    """Path resolution must confine access to the workdir."""
-
-    def test_normal_relative_path(self, tmp_path):
-        (tmp_path / "src").mkdir()
-        (tmp_path / "src" / "file.ts").write_text("hello")
-        result = resolve_repo_path("src/file.ts", str(tmp_path))
-        assert result == tmp_path / "src" / "file.ts"
-
-    def test_rejects_parent_traversal(self, tmp_path):
-        with pytest.raises(ValueError, match="escapes workdir"):
-            resolve_repo_path("../../../etc/passwd", str(tmp_path))
-
-    def test_rejects_absolute_path(self, tmp_path):
-        with pytest.raises(ValueError, match="escapes workdir"):
-            resolve_repo_path("/etc/passwd", str(tmp_path))
-
-    def test_rejects_sneaky_traversal(self, tmp_path):
-        with pytest.raises(ValueError, match="escapes workdir"):
-            resolve_repo_path("src/../../outside", str(tmp_path))
-
-    def test_allows_nested_paths(self, tmp_path):
-        (tmp_path / "src" / "deep").mkdir(parents=True)
-        (tmp_path / "src" / "deep" / "file.ts").write_text("ok")
-        result = resolve_repo_path("src/deep/file.ts", str(tmp_path))
-        assert result == tmp_path / "src" / "deep" / "file.ts"

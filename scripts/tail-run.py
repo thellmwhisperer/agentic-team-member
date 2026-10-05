@@ -1,179 +1,254 @@
 #!/usr/bin/env python3
-"""Follow a harness-worker run log (worker-*.jsonl) in readable form.
-
-    tail-run.py                          newest run under .tmp/harness-worker
-    tail-run.py .tmp/harness-worker/X    newest worker-*.jsonl in that run directory
-    tail-run.py path/worker-....jsonl    that log
-
-Agent events are rendered the way the worker prints them live. ATM's own events
-(`atm.*`) get one line each, more for a finished unit. Following stops when the run
-writes its report, fails to prepare, or leaves an exit.txt beside the log.
-"""
-from __future__ import annotations
-
+"""Follow agent run logs in real time. Pretty, complete, no truncation."""
 import argparse
+import glob
 import json
-import re
+import os
+import subprocess
 import sys
-import time
-from datetime import datetime
-from pathlib import Path
+import tempfile
 
-HERE = Path(__file__).resolve().parent.parent
-RUNS = HERE / ".tmp" / "harness-worker"  # where scripts/atm-run.py puts runs
-sys.path.insert(0, str(HERE))
-
-from agentic_tdd_runner.harness_worker import summarize_event  # noqa: E402
-
-END_EVENTS = {"atm.report", "atm.prepare_failed"}
-BARE_LABEL = re.compile(r"^\[[\w.-]+\]$")
+SEP = "─" * 80
 
 
-def is_worker_log(path: Path) -> bool:
-    return path.name.startswith("worker-") and path.suffix == ".jsonl"
+def _build_parser():
+    parser = argparse.ArgumentParser(
+        description="Follow ATM agent JSONL logs in real time."
+    )
+    parser.add_argument(
+        "logfile",
+        nargs="?",
+        help=(
+            "Specific JSONL log to follow. Defaults to the newest "
+            "agent-*.jsonl found in AGENT_LOG_DIR, the current directory, "
+            "XDG_RUNTIME_DIR, or the system temp directory."
+        ),
+    )
+    return parser
 
 
-def newest_log(path: Path) -> Path | None:
-    if path.is_file():
-        # Other files may lack the worker's terminal event and leave follow() waiting forever.
-        return path if is_worker_log(path) else None
-    logs = list(path.glob("worker-*.jsonl")) + list(path.glob("*/worker-*.jsonl")) if path.is_dir() else []
-    return max(logs, key=lambda p: p.stat().st_mtime) if logs else None
+def _default_log_dirs():
+    candidates = [
+        os.environ.get("AGENT_LOG_DIR"),
+        os.getcwd(),
+        os.environ.get("XDG_RUNTIME_DIR"),
+        tempfile.gettempdir(),
+    ]
+    return [path for i, path in enumerate(candidates) if path and path not in candidates[:i]]
 
 
-def ok(flag) -> str:
-    return "PASS" if flag else "FAIL"
+def _resolve_logfile(logfile):
+    if logfile:
+        return logfile
+    files = []
+    for directory in _default_log_dirs():
+        files.extend(glob.glob(os.path.join(directory, "agent-*.jsonl")))
+    if not files:
+        return None
+    return max(set(files), key=os.path.getmtime)
 
 
-def unit_lines(e: dict) -> list[str]:
-    lines = [f"=== unit {e.get('unit')}: {ok(e.get('passed'))} ==="]
-    for key, label in (("verified", "red/green"), ("quality_ok", "quality"), ("gate_ok", "gate"), ("scope_ok", "scope")):
-        check = e.get(key) or {}
-        lines.append(f"  {label:<10} {ok(check.get('ok'))} {check.get('message', '')}".rstrip())
-    lines.append(f"  full tests={e.get('full_tests_ok')} typecheck={e.get('typecheck_ok')} "
-                 f"agent exit={e.get('harness_exit_code')} timed_out={e.get('timed_out')} {e.get('duration_seconds')}s")
-    lines.append(f"  test file  {e.get('test_file') or 'none'}")
-    lines.append(f"  changed    {', '.join(e.get('changed_files') or []) or 'nothing'}")
-    for f in e.get("follow_ups") or []:
-        state = ("chainable" if f.get("chainable") else "accepted, not chained" if f.get("accepted") else "rejected")
-        lines.append(f"  follow-up {f.get('index')}: {state}: {f.get('title')}")
-    return lines
+def fmt_metric(value, spec, suffix=""):
+    if isinstance(value, (int, float)):
+        return f"{value:{spec}}{suffix}"
+    return f"?{suffix}"
 
 
-def render_atm(name: str, e: dict) -> list[str]:
-    if name == "scope":
-        return [f"[atm] scope ({e.get('source')}): {', '.join(e.get('paths') or []) or 'open'}"]
-    if name == "prepared":
-        return [f"[atm] prepared {e.get('worktree')} base={str(e.get('base_sha', ''))[:10]} "
-                f"tests={e.get('test_command')!r} typecheck={e.get('typecheck_command')!r}"]
-    if name == "prepare_failed":
-        return [f"[atm] PREPARE FAILED: {e.get('error')}"]
-    if name == "unit_started":
-        return ["", f"=== unit {e.get('unit')} started === base={str(e.get('base_sha', ''))[:10]} "
-                    f"scope={', '.join(e.get('scope') or []) or 'open'}"]
-    if name == "harness_failed":
-        return [f"[atm] agent did not start: {e.get('error')}"]
-    if name == "harness_done":
-        report = e.get("report") or {}
-        lines = [f"[atm] unit {e.get('unit')} agent finished: exit={e.get('exit_code')} timed_out={e.get('timed_out')} "
-                 f"{e.get('duration_seconds')}s test_file={report.get('test_file')} "
-                 f"follow_ups={len(report.get('follow_ups') or [])}"]
-        if e.get("report_parse_error"):
-            lines.append(f"      no report: {e['report_parse_error']}")
-        if report.get("summary"):
-            lines.append(f"      summary: {report['summary']}")
-        return lines
-    if name == "verify":
-        red = "PASS (bad)" if e.get("red_passed") else "FAIL (good)"
-        green = "PASS (good)" if e.get("green_passed") else "FAIL (bad)"
-        return [f"[atm] red/green {e.get('test_file')}: without fix {red}, with fix {green}"]
-    if name == "verify_worktree_changed":
-        return [f"[atm] worktree changed during verification of {e.get('test_file')}: verdict void"]
-    if name == "verify_invalid_red":
-        return [f"[atm] invalid red for {e.get('test_file')}: fails on a missing module ({e.get('marker')})"]
-    if name == "quality_forbidden":
-        return [f"[atm] forbidden patterns: {'; '.join(e.get('hits') or [])}"]
-    if name in ("duplicated_setup_judge", "duplicated_setup_judge_error"):
-        return [f"[atm] duplicated-setup judge {e.get('file')}: {e.get('decision') or e.get('error')}"]
-    if name == "follow_up_rejected":
-        return [f"[atm] follow-up {e.get('index')} rejected: {e.get('title')} ({e.get('reason')})"]
-    if name == "follow_up_not_chainable":
-        return [f"[atm] follow-up {e.get('index')} accepted, not chained: {e.get('title')} ({e.get('chain_reason')})"]
-    if name == "unit_staged":
-        return [f"[atm] follow-up {e.get('from_follow_up')} becomes unit {e.get('unit')}: red test {e.get('red_test')}"]
-    if name == "unit_done":
-        return unit_lines(e)
-    if name == "report":
-        units = e.get("units") or []
-        passed = bool(units) and all(u.get("passed") for u in units)
-        return ["", f"=== RESULT: {ok(passed)} === units={len(units)}/{e.get('max_units')} {e.get('duration_seconds')}s "
-                    f"harness={e.get('harness')} model={e.get('model') or 'default'}",
-                f"  changed  {', '.join(e.get('changed_files') or []) or 'nothing'}",
-                f"  clone    {e.get('worktree')}"]
-    return [f"[atm] {name} {json.dumps(e, ensure_ascii=False)[:300]}"]
+def fmt_tool(name, args, elapsed, result_chars, result, applied=None):
+    status = ""
+    if applied is True:
+        status = "  ✅ applied"
+    elif applied is False:
+        status = "  ❌ failed"
+    lines = [f"  🔧 {name}{status}  ({result_chars} chars, {elapsed}s)"]
+
+    if name == "str_replace_editor":
+        lines.append(f"     file: {args.get('path', '?')}")
+        old = args.get("old_str", "")
+        new = args.get("new_str", "")
+        lines.append("     ── old ──")
+        for ol in old.split("\n"):
+            lines.append(f"     - {ol}")
+        lines.append("     ── new ──")
+        for nl in new.split("\n"):
+            lines.append(f"     + {nl}")
+
+    elif name == "create_file":
+        lines.append(f"     file: {args.get('path', '?')}")
+        content = args.get("content", "")
+        for cl in content.split("\n"):
+            lines.append(f"     + {cl}")
+
+    elif name == "read_file":
+        lines.append(f"     path: {args.get('path', '?')}")
+
+    elif name == "run_command":
+        lines.append(f"     $ {args.get('command', '?')}")
+        if result:
+            for rl in result.split("\n")[:30]:
+                lines.append(f"       {rl}")
+            total = result.count("\n") + 1
+            if total > 30:
+                lines.append(f"       ... ({total} lines total)")
+
+    else:
+        lines.append(f"     args: {json.dumps(args, ensure_ascii=False, indent=2)}")
+
+    return "\n".join(lines)
 
 
-def render(entry) -> list[str]:
-    """Lines for one log entry: {"ts", "harness", "event"}."""
-    event = entry.get("event") if isinstance(entry, dict) else entry
-    kind = event.get("type", "") if isinstance(event, dict) else ""
-    if kind.startswith("atm."):
-        try:
-            stamp = datetime.fromisoformat(entry["ts"]).astimezone().strftime("%H:%M:%S ")
-        except (KeyError, TypeError, ValueError):
-            stamp = ""
-        lines = render_atm(kind[4:], event)
-        return [stamp + line if line and not line.startswith(" ") else line for line in lines]
-    summary = summarize_event(event)
-    if not summary or BARE_LABEL.match(summary):
-        return []  # "[status]", "[rate_limit_event]": bookkeeping the worker prints live, noise here
-    return [f"  {summary}"]
-
-
-def follow(log: Path) -> int:
-    finished = log.parent / "exit.txt"
-    pending = ""
-    with log.open(encoding="utf-8", errors="replace") as fh:
-        while True:
-            chunk = fh.readline()
-            if chunk:
-                pending += chunk
-                if not pending.endswith("\n"):
-                    continue  # the worker is mid-write; finish the line first
-                line, pending = pending.strip(), ""
-                if not line:
-                    continue
-                try:
-                    entry = json.loads(line)
-                except json.JSONDecodeError:
-                    print(f"  [unparsed] {line[:160]}")
-                    continue
-                for out in render(entry):
-                    print(out, flush=True)
-                event = entry.get("event") if isinstance(entry, dict) else None
-                if isinstance(event, dict) and event.get("type") in END_EVENTS:
-                    return 0
-                continue
-            if finished.exists():
-                return 0
-            time.sleep(0.5)
-
-
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("path", nargs="?", help=f"worker-*.jsonl or a run directory (default: newest under {RUNS})")
-    args = parser.parse_args(argv)
-    where = Path(args.path) if args.path else RUNS
-    log = newest_log(where)
-    if not log:
-        what = "Not a worker-*.jsonl log:" if where.is_file() else "No worker-*.jsonl log found under"
-        print(f"{what} {where}", file=sys.stderr)
+def main(argv=None):
+    args = _build_parser().parse_args(argv)
+    logfile = _resolve_logfile(args.logfile)
+    if not logfile:
+        print("No agent logs found")
         return 1
-    print(f"Following: {log}\n", flush=True)
+
+    print(f"Following: {logfile}\n")
     try:
-        return follow(log)
-    except KeyboardInterrupt:
-        return 130
+        proc = subprocess.Popen(
+            ["tail", "-f", "-n", "+1", logfile],
+            stdout=subprocess.PIPE,
+            text=True,
+        )
+    except OSError as exc:
+        print(f"Failed to start tail: {exc}", file=sys.stderr)
+        return 1
+
+    for line in proc.stdout or ():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            d = json.loads(line)
+        except json.JSONDecodeError as ex:
+            print(f"  [parse error: {ex}] line={line[:120]!r}")
+            continue
+
+        try:
+            e = d.get("event", "?")
+            s = d.get("step", "")
+
+            if e == "step":
+                finish = d.get("finish_reason", "")
+                content = d.get("content", "")
+                thinking = d.get("thinking", "")
+                timings = d.get("timings") or {}
+                prompt_ms = timings.get("prompt_ms", 0)
+                pred_ms = timings.get("predicted_ms", 0)
+                tok_s = timings.get("predicted_per_second", 0)
+                usage = d.get("usage", {})
+                p_tok = usage.get("prompt_tokens", "?")
+                c_tok = usage.get("completion_tokens", "?")
+                tc = d.get("tool_calls", [])
+                tc_names = ", ".join(t.get("name", "?") for t in tc) if tc else ""
+                tok_s_str = fmt_metric(tok_s, ".1f", " tok/s")
+                prompt_ms_str = fmt_metric(prompt_ms, ".0f", "ms")
+                pred_ms_str = fmt_metric(pred_ms, ".0f", "ms")
+
+                print(f"\n{SEP}")
+                print(
+                    f"  Step [{s}]  finish={finish}  {p_tok}→{c_tok} tok  "
+                    f"{tok_s_str}  prompt={prompt_ms_str}  pred={pred_ms_str}"
+                )
+                if tc_names:
+                    print(f"  tools: {tc_names}")
+                if thinking:
+                    print(f"\n  🧠 Thinking ({len(thinking)} chars):")
+                    for tline in thinking.strip().split("\n"):
+                        print(f"    {tline}")
+                if content:
+                    print("\n  💬 Response:")
+                    for cline in content.strip().split("\n"):
+                        print(f"    {cline}")
+
+            elif e == "tool":
+                name = d.get("name", "")
+                args = d.get("args", {})
+                elapsed = d.get("elapsed_s", 0)
+                result_chars = d.get("result_chars", 0)
+                result = d.get("result", "")
+                applied = d.get("applied")
+                print(fmt_tool(name, args, elapsed, result_chars, result, applied))
+
+            elif e == "verify_result":
+                verified = d.get("verified", "?")
+                msg = d.get("message", "")
+                tf = d.get("test_file", "")
+                print(f"\n{'═' * 80}")
+                print(f"  ✅ VERIFY  verified={verified}  test={tf}")
+                for vline in msg.strip().split("\n"):
+                    print(f"    {vline}")
+                print(f"{'═' * 80}")
+
+            elif e == "quality":
+                passed = d.get("passed", "?")
+                msg = d.get("message", "")
+                print(f"\n{'═' * 80}")
+                print(f"  🔍 QUALITY  passed={passed}")
+                for qline in msg.strip().split("\n"):
+                    print(f"    {qline}")
+                print(f"{'═' * 80}")
+
+            elif e == "done":
+                print(f"\n{'█' * 80}")
+                print(
+                    f"  🏁 DONE at step {d.get('step', '?')}, "
+                    f"verified={d.get('verified', '?')}"
+                )
+                print(f"{'█' * 80}")
+
+            elif e == "exhausted":
+                print(f"\n{'█' * 80}")
+                print(f"  💀 EXHAUSTED after {d.get('steps', '?')} steps")
+                print(f"{'█' * 80}")
+
+            elif e == "quality_give_up":
+                print(f"\n  ❌ QUALITY GIVE UP at step {d.get('step', '?')}")
+
+            elif e == "init":
+                print(
+                    f"  🚀 init: model={d.get('model', '?')}, "
+                    f"max_steps={d.get('max_steps', '?')}"
+                )
+                print(f"     workdir: {d.get('workdir', '?')}")
+                print(f"     log: {d.get('log', '?')}")
+
+            elif e == "start":
+                print("  📋 issue:")
+                for iline in d.get("issue", "").strip().split("\n"):
+                    print(f"    {iline}")
+
+            elif e == "cookbook":
+                print(
+                    "  📖 cookbook: "
+                    f"{d.get('source', '')} → {d.get('symbol', '')} "
+                    f"({d.get('prompt_len', '?')} chars)"
+                )
+
+            elif e == "error":
+                print(f"\n  ⚠️  ERROR at step {d.get('step', '?')}: {d.get('error', '')}")
+
+            elif e == "llm_timeout":
+                print(
+                    f"\n  ⏱️  LLM TIMEOUT at step {d.get('step', '?')}: "
+                    f"{d.get('error', '')}"
+                )
+
+            elif e == "context_compacted":
+                print(
+                    f"\n  🧹 CONTEXT COMPACTED after {d.get('reason', '?')}: "
+                    f"{d.get('before_messages', '?')} → "
+                    f"{d.get('after_messages', '?')} messages"
+                )
+
+            else:
+                print(f"  {e}: {json.dumps(d, indent=2)}")
+
+        except (TypeError, AttributeError, ValueError) as ex:
+            print(f"  [event format error: {ex}]")
+
+    return proc.wait()
 
 
 if __name__ == "__main__":

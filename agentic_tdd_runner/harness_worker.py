@@ -21,7 +21,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from agentic_tdd_runner import delivery, quality
+from agentic_tdd_runner import quality
 from agentic_tdd_runner import judge as follow_up_judge, verification
 from agentic_tdd_runner.config import load_config
 from agentic_tdd_runner.environment import (
@@ -82,11 +82,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--harness-bin", help="Override the harness executable")
     parser.add_argument("--dry-run", action="store_true", help="Prepare and print the brief only")
     parser.add_argument("--max-units", type=int, help="Chain accepted follow-ups as further units in the same clone, up to this many units (config [harness_worker] max_units, default 3)")
-    parser.add_argument("--deliver", choices=["no-mistakes", "none"], default="no-mistakes",
-                        help="After a green verdict, hand the clone to no-mistakes, which opens the PR (default). "
-                             "'none' stops at the verdict and leaves the patch in the clone")
-    parser.add_argument("--deliver-bin", default="no-mistakes", help="Override the delivery executable")
-    parser.add_argument("--deliver-timeout", type=int, default=1800, help="Seconds for the delivery tool (default 1800)")
     parser.add_argument("--scope", action="append", default=[], metavar="GLOB",
                         help="Repo-relative glob the diff may touch (repeatable; default: derived from the issue)")
     args = parser.parse_args(argv)
@@ -811,8 +806,7 @@ def worktree_fingerprint(workdir: str) -> str:
         if line.startswith("??"):
             path = Path(workdir) / line[3:]
             if path.is_file():
-                h.update(line.encode())
-                h.update(path.read_bytes())
+                h.update(line.encode()); h.update(path.read_bytes())
     return h.hexdigest()
 
 
@@ -822,8 +816,8 @@ def main(argv: list[str] | None = None) -> int:
     # red/green stash, which makes the oracle run the wrong code.
     os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
     config = load_config(args.config)
-    # The worker does not preflight [tools].recommended: the harness brings its own tools.
-    config.setdefault("tools", {})["recommended"] = []
+    # The recommended-tools preflight serves ATM's own tool loop; the harness brings its own tools.
+    config.setdefault("tooling", {})["recommended"] = []
     artifact_dir = Path(args.artifact_dir).resolve()
     log_dir = Path(args.log_dir).resolve()
     artifact_dir.mkdir(parents=True, exist_ok=True)
@@ -895,6 +889,7 @@ def main(argv: list[str] | None = None) -> int:
             before = worktree_fingerprint(worktree)
             verified, verify_msg = verification.verify_red_green(
                 test_file, workdir=worktree, config=config, emit=print, log=log_capturing_red,
+                apply_mechanical_edits=lambda edits, wd: 0,
             )
             if worktree_fingerprint(worktree) != before:
                 # The verdict is about code that is no longer what the agent left: never trust it.
@@ -986,14 +981,6 @@ def main(argv: list[str] | None = None) -> int:
         "duration_seconds": sum(u["duration_seconds"] for u in units), "timed_out": any(u["timed_out"] for u in units),
         "harness_exit_code": last["harness_exit_code"], "report_parse_error": last["report_parse_error"],
     }
-    delivered = None
-    if passed and args.deliver == "no-mistakes":
-        print(f"[DELIVER] no-mistakes in {worktree}")
-        delivered = delivery.deliver(worktree, args.repo, title, len(units), binary=args.deliver_bin,
-                                     timeout=args.deliver_timeout)
-        result["delivery"] = delivered
-        result["head_sha"] = delivered.get("head_sha") or result["head_sha"]
-        log("delivery", delivered)
     (artifact_dir / "report.json").write_text(json.dumps(result, indent=2))
     log("report", result)
     log_fh.close()
@@ -1013,13 +1000,8 @@ def main(argv: list[str] | None = None) -> int:
                      else "rejected: " + f.get("reason", ""))
             print(f"            follow-up {f['index']}: {state}")
     print(f"changed:    {', '.join(changed_all) or 'none'}")
-    if delivered is not None:
-        print(f"delivery:   {'PASS' if delivered['ok'] else 'FAIL'} branch={delivered.get('branch')} "
-              f"pr={delivered.get('pr_url') or 'none'} {_snippet(delivered.get('error') or delivered.get('output_tail') or '', 120)}")
     print(f"RESULT:     {'PASS' if passed else 'FAIL'} report={artifact_dir / 'report.json'}")
-    if not passed:
-        return 1
-    return 3 if delivered is not None and not delivered["ok"] else 0
+    return 0 if passed else 1
 
 
 if __name__ == "__main__":
