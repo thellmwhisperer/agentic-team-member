@@ -5,6 +5,26 @@ from agentic_tdd_runner.config import load_config
 
 
 CONFIG_DIR = Path(__file__).parent.parent / "config"
+PACKAGE_DIR = Path(__file__).parent.parent / "agentic_tdd_runner"
+
+
+def _leaf_keys(table: dict, parents: tuple[str, ...] = ()):
+    for key, value in table.items():
+        if isinstance(value, dict):
+            yield from _leaf_keys(value, (*parents, key))
+        else:
+            yield (*parents, key)
+
+
+def test_every_production_config_key_is_read_by_the_package():
+    """A key is read when one package module quotes both the key and its table."""
+    sources = [path.read_text() for path in PACKAGE_DIR.glob("*.py")]
+    dead = [
+        ".".join(key)
+        for key in _leaf_keys(load_config(CONFIG_DIR / "agent.toml"))
+        if not any(all(f'"{part}"' in source for part in key[-2:]) for source in sources)
+    ]
+    assert dead == []
 
 
 class TestLoadConfig:
