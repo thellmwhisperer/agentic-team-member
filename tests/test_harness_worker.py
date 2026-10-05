@@ -989,6 +989,21 @@ def test_deliver_none_stops_at_the_verdict(tmp_path, monkeypatch):
     assert "delivery" not in json.loads((artifacts / "report.json").read_text())
     assert not calls.exists()
 
+@pytest.mark.parametrize("from_github", [True, False])
+def test_unit_commit_of_an_issue_run_closes_the_issue(tmp_path, monkeypatch, from_github):
+    argv, artifacts, _, _ = _delivery_setup(tmp_path, monkeypatch)
+    if from_github:
+        i = argv.index("--issue-file")
+        argv[i:i + 2] = ["--issue-number", "7", "--github-repo", "owner/calc"]
+        monkeypatch.setattr(harness_worker, "load_issue", lambda args: (
+            "add returns the difference", "add(2, 3) returns -1 instead of 5."))
+    assert harness_worker.main(argv) == 0
+    clone = json.loads((artifacts / "report.json").read_text())["worktree"]
+    message = subprocess.run(["git", "log", "-1", "--format=%B"], cwd=clone, capture_output=True, text=True).stdout.strip()
+    expected = "atm unit 1: add returns the difference"
+    assert message == (f"{expected}\n\nCloses #7" if from_github else expected)
+
+
 def test_scan_forbidden_reports_only_lines_added_since_base(tmp_path):
     marker = "no" + "qa"  # spelled apart so this file never carries the forbidden pattern itself
     repo = tmp_path / "repo"
