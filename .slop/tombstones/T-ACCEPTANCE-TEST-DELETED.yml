@@ -1,0 +1,22 @@
+schema: 1
+id: T-ACCEPTANCE-TEST-DELETED
+status: accepted
+category: alien_code
+title: Review agent deleted the acceptance test of issue 98 as unreliable
+created_at: 2026-10-05
+incident:
+  pattern: The test an issue asks for is removed by a later agent that judges it imperfect.
+  what_went_wrong: >
+    On PR 109 the no-mistakes review step deleted test_every_production_config_key_is_read_by_the_package,
+    criterion 1 and red test of issue 98, calling the source-text check unreliable. Reverted twice.
+  root_cause: The reviewer optimised test quality in isolation and ignored that the issue required that test.
+  rule_established: >
+    A test the linked issue asks for is never deleted or weakened; doubts go to a note.
+    review.path_instructions for tests/** says so.
+  evidence:
+    - family: test_weakening
+      example: "no-mistakes(review): Removed unreliable source-text config check (61e6351, reverted in 04ca1af)"
+      artifact: tests/test_config.py
+match:
+  family: test_weakening
+  artifact: tests/test_config.py

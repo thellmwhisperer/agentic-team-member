@@ -1,0 +1,20 @@
+schema: 1
+id: T-FORMAT-CHURN-88
+status: accepted
+category: alien_code
+title: Document step reformatted delivery code to 88 columns in a 120-column repo
+created_at: 2026-10-05
+incident:
+  pattern: Formatting changes to untouched lines with no rule asking for them.
+  what_went_wrong: >
+    In the hand-made PR 96 the no-mistakes document step ran a formatter at its default width over
+    delivery.py (+74/-18). The repository uses 120 columns and had no formatter config. Reverted (42d1721).
+  root_cause: No ruff config existed, so the tool's default won.
+  rule_established: ruff.toml fixes line-length = 120; formatting only changes lines the change touches.
+  evidence:
+    - family: format_churn
+      example: "no-mistakes(document): Fix Ruff issues in delivery changes (788d15e)"
+      artifact: ruff.toml
+match:
+  family: format_churn
+  artifact: ruff.toml

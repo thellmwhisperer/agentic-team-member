@@ -1,0 +1,23 @@
+schema: 1
+id: T-UNBOUNDED-STATUS-POLL
+status: accepted
+category: alien_code
+title: Review agent replaced the delivery wait ceiling with an unbounded status-polling loop
+created_at: 2026-10-05
+incident:
+  pattern: A deliberate, documented upper bound replaced by a loop with no exit except success.
+  what_went_wrong: >
+    On PR 101 the no-mistakes review step swapped the fixed --wait ceiling of `axi run` in deliver()
+    for a loop calling `axi status` every second until an outcome appeared, plus a test for it. The
+    loop hung the test suite for 11 minutes; the run was aborted and both commits dropped before push.
+  root_cause: The reviewer read "until the run ends" literally and ignored the ponytail comment naming the ceiling.
+  rule_established: >
+    The delivery wait stays bounded. review.path_instructions in .no-mistakes.yaml forbids replacing it
+    with polling and forbids loops without an upper bound.
+  evidence:
+    - family: speculative_hardening
+      example: "while result['exit_code'] == 3 and not OUTCOME.search(text): ... time.sleep(1)  (pipeline commit bc65317, never pushed)"
+      artifact: agentic_tdd_runner/harness_worker.py
+match:
+  family: speculative_hardening
+  artifact: agentic_tdd_runner/harness_worker.py

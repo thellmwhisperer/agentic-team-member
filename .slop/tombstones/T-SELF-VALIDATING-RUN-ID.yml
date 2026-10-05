@@ -1,0 +1,21 @@
+schema: 1
+id: T-SELF-VALIDATING-RUN-ID
+status: accepted
+category: alien_code
+title: Hand-made delivery tested a run-id regex against invented no-mistakes output
+created_at: 2026-10-05
+incident:
+  pattern: A test fixture written from the author's guess about a tool, so test and bug agree.
+  what_went_wrong: >
+    In the hand-made PR 96 the run id regex expected `run: 01M...` without quotes; the real output is
+    `run: "01M..."`. The test fed the same invented string, so it passed while the code never parsed a
+    real run. Reverted with the morning's changes (42d1721); ATM's version parses the quoted form.
+  root_cause: Nobody ran the real tool once before writing the fixture.
+  rule_established: Fixtures for external tools are copied from real output, with the date it was captured.
+  evidence:
+    - family: self_validating_test
+      example: "PR 96: RUN_ID regex and its fixture both without quotes"
+      artifact: tests/test_harness_worker.py
+match:
+  family: self_validating_test
+  artifact: tests/test_harness_worker.py

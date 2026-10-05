@@ -7,7 +7,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-VERSION="v0.2.0"
+VERSION="v0.3.0"
 CACHE_DIR=".tmp/slopslint/${VERSION}"
 
 case "$(uname -s)" in

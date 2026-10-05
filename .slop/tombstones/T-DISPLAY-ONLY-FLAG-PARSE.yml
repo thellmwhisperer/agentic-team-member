@@ -1,0 +1,20 @@
+schema: 1
+id: T-DISPLAY-ONLY-FLAG-PARSE
+status: accepted
+category: alien_code
+title: tail-run parses the worker command line only to print the base ref and timeout
+created_at: 2026-10-05
+incident:
+  pattern: Extra input parsing whose only output is cosmetic.
+  what_went_wrong: >
+    tail-run.py reads command.txt and rebuilds the worker's flags to show "origin/main@" and "timeout=".
+    The base SHA is already in the log. Flagged by ponytail-review.
+  root_cause: The agent reproduced every field of the mock output instead of the ones that carry information.
+  rule_established: Rendering uses what the log already holds; cosmetic fields do not justify new inputs.
+  evidence:
+    - family: speculative_feature
+      example: "argv = shlex.split(cmd.read_text()); self.flags = {a: b for a, b in zip(argv, argv[1:]) ...}"
+      artifact: scripts/tail-run.py
+match:
+  family: speculative_feature
+  artifact: scripts/tail-run.py
