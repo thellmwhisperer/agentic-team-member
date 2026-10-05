@@ -505,7 +505,9 @@ Your final message must be ONLY this JSON object, nothing else:
 
 def commit_unit(worktree: str, number: int, title: str) -> str:
     """Record a passed unit in the clone so the next unit's red/green runs against it."""
-    subprocess.run(["git", "add", "-A", "--", ".", ":!.atm"], cwd=worktree, check=True, capture_output=True)
+    # Add all, then unstage .atm: an exclude pathspec makes git add exit 1 when the target ignores .atm/.
+    subprocess.run(["git", "add", "-A"], cwd=worktree, check=True, capture_output=True)
+    subprocess.run(["git", "reset", "-q", "--", ".atm"], cwd=worktree, check=True, capture_output=True)
     subprocess.run(["git", "-c", "user.name=atm", "-c", "user.email=atm@localhost", "-c", "core.hooksPath=/dev/null",
                     "commit", "-q", "--no-verify", "-m", f"atm unit {number}: {title}"[:200]],
                    cwd=worktree, check=True, capture_output=True)
