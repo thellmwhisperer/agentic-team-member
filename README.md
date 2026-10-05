@@ -473,6 +473,30 @@ discovery).
 Everything else (model URL, model name, step budgets, tool output cap) lives
 in the TOML config.
 
+### Harness worker: delivery and exit codes
+
+`python3 -m agentic_tdd_runner.harness_worker` (or `scripts/atm-run.py run`)
+hands the fix to a coding agent CLI and judges it. When every unit passes,
+delivery is the default (`--deliver no-mistakes`):
+
+1. `.no-mistakes.yaml` is copied from the source repo into the clone if the
+   source has it (tracked or ignored) and the clone does not.
+2. The clone's work is committed on `atm/<slug>-<timestamp>` and the clone's
+   `origin` points at the source repo's `origin`.
+3. `no-mistakes axi run --yes --intent "<issue title>"` runs in the clone, and
+   `no-mistakes attach` shows its TUI in the same terminal until the run ends.
+4. `no-mistakes axi status` is read and `report.json` gets `delivery`:
+   `branch`, `head_sha`, `run_id` and `pr_url`.
+
+`--deliver none` stops at the verdict and leaves the work uncommitted in the clone.
+
+| Exit code | Meaning                                                    |
+| --------- | ---------------------------------------------------------- |
+| `0`       | Every unit passed (and, with delivery, a PR exists)        |
+| `1`       | A unit failed; nothing is delivered                        |
+| `2`       | Preparation failed (issue, clone or environment)           |
+| `3`       | Every unit passed, but delivery ended without a PR         |
+
 ---
 
 ## Roadmap
