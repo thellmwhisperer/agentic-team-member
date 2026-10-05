@@ -8,7 +8,7 @@ import subprocess
 import tempfile
 from collections.abc import Callable
 
-from agentic_tdd_runner.paths import resolve_repo_path, test_runner_command_for_file
+from agentic_tdd_runner.paths import test_runner_command_for_file
 
 
 def is_invalid_red_phase_failure(output: str) -> bool:
@@ -67,25 +67,6 @@ def verification_infra_error(output: str) -> str | None:
     return None
 
 
-def mechanical_edit_paths(mechanical_edits: list[dict] | None, workdir: str) -> list[str]:
-    """Return unique repo-relative paths touched by mechanical edits."""
-    paths: list[str] = []
-    seen: set[str] = set()
-    for edit in mechanical_edits or []:
-        path = edit.get("path")
-        if not path:
-            continue
-        try:
-            resolved = resolve_repo_path(path, workdir)
-        except ValueError:
-            continue
-        rel = os.path.relpath(resolved, workdir)
-        if rel not in seen:
-            seen.add(rel)
-            paths.append(rel)
-    return paths
-
-
 def single_test_argv(test_file: str, config: dict) -> list[str]:
     """Argv that runs one test file.
 
@@ -130,8 +111,6 @@ def verify_red_green(
     config: dict,
     emit: Callable[[str], None],
     log: Callable[[str, dict], None],
-    apply_mechanical_edits: Callable[[list[dict], str], int],
-    mechanical_edits: list[dict] | None = None,
 ) -> tuple[bool, str]:
     """Verify red-green: test fails without fix, passes with fix."""
     test_timeout = config["timeouts"]["test_run"]
@@ -150,7 +129,6 @@ def verify_red_green(
         shutil.copy2(test_full, test_backup)
 
     parked = snapshot_worktree(workdir)
-    mechanical_paths = mechanical_edit_paths(mechanical_edits, workdir)
 
     test_argv = single_test_argv(test_file, config)
 
@@ -169,10 +147,6 @@ def verify_red_green(
         if test_backup:
             os.makedirs(os.path.dirname(test_full), exist_ok=True)
             shutil.copy2(test_backup, test_full)
-
-        if mechanical_edits:
-            applied = apply_mechanical_edits(mechanical_edits, workdir)
-            emit(f"  [RED] Re-applied {applied} mechanical edit(s)")
 
         emit("  [RED] Running test WITHOUT fix...")
         try:
@@ -203,12 +177,6 @@ def verify_red_green(
                 os.remove(test_full)
             if os.path.isfile(test_backup):
                 os.remove(test_backup)
-        if mechanical_paths:
-            subprocess.run(
-                ["git", "checkout", "--", *mechanical_paths],
-                cwd=workdir,
-                capture_output=True,
-            )
         if not restore_worktree(workdir, parked):
             emit("  [RED] WARNING: could not restore the parked worktree")
 

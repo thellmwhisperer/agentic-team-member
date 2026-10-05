@@ -985,7 +985,6 @@ def main(argv: list[str] | None = None) -> int:
             before = worktree_fingerprint(worktree)
             verified, verify_msg = verification.verify_red_green(
                 test_file, workdir=worktree, config=config, emit=print, log=log_capturing_red,
-                apply_mechanical_edits=lambda edits, wd: 0,
             )
             if worktree_fingerprint(worktree) != before:
                 # The verdict is about code that is no longer what the agent left: never trust it.
