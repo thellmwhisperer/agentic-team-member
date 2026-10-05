@@ -1319,6 +1319,7 @@ def test_full_suite_says_it_started_before_it_runs_and_how_it_ended_after(tmp_pa
     for name in ("prepare", "agent unit 1", "red half", "green half", "quality", "gate", "scope", "full suite",
                  "follow-up validation", "ponytail snapshot", "ponytail agent"):
         assert name in names, name
+    assert [e["state"] for e in steps if e["step"] == "ponytail snapshot"] == ["started", "passed", "started", "passed"]
     open_steps = []
     for e in steps:  # every end closes the innermost started step: nothing ends without its start first
         if e["state"] == "started":
@@ -1326,6 +1327,21 @@ def test_full_suite_says_it_started_before_it_runs_and_how_it_ended_after(tmp_pa
         else:
             assert open_steps.pop() == e["step"] and e["state"] in ("passed", "failed")
     assert open_steps == []
+
+
+def test_prepare_failure_emits_a_failed_end_event(tmp_path, monkeypatch):
+    argv, _, log_dir = _setup(tmp_path, FIXING_HARNESS)
+
+    def invalid_package(*_):
+        raise json.JSONDecodeError("invalid package", "{", 0)
+
+    monkeypatch.setattr(harness_worker, "detect_commands", invalid_package)
+    with pytest.raises(json.JSONDecodeError):
+        harness_worker.main(argv)
+    steps = [entry["event"] for entry in _log_events(log_dir)
+             if isinstance(entry.get("event"), dict) and entry["event"].get("type") == "atm.step"
+             and entry["event"].get("step") == "prepare"]
+    assert [event["state"] for event in steps] == ["started", "failed"]
 
 
 def test_monitor_command_runs_at_every_start_and_end_with_the_step_in_its_environment(tmp_path, monkeypatch):
