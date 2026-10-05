@@ -86,16 +86,15 @@ def test_tail_renders_phases_outcomes_checks_and_drops_noise(tmp_path):
          "green_output": "== test session starts ==\n\ntests/test_x.py ..   [100%]\n\n==== 2 passed in 0.10s ====\n"},
         REPORT,
     ])
-    (run / "command.txt").write_text(f"python3 -m w --repo {SOURCE} --base-ref origin/main --timeout 1800\n")
     proc = _tail(str(next(run.glob("worker-*.jsonl"))))
     out = proc.stdout
     assert proc.returncode == 0, proc.stderr
-    for title in ("PREPARE", "AGENT  unit 1 claude timeout=1800s", "RED / GREEN VERIFICATION", "SUMMARY"):
+    for title in ("PREPARE", "AGENT  unit 1 claude", "RED / GREEN VERIFICATION", "SUMMARY"):
         assert title in out
-    assert "worktree  .worktrees/atm-run-1" in out and "base      origin/main@2c6b567aeb" in out
+    assert f"worktree  {CLONE}" in out and "base      2c6b567aeb" in out and "timeout" not in out
     assert "tests     python3 -m pytest" in out
     assert "~ thinking" in out and "Look around first." in out
-    assert "▶ #1 Read  a.py" in out and SOURCE not in out
+    assert "▶ #1 Read  a.py" in out and f"{CLONE}/" not in out
     assert "✓ ok  1 def a():" in out
     assert "✎ Implementing." in out
     assert "▶ #2 Bash  python3 -m pytest -q" in out and "✗ error  Traceback" in out

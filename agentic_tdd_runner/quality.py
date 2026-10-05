@@ -65,7 +65,7 @@ def get_changed_files(workdir: str) -> list[str]:
     return sorted(files)
 
 
-def added_lines(workdir: str, path: str, base: str = "HEAD") -> list[tuple[int, str]]:
+def added_lines(workdir: str, path: str, base: str) -> list[tuple[int, str]]:
     """(line number, text) for lines of path added since base; every line when base lacks the file."""
     try:
         lines = (Path(workdir) / path).read_text(errors="replace").splitlines()
@@ -184,7 +184,7 @@ def run_quality_checks(
 
     # Grep forbidden patterns in lines added since base_ref - group by file
     forbidden_by_file: dict[str, list[str]] = {}
-    for f in changed if forbidden else []:
+    for f in changed:
         added = added_lines(workdir, f, base_ref)
         for pattern in forbidden:
             for i, line in added:

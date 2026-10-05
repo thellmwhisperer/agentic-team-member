@@ -427,21 +427,19 @@ delivery runs by default:
 ATM excludes `.atm/` from Git in each run clone, so follow-up files there do
 not make delivery dirty when the target repository lacks that ignore rule.
 
-1. `.no-mistakes.yaml` is copied from the source repo into the clone if the
-   source has it (tracked or ignored) and the clone does not.
-2. The clone's work is committed on `atm/<slug>-<timestamp>` and the clone's
+1. The clone's work is committed on `atm/<slug>-<timestamp>` and the clone's
    `origin` points at the source repo's `origin`. When the issue came from
    `--issue-number`, the unit commit message ends with `Closes #<n>`, so
    merging the PR closes the issue.
-3. `no-mistakes init` initializes the clone before the gate run starts.
+2. `no-mistakes init` initializes the clone before the gate run starts.
    If initialization fails, delivery records the error and does not start the
    run.
-4. `no-mistakes axi run --yes --intent "<issue title>"` runs in the clone, and
+3. `no-mistakes axi run --yes --intent "<issue title>"` runs in the clone, and
    `no-mistakes attach` shows its TUI in the same terminal until the run ends.
-5. `no-mistakes axi status` is read and `report.json` gets `delivery`:
+4. `no-mistakes axi status` is read and `report.json` gets `delivery`:
    `branch`, `head_sha`, `run_id` and `pr_url`.
 
-`--deliver none` stops at the verdict and leaves the work uncommitted in the clone.
+`--no-deliver` stops at the verdict and leaves the work uncommitted in the clone.
 
 | Exit code | Meaning                                                    |
 | --------- | ---------------------------------------------------------- |
