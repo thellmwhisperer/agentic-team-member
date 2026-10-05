@@ -39,7 +39,8 @@ def _result(content, is_error=False):
 REPORT = {
     "type": "atm.report", "harness": "claude", "model": "m", "effort": "high", "harness_exit_code": 0,
     "duration_seconds": 12.5, "timed_out": False, "max_units": 3,
-    "units": [{"unit": 1, "passed": False, "test_file": "tests/test_x.py"}],
+    "units": [{"unit": 1, "passed": False, "test_file": "tests/test_x.py",
+               "full_tests_tail": None, "typecheck_tail": None}],
     "verified": {"ok": True}, "quality_ok": {"ok": True}, "gate_ok": {"ok": True}, "scope_ok": {"ok": False},
     "full_tests_ok": True, "typecheck_ok": None, "changed_files": ["a.py", "tests/test_x.py"],
 }
@@ -109,6 +110,20 @@ def test_tail_renders_phases_outcomes_checks_and_drops_noise(tmp_path):
                   "rate_limit", "stream_event", "{"):
         assert noise not in out
     assert "\x1b[" not in out
+
+
+def test_tail_summary_shows_failed_full_test_and_typecheck_output(tmp_path):
+    report = {**REPORT, "units": [{**REPORT["units"][0],
+                                   "full_tests_ok": False, "typecheck_ok": False,
+                                   "full_tests_tail": "suite failure detail",
+                                   "typecheck_tail": "typecheck failure detail"}]}
+    run = _write_run(tmp_path, [report])
+    proc = _tail(str(run))
+    assert proc.returncode == 0, proc.stderr
+    assert "full suite output (last 60 lines):" in proc.stdout
+    assert "suite failure detail" in proc.stdout
+    assert "typecheck output (last 60 lines):" in proc.stdout
+    assert "typecheck failure detail" in proc.stdout
 
 
 def test_tail_stops_at_prepare_failed_and_when_exit_txt_appears(tmp_path):
