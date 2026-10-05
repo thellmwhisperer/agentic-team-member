@@ -15,6 +15,7 @@ import shlex
 import shutil
 import signal
 import subprocess
+import sys
 import textwrap
 import threading
 import time
@@ -79,6 +80,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--config", default="config/agent.toml")
     parser.add_argument("--log-dir")
     parser.add_argument("--artifact-dir")
+    parser.add_argument("--label", help="Run name: --artifact-dir defaults to .tmp/harness-worker/LABEL, which must not exist yet")
     parser.add_argument("--harness-bin", help="Override the harness executable")
     parser.add_argument("--dry-run", action="store_true", help="Prepare and print the brief only")
     parser.add_argument("--max-units", type=int, help="Chain accepted follow-ups as further units in the same clone, up to this many units (config [harness_worker] max_units, default 3)")
@@ -88,8 +90,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     args = parser.parse_args(argv)
     if not args.issue_file and not (args.issue_number and args.github_repo):
         parser.error("give --issue-file or both --issue-number and --github-repo")
-    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    stamp = args.label or datetime.now().strftime("%Y%m%d-%H%M%S")
     args.artifact_dir = args.artifact_dir or os.path.join(".tmp", "harness-worker", stamp)
+    if args.label and os.path.exists(args.artifact_dir):  # a run never writes into another run's directory
+        parser.exit(2, f"label already used: {os.path.abspath(args.artifact_dir)}\n")
     args.log_dir = args.log_dir or args.artifact_dir
     return args
 
@@ -528,7 +532,7 @@ FINAL = re.compile(r'^\s*(?:outcome|status): "?(?:checks-passed|passed|passed-wi
 
 
 def terminal():
-    """The pane's terminal, for the no-mistakes TUI: under atm-run.py the worker's stdout is stdout.txt.
+    """The pane's terminal, for the no-mistakes TUI, even when the worker's stdout goes to a file.
     None without a controlling terminal (CI), and then there is no TUI to show."""
     try:
         return open("/dev/tty", "r+b", buffering=0)
@@ -1054,6 +1058,8 @@ def main(argv: list[str] | None = None) -> int:
     log_dir = Path(args.log_dir).resolve()
     artifact_dir.mkdir(parents=True, exist_ok=True)
     log_dir.mkdir(parents=True, exist_ok=True)
+    started = [sys.executable, "-m", "agentic_tdd_runner.harness_worker", *(sys.argv[1:] if argv is None else argv)]
+    (artifact_dir / "command.txt").write_text(f"cd {shlex.quote(os.getcwd())} && {shlex.join(started)}\n")
     log_path = log_dir / f"worker-{datetime.now().strftime('%Y%m%d-%H%M%S')}.jsonl"
     write, log, log_fh = make_logger(str(log_path), args.harness)
 

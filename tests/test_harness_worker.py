@@ -266,6 +266,27 @@ def test_dry_run_writes_brief_without_running_harness(tmp_path, capsys, monkeypa
     assert not (artifacts / "report.json").exists()
 
 
+def test_label_names_the_run_directory_and_is_refused_once_used(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
+    monkeypatch.chdir(tmp_path)
+    argv, _, _ = _setup(tmp_path, FIXING_HARNESS)
+    i = argv.index("--artifact-dir")
+    argv = [*argv[:i], *argv[i + 2:], "--label", "same"]
+    run = tmp_path / ".tmp" / "harness-worker" / "same"
+
+    assert harness_worker.main(argv) == 0
+    assert json.loads((run / "report.json").read_text())["verified"]["ok"] is True
+    command = (run / "command.txt").read_text()
+    assert f"cd {tmp_path} && " in command and "-m agentic_tdd_runner.harness_worker" in command
+    assert command.rstrip().endswith("--no-deliver --label same")
+
+    capsys.readouterr()
+    with pytest.raises(SystemExit) as exit_info:
+        harness_worker.main(argv)
+    assert exit_info.value.code == 2
+    assert f"label already used: {run}" in capsys.readouterr().err
+
+
 def test_extract_report_takes_last_top_level_object():
     text = 'first {"a": 1} then ```json\n{"test_file": "t.py", "changed_files": [], "x": {"y": 2}}\n```'
     report, error = harness_worker.extract_report(text)

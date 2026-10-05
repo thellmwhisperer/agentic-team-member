@@ -1,4 +1,4 @@
-"""`atm-run.py tail` follows a harness worker log and renders it with shape."""
+"""`tail-run.py` follows a harness worker log and renders it with shape."""
 
 import json
 import os
@@ -7,7 +7,6 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-ATM_RUN = REPO_ROOT / "scripts" / "atm-run.py"
 TAIL_RUN = REPO_ROOT / "scripts" / "tail-run.py"
 SOURCE = "/src/repo"
 CLONE = f"{SOURCE}/.worktrees/atm-run-1"
@@ -23,7 +22,7 @@ def _write_run(tmp_path: Path, events: list[dict], harness: str = "claude") -> P
 
 def _tail(*args: str) -> subprocess.CompletedProcess:
     env = {**os.environ, "NO_COLOR": "1"}
-    return subprocess.run([sys.executable, str(ATM_RUN), "tail", *args], capture_output=True, text=True,
+    return subprocess.run([sys.executable, str(TAIL_RUN), *args], capture_output=True, text=True,
                           env=env, timeout=30)
 
 
@@ -153,11 +152,9 @@ def test_tail_stops_at_prepare_failed_and_when_exit_txt_appears(tmp_path):
 def test_tail_refuses_a_path_that_is_not_a_worker_log(tmp_path):
     other = tmp_path / "agent-1.jsonl"
     other.write_text("{}\n")
-    for script in (ATM_RUN, TAIL_RUN):
-        args = [sys.executable, str(script)] + (["tail"] if script == ATM_RUN else []) + [str(other)]
-        proc = subprocess.run(args, capture_output=True, text=True, timeout=30)
-        assert proc.returncode == 1
-        assert "worker-*.jsonl" in proc.stderr
+    proc = _tail(str(other))
+    assert proc.returncode == 1
+    assert "worker-*.jsonl" in proc.stderr
 
 
 def test_tail_shows_tool_outcomes_for_codex_opencode_and_pi(tmp_path):
