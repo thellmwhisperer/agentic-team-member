@@ -980,7 +980,7 @@ def test_delivery_command_gets_configured_tool_path(tmp_path, monkeypatch):
 
 
 def test_delivery_command_reads_the_committed_head_in_atm_report(tmp_path, monkeypatch):
-    command = ("python -c 'import json, os, subprocess; report=json.load(open(os.environ[\"ATM_REPORT\"])); "
+    command = ("python3 -c 'import json, os, subprocess; report=json.load(open(os.environ[\"ATM_REPORT\"])); "
                "head=subprocess.check_output([\"git\", \"rev-parse\", \"HEAD\"], text=True).strip(); "
                "print(report[\"head_sha\"] == head)'")
     argv, artifacts = _delivery_setup(tmp_path, monkeypatch, command=command)
