@@ -18,6 +18,7 @@ Commands:
     atm-run.py run  ... --pane w3:pB      # launch inside a herdr pane and verify it started
     atm-run.py show --label opus-5         # the verdict of a finished run
     atm-run.py list                        # every run under .tmp/harness-worker with its verdict
+    atm-run.py tail [--label L | PATH]     # follow a run's worker log: what ran, its outcome, the verdict
     atm-run.py clean --config C [--yes]    # remove the target's atm-run-* clones and worktrees
 
 Why this exists (4-oct-2026): runs were launched by pasting a 400-character command into a
@@ -246,6 +247,13 @@ def cmd_list(args) -> int:
     return 0
 
 
+def cmd_tail(args) -> int:
+    cmd = [sys.executable, str(Path(__file__).with_name("tail-run.py"))]
+    cmd += [args.path] if args.path else []
+    cmd += ["--label", args.label] if args.label else []
+    return subprocess.call(cmd)
+
+
 def cmd_clean(args) -> int:
     launch = load_launch(args.config)
     repo = Path(launch["repo"]).resolve()
@@ -296,6 +304,10 @@ def main(argv: list[str] | None = None) -> int:
     s.set_defaults(fn=cmd_show)
     l = sub.add_parser("list", help="one verdict line per run")
     l.set_defaults(fn=cmd_list)
+    t = sub.add_parser("tail", help="follow a run's worker log (scripts/tail-run.py)")
+    t.add_argument("path", nargs="?", type=os.path.abspath, help="a worker-*.jsonl or its run directory")
+    t.add_argument("--label")
+    t.set_defaults(fn=cmd_tail)
     c = sub.add_parser("clean", help="remove the target repo's atm-run-* clones and worktrees")
     c.add_argument("--config", required=True)
     c.add_argument("--yes", action="store_true")
