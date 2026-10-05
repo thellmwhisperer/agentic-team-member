@@ -644,9 +644,8 @@ def load_renderer():
 
 
 class RunLog:
-    """The run's JSONL log, each event rendered as it is written. Every step writes a start event before it
-    runs and an end event after; both run `monitor` ([monitor].command). A step silent for ELAPSED_EVERY
-    seconds gets an elapsed event, so a long step is never mistaken for a stuck run."""
+    """Render JSONL events as written. Named steps emit start/end events and notify the monitor.
+    An open step with no visible output for ELAPSED_EVERY seconds emits an elapsed event."""
 
     def __init__(self, path: str, harness: str, *, render=None, visible=None, monitor: str = "", label: str = "", report: str = ""):
         self.fh = open(path, "a", encoding="utf-8")
