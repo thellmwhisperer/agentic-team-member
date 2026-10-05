@@ -5,6 +5,7 @@ import os
 import subprocess
 import sys
 import textwrap
+from datetime import datetime
 from pathlib import Path
 
 from agentic_tdd_runner import harness_worker
@@ -894,6 +895,22 @@ def test_green_run_without_a_pr_exits_3(tmp_path, monkeypatch):
     assert harness_worker.main(argv) == 3
     report = json.loads((artifacts / "report.json").read_text())
     assert report["delivery"]["pr_url"] is None and report["delivery"]["run_id"] == "01M45YGAMAHEKN66DQGKV4AF30"
+
+
+def test_concurrent_deliveries_get_distinct_branches(tmp_path, monkeypatch):
+    argv, artifacts, _, _ = _delivery_setup(tmp_path, monkeypatch)
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 10, 5, 12, 0, 0, tzinfo=tz)
+
+    monkeypatch.setattr(harness_worker, "datetime", FixedDateTime)
+    assert harness_worker.main(argv) == 0
+    report = json.loads((artifacts / "report.json").read_text())
+    second = harness_worker.deliver(report["worktree"], argv[argv.index("--repo") + 1],
+                                    "add returns the difference", 1, artifacts)
+
+    assert second["branch"] != report["delivery"]["branch"]
 
 
 def test_deliver_none_stops_at_the_verdict(tmp_path, monkeypatch):
