@@ -172,3 +172,17 @@ def test_tail_shows_tool_outcomes_for_codex_opencode_and_pi(tmp_path):
         proc = _tail(str(next(run.glob("worker-*.jsonl"))))
         assert proc.returncode == 0, proc.stderr
         assert outcome in proc.stdout
+
+
+def test_tail_renders_step_starts_ends_and_elapsed_lines(tmp_path):
+    run = _write_run(tmp_path, [
+        {"type": "atm.step", "step": "full suite", "state": "started"},
+        {"type": "atm.step_elapsed", "step": "full suite", "elapsed_seconds": 90},
+        {"type": "atm.step", "step": "full suite", "state": "passed", "duration_seconds": 95.2},
+        {"type": "atm.step", "step": "red half", "state": "started"},
+        {"type": "atm.step", "step": "red half", "state": "failed", "duration_seconds": 0.4},
+        REPORT,
+    ])
+    out = _tail(str(run)).stdout
+    assert "▶ full suite\n  … full suite 1m30s\n  ✓ full suite 1m35s\n" in out
+    assert "▶ red half\n  ✗ red half 0.4s\n" in out

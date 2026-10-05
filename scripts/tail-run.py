@@ -5,8 +5,10 @@
     tail-run.py --label <label>  # that run
     tail-run.py <path>           # a worker-*.jsonl, or the run directory holding one
 
-Phases (PREPARE, AGENT, RED / GREEN VERIFICATION, SUMMARY), one numbered line per tool call with
-its outcome under it, and the verdict. Stops at the report, at a failed prepare, or when exit.txt
+Phases (PREPARE, AGENT, RED / GREEN VERIFICATION, SUMMARY), ``▶ <step>`` when a step starts and
+``✓``/``✗ <step> <duration>`` when it ends, ``… <step> <elapsed>`` while a step is silent, one numbered
+line per tool call with its outcome under it, and the verdict. The worker renders its own stdout with
+this same Renderer. Stops at the report, at a failed prepare, or when exit.txt
 appears next to the log. Colour only when stdout is a terminal and NO_COLOR is unset; every state
 also has a symbol and a word.
 """
@@ -46,6 +48,11 @@ def cyan(t): return paint("36", t)
 
 def mark(ok) -> str:
     return green("✓") if ok else "–" if ok is None else red("✗")
+
+
+def took(seconds) -> str:
+    seconds = float(seconds or 0)
+    return f"{int(seconds) // 60}m{int(seconds) % 60:02d}s" if seconds >= 60 else f"{seconds:.1f}s"
 
 
 def shown(path) -> str:
@@ -125,6 +132,15 @@ class Renderer:
         self.phase("PREPARE")
         print(f"\n{red('✗ RESULT')}  {red('FAIL')}  prepare failed: {e.get('error')}")
         return True
+
+    def on_atm_step(self, e):
+        if e.get("state") == "started":
+            print(cyan(f"  ▶ {e.get('step')}"))
+        else:
+            print(f"  {mark(e.get('state') == 'passed')} {e.get('step')} {took(e.get('duration_seconds'))}")
+
+    def on_atm_step_elapsed(self, e):
+        print(dim(f"  … {e.get('step')} {took(e.get('elapsed_seconds'))}"))
 
     def on_atm_unit_started(self, e):
         self.phase(f"AGENT  unit {e.get('unit')} {self.harness}")

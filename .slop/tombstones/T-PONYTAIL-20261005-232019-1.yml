@@ -1,0 +1,18 @@
+schema: 1
+id: T-PONYTAIL-20261005-232019-1
+status: accepted
+category: alien_code
+title: "In the red/green `halves` callback, `elif run_log.steps and run_log.steps[-1][0] == name` is now a p"
+created_at: 2026-10-05
+incident:
+  pattern: "In the red/green `halves` callback, `elif run_log.steps and run_log.steps[-1][0] == name` is now a plain `else`. verify_red_green always prints a half's `Running` line before its outcome line, so the half being closed is always the innermost open step."
+  what_went_wrong: "An ATM run wrote it and ATM's ponytail pass cut it before delivery."
+  root_cause: "The coding agent wrote more than the issue needed."
+  rule_established: "Cut by the ponytail pass; it does not come back."
+  evidence:
+    - family: speculative_hardening
+      example: "In the red/green `halves` callback, `elif run_log.steps and run_log.steps[-1][0] == name` is now a plain `else`. verify_red_green always prints a half's `Running` line before its outcome line, so the half being closed is always the innermost open step."
+      artifact: agentic_tdd_runner/harness_worker.py
+match:
+  family: speculative_hardening
+  artifact: agentic_tdd_runner/harness_worker.py

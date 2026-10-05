@@ -17,6 +17,13 @@ require_clean = true
 run_typecheck = true
 timeout = 300
 
+[monitor]
+# Harness worker: a shell line run at every step start and end, with ATM_LABEL, ATM_STEP,
+# ATM_STATE (started | passed | failed), ATM_DURATION and ATM_REPORT in the environment.
+# Output discarded, exit code ignored, killed after 5 s. Empty means the worker's stdout must be
+# a terminal, or the worker refuses to start (exit 2).
+command = ""
+
 [prompt]
 quality_failed = """QUALITY CHECK FAILED. Fix the issues below and say DONE again.
 
