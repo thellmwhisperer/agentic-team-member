@@ -132,6 +132,10 @@ def prepare_run_clone(
         if result.returncode != 0:
             detail = (result.stderr or result.stdout or "").strip()
             raise WorktreePrepError(f"clone failed at {' '.join(command[:2])}: {detail}")
+    exclude = destination / ".git" / "info" / "exclude"
+    exclude.parent.mkdir(parents=True, exist_ok=True)
+    with exclude.open("a") as fh:  # ATM's scratch, invisible to git even when the target does not ignore it
+        fh.write("\n/.atm/\n")
 
     return WorktreeReport(
         repo=str(repo_root),

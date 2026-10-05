@@ -913,7 +913,10 @@ if args == ["init"]:
         fh.write(os.getcwd() + " " + git("remote", "get-url", "origin") + "\\n")
 elif args[:2] == ["axi", "run"] and not inited or args[:2] == ["axi", "status"] and not inited:
     sys.exit("error: repo not initialized (run 'no-mistakes init' first)")
+elif args[:2] == ["axi", "run"] and git("status", "--porcelain"):
+    sys.exit("error: uncommitted changes in the working tree")
 elif args[:2] == ["axi", "run"]:
+    open(os.environ["FAKE_NM_LOG"] + ".ran", "w").close()
     print('run: "01M45YGAMAHEKN66DQGKV4AF30"')
     print("outcome: passed")
 elif args[:2] == ["axi", "status"]:
@@ -921,7 +924,7 @@ elif args[:2] == ["axi", "status"]:
     print('  id: "01M45YGAMAHEKN66DQGKV4AF30"')
     print("  branch: " + git("branch", "--show-current"))
     print("  head_sha: " + git("rev-parse", "HEAD"))
-    if not os.environ.get("FAKE_NM_NO_PR"):
+    if not os.environ.get("FAKE_NM_NO_PR") and os.path.exists(os.environ["FAKE_NM_LOG"] + ".ran"):
         print("  pr: https://github.com/owner/calc/pull/7")
     print("outcome: passed")
 elif args == ["attach"]:
@@ -929,9 +932,9 @@ elif args == ["attach"]:
 """
 
 
-def _delivery_setup(tmp_path, monkeypatch):
+def _delivery_setup(tmp_path, monkeypatch, harness=FIXING_HARNESS):
     monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
-    argv, artifacts, _ = _setup(tmp_path, FIXING_HARNESS, deliver=None)
+    argv, artifacts, _ = _setup(tmp_path, harness, deliver=None)
     source = tmp_path / "target"
     _git(source, "remote", "add", "origin", "https://github.com/owner/calc.git")
     (source / ".no-mistakes.yaml").write_text("agent: claude\n")
@@ -971,6 +974,16 @@ def test_green_run_delivers_through_no_mistakes_by_default(tmp_path, monkeypatch
     assert "attach" in during and any(c.startswith("axi run --yes --intent add returns the difference") for c in during)
     assert status == "axi status"
     assert "attach TUI" in pane.read_text()
+
+
+def test_green_run_with_a_follow_up_in_atm_delivers_when_the_target_does_not_ignore_atm(tmp_path, monkeypatch):
+    harness = _follow_up_harness([("tests/test_mul_neg.py", MUL_NEG_TEST)])
+    argv, artifacts, _, _ = _delivery_setup(tmp_path, monkeypatch, harness)
+    assert ".atm" not in (tmp_path / "target" / ".gitignore").read_text()
+    assert harness_worker.main(argv) == 0
+    report = json.loads((artifacts / "report.json").read_text())
+    assert report["delivery"]["pr_url"] == "https://github.com/owner/calc/pull/7"
+    assert (Path(report["worktree"]) / ".atm" / "follow-ups" / "1" / "tests" / "test_mul_neg.py").is_file()
 
 
 def test_green_run_without_a_pr_exits_3(tmp_path, monkeypatch):
