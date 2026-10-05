@@ -1,0 +1,20 @@
+schema: 1
+id: T-RECOVERED-MOCK-TESTS
+status: accepted
+category: alien_code
+title: Hand-made PR 93 restored 1,945 lines of old tests with 219 mock uses
+created_at: 2026-10-05
+incident:
+  pattern: Bulk test recovery that brings back coupling to code that changed shape.
+  what_went_wrong: >
+    "Recover pre-prune tests for code that is still alive" (ef4cbd6) restored 96 test functions with 219
+    mock or monkeypatch uses. Reverted with the morning's changes (42d1721) and not reintroduced.
+  root_cause: Coverage was counted instead of read.
+  rule_established: Tests come back one behaviour at a time, through an issue, never as a bulk restore.
+  evidence:
+    - family: mock_heavy_test
+      example: "ef4cbd6: tests +1945"
+      artifact: tests/test_harness_worker.py
+match:
+  family: mock_heavy_test
+  artifact: tests/test_harness_worker.py

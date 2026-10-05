@@ -1,0 +1,20 @@
+schema: 1
+id: T-VENV-COMMITTED
+status: accepted
+category: alien_code
+title: Test step committed a whole virtualenv (1,101 files, 364k lines)
+created_at: 2026-10-05
+incident:
+  pattern: An agent's local environment directory committed as if it were source.
+  what_went_wrong: >
+    On the issue 100 branch the no-mistakes test step created .venv/ in the clone and committed it
+    whole. Dropped with reset --soft before any push.
+  root_cause: .venv/ was not ignored and the step commits everything it leaves behind.
+  rule_established: .venv/ is in .gitignore; every gate commit is read with git show --stat before merging.
+  evidence:
+    - family: agent_artifact_in_repo
+      example: "no-mistakes(test): Los dos casos dirigidos pasan (c773f2c, never pushed)"
+      artifact: .gitignore
+match:
+  family: agent_artifact_in_repo
+  artifact: .gitignore
