@@ -420,14 +420,14 @@ see [Configuration](#configuration) for what the TOML holds.
 
 ### Harness worker: delivery and exit codes
 
-`python3 -m agentic_tdd_runner.harness_worker` (or `scripts/atm-run.py run`)
-hands the fix to a coding agent CLI and judges it.
+`python3 -m agentic_tdd_runner.harness_worker` hands the fix to a coding agent
+CLI and judges it. `--label NAME` writes the run to `.tmp/harness-worker/NAME`
+and exits 2 if that directory already exists; without it the directory is a
+timestamp. `command.txt` there holds the exact command, to repeat the run.
 
-Under `scripts/atm-run.py run` (with or without `--pane`) the terminal shows
-the run as `scripts/atm-run.py tail` renders it: phases, numbered tool calls
-with their outcome, the checks line and `RESULT` last. The worker does not
-print the agent's stream itself; its own lines, the launcher's verdict and a
-plain copy of that rendering go to `stdout.txt` in the run directory.
+The worker does not print the agent's stream itself; `scripts/tail-run.py
+--label NAME` renders it: phases, numbered tool calls with their outcome, the
+checks line and `RESULT` last.
 
 When every unit passes, ATM runs a ponytail pass, then delivery.
 

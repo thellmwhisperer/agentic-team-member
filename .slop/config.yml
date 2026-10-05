@@ -1,7 +1,7 @@
 # What the slop gate measures in this repository.
 #
 # Two duplication scopes, measured independently so production code cannot hide
-# inside the test scope. Production is the package plus the launcher scripts.
+# inside the test scope. Production is the package plus scripts/*.py.
 schema: 1
 
 detector:
