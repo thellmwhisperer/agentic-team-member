@@ -4,4 +4,4 @@ scopes:
   python_production:
     active_clones_ceiling: 1
   python_tests:
-    active_clones_ceiling: 20
+    active_clones_ceiling: 19
