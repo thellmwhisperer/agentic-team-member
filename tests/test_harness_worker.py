@@ -287,7 +287,7 @@ def test_red_green_command_template_can_name_the_test_dir(tmp_path, monkeypatch)
     (tmp_path / "pkg").mkdir()
     (tmp_path / "pkg" / "x_test.go").write_text("package pkg\n")
     verification.verify_red_green("pkg/x_test.go", workdir=str(tmp_path), config=config, emit=lambda s: None,
-                                  log=lambda n, d: None, apply_mechanical_edits=lambda e, w: 0)
+                                  log=lambda n, d: None)
     test_runs = [a for a in seen if a[:2] == ["go", "test"]]
     assert test_runs and all(a == ["go", "test", "./pkg"] for a in test_runs)
 
