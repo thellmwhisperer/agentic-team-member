@@ -559,6 +559,12 @@ def deliver(worktree: str, source_repo: str, title: str, unit_number: int, artif
         subprocess.run(["git", "remote", "set-url", "origin", remote], cwd=worktree, check=True, capture_output=True)
     except subprocess.CalledProcessError as exc:
         return result | {"error": f"branch preparation failed: {(exc.stderr or b'').decode(errors='replace').strip()}"}
+    try:  # a fresh clone is unknown to no-mistakes; init registers it, and on a registered repo it only refreshes
+        init = subprocess.run(["no-mistakes", "init"], cwd=worktree, capture_output=True, text=True)
+    except OSError as exc:
+        return result | {"error": f"no-mistakes did not start: {exc}"}
+    if init.returncode:
+        return result | {"error": f"no-mistakes init failed: {(init.stdout + init.stderr).strip()}"}
     run_log = artifact_dir / "no-mistakes-run.txt"
     term, attach = terminal(), None
     try:

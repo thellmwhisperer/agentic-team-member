@@ -887,7 +887,16 @@ args = sys.argv[1:]
 with open(os.environ["FAKE_NM_LOG"], "a") as fh:
     fh.write(" ".join(args) + "\\n")
 git = lambda *a: subprocess.run(["git", *a], capture_output=True, text=True).stdout.strip()
-if args[:2] == ["axi", "run"]:
+registry = os.environ["FAKE_NM_LOG"] + ".init"  # one line per init: "<cwd> <origin url>"
+inited = os.path.exists(registry) and any(l.split(" ")[0] == os.getcwd() for l in open(registry))
+if args == ["init"]:
+    if os.environ.get("FAKE_NM_INIT_FAIL"):
+        sys.exit("error: origin remote unreachable")
+    with open(registry, "a") as fh:  # like the real init, a second run refreshes and succeeds
+        fh.write(os.getcwd() + " " + git("remote", "get-url", "origin") + "\\n")
+elif args[:2] == ["axi", "run"] and not inited or args[:2] == ["axi", "status"] and not inited:
+    sys.exit("error: repo not initialized (run 'no-mistakes init' first)")
+elif args[:2] == ["axi", "run"]:
     print('run: "01M45YGAMAHEKN66DQGKV4AF30"')
     print("outcome: passed")
 elif args[:2] == ["axi", "status"]:
@@ -953,6 +962,25 @@ def test_green_run_without_a_pr_exits_3(tmp_path, monkeypatch):
     assert harness_worker.main(argv) == 3
     report = json.loads((artifacts / "report.json").read_text())
     assert report["delivery"]["pr_url"] is None and report["delivery"]["run_id"] == "01M45YGAMAHEKN66DQGKV4AF30"
+
+
+def test_delivery_runs_no_mistakes_init_in_the_clone_after_pointing_origin(tmp_path, monkeypatch):
+    argv, artifacts, calls, _ = _delivery_setup(tmp_path, monkeypatch)
+    assert harness_worker.main(argv) == 0
+    report = json.loads((artifacts / "report.json").read_text())
+    assert report["delivery"]["run_id"] == "01M45YGAMAHEKN66DQGKV4AF30"
+    clone = os.path.realpath(report["worktree"])
+    assert Path(f"{calls}.init").read_text().splitlines() == [f"{clone} https://github.com/owner/calc.git"]
+    assert calls.read_text().splitlines()[0] == "init"
+
+
+def test_failed_no_mistakes_init_is_recorded_and_exits_3(tmp_path, monkeypatch):
+    argv, artifacts, calls, _ = _delivery_setup(tmp_path, monkeypatch)
+    monkeypatch.setenv("FAKE_NM_INIT_FAIL", "1")
+    assert harness_worker.main(argv) == 3
+    delivery = json.loads((artifacts / "report.json").read_text())["delivery"]
+    assert "origin remote unreachable" in delivery["error"] and delivery["run_id"] is None
+    assert calls.read_text().splitlines() == ["init"]
 
 
 def test_deliver_none_stops_at_the_verdict(tmp_path, monkeypatch):
