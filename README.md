@@ -438,12 +438,12 @@ the standard library, a native feature or an existing helper. ATM keeps the cut
 only if the run's net added lines go down and every gate still passes: each
 unit's red test fails without the run's changes and passes with them, then the
 full test command, typecheck, quality, gate, scope (the files the run already
-touched) and the target's lint (`commands.lint` of its tracked
-`.no-mistakes.yaml`). Otherwise ATM restores the pre-ponytail worktree.
+touched) and the target's lint (`commands.lint` in `.no-mistakes.yaml`, when
+ATM can read it). Otherwise ATM restores the pre-ponytail worktree.
 `report.json` gets `ponytail`: `findings`, `net_lines_before`,
 `net_lines_after`, `kept`, `reason` and `tombstones`. When the target has
-`.slop/`, each finding of a kept cut becomes a standing slopslint tombstone in
-`.slop/tombstones/`, committed with the cut.
+`.slop/`, each finding of a kept cut that names an existing file becomes a
+standing slopslint tombstone in `.slop/tombstones/`, committed with the cut.
 
 ATM excludes `.atm/` from Git in each run clone, so follow-up files there do
 not make delivery dirty when the target repository lacks that ignore rule.
