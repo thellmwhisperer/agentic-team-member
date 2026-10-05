@@ -1353,11 +1353,17 @@ def test_worker_refuses_to_start_when_nobody_can_watch_it(tmp_path, monkeypatch,
     assert not artifacts.exists()
 
 
-def test_a_silent_step_gets_one_elapsed_line_every_30_seconds(tmp_path, capsys):
+def test_a_silent_step_gets_one_elapsed_line_every_30_seconds(tmp_path, monkeypatch, capsys):
     events = []
-    run_log = harness_worker.RunLog(str(tmp_path / "worker-1.jsonl"), "claude", render=events.append)
+    renderer = harness_worker.load_renderer()(tmp_path / "worker-1.jsonl")
+    clock = [100.0]
+    monkeypatch.setattr(harness_worker.time, "monotonic", lambda: clock[0])
+    run_log = harness_worker.RunLog(str(tmp_path / "worker-1.jsonl"), "claude", render=events.append,
+                                    visible=renderer.visible)
     run_log.begin("full suite")
     t0 = run_log.quiet_since
+    clock[0] = t0 + 29
+    run_log.write({"type": "tool_progress"})
     for offset in (29, 30, 45, 60, 89, 90):
         run_log.tick(t0 + offset)
     elapsed = [e["elapsed_seconds"] for e in events if e["type"] == "atm.step_elapsed"]

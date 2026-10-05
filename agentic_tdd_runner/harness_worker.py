@@ -648,9 +648,9 @@ class RunLog:
     runs and an end event after; both run `monitor` ([monitor].command). A step silent for ELAPSED_EVERY
     seconds gets an elapsed event, so a long step is never mistaken for a stuck run."""
 
-    def __init__(self, path: str, harness: str, *, render=None, monitor: str = "", label: str = "", report: str = ""):
+    def __init__(self, path: str, harness: str, *, render=None, visible=None, monitor: str = "", label: str = "", report: str = ""):
         self.fh = open(path, "a", encoding="utf-8")
-        self.harness, self.render, self.monitor = harness, render, monitor
+        self.harness, self.render, self.visible, self.monitor = harness, render, visible, monitor
         self.monitor_env = {"ATM_LABEL": label, "ATM_REPORT": report}
         self.lock = threading.RLock()
         self.steps: list[tuple[str, float]] = []  # open steps, innermost last
@@ -662,7 +662,8 @@ class RunLog:
         with self.lock:
             self.fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
             self.fh.flush()
-            self.quiet_since = time.monotonic()
+            if self.visible is None or self.visible(event):
+                self.quiet_since = time.monotonic()
             if self.render:
                 self.render(event)
                 sys.stdout.flush()
@@ -1158,7 +1159,7 @@ def main(argv: list[str] | None = None) -> int:
     log_path = log_dir / f"worker-{datetime.now().strftime('%Y%m%d-%H%M%S')}.jsonl"
     renderer = load_renderer()(log_path)
     renderer.harness = args.harness
-    run_log = RunLog(str(log_path), args.harness, render=renderer.render, monitor=monitor,
+    run_log = RunLog(str(log_path), args.harness, render=renderer.render, visible=renderer.visible, monitor=monitor,
                      label=args.label or artifact_dir.name, report=str(artifact_dir / "report.json"))
     write, log = run_log.write, run_log.log
 
