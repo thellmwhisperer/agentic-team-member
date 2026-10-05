@@ -816,3 +816,69 @@ def test_harness_arg_lands_before_the_brief():
     args = harness_worker.parse_args(["--repo", "r", "--issue-file", "i.md", "--harness", "claude", "--harness-arg=--verbose-x"])
     cmd, stdin = harness_worker.harness_command(args, "/wt", "the brief", "/s", "/m")
     assert cmd[-1] == "--verbose-x" and stdin == "the brief"
+
+
+FAKE_NO_MISTAKES = """
+import json, pathlib, subprocess, sys
+assert sys.argv[1:4] == ["axi", "run", "--yes"], sys.argv
+assert sys.argv[4] == "--intent" and sys.argv[5] == "add returns the difference"
+branch = subprocess.run(["git", "branch", "--show-current"], capture_output=True, text=True).stdout.strip()
+assert branch.startswith("atm/add-returns-the-difference-"), branch
+assert subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True).stdout == ""
+origin = subprocess.run(["git", "remote", "get-url", "origin"], capture_output=True, text=True).stdout.strip()
+pathlib.Path(sys.argv[6]).write_text(json.dumps({"branch": branch, "origin": origin}))
+print("run_id: 01ARZ3NDEKTSV4RRFFQ69G5FAV")
+print("pr: https://github.com/you/repo/pull/7")
+"""
+
+
+def test_green_clone_is_handed_to_no_mistakes_and_report_carries_the_pr(tmp_path, monkeypatch):
+    monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
+    argv, artifacts, _ = _setup(tmp_path, FIXING_HARNESS)
+    repo = tmp_path / "target"
+    _git(repo, "remote", "add", "origin", "git@github.com:you/repo.git")
+    seen = tmp_path / "seen.json"
+    fake = tmp_path / "fake_no_mistakes.py"
+    fake.write_text(f"#!{sys.executable}\n" + textwrap.dedent(FAKE_NO_MISTAKES).replace("sys.argv[6]", repr(str(seen))))
+    fake.chmod(0o755)
+    argv += ["--deliver", "no-mistakes", "--deliver-bin", str(fake), "--deliver-timeout", "60"]
+
+    assert harness_worker.main(argv) == 0
+    report = json.loads((artifacts / "report.json").read_text())
+    delivered = report["delivery"]
+    assert delivered["ok"] is True
+    assert delivered["pr_url"] == "https://github.com/you/repo/pull/7"
+    assert delivered["run_id"] == "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+    assert delivered["branch"].startswith("atm/add-returns-the-difference-")
+    assert report["head_sha"] == delivered["head_sha"] != report["base_sha"]
+    observed = json.loads(seen.read_text())
+    assert observed == {"branch": delivered["branch"], "origin": "git@github.com:you/repo.git"}
+    clone = report["worktree"]
+    subject = subprocess.run(["git", "log", "-1", "--format=%s"], cwd=clone, capture_output=True, text=True).stdout
+    assert subject.strip() == "atm unit 1: add returns the difference"
+    assert "calc.py" in subprocess.run(["git", "show", "--name-only", "--format=", "HEAD"], cwd=clone,
+                                       capture_output=True, text=True).stdout
+
+
+def test_delivery_without_a_pr_exits_3_and_keeps_the_green_verdict(tmp_path, monkeypatch):
+    monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
+    argv, artifacts, _ = _setup(tmp_path, FIXING_HARNESS)
+    fake = tmp_path / "fake_no_mistakes.py"
+    fake.write_text(f"#!{sys.executable}\nprint('review found 1 blocking issue')\nraise SystemExit(1)\n")
+    fake.chmod(0o755)
+    argv += ["--deliver", "no-mistakes", "--deliver-bin", str(fake)]
+
+    assert harness_worker.main(argv) == 3
+    report = json.loads((artifacts / "report.json").read_text())
+    assert report["verified"]["ok"] is True
+    assert report["delivery"]["ok"] is False
+    assert report["delivery"]["pr_url"] is None
+    assert "blocking issue" in report["delivery"]["output_tail"]
+
+
+def test_failed_unit_is_never_delivered(tmp_path, monkeypatch):
+    monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
+    argv, artifacts, _ = _setup(tmp_path, HELPER_ONLY_HARNESS)
+    argv += ["--deliver", "no-mistakes", "--deliver-bin", "/nonexistent/no-mistakes"]
+    assert harness_worker.main(argv) == 1
+    assert "delivery" not in json.loads((artifacts / "report.json").read_text())

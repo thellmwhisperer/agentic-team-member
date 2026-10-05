@@ -16,9 +16,12 @@ issue ──▶ clone ──▶ agent: red test, then fix ──▶ ATM gates �
               accepted follow-up with a red test ◀───┘  (same clone, next unit)
 ```
 
-ATM does not call a model API. The agent runs as a subprocess with your own login.
-ATM never pushes or opens a PR. It commits only inside the throwaway clone, between
-chained units.
+The agent runs as a subprocess with your own login. ATM itself calls no model API, with
+one optional exception: the follow-up judge (`[follow_ups.judge]`, off by default) sends
+the issue title and body to TypeSafe. By default ATM never pushes or opens a PR: it
+commits only inside the throwaway clone, between chained units. With
+`--deliver no-mistakes` a green clone is handed to [no-mistakes](https://github.com/kunchenguid/no-mistakes),
+which reviews, tests, pushes and opens the PR; ATM records the PR URL in `report.json`.
 
 ## The gates
 
@@ -81,12 +84,13 @@ python3 -m agentic_tdd_runner.harness_worker --repo ~/code/your-repo --issue-fil
 | `--max-units N` | Longest follow-up chain |
 | `--env KEY=VALUE`, `--harness-arg ARG` | Extra environment and arguments for the agent process |
 | `--timeout` | Seconds per unit before the agent is killed (default 1800) |
+| `--deliver no-mistakes` | After a green verdict: commit the clone on an `atm/<slug>` branch, aim its `origin` at the source repo's `origin`, run `no-mistakes axi run --yes --intent "<issue title>"` inside it |
 | `--config` | Worker TOML (default `config/agent.toml`) |
 | `--artifact-dir`, `--log-dir` | Output directory (default `.tmp/harness-worker/<timestamp>`) |
 | `--run-root` | Where clones go (default `REPO/.worktree`) |
 
 Exit code: 0 when every unit passed, 1 when a unit failed, 2 when the clone or the
-environment could not be prepared.
+environment could not be prepared, 3 when the units passed but delivery did not end with a PR.
 
 The artifact directory holds `brief.md`, `report.json` and the full event stream as
 `worker-<timestamp>.jsonl`. The clone stays at `REPO/.worktree/atm-run-<timestamp>`
