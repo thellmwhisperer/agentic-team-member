@@ -168,7 +168,7 @@ def test_fake_claude_fix_passes_all_gates_via_cli(tmp_path):
         cwd=REPO_ROOT, env=env, capture_output=True, text=True, timeout=180,
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
-    assert "[tool] Write: tests/test_add.py" in proc.stdout
+    assert "[tool]" not in proc.stdout  # the agent's stream is the log's; tail-run.py renders it
 
     brief = (artifacts / "brief.md").read_text()
     assert "add returns the difference" in brief
@@ -859,23 +859,29 @@ print(json.dumps({"type": "agent_end"}), flush=True)
 """
 
 
-def test_opencode_harness_fix_passes_the_gates(tmp_path, monkeypatch, capsys):
+def _tail(log_dir) -> str:
+    """What the pane shows for the run: the worker log rendered by scripts/tail-run.py."""
+    return subprocess.run([sys.executable, str(REPO_ROOT / "scripts" / "tail-run.py"), str(log_dir)],
+                          capture_output=True, text=True, timeout=30, env={**os.environ, "NO_COLOR": "1"}).stdout
+
+
+def test_opencode_harness_fix_passes_the_gates(tmp_path, monkeypatch):
     monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
-    argv, artifacts, _ = _setup(tmp_path, OPENCODE_HARNESS)
+    argv, artifacts, log_dir = _setup(tmp_path, OPENCODE_HARNESS)
     assert harness_worker.main([*argv, "--harness", "opencode", "--model", "ollama/qwen3.8:27b-mlx"]) == 0
     report = json.loads((artifacts / "report.json").read_text())
     assert report["harness"] == "opencode" and report["verified"]["ok"] is True
-    out = capsys.readouterr().out
+    out = _tail(log_dir)
     assert "[tool] edit (completed)" in out and "[text] Done." in out
 
 
-def test_pi_harness_fix_passes_the_gates_and_prints_thinking(tmp_path, monkeypatch, capsys):
+def test_pi_harness_fix_passes_the_gates_and_prints_thinking(tmp_path, monkeypatch):
     monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
-    argv, artifacts, _ = _setup(tmp_path, PI_HARNESS)
+    argv, artifacts, log_dir = _setup(tmp_path, PI_HARNESS)
     assert harness_worker.main([*argv, "--harness", "pi", "--model", "ollama/qwen3.8:27b-mlx", "--effort", "low"]) == 0
     report = json.loads((artifacts / "report.json").read_text())
     assert report["harness"] == "pi" and report["verified"]["ok"] is True
-    out = capsys.readouterr().out
+    out = _tail(log_dir)
     assert "[thinking]" in out and "trace the flow" in out and "[text] Done." in out
 
 
