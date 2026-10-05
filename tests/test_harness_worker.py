@@ -979,7 +979,11 @@ def test_green_run_delivers_through_no_mistakes_by_default(tmp_path, monkeypatch
 def test_green_run_with_a_follow_up_in_atm_delivers_when_the_target_does_not_ignore_atm(tmp_path, monkeypatch):
     harness = _follow_up_harness([("tests/test_mul_neg.py", MUL_NEG_TEST)])
     argv, artifacts, _, _ = _delivery_setup(tmp_path, monkeypatch, harness)
-    assert ".atm" not in (tmp_path / "target" / ".gitignore").read_text()
+    ignored = subprocess.run(
+        ["git", "check-ignore", "-q", "--no-index", "--", ".atm/follow-ups/1/tests/test_mul_neg.py"],
+        cwd=tmp_path / "target",
+    )
+    assert ignored.returncode == 1
     assert harness_worker.main(argv) == 0
     report = json.loads((artifacts / "report.json").read_text())
     assert report["delivery"]["pr_url"] == "https://github.com/owner/calc/pull/7"
