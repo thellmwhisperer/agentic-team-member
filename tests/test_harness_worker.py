@@ -1112,6 +1112,51 @@ def test_ponytail_cut_that_fails_the_target_lint_is_discarded(tmp_path, monkeypa
     assert (Path(report["worktree"]) / "calc.py").read_text() == FIXED_CALC + UNUSED
 
 
+def test_ponytail_quoted_lint_command_runs_as_yaml_value(tmp_path, monkeypatch):
+    argv, artifacts, _ = _setup(tmp_path, _ponytail_harness())
+    source = tmp_path / "target"
+    (source / ".no-mistakes.yaml").write_text('commands:\n  lint: "true"\n')
+    _git(source, "add", ".no-mistakes.yaml")
+    _git(source, "commit", "-q", "-m", "lint")
+    assert harness_worker.main(argv) == 0
+    assert json.loads((artifacts / "report.json").read_text())["ponytail"]["kept"] is True
+
+
+def test_ponytail_failure_discards_a_shortened_diff(tmp_path, monkeypatch):
+    argv, artifacts, _ = _setup(tmp_path, _ponytail_harness())
+    run_harness = harness_worker.run_harness
+
+    def failing_ponytail(*args, **kwargs):
+        result = run_harness(*args, **kwargs)
+        if args[1].startswith("# Ponytail pass"):
+            result["exit_code"] = 1
+        return result
+
+    monkeypatch.setattr(harness_worker, "run_harness", failing_ponytail)
+    assert harness_worker.main(argv) == 0
+    report = json.loads((artifacts / "report.json").read_text())
+    assert report["ponytail"]["kept"] is False
+    assert "harness exited 1" in report["ponytail"]["reason"]
+    assert (Path(report["worktree"]) / "calc.py").read_text() == FIXED_CALC + UNUSED
+
+
+def test_report_changed_files_reflects_files_removed_by_ponytail(tmp_path, monkeypatch):
+    harness = _ponytail_harness().replace(
+        'calc.write_text(calc.read_text().replace("a - b", "a + b") + UNUSED)',
+        'calc.write_text(calc.read_text().replace("a - b", "a + b") + UNUSED)\n'
+        '    pathlib.Path("extra.py").write_text("x = 1\\n")',
+    ).replace(
+        'calc.write_text(calc.read_text().replace(UNUSED, ""))',
+        'calc.write_text(calc.read_text().replace(UNUSED, ""))\n'
+        '    pathlib.Path("extra.py").unlink()',
+    )
+    argv, artifacts, _ = _setup(tmp_path, harness)
+    assert harness_worker.main(argv) == 0
+    report = json.loads((artifacts / "report.json").read_text())
+    assert report["ponytail"]["kept"] is True
+    assert "extra.py" not in report["changed_files"]
+
+
 @pytest.mark.parametrize("from_github", [True, False])
 def test_unit_commit_of_an_issue_run_closes_the_issue(tmp_path, monkeypatch, from_github):
     argv, artifacts, _, _ = _delivery_setup(tmp_path, monkeypatch)

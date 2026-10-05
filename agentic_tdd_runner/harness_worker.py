@@ -914,7 +914,7 @@ PONYTAIL_SCHEMA = {
     "properties": {
         "findings": {"type": "array", "items": {
             "type": "object",
-            "properties": {"file": {"type": "string"}, "family": {"type": "string"}, "finding": {"type": "string"}},
+            "properties": {"file": {"type": "string"}, "family": {"enum": list(SLOP_FAMILIES)}, "finding": {"type": "string"}},
             "required": ["file", "family", "finding"],
             "additionalProperties": False,
         }},
@@ -976,9 +976,13 @@ def net_added_lines(workdir: str, base: str, snapshot: str) -> int:
 def lint_command(workdir: str) -> str | None:
     """The target's lint: `commands.lint` of its tracked .no-mistakes.yaml, run by sh."""
     path = Path(workdir, ".no-mistakes.yaml")
-    # ponytail: one plain one-line value; a quoted or block scalar would reach sh as is and fail the pass, never pass it.
     match = re.search(r"^\s+lint:\s*(.+)$", path.read_text(), re.M) if path.is_file() else None
-    return f"sh -c {shlex.quote(match.group(1).strip())}" if match else None
+    if not match:
+        return None
+    command = match.group(1).strip()
+    if len(command) >= 2 and command[0] == command[-1] and command[0] in "\"'":
+        command = command[1:-1].replace("''", "'") if command[0] == "'" else json.loads(command)
+    return f"sh -c {shlex.quote(command)}"
 
 
 def write_tombstones(workdir: str, findings: list[dict]) -> list[str]:
@@ -1176,7 +1180,15 @@ def main(argv: list[str] | None = None) -> int:
         after = snapshot_commit(worktree)
         record = {"findings": findings, "net_lines_before": net_added_lines(worktree, base_sha, before),
                   "net_lines_after": net_added_lines(worktree, base_sha, after), "kept": False, "tombstones": []}
-        if git_lines(worktree, "rev-parse", "HEAD") != [head]:
+        report_valid = (isinstance(pony_report, dict) and set(pony_report) == {"findings", "summary"}
+                        and isinstance(pony_report.get("findings"), list) and isinstance(pony_report.get("summary"), str)
+                        and all(isinstance(f, dict) and set(f) == {"file", "family", "finding"}
+                                and all(isinstance(f.get(key), str) for key in ("file", "family", "finding"))
+                                and f["family"] in SLOP_FAMILIES for f in pony_report["findings"]))
+        if run["timed_out"] or run["exit_code"] != 0 or parse_error or not report_valid:
+            reason = "harness timed out" if run["timed_out"] else (
+                f"harness exited {run['exit_code']}" if run["exit_code"] != 0 else "invalid ponytail report")
+        elif git_lines(worktree, "rev-parse", "HEAD") != [head]:
             reason = "harness moved HEAD (created commits)"
         elif record["net_lines_after"] >= record["net_lines_before"]:
             reason = "did not reduce the run's net added lines"
@@ -1235,13 +1247,13 @@ def main(argv: list[str] | None = None) -> int:
     accepted = [f for f in all_follow_ups if f["accepted"] and not f.get("chained_as_unit")]
     if accepted:
         (artifact_dir / "follow-ups.json").write_text(json.dumps(accepted, indent=2))
-    changed_all = sorted({p for u in units for p in u["changed_files"]} | {
-        p for u in units if u.get("committed_as") for p in git_lines(worktree, "diff", "--name-only", base_sha, u["committed_as"])
-        if not is_atm_path(p)})
     failed_unit = next((u for u in units if not u["passed"]), None)
     last = units[-1]
     passed = failed_unit is None
     ponytail = ponytail_pass(units) if passed else None
+    changed_all = sorted({p for p in git_lines(worktree, "diff", "--name-only", base_sha, "HEAD")
+                          + quality.get_changed_files(worktree)
+                          if not is_atm_path(p) and os.path.exists(os.path.join(worktree, p))})
     result = {
         "harness": args.harness, "model": args.model, "effort": args.effort, "base_ref": args.base_ref, "base_sha": base_sha,
         "head_sha": git_lines(worktree, "rev-parse", "HEAD")[0], "worktree": worktree,
