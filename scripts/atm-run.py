@@ -16,7 +16,7 @@ Commands:
 
     atm-run.py run  --config C --label opus-5 --harness claude --model claude-opus-5-5
     atm-run.py run  ... --pane w3:pB      # launch inside a herdr pane and verify it started
-    atm-run.py run  ... --deliver none    # stop at the verdict instead of handing the clone to no-mistakes
+    atm-run.py run  ... --no-deliver      # stop at the verdict instead of handing the clone to no-mistakes
     atm-run.py show --label opus-5         # the verdict of a finished run
     atm-run.py list                        # every run under .tmp/harness-worker with its verdict
     atm-run.py tail [--label L | PATH]     # follow a run's worker log: what ran, its outcome, the verdict
@@ -83,8 +83,8 @@ def worker_command(args, launch: dict, out: Path) -> list[str]:
         cmd += ["--harness-arg", a]
     if args.timeout:
         cmd += ["--timeout", str(args.timeout)]
-    if args.deliver == "none":
-        cmd += ["--deliver", "none"]
+    if args.no_deliver:
+        cmd += ["--no-deliver"]
     return cmd
 
 
@@ -184,8 +184,8 @@ def launch_in_pane(args) -> int:
         inner += ["--harness-arg", a]
     if args.timeout:
         inner += ["--timeout", str(args.timeout)]
-    if args.deliver == "none":
-        inner += ["--deliver", "none"]
+    if args.no_deliver:
+        inner += ["--no-deliver"]
     # A pane stuck in a tail/pager swallows typed text: interrupt whatever is in the foreground first.
     subprocess.run(["herdr", "pane", "send-keys", pane, "C-c"], check=False)
     time.sleep(0.5)
@@ -305,8 +305,7 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--model")
     r.add_argument("--effort", choices=["low", "medium", "high", "xhigh", "max"])
     r.add_argument("--timeout", type=int)
-    r.add_argument("--deliver", choices=["none"],
-                   help="skip no-mistakes delivery after a green verdict")
+    r.add_argument("--no-deliver", action="store_true", help="skip no-mistakes delivery after a green verdict")
     r.add_argument("--pane", help="herdr pane id; launch there and verify [PREPARE] appears")
     r.add_argument("--wait", type=int, default=30, help="seconds to wait for [PREPARE] with --pane")
     r.set_defaults(fn=cmd_run)

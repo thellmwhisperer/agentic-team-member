@@ -17,7 +17,6 @@ import fnmatch
 import json
 import os
 import re
-import shlex
 import sys
 import textwrap
 import time
@@ -62,10 +61,6 @@ class Renderer:
         self.harness = "harness"
         self.n = 0
         self.clone = ""
-        # base ref, source repo and timeout are not in the log; atm-run.py writes the worker command beside it.
-        cmd = log.parent / "command.txt"
-        argv = shlex.split(cmd.read_text()) if cmd.exists() else []
-        self.flags = {a: b for a, b in zip(argv, argv[1:]) if a.startswith("--")}
 
     def strip(self, text) -> str:
         return str(text).replace(self.clone + "/", "") if self.clone else str(text)
@@ -121,12 +116,9 @@ class Renderer:
 
     def on_atm_prepared(self, e):
         self.clone = e.get("worktree") or ""
-        repo = self.flags.get("--repo")
-        worktree = os.path.relpath(self.clone, repo) if repo and self.clone.startswith(repo.rstrip("/") + "/") else self.clone
-        base = (e.get("base_sha") or "")[:10]
         self.phase("PREPARE")
-        print(f"  worktree  {worktree}")
-        print(f"  base      {self.flags['--base-ref'] + '@' if '--base-ref' in self.flags else ''}{base}")
+        print(f"  worktree  {self.clone}")
+        print(f"  base      {(e.get('base_sha') or '')[:10]}")
         print(f"  tests     {e.get('test_command') or 'none'}")
 
     def on_atm_prepare_failed(self, e):
@@ -135,8 +127,7 @@ class Renderer:
         return True
 
     def on_atm_unit_started(self, e):
-        timeout = f" timeout={self.flags['--timeout']}s" if "--timeout" in self.flags else ""
-        self.phase(f"AGENT  unit {e.get('unit')} {self.harness}{timeout}")
+        self.phase(f"AGENT  unit {e.get('unit')} {self.harness}")
 
     def on_assistant(self, e):
         for block in (e.get("message") or {}).get("content") or []:
