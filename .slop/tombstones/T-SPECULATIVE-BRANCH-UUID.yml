@@ -24,7 +24,7 @@ incident:
     read before any merge.
   evidence:
     - family: speculative_hardening
-      example: 'f"atm/{slug}-{datetime.now().strftime(...)}-{uuid.uuid4().hex}" in deliver(), PR 101 commit 3b97887, reverted in 52b7028'
+      example: 'f"atm/{slug}-{datetime.now().strftime(...)}-{uuid.uuid4().hex}" in deliver(), added in 9469662, reverted in eb86552 on main'
       artifact: agentic_tdd_runner/harness_worker.py
 match:
   family: speculative_hardening
