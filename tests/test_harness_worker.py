@@ -131,7 +131,7 @@ def _git(cwd, *args):
     )
 
 
-def _setup(tmp_path, harness_source, issue_text="add(2, 3) returns -1 instead of 5.", deliver=False):
+def _setup(tmp_path, harness_source, issue_text="add(2, 3) returns -1 instead of 5."):
     repo = tmp_path / "target"
     (repo / "tests").mkdir(parents=True)
     (repo / "pyproject.toml").write_text('[project]\nname = "calc"\nversion = "0"\n\n[tool.pytest.ini_options]\n')
@@ -157,8 +157,6 @@ def _setup(tmp_path, harness_source, issue_text="add(2, 3) returns -1 instead of
         "--repo", str(repo), "--issue-file", str(issue), "--config", str(config_dir / "agent.toml"),
         "--artifact-dir", str(artifacts), "--log-dir", str(tmp_path / "logs"), "--harness-bin", str(harness),
     ]
-    if not deliver:  # the verdict tests stop at the verdict; the delivery tests pass deliver=True for the default
-        argv += ["--no-deliver"]
     return argv, artifacts, tmp_path / "logs"
 
 
@@ -281,7 +279,7 @@ def test_label_names_the_run_directory_and_is_refused_once_used(tmp_path, monkey
     assert json.loads((run / "report.json").read_text())["verified"]["ok"] is True
     command = (run / "command.txt").read_text()
     assert f"cd {tmp_path} && " in command and "-m agentic_tdd_runner.harness_worker" in command
-    assert command.rstrip().endswith("--no-deliver --label same")
+    assert command.rstrip().endswith("--label same")
 
     capsys.readouterr()
     assert harness_worker.main(argv) == 2
@@ -931,101 +929,43 @@ def test_harness_arg_lands_before_the_brief():
     assert cmd[-1] == "--verbose-x" and stdin == "the brief"
 
 
-FAKE_NO_MISTAKES = """
-import os, subprocess, sys
-args = sys.argv[1:]
-with open(os.environ["FAKE_NM_LOG"], "a") as fh:
-    fh.write(" ".join(args) + "\\n")
-git = lambda *a: subprocess.run(["git", *a], capture_output=True, text=True).stdout.strip()
-registry = os.environ["FAKE_NM_LOG"] + ".init"  # one line per init: "<cwd> <origin url>"
-inited = os.path.exists(registry) and any(l.split(" ")[0] == os.getcwd() for l in open(registry))
-gate, paused = os.environ.get("FAKE_NM_GATE"), os.environ["FAKE_NM_LOG"] + ".paused"  # gate: once, never or protected
-if args == ["init"]:
-    if os.environ.get("FAKE_NM_INIT_FAIL"):
-        sys.exit("error: origin remote unreachable")
-    with open(registry, "a") as fh:  # like the real init, a second run refreshes and succeeds
-        fh.write(os.getcwd() + " " + git("remote", "get-url", "origin") + "\\n")
-elif args[:2] == ["axi", "run"] and not inited or args[:2] == ["axi", "status"] and not inited:
-    sys.exit("error: repo not initialized (run 'no-mistakes init' first)")
-elif args[:2] == ["axi", "run"] and git("status", "--porcelain"):
-    sys.exit("error: uncommitted changes in the working tree")
-elif args[:2] == ["axi", "run"] and (gate == "once" and not os.path.exists(paused) or gate in ("never", "protected")):
-    open(paused, "w").close()  # --wait elapsed with the run parked at a gate
-    print('run: "01M45YGAMAHEKN66DQGKV4AF30"')
-    sys.exit(3)
-elif args[:2] == ["axi", "run"]:
-    open(os.environ["FAKE_NM_LOG"] + ".ran", "w").close()
-    print('run: "01M45YGAMAHEKN66DQGKV4AF30"')
-    print("outcome: passed")
-elif args[:2] == ["axi", "status"]:
-    if os.environ.get("FAKE_NM_STATUS_FAIL"):
-        sys.exit("status temporarily unavailable")
-    ran = os.path.exists(os.environ["FAKE_NM_LOG"] + ".ran")
-    print("run:")
-    print('  id: "01M45YGAMAHEKN66DQGKV4AF30"')
-    print("  branch: " + git("branch", "--show-current"))
-    print("  status: " + ("completed" if ran else "running"))
-    if not ran:
-        print("  awaiting_agent: parked 2h0m0s")
-    print("  head_sha: " + git("rev-parse", "HEAD"))
-    if not os.environ.get("FAKE_NM_NO_PR") and (ran or gate == "never"):
-        print("  pr: https://github.com/owner/calc/pull/7")
-    if gate == "protected":
-        print("gate: protected-path-refusal")
-    if ran:
-        print("outcome: passed")
-elif args == ["attach"]:
-    print("attach TUI")
-"""
-
-
-def _delivery_setup(tmp_path, monkeypatch, harness=FIXING_HARNESS):
+def _delivery_setup(tmp_path, monkeypatch, harness=FIXING_HARNESS, command="true"):
     monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
-    argv, artifacts, _ = _setup(tmp_path, harness, deliver=True)
-    source = tmp_path / "target"
-    _git(source, "remote", "add", "origin", "https://github.com/owner/calc.git")
-    (source / ".no-mistakes.yaml").write_text("agent: claude\n")
-    with (source / ".git" / "info" / "exclude").open("a") as fh:
-        fh.write(".no-mistakes.yaml\n")  # ignored in the source repo, so the clone does not get it from git
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    fake = bin_dir / "no-mistakes"
-    fake.write_text(f"#!{sys.executable}\n" + FAKE_NO_MISTAKES)
-    fake.chmod(0o755)
-    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
-    monkeypatch.setenv("FAKE_NM_LOG", str(tmp_path / "no-mistakes-calls.txt"))
-    pane = tmp_path / "pane.txt"
-    monkeypatch.setattr(harness_worker, "terminal", lambda: pane.open("w"), raising=False)  # the pane's /dev/tty
-    return argv, artifacts, tmp_path / "no-mistakes-calls.txt", pane
+    argv, artifacts, _ = _setup(tmp_path, harness)
+    _git(tmp_path / "target", "remote", "add", "origin", "https://github.com/owner/calc.git")
+    with (tmp_path / "config" / "agent.toml").open("a") as fh:
+        fh.write(f"\n[delivery]\ncommand = {json.dumps(command)}\n")
+    return argv, artifacts
 
 
-def test_green_run_delivers_through_no_mistakes_by_default(tmp_path, monkeypatch):
-    argv, artifacts, calls, pane = _delivery_setup(tmp_path, monkeypatch)
+def test_delivery_runs_the_configured_command_and_exits_4_when_it_fails(tmp_path, monkeypatch, capsys):
+    argv, artifacts = _delivery_setup(tmp_path, monkeypatch, command="printf 'gate: waiting\\n'; exit 3")
+    assert harness_worker.main(argv) == 4
+    delivery = json.loads((artifacts / "report.json").read_text())["delivery"]
+    assert delivery["exit_code"] == 3 and delivery["command"] == "printf 'gate: waiting\\n'; exit 3"
+    assert delivery["duration_seconds"] >= 0
+    assert "gate: waiting" in Path(delivery["output"]).read_text()
+    assert "gate: waiting" in capsys.readouterr().out  # the pane
+
+
+def test_delivery_command_gets_the_committed_branch_and_the_atm_environment(tmp_path, monkeypatch):
+    command = ('printf "%s\\n" "$ATM_TITLE" "$ATM_ISSUE" "$ATM_BRANCH" "$ATM_CLONE" "$ATM_REPORT" '
+               '"$(git branch --show-current)" "$(git remote get-url origin)" "$(git status --porcelain)"')
+    argv, artifacts = _delivery_setup(tmp_path, monkeypatch, command=command)
     assert harness_worker.main(argv) == 0
     report = json.loads((artifacts / "report.json").read_text())
-    delivery = report["delivery"]
-    assert delivery["run_id"] == "01M45YGAMAHEKN66DQGKV4AF30"
-    assert delivery["pr_url"] == "https://github.com/owner/calc/pull/7"
-    clone = report["worktree"]
-    assert delivery["branch"].startswith("atm/add-returns-the-difference-")
-    assert subprocess.run(["git", "branch", "--show-current"], cwd=clone, capture_output=True, text=True).stdout.strip() == delivery["branch"]
-    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=clone, capture_output=True, text=True).stdout.strip()
-    assert delivery["head_sha"] == head and head != report["base_sha"]
+    delivery, clone = report["delivery"], report["worktree"]
+    assert delivery["exit_code"] == 0 and delivery["branch"].startswith("atm/add-returns-the-difference-")
+    assert Path(delivery["output"]).read_text().split("\n") == [
+        "add returns the difference", "", delivery["branch"], clone, str(artifacts.resolve() / "report.json"),
+        delivery["branch"], "https://github.com/owner/calc.git", "", ""]
     committed = subprocess.run(["git", "show", "--name-only", "--format=", "HEAD"], cwd=clone, capture_output=True, text=True).stdout.split()
     assert sorted(committed) == ["calc.py", "tests/test_add.py"]
-    assert not (Path(clone) / ".no-mistakes.yaml").exists()
-    origin = subprocess.run(["git", "remote", "get-url", "origin"], cwd=clone, capture_output=True, text=True).stdout.strip()
-    assert origin == "https://github.com/owner/calc.git"
-    lines = calls.read_text().splitlines()
-    during, status = lines[:-1], lines[-1]  # run and attach start together, in either order
-    assert "attach" in during and any(c.startswith("axi run --yes --intent add returns the difference") for c in during)
-    assert status == "axi status"
-    assert "attach TUI" in pane.read_text()
 
 
 def test_green_run_with_a_follow_up_in_atm_delivers_when_the_target_does_not_ignore_atm(tmp_path, monkeypatch):
     harness = _follow_up_harness([("tests/test_mul_neg.py", MUL_NEG_TEST)])
-    argv, artifacts, _, _ = _delivery_setup(tmp_path, monkeypatch, harness)
+    argv, artifacts = _delivery_setup(tmp_path, monkeypatch, harness, command="test -z \"$(git status --porcelain)\"")
     ignored = subprocess.run(
         ["git", "check-ignore", "-q", "--no-index", "--", ".atm/follow-ups/1/tests/test_mul_neg.py"],
         cwd=tmp_path / "target",
@@ -1033,93 +973,18 @@ def test_green_run_with_a_follow_up_in_atm_delivers_when_the_target_does_not_ign
     assert ignored.returncode == 1
     assert harness_worker.main(argv) == 0
     report = json.loads((artifacts / "report.json").read_text())
-    assert report["delivery"]["pr_url"] == "https://github.com/owner/calc/pull/7"
+    assert report["delivery"]["exit_code"] == 0
     assert (Path(report["worktree"]) / ".atm" / "follow-ups" / "1" / "tests" / "test_mul_neg.py").is_file()
 
 
-def test_green_run_without_a_pr_exits_3(tmp_path, monkeypatch):
-    argv, artifacts, _, _ = _delivery_setup(tmp_path, monkeypatch)
-    monkeypatch.setenv("FAKE_NM_NO_PR", "1")
-    assert harness_worker.main(argv) == 3
-    report = json.loads((artifacts / "report.json").read_text())
-    assert report["delivery"]["pr_url"] is None and report["delivery"]["run_id"] == "01M45YGAMAHEKN66DQGKV4AF30"
-
-
-def test_delivery_drives_the_run_again_while_it_is_parked_at_a_gate(tmp_path, monkeypatch):
-    argv, artifacts, calls, pane = _delivery_setup(tmp_path, monkeypatch)
-    monkeypatch.setenv("FAKE_NM_GATE", "once")
-    assert harness_worker.main(argv) == 0
-    delivery = json.loads((artifacts / "report.json").read_text())["delivery"]
-    assert delivery["pr_url"] == "https://github.com/owner/calc/pull/7"
-    assert delivery["drives"] == 2 and "error" not in delivery
-    lines = calls.read_text().splitlines()
-    assert sum(c.startswith("axi run --yes") for c in lines) == 2 and lines[-1] == "axi status"
-    assert "attach TUI" in pane.read_text()
-
-
-def test_delivery_stops_driving_at_the_ceiling(tmp_path, monkeypatch):
-    argv, artifacts, calls, _ = _delivery_setup(tmp_path, monkeypatch)
-    monkeypatch.setenv("FAKE_NM_GATE", "never")
-    assert harness_worker.main(argv) == 3
-    delivery = json.loads((artifacts / "report.json").read_text())["delivery"]
-    assert delivery["drives"] == harness_worker.NO_MISTAKES_MAX_DRIVES
-    assert f"{harness_worker.NO_MISTAKES_MAX_DRIVES} drives" in delivery["error"]
-    assert sum(c.startswith("axi run --yes") for c in calls.read_text().splitlines()) == harness_worker.NO_MISTAKES_MAX_DRIVES
-
-
-def test_delivery_reports_status_failure_while_run_is_active(tmp_path, monkeypatch):
-    argv, artifacts, calls, _ = _delivery_setup(tmp_path, monkeypatch)
-    monkeypatch.setenv("FAKE_NM_GATE", "once")
-    monkeypatch.setenv("FAKE_NM_STATUS_FAIL", "1")
-    assert harness_worker.main(argv) == 3
-    delivery = json.loads((artifacts / "report.json").read_text())["delivery"]
-    assert "status failed: status temporarily unavailable" in delivery["error"]
-    assert delivery["drives"] == 1
-    assert sum(c.startswith("axi run --yes") for c in calls.read_text().splitlines()) == 1
-
-
-def test_delivery_error_with_a_pr_exits_3(tmp_path, monkeypatch):
-    argv, artifacts, _, _ = _delivery_setup(tmp_path, monkeypatch)
-    monkeypatch.setenv("FAKE_NM_GATE", "never")
-    assert harness_worker.main(argv) == 3
-    delivery = json.loads((artifacts / "report.json").read_text())["delivery"]
-    assert delivery["pr_url"] == "https://github.com/owner/calc/pull/7"
-    assert "error" in delivery
-
-
-def test_delivery_stops_at_a_protected_path_refusal(tmp_path, monkeypatch):
-    argv, artifacts, calls, _ = _delivery_setup(tmp_path, monkeypatch)
-    monkeypatch.setenv("FAKE_NM_GATE", "protected")
-    assert harness_worker.main(argv) == 3
-    delivery = json.loads((artifacts / "report.json").read_text())["delivery"]
-    assert delivery["drives"] == 1 and "protected-path refusal" in delivery["error"]
-    assert sum(c.startswith("axi run --yes") for c in calls.read_text().splitlines()) == 1
-
-
-def test_delivery_runs_no_mistakes_init_in_the_clone_after_pointing_origin(tmp_path, monkeypatch):
-    argv, artifacts, calls, _ = _delivery_setup(tmp_path, monkeypatch)
+def test_without_a_delivery_command_the_run_stops_at_the_verdict(tmp_path, monkeypatch):
+    monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
+    argv, artifacts, _ = _setup(tmp_path, FIXING_HARNESS)
     assert harness_worker.main(argv) == 0
     report = json.loads((artifacts / "report.json").read_text())
-    assert report["delivery"]["run_id"] == "01M45YGAMAHEKN66DQGKV4AF30"
-    clone = os.path.realpath(report["worktree"])
-    assert Path(f"{calls}.init").read_text().splitlines() == [f"{clone} https://github.com/owner/calc.git"]
-    assert calls.read_text().splitlines()[0] == "init"
+    assert report["delivery"] == {"skipped": "no [delivery].command"}
+    assert subprocess.run(["git", "status", "--porcelain"], cwd=report["worktree"], capture_output=True, text=True).stdout
 
-
-def test_failed_no_mistakes_init_is_recorded_and_exits_3(tmp_path, monkeypatch):
-    argv, artifacts, calls, _ = _delivery_setup(tmp_path, monkeypatch)
-    monkeypatch.setenv("FAKE_NM_INIT_FAIL", "1")
-    assert harness_worker.main(argv) == 3
-    delivery = json.loads((artifacts / "report.json").read_text())["delivery"]
-    assert "origin remote unreachable" in delivery["error"] and delivery["run_id"] is None
-    assert calls.read_text().splitlines() == ["init"]
-
-
-def test_no_deliver_stops_at_the_verdict(tmp_path, monkeypatch):
-    argv, artifacts, calls, _ = _delivery_setup(tmp_path, monkeypatch)
-    assert harness_worker.main([*argv, "--no-deliver"]) == 0
-    assert "delivery" not in json.loads((artifacts / "report.json").read_text())
-    assert not calls.exists()
 
 UNUSED = "\n\ndef unused(x):\n    if x is None:\n        return 0\n    return x\n"
 FIXED_CALC = "def add(a, b):\n    return a + b\n\n\ndef mul(a, b):\n    return abs(a * b)\n"
@@ -1151,7 +1016,7 @@ def _committed(clone, *args):
 
 
 def test_ponytail_pass_keeps_a_cut_that_passes_every_gate_and_tombstones_it(tmp_path, monkeypatch, capsys):
-    argv, artifacts, _, _ = _delivery_setup(tmp_path, monkeypatch, _ponytail_harness())
+    argv, artifacts = _delivery_setup(tmp_path, monkeypatch, _ponytail_harness())
     source = tmp_path / "target"
     (source / ".slop" / "tombstones").mkdir(parents=True)
     (source / ".slop" / "tombstones" / "README.md").write_text("# Tombstones\n")
@@ -1179,7 +1044,7 @@ def test_ponytail_pass_keeps_a_cut_that_passes_every_gate_and_tombstones_it(tmp_
 
 def test_ponytail_cut_that_breaks_the_unit_test_is_discarded(tmp_path, monkeypatch, capsys):
     breaks = 'calc.write_text(calc.read_text().replace("a + b", "a - b"))'
-    argv, artifacts, _, _ = _delivery_setup(tmp_path, monkeypatch, _ponytail_harness(breaks))
+    argv, artifacts = _delivery_setup(tmp_path, monkeypatch, _ponytail_harness(breaks))
     assert harness_worker.main(argv) == 0
     report = json.loads((artifacts / "report.json").read_text())
     pony = report["ponytail"]
@@ -1193,22 +1058,18 @@ def test_ponytail_cut_that_breaks_the_unit_test_is_discarded(tmp_path, monkeypat
 def test_ponytail_cut_that_fails_the_target_lint_is_discarded(tmp_path, monkeypatch):
     monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
     argv, artifacts, _ = _setup(tmp_path, _ponytail_harness())
-    source = tmp_path / "target"
-    (source / ".no-mistakes.yaml").write_text("commands:\n  test: python3 -m pytest -q\n  lint: echo LINT BROKE && exit 3\n")
-    _git(source, "add", ".no-mistakes.yaml")
-    _git(source, "commit", "-q", "-m", "nm")
+    with (tmp_path / "config" / "agent.toml").open("a") as fh:
+        fh.write('\n[delivery]\nlint_command = "echo LINT BROKE && exit 3"\n')
     assert harness_worker.main(argv) == 0
     report = json.loads((artifacts / "report.json").read_text())
     assert report["ponytail"]["kept"] is False and "lint" in report["ponytail"]["reason"]
     assert (Path(report["worktree"]) / "calc.py").read_text() == FIXED_CALC + UNUSED
 
 
-def test_ponytail_quoted_lint_command_runs_as_yaml_value(tmp_path, monkeypatch):
+def test_ponytail_cut_that_passes_the_target_lint_is_kept(tmp_path, monkeypatch):
     argv, artifacts, _ = _setup(tmp_path, _ponytail_harness())
-    source = tmp_path / "target"
-    (source / ".no-mistakes.yaml").write_text('commands:\n  lint: "true"\n')
-    _git(source, "add", ".no-mistakes.yaml")
-    _git(source, "commit", "-q", "-m", "lint")
+    with (tmp_path / "config" / "agent.toml").open("a") as fh:
+        fh.write('\n[delivery]\nlint_command = \"true\"\n')
     assert harness_worker.main(argv) == 0
     assert json.loads((artifacts / "report.json").read_text())["ponytail"]["kept"] is True
 
@@ -1250,14 +1111,16 @@ def test_report_changed_files_reflects_files_removed_by_ponytail(tmp_path, monke
 
 @pytest.mark.parametrize("from_github", [True, False])
 def test_unit_commit_of_an_issue_run_closes_the_issue(tmp_path, monkeypatch, from_github):
-    argv, artifacts, _, _ = _delivery_setup(tmp_path, monkeypatch)
+    argv, artifacts = _delivery_setup(tmp_path, monkeypatch, command='printf "$ATM_ISSUE"')
     if from_github:
         i = argv.index("--issue-file")
         argv[i:i + 2] = ["--issue-number", "7", "--github-repo", "owner/calc"]
         monkeypatch.setattr(harness_worker, "load_issue", lambda args: (
             "add returns the difference", "add(2, 3) returns -1 instead of 5."))
     assert harness_worker.main(argv) == 0
-    clone = json.loads((artifacts / "report.json").read_text())["worktree"]
+    report = json.loads((artifacts / "report.json").read_text())
+    clone = report["worktree"]
+    assert Path(report["delivery"]["output"]).read_text() == ("7" if from_github else "")
     message = subprocess.run(["git", "log", "-1", "--format=%B"], cwd=clone, capture_output=True, text=True).stdout.strip()
     expected = "atm unit 1: add returns the difference"
     assert message == (f"{expected}\n\nCloses #7" if from_github else expected)
