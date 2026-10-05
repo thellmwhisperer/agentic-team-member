@@ -65,6 +65,27 @@ def get_changed_files(workdir: str) -> list[str]:
     return sorted(files)
 
 
+def added_lines(workdir: str, path: str, base: str = "HEAD") -> list[tuple[int, str]]:
+    """(line number, text) for lines of path added since base; every line when base lacks the file."""
+    try:
+        lines = (Path(workdir) / path).read_text(errors="replace").splitlines()
+    except OSError:
+        return []
+    tracked = subprocess.run(["git", "cat-file", "-e", f"{base}:{path}"], cwd=workdir, capture_output=True)
+    if tracked.returncode != 0:
+        return list(enumerate(lines, 1))
+    diff = subprocess.run(
+        ["git", "diff", "-U0", "--no-color", "--no-ext-diff", "--no-textconv", base, "--", path],
+        cwd=workdir, capture_output=True, text=True, errors="replace",
+    )
+    numbers = [
+        n
+        for start, count in re.findall(r"^@@ -\S+ \+(\d+)(?:,(\d+))? @@", diff.stdout, re.MULTILINE)
+        for n in range(int(start), int(start) + int(count or 1))
+    ]
+    return [(n, lines[n - 1]) for n in numbers if n <= len(lines)]
+
+
 def format_duplicated_setup_finding(path: str, report_lines: list[str]) -> str:
     """Format duplicated setup lines without echoing full test setup content."""
     identifiers: list[str] = []
@@ -86,6 +107,7 @@ def run_quality_checks(
     is_test_file_path: Callable[[str], bool],
     detect_quality_tools_fn: Callable[[str], list[dict]] | None = None,
     get_changed_files_fn: Callable[[], list[str]] | None = None,
+    base_ref: str = "HEAD",
 ) -> tuple[bool, str]:
     """Run quality checks on changed files. Returns (passed, message)."""
     quality_cfg = config.get("quality", {})
@@ -160,19 +182,12 @@ def run_quality_checks(
         except (OSError, UnicodeDecodeError) as e:
             failures.append(f"[{check['name']}] ERROR: {e}")
 
-    # Grep forbidden patterns in changed files - group by file
+    # Grep forbidden patterns in lines added since base_ref - group by file
     forbidden_by_file: dict[str, list[str]] = {}
-    for f in changed:
-        full = os.path.join(workdir, f)
-        if not os.path.isfile(full):
-            continue
-        try:
-            with open(full, errors="replace") as fh:
-                content = fh.read()
-        except OSError:
-            continue
+    for f in changed if forbidden else []:
+        added = added_lines(workdir, f, base_ref)
         for pattern in forbidden:
-            for i, line in enumerate(content.splitlines(), 1):
+            for i, line in added:
                 if pattern in line:
                     forbidden_by_file.setdefault(f, []).append(f"  {f}:{i} '{pattern}'")
     for f, hits in forbidden_by_file.items():

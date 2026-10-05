@@ -131,14 +131,11 @@ def quality_lang_key(workdir: str, project_type: str) -> str:
     return QUALITY_LANG.get(project_type, "")
 
 
-def scan_forbidden(workdir: str, changed: list[str], forbidden: list[str]) -> list[str]:
-    """Forbidden-pattern hits in changed files, for languages ATM's quality module does not know."""
+def scan_forbidden(workdir: str, changed: list[str], forbidden: list[str], base: str = "HEAD") -> list[str]:
+    """Forbidden-pattern hits in lines added since base, for languages ATM's quality module does not know."""
     hits = []
     for rel in changed:
-        path = Path(workdir) / rel
-        if not path.is_file():
-            continue
-        for number, line in enumerate(path.read_text(errors="replace").splitlines(), start=1):
+        for number, line in quality.added_lines(workdir, rel, base):
             for pattern in forbidden:
                 if pattern in line:
                     hits.append(f"{rel}:{number} {pattern!r}")
@@ -991,9 +988,10 @@ def main(argv: list[str] | None = None) -> int:
         quality_ok, quality_msg = quality.run_quality_checks(
             test_file or (changed[0] if changed else ""), workdir=worktree, config=config, log=log,
             is_test_file_path=lambda p: is_test_file_path(p, config), get_changed_files_fn=lambda: changed,
+            base_ref=unit_base,
         )
         if quality_ok and lang_key not in QUALITY_LANG.values():
-            hits = scan_forbidden(worktree, changed, forbidden)
+            hits = scan_forbidden(worktree, changed, forbidden, unit_base)
             if hits:
                 quality_ok, quality_msg = False, "forbidden patterns: " + "; ".join(hits[:5])
                 log("quality_forbidden", {"hits": hits})
