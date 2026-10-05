@@ -192,6 +192,7 @@ def test_fake_claude_fix_passes_all_gates_via_cli(tmp_path):
     assert report["timed_out"] is False
     assert report["harness_exit_code"] == 0
     assert report["report_parse_error"] is None
+    assert report["ponytail"]["kept"] is False and "did not reduce" in report["ponytail"]["reason"]
     for key in ("harness", "model", "base_ref", "worktree", "brief", "log", "duration_seconds"):
         assert key in report
 
@@ -1028,6 +1029,88 @@ def test_no_deliver_stops_at_the_verdict(tmp_path, monkeypatch):
     assert harness_worker.main([*argv, "--no-deliver"]) == 0
     assert "delivery" not in json.loads((artifacts / "report.json").read_text())
     assert not calls.exists()
+
+UNUSED = "\n\ndef unused(x):\n    if x is None:\n        return 0\n    return x\n"
+FIXED_CALC = "def add(a, b):\n    return a + b\n\n\ndef mul(a, b):\n    return abs(a * b)\n"
+PONYTAIL_HARNESS = """
+import json, pathlib, sys
+brief = sys.stdin.read()
+calc = pathlib.Path("calc.py")
+if brief.startswith("# Ponytail pass"):
+    assert "+def unused(x):" in brief  # the run's diff against the base commit
+    calc.write_text(calc.read_text().replace(UNUSED, ""))
+    BREAK
+    report = {"findings": [{"file": "calc.py", "family": "speculative_feature",
+                            "finding": "unused() has no caller: deleted"}], "summary": "cut one function"}
+else:
+    pathlib.Path("tests/test_add.py").write_text("from calc import add\\n\\n\\ndef test_add_sums():\\n    assert add(2, 3) == 5\\n")
+    calc.write_text(calc.read_text().replace("a - b", "a + b") + UNUSED)
+    report = {"test_file": "tests/test_add.py", "changed_files": ["calc.py", "tests/test_add.py"],
+              "summary": "fixed add", "commands_run": [], "follow_ups": []}
+print(json.dumps({"type": "result", "subtype": "success", "result": json.dumps(report)}), flush=True)
+"""
+
+
+def _ponytail_harness(breaks="pass"):
+    return PONYTAIL_HARNESS.replace("UNUSED", repr(UNUSED)).replace("BREAK", breaks)
+
+
+def _committed(clone, *args):
+    return subprocess.run(["git", *args], cwd=clone, capture_output=True, text=True, check=True).stdout
+
+
+def test_ponytail_pass_keeps_a_cut_that_passes_every_gate_and_tombstones_it(tmp_path, monkeypatch, capsys):
+    argv, artifacts, _, _ = _delivery_setup(tmp_path, monkeypatch, _ponytail_harness())
+    source = tmp_path / "target"
+    (source / ".slop" / "tombstones").mkdir(parents=True)
+    (source / ".slop" / "tombstones" / "README.md").write_text("# Tombstones\n")
+    _git(source, "add", ".slop")
+    _git(source, "commit", "-q", "-m", "slop")
+    assert harness_worker.main(argv) == 0
+    report = json.loads((artifacts / "report.json").read_text())
+    pony = report["ponytail"]
+    assert pony["kept"] is True, pony
+    assert pony["net_lines_after"] < pony["net_lines_before"]
+    assert pony["findings"] == [{"file": "calc.py", "family": "speculative_feature",
+                                 "finding": "unused() has no caller: deleted"}]
+    clone = report["worktree"]
+    assert _committed(clone, "show", "HEAD:calc.py") == FIXED_CALC
+    committed = _committed(clone, "show", "--name-only", "--format=", "HEAD").split()
+    (tombstone,) = [p for p in committed if p.startswith(".slop/tombstones/T-")]
+    assert sorted(set(committed) - {tombstone}) == ["calc.py", "tests/test_add.py"]
+    text = _committed(clone, "show", f"HEAD:{tombstone}")
+    assert "family: speculative_feature" in text and "artifact: calc.py" in text
+    assert 'example: "unused() has no caller: deleted"' in text and "status: accepted" in text
+    assert pony["tombstones"] == [tombstone]
+    summary = capsys.readouterr().out.split("=== HARNESS WORKER SUMMARY ===")[1]
+    assert f"ponytail:   kept, {pony['net_lines_before'] - pony['net_lines_after']} net lines saved" in summary
+
+
+def test_ponytail_cut_that_breaks_the_unit_test_is_discarded(tmp_path, monkeypatch, capsys):
+    breaks = 'calc.write_text(calc.read_text().replace("a + b", "a - b"))'
+    argv, artifacts, _, _ = _delivery_setup(tmp_path, monkeypatch, _ponytail_harness(breaks))
+    assert harness_worker.main(argv) == 0
+    report = json.loads((artifacts / "report.json").read_text())
+    pony = report["ponytail"]
+    assert pony["kept"] is False and "red/green" in pony["reason"], pony
+    clone = report["worktree"]
+    assert _committed(clone, "show", "HEAD:calc.py") == FIXED_CALC + UNUSED  # the pre-ponytail diff, delivered
+    assert sorted(_committed(clone, "show", "--name-only", "--format=", "HEAD").split()) == ["calc.py", "tests/test_add.py"]
+    assert "ponytail:   discarded, 0 net lines saved" in capsys.readouterr().out
+
+
+def test_ponytail_cut_that_fails_the_target_lint_is_discarded(tmp_path, monkeypatch):
+    monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
+    argv, artifacts, _ = _setup(tmp_path, _ponytail_harness())
+    source = tmp_path / "target"
+    (source / ".no-mistakes.yaml").write_text("commands:\n  test: python3 -m pytest -q\n  lint: echo LINT BROKE && exit 3\n")
+    _git(source, "add", ".no-mistakes.yaml")
+    _git(source, "commit", "-q", "-m", "nm")
+    assert harness_worker.main(argv) == 0
+    report = json.loads((artifacts / "report.json").read_text())
+    assert report["ponytail"]["kept"] is False and "lint" in report["ponytail"]["reason"]
+    assert (Path(report["worktree"]) / "calc.py").read_text() == FIXED_CALC + UNUSED
+
 
 @pytest.mark.parametrize("from_github", [True, False])
 def test_unit_commit_of_an_issue_run_closes_the_issue(tmp_path, monkeypatch, from_github):

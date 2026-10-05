@@ -125,6 +125,18 @@ def test_tail_summary_shows_failed_full_test_and_typecheck_output(tmp_path):
     assert "typecheck failure detail" in proc.stdout
 
 
+def test_tail_summary_shows_one_ponytail_line(tmp_path):
+    for pony, line in (({"kept": True, "net_lines_before": 12, "net_lines_after": 5, "reason": "every gate passed"},
+                        "ponytail   ✓ kept  7 net lines saved  every gate passed"),
+                       ({"kept": False, "net_lines_before": 12, "net_lines_after": 5, "reason": "lint failed"},
+                        "ponytail   – discarded  0 net lines saved  lint failed")):
+        run = _write_run(tmp_path / str(pony["kept"]), [{"type": "atm.ponytail_started"}, {**REPORT, "ponytail": pony}])
+        proc = _tail(str(run))
+        assert proc.returncode == 0, proc.stderr
+        assert "AGENT  ponytail claude" in proc.stdout
+        assert [ln for ln in proc.stdout.splitlines() if "ponytail " in ln and "AGENT" not in ln] == [f"  {line}"]
+
+
 def test_tail_stops_at_prepare_failed_and_when_exit_txt_appears(tmp_path):
     run = _write_run(tmp_path, [{"type": "atm.prepare_failed", "error": "no such ref"}])
     proc = _tail(str(run))
