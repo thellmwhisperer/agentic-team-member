@@ -16,6 +16,7 @@ Commands:
 
     atm-run.py run  --config C --label opus-5 --harness claude --model claude-opus-5-5
     atm-run.py run  ... --pane w3:pB      # launch inside a herdr pane and verify it started
+    atm-run.py run  ... --deliver none    # stop at the verdict instead of handing the clone to no-mistakes
     atm-run.py show --label opus-5         # the verdict of a finished run
     atm-run.py list                        # every run under .tmp/harness-worker with its verdict
     atm-run.py tail [--label L | PATH]     # follow a run's worker log: what ran, its outcome, the verdict
@@ -82,7 +83,7 @@ def worker_command(args, launch: dict, out: Path) -> list[str]:
         cmd += ["--harness-arg", a]
     if args.timeout:
         cmd += ["--timeout", str(args.timeout)]
-    return cmd
+    return cmd + ["--deliver", args.deliver]
 
 
 def cmd_run(args) -> int:
@@ -181,6 +182,7 @@ def launch_in_pane(args) -> int:
         inner += ["--harness-arg", a]
     if args.timeout:
         inner += ["--timeout", str(args.timeout)]
+    inner += ["--deliver", args.deliver]
     # A pane stuck in a tail/pager swallows typed text: interrupt whatever is in the foreground first.
     subprocess.run(["herdr", "pane", "send-keys", pane, "C-c"], check=False)
     time.sleep(0.5)
@@ -206,10 +208,11 @@ def verdict(label: str) -> str:
     ok = r.get("verified") or {}
     accepted = [f for f in r.get("follow_ups", []) if f.get("accepted") and not f.get("chained_as_unit")]
     rejected = [f for f in r.get("follow_ups", []) if not f.get("accepted")]
-    passed = (out / "exit.txt").read_text().strip() == "0" if (out / "exit.txt").exists() else None
+    code = (out / "exit.txt").read_text().strip() if (out / "exit.txt").exists() else None
+    state = {None: "report present", "0": "PASS", "3": "PASS, NO PR"}.get(code, "FAIL")
     units = r.get("units") or []
     lines = [
-        f"{label}: {'PASS' if passed else 'FAIL' if passed is False else 'report present'} "
+        f"{label}: {state} "
         f"harness={r.get('harness')} model={r.get('model') or 'default'} effort={r.get('effort') or 'default'} {r.get('duration_seconds')}s "
         f"units={len(units) or 1}/{r.get('max_units', '-')}",
         f"  bug fixed:   {'yes' if ok.get('ok') else 'no'} ({ok.get('message', '')})",
@@ -218,6 +221,9 @@ def verdict(label: str) -> str:
         f"  follow-ups:  {len(accepted)} accepted and left, {len(rejected)} rejected, "
         f"{sum(1 for f in r.get('follow_ups', []) if f.get('chained_as_unit'))} chained",
     ]
+    d = r.get("delivery")
+    if d:
+        lines.append(f"  delivery:    branch={d.get('branch')} run={d.get('run_id')} pr={d.get('pr_url') or 'none'} {d.get('error', '')}")
     for u in units:
         lines.append(f"  unit {u['unit']}: {'PASS' if u.get('passed') else 'FAIL'} test={u.get('test_file')} "
                      f"changed={', '.join(u.get('changed_files') or []) or 'nothing'}")
@@ -296,6 +302,9 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--model")
     r.add_argument("--effort", choices=["low", "medium", "high", "xhigh", "max"])
     r.add_argument("--timeout", type=int)
+    r.add_argument("--deliver", choices=["no-mistakes", "none"], default="no-mistakes",
+                   help="after a green verdict, run no-mistakes in the clone with its TUI in this pane (default); "
+                        "'none' stops at the verdict")
     r.add_argument("--pane", help="herdr pane id; launch there and verify [PREPARE] appears")
     r.add_argument("--wait", type=int, default=30, help="seconds to wait for [PREPARE] with --pane")
     r.set_defaults(fn=cmd_run)

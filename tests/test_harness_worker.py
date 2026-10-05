@@ -122,7 +122,7 @@ def _git(cwd, *args):
     )
 
 
-def _setup(tmp_path, harness_source, issue_text="add(2, 3) returns -1 instead of 5."):
+def _setup(tmp_path, harness_source, issue_text="add(2, 3) returns -1 instead of 5.", deliver="none"):
     repo = tmp_path / "target"
     (repo / "tests").mkdir(parents=True)
     (repo / "pyproject.toml").write_text('[project]\nname = "calc"\nversion = "0"\n\n[tool.pytest.ini_options]\n')
@@ -148,6 +148,8 @@ def _setup(tmp_path, harness_source, issue_text="add(2, 3) returns -1 instead of
         "--repo", str(repo), "--issue-file", str(issue), "--config", str(config_dir / "agent.toml"),
         "--artifact-dir", str(artifacts), "--log-dir", str(tmp_path / "logs"), "--harness-bin", str(harness),
     ]
+    if deliver:  # the verdict tests stop at the verdict; the delivery tests pass deliver=None for the default
+        argv += ["--deliver", deliver]
     return argv, artifacts, tmp_path / "logs"
 
 
@@ -818,3 +820,84 @@ def test_harness_arg_lands_before_the_brief():
     args = harness_worker.parse_args(["--repo", "r", "--issue-file", "i.md", "--harness", "claude", "--harness-arg=--verbose-x"])
     cmd, stdin = harness_worker.harness_command(args, "/wt", "the brief", "/s", "/m")
     assert cmd[-1] == "--verbose-x" and stdin == "the brief"
+
+
+FAKE_NO_MISTAKES = """
+import os, subprocess, sys
+args = sys.argv[1:]
+with open(os.environ["FAKE_NM_LOG"], "a") as fh:
+    fh.write(" ".join(args) + "\\n")
+git = lambda *a: subprocess.run(["git", *a], capture_output=True, text=True).stdout.strip()
+if args[:2] == ["axi", "run"]:
+    print('run: "01M45YGAMAHEKN66DQGKV4AF30"')
+    print("outcome: passed")
+elif args[:2] == ["axi", "status"]:
+    print("run:")
+    print('  id: "01M45YGAMAHEKN66DQGKV4AF30"')
+    print("  branch: " + git("branch", "--show-current"))
+    print("  head_sha: " + git("rev-parse", "HEAD"))
+    if not os.environ.get("FAKE_NM_NO_PR"):
+        print("  pr: https://github.com/owner/calc/pull/7")
+    print("outcome: passed")
+elif args == ["attach"]:
+    print("attach TUI")
+"""
+
+
+def _delivery_setup(tmp_path, monkeypatch):
+    monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
+    argv, artifacts, _ = _setup(tmp_path, FIXING_HARNESS, deliver=None)
+    source = tmp_path / "target"
+    _git(source, "remote", "add", "origin", "https://github.com/owner/calc.git")
+    (source / ".no-mistakes.yaml").write_text("agent: claude\n")
+    with (source / ".git" / "info" / "exclude").open("a") as fh:
+        fh.write(".no-mistakes.yaml\n")  # ignored in the source repo, so the clone does not get it from git
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fake = bin_dir / "no-mistakes"
+    fake.write_text(f"#!{sys.executable}\n" + FAKE_NO_MISTAKES)
+    fake.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setenv("FAKE_NM_LOG", str(tmp_path / "no-mistakes-calls.txt"))
+    pane = tmp_path / "pane.txt"
+    monkeypatch.setattr(harness_worker, "terminal", lambda: pane.open("w"), raising=False)  # the pane's /dev/tty
+    return argv, artifacts, tmp_path / "no-mistakes-calls.txt", pane
+
+
+def test_green_run_delivers_through_no_mistakes_by_default(tmp_path, monkeypatch):
+    argv, artifacts, calls, pane = _delivery_setup(tmp_path, monkeypatch)
+    assert harness_worker.main(argv) == 0
+    report = json.loads((artifacts / "report.json").read_text())
+    delivery = report["delivery"]
+    assert delivery["run_id"] == "01M45YGAMAHEKN66DQGKV4AF30"
+    assert delivery["pr_url"] == "https://github.com/owner/calc/pull/7"
+    clone = report["worktree"]
+    assert delivery["branch"].startswith("atm/add-returns-the-difference-")
+    assert subprocess.run(["git", "branch", "--show-current"], cwd=clone, capture_output=True, text=True).stdout.strip() == delivery["branch"]
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=clone, capture_output=True, text=True).stdout.strip()
+    assert delivery["head_sha"] == head and head != report["base_sha"]
+    committed = subprocess.run(["git", "show", "--name-only", "--format=", "HEAD"], cwd=clone, capture_output=True, text=True).stdout.split()
+    assert sorted(committed) == ["calc.py", "tests/test_add.py"]
+    assert (Path(clone) / ".no-mistakes.yaml").read_text() == "agent: claude\n"
+    origin = subprocess.run(["git", "remote", "get-url", "origin"], cwd=clone, capture_output=True, text=True).stdout.strip()
+    assert origin == "https://github.com/owner/calc.git"
+    lines = calls.read_text().splitlines()
+    during, status = lines[:-1], lines[-1]  # run and attach start together, in either order
+    assert "attach" in during and any(c.startswith("axi run --yes --intent add returns the difference") for c in during)
+    assert status == "axi status"
+    assert "attach TUI" in pane.read_text()
+
+
+def test_green_run_without_a_pr_exits_3(tmp_path, monkeypatch):
+    argv, artifacts, _, _ = _delivery_setup(tmp_path, monkeypatch)
+    monkeypatch.setenv("FAKE_NM_NO_PR", "1")
+    assert harness_worker.main(argv) == 3
+    report = json.loads((artifacts / "report.json").read_text())
+    assert report["delivery"]["pr_url"] is None and report["delivery"]["run_id"] == "01M45YGAMAHEKN66DQGKV4AF30"
+
+
+def test_deliver_none_stops_at_the_verdict(tmp_path, monkeypatch):
+    argv, artifacts, calls, _ = _delivery_setup(tmp_path, monkeypatch)
+    assert harness_worker.main([*argv, "--deliver", "none"]) == 0
+    assert "delivery" not in json.loads((artifacts / "report.json").read_text())
+    assert not calls.exists()
