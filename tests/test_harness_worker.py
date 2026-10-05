@@ -864,6 +864,7 @@ def test_green_clone_is_handed_to_no_mistakes_and_report_carries_the_pr(tmp_path
 def test_delivery_is_the_default(tmp_path, monkeypatch):
     monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
     argv, artifacts, _ = _setup(tmp_path, FIXING_HARNESS)
+    _git(tmp_path / "target", "remote", "add", "origin", "git@github.com:you/repo.git")
     argv = [a for a in argv if a not in ("--deliver", "none")]
     fake = tmp_path / "fake_no_mistakes.py"
     fake.write_text(f"#!{sys.executable}\nprint('pr: https://github.com/you/repo/pull/8')\n")
@@ -886,6 +887,7 @@ def test_deliver_none_stops_at_the_verdict(tmp_path, monkeypatch):
 def test_delivery_without_a_pr_exits_3_and_keeps_the_green_verdict(tmp_path, monkeypatch):
     monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
     argv, artifacts, _ = _setup(tmp_path, FIXING_HARNESS)
+    _git(tmp_path / "target", "remote", "add", "origin", "git@github.com:you/repo.git")
     fake = tmp_path / "fake_no_mistakes.py"
     fake.write_text(f"#!{sys.executable}\nprint('review found 1 blocking issue')\nraise SystemExit(1)\n")
     fake.chmod(0o755)
