@@ -503,13 +503,15 @@ Your final message must be ONLY this JSON object, nothing else:
 """
 
 
-def commit_unit(worktree: str, number: int, title: str) -> str:
-    """Record a passed unit in the clone so the next unit's red/green runs against it."""
+def commit_unit(worktree: str, number: int, title: str, closes: int | None = None) -> str:
+    """Record a passed unit in the clone so the next unit's red/green runs against it. `closes` is the GitHub
+    issue the run came from: merging the delivered PR then closes it."""
+    message = f"atm unit {number}: {title}"[:200] + (f"\n\nCloses #{closes}" if closes else "")
     # Add all, then unstage .atm: an exclude pathspec makes git add exit 1 when the target ignores .atm/.
     subprocess.run(["git", "add", "-A"], cwd=worktree, check=True, capture_output=True)
     subprocess.run(["git", "reset", "-q", "--", ".atm"], cwd=worktree, check=True, capture_output=True)
     subprocess.run(["git", "-c", "user.name=atm", "-c", "user.email=atm@localhost", "-c", "core.hooksPath=/dev/null",
-                    "commit", "-q", "--no-verify", "-m", f"atm unit {number}: {title}"[:200]],
+                    "commit", "-q", "--no-verify", "-m", message],
                    cwd=worktree, check=True, capture_output=True)
     return git_lines(worktree, "rev-parse", "HEAD")[0]
 
@@ -532,7 +534,8 @@ def terminal():
         return None
 
 
-def deliver(worktree: str, source_repo: str, title: str, unit_number: int, artifact_dir: Path) -> dict:
+def deliver(worktree: str, source_repo: str, title: str, unit_number: int, artifact_dir: Path,
+            closes: int | None = None) -> dict:
     """Hand the green clone to no-mistakes: its config, a branch with the work committed, the source repo's
     origin, then `axi run --yes` with `attach` showing the TUI in this pane until the run ends. The PR is
     no-mistakes' job; ATM records what `axi status` says at the end."""
@@ -555,7 +558,7 @@ def deliver(worktree: str, source_repo: str, title: str, unit_number: int, artif
     try:
         subprocess.run(["git", "checkout", "-q", "-b", result["branch"]], cwd=worktree, check=True, capture_output=True)
         if git_lines(worktree, "status", "--porcelain", "--", ".", ":!.atm"):
-            commit_unit(worktree, unit_number, title)
+            commit_unit(worktree, unit_number, title, closes)
         subprocess.run(["git", "remote", "set-url", "origin", remote], cwd=worktree, check=True, capture_output=True)
     except subprocess.CalledProcessError as exc:
         return result | {"error": f"branch preparation failed: {(exc.stderr or b'').decode(errors='replace').strip()}"}
@@ -923,6 +926,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         title, body = load_issue(args)
+        closes = None if args.issue_file else args.issue_number  # load_issue read it from GitHub
         wt = prepare_run_clone(args.repo, base_ref=args.base_ref, run_root=args.run_root)
         env_report = prepare_environment(wt.workdir, config)
     except (WorktreePrepError, EnvironmentPrepError, subprocess.CalledProcessError, OSError) as exc:
@@ -1042,7 +1046,8 @@ def main(argv: list[str] | None = None) -> int:
         if not chainable:
             break
         nxt = chainable[0]
-        unit_base = commit_unit(worktree, number, title if number == 1 else str(units[-1].get("title") or "follow-up"))
+        unit_base = commit_unit(worktree, number, title if number == 1 else str(units[-1].get("title") or "follow-up"),
+                                closes)
         unit["committed_as"] = unit_base
         forced_test = stage_follow_up_as_unit(worktree, nxt, number + 1, log)
         nxt["chained_as_unit"] = number + 1
@@ -1080,7 +1085,7 @@ def main(argv: list[str] | None = None) -> int:
     delivery = None
     if passed and args.deliver != "none":
         print(f"[DELIVER] no-mistakes in {worktree}", flush=True)
-        delivery = result["delivery"] = deliver(worktree, args.repo, title, len(units), artifact_dir)
+        delivery = result["delivery"] = deliver(worktree, args.repo, title, len(units), artifact_dir, closes)
         log("delivery", delivery)
     (artifact_dir / "report.json").write_text(json.dumps(result, indent=2))
     log("report", result)
