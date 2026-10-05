@@ -72,6 +72,28 @@ class Renderer:
     def strip(self, text) -> str:
         return str(text).replace(self.clone + "/", "") if self.clone else str(text)
 
+    def visible(self, event) -> bool:
+        if not isinstance(event, dict):
+            return bool(str(event).strip())
+        kind = event.get("type", "")
+        if kind in NOISE or event.get("subtype") in NOISE:
+            return False
+        handler = getattr(self, "on_" + kind.replace(".", "_"), None)
+        if handler:
+            if kind == "atm.harness_done":
+                return event.get("exit_code") != 0 or event.get("timed_out")
+            if kind == "assistant":
+                return any(block.get("type") == "tool_use" or
+                           (block.get("type") in ("thinking", "text") and block.get(block["type"], "").strip())
+                           for block in (event.get("message") or {}).get("content") or [] if isinstance(block, dict))
+            if kind == "user":
+                return any(isinstance(block, dict) and block.get("type") == "tool_result"
+                           for block in (event.get("message") or {}).get("content") or [])
+            return True
+        if kind.startswith("atm."):
+            return False
+        return bool(summarize_event(event) or self.tool_outcome(kind, event))
+
     def phase(self, title: str) -> None:
         print(f"\n{RULE}\n{bold(title)}\n{RULE}")
 
