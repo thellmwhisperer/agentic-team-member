@@ -580,6 +580,10 @@ def deliver(worktree: str, source_repo: str, title: str, unit_number: int, artif
                 status = subprocess.run(["no-mistakes", "axi", "status"], cwd=worktree, capture_output=True, text=True)
                 text = status.stdout + status.stderr
                 output = run_log.read_text(errors="replace")
+                if status.returncode:
+                    detail = text.strip() or f"exit code {status.returncode}"
+                    result["error"] = f"no-mistakes status failed: {detail}"
+                    break
                 if "protected-path-refusal" in text + output:
                     result["error"] = "no-mistakes stopped at a protected-path refusal gate that --yes cannot resolve"
                     break
@@ -1124,7 +1128,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"RESULT:     {'PASS' if passed else 'FAIL'} report={artifact_dir / 'report.json'}")
     if not passed:
         return 1
-    return 3 if delivery and not delivery["pr_url"] else 0
+    return 3 if delivery and (delivery.get("error") or not delivery["pr_url"]) else 0
 
 
 if __name__ == "__main__":
