@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Enable once per checkout: git config core.hooksPath .githooks
+exec "$(git rev-parse --show-toplevel)/scripts/slopslint.sh" check --classify --enforce > /dev/null

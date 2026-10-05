@@ -1,0 +1,34 @@
+# What the slop gate measures in this repository.
+#
+# Two duplication scopes, measured independently so production code cannot hide
+# inside the test scope. Production is the package plus the launcher scripts.
+schema: 1
+
+detector:
+  name: jscpd
+  version: "4.2.5" # must match the detector linked into the binary
+
+defaults:
+  format: python
+  mode: mild
+  min_lines: 5
+  min_tokens: 50
+
+global_ignore:
+  - "**/.git/**"
+  - "**/.tmp/**"
+  - "**/.worktree/**"
+  - "**/.worktrees/**"
+  - "**/.workspace/**"
+  - "**/__pycache__/**"
+  - "**/.claude/**"
+  - "targets/**"
+
+scopes:
+  python_production:
+    scan_path: .
+    pattern: "{agentic_tdd_runner/**/*.py,scripts/*.py}"
+
+  python_tests:
+    scan_path: .
+    pattern: "tests/**/*.py"

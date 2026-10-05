@@ -1,6 +1,6 @@
 commands:
   test: python3 -m pytest -q
-  lint: uvx ruff check .
+  lint: uvx ruff check . && scripts/slopslint.sh check --classify --enforce > /dev/null
 review:
   path_instructions:
     - path: "agentic_tdd_runner/**"
