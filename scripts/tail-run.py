@@ -19,6 +19,7 @@ import os
 import re
 import shlex
 import sys
+import textwrap
 import time
 from pathlib import Path
 
@@ -225,6 +226,9 @@ class Renderer:
         for u in units:
             word = green("✓ PASS") if u.get("passed") else red("✗ FAIL")
             print(f"  {'unit ' + str(u.get('unit')):<10} {word}  test={u.get('test_file') or 'none'}")
+            for label, tail in (("full suite", u.get("full_tests_tail")), ("typecheck", u.get("typecheck_tail"))):
+                if tail is not None:
+                    print(f"    {label} output (last 60 lines):\n{textwrap.indent(tail, '      ')}")
         checks = [("red/green", (r.get("verified") or {}).get("ok")), ("quality", (r.get("quality_ok") or {}).get("ok")),
                   ("gate", (r.get("gate_ok") or {}).get("ok")), ("scope", (r.get("scope_ok") or {}).get("ok")),
                   ("full suite", r.get("full_tests_ok")), ("typecheck", r.get("typecheck_ok"))]
