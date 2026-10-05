@@ -876,17 +876,28 @@ def check_gate(workdir: str, base_sha: str, config: dict) -> tuple[bool, str]:
     return True, f"touches pre-existing source: {', '.join(modified)}"
 
 
-def run_command(command: str | None, workdir: str, config: dict, timeout: int) -> bool | None:
+def run_command(command: str | None, workdir: str, config: dict, timeout: int, log) -> tuple[bool | None, str | None]:
+    """(ok, tail): on failure, the last 60 lines of combined output, also logged as command_failed."""
     if not command:
-        return None
+        return None, None
     env = build_command_env(config)
     env.setdefault("CI", "1")
     try:
-        result = subprocess.run(shlex.split(command), cwd=workdir, env=env, capture_output=True,
-                                text=True, timeout=timeout)
-    except (OSError, subprocess.TimeoutExpired):
-        return False
-    return result.returncode == 0
+        result = subprocess.run(shlex.split(command), cwd=workdir, env=env, stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        output, failure = exc.output, {"timeout": timeout}
+    except OSError as exc:
+        output, failure = str(exc), {"error": str(exc)}
+    else:
+        if result.returncode == 0:
+            return True, None
+        output, failure = result.stdout, {"exit_code": result.returncode}
+    if isinstance(output, bytes):  # TimeoutExpired keeps raw bytes even with text=True
+        output = output.decode(errors="replace")
+    tail = "\n".join((output or "").splitlines()[-60:])
+    log("command_failed", {"command": command, **failure, "output_tail": tail})
+    return False, tail
 
 
 def worktree_fingerprint(workdir: str) -> str:
@@ -1012,8 +1023,8 @@ def main(argv: list[str] | None = None) -> int:
                 quality_ok, quality_msg = False, "forbidden patterns: " + "; ".join(hits[:5])
                 log("quality_forbidden", {"hits": hits})
         gate_ok, gate_msg = check_gate(worktree, unit_base, config)
-        full_tests_ok = run_command(test_cmd, worktree, config, timeout)
-        typecheck_ok = run_command(typecheck_cmd, worktree, config, timeout)
+        full_tests_ok, full_tests_tail = run_command(test_cmd, worktree, config, timeout, log)
+        typecheck_ok, typecheck_tail = run_command(typecheck_cmd, worktree, config, timeout, log)
         scope_ok, scope_msg = check_scope(worktree, unit_base, config, unit_scope)
         follow_ups = validate_follow_ups(harness_report, worktree, config, log, base_sha=unit_base, issue_text=issue_text,
                                          issue={"title": title, "body": body})
@@ -1028,6 +1039,7 @@ def main(argv: list[str] | None = None) -> int:
             "gate_ok": {"ok": gate_ok, "message": gate_msg},
             "scope_ok": {"ok": scope_ok, "message": scope_msg}, "follow_ups": follow_ups,
             "full_tests_ok": full_tests_ok, "typecheck_ok": typecheck_ok,
+            "full_tests_tail": full_tests_tail, "typecheck_tail": typecheck_tail,
             "duration_seconds": run["duration_seconds"], "timed_out": run["timed_out"],
             "harness_exit_code": run["exit_code"], "report_parse_error": parse_error, "passed": passed,
         }
@@ -1100,6 +1112,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"            red/green {'PASS' if u['verified']['ok'] else 'FAIL'} {_snippet(u['verified']['message'], 90)}")
         print(f"            quality {'PASS' if u['quality_ok']['ok'] else 'FAIL'} gate {'PASS' if u['gate_ok']['ok'] else 'FAIL'} "
               f"scope {'PASS' if u['scope_ok']['ok'] else 'FAIL'} full={u['full_tests_ok']} typecheck={u['typecheck_ok']}")
+        for label, tail in (("full suite", u["full_tests_tail"]), ("typecheck", u["typecheck_tail"])):
+            if tail is not None:
+                print(f"            {label} output (last 60 lines):\n{textwrap.indent(tail, '              ')}")
         for f in u["follow_ups"]:
             state = (f"chained as unit {f['chained_as_unit']}" if f.get("chained_as_unit")
                      else "accepted, not chained: " + f.get("chain_reason", "") if f["accepted"]

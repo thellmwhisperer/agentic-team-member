@@ -196,6 +196,23 @@ def test_fake_claude_fix_passes_all_gates_via_cli(tmp_path):
         assert key in report
 
 
+def test_failed_full_suite_keeps_its_output(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
+    failing = f"{sys.executable} -c \"print('FULL SUITE EXPLODED'); raise SystemExit(1)\""
+    monkeypatch.setattr(harness_worker, "detect_commands", lambda workdir, env_report: (failing, None))
+    argv, artifacts, log_dir = _setup(tmp_path, FIXING_HARNESS)
+    assert harness_worker.main(argv) == 1
+    (unit,) = json.loads((artifacts / "report.json").read_text())["units"]
+    assert unit["full_tests_ok"] is False
+    assert "FULL SUITE EXPLODED" in unit["full_tests_tail"]
+    assert unit["typecheck_tail"] is None
+    (event,) = [e["event"] for e in _log_events(log_dir)
+                if isinstance(e["event"], dict) and e["event"].get("type") == "atm.command_failed"]
+    assert (event["command"], event["exit_code"]) == (failing, 1)
+    assert "FULL SUITE EXPLODED" in event["output_tail"]
+    assert "FULL SUITE EXPLODED" in capsys.readouterr().out.split("=== HARNESS WORKER SUMMARY ===")[1]
+
+
 def test_helper_only_change_fails_verification_and_gate(tmp_path, monkeypatch):
     monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
     argv, artifacts, _ = _setup(tmp_path, HELPER_ONLY_HARNESS)
