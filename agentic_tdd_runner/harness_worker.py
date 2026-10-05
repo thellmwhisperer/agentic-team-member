@@ -82,8 +82,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--harness-bin", help="Override the harness executable")
     parser.add_argument("--dry-run", action="store_true", help="Prepare and print the brief only")
     parser.add_argument("--max-units", type=int, help="Chain accepted follow-ups as further units in the same clone, up to this many units (config [harness_worker] max_units, default 3)")
-    parser.add_argument("--deliver", choices=["none", "no-mistakes"], default="none",
-                        help="After a green verdict, hand the clone to a delivery tool that opens the PR (default: none)")
+    parser.add_argument("--deliver", choices=["no-mistakes", "none"], default="no-mistakes",
+                        help="After a green verdict, hand the clone to no-mistakes, which opens the PR (default). "
+                             "'none' stops at the verdict and leaves the patch in the clone")
     parser.add_argument("--deliver-bin", default="no-mistakes", help="Override the delivery executable")
     parser.add_argument("--deliver-timeout", type=int, default=1800, help="Seconds for the delivery tool (default 1800)")
     parser.add_argument("--scope", action="append", default=[], metavar="GLOB",

@@ -18,10 +18,10 @@ issue ──▶ clone ──▶ agent: red test, then fix ──▶ ATM gates �
 
 The agent runs as a subprocess with your own login. ATM itself calls no model API, with
 one optional exception: the follow-up judge (`[follow_ups.judge]`, off by default) sends
-the issue title and body to TypeSafe. By default ATM never pushes or opens a PR: it
-commits only inside the throwaway clone, between chained units. With
-`--deliver no-mistakes` a green clone is handed to [no-mistakes](https://github.com/kunchenguid/no-mistakes),
+the issue title and body to TypeSafe. ATM never pushes on its own: it commits only inside
+the throwaway clone. A green clone is handed to [no-mistakes](https://github.com/kunchenguid/no-mistakes),
 which reviews, tests, pushes and opens the PR; ATM records the PR URL in `report.json`.
+`--deliver none` stops at the verdict and leaves the patch in the clone.
 
 ## The gates
 
@@ -84,7 +84,7 @@ python3 -m agentic_tdd_runner.harness_worker --repo ~/code/your-repo --issue-fil
 | `--max-units N` | Longest follow-up chain |
 | `--env KEY=VALUE`, `--harness-arg ARG` | Extra environment and arguments for the agent process |
 | `--timeout` | Seconds per unit before the agent is killed (default 1800) |
-| `--deliver no-mistakes` | After a green verdict: commit the clone on an `atm/<slug>` branch, aim its `origin` at the source repo's `origin`, run `no-mistakes axi run --yes --intent "<issue title>"` inside it |
+| `--deliver` | `no-mistakes` (default): after a green verdict, commit the clone on an `atm/<slug>` branch, aim its `origin` at the source repo's `origin`, run `no-mistakes axi run --yes --intent "<issue title>"` inside it. `none`: stop at the verdict |
 | `--config` | Worker TOML (default `config/agent.toml`) |
 | `--artifact-dir`, `--log-dir` | Output directory (default `.tmp/harness-worker/<timestamp>`) |
 | `--run-root` | Where clones go (default `REPO/.worktree`) |

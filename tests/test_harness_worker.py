@@ -145,6 +145,7 @@ def _setup(tmp_path, harness_source, issue_text="add(2, 3) returns -1 instead of
     argv = [
         "--repo", str(repo), "--issue-file", str(issue), "--config", str(config_dir / "agent.toml"),
         "--artifact-dir", str(artifacts), "--log-dir", str(tmp_path / "logs"), "--harness-bin", str(harness),
+        "--deliver", "none",
     ]
     return argv, artifacts, tmp_path / "logs"
 
@@ -858,6 +859,28 @@ def test_green_clone_is_handed_to_no_mistakes_and_report_carries_the_pr(tmp_path
     assert subject.strip() == "atm unit 1: add returns the difference"
     assert "calc.py" in subprocess.run(["git", "show", "--name-only", "--format=", "HEAD"], cwd=clone,
                                        capture_output=True, text=True).stdout
+
+
+def test_delivery_is_the_default(tmp_path, monkeypatch):
+    monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
+    argv, artifacts, _ = _setup(tmp_path, FIXING_HARNESS)
+    argv = [a for a in argv if a not in ("--deliver", "none")]
+    fake = tmp_path / "fake_no_mistakes.py"
+    fake.write_text(f"#!{sys.executable}\nprint('pr: https://github.com/you/repo/pull/8')\n")
+    fake.chmod(0o755)
+    argv += ["--deliver-bin", str(fake)]
+    assert harness_worker.main(argv) == 0
+    assert json.loads((artifacts / "report.json").read_text())["delivery"]["pr_url"] == "https://github.com/you/repo/pull/8"
+
+
+def test_deliver_none_stops_at_the_verdict(tmp_path, monkeypatch):
+    monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
+    argv, artifacts, _ = _setup(tmp_path, FIXING_HARNESS)
+    argv += ["--deliver-bin", "/nonexistent/no-mistakes"]
+    assert harness_worker.main(argv) == 0
+    report = json.loads((artifacts / "report.json").read_text())
+    assert "delivery" not in report
+    assert report["head_sha"] == report["base_sha"]
 
 
 def test_delivery_without_a_pr_exits_3_and_keeps_the_green_verdict(tmp_path, monkeypatch):
