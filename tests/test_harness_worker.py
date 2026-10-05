@@ -912,6 +912,7 @@ with open(os.environ["FAKE_NM_LOG"], "a") as fh:
 git = lambda *a: subprocess.run(["git", *a], capture_output=True, text=True).stdout.strip()
 registry = os.environ["FAKE_NM_LOG"] + ".init"  # one line per init: "<cwd> <origin url>"
 inited = os.path.exists(registry) and any(l.split(" ")[0] == os.getcwd() for l in open(registry))
+gate, paused = os.environ.get("FAKE_NM_GATE"), os.environ["FAKE_NM_LOG"] + ".paused"  # gate: once, never or protected
 if args == ["init"]:
     if os.environ.get("FAKE_NM_INIT_FAIL"):
         sys.exit("error: origin remote unreachable")
@@ -921,18 +922,29 @@ elif args[:2] == ["axi", "run"] and not inited or args[:2] == ["axi", "status"] 
     sys.exit("error: repo not initialized (run 'no-mistakes init' first)")
 elif args[:2] == ["axi", "run"] and git("status", "--porcelain"):
     sys.exit("error: uncommitted changes in the working tree")
+elif args[:2] == ["axi", "run"] and (gate == "once" and not os.path.exists(paused) or gate in ("never", "protected")):
+    open(paused, "w").close()  # --wait elapsed with the run parked at a gate
+    print('run: "01M45YGAMAHEKN66DQGKV4AF30"')
+    sys.exit(3)
 elif args[:2] == ["axi", "run"]:
     open(os.environ["FAKE_NM_LOG"] + ".ran", "w").close()
     print('run: "01M45YGAMAHEKN66DQGKV4AF30"')
     print("outcome: passed")
 elif args[:2] == ["axi", "status"]:
+    ran = os.path.exists(os.environ["FAKE_NM_LOG"] + ".ran")
     print("run:")
     print('  id: "01M45YGAMAHEKN66DQGKV4AF30"')
     print("  branch: " + git("branch", "--show-current"))
+    print("  status: " + ("completed" if ran else "running"))
+    if not ran:
+        print("  awaiting_agent: parked 2h0m0s")
     print("  head_sha: " + git("rev-parse", "HEAD"))
-    if not os.environ.get("FAKE_NM_NO_PR") and os.path.exists(os.environ["FAKE_NM_LOG"] + ".ran"):
+    if not os.environ.get("FAKE_NM_NO_PR") and ran:
         print("  pr: https://github.com/owner/calc/pull/7")
-    print("outcome: passed")
+    if gate == "protected":
+        print("gate: protected-path-refusal")
+    if ran:
+        print("outcome: passed")
 elif args == ["attach"]:
     print("attach TUI")
 """
@@ -1002,6 +1014,37 @@ def test_green_run_without_a_pr_exits_3(tmp_path, monkeypatch):
     assert harness_worker.main(argv) == 3
     report = json.loads((artifacts / "report.json").read_text())
     assert report["delivery"]["pr_url"] is None and report["delivery"]["run_id"] == "01M45YGAMAHEKN66DQGKV4AF30"
+
+
+def test_delivery_drives_the_run_again_while_it_is_parked_at_a_gate(tmp_path, monkeypatch):
+    argv, artifacts, calls, pane = _delivery_setup(tmp_path, monkeypatch)
+    monkeypatch.setenv("FAKE_NM_GATE", "once")
+    assert harness_worker.main(argv) == 0
+    delivery = json.loads((artifacts / "report.json").read_text())["delivery"]
+    assert delivery["pr_url"] == "https://github.com/owner/calc/pull/7"
+    assert delivery["drives"] == 2 and "error" not in delivery
+    lines = calls.read_text().splitlines()
+    assert sum(c.startswith("axi run --yes") for c in lines) == 2 and lines[-1] == "axi status"
+    assert "attach TUI" in pane.read_text()
+
+
+def test_delivery_stops_driving_at_the_ceiling(tmp_path, monkeypatch):
+    argv, artifacts, calls, _ = _delivery_setup(tmp_path, monkeypatch)
+    monkeypatch.setenv("FAKE_NM_GATE", "never")
+    assert harness_worker.main(argv) == 3
+    delivery = json.loads((artifacts / "report.json").read_text())["delivery"]
+    assert delivery["drives"] == harness_worker.NO_MISTAKES_MAX_DRIVES
+    assert f"{harness_worker.NO_MISTAKES_MAX_DRIVES} drives" in delivery["error"]
+    assert sum(c.startswith("axi run --yes") for c in calls.read_text().splitlines()) == harness_worker.NO_MISTAKES_MAX_DRIVES
+
+
+def test_delivery_stops_at_a_protected_path_refusal(tmp_path, monkeypatch):
+    argv, artifacts, calls, _ = _delivery_setup(tmp_path, monkeypatch)
+    monkeypatch.setenv("FAKE_NM_GATE", "protected")
+    assert harness_worker.main(argv) == 3
+    delivery = json.loads((artifacts / "report.json").read_text())["delivery"]
+    assert delivery["drives"] == 1 and "protected-path refusal" in delivery["error"]
+    assert sum(c.startswith("axi run --yes") for c in calls.read_text().splitlines()) == 1
 
 
 def test_delivery_runs_no_mistakes_init_in_the_clone_after_pointing_origin(tmp_path, monkeypatch):
