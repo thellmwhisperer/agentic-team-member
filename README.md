@@ -487,8 +487,7 @@ After the ponytail pass, delivery is the command in `[delivery].command`:
    `duration_seconds`, `output` (the path of that file), and `error` if the
    branch could not be prepared.
 
-For example, with no-mistakes:
-`command = 'no-mistakes init && no-mistakes axi run --intent "$ATM_TITLE" ${ATM_ISSUE:+--closes "$ATM_ISSUE"} --wait 2h'`.
+The checked-in [configuration](config/agent.toml) has a no-mistakes example.
 `--closes` puts the closing reference in the PR body, so the issue closes when
 the PR merges. Without `--yes`, `axi run` returns at a gate, and the agent that
 launched ATM answers it with `axi respond`.
