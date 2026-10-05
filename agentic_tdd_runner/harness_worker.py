@@ -18,7 +18,6 @@ import subprocess
 import textwrap
 import threading
 import time
-import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -554,7 +553,7 @@ def deliver(worktree: str, source_repo: str, title: str, unit_number: int, artif
         with exclude.open("a") as fh:  # the source's local config, never part of the PR
             fh.write(f"\n/{NO_MISTAKES_CONFIG}\n")
     slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:40] or "fix"
-    result["branch"] = f"atm/{slug}-{datetime.now().strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex}"
+    result["branch"] = f"atm/{slug}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
     try:
         subprocess.run(["git", "checkout", "-q", "-b", result["branch"]], cwd=worktree, check=True, capture_output=True)
         if git_lines(worktree, "status", "--porcelain", "--", ".", ":!.atm"):
