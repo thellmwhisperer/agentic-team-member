@@ -424,6 +424,9 @@ see [Configuration](#configuration) for what the TOML holds.
 hands the fix to a coding agent CLI and judges it. When every unit passes,
 delivery runs by default:
 
+ATM excludes `.atm/` from Git in each run clone, so follow-up files there do
+not make delivery dirty when the target repository lacks that ignore rule.
+
 1. `.no-mistakes.yaml` is copied from the source repo into the clone if the
    source has it (tracked or ignored) and the clone does not.
 2. The clone's work is committed on `atm/<slug>-<timestamp>` and the clone's
