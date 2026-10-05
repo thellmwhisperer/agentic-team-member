@@ -30,6 +30,7 @@ old clones piled up under the target repo. Each of those is now a refusal or a c
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import shutil
@@ -42,6 +43,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent.parent
 RUNS = HERE / ".tmp" / "harness-worker"
 LAUNCH_KEYS = ("repo", "base_ref", "github_repo", "issue_number", "run_root", "scope")
+TAIL = [sys.executable, str(Path(__file__).with_name("tail-run.py"))]
 
 
 def load_launch(config: str) -> dict:
@@ -98,21 +100,30 @@ def cmd_run(args) -> int:
     out.mkdir(parents=True)
     cmd = worker_command(args, launch, out)
     (out / "command.txt").write_text(" ".join(cmd) + "\n")
-    print(f"[LAUNCH] label={args.label} harness={args.harness} model={args.model or 'default'} effort={args.effort or 'default'}")
-    print(f"[LAUNCH] out={out}")
-    print(f"[LAUNCH] {' '.join(cmd)}", flush=True)
-    with (out / "stdout.txt").open("w", buffering=1) as sink:  # line-buffered: the file is readable while the run lives
-        proc = subprocess.Popen(cmd, cwd=HERE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-        assert proc.stdout is not None
-        for line in proc.stdout:
-            sys.stdout.write(line)
-            sys.stdout.flush()
-            sink.write(line)
+    # The terminal shows the worker log through tail-run.py, the one renderer, exactly as `atm-run.py tail` would;
+    # the launcher's and the worker's own lines go to stdout.txt only.
+    tail = None
+    with (out / "stdout.txt").open("w", buffering=1) as sink, contextlib.redirect_stdout(sink):  # line-buffered: readable while the run lives
+        print(f"[LAUNCH] label={args.label} harness={args.harness} model={args.model or 'default'} effort={args.effort or 'default'}")
+        print(f"[LAUNCH] out={out}")
+        print(f"[LAUNCH] {' '.join(cmd)}")
+        proc = subprocess.Popen(cmd, cwd=HERE, stdout=sink, stderr=subprocess.STDOUT,
+                                env={**os.environ, "PYTHONUNBUFFERED": "1"})  # [PREPARE] must reach the file at once
+        while not any(out.glob("worker-*.jsonl")) and proc.poll() is None:
+            time.sleep(0.1)
+        if any(out.glob("worker-*.jsonl")):
+            tail = subprocess.Popen(TAIL + [str(out)])  # inherits the terminal, so it keeps its colours
         code = proc.wait()
-    save_patch(out)
-    (out / "exit.txt").write_text(f"{code}\n")
-    print(f"\n[LAUNCH] worker exit={code}")
-    print(verdict(args.label))
+        save_patch(out)
+        (out / "exit.txt").write_text(f"{code}\n")  # tail-run.py stops here when the worker left no report
+        print(f"\n[LAUNCH] worker exit={code}")
+        print(verdict(args.label))
+    if tail:
+        tail.wait()
+    else:  # the worker died before opening its log: its own words are all there is
+        print((out / "stdout.txt").read_text(), end="")
+    with (out / "stdout.txt").open("a") as sink:  # and the same rendering, plain, as the record
+        subprocess.run(TAIL + [str(out)], stdout=sink, stderr=subprocess.STDOUT, env={**os.environ, "NO_COLOR": "1"})
     return code
 
 
@@ -257,8 +268,7 @@ def cmd_list(args) -> int:
 
 
 def cmd_tail(args) -> int:
-    cmd = [sys.executable, str(Path(__file__).with_name("tail-run.py"))]
-    cmd += [args.path] if args.path else []
+    cmd = TAIL + ([args.path] if args.path else [])
     cmd += ["--label", args.label] if args.label else []
     return subprocess.call(cmd)
 

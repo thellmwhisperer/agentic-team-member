@@ -424,6 +424,12 @@ see [Configuration](#configuration) for what the TOML holds.
 hands the fix to a coding agent CLI and judges it. When every unit passes,
 delivery runs by default:
 
+Under `scripts/atm-run.py run` (with or without `--pane`) the terminal shows
+the run as `scripts/atm-run.py tail` renders it: phases, numbered tool calls
+with their outcome, the checks line and `RESULT` last. The worker does not
+print the agent's stream itself; its own lines, the launcher's verdict and a
+plain copy of that rendering go to `stdout.txt` in the run directory.
+
 ATM excludes `.atm/` from Git in each run clone, so follow-up files there do
 not make delivery dirty when the target repository lacks that ignore rule.
 

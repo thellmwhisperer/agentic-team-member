@@ -524,7 +524,7 @@ NO_MISTAKES_WAIT = "2h"
 
 
 def terminal():
-    """The pane's terminal, for the no-mistakes TUI: under atm-run.py the worker's stdout is a pipe.
+    """The pane's terminal, for the no-mistakes TUI: under atm-run.py the worker's stdout is stdout.txt.
     None without a controlling terminal (CI), and then there is no TUI to show."""
     try:
         return open("/dev/tty", "r+b", buffering=0)
@@ -802,10 +802,7 @@ def run_harness(cmd, stdin_text, *, cwd, timeout, harness, write, extra_env: dic
                 event = json.loads(line)
             except json.JSONDecodeError:
                 event = line
-            write(event)
-            summary = summarize_event(event)
-            if summary:
-                print(f"  {summary}", flush=True)
+            write(event)  # the log is the stream; scripts/tail-run.py is what renders it
             last_text = final_text(event, harness) or last_text
         exit_code = proc.wait()
     finally:
