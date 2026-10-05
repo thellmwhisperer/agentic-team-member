@@ -958,3 +958,17 @@ def test_deliver_none_stops_at_the_verdict(tmp_path, monkeypatch):
     assert harness_worker.main([*argv, "--deliver", "none"]) == 0
     assert "delivery" not in json.loads((artifacts / "report.json").read_text())
     assert not calls.exists()
+
+def test_scan_forbidden_reports_only_lines_added_since_base(tmp_path):
+    marker = "no" + "qa"  # spelled apart so this file never carries the forbidden pattern itself
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "a.py").write_text(f"import os  # {marker}\n")
+    _git(repo, "init", "-q")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "base")
+    with (repo / "a.py").open("a") as fh:
+        fh.write(f"x = 1\nimport sys  # {marker}\n")
+    (repo / "b.py").write_text(f"import re  # {marker}\n")
+    hits = harness_worker.scan_forbidden(str(repo), ["a.py", "b.py"], [marker])
+    assert hits == [f"a.py:3 {marker!r}", f"b.py:1 {marker!r}"]
