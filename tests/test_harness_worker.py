@@ -481,6 +481,24 @@ def test_fingerprint_ignores_staging_and_survives_snapshot_restore(tmp_path):
     assert harness_worker.worktree_fingerprint(str(repo)) != before
 
 
+def test_fingerprint_distinguishes_symlink_targets_with_identical_contents(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "a.txt").write_text("same\n")
+    (repo / "b.txt").write_text("same\n")
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "init")
+    link = repo / "link.txt"
+    link.symlink_to("a.txt")
+
+    before = harness_worker.worktree_fingerprint(str(repo))
+    link.unlink()
+    link.symlink_to("b.txt")
+
+    assert harness_worker.worktree_fingerprint(str(repo)) != before
+
+
 def test_verdict_is_void_when_the_worktree_changes_during_verification(tmp_path, monkeypatch):
     monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
     argv, artifacts, log_dir = _setup(tmp_path, FIXING_HARNESS)
