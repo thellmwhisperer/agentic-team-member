@@ -11,6 +11,8 @@ import re
 import subprocess
 import time
 from datetime import datetime
+from pathlib import Path
+from uuid import uuid4
 
 PR_URL = re.compile(r"https://github\.com/[\w.-]+/[\w.-]+/pull/\d+")
 RUN_ID = re.compile(r"\b(?:run[_ ]id|run)[:=]?\s*([0-9A-HJKMNP-TV-Z]{26})\b", re.IGNORECASE)
@@ -20,7 +22,7 @@ GIT_IDENTITY = ["-c", "user.name=atm", "-c", "user.email=atm@localhost", "-c", "
 def branch_name(title: str, now: datetime | None = None) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:40] or "fix"
     stamp = (now or datetime.now()).strftime("%Y%m%d-%H%M%S")
-    return f"atm/{slug}-{stamp}"
+    return f"atm/{slug}-{stamp}-{uuid4().hex[:8]}"
 
 
 def _git(cwd: str, *args: str, check: bool = True) -> subprocess.CompletedProcess:
@@ -30,14 +32,18 @@ def _git(cwd: str, *args: str, check: bool = True) -> subprocess.CompletedProces
 def prepare_branch(worktree: str, source_repo: str, title: str, unit_number: int) -> tuple[str, str]:
     """Commit the clone's remaining work, create the delivery branch and aim `origin` at the
     source repository's remote. Returns (branch, head_sha)."""
+    remote = _git(source_repo, "remote", "get-url", "origin").stdout.strip()
+    if not remote:
+        raise subprocess.CalledProcessError(1, ["git", "remote", "get-url", "origin"])
+    if not Path(remote).is_absolute() and not re.match(r"^(?:[\w+.-]+://|[^/:\s]+@[^/:]+:)", remote):
+        source_root = Path(_git(source_repo, "rev-parse", "--show-toplevel").stdout.strip())
+        remote = str((source_root / remote).resolve())
     branch = branch_name(title)
     _git(worktree, "checkout", "-q", "-b", branch)
     if _git(worktree, "status", "--porcelain", "-uall").stdout.strip():
         _git(worktree, "add", "-A", "--", ".", ":!.atm")
         _git(worktree, "commit", "-q", "--no-verify", "-m", f"atm unit {unit_number}: {title}"[:200])
-    remote = subprocess.run(["git", "remote", "get-url", "origin"], cwd=source_repo, capture_output=True, text=True)
-    if remote.returncode == 0 and remote.stdout.strip():
-        _git(worktree, "remote", "set-url", "origin", remote.stdout.strip())
+    _git(worktree, "remote", "set-url", "origin", remote)
     head = _git(worktree, "rev-parse", "HEAD").stdout.strip()
     return branch, head
 
