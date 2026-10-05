@@ -27,6 +27,13 @@ def test_no_log_exits_1_with_message(tmp_path, capsys):
     assert "No worker-*.jsonl log found" in capsys.readouterr().err
 
 
+def test_a_file_that_is_not_a_worker_log_is_refused_instead_of_followed(tmp_path, capsys):
+    other = tmp_path / "stdout.txt"
+    other.write_text("agent chatter with no terminal event\n")
+    assert tail_run.main([str(other)]) == 1
+    assert f"Not a worker-*.jsonl log: {other}" in capsys.readouterr().err
+
+
 def test_renders_worker_and_agent_events_and_stops_at_report(tmp_path, capsys):
     run = tmp_path / "run"
     write_log(run / "worker-20261004-120000.jsonl", [
