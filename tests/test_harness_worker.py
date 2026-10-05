@@ -963,6 +963,36 @@ def test_delivery_command_gets_the_committed_branch_and_the_atm_environment(tmp_
     assert sorted(committed) == ["calc.py", "tests/test_add.py"]
 
 
+def test_delivery_command_gets_configured_tool_path(tmp_path, monkeypatch):
+    argv, artifacts = _delivery_setup(tmp_path, monkeypatch, command="delivery-probe")
+    tool_dir = tmp_path / "delivery-tools"
+    tool_dir.mkdir()
+    tool = tool_dir / "delivery-probe"
+    tool.write_text("#!/bin/sh\nprintf 'configured delivery tool\\n'\n")
+    tool.chmod(0o755)
+    with (tmp_path / "config" / "agent.toml").open("a") as fh:
+        fh.write(f"\n[tooling]\npath_dirs = [{json.dumps(str(tool_dir))}]\n")
+
+    assert harness_worker.main(argv) == 0
+    report = json.loads((artifacts / "report.json").read_text())
+    assert report["delivery"]["exit_code"] == 0
+    assert Path(report["delivery"]["output"]).read_text() == "configured delivery tool\n"
+
+
+def test_delivery_command_reads_the_committed_head_in_atm_report(tmp_path, monkeypatch):
+    command = ("python -c 'import json, os, subprocess; report=json.load(open(os.environ[\"ATM_REPORT\"])); "
+               "head=subprocess.check_output([\"git\", \"rev-parse\", \"HEAD\"], text=True).strip(); "
+               "print(report[\"head_sha\"] == head)'")
+    argv, artifacts = _delivery_setup(tmp_path, monkeypatch, command=command)
+
+    assert harness_worker.main(argv) == 0
+    report = json.loads((artifacts / "report.json").read_text())
+    assert Path(report["delivery"]["output"]).read_text() == "True\n"
+    assert report["head_sha"] == subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=report["worktree"], capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+
 def test_green_run_with_a_follow_up_in_atm_delivers_when_the_target_does_not_ignore_atm(tmp_path, monkeypatch):
     harness = _follow_up_harness([("tests/test_mul_neg.py", MUL_NEG_TEST)])
     argv, artifacts = _delivery_setup(tmp_path, monkeypatch, harness, command="test -z \"$(git status --porcelain)\"")
