@@ -29,9 +29,14 @@ END_EVENTS = {"atm.report", "atm.prepare_failed"}
 BARE_LABEL = re.compile(r"^\[[\w.-]+\]$")
 
 
+def is_worker_log(path: Path) -> bool:
+    return path.name.startswith("worker-") and path.suffix == ".jsonl"
+
+
 def newest_log(path: Path) -> Path | None:
     if path.is_file():
-        return path
+        # Any other file has no terminal event and no exit.txt beside it: follow() would never return.
+        return path if is_worker_log(path) else None
     logs = list(path.glob("worker-*.jsonl")) + list(path.glob("*/worker-*.jsonl")) if path.is_dir() else []
     return max(logs, key=lambda p: p.stat().st_mtime) if logs else None
 
@@ -161,7 +166,8 @@ def main(argv: list[str] | None = None) -> int:
     where = Path(args.path) if args.path else RUNS
     log = newest_log(where)
     if not log:
-        print(f"No worker-*.jsonl log found under {where}", file=sys.stderr)
+        what = "Not a worker-*.jsonl log:" if where.is_file() else "No worker-*.jsonl log found under"
+        print(f"{what} {where}", file=sys.stderr)
         return 1
     print(f"Following: {log}\n", flush=True)
     try:
