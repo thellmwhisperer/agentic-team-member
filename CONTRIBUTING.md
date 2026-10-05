@@ -47,6 +47,24 @@ write the failing test first, then the fix.
    and call out anything reviewers should look at first.
 6. CI must be green before review.
 
+### High-risk PRs
+
+Every PR to `main` arms auto-merge when it opens, except when the
+level after `## Risk Assessment` in the PR body is High or cannot be
+read. Those PRs wait for the `risk-reviewed` label.
+
+Before adding the label, whoever launched the run writes one PR
+comment that starts with `Risk reviewed:` and has one line per review
+finding:
+
+```
+Risk reviewed:
+<finding id>: fixed | accepted | dismissed - <one-line reason>
+```
+
+The label is the switch; the comment is the record. Adding the label
+arms auto-merge at once.
+
 ## What ATM does and does not accept
 
 - **Yes**: bug fixes, new language plugins, new cookbook shapes,
