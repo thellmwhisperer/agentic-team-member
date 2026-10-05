@@ -1169,25 +1169,30 @@ def main(argv: list[str] | None = None) -> int:
         closes = None if args.issue_file else args.issue_number  # load_issue read it from GitHub
         wt = prepare_run_clone(args.repo, base_ref=args.base_ref, run_root=args.run_root)
         env_report = prepare_environment(wt.workdir, config)
+        worktree = wt.workdir
+        if env_report.runner_bootstrap:
+            config.setdefault("runner", {})["bootstrap"] = env_report.runner_bootstrap.to_log_dict()
+        base_sha = git_lines(worktree, "rev-parse", "HEAD")[0]
+        test_cmd, typecheck_cmd = detect_commands(worktree, env_report)
+        lang_key = quality_lang_key(worktree, env_report.project_type)
+        forbidden = config.get("quality", {}).get(lang_key, {}).get("forbidden", [])
+        scope_source, scope = resolve_scope(args.scope, title, body, worktree)
+        log("scope", {"source": scope_source, "paths": scope})
+        brief = build_brief(title=title, body=body, worktree=worktree, base_ref=args.base_ref,
+                            test_cmd=test_cmd, typecheck_cmd=typecheck_cmd, forbidden=forbidden, scope=scope)
+        brief_path = artifact_dir / "brief.md"
+        brief_path.write_text(brief)
+        log("prepared", {"worktree": worktree, "base_sha": base_sha, "test_command": test_cmd,
+                         "typecheck_command": typecheck_cmd, "environment": env_report.to_log_dict()})
     except (WorktreePrepError, EnvironmentPrepError, subprocess.CalledProcessError, OSError) as exc:
         run_log.end(False)
         log("prepare_failed", {"error": str(exc)})
+        run_log.close()
         return 2
-    worktree = wt.workdir
-    if env_report.runner_bootstrap:
-        config.setdefault("runner", {})["bootstrap"] = env_report.runner_bootstrap.to_log_dict()
-    base_sha = git_lines(worktree, "rev-parse", "HEAD")[0]
-    test_cmd, typecheck_cmd = detect_commands(worktree, env_report)
-    lang_key = quality_lang_key(worktree, env_report.project_type)
-    forbidden = config.get("quality", {}).get(lang_key, {}).get("forbidden", [])
-    scope_source, scope = resolve_scope(args.scope, title, body, worktree)
-    log("scope", {"source": scope_source, "paths": scope})
-    brief = build_brief(title=title, body=body, worktree=worktree, base_ref=args.base_ref,
-                        test_cmd=test_cmd, typecheck_cmd=typecheck_cmd, forbidden=forbidden, scope=scope)
-    brief_path = artifact_dir / "brief.md"
-    brief_path.write_text(brief)
-    log("prepared", {"worktree": worktree, "base_sha": base_sha, "test_command": test_cmd,
-                     "typecheck_command": typecheck_cmd, "environment": env_report.to_log_dict()})
+    except BaseException:
+        run_log.end(False)
+        run_log.close()
+        raise
     run_log.end(True)
     if args.dry_run:
         print(brief)
@@ -1344,7 +1349,7 @@ def main(argv: list[str] | None = None) -> int:
         log("harness_done", {k: v for k, v in run.items() if k != "final_text"} | {"unit": "ponytail", "report": pony_report,
                                                                                     "report_parse_error": parse_error})
         findings = [f for f in (pony_report or {}).get("findings") or [] if isinstance(f, dict)]
-        after = snapshot_commit(worktree)
+        after = run_log.step("ponytail snapshot", snapshot_commit, worktree)
         record = {"findings": findings, "net_lines_before": net_added_lines(worktree, base_sha, before),
                   "net_lines_after": net_added_lines(worktree, base_sha, after), "kept": False, "tombstones": []}
         report_valid = (isinstance(pony_report, dict) and set(pony_report) == {"findings", "summary"}
