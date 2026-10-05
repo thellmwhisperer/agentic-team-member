@@ -2,7 +2,6 @@
 
 import os
 
-from agentic_tdd_runner.config import load_config
 from agentic_tdd_runner.shell import build_command_env
 
 
@@ -28,11 +27,12 @@ def test_build_command_env_accepts_configured_tool_dirs(monkeypatch):
     assert "/custom/bin" in path_dirs
 
 
-def test_build_command_env_reads_path_dirs_from_a_loaded_config(monkeypatch, tmp_path):
+def test_build_command_env_accepts_loaded_tooling_config(monkeypatch):
     monkeypatch.setenv("PATH", "/usr/bin")
-    toml = tmp_path / "agent.toml"
-    toml.write_text('[tools]\npath_dirs = ["/configured/bin"]\n')
 
-    env = build_command_env(load_config(toml))
+    env = build_command_env({
+        "tools": [{"type": "function", "function": {"name": "run_command"}}],
+        "tooling": {"path_dirs": ["/configured/bin"]},
+    })
 
     assert "/configured/bin" in env["PATH"].split(os.pathsep)

@@ -27,7 +27,9 @@ def build_command_env(config: dict | None = None) -> dict[str, str]:
     env = os.environ.copy()
     path_dirs: list[str] = []
 
-    tools_config = (config or {}).get("tools", {})
+    tools_config = (config or {}).get("tooling")
+    if not isinstance(tools_config, dict):
+        tools_config = (config or {}).get("tools", {})
     configured_dirs = (
         tools_config.get("path_dirs", [])
         if isinstance(tools_config, dict)

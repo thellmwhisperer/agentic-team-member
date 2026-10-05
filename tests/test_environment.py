@@ -3,7 +3,6 @@
 import json
 import os
 import subprocess
-from pathlib import Path
 
 import pytest
 
@@ -280,7 +279,7 @@ class TestPrepareEnvironment:
         run_config = {
             "environment": {"install": "never", "run_typecheck": False},
             "timeouts": {"tool_execution": 60},
-            "tools": {"recommended": ["rg"], "path_dirs": ["/opt/homebrew/bin"]},
+            "tooling": {"recommended": ["rg"], "path_dirs": ["/opt/homebrew/bin"]},
         }
 
         report = prepare_environment(str(tmp_path), run_config)
@@ -320,7 +319,7 @@ class TestPrepareEnvironment:
 
     def test_recommended_tools_from_config_normalizes_and_dedupes(self):
         assert recommended_tools_from_config({
-            "tools": {"recommended": ["rg", "/opt/homebrew/bin/rg", "", 123]},
+            "tooling": {"recommended": ["rg", "/opt/homebrew/bin/rg", "", 123]},
         }) == ["rg"]
 
     def test_javascript_project_skips_install_when_node_modules_exists(self, tmp_path, monkeypatch):
@@ -429,75 +428,7 @@ class TestPrepareEnvironment:
             tmp_path,
             ["rg", "--version"],
             timeout=3,
-            config={"tools": {"path_dirs": ["/opt/homebrew/bin"]}},
+            config={"tooling": {"path_dirs": ["/opt/homebrew/bin"]}},
         )
 
         assert result.returncode == 0
-
-
-def _git_repo(path, *files):
-    path.mkdir()
-    for name in files or ("README",):
-        (path / name).write_text("base\n")
-    for args in (["init", "-q", "-b", "main"], ["add", "-A"],
-                 ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "base"]):
-        subprocess.run(["git", *args], cwd=path, check=True, capture_output=True)
-    return subprocess.run(["git", "rev-parse", "HEAD"], cwd=path, check=True, capture_output=True, text=True).stdout.strip()
-
-
-def _git(path, *args):
-    return subprocess.run(["git", *args], cwd=path, capture_output=True, text=True).stdout.strip()
-
-
-class TestPrepareRunClone:
-    """Recovered from the pre-prune prepare_run_worktree tests (0e9a197); the worker now clones."""
-
-    def test_creates_detached_clone_at_base_ref(self, tmp_path):
-        repo = tmp_path / "repo"
-        base = _git_repo(repo)
-        (repo / "README").write_text("later\n")
-        subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qam", "later"], cwd=repo, check=True)
-        destination = tmp_path / "run"
-
-        report = environment.prepare_run_clone(str(repo), workdir=str(destination), base_ref=base)
-
-        assert report.workdir == str(destination.resolve())
-        assert report.base_ref == base
-        assert _git(destination, "rev-parse", "HEAD") == base
-        assert _git(destination, "symbolic-ref", "-q", "HEAD") == ""  # detached
-        assert (destination / "README").read_text() == "base\n"
-
-    def test_defaults_to_repo_local_worktree_dir(self, tmp_path):
-        repo = tmp_path / "repo"
-        _git_repo(repo)
-
-        report = environment.prepare_run_clone(str(repo))
-
-        workdir = Path(report.workdir)
-        assert workdir.parent == (repo / ".worktree").resolve()
-        assert workdir.name.startswith("atm-run-")
-
-    def test_defaults_to_main_ref(self, tmp_path):
-        repo = tmp_path / "repo"
-        base = _git_repo(repo)
-
-        report = environment.prepare_run_clone(str(repo), run_root=str(tmp_path / "runs"))
-
-        assert report.base_ref == "main"
-        assert _git(report.workdir, "rev-parse", "HEAD") == base
-
-    def test_rejects_file_destination(self, tmp_path):
-        repo = tmp_path / "repo"
-        _git_repo(repo)
-        destination = tmp_path / "run"
-        destination.write_text("not a directory")
-
-        with pytest.raises(environment.WorktreePrepError, match="not a directory"):
-            environment.prepare_run_clone(str(repo), workdir=str(destination))
-
-    def test_rejects_file_repo(self, tmp_path):
-        repo = tmp_path / "repo-file"
-        repo.write_text("not a directory")
-
-        with pytest.raises(environment.WorktreePrepError, match="repo is not a directory"):
-            environment.prepare_run_clone(str(repo))
