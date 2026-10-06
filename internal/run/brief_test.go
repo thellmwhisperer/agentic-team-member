@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-const briefYAML = `install: go mod download
+const briefYAML = `install: "true"
 test: go test ./...
 typecheck: go vet ./...
 lint: ""
@@ -26,7 +26,7 @@ func TestRunWritesTheContractForTheTaskType(t *testing.T) {
 		"refactor":   "the full suite passes before and after",
 		"tests":      "passes on the base commit and after",
 		"docs":       "do not touch source or tests",
-		"chore":      "Reinstall dependencies (`go mod download`)",
+		"chore":      "Reinstall dependencies (`true`)",
 	} {
 		t.Run(typ, func(t *testing.T) {
 			root := repo(t, "https://example.com/owner/repo.git", briefYAML)
@@ -36,8 +36,8 @@ func TestRunWritesTheContractForTheTaskType(t *testing.T) {
 				t.Fatal(err)
 			}
 			evs := events(t, &out)
-			if last := evs[len(evs)-1]; last["step"] != "contract" || last["state"] != "passed" {
-				t.Fatalf("want the contract step passed last, got %v", evs)
+			if evs[3]["step"] != "contract" || evs[3]["state"] != "passed" {
+				t.Fatalf("want the contract step passed, got %v", evs)
 			}
 			b, err := os.ReadFile(filepath.Join(root, ".atm", "brief.md"))
 			if err != nil {

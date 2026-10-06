@@ -3,6 +3,8 @@
 package run
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -22,9 +24,10 @@ var githubURL = regexp.MustCompile(`^(?:[a-z][a-z0-9+.-]*://)?(?:[^/@]+@)?github
 
 // Run is atm run with args, its flags and then the issue: a file, or an issue number of origin's repository.
 // Each step's start and end go to out, one JSON object a line.
-func Run(args []string, out io.Writer) error {
+func Run(args []string, out io.Writer) (err error) {
 	fs := flag.NewFlagSet("atm run", flag.ContinueOnError)
 	var flags config.Agent
+	base := fs.String("base-ref", "main", "the ref the run starts from, resolved in the repository")
 	fs.StringVar(&flags.Harness, "harness", "", "agent CLI: claude, codex, opencode or pi")
 	fs.StringVar(&flags.Model, "model", "", "the agent's model")
 	fs.StringVar(&flags.Effort, "effort", "", "the agent's effort")
@@ -32,15 +35,15 @@ func Run(args []string, out io.Writer) error {
 		return err
 	}
 	if fs.NArg() != 1 {
-		return errors.New("usage: atm run [--harness h] [--model m] [--effort e] <issue.md | issue number>")
+		return errors.New("usage: atm run [--base-ref r] [--harness h] [--model m] [--effort e] <issue.md | issue number>")
 	}
-	root, err := git("rev-parse", "--show-toplevel")
+	root, err := git("", "rev-parse", "--show-toplevel")
 	if err != nil {
 		return fmt.Errorf("not in a git repository: %w", err)
 	}
 	repo := ""
 	// No origin is not an error: the repository just has no GitHub issues.
-	if url, err := git("remote", "get-url", "origin"); err == nil {
+	if url, err := git("", "remote", "get-url", "origin"); err == nil {
 		if m := githubURL.FindStringSubmatch(url); m != nil {
 			repo = m[1]
 		}
@@ -65,7 +68,7 @@ func Run(args []string, out io.Writer) error {
 	}); err != nil {
 		return err
 	}
-	return step(out, "contract", func() (map[string]any, error) {
+	if err := step(out, "contract", func() (map[string]any, error) {
 		// ponytail: brief.md goes to the repository's .atm/ until node 2 gives the run its clone.
 		path := filepath.Join(root, ".atm", "brief.md")
 		b, err := brief(i, c)
@@ -76,12 +79,42 @@ func Run(args []string, out io.Writer) error {
 			err = os.WriteFile(path, []byte(b), 0o644)
 		}
 		return map[string]any{"brief": path}, err
+	}); err != nil {
+		return err
+	}
+	var dir string
+	defer func() { err = errors.Join(err, release(dir, repo)) }()
+	return step(out, "clone", func() (map[string]any, error) {
+		d, sha, err := clone(root, *base, c.Install, repo)
+		dir = d
+		return map[string]any{"clone": d, "sha": sha}, err
 	})
 }
 
-func git(args ...string) (string, error) {
-	out, err := exec.Command("git", args...).Output()
-	return strings.TrimSpace(string(out)), err
+// timeout bounds every command a step runs. ponytail: one fixed ceiling, and on timeout only the command
+// itself is killed, not what it started; a key in .atm.yaml and a process group are the upgrades.
+var timeout = 10 * time.Minute
+
+// command runs name in dir, "" for the working directory, and returns its trimmed stdout; a failure or a
+// timeout carries stderr.
+func command(dir, name string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, name, args...)
+	var stderr bytes.Buffer
+	cmd.Dir, cmd.Stderr, cmd.WaitDelay = dir, &stderr, time.Second
+	out, err := cmd.Output()
+	if ctx.Err() != nil {
+		err = fmt.Errorf("timed out after %s", timeout)
+	}
+	if err != nil {
+		return "", fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+func git(dir string, args ...string) (string, error) {
+	return command(dir, "git", args...)
 }
 
 // step writes name's start event, runs fn, and writes its end event with fn's fields or its error.

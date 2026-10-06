@@ -11,10 +11,16 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
-// TestMain doubles as a fake gh: fakeGH puts this test binary on PATH as gh.
+// TestMain doubles as a fake gh: fakeGH puts this test binary on PATH as gh. With FAKE_HANG it is a command
+// that outlives any timeout a test sets, and then exits on its own.
 func TestMain(m *testing.M) {
+	if os.Getenv("FAKE_HANG") != "" {
+		<-time.After(30 * time.Second)
+		os.Exit(0)
+	}
 	if out, ok := os.LookupEnv("FAKE_GH_OUT"); ok {
 		_ = os.WriteFile(os.Getenv("FAKE_GH_ARGS"), []byte(strings.Join(os.Args[1:], " ")), 0o600)
 		fmt.Print(out)
@@ -64,17 +70,21 @@ docs_patterns: ["**/*.md"]
 delivery: ""
 `
 
-// repo is a git repository with origin and .atm.yaml, the working directory for the rest of the test.
+// repo is a git repository with one commit on main, origin and .atm.yaml, the working directory for the
+// rest of the test.
 func repo(t *testing.T, origin, atm string) string {
 	t.Helper()
 	dir := t.TempDir()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
-	for _, args := range [][]string{{"init", "-q"}, {"remote", "add", "origin", origin}} {
-		if out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
+	t.Setenv("GIT_AUTHOR_NAME", "atm")
+	t.Setenv("GIT_AUTHOR_EMAIL", "atm@example.com")
+	t.Setenv("GIT_COMMITTER_NAME", "atm")
+	t.Setenv("GIT_COMMITTER_EMAIL", "atm@example.com")
+	for _, args := range [][]string{{"init", "-q", "-b", "main"}, {"remote", "add", "origin", origin},
+		{"commit", "-q", "--allow-empty", "-m", "init"}} {
+		gitT(t, dir, args...)
 	}
 	if atm != "" {
 		if err := os.WriteFile(filepath.Join(dir, ".atm.yaml"), []byte(atm), 0o600); err != nil {
@@ -83,6 +93,16 @@ func repo(t *testing.T, origin, atm string) string {
 	}
 	t.Chdir(dir)
 	return dir
+}
+
+// gitT runs git in dir and returns its trimmed output, failing the test when git fails.
+func gitT(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+	return strings.TrimSpace(string(out))
 }
 
 func issueFile(t *testing.T, text string) string {
@@ -108,11 +128,12 @@ func events(t *testing.T, out io.Reader) []map[string]any {
 	return evs
 }
 
-// issueStep is the issue step's end event, after checking its start came first.
+// issueStep is the issue step's end event, after checking its start came first and nothing followed a failure.
 func issueStep(t *testing.T, out io.Reader) map[string]any {
 	t.Helper()
 	evs := events(t, out)
-	if len(evs) < 2 || evs[0]["step"] != "issue" || evs[0]["state"] != "started" || evs[1]["step"] != "issue" {
+	if len(evs) < 2 || evs[0]["step"] != "issue" || evs[0]["state"] != "started" || evs[1]["step"] != "issue" ||
+		evs[1]["state"] == "failed" && len(evs) != 2 {
 		t.Fatalf("want the issue step's start and end, got %v", evs)
 	}
 	return evs[1]
