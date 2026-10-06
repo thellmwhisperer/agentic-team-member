@@ -239,6 +239,35 @@ def test_red_that_fails_on_missing_module_is_not_verified(tmp_path, monkeypatch)
     assert "INVALID RED" in report["verified"]["message"]
     assert report["gate_ok"]["ok"] is True  # calc.py was touched; the gate is not the problem here
     assert any(e["event"].get("type") == "atm.verify_invalid_red" for e in _log_events(log_dir))
+    assert "(no module named 'calc2')" in report["verified"]["message"]
+
+
+QUOTED_MARKER_RED = """\
+=================================== FAILURES ===================================
+____________________________ test_summary_lists_follow_ups ____________________________
+E       AssertionError: assert 'follow-ups: 1' in 'SUMMARY\\nfollow-up 2: rejected: red test fails on a missing module (no module named), not on behavior\\n'
+---------------------------- Captured stdout call -----------------------------
+SUMMARY
+follow-up 2: rejected: red test fails on a missing module (no module named), not on behavior
+ModuleNotFoundError: No module named 'quoted'
+Error: Cannot find module 'quoted'
+=========================== short test summary info ============================
+FAILED tests/test_harness_worker.py::test_summary_lists_follow_ups - AssertionError
+"""
+
+
+@pytest.mark.parametrize("output, expected", [
+    (QUOTED_MARKER_RED, None),
+    ("_ ERROR collecting tests/test_calc.py _\nImportError while importing test module 'tests/test_calc.py'.\n"
+     "Traceback:\n    import calc_new\nE   ModuleNotFoundError: No module named 'calc_new'\n",
+     "no module named 'calc_new'"),
+    ("Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/repo/src/calc.js' imported from /repo/calc.test.js\n",
+     "cannot find module '/repo/src/calc.js'"),
+    (" FAIL  src/calc.test.ts\nError: Failed to resolve import \"./calc\" from \"src/calc.test.ts\". Does the file exist?\n",
+     "failed to resolve import './calc'"),
+])
+def test_red_missing_module_needs_a_real_import_error(output, expected):
+    assert harness_worker.red_failed_on_missing_module(output) == expected
 
 
 def test_brief_demands_a_behavioral_red(tmp_path, capsys, monkeypatch):
