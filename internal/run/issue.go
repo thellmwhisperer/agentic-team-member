@@ -28,7 +28,7 @@ var taskTypes = map[string]string{
 	"tests": "tests", "docs": "docs", "chore": "chore",
 }
 
-var typeLine = regexp.MustCompile(`(?im)^type:[ \t]*(\S*)[ \t]*$`)
+var typeLine = regexp.MustCompile(`(?im)^type:[ \t]*(\S+)[ \t]*$`)
 
 // readIssue reads arg, a file or, when it is a number, an issue of the GitHub repository repo.
 func readIssue(arg, repo string) (Issue, error) {
@@ -73,7 +73,7 @@ func parse(i Issue) (Issue, error) {
 		return i, errors.New("issue: empty body")
 	}
 	m := typeLine.FindStringSubmatch(i.Body)
-	if m == nil || m[1] == "" {
+	if m == nil {
 		return i, errors.New(`issue: task type missing, want a "Type: <type>" line in the body`)
 	}
 	if i.Type = taskTypes[strings.ToLower(m[1])]; i.Type == "" {

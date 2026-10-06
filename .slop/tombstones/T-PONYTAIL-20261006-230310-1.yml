@@ -1,0 +1,18 @@
+schema: 1
+id: T-PONYTAIL-20261006-230310-1
+status: accepted
+category: alien_code
+title: "Removed the exported ProjectFile const, which nothing outside the package uses. A local `project` pa"
+created_at: 2026-10-06
+incident:
+  pattern: "Removed the exported ProjectFile const, which nothing outside the package uses. A local `project` path now replaces it, so the path is joined once instead of twice."
+  what_went_wrong: "An ATM run wrote it and ATM's ponytail pass cut it before delivery."
+  root_cause: "The coding agent wrote more than the issue needed."
+  rule_established: "Cut by the ponytail pass; it does not come back."
+  evidence:
+    - family: speculative_feature
+      example: "Removed the exported ProjectFile const, which nothing outside the package uses. A local `project` path now replaces it, so the path is joined once instead of twice."
+      artifact: internal/config/config.go
+match:
+  family: speculative_feature
+  artifact: internal/config/config.go

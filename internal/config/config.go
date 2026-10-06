@@ -36,10 +36,7 @@ type Config struct {
 	Delivery     string   `yaml:"delivery"`
 }
 
-// ProjectFile is the repository layer, in the repository root.
-const ProjectFile = ".atm.yaml"
-
-// required is every key ProjectFile must declare; an empty value is a deliberate "none".
+// required is every key .atm.yaml must declare; an empty value is a deliberate "none".
 var required = []string{"install", "test", "typecheck", "lint", "test_file", "test_patterns", "docs_patterns",
 	"delivery"}
 
@@ -50,7 +47,8 @@ func Load(root, home string, flags Agent) (Config, error) {
 	if _, err := decode(filepath.Join(home, ".config", "atm", "config.yaml"), &c.Agent); err != nil {
 		return c, err
 	}
-	keys, err := decode(filepath.Join(root, ProjectFile), &c)
+	project := filepath.Join(root, ".atm.yaml")
+	keys, err := decode(project, &c)
 	if err != nil {
 		return c, err
 	}
@@ -61,8 +59,7 @@ func Load(root, home string, flags Agent) (Config, error) {
 		}
 	}
 	if len(missing) > 0 {
-		return c, fmt.Errorf("config incomplete: %s lacks %s", filepath.Join(root, ProjectFile),
-			strings.Join(missing, ", "))
+		return c, fmt.Errorf("config incomplete: %s lacks %s", project, strings.Join(missing, ", "))
 	}
 	if c.TestFile != "" && !strings.Contains(c.TestFile, "{file}") && !strings.Contains(c.TestFile, "{dir}") {
 		return c, fmt.Errorf("test_file %q: want {file} or {dir} in it", c.TestFile)
