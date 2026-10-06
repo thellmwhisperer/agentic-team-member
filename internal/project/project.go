@@ -16,7 +16,7 @@ type Project struct {
 	GitHub string // owner/repo of origin, empty when origin is missing or not on GitHub
 }
 
-var githubURL = regexp.MustCompile(`github\.com[:/]([^/]+/[^/]+?)(\.git)?/?$`)
+var githubURL = regexp.MustCompile(`^(?:[a-z][a-z0-9+.-]*://)?(?:[^/@]+@)?github\.com[:/]([^/]+/[^/]+?)(\.git)?/?$`)
 
 // Find is the project around dir.
 func Find(dir string) (Project, error) {
