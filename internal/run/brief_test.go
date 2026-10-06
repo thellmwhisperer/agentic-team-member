@@ -43,7 +43,7 @@ func TestRunWritesTheContractForTheTaskType(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			got := string(b)
+			got := strings.ReplaceAll(string(b), "\r\n", "\n")
 			first, _, _ := strings.Cut(got, "\n")
 			if !strings.Contains(first, "`AGENTS.md`") || !strings.Contains(first, "this brief wins") {
 				t.Errorf("first line does not point to AGENTS.md: %q", first)
