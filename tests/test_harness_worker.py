@@ -1466,16 +1466,19 @@ def test_sweep_removes_a_merged_clone_from_a_failed_run_report(tmp_path, monkeyp
 
 def test_sweep_preserves_follow_up_tests_before_removing_a_merged_clone(tmp_path, monkeypatch):
     clone, run = _past_run(tmp_path, monkeypatch, "MERGED")
-    red_test = clone / ".atm" / "follow-ups" / "1" / "test_gap.py"
+    red_test = clone / ".atm" / "units" / "1" / "follow-ups" / "2" / "test_gap.py"
     red_test.parent.mkdir(parents=True)
     red_test.write_text("def test_gap():\n    assert False\n")
     harness_worker.sweep_merged_clones(tmp_path / "current-run")
     assert not clone.exists()
-    assert (run / "follow-ups" / "1" / "test_gap.py").read_text() == "def test_gap():\n    assert False\n"
+    assert (run / "atm" / "units" / "1" / "follow-ups" / "2" / "test_gap.py").read_text() == "def test_gap():\n    assert False\n"
 
 
 def test_sweep_continues_after_removal_fails_for_one_report(tmp_path, monkeypatch):
     failed, failed_run = _past_run(tmp_path, monkeypatch, "MERGED")
+    red_test = failed / ".atm" / "units" / "1" / "follow-ups" / "2" / "test_gap.py"
+    red_test.parent.mkdir(parents=True)
+    red_test.write_text("first copy\n")
     succeeded = tmp_path / "atm-run-succeeded"
     _git(tmp_path, "init", "-q", "-b", "atm/x", str(succeeded))
     _git(succeeded, "remote", "add", "origin", str(tmp_path / "source-repo"))
@@ -1484,14 +1487,24 @@ def test_sweep_continues_after_removal_fails_for_one_report(tmp_path, monkeypatc
     (succeeded_run / "report.json").write_text(json.dumps({"worktree": str(succeeded), "delivery": {"exit_code": 0}}))
     real_rmtree = harness_worker.shutil.rmtree
 
-    def fail_one(path, *args, **kwargs):
-        if Path(path) == failed:
+    failures = [failed]
+
+    def fail_once(path, *args, **kwargs):
+        if Path(path) in failures:
+            failures.remove(Path(path))
             raise OSError("permission denied")
         return real_rmtree(path, *args, **kwargs)
 
-    monkeypatch.setattr(harness_worker.shutil, "rmtree", fail_one)
+    monkeypatch.setattr(harness_worker.shutil, "rmtree", fail_once)
     harness_worker.sweep_merged_clones(tmp_path / "current-run")
     assert failed.is_dir()
     assert not succeeded.exists()
     assert "clone_removed" not in json.loads((failed_run / "report.json").read_text())
     assert json.loads((succeeded_run / "report.json").read_text())["clone_removed"]
+    preserved_test = failed_run / "atm" / "units" / "1" / "follow-ups" / "2" / "test_gap.py"
+    assert preserved_test.read_text() == "first copy\n"
+    red_test.write_text("updated on retry\n")
+    harness_worker.sweep_merged_clones(tmp_path / "current-run")
+    assert not failed.exists()
+    assert json.loads((failed_run / "report.json").read_text())["clone_removed"]
+    assert preserved_test.read_text() == "updated on retry\n"
