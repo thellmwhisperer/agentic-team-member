@@ -47,7 +47,7 @@ func clone(repo, baseRef string) (dir, sha string, err error) {
 		return "", "", err
 	}
 	for _, step := range [][]string{
-		{"-C", repo, "clone", "-q", "--local", "--no-checkout", repo, dir},
+		{"-C", repo, "clone", "-q", "--local", "--no-checkout", "--config", "core.autocrlf=false", repo, dir},
 		{"-C", dir, "fetch", "-q", repo, sha},
 		{"-C", dir, "checkout", "-q", "--detach", sha},
 	} {
