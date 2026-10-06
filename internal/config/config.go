@@ -54,7 +54,7 @@ func Defaults() Config {
 			"@ts-expect-error"},
 	}
 	c.Timeouts.Agent, c.Timeouts.Test = 1800, 300
-	c.Delivery.Command = `no-mistakes init && no-mistakes axi run --intent "$ATM_TITLE" ` +
+	c.Delivery.Command = `no-mistakes init && no-mistakes axi run --yes --intent "$ATM_TITLE" ` +
 		`${ATM_ISSUE:+--closes "$ATM_ISSUE"} --wait 2h`
 	return c
 }
