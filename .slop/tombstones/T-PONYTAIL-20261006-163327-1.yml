@@ -1,0 +1,18 @@
+schema: 1
+id: T-PONYTAIL-20261006-163327-1
+status: accepted
+category: alien_code
+title: "Removed the funlen lines: 60 / statements: 40 and lll line-length: 120 settings. They only restate g"
+created_at: 2026-10-06
+incident:
+  pattern: "Removed the funlen lines: 60 / statements: 40 and lll line-length: 120 settings. They only restate golangci-lint v2's own defaults, so the linters behave the same without them. Only the gocyclo min-complexity: 15 setting is left, because it differs from the default of 30."
+  what_went_wrong: "An ATM run wrote it and ATM's ponytail pass cut it before delivery."
+  root_cause: "The coding agent wrote more than the issue needed."
+  rule_established: "Cut by the ponytail pass; it does not come back."
+  evidence:
+    - family: speculative_hardening
+      example: "Removed the funlen lines: 60 / statements: 40 and lll line-length: 120 settings. They only restate golangci-lint v2's own defaults, so the linters behave the same without them. Only the gocyclo min-complexity: 15 setting is left, because it differs from the default of 30."
+      artifact: .golangci.yml
+match:
+  family: speculative_hardening
+  artifact: .golangci.yml

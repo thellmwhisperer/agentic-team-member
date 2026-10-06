@@ -1,0 +1,18 @@
+schema: 1
+id: T-PONYTAIL-20261006-163327-2
+status: accepted
+category: alien_code
+title: "Removed `defaults: run: shell: bash` from the test job. Every step is a single command (`go install`"
+created_at: 2026-10-06
+incident:
+  pattern: "Removed `defaults: run: shell: bash` from the test job. Every step is a single command (`go install`, `choco install`, `make test`, `make lint`) that runs the same under the runner's default shell on all three platforms."
+  what_went_wrong: "An ATM run wrote it and ATM's ponytail pass cut it before delivery."
+  root_cause: "The coding agent wrote more than the issue needed."
+  rule_established: "Cut by the ponytail pass; it does not come back."
+  evidence:
+    - family: speculative_hardening
+      example: "Removed `defaults: run: shell: bash` from the test job. Every step is a single command (`go install`, `choco install`, `make test`, `make lint`) that runs the same under the runner's default shell on all three platforms."
+      artifact: .github/workflows/go.yml
+match:
+  family: speculative_hardening
+  artifact: .github/workflows/go.yml
