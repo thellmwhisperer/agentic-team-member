@@ -21,7 +21,7 @@ or a fix that moves a row from `weak` to `partial` to `strong`.
 git clone https://github.com/<your-fork>/agentic-team-member.git
 cd agentic-team-member
 pip install -e '.[dev]' || pip install 'requests>=2.31,<3'
-python -m pip install uv
+pip install uv
 ```
 
 You also need a local LLM server running a tool-calling GGUF model.
