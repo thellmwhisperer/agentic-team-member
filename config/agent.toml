@@ -25,9 +25,10 @@ timeout = 300
 command = ""
 
 [delivery]
-# Harness worker: a shell line run in the clone after a green verdict and the ponytail pass, with the work
-# committed on its branch and origin set. ATM_TITLE, ATM_ISSUE (empty with --issue-file), ATM_BRANCH,
-# ATM_CLONE and ATM_REPORT are in its environment. Non-zero exit is worker exit 4. Empty skips delivery.
+# Harness worker: a shell line run in the clone after a green verdict and the ponytail pass, with any
+# remaining work committed and origin set. ATM_TITLE, ATM_ISSUE (empty with --issue-file), ATM_BRANCH,
+# ATM_CLONE, ATM_REPORT and ATM_PONYTAIL (kept cut findings, or empty) are in its environment.
+# Non-zero exit is worker exit 4. Empty skips delivery.
 command = 'no-mistakes init && no-mistakes axi run --intent "$ATM_TITLE" ${ATM_ISSUE:+--closes "$ATM_ISSUE"} --wait 2h'
 # The target's lint, a shell line every ponytail cut must pass. Empty means none.
 lint_command = ""
