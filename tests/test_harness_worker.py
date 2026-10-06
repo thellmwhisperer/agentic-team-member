@@ -1441,7 +1441,7 @@ def test_sweep_does_not_remove_a_non_atm_directory_named_in_a_neighboring_report
     clone, run = _past_run(tmp_path, monkeypatch, "MERGED")
     unrelated = tmp_path / "unrelated-repo"
     clone.rename(unrelated)
-    (run / "report.json").write_text(json.dumps({"worktree": str(unrelated)}))
+    (run / "report.json").write_text(json.dumps({"worktree": str(unrelated), "delivery": {"exit_code": 0}}))
     harness_worker.sweep_merged_clones(tmp_path / "current-run")
     assert unrelated.is_dir()
     assert "clone_removed" not in json.loads((run / "report.json").read_text())
@@ -1462,7 +1462,7 @@ def test_sweep_continues_after_removal_fails_for_one_report(tmp_path, monkeypatc
     _git(succeeded, "remote", "add", "origin", str(tmp_path / "source-repo"))
     succeeded_run = tmp_path / "succeeded-run"
     succeeded_run.mkdir()
-    (succeeded_run / "report.json").write_text(json.dumps({"worktree": str(succeeded)}))
+    (succeeded_run / "report.json").write_text(json.dumps({"worktree": str(succeeded), "delivery": {"exit_code": 0}}))
     real_rmtree = harness_worker.shutil.rmtree
 
     def fail_one(path, *args, **kwargs):
