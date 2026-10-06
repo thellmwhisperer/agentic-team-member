@@ -11,10 +11,14 @@ ROOT = Path(__file__).resolve().parent.parent
 WORKFLOWS = ROOT / ".github" / "workflows"
 
 
-def _repo(tmp_path, *, go_mod=False):
+def _repo(tmp_path, *, go_mod=False, files=None):
     repo = tmp_path / "repo"
     (repo / "scripts").mkdir(parents=True)
     shutil.copy(ROOT / "scripts" / "changed-areas.sh", repo / "scripts" / "changed-areas.sh")
+    for path, contents in (files or {}).items():
+        file = repo / path
+        file.parent.mkdir(parents=True, exist_ok=True)
+        file.write_text(contents)
     if go_mod:
         (repo / "go.mod").write_text("module example.com/atm\n\ngo 1.23\n")
     subprocess.run(["git", "init", "-q", str(repo)], check=True)
@@ -30,6 +34,7 @@ def _detect(repo, base, tmp_path):
     subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
     subprocess.run(["git", "-C", str(repo), "commit", "-qm", "change"], check=True)
     output = tmp_path / "github-output"
+    output.unlink(missing_ok=True)
     result = subprocess.run(
         ["sh", "scripts/changed-areas.sh", base],
         cwd=repo,
@@ -68,6 +73,32 @@ def test_detector_change_selects_affected_checks(tmp_path):
     script.write_text(script.read_text() + "\n")
 
     assert _detect(repo, base, tmp_path) == {"python": "true", "go": "true"}
+
+
+def test_renames_select_checks_from_both_old_and_new_paths(tmp_path):
+    repo, base = _repo(
+        tmp_path,
+        go_mod=True,
+        files={
+            "runner.py": "value = 1\n",
+            "runner.go": "package runner\n",
+            "config/agent.toml": "[agent]\n",
+        },
+    )
+    for old, new in (
+        ("runner.py", "runner-python.txt"),
+        ("runner.go", "runner-go.txt"),
+        ("config/agent.toml", "archive/agent.txt"),
+    ):
+        source = repo / old
+        target = repo / new
+        target.parent.mkdir(parents=True, exist_ok=True)
+        source.rename(target)
+        selected = _detect(repo, base, tmp_path)
+        if old.endswith(".go"):
+            assert selected["go"] == "true"
+        else:
+            assert selected["python"] == "true"
 
 
 def _workflow(name):
@@ -135,3 +166,48 @@ def test_ci_summary_rejects_failed_or_cancelled_jobs():
         assert subprocess.run(
             ["sh", "scripts/ci-summary.sh", *results], cwd=ROOT, capture_output=True
         ).returncode != 0
+
+
+def _stub(path, name, log):
+    command = path / name
+    command.write_text(f'#!/bin/sh\nprintf "%s\\n" "{name} $*" >> "{log}"\n')
+    command.chmod(0o755)
+
+
+def _tool_repo(tmp_path, script, *, go_mod):
+    repo = tmp_path / "tool-repo"
+    scripts = repo / "scripts"
+    bin_dir = tmp_path / "bin"
+    log = tmp_path / "calls.log"
+    scripts.mkdir(parents=True)
+    bin_dir.mkdir()
+    shutil.copy(ROOT / "scripts" / script, scripts / script)
+    _stub(scripts, "slopslint.sh", log)
+    for tool in ("uv", "uvx", "go", "golangci-lint"):
+        _stub(bin_dir, tool, log)
+    if go_mod:
+        (repo / "go.mod").write_text("module example.com/atm\n\ngo 1.23\n")
+    env = dict(os.environ, PATH=f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    return repo, env, log
+
+
+def _run_script(repo, env, script):
+    return subprocess.run(["sh", f"scripts/{script}"], cwd=repo, env=env, capture_output=True, text=True)
+
+
+def test_test_script_runs_go_tests_only_when_module_exists(tmp_path):
+    for go_mod, expected in ((False, False), (True, True)):
+        repo, env, log = _tool_repo(tmp_path / str(go_mod), "test.sh", go_mod=go_mod)
+        result = _run_script(repo, env, "test.sh")
+        calls = log.read_text().splitlines() if log.exists() else []
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert ("go test ./..." in calls) is expected
+
+
+def test_lint_script_runs_go_lint_only_when_module_exists(tmp_path):
+    for go_mod, expected in ((False, False), (True, True)):
+        repo, env, log = _tool_repo(tmp_path / str(go_mod), "lint.sh", go_mod=go_mod)
+        result = _run_script(repo, env, "lint.sh")
+        calls = log.read_text().splitlines() if log.exists() else []
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert ("golangci-lint run" in calls) is expected
