@@ -21,8 +21,29 @@ type agentReport struct {
 	} `json:"findings"`
 }
 
-// agent runs the fake under name in dir the way ATM calls that CLI, and returns the last message it streamed.
-func agent(t *testing.T, name, dir string, env []string, brief string, args ...string) string {
+type agentEvent struct {
+	Type    string `json:"type"`
+	Subtype string `json:"subtype"`
+	IsError bool   `json:"is_error"`
+	Result  string `json:"result"`
+	Item    struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	} `json:"item"`
+	Part struct {
+		Text string `json:"text"`
+	} `json:"part"`
+	Message struct {
+		Role    string `json:"role"`
+		Content []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+	} `json:"message"`
+}
+
+// agentOutput runs the fake under name in dir the way ATM calls that CLI.
+func agentOutput(t *testing.T, name, dir string, env []string, brief string, args ...string) (agentEvent, string) {
 	t.Helper()
 	cmd := exec.Command(filepath.Join(fakeDir, name+exe), args...)
 	cmd.Dir, cmd.Env = dir, env
@@ -36,12 +57,7 @@ func agent(t *testing.T, name, dir string, env []string, brief string, args ...s
 		t.Fatalf("%s: %v\n%s", name, err, out)
 	}
 	lines := bytes.Split(bytes.TrimSpace(out), []byte("\n"))
-	var last struct {
-		Result  string
-		Item    struct{ Text string }
-		Part    struct{ Text string }
-		Message struct{ Content []struct{ Text string } }
-	}
+	var last agentEvent
 	if err := json.Unmarshal(lines[len(lines)-1], &last); err != nil {
 		t.Fatalf("%s: last line is not an event: %v\n%s", name, err, out)
 	}
@@ -49,6 +65,12 @@ func agent(t *testing.T, name, dir string, env []string, brief string, args ...s
 	for _, block := range last.Message.Content {
 		text += block.Text
 	}
+	return last, text
+}
+
+// agent runs the fake under name in dir and returns the last message it streamed.
+func agent(t *testing.T, name, dir string, env []string, brief string, args ...string) string {
+	_, text := agentOutput(t, name, dir, env, brief, args...)
 	return text
 }
 
@@ -124,7 +146,26 @@ func TestFakeAgentSpeaksTheProtocolOfItsName(t *testing.T) {
 			repo := target(t)
 			env, log := fakes(t, "fixing")
 			last := filepath.Join(t.TempDir(), "last.txt")
-			text := agent(t, name, repo, env, issue, "exec", "-o", last)
+			event, text := agentOutput(t, name, repo, env, issue, "exec", "-o", last)
+			valid := false
+			switch name {
+			case "claude":
+				valid = event.Type == "result" && event.Subtype == "success" && !event.IsError && event.Result != ""
+			case "codex":
+				valid = event.Type == "item.completed" && event.Item.Type == "agent_message" && event.Item.Text != ""
+			case "opencode":
+				valid = event.Type == "text" && event.Part.Text != ""
+			case "pi":
+				valid = event.Type == "message_end" && event.Message.Role == "assistant"
+				hasText := false
+				for _, block := range event.Message.Content {
+					hasText = hasText || block.Type == "text" && block.Text != ""
+				}
+				valid = valid && hasText
+			}
+			if !valid {
+				t.Errorf("%s emitted the wrong final event: %+v", name, event)
+			}
 			if reportOf(t, text).TestFile != "tests/test_add.py" {
 				t.Errorf("no report in the last %s event: %q", name, text)
 			}
