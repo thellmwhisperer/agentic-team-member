@@ -508,8 +508,9 @@ the PR merges. Without `--yes`, `axi run` returns at a gate, and the agent that
 launched ATM answers it with `axi respond`.
 
 With no `[delivery].command`, `report.json` has
-`delivery: {"skipped": "no [delivery].command"}` and the work remains in the
-clone's commit history, without being passed to a delivery command.
+`delivery: {"skipped": "no [delivery].command"}`. A kept ponytail cut leaves
+the final unit and ponytail commits in the clone; without a kept cut, the final
+unit's work stays uncommitted. Earlier unit commits remain in chained runs.
 
 | Exit code | Meaning                                                    |
 | --------- | ---------------------------------------------------------- |

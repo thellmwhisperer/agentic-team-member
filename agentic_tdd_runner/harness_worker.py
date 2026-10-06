@@ -1302,7 +1302,6 @@ def main(argv: list[str] | None = None) -> int:
                   "net_lines_after": net_added_lines(worktree, base_sha, after), "kept": False, "tombstones": [], "commit": None}
         report_valid = (isinstance(pony_report, dict) and set(pony_report) == {"findings", "summary"}
                         and isinstance(pony_report.get("findings"), list) and isinstance(pony_report.get("summary"), str)
-                        and bool(pony_report["findings"])
                         and all(isinstance(f, dict) and set(f) == {"file", "family", "finding"}
                                 and all(isinstance(f.get(key), str) for key in ("file", "family", "finding"))
                                 and all(f[key].strip() and f[key].splitlines() == [f[key]]
@@ -1315,6 +1314,8 @@ def main(argv: list[str] | None = None) -> int:
             reason = "harness moved HEAD (created commits)"
         elif record["net_lines_after"] >= record["net_lines_before"]:
             reason = "did not reduce the run's net added lines"
+        elif not findings:
+            reason = "invalid ponytail report"
         else:
             reason = "; ".join(run_log.step("ponytail re-checks", recheck, units, head, run_files,
                                             ok=lambda failed: not failed))
