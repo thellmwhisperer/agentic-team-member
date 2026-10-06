@@ -8,7 +8,8 @@ if [ -z "${GH_TOKEN:-}" ]; then
   echo "AUTO_MERGE_TOKEN is not set" >&2
   exit 1
 fi
-level=$(gh pr view "$1" --repo "$GITHUB_REPOSITORY" --json body --jq .body | awk '
+body=$(gh pr view "$1" --repo "$GITHUB_REPOSITORY" --json body --jq .body)
+level=$(printf '%s\n' "$body" | awk '
   { sub(/\r$/, "") }
   !found && /^## Risk Assessment[[:space:]]*$/ { found = 1; next }
   found && /^#+[[:space:]]/ { exit }
@@ -16,7 +17,8 @@ level=$(gh pr view "$1" --repo "$GITHUB_REPOSITORY" --json body --jq .body | awk
 case "$level" in
   Low|Medium) ;;
   *)
-    if ! gh pr view "$1" --repo "$GITHUB_REPOSITORY" --json labels --jq '.labels[].name' | grep -qx risk-reviewed; then
+    labels=$(gh pr view "$1" --repo "$GITHUB_REPOSITORY" --json labels --jq '.labels[].name')
+    if ! printf '%s\n' "$labels" | grep -qx risk-reviewed; then
       echo "risk high: waiting for risk-reviewed"
       exit 0
     fi
