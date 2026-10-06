@@ -95,6 +95,14 @@ with the function behind each one: [How a run flows](docs/how-a-run-flows.md).
 
 ## Run it
 
+The Go port currently provides `atm init` and `atm doctor`; issue runs still use
+the Python worker below. Build it with `go build -o atm ./cmd/atm`, then run
+`./atm init` in a git repository to create a commented `.atm.yaml` and ignore
+`.atm/`. Running init again preserves both files. `./atm doctor` checks git,
+the configured agent CLI, and `gh` when the repository's origin is on GitHub.
+See [Configuration](docs/configuration.md#go-port-configuration) for the Go
+port's YAML layers and flags.
+
 ```bash
 git clone https://github.com/thellmwhisperer/agentic-team-member.git
 cd agentic-team-member && pip install -r requirements.txt   # Python 3.12+, git, gh, one agent CLI
