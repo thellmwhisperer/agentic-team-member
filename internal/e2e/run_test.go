@@ -337,7 +337,7 @@ func TestRunHandsTheContractToTheAgent(t *testing.T) {
 	for _, section := range []string{"## GOAL", strings.TrimSpace(issue)[2:], "## SCOPE", "Allowed paths: `calc.py`",
 		"## ACCEPTANCE", "## VERIFY", "python3 -m pytest", "## STYLE: ponytail", "## FORBIDDEN", "`noqa`",
 		"## FOLLOW-UPS", "## REPORT"} {
-		if !strings.Contains(brief, section) {
+		if !strings.Contains(strings.ReplaceAll(brief, "\r\n", "\n"), section) {
 			t.Errorf("brief.md lacks %q:\n%s", section, brief)
 		}
 	}
