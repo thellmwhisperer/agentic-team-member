@@ -161,11 +161,12 @@ Nothing is detected or defaulted per language.
 | Key | Meaning |
 |-----|---------|
 | `install`, `test`, `typecheck`, `lint` | Shell commands |
-| `test_file` | Runs one test; must contain `{file}` or `{dir}` |
+| `test_file` | Command for one test; when nonempty, must contain `{file}` or `{dir}` |
 | `test_patterns`, `docs_patterns` | Lists of globs for test and doc files |
 | `delivery` | The delivery command |
 
-The issue's first line is its title (a leading `#` is dropped) and the rest its
-body, which must declare a `Type:` line: `fix` (or `hotfix`), `feature`,
+For an issue file, the first line is its title (all leading `#` characters are
+dropped) and the rest its body. The body must declare a case-sensitive `Type:`
+line with a lowercase type: `fix` (or `hotfix`), `feature`,
 `greenfield`, `refactor`, `tests`, `docs` or `chore`. A number is read with
 `gh issue view` from the repository `origin` names.
