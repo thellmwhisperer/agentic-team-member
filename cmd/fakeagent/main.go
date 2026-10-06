@@ -37,6 +37,10 @@ var finals = map[string]func(text string) obj{
 func main() {
 	if os.Getenv("FAKEAGENT_GRANDCHILD") != "" {
 		fmt.Println(`{"type": "system", "subtype": "grandchild"}`)
+		if marker := os.Getenv("FAKEAGENT_GRANDCHILD_MARKER_FILE"); marker != "" {
+			time.Sleep(4 * time.Second)
+			_ = os.WriteFile(marker, []byte("survived timeout"), 0o600)
+		}
 		time.Sleep(time.Minute)
 		return
 	}

@@ -11,12 +11,12 @@ import (
 )
 
 const (
-	createSuspended                = 0x00000004
-	jobObjectLimitKillOnJobClose   = 0x00002000
-	jobObjectBasicLimitInformation = 2
-	processSetQuota                = 0x0100
-	processTerminate               = 0x0001
-	processSuspendResume           = 0x0800
+	createSuspended              = 0x00000004
+	jobObjectLimitKillOnJobClose = 0x00002000
+	jobObjectExtendedLimitInfo   = 9
+	processSetQuota              = 0x0100
+	processTerminate             = 0x0001
+	processSuspendResume         = 0x0800
 )
 
 type jobBasicLimitInformation struct {
@@ -29,6 +29,15 @@ type jobBasicLimitInformation struct {
 	Affinity                uintptr
 	PriorityClass           uint32
 	SchedulingClass         uint32
+}
+
+type jobExtendedLimitInformation struct {
+	BasicLimitInformation jobBasicLimitInformation
+	IoInfo                [6]uint64
+	ProcessMemoryLimit    uintptr
+	JobMemoryLimit        uintptr
+	PeakProcessMemoryUsed uintptr
+	PeakJobMemoryUsed     uintptr
 }
 
 var (
@@ -48,8 +57,10 @@ func inOwnGroup(cmd *exec.Cmd) (func() error, func(), error) {
 	}
 	job := syscall.Handle(r)
 	close := func() { _ = syscall.CloseHandle(job) }
-	limits := jobBasicLimitInformation{LimitFlags: jobObjectLimitKillOnJobClose}
-	r, _, callErr = setInformationJob.Call(uintptr(job), jobObjectBasicLimitInformation,
+	limits := jobExtendedLimitInformation{BasicLimitInformation: jobBasicLimitInformation{
+		LimitFlags: jobObjectLimitKillOnJobClose,
+	}}
+	r, _, callErr = setInformationJob.Call(uintptr(job), jobObjectExtendedLimitInfo,
 		uintptr(unsafe.Pointer(&limits)), unsafe.Sizeof(limits))
 	if r == 0 {
 		close()
