@@ -93,7 +93,7 @@ Two more optional model calls never pass a unit on their own: a local Ollama jud
 for duplicated test setup, and TypeSafe's Jev for follow-ups. Step by step,
 with the function behind each one: [How a run flows](docs/how-a-run-flows.md).
 
-## Run it
+## Run the Python worker
 
 ```bash
 git clone https://github.com/thellmwhisperer/agentic-team-member.git
@@ -123,6 +123,14 @@ without reading its output; with no monitor, the worker wants a terminal.
 reads the same `[runs].dir` and follows it from another terminal. Delivery is whatever `[delivery].command` says; the shipped
 example hands the branch to [no-mistakes](https://github.com/kunchenguid/no-mistakes).
 Leave it empty and the green work stays in the clone.
+
+## Go port: issue step
+
+From inside the target repository, `atm run <issue.md | issue number>` loads
+the required `.atm.yaml` and reads the issue as one step. It emits JSON start
+and result events. The Go port stops after this step for now; it does not run
+the configured commands or deliver a branch yet. See [Go port configuration](docs/configuration.md#go-port-configuration)
+for the issue format and YAML keys.
 
 ## Read more
 
