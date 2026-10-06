@@ -145,7 +145,7 @@ def _setup(tmp_path, harness_source, issue_text="add(2, 3) returns -1 instead of
 
     config_dir = tmp_path / "config"
     config_dir.mkdir()
-    (config_dir / "agent.toml").write_text(CONFIG_TOML)
+    (config_dir / "agent.toml").write_text(CONFIG_TOML + f'\n[runs]\ndir = "{tmp_path / "runs"}"\n')
     (config_dir / "tools.json").write_text("[]")
     issue = tmp_path / "issue.md"
     issue.write_text(f"# add returns the difference\n\n{issue_text}\n")
@@ -302,13 +302,35 @@ def test_dry_run_writes_brief_without_running_harness(tmp_path, capsys, monkeypa
     assert not (artifacts / "report.json").exists()
 
 
+def test_dry_run_puts_the_run_under_runs_dir_not_the_cwd(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    cwd, runs = tmp_path / "elsewhere", tmp_path / "home" / ".atm" / "runs"
+    cwd.mkdir()
+    monkeypatch.chdir(cwd)
+    argv = _setup(tmp_path, SLEEPING_HARNESS)[0][:-6]  # without --artifact-dir, --log-dir, --harness-bin
+    config = tmp_path / "config" / "agent.toml"
+    config.write_text(config.read_text().replace(str(tmp_path / "runs"), "~/.atm/runs"))
+
+    assert harness_worker.main([*argv, "--dry-run"]) == 0
+    (run,) = runs.iterdir()
+    assert (run / "brief.md").is_file() and (run / "command.txt").is_file() and list(run.glob("worker-*.jsonl"))
+    assert not (cwd / ".tmp").exists()
+
+    config.write_text(config.read_text().replace('"~/.atm/runs"', '"relative/runs"'))
+    capsys.readouterr()
+    assert harness_worker.main([*argv, "--dry-run"]) == 2
+    assert "[runs].dir must be an absolute path" in capsys.readouterr().err
+    assert list(cwd.iterdir()) == []
+
+
 def test_label_names_the_run_directory_and_is_refused_once_used(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
     monkeypatch.chdir(tmp_path)
     argv, _, _ = _setup(tmp_path, FIXING_HARNESS)
     i = argv.index("--artifact-dir")
-    argv = [*argv[:i], *argv[i + 2:], "--label", "same"]
-    run = tmp_path / ".tmp" / "harness-worker" / "same"
+    argv = [*argv[:i], *argv[i + 4:], "--label", "same"]
+    run = tmp_path / "runs" / "same"
 
     assert harness_worker.main(argv) == 0
     assert json.loads((run / "report.json").read_text())["verified"]["ok"] is True

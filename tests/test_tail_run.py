@@ -45,6 +45,23 @@ REPORT = {
 }
 
 
+def test_tail_label_and_newest_run_read_runs_dir_from_config(tmp_path):
+    runs = tmp_path / "runs"
+    for label, unit in (("older", 1), ("newer", 2)):
+        (runs / label).mkdir(parents=True)
+        (runs / label / "worker-1.jsonl").write_text(
+            json.dumps({"event": {"type": "atm.unit_started", "unit": unit}}) + "\n")
+        (runs / label / "exit.txt").write_text("2\n")
+    os.utime(runs / "older" / "worker-1.jsonl", (0, 0))
+    config = tmp_path / "agent.toml"
+    config.write_text(f'[runs]\ndir = "{runs}"\n')
+
+    proc = _tail("--config", str(config), "--label", "older")
+    assert proc.returncode == 0 and "AGENT  unit 1" in proc.stdout, proc.stderr
+    proc = _tail("--config", str(config))
+    assert proc.returncode == 0 and "AGENT  unit 2" in proc.stdout, proc.stderr
+
+
 def test_tail_follows_worker_log_in_run_dir_and_stops_at_report(tmp_path):
     run = _write_run(tmp_path, [
         _assistant({"type": "tool_use", "name": "Bash", "input": {"command": "python3 -m pytest"}}),

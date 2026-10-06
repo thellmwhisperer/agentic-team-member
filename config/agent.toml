@@ -17,6 +17,11 @@ require_clean = true
 run_typecheck = true
 timeout = 300
 
+[runs]
+# One subdirectory per run: report.json, worker-*.jsonl, briefs, delivery-output.txt, command.txt.
+# `~` is expanded; must be absolute. --artifact-dir overrides it for one run.
+dir = "~/.atm/runs"
+
 [monitor]
 # Harness worker: a shell line run at every step start and end, with ATM_LABEL, ATM_STEP,
 # ATM_STATE (started | passed | failed), ATM_DURATION and ATM_REPORT in the environment.
