@@ -1,0 +1,18 @@
+schema: 1
+id: T-PONYTAIL-20261006-103440-2
+status: accepted
+category: alien_code
+title: "Cut the README's three-line repeat of how scripts/test.sh works (uv, Python 3.12, requirements.txt, "
+created_at: 2026-10-06
+incident:
+  pattern: "Cut the README's three-line repeat of how scripts/test.sh works (uv, Python 3.12, requirements.txt, arguments passed to pytest) to one line that names scripts/test.sh and links to CONTRIBUTING.md, which already explains it."
+  what_went_wrong: "An ATM run wrote it and ATM's ponytail pass cut it before delivery."
+  root_cause: "The coding agent wrote more than the issue needed."
+  rule_established: "Cut by the ponytail pass; it does not come back."
+  evidence:
+    - family: documented_as_convention
+      example: "Cut the README's three-line repeat of how scripts/test.sh works (uv, Python 3.12, requirements.txt, arguments passed to pytest) to one line that names scripts/test.sh and links to CONTRIBUTING.md, which already explains it."
+      artifact: README.md
+match:
+  family: documented_as_convention
+  artifact: README.md

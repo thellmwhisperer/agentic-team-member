@@ -29,8 +29,13 @@ See [README → Requirements](README.md#requirements).
 ## Running the test suite
 
 ```bash
-python3.12 -m pytest -q
+scripts/test.sh
 ```
+
+`scripts/test.sh` is the one way to run the tests: it uses
+[`uv`](https://docs.astral.sh/uv/) to run pytest under Python 3.12 (see
+`.python-version`) with `requirements.txt`, whatever `python3` comes first
+on your PATH. Its arguments go to pytest (`scripts/test.sh tests/test_config.py`).
 
 The full suite runs in under a minute on a modern laptop. New code
 should come with tests that follow the project's TDD ordering:
