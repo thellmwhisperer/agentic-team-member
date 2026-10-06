@@ -1,6 +1,0 @@
-run:
-  label: golden
-  result: PASS
-  exit: 0
-  units: 1
-  report: .atm/runs/golden/report.json
