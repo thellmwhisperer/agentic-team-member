@@ -114,6 +114,9 @@ func TestRunWritesEveryStepStartBeforeItsEnd(t *testing.T) {
 	var open, started []string
 	for _, e := range stepEvents(t, runDir(repo, "graph")) {
 		if e.State == "started" {
+			if len(open) != 0 {
+				t.Fatalf("%s starts before %v ended", e.Step, open)
+			}
 			open, started = append(open, e.Step), append(started, e.Step)
 			continue
 		}
@@ -192,7 +195,11 @@ func TestRunVerdicts(t *testing.T) {
 		{"ponytail-cuts", 0, func(r runReport) bool { return r.Verified.OK && r.Ponytail.Kept }},
 	} {
 		t.Run(tc.scenario, func(t *testing.T) {
-			repo, out, exit := run(t, tc.scenario, "verdict")
+			var args []string
+			if tc.scenario == "scope-breaking" {
+				args = []string{"--scope", "calc.py"}
+			}
+			repo, out, exit := run(t, tc.scenario, "verdict", args...)
 			if r := readReport(t, repo, "verdict"); exit != tc.exit || !tc.check(r) {
 				t.Errorf("exit %d (want %d), report %+v\n%s", exit, tc.exit, r, out)
 			}
