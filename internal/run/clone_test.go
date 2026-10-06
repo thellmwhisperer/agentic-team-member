@@ -22,7 +22,9 @@ func atmInstall(line string) string {
 func cloneStep(t *testing.T, out *bytes.Buffer) map[string]any {
 	t.Helper()
 	evs := events(t, out)
-	if len(evs) != 6 || evs[1]["state"] != "passed" || evs[2]["step"] != "contract" || evs[3]["state"] != "passed" || evs[4]["step"] != "clone" || evs[4]["state"] != "started" ||
+	if len(evs) != 6 || evs[1]["state"] != "passed" ||
+		evs[2]["step"] != "contract" || evs[3]["state"] != "passed" ||
+		evs[4]["step"] != "clone" || evs[4]["state"] != "started" ||
 		evs[5]["step"] != "clone" {
 		t.Fatalf("want the issue, contract, and clone steps, got %v", evs)
 	}
