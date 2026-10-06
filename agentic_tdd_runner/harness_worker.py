@@ -1291,8 +1291,11 @@ def main(argv: list[str] | None = None) -> int:
                   "net_lines_after": net_added_lines(worktree, base_sha, after), "kept": False, "tombstones": [], "commit": None}
         report_valid = (isinstance(pony_report, dict) and set(pony_report) == {"findings", "summary"}
                         and isinstance(pony_report.get("findings"), list) and isinstance(pony_report.get("summary"), str)
+                        and bool(pony_report["findings"])
                         and all(isinstance(f, dict) and set(f) == {"file", "family", "finding"}
                                 and all(isinstance(f.get(key), str) for key in ("file", "family", "finding"))
+                                and all(f[key].strip() and f[key].splitlines() == [f[key]]
+                                        for key in ("file", "finding"))
                                 and f["family"] in SLOP_FAMILIES for f in pony_report["findings"]))
         if run["timed_out"] or run["exit_code"] != 0 or parse_error or not report_valid:
             reason = "harness timed out" if run["timed_out"] else (

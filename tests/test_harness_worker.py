@@ -1028,6 +1028,7 @@ if brief.startswith("# Ponytail pass"):
     BREAK
     report = {"findings": [{"file": "calc.py", "family": "speculative_feature",
                             "finding": "unused() has no caller: deleted"}], "summary": "cut one function"}
+    MUTATE
 else:
     pathlib.Path("tests/test_add.py").write_text("from calc import add\\n\\n\\ndef test_add_sums():\\n    assert add(2, 3) == 5\\n")
     calc.write_text(calc.read_text().replace("a - b", "a + b") + UNUSED)
@@ -1037,8 +1038,8 @@ print(json.dumps({"type": "result", "subtype": "success", "result": json.dumps(r
 """
 
 
-def _ponytail_harness(breaks="pass"):
-    return PONYTAIL_HARNESS.replace("UNUSED", repr(UNUSED)).replace("BREAK", breaks)
+def _ponytail_harness(breaks="pass", mutation="pass"):
+    return PONYTAIL_HARNESS.replace("UNUSED", repr(UNUSED)).replace("BREAK", breaks).replace("MUTATE", mutation)
 
 
 def _committed(clone, *args):
@@ -1090,6 +1091,25 @@ def test_kept_ponytail_cut_is_its_own_commit_and_delivery_gets_its_findings(tmp_
     assert _committed(clone, "show", "HEAD~1:calc.py") == FIXED_CALC + UNUSED  # the unit commit, pre-ponytail
     assert pony["commit"] == report["head_sha"] == _committed(clone, "rev-parse", "HEAD").strip()
     assert Path(report["delivery"]["output"]).read_text() == line
+
+
+@pytest.mark.parametrize("mutation", [
+    'report["findings"] = []',
+    'report["findings"][0]["file"] = "calc.py\\nother.py"',
+    'report["findings"][0]["file"] = "calc.py\\n"',
+    'report["findings"][0]["finding"] = "\\n"',
+])
+def test_unusable_ponytail_findings_discard_the_cut_and_delivery_lines(tmp_path, monkeypatch, mutation):
+    argv, artifacts = _delivery_setup(tmp_path, monkeypatch, _ponytail_harness(mutation=mutation),
+                                      command='printf "[%s]" "$ATM_PONYTAIL"')
+    assert harness_worker.main(argv) == 0
+    report = json.loads((artifacts / "report.json").read_text())
+    pony, clone = report["ponytail"], report["worktree"]
+    assert pony["kept"] is False and pony["commit"] is None
+    assert "invalid ponytail report" in pony["reason"]
+    assert Path(report["delivery"]["output"]).read_text() == "[]"
+    assert _committed(clone, "log", "--format=%s", f"{report['base_sha']}..HEAD").splitlines() == [
+        "atm unit 1: add returns the difference"]
 
 
 def test_ponytail_cut_that_breaks_the_unit_test_is_discarded(tmp_path, monkeypatch, capsys):
