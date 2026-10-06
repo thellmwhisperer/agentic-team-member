@@ -94,5 +94,6 @@ Auto-merge is armed, so this is the last look, and it is short:
 ## Cleaning up
 
 Each run leaves a full clone under the run root (`--run-root .worktrees` in this
-repository's runs). Remove it once its branch is merged. Run
+repository's runs). ATM removes merged clones as described in
+[How a run flows](how-a-run-flows.md#what-a-run-leaves-on-disk). Run
 directories under [`[runs].dir`](configuration.md#runs) are the record of what happened.
