@@ -963,13 +963,9 @@ def run_command(command: str | None, workdir: str, config: dict, timeout: int, l
         return None, None
     argv = shlex.split(command)
     if "&&" in argv:  # a quoted `sh -c 'a && b'` stays one token and goes to the shell whole
-        start = 0
-        for end in [i for i, token in enumerate(argv) if token == "&&"] + [len(argv)]:
-            ok, tail = run_command(shlex.join(argv[start:end]), workdir, config, timeout, log)
-            if not ok:
-                return ok, tail
-            start = end + 1
-        return True, None
+        i = argv.index("&&")
+        ok, tail = run_command(shlex.join(argv[:i]), workdir, config, timeout, log)
+        return run_command(shlex.join(argv[i + 1:]), workdir, config, timeout, log) if ok else (ok, tail)
     env = build_command_env(config)
     env.setdefault("CI", "1")
     try:

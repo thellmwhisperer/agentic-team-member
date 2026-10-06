@@ -1,0 +1,18 @@
+schema: 1
+id: T-PONYTAIL-20261006-164752-1
+status: accepted
+category: alien_code
+title: "Cut the hand-built loop in run_command that collected every `&&` index and walked the slices with a "
+created_at: 2026-10-06
+incident:
+  pattern: "Cut the hand-built loop in run_command that collected every `&&` index and walked the slices with a start cursor. It now splits at the first `&&` token and recurses: run the left part, and if it passes, run the right part. Same order and the first failure still wins, in 3 lines instead of 7."
+  what_went_wrong: "An ATM run wrote it and ATM's ponytail pass cut it before delivery."
+  root_cause: "The coding agent wrote more than the issue needed."
+  rule_established: "Cut by the ponytail pass; it does not come back."
+  evidence:
+    - family: speculative_feature
+      example: "Cut the hand-built loop in run_command that collected every `&&` index and walked the slices with a start cursor. It now splits at the first `&&` token and recurses: run the left part, and if it passes, run the right part. Same order and the first failure still wins, in 3 lines instead of 7."
+      artifact: agentic_tdd_runner/harness_worker.py
+match:
+  family: speculative_feature
+  artifact: agentic_tdd_runner/harness_worker.py
