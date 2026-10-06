@@ -2,12 +2,14 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
 
 	"github.com/thellmwhisperer/agentic-team-member/internal/config"
+	"github.com/thellmwhisperer/agentic-team-member/internal/run"
 )
 
 // Execute runs atm with os.Args and returns its exit code.
@@ -19,9 +21,12 @@ func Execute() int {
 		SilenceErrors: true,
 	}
 	config.AddFlags(root.PersistentFlags())
-	root.AddCommand(initCmd(), doctorCmd())
+	root.AddCommand(initCmd(), doctorCmd(), runCmd())
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, "atm:", err)
+		if errors.Is(err, run.ErrNotStarted) {
+			return 2
+		}
 		return 1
 	}
 	return 0
