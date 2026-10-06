@@ -1,5 +1,5 @@
 commands:
-  test: python3 -m pytest -q
+  test: scripts/test.sh
   lint: uvx ruff check . && scripts/slopslint.sh check --classify --enforce > /dev/null
 review:
   path_instructions:
@@ -16,6 +16,11 @@ review:
       instructions: |
         Never delete or weaken a test that the linked issue's acceptance criteria or red test ask for,
         even when it looks heuristic. If such a test seems unreliable, report it as a note and change nothing.
+    - path: "**"
+      instructions: |
+        Run tests only through `scripts/test.sh` (it passes its arguments to pytest). It runs pytest
+        under Python 3.12 with requirements.txt; a bare `python3 -m pytest` may pick a Python older
+        than ATM supports and fail before collecting a test.
 auto_fix:
   review: 0  # the reviewer only reports; the agent that launched ATM answers every finding (Javi, 5-oct-2026)
 ci:
