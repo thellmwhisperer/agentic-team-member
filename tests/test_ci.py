@@ -1,121 +1,137 @@
-"""Tests for CI and the no-mistakes gate: Go changes run Go checks, Python changes run Python checks."""
+"""Behavioral checks for CI path selection and workflow contracts."""
 
 import os
-import re
 import shutil
 import subprocess
 from pathlib import Path
+
+import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
 WORKFLOWS = ROOT / ".github" / "workflows"
 
 
-def _stub(bin_dir, name, log):
-    path = bin_dir / name
-    path.write_text(f'#!/bin/sh\necho "{name} $*" >> "{log}"\n')
-    path.chmod(0o755)
-
-
-def _go_repo(tmp_path, *scripts):
-    """A copy of the given scripts in a repo with go.mod, and stubs for every tool they call."""
-    repo, bin_dir, log = tmp_path / "repo", tmp_path / "bin", tmp_path / "calls.log"
+def _repo(tmp_path, *, go_mod=False):
+    repo = tmp_path / "repo"
     (repo / "scripts").mkdir(parents=True)
-    bin_dir.mkdir()
-    for script in scripts:
-        shutil.copy(ROOT / "scripts" / script, repo / "scripts" / script)
-    (repo / "go.mod").write_text("module example.com/atm\n\ngo 1.23\n")
-    for tool in ("uv", "uvx", "go", "golangci-lint"):
-        _stub(bin_dir, tool, log)
-    _stub(repo / "scripts", "slopslint.sh", log)
-    env = dict(os.environ, PATH=f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
-    return repo, env, log
+    shutil.copy(ROOT / "scripts" / "changed-areas.sh", repo / "scripts" / "changed-areas.sh")
+    if go_mod:
+        (repo / "go.mod").write_text("module example.com/atm\n\ngo 1.23\n")
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    subprocess.run(["git", "-C", str(repo), "config", "user.email", "ci@example.com"], check=True)
+    subprocess.run(["git", "-C", str(repo), "config", "user.name", "CI test"], check=True)
+    subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-qm", "base"], check=True)
+    base = subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD"], text=True).strip()
+    return repo, base
 
 
-def _lint_command():
-    return re.search(r"^  lint: (.+)$", (ROOT / ".no-mistakes.yaml").read_text(), re.M).group(1)
-
-
-def test_test_script_runs_go_tests_when_go_mod_exists(tmp_path):
-    repo, env, log = _go_repo(tmp_path, "test.sh")
-
-    result = subprocess.run(["sh", "scripts/test.sh"], cwd=repo, env=env, capture_output=True, text=True)
-
+def _detect(repo, base, tmp_path):
+    subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-qm", "change"], check=True)
+    output = tmp_path / "github-output"
+    result = subprocess.run(
+        ["sh", "scripts/changed-areas.sh", base],
+        cwd=repo,
+        env=dict(os.environ, GITHUB_OUTPUT=str(output)),
+        capture_output=True,
+        text=True,
+    )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "go test ./..." in log.read_text().splitlines()
+    return dict(line.split("=", 1) for line in output.read_text().splitlines())
 
 
-def test_gate_lint_is_a_script_that_runs_golangci_lint_when_go_mod_exists(tmp_path):
-    lint = _lint_command()
-    assert re.fullmatch(r"scripts/[\w.-]+", lint), f"commands.lint must be a script, not {lint!r}"
-    repo, env, log = _go_repo(tmp_path, Path(lint).name)
+def test_python_changes_select_only_python_checks(tmp_path):
+    repo, base = _repo(tmp_path)
+    (repo / "runner.py").write_text("value = 1\n")
 
-    result = subprocess.run(["sh", lint], cwd=repo, env=env, capture_output=True, text=True)
-
-    assert result.returncode == 0, result.stdout + result.stderr
-    calls = log.read_text().splitlines()
-    assert "golangci-lint run" in calls
-    assert any(c.startswith("uvx ruff check") for c in calls), calls
+    assert _detect(repo, base, tmp_path) == {"python": "true", "go": "false"}
 
 
-def test_gate_lint_skips_golangci_lint_without_go_mod(tmp_path):
-    lint = _lint_command()
-    repo, env, log = _go_repo(tmp_path, Path(lint).name)
-    (repo / "go.mod").unlink()
+def test_go_change_without_module_does_not_select_go_checks(tmp_path):
+    repo, base = _repo(tmp_path)
+    (repo / "runner.go").write_text("package runner\n")
 
-    result = subprocess.run(["sh", lint], cwd=repo, env=env, capture_output=True, text=True)
-
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "golangci-lint run" not in log.read_text().splitlines()
+    assert _detect(repo, base, tmp_path)["go"] == "false"
 
 
-def _job_paths(workflow):
-    """Paths listed under the workflow's `paths:` keys and its paths-filter `filters:`."""
-    return set(re.findall(r"^\s+- ['\"]?([^'\"\s]+)['\"]?$", workflow, re.M))
+def test_go_change_with_module_selects_go_checks(tmp_path):
+    repo, base = _repo(tmp_path, go_mod=True)
+    (repo / "runner.go").write_text("package runner\n")
+
+    assert _detect(repo, base, tmp_path)["go"] == "true"
 
 
-def test_python_workflows_are_filtered_to_python_paths():
-    for name in ("pr.yml", "cd.yml"):
-        workflow = (WORKFLOWS / name).read_text()
-        paths = _job_paths(workflow)
-        for path in ("pyproject.toml", "ruff.toml", ".python-version", "scripts/test.sh", f".github/workflows/{name}"):
-            assert path in paths, f"{name} does not filter on {path}"
-        assert {"**.py", "**/*.py"} & paths, f"{name} does not filter on Python sources"
-        assert not {"**.go", "**/*.go", "go.mod"} & paths, f"{name} runs for Go changes"
+def test_detector_change_selects_affected_checks(tmp_path):
+    repo, base = _repo(tmp_path, go_mod=True)
+    script = repo / "scripts" / "changed-areas.sh"
+    script.write_text(script.read_text() + "\n")
+
+    assert _detect(repo, base, tmp_path) == {"python": "true", "go": "true"}
 
 
-def test_go_workflow_runs_make_test_and_lint_on_three_platforms():
-    workflow = (WORKFLOWS / "go.yml").read_text()
-
-    for os_name in ("ubuntu-latest", "macos-latest", "windows-latest"):
-        assert os_name in workflow
-    assert re.search(r"^\s+run: make test$", workflow, re.M)
-    assert re.search(r"^\s+run: make lint$", workflow, re.M)
-    assert "go-version-file: go.mod" in workflow
-    paths = _job_paths(workflow)
-    for path in ("go.mod", "go.sum", ".golangci.yml", "Makefile", ".github/workflows/go.yml"):
-        assert path in paths, f"go.yml does not filter on {path}"
-    assert {"**.go", "**/*.go"} & paths
+def _workflow(name):
+    return yaml.load((WORKFLOWS / name).read_text(), Loader=yaml.BaseLoader)
 
 
-def test_pull_request_workflows_report_an_always_present_summary_check():
-    for name in ("pr.yml", "go.yml"):
-        workflow = (WORKFLOWS / name).read_text()
-        trigger = workflow.split("\njobs:", 1)[0]
-        pull_request = trigger.split("pull_request:", 1)[1].split("\n  push:", 1)[0]
-        assert "paths" not in pull_request, f"{name} must start on every PR so its summary check is always present"
-        assert "if: always()" in workflow, f"{name} has no summary job that runs when the filtered jobs skip"
-        assert "scripts/ci-summary.sh" in workflow
+def _steps(job):
+    return job["steps"]
 
 
-def _summary(*results):
-    return subprocess.run(["sh", "scripts/ci-summary.sh", *results], cwd=ROOT, capture_output=True, text=True)
+def _step_run(job, command):
+    return any(step.get("run") == command for step in _steps(job))
 
 
-def test_ci_summary_is_green_when_filtered_jobs_succeed_or_skip():
-    assert _summary("success", "skipped").returncode == 0
-    assert _summary("skipped").returncode == 0
+def test_pr_workflow_runs_python_matrix_and_keeps_summary_for_filtered_changes():
+    workflow = _workflow("pr.yml")
+    jobs = workflow["jobs"]
+    assert "paths" not in workflow["on"]["pull_request"]
+    assert "scripts/changed-areas.sh" in _steps(jobs["changes"])[-1]["run"]
+    assert jobs["test"]["needs"] == "changes"
+    assert jobs["test"]["if"] == "needs.changes.outputs.python == 'true'"
+    assert set(jobs["test"]["strategy"]["matrix"]["python-version"]) == {"3.12", "3.13", "3.14"}
+    assert _step_run(jobs["test"], "python -m pytest tests/ -v")
+    assert jobs["summary"]["name"] == "Python checks"
+    assert jobs["summary"]["needs"] == ["changes", "test"]
+    assert jobs["summary"]["if"] == "always()"
 
 
-def test_ci_summary_is_red_when_a_job_fails_or_is_cancelled():
-    assert _summary("success", "failure").returncode != 0
-    assert _summary("cancelled").returncode != 0
+def test_go_workflow_skips_without_module_and_keeps_summary():
+    workflow = _workflow("go.yml")
+    jobs = workflow["jobs"]
+    assert "paths" not in workflow["on"]["push"]
+    assert "scripts/changed-areas.sh" in _steps(jobs["changes"])[-1]["run"]
+    assert "github.event.before" in _steps(jobs["changes"])[-1]["env"]["BASE_SHA"]
+    assert jobs["test"]["needs"] == "changes"
+    assert jobs["test"]["if"] == "needs.changes.outputs.go == 'true'"
+    assert set(jobs["test"]["strategy"]["matrix"]["os"]) == {
+        "ubuntu-latest",
+        "macos-latest",
+        "windows-latest",
+    }
+    assert _step_run(jobs["test"], "make test")
+    assert _step_run(jobs["test"], "make lint")
+    assert jobs["summary"]["name"] == "Go checks"
+    assert jobs["summary"]["needs"] == ["changes", "test"]
+    assert jobs["summary"]["if"] == "always()"
+
+
+def test_cd_workflow_uses_shared_detector_instead_of_trigger_path_lists():
+    workflow = _workflow("cd.yml")
+    jobs = workflow["jobs"]
+    assert "paths" not in workflow["on"]["push"]
+    assert "scripts/changed-areas.sh" in _steps(jobs["changes"])[-1]["run"]
+    assert jobs["test"]["needs"] == "changes"
+    assert jobs["test"]["if"] == "needs.changes.outputs.python == 'true'"
+
+
+def test_ci_summary_accepts_success_and_skipped_jobs():
+    for results in (("success", "skipped"), ("skipped",)):
+        assert subprocess.run(["sh", "scripts/ci-summary.sh", *results], cwd=ROOT).returncode == 0
+
+
+def test_ci_summary_rejects_failed_or_cancelled_jobs():
+    for results in (("success", "failure"), ("cancelled",)):
+        assert subprocess.run(
+            ["sh", "scripts/ci-summary.sh", *results], cwd=ROOT, capture_output=True
+        ).returncode != 0
