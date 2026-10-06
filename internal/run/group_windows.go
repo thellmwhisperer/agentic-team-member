@@ -88,20 +88,26 @@ func inOwnGroup(cmd *exec.Cmd) (func() error, func(), error) {
 		if canceled {
 			return fmt.Errorf("process group was canceled before it started")
 		}
-		process, err := syscall.OpenProcess(processSetQuota|processTerminate|processSuspendResume, false, uint32(cmd.Process.Pid))
-		if err != nil {
-			return err
-		}
-		defer syscall.CloseHandle(process)
-		r, _, callErr := assignProcessToJob.Call(uintptr(job), uintptr(process))
-		if r == 0 {
-			return callErr
-		}
-		status, _, _ := resumeProcess.Call(uintptr(process))
-		if int32(status) < 0 {
-			return fmt.Errorf("resume suspended process: NTSTATUS 0x%08x", uint32(status))
-		}
-		return nil
+		return assignAndResume(job, cmd.Process.Pid)
 	}
 	return afterStart, close, nil
+}
+
+func assignAndResume(job syscall.Handle, pid int) error {
+	process, err := syscall.OpenProcess(
+		processSetQuota|processTerminate|processSuspendResume, false, uint32(pid),
+	)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = syscall.CloseHandle(process) }()
+	r, _, callErr := assignProcessToJob.Call(uintptr(job), uintptr(process))
+	if r == 0 {
+		return callErr
+	}
+	status, _, _ := resumeProcess.Call(uintptr(process))
+	if int32(status) < 0 {
+		return fmt.Errorf("resume suspended process: NTSTATUS 0x%08x", uint32(status))
+	}
+	return nil
 }
