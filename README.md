@@ -100,8 +100,8 @@ ATM is built to be launched and watched by an agent. `[monitor].command` runs
 at every step start and end, so the launching agent knows where the run is
 without reading its output; with no monitor, the worker wants a terminal.
 `--dry-run` prints the contract and stops. `--label NAME` puts the run in
-`.tmp/harness-worker/NAME`. `scripts/tail-run.py --label NAME` follows it from
-another terminal. Delivery is whatever `[delivery].command` says; the shipped
+`<[runs].dir>/NAME` (`~/.atm/runs` as shipped). `scripts/tail-run.py --label NAME`
+reads the same `[runs].dir` and follows it from another terminal. Delivery is whatever `[delivery].command` says; the shipped
 example hands the branch to [no-mistakes](https://github.com/kunchenguid/no-mistakes).
 Leave it empty and the green work stays in the clone.
 

@@ -283,7 +283,7 @@ code. The worker then prints a summary and exits 0, 1, 2 or 4.
 
 ## What a run leaves on disk
 
-In the artifact directory (`--artifact-dir`, or `.tmp/harness-worker/<label>`,
+In the artifact directory (`--artifact-dir`, or `<[runs].dir>/<label>`,
 or a timestamp):
 
 | File | What it is |
