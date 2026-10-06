@@ -225,19 +225,21 @@ so this unit's test suite never sees it.
 """
 
 
-MISSING_MODULE_MARKERS = (
-    "cannot find module", "module not found", "could not resolve", "cannot find package",
-    "no module named", "modulenotfounderror", "failed to resolve import",
-)
+# An import error as the runner prints it: at line start, after only indentation, pytest's `E`
+# gutter and the error class. The same words inside an assertion or a quoted string do not count.
+IMPORT_ERROR = re.compile(
+    r"^[\sE>|]*(?:(?:ModuleNotFoundError|ImportError|Error(?: \[ERR_MODULE_NOT_FOUND\])?):\s*)?"
+    r"(no module named|cannot find (?:module|package)|failed to resolve import) ['\"]([^'\"]+)['\"]",
+    re.IGNORECASE | re.MULTILINE)
+# ponytail: only pytest's captured output sections are dropped; a Jest console.log echoing an
+# import error at line start still counts. Strip those blocks too if it ever bites.
+CAPTURED_OUTPUT = re.compile(r"^-+ Captured .*?(?=^[-=_]{3,}|\Z)", re.MULTILINE | re.DOTALL)
 
 
 def red_failed_on_missing_module(red_output: str) -> str | None:
     """A red phase that fails because a new module is absent proves nothing about the bug."""
-    lowered = red_output.lower()
-    for marker in MISSING_MODULE_MARKERS:
-        if marker in lowered:
-            return marker
-    return None
+    match = IMPORT_ERROR.search(CAPTURED_OUTPUT.sub("", red_output))
+    return f"{match[1].lower()} '{match[2]}'" if match else None
 
 
 ATM_DIR = ".atm/"
