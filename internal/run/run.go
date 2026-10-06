@@ -39,7 +39,7 @@ func Run(args []string, out io.Writer) error {
 	}
 	repo := ""
 	// No origin is not an error: the repository just has no GitHub issues.
-	if url, err := git("-C", root, "remote", "get-url", "origin"); err == nil {
+	if url, err := git("remote", "get-url", "origin"); err == nil {
 		if m := githubURL.FindStringSubmatch(url); m != nil {
 			repo = m[1]
 		}
