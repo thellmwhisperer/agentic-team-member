@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -49,16 +50,32 @@ func Run(args []string, out io.Writer) error {
 		return err
 	}
 	// The steps after the issue take the config from here.
-	if _, err := config.Load(root, home, flags); err != nil {
+	c, err := config.Load(root, home, flags)
+	if err != nil {
 		return err
 	}
-	return step(out, "issue", func() (map[string]any, error) {
-		i, err := readIssue(fs.Arg(0), repo)
+	var i Issue
+	if err := step(out, "issue", func() (map[string]any, error) {
+		i, err = readIssue(fs.Arg(0), repo)
 		ev := map[string]any{"title": i.Title, "type": i.Type}
 		if i.Number != 0 {
 			ev["number"] = i.Number
 		}
 		return ev, err
+	}); err != nil {
+		return err
+	}
+	return step(out, "contract", func() (map[string]any, error) {
+		// ponytail: brief.md goes to the repository's .atm/ until node 2 gives the run its clone.
+		path := filepath.Join(root, ".atm", "brief.md")
+		b, err := brief(i, c)
+		if err == nil {
+			err = os.MkdirAll(filepath.Dir(path), 0o755)
+		}
+		if err == nil {
+			err = os.WriteFile(path, []byte(b), 0o644)
+		}
+		return map[string]any{"brief": path}, err
 	})
 }
 
