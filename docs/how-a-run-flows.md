@@ -294,6 +294,7 @@ label or a timestamp; see [Configuration](configuration.md#runs)):
 | `report.json` | The verdict |
 | `follow-ups.json` | Follow-ups accepted but not chained, for a later run |
 | `delivery-output.txt` | What the delivery command printed |
+| `atm/` | The clone's `.atm/` contents, copied here before a merged clone is removed; includes parked follow-up tests |
 
 In the target repository: one clone per run under `.worktree/` (or
 `--run-root`). The `clone sweep` step runs at startup and after the final
@@ -301,8 +302,9 @@ report on the normal completion path. It checks other run directories next
 to the artifact directory. If a `report.json` names an existing `atm-run-`
 clone whose branch has a merged PR, ATM removes the clone and records the
 time as `clone_removed` in that report. It skips reports marked
-`delivery.running: true` while delivery is in progress. The run directory
-and its logs stay.
+`delivery.running: true` while delivery is in progress. If copying `.atm/`
+fails, ATM leaves the clone for a later sweep. The run directory and its logs
+stay.
 
 ## Languages
 
