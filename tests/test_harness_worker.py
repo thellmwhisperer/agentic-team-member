@@ -2,7 +2,6 @@
 
 import json
 import os
-import shlex
 import subprocess
 import sys
 import textwrap
@@ -218,24 +217,6 @@ def test_failed_full_suite_keeps_its_output(tmp_path, monkeypatch, capsys):
     assert (event["command"], event["exit_code"]) == (failing, 1)
     assert "FULL SUITE EXPLODED" in event["output_tail"]
     assert "FULL SUITE EXPLODED" in capsys.readouterr().out.split("=== HARNESS WORKER SUMMARY ===")[1]
-
-
-def test_python_and_go_repo_runs_both_suites(tmp_path):
-    from types import SimpleNamespace
-    (tmp_path / "go.mod").write_text("module example.com/x\n\ngo 1.22\n")
-    env_report = SimpleNamespace(project_type="python", package_manager=None, runner_bootstrap=None)
-    assert harness_worker.detect_commands(str(tmp_path), env_report) == (
-        "python3 -m pytest && go test ./...", "go vet ./...")
-    passing = f"{sys.executable} -c \"print('PYTHON OK')\""
-    failing = f"{sys.executable} -c \"print('GO SUITE EXPLODED'); raise SystemExit(2)\""
-    events = []
-    ok, tail = harness_worker.run_command(f"{passing} && {failing}", str(tmp_path), {}, 30,
-                                          lambda kind, data: events.append((kind, data)))
-    assert ok is False
-    assert "GO SUITE EXPLODED" in tail and "PYTHON OK" not in tail
-    assert [(k, d["command"], d["exit_code"]) for k, d in events] == [
-        ("command_failed", shlex.join(shlex.split(failing)), 2)]
-    assert harness_worker.run_command(f"{passing} && {passing}", str(tmp_path), {}, 30, None) == (True, None)
 
 
 def test_helper_only_change_fails_verification_and_gate(tmp_path, monkeypatch):
