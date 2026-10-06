@@ -2,10 +2,8 @@
 set -eu
 cd "$(dirname "$0")/.."
 base=${1:?base commit is required}
-python=false
-go=false
-
-while IFS= read -r path; do
+classify_path() {
+  path=$1
   case "$path" in
     *.py|pyproject.toml|requirements*.txt|ruff.toml|.python-version|scripts/test.sh|scripts/changed-areas.sh|config/*|.github/workflows/pr.yml|.github/workflows/cd.yml)
       python=true
@@ -16,15 +14,24 @@ while IFS= read -r path; do
       go=true
       ;;
   esac
-done <<EOF
-$(git diff --name-only "$base" HEAD)
-EOF
+}
 
-if [ ! -f go.mod ]; then
+git diff --name-status -M "$base" HEAD | {
+  python=false
   go=false
-fi
+  while IFS="$(printf '\t')" read -r status first second; do
+    case "$status" in
+      R*|C*) classify_path "$first"; classify_path "$second" ;;
+      *) classify_path "$first" ;;
+    esac
+  done
 
-printf 'python=%s\ngo=%s\n' "$python" "$go"
-if [ -n "${GITHUB_OUTPUT:-}" ]; then
-  printf 'python=%s\ngo=%s\n' "$python" "$go" >> "$GITHUB_OUTPUT"
-fi
+  if [ ! -f go.mod ]; then
+    go=false
+  fi
+
+  printf 'python=%s\ngo=%s\n' "$python" "$go"
+  if [ -n "${GITHUB_OUTPUT:-}" ]; then
+    printf 'python=%s\ngo=%s\n' "$python" "$go" >> "$GITHUB_OUTPUT"
+  fi
+}

@@ -64,9 +64,9 @@ Either way:
 
 | Workflow | Runs on | Runs when these change | Does |
 |---|---|---|---|
-| `pr.yml` | every PR to `main` | `**.py`, `pyproject.toml`, `requirements*.txt`, `ruff.toml`, `.python-version`, `scripts/test.sh`, `config/**`, `pr.yml` | pytest on Python 3.12, 3.13, 3.14 |
-| `cd.yml` | push to `main` | the same Python paths, `cd.yml` | pytest and a production config load |
-| `go.yml` | every PR to `main`, push to `main` | `**.go`, `go.mod`, `go.sum`, `.golangci.yml`, `Makefile`, `go.yml` | `make test` and `make lint` on ubuntu, macos, windows |
+| `pr.yml` | every PR to `main` | Python paths, `pr.yml`, or `scripts/changed-areas.sh` | pytest on Python 3.12, 3.13, 3.14 |
+| `cd.yml` | push to `main` | Python paths, `cd.yml`, or `scripts/changed-areas.sh` | pytest and a production config load |
+| `go.yml` | every PR to `main`, push to `main` | Go paths, `go.yml`, or `scripts/changed-areas.sh`, when `go.mod` exists | `make test` and `make lint` on ubuntu, macos, windows |
 | `auto-merge.yml` | every PR to `main` | always | arms auto-merge (below) |
 
 `pr.yml` and `go.yml` start on every PR and skip their test jobs when their
