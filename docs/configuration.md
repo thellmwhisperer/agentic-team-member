@@ -170,3 +170,8 @@ dropped) and the rest its body. The body must declare a case-sensitive `Type:`
 line with a lowercase type: `fix` (or `hotfix`), `feature`,
 `greenfield`, `refactor`, `tests`, `docs` or `chore`. A number is read with
 `gh issue view` from the repository `origin` names.
+
+The current Go port validates configuration before reading the issue, then
+emits one JSON line when the `issue` step starts and another when it passes or
+fails. The final line includes the title and task type on success, plus the
+issue number for GitHub issues. Later run steps are not yet implemented.
