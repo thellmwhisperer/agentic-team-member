@@ -31,9 +31,7 @@ scripts/test.sh
 `scripts/test.sh` runs pytest under Python 3.12 with `requirements.txt`
 through [`uv`](https://docs.astral.sh/uv/), whatever `python3` comes first on
 your `PATH`; its arguments go to pytest (`scripts/test.sh tests/test_config.py`).
-With no arguments, it then runs `go test ./...`, including the Go port's fake
-agent and behaviour contract. The suite runs real git and fake harness subprocesses; expect about
-two minutes.
+The suite runs real git and fake harness subprocesses; expect about two minutes.
 The pre-commit hook runs slopslint; its first run downloads the pinned binary
 into `.tmp/slopslint/` and needs the network.
 
