@@ -6,10 +6,5 @@ linters:
     - gocyclo
     - lll
   settings:
-    funlen:
-      lines: 60
-      statements: 40
     gocyclo:
       min-complexity: 15
-    lll:
-      line-length: 120
