@@ -580,17 +580,24 @@ def sweep_merged_clones(artifact_dir: Path) -> None:
         try:
             report = json.loads(report_path.read_text())
             clone = report.get("worktree") if isinstance(report, dict) else None
-            if not clone or report.get("clone_removed") or not Path(clone).is_dir():
+            clone_path = Path(clone) if clone else None
+            if not clone_path or report.get("clone_removed") or not clone_path.name.startswith("atm-run-") or not clone_path.is_dir():
                 continue
             branch = git_lines(clone, "branch", "--show-current")
+            origin = git_lines(clone, "remote", "get-url", "origin")
+            local_origin = Path(origin[0]) if origin else None
+            if local_origin and not local_origin.is_absolute():
+                local_origin = clone_path / local_origin
+            gh_cwd = local_origin if local_origin and local_origin.is_dir() else clone_path
             state = branch and subprocess.run(["gh", "pr", "view", branch[0], "--json", "state", "--jq", ".state"],
-                                              cwd=clone, capture_output=True, text=True, timeout=60).stdout.strip()
-        except (OSError, ValueError, subprocess.SubprocessError):
-            continue
-        if state == "MERGED":
+                                              cwd=gh_cwd, capture_output=True, text=True, timeout=60).stdout.strip()
+            if state != "MERGED":
+                continue
             shutil.rmtree(clone)
             report["clone_removed"] = datetime.now(timezone.utc).isoformat()
             report_path.write_text(json.dumps(report, indent=2))
+        except (OSError, ValueError, subprocess.SubprocessError):
+            continue
 
 
 def stage_follow_up_as_unit(worktree: str, follow_up: dict, unit_number: int, log) -> str:
