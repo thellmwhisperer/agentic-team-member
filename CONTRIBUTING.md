@@ -33,7 +33,7 @@ See [README → Requirements](README.md#requirements).
 scripts/test.sh
 ```
 
-`scripts/test.sh` is the one way to run the tests: it uses
+For local runs, use `scripts/test.sh`: it uses
 [`uv`](https://docs.astral.sh/uv/) to run pytest under Python 3.12 (see
 `.python-version`) with `requirements.txt`, whatever `python3` comes first
 on your PATH. Its arguments go to pytest (`scripts/test.sh tests/test_config.py`).
