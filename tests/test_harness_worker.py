@@ -1406,7 +1406,7 @@ def _past_run(tmp_path, monkeypatch, state):
     _git(clone, "remote", "add", "origin", str(origin))
     run.mkdir()
     (run / "worker-1.jsonl").write_text("{}\n")
-    (run / "report.json").write_text(json.dumps({"worktree": str(clone)}))
+    (run / "report.json").write_text(json.dumps({"worktree": str(clone), "delivery": {"skipped": "fixture"}}))
     gh = tmp_path / "bin" / "gh"
     gh.parent.mkdir()
     gh.write_text(f'#!/bin/sh\n[ "$PWD" = "{origin}" ] && [ "$*" = "pr view atm/x --json state --jq .state" ] && cat {tmp_path / "pr-state"}\n')
@@ -1445,6 +1445,14 @@ def test_sweep_does_not_remove_a_non_atm_directory_named_in_a_neighboring_report
     harness_worker.sweep_merged_clones(tmp_path / "current-run")
     assert unrelated.is_dir()
     assert "clone_removed" not in json.loads((run / "report.json").read_text())
+
+
+def test_sweep_skips_a_report_while_its_delivery_is_in_progress(tmp_path, monkeypatch):
+    clone, run = _past_run(tmp_path, monkeypatch, "MERGED")
+    (run / "report.json").write_text(json.dumps({"worktree": str(clone)}))
+    harness_worker.sweep_merged_clones(tmp_path / "current-run")
+    assert clone.is_dir()
+    assert "delivery" not in json.loads((run / "report.json").read_text())
 
 
 def test_sweep_continues_after_removal_fails_for_one_report(tmp_path, monkeypatch):

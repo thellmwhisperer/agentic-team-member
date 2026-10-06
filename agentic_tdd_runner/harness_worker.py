@@ -581,7 +581,8 @@ def sweep_merged_clones(artifact_dir: Path) -> None:
             report = json.loads(report_path.read_text())
             clone = report.get("worktree") if isinstance(report, dict) else None
             clone_path = Path(clone) if clone else None
-            if not clone_path or report.get("clone_removed") or not clone_path.name.startswith("atm-run-") or not clone_path.is_dir():
+            if (not clone_path or "delivery" not in report or report.get("clone_removed")
+                    or not clone_path.name.startswith("atm-run-") or not clone_path.is_dir()):
                 continue
             branch = git_lines(clone, "branch", "--show-current")
             origin = git_lines(clone, "remote", "get-url", "origin")
