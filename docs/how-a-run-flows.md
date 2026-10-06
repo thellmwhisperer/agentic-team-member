@@ -296,11 +296,13 @@ label or a timestamp; see [Configuration](configuration.md#runs)):
 | `delivery-output.txt` | What the delivery command printed |
 
 In the target repository: one clone per run under `.worktree/` (or
-`--run-root`). At the start and at the end of every run, ATM looks at the
-other run directories next to its artifact directory. When a run's
-`report.json` names a `worktree` whose branch (`git branch --show-current`)
-has a merged PR (`gh pr view <branch>`), ATM removes that clone and records
-the time as `clone_removed` in that `report.json`. The run directory stays.
+`--run-root`). The `clone sweep` step runs at startup and after the final
+report on the normal completion path. It checks other run directories next
+to the artifact directory. If a `report.json` names an existing `atm-run-`
+clone whose branch has a merged PR, ATM removes the clone and records the
+time as `clone_removed` in that report. It skips reports marked
+`delivery.running: true` while delivery is in progress. The run directory
+and its logs stay.
 
 ## Languages
 
