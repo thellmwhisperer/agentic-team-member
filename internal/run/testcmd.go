@@ -64,7 +64,8 @@ func suite(clone, test, typecheck string) (string, string) {
 }
 
 func packageManager(clone string, pkg packageJSON) string {
-	if name, _, _ := strings.Cut(pkg.PackageManager, "@"); name == "bun" || name == "pnpm" || name == "yarn" || name == "npm" {
+	name, _, _ := strings.Cut(pkg.PackageManager, "@")
+	if name == "bun" || name == "pnpm" || name == "yarn" || name == "npm" {
 		return name
 	}
 	for _, lock := range []struct{ file, manager string }{

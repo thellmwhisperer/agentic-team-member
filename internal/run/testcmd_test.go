@@ -16,7 +16,8 @@ func TestPackageManagerSelection(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		write("package.json", `{"packageManager":"pnpm@9.0.0","scripts":{"test":"vitest","typecheck":"tsc"},"devDependencies":{"vitest":"1"}}`)
+		write("package.json", `{"packageManager":"pnpm@9.0.0",`+
+			`"scripts":{"test":"vitest","typecheck":"tsc"},"devDependencies":{"vitest":"1"}}`)
 		write("package-lock.json", "stale")
 		_, ok := readPackage(clone)
 		if !ok {
