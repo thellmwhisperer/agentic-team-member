@@ -34,7 +34,7 @@ gets an elapsed line (`… full suite 1m30s`), every 30 s while it stays quiet.
 The step names are `prepare`, `agent unit <n>`, `red half`, `green half`,
 `quality`, `forbidden scan`, `gate`, `full suite`, `typecheck`, `scope`,
 `follow-up validation`, `commit`, `ponytail snapshot`, `ponytail agent`,
-`ponytail re-checks` and `delivery`. A step with no command (no typecheck,
+`ponytail re-checks`, `delivery` and `clone sweep`. A step with no command (no typecheck,
 say) does not run and writes nothing.
 
 `[monitor].command` is a shell line ATM runs at every step start and end, with
@@ -296,7 +296,11 @@ label or a timestamp; see [Configuration](configuration.md#runs)):
 | `delivery-output.txt` | What the delivery command printed |
 
 In the target repository: one clone per run under `.worktree/` (or
-`--run-root`).
+`--run-root`). At the start and at the end of every run, ATM looks at the
+other run directories next to its artifact directory. When a run's
+`report.json` names a `worktree` whose branch (`git branch --show-current`)
+has a merged PR (`gh pr view <branch>`), ATM removes that clone and records
+the time as `clone_removed` in that `report.json`. The run directory stays.
 
 ## Languages
 

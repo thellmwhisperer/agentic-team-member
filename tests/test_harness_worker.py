@@ -1396,3 +1396,40 @@ def test_a_silent_step_gets_one_elapsed_line_every_30_seconds(tmp_path, monkeypa
     assert elapsed == [30, 60, 90]
     run_log.end(True)
     assert [e["state"] for e in events if e["type"] == "atm.step"] == ["started", "passed"]
+
+
+def _past_run(tmp_path, monkeypatch, state):
+    """A past run next to the artifact dir whose clone is on atm/x, and a gh that answers the PR state in `state`."""
+    clone, run = tmp_path / "old-clone", tmp_path / "old-run"
+    _git(tmp_path, "init", "-q", "-b", "atm/x", str(clone))
+    run.mkdir()
+    (run / "worker-1.jsonl").write_text("{}\n")
+    (run / "report.json").write_text(json.dumps({"worktree": str(clone)}))
+    gh = tmp_path / "bin" / "gh"
+    gh.parent.mkdir()
+    gh.write_text(f'#!/bin/sh\n[ "$*" = "pr view atm/x --json state --jq .state" ] && cat {tmp_path / "pr-state"}\n')
+    gh.chmod(0o755)
+    (tmp_path / "pr-state").write_text(state)
+    monkeypatch.setenv("PATH", f"{gh.parent}{os.pathsep}{os.environ['PATH']}")
+    return clone, run
+
+
+@pytest.mark.parametrize("state", ["MERGED", "OPEN"])
+def test_a_run_starts_by_removing_the_clones_of_past_runs_whose_pr_is_merged(tmp_path, monkeypatch, state):
+    clone, run = _past_run(tmp_path, monkeypatch, state)
+    argv, artifacts, _ = _setup(tmp_path, FIXING_HARNESS)
+    assert harness_worker.main([*argv, "--dry-run"]) == 0
+    report = json.loads((run / "report.json").read_text())
+    assert (run / "worker-1.jsonl").is_file()
+    if state == "MERGED":
+        assert not clone.exists() and report["clone_removed"]
+    else:
+        assert clone.is_dir() and "clone_removed" not in report
+
+
+def test_a_run_ends_by_removing_the_clones_of_past_runs_merged_while_it_ran(tmp_path, monkeypatch):
+    clone, run = _past_run(tmp_path, monkeypatch, "OPEN")
+    argv, artifacts = _delivery_setup(tmp_path, monkeypatch, command=f"echo MERGED > {tmp_path / 'pr-state'}")
+    assert harness_worker.main(argv) == 0
+    assert not clone.exists() and json.loads((run / "report.json").read_text())["clone_removed"]
+    assert Path(json.loads((artifacts / "report.json").read_text())["worktree"]).is_dir()  # its own clone stays
