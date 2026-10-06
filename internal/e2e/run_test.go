@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -287,6 +288,41 @@ func TestRunWorksAUnitInAClone(t *testing.T) {
 	if len(clones) != 1 || git(t, clones[0], "rev-parse", "HEAD") != git(t, repo, "rev-parse", "main") ||
 		!strings.Contains(readFile(t, filepath.Join(clones[0], ".git", "info", "exclude")), "/.atm/") {
 		t.Fatalf("clones %v, want one at main that excludes /.atm/", clones)
+	}
+}
+
+func TestConcurrentRunsClaimSeparateClones(t *testing.T) {
+	repo := target(t)
+	env, _ := fakes(t, "fixing")
+	issuePath := issueFile(t, issue)
+	type result struct {
+		label  string
+		output []byte
+		err    error
+	}
+	results := make(chan result, 2)
+	for _, label := range []string{"first", "second"} {
+		go func(label string) {
+			cmd := exec.Command(atmBin, "run", "--label", label, issuePath)
+			cmd.Dir, cmd.Env = repo, env
+			out, err := cmd.CombinedOutput()
+			results <- result{label, out, err}
+		}(label)
+	}
+	for range 2 {
+		r := <-results
+		if r.err != nil {
+			t.Errorf("%s: %v\n%s", r.label, r.err, r.output)
+		}
+	}
+	clones, err := filepath.Glob(filepath.Join(repo, ".atm", "clones", "atm-run-*"))
+	if err != nil || len(clones) != 2 {
+		t.Fatalf("claimed clones %v, error %v; want two", clones, err)
+	}
+	for _, clone := range clones {
+		if _, err := os.Stat(filepath.Join(clone, ".git")); err != nil {
+			t.Errorf("%s is not a full clone: %v", clone, err)
+		}
 	}
 }
 
