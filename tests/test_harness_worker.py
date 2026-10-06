@@ -1148,7 +1148,7 @@ def test_unusable_ponytail_findings_discard_the_cut_and_delivery_lines(tmp_path,
 
 
 def test_empty_findings_are_valid_when_the_ponytail_makes_no_cut(tmp_path, monkeypatch):
-    harness = _ponytail_harness(breaks="calc.write_text(calc.read_text() + UNUSED)",
+    harness = _ponytail_harness(breaks=f"calc.write_text(calc.read_text() + {UNUSED!r})",
                                 mutation='report["findings"] = []')
     argv, artifacts, _ = _setup(tmp_path, harness)
     assert harness_worker.main(argv) == 0
