@@ -225,12 +225,12 @@ so this unit's test suite never sees it.
 """
 
 
-# An import error as the runner prints it: at line start, after only indentation, pytest's `E`
-# gutter and the error class. The same words inside an assertion or a quoted string do not count.
 IMPORT_ERROR = re.compile(
-    r"^[ \t]*(?:E[ \t]+)?(?:ModuleNotFoundError|ImportError|Error(?: \[ERR_MODULE_NOT_FOUND\])?):[ \t]*"
-    r"(?:(no module named|cannot find (?:module|package)|failed to resolve import) ['\"]([^'\"]+)['\"]|"
-    r"cannot import name ['\"]([^'\"]+)['\"] from ['\"]([^'\"]+)['\"])",
+    r"^(?:[ \t]*(?:E[ \t]+)?(?:ModuleNotFoundError|ImportError|Error(?: \[ERR_MODULE_NOT_FOUND\])?):[ \t]*"
+    r"(?:(?P<marker>no module named|cannot find (?:module|package)|failed to resolve import) ['\"](?P<module>[^'\"]+)['\"]|"
+    r"cannot import name ['\"](?P<name>[^'\"]+)['\"] from ['\"](?P<package>[^'\"]+)['\"])|"
+    r"(?P<jest>cannot find module) ['\"](?P<jest_module>[^'\"]+)['\"] from ['\"][^'\"]+['\"]|"
+    r"(?P<vite>failed to resolve import) ['\"](?P<vite_module>[^'\"]+)['\"] from ['\"][^'\"]+['\"](?:[^\n]*)?)",
     re.IGNORECASE | re.MULTILINE)
 # ponytail: only pytest's captured output sections are dropped; a Jest console.log echoing an
 # import error at line start still counts. Strip those blocks too if it ever bites.
@@ -242,9 +242,13 @@ def red_failed_on_missing_module(red_output: str) -> str | None:
     match = IMPORT_ERROR.search(CAPTURED_OUTPUT.sub("", red_output))
     if not match:
         return None
-    if match[1]:
-        return f"{match[1].lower()} '{match[2]}'"
-    return f"cannot import name '{match[3]}' from '{match[4]}'"
+    if match["marker"]:
+        return f"{match['marker'].lower()} '{match['module']}'"
+    if match["name"]:
+        return f"cannot import name '{match['name']}' from '{match['package']}'"
+    kind, module = ("cannot find module", match["jest_module"]) if match["jest"] else (
+        "failed to resolve import", match["vite_module"])
+    return f"{kind} '{module}'"
 
 
 ATM_DIR = ".atm/"

@@ -265,7 +265,11 @@ FAILED tests/test_harness_worker.py::test_summary_lists_follow_ups - AssertionEr
      "cannot import name 'widget' from 'pkg'"),
     ("Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/repo/src/calc.js' imported from /repo/calc.test.js\n",
      "cannot find module '/repo/src/calc.js'"),
+    ("FAIL src/calc.test.ts\nCannot find module './calc' from 'src/calc.test.ts'\n",
+     "cannot find module './calc'"),
     (" FAIL  src/calc.test.ts\nError: Failed to resolve import \"./calc\" from \"src/calc.test.ts\". Does the file exist?\n",
+     "failed to resolve import './calc'"),
+    ("FAIL src/calc.test.ts\nFailed to resolve import \"./calc\" from \"src/calc.test.ts\". Does the file exist?\n",
      "failed to resolve import './calc'"),
 ])
 def test_red_missing_module_needs_a_real_import_error(output, expected):
