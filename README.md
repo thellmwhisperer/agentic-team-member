@@ -474,12 +474,13 @@ Otherwise ATM restores the pre-ponytail worktree.
 `.slop/`, each finding of a kept cut that names an existing file becomes a
 standing slopslint tombstone in `.slop/tombstones/`, committed with the cut.
 
-A kept cut ends the run with two commits: `atm unit <n>: <title>` with the
+A kept cut adds two final commits: `atm unit <n>: <title>` with the
 pre-ponytail tree, and on top `ponytail: <n> cuts` with only the cut and its
-tombstones. Its message lists each finding as `- <file>: <finding> (<family>)`,
-and `commit` is its sha. With no kept cut there is no ponytail commit and
-`commit` is `null`. The delivery reviewer can then tell the agent's work from
-the cut, and why each cut was made.
+tombstones. Earlier unit commits remain in chained runs. The ponytail commit
+message lists each finding as `- <file>: <finding> (<family>)`, and `commit` is
+its sha. With no kept cut there is no ponytail commit and `commit` is `null`.
+The delivery reviewer can then tell the agent's work from the cut, and why each
+cut was made.
 
 ATM excludes `.atm/` from Git in each run clone, so follow-up files there do
 not make delivery dirty when the target repository lacks that ignore rule.
@@ -507,8 +508,8 @@ the PR merges. Without `--yes`, `axi run` returns at a gate, and the agent that
 launched ATM answers it with `axi respond`.
 
 With no `[delivery].command`, `report.json` has
-`delivery: {"skipped": "no [delivery].command"}` and the work stays
-uncommitted in the clone.
+`delivery: {"skipped": "no [delivery].command"}` and the work remains in the
+clone's commit history, without being passed to a delivery command.
 
 | Exit code | Meaning                                                    |
 | --------- | ---------------------------------------------------------- |
