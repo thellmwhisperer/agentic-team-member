@@ -25,7 +25,7 @@ from pathlib import Path
 
 from agentic_tdd_runner import quality
 from agentic_tdd_runner import judge as follow_up_judge, verification
-from agentic_tdd_runner.config import load_config
+from agentic_tdd_runner.config import load_config, runs_dir
 from agentic_tdd_runner.environment import (
     EnvironmentPrepError,
     WorktreePrepError,
@@ -81,7 +81,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--config", default="config/agent.toml")
     parser.add_argument("--log-dir")
     parser.add_argument("--artifact-dir")
-    parser.add_argument("--label", help="Run name: --artifact-dir defaults to .tmp/harness-worker/LABEL, which must not exist yet")
+    parser.add_argument("--label", help="Run name: --artifact-dir defaults to [runs].dir/LABEL, which must not exist yet")
     parser.add_argument("--harness-bin", help="Override the harness executable")
     parser.add_argument("--dry-run", action="store_true", help="Prepare and print the brief only")
     parser.add_argument("--max-units", type=int, help="Chain accepted follow-ups as further units in the same clone, up to this many units (config [harness_worker] max_units, default 3)")
@@ -90,9 +90,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     args = parser.parse_args(argv)
     if not args.issue_file and not (args.issue_number and args.github_repo):
         parser.error("give --issue-file or both --issue-number and --github-repo")
-    stamp = args.label or datetime.now().strftime("%Y%m%d-%H%M%S")
-    args.artifact_dir = args.artifact_dir or os.path.join(".tmp", "harness-worker", stamp)
-    args.log_dir = args.log_dir or args.artifact_dir
     return args
 
 
@@ -1090,8 +1087,14 @@ def main(argv: list[str] | None = None) -> int:
     if not monitor and not sys.stdout.isatty():
         print("no monitor: stdout is not a terminal and [monitor].command is empty", file=sys.stderr)
         return 2
+    if not args.artifact_dir:
+        try:
+            args.artifact_dir = runs_dir(config) / (args.label or datetime.now().strftime("%Y%m%d-%H%M%S"))
+        except ValueError as exc:
+            print(exc, file=sys.stderr)
+            return 2
     artifact_dir = Path(args.artifact_dir).resolve()
-    log_dir = Path(args.log_dir).resolve()
+    log_dir = Path(args.log_dir or artifact_dir).resolve()
     if args.label:
         try:
             artifact_dir.mkdir(parents=True)

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Follow a harness-worker log (``worker-*.jsonl``) and render it with shape.
 
-    tail-run.py                  # newest run under .tmp/harness-worker
+    tail-run.py                  # newest run under [runs].dir of --config
     tail-run.py --label <label>  # that run
     tail-run.py <path>           # a worker-*.jsonl, or the run directory holding one
 
@@ -25,9 +25,9 @@ import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent.parent
-RUNS = HERE / ".tmp" / "harness-worker"
 sys.path.insert(0, str(HERE))
-from agentic_tdd_runner.harness_worker import _snippet, summarize_event  # after the sys.path line on purpose
+from agentic_tdd_runner.config import load_config, runs_dir  # after the sys.path line on purpose
+from agentic_tdd_runner.harness_worker import _snippet, summarize_event
 
 RULE = "─" * 48
 NOISE = {"hook_progress", "status", "tool_progress", "task_started", "task_notification", "rate_limit_event", "init",
@@ -281,12 +281,17 @@ def refuse(message: str) -> None:
     sys.exit(1)
 
 
-def find_log(path: str | None, label: str | None) -> Path:
+def find_log(path: str | None, label: str | None, config: str) -> Path:
     if path and not Path(path).is_dir():
         if not fnmatch.fnmatch(Path(path).name, "worker-*.jsonl") or not Path(path).is_file():
             refuse(f"not a worker-*.jsonl: {path}")
         return Path(path)
-    where = Path(path) if path else RUNS / label if label else RUNS
+    if not path:
+        try:
+            runs = runs_dir(load_config(config))
+        except (OSError, ValueError) as exc:
+            refuse(str(exc))
+    where = Path(path) if path else runs / label if label else runs
     logs = list(where.glob("worker-*.jsonl" if path or label else "*/worker-*.jsonl"))
     if not logs:
         refuse(f"no worker-*.jsonl under {where}")
@@ -322,9 +327,10 @@ def follow(log: Path) -> int:
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("path", nargs="?", help="a worker-*.jsonl, or the run directory holding one")
-    p.add_argument("--label", help="run label under .tmp/harness-worker")
+    p.add_argument("--label", help="run label under [runs].dir")
+    p.add_argument("--config", default="config/agent.toml", help="the worker's TOML file, for [runs].dir")
     args = p.parse_args(argv)
-    log = find_log(args.path, args.label)
+    log = find_log(args.path, args.label, args.config)
     print(f"Following: {shown(log)}")
     try:
         return follow(log)
