@@ -1,0 +1,18 @@
+schema: 1
+id: T-PONYTAIL-20261007-004746-1
+status: accepted
+category: alien_code
+title: "Removed the hand-written quote helper, which quoted the codex model and effort with json.Marshal, an"
+created_at: 2026-10-07
+incident:
+  pattern: "Removed the hand-written quote helper, which quoted the codex model and effort with json.Marshal, and called strconv.Quote from the standard library in its place."
+  what_went_wrong: "An ATM run wrote it and ATM's ponytail pass cut it before delivery."
+  root_cause: "The coding agent wrote more than the issue needed."
+  rule_established: "Cut by the ponytail pass; it does not come back."
+  evidence:
+    - family: speculative_feature
+      example: "Removed the hand-written quote helper, which quoted the codex model and effort with json.Marshal, and called strconv.Quote from the standard library in its place."
+      artifact: internal/run/agent.go
+match:
+  family: speculative_feature
+  artifact: internal/run/agent.go
