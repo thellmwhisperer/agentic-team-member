@@ -15,6 +15,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -77,8 +78,8 @@ func (a agent) argv(clone, skill, final, brief string) (argv []string, stdin str
 		return append(argv, a.args...), brief
 	case "codex":
 		argv = []string{"codex", "exec", "--json", "-C", clone, "--sandbox", "workspace-write", "-o", final}
-		argv = with(argv, a.Model, "-c", "model="+quote(a.Model))
-		argv = with(argv, a.Effort, "-c", "model_reasoning_effort="+quote(a.Effort))
+		argv = with(argv, a.Model, "-c", "model="+strconv.Quote(a.Model))
+		argv = with(argv, a.Effort, "-c", "model_reasoning_effort="+strconv.Quote(a.Effort))
 	case "opencode":
 		argv = []string{"opencode", "run", "--pure", "--format", "json", "--dir", clone}
 		argv = with(with(argv, a.Model, "-m", a.Model), a.Effort, "--variant", a.Effort)
@@ -88,11 +89,6 @@ func (a agent) argv(clone, skill, final, brief string) (argv []string, stdin str
 		argv = with(with(argv, a.Model, "--model", a.Model), a.Effort, "--thinking", a.Effort)
 	}
 	return append(append(argv, a.args...), brief), ""
-}
-
-func quote(s string) string {
-	b, _ := json.Marshal(s)
-	return string(b)
 }
 
 // run runs the agent on brief in clone, in its own process group, and returns its report. Every line it
