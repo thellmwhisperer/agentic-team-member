@@ -466,9 +466,16 @@ full test command, typecheck, quality, gate, scope (the files the run already
 touched) and the target's lint (`[delivery].lint_command`, when set).
 Otherwise ATM restores the pre-ponytail worktree.
 `report.json` gets `ponytail`: `findings`, `net_lines_before`,
-`net_lines_after`, `kept`, `reason` and `tombstones`. When the target has
+`net_lines_after`, `kept`, `reason`, `tombstones` and `commit`. When the target has
 `.slop/`, each finding of a kept cut that names an existing file becomes a
 standing slopslint tombstone in `.slop/tombstones/`, committed with the cut.
+
+A kept cut ends the run with two commits: `atm unit <n>: <title>` with the
+pre-ponytail tree, and on top `ponytail: <n> cuts` with only the cut and its
+tombstones. Its message lists each finding as `- <file>: <finding> (<family>)`,
+and `commit` is its sha. With no kept cut there is no ponytail commit and
+`commit` is `null`. The delivery reviewer can then tell the agent's work from
+the cut, and why each cut was made.
 
 ATM excludes `.atm/` from Git in each run clone, so follow-up files there do
 not make delivery dirty when the target repository lacks that ignore rule.
@@ -479,8 +486,11 @@ After the ponytail pass, delivery is the command in `[delivery].command`:
    `origin` points at the source repo's `origin`. When the issue came from
    `--issue-number`, the unit commit message ends with `Closes #<n>`.
 2. The command runs in the clone through the shell, with `ATM_TITLE`,
-   `ATM_ISSUE` (empty with `--issue-file`), `ATM_BRANCH`, `ATM_CLONE` and
-   `ATM_REPORT` in its environment. Its stdout and stderr go to the pane and
+   `ATM_ISSUE` (empty with `--issue-file`), `ATM_BRANCH`, `ATM_CLONE`,
+   `ATM_REPORT` and `ATM_PONYTAIL` in its environment. `ATM_PONYTAIL` is the
+   ponytail commit's finding lines joined by newlines, empty when no cut was
+   kept, so the command can hand them to the reviewer, for example inside
+   `--intent`. Its stdout and stderr go to the pane and
    to `delivery-output.txt`. ATM does not read them: whether a PR is open or a
    gate is waiting is in that output.
 3. `report.json` gets `delivery`: `command`, `branch`, `exit_code`,
