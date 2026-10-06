@@ -61,6 +61,17 @@ def test_tail_label_and_newest_run_read_runs_dir_from_config(tmp_path):
     proc = _tail("--config", str(config))
     assert proc.returncode == 0 and "AGENT  unit 2" in proc.stdout, proc.stderr
 
+    home = tmp_path / "home"
+    default_run = home / ".atm" / "runs" / "default"
+    default_run.mkdir(parents=True)
+    (default_run / "worker-1.jsonl").write_text(
+        json.dumps({"event": {"type": "atm.unit_started", "unit": 3}}) + "\n")
+    (default_run / "exit.txt").write_text("0\n")
+    config.write_text("")
+    proc = subprocess.run([sys.executable, str(TAIL_RUN), "--config", str(config), "--label", "default"],
+                          capture_output=True, text=True, timeout=30, env={**os.environ, "HOME": str(home), "NO_COLOR": "1"})
+    assert proc.returncode == 0 and "AGENT  unit 3" in proc.stdout, proc.stderr
+
 
 def test_tail_follows_worker_log_in_run_dir_and_stops_at_report(tmp_path):
     run = _write_run(tmp_path, [

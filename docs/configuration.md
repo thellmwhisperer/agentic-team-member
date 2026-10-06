@@ -25,7 +25,8 @@ some module in the package. A key nobody reads fails the suite.
 | `--scope GLOB` | from the issue | Paths the diff may touch, repeatable |
 | `--max-units` | `[harness_worker].max_units` | First unit plus chained follow-ups |
 | `--label` | | Run directory `<[runs].dir>/<label>`; exit 2 if it exists |
-| `--artifact-dir`, `--log-dir` | from `--label` or a timestamp | Where the report and the log go |
+| `--artifact-dir` | `[runs].dir/<label or timestamp>` | Override the run directory for one run |
+| `--log-dir` | the run directory | Override where `worker-*.jsonl` is written |
 | `--run-root` | `<repo>/.worktree` | Where clones go; relative to `--repo` |
 | `--config` | `config/agent.toml` | The TOML file |
 | `--dry-run` | | Prepare, print the contract, stop |
@@ -63,7 +64,7 @@ not know. Python test files always run with `python3 -m pytest`.
 
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `dir` | `"~/.atm/runs"` | One subdirectory per run (`report.json`, `worker-*.jsonl`, briefs, `delivery-output.txt`, `command.txt`). `~` is expanded; a relative path is exit 2. `--artifact-dir` overrides it for one run; `scripts/tail-run.py --config` reads it too |
+| `dir` | `"~/.atm/runs"` in the shipped config | Base directory for runs, independent of the caller's working directory. `~` is expanded; a relative path makes the worker exit 2. `scripts/tail-run.py` reads the same key from its `--config` file (default `config/agent.toml`) when finding a run by label or choosing the newest run |
 
 ## `[monitor]`
 

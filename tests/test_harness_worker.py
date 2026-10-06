@@ -323,6 +323,10 @@ def test_dry_run_puts_the_run_under_runs_dir_not_the_cwd(tmp_path, monkeypatch, 
     assert "[runs].dir must be an absolute path" in capsys.readouterr().err
     assert list(cwd.iterdir()) == []
 
+    config.write_text(config.read_text().split("\n[runs]")[0])
+    assert harness_worker.main([*argv, "--dry-run", "--label", "default"]) == 0
+    assert (runs / "default" / "brief.md").is_file()
+
 
 def test_label_names_the_run_directory_and_is_refused_once_used(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
