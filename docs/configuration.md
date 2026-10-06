@@ -214,8 +214,8 @@ for `claude`, a read of its `SKILL.md` for `pi` and `codex`, a `skill` event for
 `opencode`), or the run dies.
 
 The agent runs in the clone in its own process group; past 30 minutes, or when
-ATM gets SIGINT or SIGTERM, the whole group is killed (on Windows, only the
-agent). Every line it writes goes to `.atm/worker-<timestamp>.jsonl`, named
+ATM gets SIGINT or SIGTERM, the whole group is killed. Every line it writes
+goes to `.atm/worker-<timestamp>.jsonl`, named
 after the clone: JSON lines as they are, any other line as a JSON string. The
 report is the last JSON object of its final message (`codex`: its `-o` file,
 `.atm/worker-<timestamp>.final.md`) and must carry `test_file`: ATM never
