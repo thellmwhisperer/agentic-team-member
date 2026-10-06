@@ -1,7 +1,6 @@
 # Configuration
 
-The Python worker uses two sources, and they do not overlap. The Go port's
-configuration is described in [Go port configuration](#go-port-configuration).
+Two sources, and they do not overlap.
 
 - **The command line** chooses what varies per run.
 - **The TOML file** (`--config`, default `config/agent.toml`) holds what is
@@ -145,36 +144,3 @@ and is not chained.
 | `PYTHONDONTWRITEBYTECODE=1` | Set by the worker, so stale `.pyc` files cannot survive the red/green stash |
 | `CLAUDE_CODE_CHILD_SESSION` | Removed from the agent's environment, so a nested Claude Code session keeps its transcripts |
 | `ATM_*` | Set for `[monitor].command` and `[delivery].command`, as listed above |
-
-## Go port configuration
-
-The Go `atm` command loads built-in defaults, then
-`~/.config/atm/config.yaml`, then the repository root's `.atm.yaml`, then
-explicit `--harness`, `--model`, and `--effort` flags. Later layers override
-earlier ones. Any supported key may appear in either YAML file; the global
-file is intended for agent settings, and `.atm.yaml` for repository settings.
-Unknown keys and invalid values fail configuration loading.
-
-`atm init` creates a commented `.atm.yaml` with the defaults and adds `/.atm/`
-to `.gitignore` if an existing line does not already ignore it. Existing
-`.atm.yaml` content is preserved. `atm doctor` reports each check and exits
-non-zero if any fails: git, configuration, the selected agent CLI, and `gh`
-when the origin is recognized as GitHub. The built-in harness is `claude`;
-supported harnesses are `claude`, `codex`, `opencode`, and `pi`. Model and
-effort default to the agent CLI's choice. Effort accepts `low`, `medium`,
-`high`, `xhigh`, or `max`.
-
-| YAML key | Built-in default | Meaning |
-|----------|------------------|---------|
-| `harness` | `claude` | Agent CLI checked by `atm doctor` |
-| `model`, `effort` | empty | Agent settings |
-| `commands.test` | empty | Named in the `atm run` contract; used for red/green when no Python or JavaScript test runner is selected automatically |
-| `commands.typecheck` | empty | Included in the `atm run` agent contract when set; not run by this step |
-| `commands.lint` | empty | Reserved for a later Go port step |
-| `forbidden.python` | `type: ignore`, `noqa` | Forbidden added-line patterns |
-| `forbidden.typescript` | `as any`, `as unknown as`, `as never`, `{} as`, `: any`, `eslint-disable`, `@ts-ignore`, `@ts-expect-error` | Forbidden added-line patterns |
-| `timeouts.agent`, `timeouts.test` | `1800`, `300` | Positive durations in seconds |
-| `delivery.command` | `no-mistakes init && no-mistakes axi run --yes ... --wait 2h` | Delivery command reserved for a later Go port step; empty disables it |
-
-The Go port's YAML files and flags are separate from the Python worker's TOML
-configuration and command-line flags above.
