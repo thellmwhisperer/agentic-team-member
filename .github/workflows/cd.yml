@@ -3,18 +3,24 @@ name: CD
 on:
   push:
     branches: [main]
-    paths:
-      - '**.py'
-      - 'pyproject.toml'
-      - 'requirements*.txt'
-      - 'ruff.toml'
-      - '.python-version'
-      - 'scripts/test.sh'
-      - 'config/**'
-      - '.github/workflows/cd.yml'
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      python: ${{ steps.detect.outputs.python }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: detect
+        env:
+          BASE_SHA: ${{ github.event.before }}
+        run: scripts/changed-areas.sh "$BASE_SHA"
+
   test:
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -25,7 +31,7 @@ jobs:
           python-version: "3.13"
 
       - name: Install dependencies
-        run: python -m pip install uv 'pytest>=9.0,<10' 'requests>=2.31,<3'
+        run: python -m pip install uv -r requirements.txt
 
       - name: Run tests
         run: python -m pytest tests/ -v
