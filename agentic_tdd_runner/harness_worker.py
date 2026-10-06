@@ -228,8 +228,9 @@ so this unit's test suite never sees it.
 # An import error as the runner prints it: at line start, after only indentation, pytest's `E`
 # gutter and the error class. The same words inside an assertion or a quoted string do not count.
 IMPORT_ERROR = re.compile(
-    r"^[\sE>|]*(?:(?:ModuleNotFoundError|ImportError|Error(?: \[ERR_MODULE_NOT_FOUND\])?):\s*)?"
-    r"(no module named|cannot find (?:module|package)|failed to resolve import) ['\"]([^'\"]+)['\"]",
+    r"^[ \t]*(?:E[ \t]+)?(?:ModuleNotFoundError|ImportError|Error(?: \[ERR_MODULE_NOT_FOUND\])?):[ \t]*"
+    r"(?:(no module named|cannot find (?:module|package)|failed to resolve import) ['\"]([^'\"]+)['\"]|"
+    r"cannot import name ['\"]([^'\"]+)['\"] from ['\"]([^'\"]+)['\"])",
     re.IGNORECASE | re.MULTILINE)
 # ponytail: only pytest's captured output sections are dropped; a Jest console.log echoing an
 # import error at line start still counts. Strip those blocks too if it ever bites.
@@ -239,7 +240,11 @@ CAPTURED_OUTPUT = re.compile(r"^-+ Captured .*?(?=^[-=_]{3,}|\Z)", re.MULTILINE 
 def red_failed_on_missing_module(red_output: str) -> str | None:
     """A red phase that fails because a new module is absent proves nothing about the bug."""
     match = IMPORT_ERROR.search(CAPTURED_OUTPUT.sub("", red_output))
-    return f"{match[1].lower()} '{match[2]}'" if match else None
+    if not match:
+        return None
+    if match[1]:
+        return f"{match[1].lower()} '{match[2]}'"
+    return f"cannot import name '{match[3]}' from '{match[4]}'"
 
 
 ATM_DIR = ".atm/"

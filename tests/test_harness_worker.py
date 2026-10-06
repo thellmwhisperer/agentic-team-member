@@ -261,6 +261,8 @@ FAILED tests/test_harness_worker.py::test_summary_lists_follow_ups - AssertionEr
     ("_ ERROR collecting tests/test_calc.py _\nImportError while importing test module 'tests/test_calc.py'.\n"
      "Traceback:\n    import calc_new\nE   ModuleNotFoundError: No module named 'calc_new'\n",
      "no module named 'calc_new'"),
+    ("_ ERROR collecting tests/test_calc.py _\nImportError: cannot import name 'widget' from 'pkg'\n",
+     "cannot import name 'widget' from 'pkg'"),
     ("Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/repo/src/calc.js' imported from /repo/calc.test.js\n",
      "cannot find module '/repo/src/calc.js'"),
     (" FAIL  src/calc.test.ts\nError: Failed to resolve import \"./calc\" from \"src/calc.test.ts\". Does the file exist?\n",
