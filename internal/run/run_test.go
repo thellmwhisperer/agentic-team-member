@@ -13,8 +13,15 @@ import (
 	"testing"
 )
 
-// TestMain doubles as a fake gh: fakeGH puts this test binary on PATH as gh.
+// fakes holds this test binary under each agent CLI's name, first on PATH in every repo test.
+var fakes string
+
+// TestMain doubles as a fake gh, which fakeGH puts on PATH, and as the fake agents in fakes.
 func TestMain(m *testing.M) {
+	switch name := strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe"); name {
+	case "claude", "codex", "opencode", "pi":
+		os.Exit(fakeAgent(name))
+	}
 	if out, ok := os.LookupEnv("FAKE_GH_OUT"); ok {
 		_ = os.WriteFile(os.Getenv("FAKE_GH_ARGS"), []byte(strings.Join(os.Args[1:], " ")), 0o600)
 		fmt.Print(out)
@@ -23,7 +30,39 @@ func TestMain(m *testing.M) {
 		}
 		os.Exit(0)
 	}
-	os.Exit(m.Run())
+	dir, err := linkFakes()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "fake agents:", err)
+		os.Exit(1)
+	}
+	fakes = dir
+	code := m.Run()
+	_ = os.RemoveAll(dir)
+	os.Exit(code)
+}
+
+// linkFakes links this test binary under each agent CLI's name in a new directory.
+func linkFakes() (string, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	dir, err := os.MkdirTemp("", "atm-fakes-")
+	if err != nil {
+		return "", err
+	}
+	for _, name := range []string{"claude", "codex", "opencode", "pi"} {
+		if runtime.GOOS == "windows" {
+			name += ".exe"
+		}
+		link := filepath.Join(dir, name)
+		if os.Symlink(exe, link) != nil { // Windows without symlink rights: a hard link keeps argv[0]
+			if err := os.Link(exe, link); err != nil {
+				return dir, err
+			}
+		}
+	}
+	return dir, nil
 }
 
 // fakeGH makes gh print out, failing when fail is set, and returns the file its arguments go to.
@@ -65,7 +104,7 @@ delivery: ""
 `
 
 // repo is a git repository with one commit on main, origin and .atm.yaml, the working directory for the
-// rest of the test.
+// rest of the test, whose agents are the fakes.
 func repo(t *testing.T, origin, atm string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -76,6 +115,7 @@ func repo(t *testing.T, origin, atm string) string {
 	t.Setenv("GIT_AUTHOR_EMAIL", "atm@example.com")
 	t.Setenv("GIT_COMMITTER_NAME", "atm")
 	t.Setenv("GIT_COMMITTER_EMAIL", "atm@example.com")
+	t.Setenv("PATH", fakes+string(os.PathListSeparator)+os.Getenv("PATH"))
 	for _, args := range [][]string{{"init", "-q", "-b", "main"}, {"remote", "add", "origin", origin},
 		{"commit", "-q", "--allow-empty", "-m", "init"}} {
 		gitT(t, dir, args...)

@@ -22,20 +22,22 @@ import (
 
 var githubURL = regexp.MustCompile(`^(?:[a-z][a-z0-9+.-]*://)?(?:[^/@]+@)?github\.com[:/]([^/]+/[^/]+?)(\.git)?/?$`)
 
+// Usage is atm run's command line.
+const Usage = "usage: atm run [--base-ref r] [--harness h] [--model m] [--effort e] [--harness-arg a]... " +
+	"[--env KEY=VALUE]... <issue.md | issue number>"
+
 // Run is atm run with args, its flags and then the issue: a file, or an issue number of origin's repository.
 // Each step's start and end go to out, one JSON object a line.
 func Run(args []string, out io.Writer) (err error) {
 	fs := flag.NewFlagSet("atm run", flag.ContinueOnError)
-	var flags config.Agent
 	base := fs.String("base-ref", "main", "the ref the run starts from, resolved in the repository")
-	fs.StringVar(&flags.Harness, "harness", "", "agent CLI: claude, codex, opencode or pi")
-	fs.StringVar(&flags.Model, "model", "", "the agent's model")
-	fs.StringVar(&flags.Effort, "effort", "", "the agent's effort")
+	var a agent
+	a.flags(fs)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if fs.NArg() != 1 {
-		return errors.New("usage: atm run [--base-ref r] [--harness h] [--model m] [--effort e] <issue.md | issue number>")
+		return errors.New(Usage)
 	}
 	root, err := git("", "rev-parse", "--show-toplevel")
 	if err != nil {
@@ -53,10 +55,11 @@ func Run(args []string, out io.Writer) (err error) {
 		return err
 	}
 	// The steps after the issue take the config from here.
-	c, err := config.Load(root, home, flags)
+	c, err := config.Load(root, home, a.Agent)
 	if err != nil {
 		return err
 	}
+	a.Agent = c.Agent
 	var i Issue
 	if err := step(out, "issue", func() (map[string]any, error) {
 		i, err = readIssue(fs.Arg(0), repo)
@@ -68,19 +71,26 @@ func Run(args []string, out io.Writer) (err error) {
 	}); err != nil {
 		return err
 	}
-	if err := step(out, "contract", func() (map[string]any, error) { return writeBrief(root, i, c) }); err != nil {
+	var text string
+	if err := step(out, "contract", func() (ev map[string]any, err error) {
+		text, ev, err = writeBrief(root, i, c)
+		return ev, err
+	}); err != nil {
 		return err
 	}
 	var dir string
 	defer func() { err = errors.Join(err, release(dir, repo)) }()
-	return step(out, "clone", func() (map[string]any, error) {
+	if err := step(out, "clone", func() (map[string]any, error) {
 		d, sha, err := clone(root, *base, c.Install, repo)
 		dir = d
 		return map[string]any{"clone": d, "sha": sha}, err
-	})
+	}); err != nil {
+		return err
+	}
+	return step(out, "agent", func() (map[string]any, error) { return a.run(dir, text) })
 }
 
-func writeBrief(root string, i Issue, c config.Config) (map[string]any, error) {
+func writeBrief(root string, i Issue, c config.Config) (string, map[string]any, error) {
 	// ponytail: brief.md goes to the repository's .atm/ until node 2 gives the run its clone.
 	path := filepath.Join(root, ".atm", "brief.md")
 	b, err := brief(i, c)
@@ -90,12 +100,15 @@ func writeBrief(root string, i Issue, c config.Config) (map[string]any, error) {
 	if err == nil {
 		err = os.WriteFile(path, []byte(b), 0o644)
 	}
-	return map[string]any{"brief": path}, err
+	return b, map[string]any{"brief": path}, err
 }
 
 // timeout bounds every command a step runs. ponytail: one fixed ceiling, and on timeout only the command
 // itself is killed, not what it started; a key in .atm.yaml and a process group are the upgrades.
 var timeout = 10 * time.Minute
+
+// agentTimeout bounds the agent. ponytail: one fixed ceiling; a flag or a key in .atm.yaml is the upgrade.
+var agentTimeout = 30 * time.Minute
 
 // command runs name in dir, "" for the working directory, and returns its trimmed stdout; a failure or a
 // timeout carries stderr.
