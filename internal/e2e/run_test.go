@@ -175,25 +175,30 @@ func TestRunLeavesItsArtifactsOnDisk(t *testing.T) {
 }
 
 func TestRunVerdicts(t *testing.T) {
-	t.Skip(theRun)
 	for _, tc := range []struct {
 		scenario string
 		exit     int
 		check    func(r runReport) bool
+		later    string // the step that ports what the check needs
 	}{
-		{"fixing", 0, func(r runReport) bool { return r.Verified.OK && !r.Ponytail.Kept }},
-		{"new-module", 1, func(r runReport) bool { return strings.Contains(r.Units[0].Verified.Message, "INVALID RED") }},
-		{"helper-only", 1, func(r runReport) bool { return !r.GateOK.OK }},
+		{"fixing", 0, func(r runReport) bool { return r.Verified.OK && !r.Ponytail.Kept }, ""},
+		{"new-module", 1, func(r runReport) bool {
+			return strings.Contains(r.Units[0].Verified.Message, "INVALID RED")
+		}, ""},
+		{"helper-only", 1, func(r runReport) bool { return !r.GateOK.OK }, theRun},
 		{"scope-breaking", 1, func(r runReport) bool {
 			return !r.ScopeOK.OK && strings.Contains(r.ScopeOK.Message, "other.py")
-		}},
+		}, theRun},
 		{"follow-up", 0, func(r runReport) bool {
 			return len(r.Units) == 2 && r.Units[1].Passed && r.Units[1].TestFile == "tests/test_mul_neg.py" &&
 				r.Units[0].CommittedAs != "" && r.Units[1].BaseSHA == r.Units[0].CommittedAs
-		}},
-		{"ponytail-cuts", 0, func(r runReport) bool { return r.Verified.OK && r.Ponytail.Kept }},
+		}, theRun},
+		{"ponytail-cuts", 0, func(r runReport) bool { return r.Verified.OK && r.Ponytail.Kept }, theRun},
 	} {
 		t.Run(tc.scenario, func(t *testing.T) {
+			if tc.later != "" {
+				t.Skip(tc.later)
+			}
 			var args []string
 			if tc.scenario == "scope-breaking" {
 				args = []string{"--scope", "calc.py"}
@@ -207,7 +212,6 @@ func TestRunVerdicts(t *testing.T) {
 }
 
 func TestAgentTimeoutKillsTheProcessGroup(t *testing.T) {
-	t.Skip(theRun)
 	start := time.Now()
 	repo, out, exit := run(t, "sleeping", "slow", "--timeout", "2")
 	// The grandchild holds the agent's stdout for a minute unless the whole group dies.
@@ -220,7 +224,6 @@ func TestAgentTimeoutKillsTheProcessGroup(t *testing.T) {
 }
 
 func TestRunFromAFileNeedsNoGh(t *testing.T) {
-	t.Skip(theRun)
 	repo := target(t)
 	env, log := fakes(t, "fixing")
 	if out, exit := atm(t, repo, env, "run", "--label", "file", issueFile(t, issue)); exit != 0 {
@@ -230,6 +233,59 @@ func TestRunFromAFileNeedsNoGh(t *testing.T) {
 		if call.Name == "gh" {
 			t.Errorf("a run from a file called gh %v", call.Args)
 		}
+	}
+}
+
+// #150 step 3: one unit in the foreground, from a clone, with the step lines on stdout and in the log.
+func TestRunWorksAUnitInAClone(t *testing.T) {
+	repo, out, exit := run(t, "fixing", "unit")
+	if exit != 0 {
+		t.Fatalf("exit %d:\n%s", exit, out)
+	}
+	unit := steps[:4]
+	var started []string
+	for i, e := range stepEvents(t, runDir(repo, "unit")) {
+		if want := []string{"started", "passed"}[i%2]; e.State != want || e.Step != unit[i/2] {
+			t.Fatalf("event %d is %s %s, want %s %s", i, e.Step, e.State, unit[i/2], want)
+		}
+		if e.State == "started" {
+			started = append(started, e.Step)
+		}
+	}
+	if !slices.Equal(started, unit) {
+		t.Errorf("started steps %v, want %v", started, unit)
+	}
+	for _, step := range unit {
+		step := regexp.QuoteMeta(step)
+		if !regexp.MustCompile(`(?m)^▶ ` + step + `\n(?s:.*)^✓ ` + step + ` \d+(\.\d)? (s|min|h)\b`).MatchString(out) {
+			t.Errorf("no ▶ and ✓ lines with a human duration for %s:\n%s", step, out)
+		}
+	}
+	clones, _ := filepath.Glob(filepath.Join(repo, ".atm", "clones", "atm-run-*"))
+	if len(clones) != 1 || git(t, clones[0], "rev-parse", "HEAD") != git(t, repo, "rev-parse", "main") ||
+		!strings.Contains(readFile(t, filepath.Join(clones[0], ".git", "info", "exclude")), "/.atm/") {
+		t.Fatalf("clones %v, want one at main that excludes /.atm/", clones)
+	}
+}
+
+func TestRunHandsTheContractToTheAgent(t *testing.T) {
+	repo := target(t)
+	env, log := fakes(t, "fixing")
+	args := []string{"run", "--label", "brief", "--scope", "calc.py", "--model", "m", "--effort", "low"}
+	if out, exit := atm(t, repo, env, append(args, issueFile(t, issue))...); exit != 0 {
+		t.Fatalf("exit %d:\n%s", exit, out)
+	}
+	brief := readFile(t, filepath.Join(runDir(repo, "brief"), "brief.md"))
+	for _, section := range []string{"## GOAL", strings.TrimSpace(issue)[2:], "## SCOPE", "Allowed paths: `calc.py`",
+		"## ACCEPTANCE", "## VERIFY", "python3 -m pytest", "## STYLE: ponytail", "## FORBIDDEN", "`noqa`",
+		"## FOLLOW-UPS", "## REPORT"} {
+		if !strings.Contains(brief, section) {
+			t.Errorf("brief.md lacks %q:\n%s", section, brief)
+		}
+	}
+	if calls := invocations(t, log); len(calls) != 1 || calls[0].Brief != brief ||
+		!strings.Contains(strings.Join(calls[0].Args, " "), "--model m --effort low") {
+		t.Errorf("agent calls %+v, want one claude call with the model, the effort and brief.md", calls)
 	}
 }
 
