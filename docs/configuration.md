@@ -57,7 +57,7 @@ not know. Python test files always run with `python3 -m pytest`.
 | `install` | `"auto"` | `auto`, `always` or `never` for the JavaScript install |
 | `require_clean` | `true` | Refuse a dirty clone |
 | `run_typecheck` | `true` | Run the JavaScript typecheck as a preflight |
-| `timeout` | `300` | Seconds for install, preflight, and each full suite and typecheck command. The full suite is `python3 -m pytest` for Python, `go test ./...` for Go, and both in a Python repository with a `go.mod`; the typecheck is `go vet ./...` for Go and Python repositories with a `go.mod` |
+| `timeout` | `300` | Seconds for install, preflight, and each full suite and typecheck command. See [Gate, suite, typecheck, scope](how-a-run-flows.md#9-gate-suite-typecheck-scope) for detected commands |
 | `preflight_test_command` | unset | One more JavaScript preflight command |
 
 ## `[runs]`
