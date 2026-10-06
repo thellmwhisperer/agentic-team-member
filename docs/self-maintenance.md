@@ -95,4 +95,4 @@ Auto-merge is armed, so this is the last look, and it is short:
 
 Each run leaves a full clone under the run root (`--run-root .worktrees` in this
 repository's runs). Remove it once its branch is merged. Run
-directories under `[runs].dir` (`~/.atm/runs`) are the record of what happened.
+directories under [`[runs].dir`](configuration.md#runs) are the record of what happened.
