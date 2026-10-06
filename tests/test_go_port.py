@@ -3,6 +3,7 @@
 import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -27,8 +28,10 @@ def test_go_contract_passes_and_every_skip_names_the_step_that_unskips_it():
         assert outcome.get((e2e, f"TestFakeAgentPlaysTheScenario/{scenario}")) == "pass", scenario
     for protocol in ("claude", "codex", "opencode", "pi"):
         assert outcome.get((e2e, f"TestFakeAgentSpeaksTheProtocolOfItsName/{protocol}")) == "pass", protocol
-    for name in ("TestGhFailsClosed", "TestSleepingAgentHoldsStdoutThroughAGrandchild"):
+    for name in ("TestGhFailsClosed",):
         assert outcome.get((e2e, name)) == "pass", name
+    if sys.platform != "win32":
+        assert outcome.get((e2e, "TestSleepingAgentHoldsStdoutThroughAGrandchild")) == "pass"
     skipped = [key for key, action in outcome.items() if action == "skip"]
     assert (e2e, "TestRunWritesEveryStepStartBeforeItsEnd") in skipped
     for key in skipped:
