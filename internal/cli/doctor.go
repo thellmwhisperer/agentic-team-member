@@ -35,7 +35,6 @@ func doctorCmd() *cobra.Command {
 			cfg, err := config.Load(p.Root, cmd.Flags())
 			if err != nil {
 				check("config", "", err)
-				return fmt.Errorf("%d checks failed", failed)
 			}
 			agentPath, err := exec.LookPath(cfg.Harness)
 			check(cfg.Harness, fmt.Sprintf("%s (model %s, effort %s)", agentPath, cmp.Or(cfg.Model, "default"),
