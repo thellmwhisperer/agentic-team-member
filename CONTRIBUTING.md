@@ -67,6 +67,13 @@ Risk reviewed:
 The label is the switch; the comment is the record. Adding the label
 triggers the workflow to arm auto-merge for eligible PRs.
 
+The workflow arms auto-merge with the `AUTO_MERGE_TOKEN` secret: a
+fine-grained personal access token of the owner, limited to this
+repository, with Contents and Pull requests read and write. It does not
+use the workflow token, because merges made with it start no workflow
+(so no `CD` run) and close no issue. If the secret is missing, the
+check fails with `AUTO_MERGE_TOKEN is not set`.
+
 ## What ATM does and does not accept
 
 - **Yes**: bug fixes, new language plugins, new cookbook shapes,

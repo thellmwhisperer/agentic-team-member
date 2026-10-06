@@ -3,6 +3,11 @@
 # Low and Medium risk arm at once. High risk, or a body without a readable level under
 # `## Risk Assessment`, waits for the `risk-reviewed` label (see CONTRIBUTING.md).
 set -eu
+# The workflow token's merges start no workflow and close no issue, so never fall back to it.
+if [ -z "${GH_TOKEN:-}" ]; then
+  echo "AUTO_MERGE_TOKEN is not set" >&2
+  exit 1
+fi
 level=$(gh pr view "$1" --repo "$GITHUB_REPOSITORY" --json body --jq .body | awk '
   { sub(/\r$/, "") }
   !found && /^## Risk Assessment[[:space:]]*$/ { found = 1; next }
