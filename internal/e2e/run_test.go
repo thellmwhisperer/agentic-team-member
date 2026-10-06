@@ -14,7 +14,6 @@ import (
 
 // The #150 step that builds a piece unskips the tests that name it.
 const (
-	skeleton = "unskipped by #150 step 2, the skeleton: cmd/atm, cli, config, project, init"
 	theRun   = "unskipped by #150, the step that ports the run: clone, agent, red/green, gates, follow-ups"
 	delivery = "unskipped by #150, the step that ports the slop detector, delivery and the clone sweep"
 	screen   = "unskipped by #150 step 6, the screen"
@@ -235,7 +234,6 @@ func TestRunFromAFileNeedsNoGh(t *testing.T) {
 }
 
 func TestInitWritesConfigAndIgnoresAtm(t *testing.T) {
-	t.Skip(skeleton)
 	repo := target(t)
 	env, _ := fakes(t, "fixing")
 	if out, exit := atm(t, repo, env, "init"); exit != 0 {
