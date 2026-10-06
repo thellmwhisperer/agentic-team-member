@@ -28,7 +28,7 @@ var taskTypes = map[string]string{
 	"tests": "tests", "docs": "docs", "chore": "chore",
 }
 
-var typeLine = regexp.MustCompile(`(?m)^Type:[ \t]*(\S+)\r?[ \t]*$`)
+var typeLine = regexp.MustCompile(`(?m)^Type:[ \t]*(\S+)[ \t]*\r?$`)
 
 // readIssue reads arg, a file or, when it is a number, an issue of the GitHub repository repo.
 func readIssue(arg, repo string) (Issue, error) {
