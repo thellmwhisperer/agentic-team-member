@@ -10,8 +10,7 @@ import (
 
 func main() {
 	if len(os.Args) < 2 || os.Args[1] != "run" {
-		fmt.Fprintln(os.Stderr, "usage: atm run [--base-ref r] [--harness h] [--model m] [--effort e] "+
-			"<issue.md | issue number>")
+		fmt.Fprintln(os.Stderr, run.Usage)
 		os.Exit(2)
 	}
 	if err := run.Run(os.Args[2:], os.Stdout); err != nil {

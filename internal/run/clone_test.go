@@ -18,11 +18,12 @@ func atmInstall(line string) string {
 	return strings.Replace(atmYAML, `install: ""`, "install: '"+line+"'", 1)
 }
 
-// cloneStep is the clone step's end event, after checking issue and contract passed.
+// cloneStep is the clone step's end event, after checking issue and contract passed and nothing followed a
+// failure.
 func cloneStep(t *testing.T, out *bytes.Buffer) map[string]any {
 	t.Helper()
 	evs := events(t, out)
-	if len(evs) != 6 || evs[1]["state"] != "passed" ||
+	if len(evs) < 6 || evs[5]["state"] == "failed" && len(evs) != 6 || evs[1]["state"] != "passed" ||
 		evs[2]["step"] != "contract" || evs[3]["state"] != "passed" ||
 		evs[4]["step"] != "clone" || evs[4]["state"] != "started" ||
 		evs[5]["step"] != "clone" {
