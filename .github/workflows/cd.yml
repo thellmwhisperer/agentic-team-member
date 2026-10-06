@@ -3,6 +3,15 @@ name: CD
 on:
   push:
     branches: [main]
+    paths:
+      - '**.py'
+      - 'pyproject.toml'
+      - 'requirements*.txt'
+      - 'ruff.toml'
+      - '.python-version'
+      - 'scripts/test.sh'
+      - 'config/**'
+      - '.github/workflows/cd.yml'
 
 jobs:
   test:

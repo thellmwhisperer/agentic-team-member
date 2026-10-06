@@ -1,6 +1,6 @@
 commands:
   test: scripts/test.sh
-  lint: uvx ruff check . && scripts/slopslint.sh check --classify --enforce > /dev/null
+  lint: scripts/lint.sh
 review:
   path_instructions:
     - path: "agentic_tdd_runner/**"
