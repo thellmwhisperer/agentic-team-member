@@ -345,6 +345,8 @@ pip install 'requests>=2.31,<3'
 
 There is no published package yet — clone and run from source.
 
+Run the tests with `scripts/test.sh`, see [CONTRIBUTING.md](CONTRIBUTING.md#running-the-test-suite).
+
 ---
 
 ## Requirements

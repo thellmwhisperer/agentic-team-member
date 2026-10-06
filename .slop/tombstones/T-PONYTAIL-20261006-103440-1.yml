@@ -1,0 +1,18 @@
+schema: 1
+id: T-PONYTAIL-20261006-103440-1
+status: accepted
+category: alien_code
+title: "Cut the 'Run tests only through scripts/test.sh' line copied into the agentic_tdd_runner/** and test"
+created_at: 2026-10-06
+incident:
+  pattern: "Cut the 'Run tests only through scripts/test.sh' line copied into the agentic_tdd_runner/** and tests/** rules. The new \"**\" rule already matches every path, and the binary's matchPathInstructions suggests no-mistakes applies every rule that matches, not only the first one."
+  what_went_wrong: "An ATM run wrote it and ATM's ponytail pass cut it before delivery."
+  root_cause: "The coding agent wrote more than the issue needed."
+  rule_established: "Cut by the ponytail pass; it does not come back."
+  evidence:
+    - family: documented_as_convention
+      example: "Cut the 'Run tests only through scripts/test.sh' line copied into the agentic_tdd_runner/** and tests/** rules. The new \"**\" rule already matches every path, and the binary's matchPathInstructions suggests no-mistakes applies every rule that matches, not only the first one."
+      artifact: .no-mistakes.yaml
+match:
+  family: documented_as_convention
+  artifact: .no-mistakes.yaml
