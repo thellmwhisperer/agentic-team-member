@@ -78,6 +78,7 @@ func target(t *testing.T) string {
 		writeFile(t, filepath.Join(repo, path), text)
 	}
 	git(t, repo, "init", "-q", "-b", "main")
+	git(t, repo, "config", "--local", "core.autocrlf", "false")
 	git(t, repo, "add", ".")
 	git(t, repo, "commit", "-q", "-m", "init")
 	return repo
