@@ -182,9 +182,11 @@ files of that language are checked.
   the diff touches at least one non-test file.
 - `full suite` and `typecheck`: `detect_commands` gives `<pm> run test` and
   the typecheck script for JavaScript, `python3 -m pytest` for Python, `go test
-  ./...` and `go vet ./...` when there is a `go.mod`. Bounded by
-  `[environment].timeout`. On failure the last 60 lines go into the unit
-  record.
+  ./...` and `go vet ./...` when there is a `go.mod`. A Python repository with
+  a `go.mod` gets both: `python3 -m pytest && go test ./...` as the full suite
+  and `go vet ./...` as the typecheck. Each part runs in order; the first that
+  fails fails the step. Bounded by `[environment].timeout`, per command. On
+  failure the last 60 lines of the failing command go into the unit record.
 - `check_scope`: every touched non-test file outside `.atm/` matches a scope
   glob.
 

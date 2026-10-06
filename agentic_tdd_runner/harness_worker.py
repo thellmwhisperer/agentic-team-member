@@ -116,9 +116,10 @@ def detect_commands(workdir: str, env_report) -> tuple[str | None, str | None]:
         test_cmd = f"{pm} run test" if bootstrap and bootstrap.test_command else None
         typecheck = javascript_preflight_commands(root, pkg, {"run_typecheck": True}, package_manager=pm)
         return test_cmd, (shlex.join(typecheck[0]) if typecheck else None)
+    go = (root / "go.mod").is_file()
     if env_report.project_type == "python":
-        return "python3 -m pytest", None
-    if (root / "go.mod").is_file():
+        return ("python3 -m pytest && go test ./...", "go vet ./...") if go else ("python3 -m pytest", None)
+    if go:
         return "go test ./...", "go vet ./..."
     return None, None
 
@@ -956,13 +957,23 @@ def check_gate(workdir: str, base_sha: str, config: dict) -> tuple[bool, str]:
 
 
 def run_command(command: str | None, workdir: str, config: dict, timeout: int, log) -> tuple[bool | None, str | None]:
-    """(ok, tail): on failure, the last 60 lines of combined output, also logged as command_failed."""
+    """(ok, tail): on failure, the last 60 lines of combined output, also logged as command_failed.
+    `a && b` runs each part in order, without a shell; the first that fails is the result."""
     if not command:
         return None, None
+    argv = shlex.split(command)
+    if "&&" in argv:  # a quoted `sh -c 'a && b'` stays one token and goes to the shell whole
+        start = 0
+        for end in [i for i, token in enumerate(argv) if token == "&&"] + [len(argv)]:
+            ok, tail = run_command(shlex.join(argv[start:end]), workdir, config, timeout, log)
+            if not ok:
+                return ok, tail
+            start = end + 1
+        return True, None
     env = build_command_env(config)
     env.setdefault("CI", "1")
     try:
-        result = subprocess.run(shlex.split(command), cwd=workdir, env=env, stdout=subprocess.PIPE,
+        result = subprocess.run(argv, cwd=workdir, env=env, stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT, text=True, timeout=timeout)
     except subprocess.TimeoutExpired as exc:
         output, failure = exc.output, {"timeout": timeout}
