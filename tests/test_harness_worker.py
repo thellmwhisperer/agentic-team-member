@@ -1147,6 +1147,19 @@ def test_unusable_ponytail_findings_discard_the_cut_and_delivery_lines(tmp_path,
         "atm unit 1: add returns the difference"]
 
 
+def test_empty_findings_are_valid_when_the_ponytail_makes_no_cut(tmp_path, monkeypatch):
+    harness = _ponytail_harness(breaks="calc.write_text(calc.read_text() + UNUSED)",
+                                mutation='report["findings"] = []')
+    argv, artifacts, _ = _setup(tmp_path, harness)
+    assert harness_worker.main(argv) == 0
+    report = json.loads((artifacts / "report.json").read_text())
+    pony = report["ponytail"]
+    assert pony["kept"] is False
+    assert pony["reason"] == "did not reduce the run's net added lines"
+    assert subprocess.run(["git", "status", "--porcelain"], cwd=report["worktree"],
+                          capture_output=True, text=True).stdout.strip()
+
+
 def test_ponytail_cut_that_breaks_the_unit_test_is_discarded(tmp_path, monkeypatch, capsys):
     breaks = 'calc.write_text(calc.read_text().replace("a + b", "a - b"))'
     argv, artifacts = _delivery_setup(tmp_path, monkeypatch, _ponytail_harness(breaks), command='printf "[%s]" "$ATM_PONYTAIL"')
