@@ -172,6 +172,11 @@ line with a lowercase type: `fix` (or `hotfix`), `feature`,
 `gh issue view` from the repository `origin` names.
 
 The current Go port validates configuration before reading the issue, then
-emits one JSON line when the `issue` step starts and another when it passes or
-fails. The final line includes the title and task type on success, plus the
-issue number for GitHub issues. Later run steps are not yet implemented.
+emits start and result JSON lines for the `issue` and `contract` steps. The
+`issue` result includes the title and task type on success, plus the issue
+number for GitHub issues. The `contract` step writes `.atm/brief.md` at the
+repository root and reports its path on success. The brief starts by directing
+the agent to read `AGENTS.md` if present, then gives the issue, task-type
+acceptance criteria, verification commands from `.atm.yaml`, style and
+forbidden actions, and the required JSON report. Later run steps are not yet
+implemented.
