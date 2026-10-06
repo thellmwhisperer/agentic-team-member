@@ -1,0 +1,60 @@
+Read `AGENTS.md` at the clone root if it exists. Where it and this brief disagree, this brief wins.
+
+# Brief
+
+## GOAL
+Task type: {{.Type}}. The issue, verbatim:
+
+### {{.Title}}
+
+{{.Body}}
+
+## SCOPE
+- Edit only files inside this clone, your working directory.
+- Test files are those matching {{code .TestPatterns}}. Docs files are those matching {{code .DocsPatterns}}.
+  Every other file is source.
+
+## ACCEPTANCE
+{{- if eq .Type "fix"}}
+1. Write a test on the existing code that fails today on behaviour, not on a missing symbol or module.
+   The fix may add files: the test must still fail with those files present and the fix reverted.
+2. Fix the source. The test passes.
+{{- else if eq .Type "feature"}}
+1. Write a test that fails today, possibly on a missing symbol.
+2. Implement the feature. The test passes.
+{{- else if eq .Type "greenfield"}}
+1. Write a test that fails today, possibly on a missing module.
+2. Build it. The test passes.
+{{- else if eq .Type "refactor"}}
+1. No red test: the full suite passes before and after the change.
+2. Do not touch existing tests.
+{{- else if eq .Type "tests"}}
+1. Write the new test. It passes on the base commit and after your change.
+2. Do not touch source.
+{{- else if eq .Type "docs"}}
+1. Change only docs: do not touch source or tests.
+2. The project's commands below pass.
+{{- else if eq .Type "chore"}}
+1. Reinstall dependencies{{with .Install}} (`{{.}}`){{end}} after your change.
+2. The project's commands below pass.
+{{- end}}
+3. Then every command in VERIFY passes.
+
+## VERIFY
+- Test: {{cmd .Test}}
+- Typecheck: {{cmd .Typecheck}}
+- Lint: {{cmd .Lint}}
+
+## STYLE
+Use the `ponytail` skill.
+
+## FORBIDDEN
+- Anything the issue does not ask for. A real behaviour gap goes to follow-ups, with a red test.
+- `git commit`, `git push`, `git rebase`, any `gh` command.
+- Deleting, skipping or weakening tests.
+- `sleep` in tests.
+
+## REPORT
+Your final message must be ONLY this JSON object, nothing else:
+{"test_file": "<repo-relative path of the new test, or empty>", "changed_files": ["<path>"], "summary": "<one paragraph>", "commands_run": ["<command>"], "follow_ups": [{"title": "<gap>", "red_test": "<repo-relative path of its failing test>"}]}
+Use `"follow_ups": []` when there are none.

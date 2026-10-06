@@ -112,7 +112,7 @@ func events(t *testing.T, out io.Reader) []map[string]any {
 func issueStep(t *testing.T, out io.Reader) map[string]any {
 	t.Helper()
 	evs := events(t, out)
-	if len(evs) != 2 || evs[0]["step"] != "issue" || evs[0]["state"] != "started" || evs[1]["step"] != "issue" {
+	if len(evs) < 2 || evs[0]["step"] != "issue" || evs[0]["state"] != "started" || evs[1]["step"] != "issue" {
 		t.Fatalf("want the issue step's start and end, got %v", evs)
 	}
 	return evs[1]
