@@ -119,18 +119,27 @@ func issueStep(t *testing.T, out io.Reader) map[string]any {
 }
 
 func TestRunReadsIssueFile(t *testing.T) {
-	repo(t, "https://example.com/owner/repo.git", atmYAML)
-	path := issueFile(t, "# Retry on timeout\n\nType: hotfix\n\nRetry once.\n")
-	var out bytes.Buffer
-	if err := Run([]string{path}, &out); err != nil {
-		t.Fatal(err)
-	}
-	end := issueStep(t, &out)
-	if end["state"] != "passed" || end["title"] != "Retry on timeout" || end["type"] != "fix" {
-		t.Fatalf("end event: %v", end)
-	}
-	if _, ok := end["number"]; ok {
-		t.Fatalf("a file issue has no number: %v", end)
+	for _, c := range []struct {
+		name, issue string
+	}{
+		{name: "LF", issue: "# Retry on timeout\n\nType: hotfix\n\nRetry once.\n"},
+		{name: "CRLF", issue: "# Retry on timeout\r\n\r\nType: hotfix\r\n\r\nRetry once.\r\n"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			repo(t, "https://example.com/owner/repo.git", atmYAML)
+			path := issueFile(t, c.issue)
+			var out bytes.Buffer
+			if err := Run([]string{path}, &out); err != nil {
+				t.Fatal(err)
+			}
+			end := issueStep(t, &out)
+			if end["state"] != "passed" || end["title"] != "Retry on timeout" || end["type"] != "fix" {
+				t.Fatalf("end event: %v", end)
+			}
+			if _, ok := end["number"]; ok {
+				t.Fatalf("a file issue has no number: %v", end)
+			}
+		})
 	}
 }
 
