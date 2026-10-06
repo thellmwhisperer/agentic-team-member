@@ -68,18 +68,7 @@ func Run(args []string, out io.Writer) (err error) {
 	}); err != nil {
 		return err
 	}
-	if err := step(out, "contract", func() (map[string]any, error) {
-		// ponytail: brief.md goes to the repository's .atm/ until node 2 gives the run its clone.
-		path := filepath.Join(root, ".atm", "brief.md")
-		b, err := brief(i, c)
-		if err == nil {
-			err = os.MkdirAll(filepath.Dir(path), 0o755)
-		}
-		if err == nil {
-			err = os.WriteFile(path, []byte(b), 0o644)
-		}
-		return map[string]any{"brief": path}, err
-	}); err != nil {
+	if err := step(out, "contract", func() (map[string]any, error) { return writeBrief(root, i, c) }); err != nil {
 		return err
 	}
 	var dir string
@@ -89,6 +78,19 @@ func Run(args []string, out io.Writer) (err error) {
 		dir = d
 		return map[string]any{"clone": d, "sha": sha}, err
 	})
+}
+
+func writeBrief(root string, i Issue, c config.Config) (map[string]any, error) {
+	// ponytail: brief.md goes to the repository's .atm/ until node 2 gives the run its clone.
+	path := filepath.Join(root, ".atm", "brief.md")
+	b, err := brief(i, c)
+	if err == nil {
+		err = os.MkdirAll(filepath.Dir(path), 0o755)
+	}
+	if err == nil {
+		err = os.WriteFile(path, []byte(b), 0o644)
+	}
+	return map[string]any{"brief": path}, err
 }
 
 // timeout bounds every command a step runs. ponytail: one fixed ceiling, and on timeout only the command
