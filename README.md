@@ -295,6 +295,10 @@ on issue-only discovery.
 The `[prompt].quality_failed` message is configurable in `config/agent.toml`.
 Verification behavior is defined by the runner, not by a `[verification]`
 configuration section.
+An `INVALID RED` rejects a red test that fails on a missing import rather than
+the behavior under test. The runner recognizes import-error diagnostics in
+Python and JavaScript test output; quoted error text in an assertion or pytest
+captured output does not trigger this check.
 
 With environment prep enabled, ATM inspects the nearest `package.json` and
 lockfile before the model starts. For focused JS test runs it uses the detected
