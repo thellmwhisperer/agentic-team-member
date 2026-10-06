@@ -483,8 +483,9 @@ not make delivery dirty when the target repository lacks that ignore rule.
 
 After the ponytail pass, delivery is the command in `[delivery].command`:
 
-1. The clone's work is committed on `atm/<slug>-<timestamp>` and the clone's
-   `origin` points at the source repo's `origin`. When the issue came from
+1. ATM creates `atm/<slug>-<timestamp>`, commits any remaining work, and points
+   the clone's `origin` at the source repo's `origin`. A kept cut's two commits
+   already exist when ATM creates the branch. When the issue came from
    `--issue-number`, the unit commit message ends with `Closes #<n>`.
 2. The command runs in the clone through the shell, with `ATM_TITLE`,
    `ATM_ISSUE` (empty with `--issue-file`), `ATM_BRANCH`, `ATM_CLONE`,
