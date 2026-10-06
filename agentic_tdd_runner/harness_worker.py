@@ -594,6 +594,9 @@ def sweep_merged_clones(artifact_dir: Path) -> None:
                                               cwd=gh_cwd, capture_output=True, text=True, timeout=60).stdout.strip()
             if state != "MERGED":
                 continue
+            follow_ups = clone_path / ".atm" / "follow-ups"
+            if follow_ups.exists():
+                shutil.copytree(follow_ups, report_path.parent / "follow-ups")
             shutil.rmtree(clone)
             report["clone_removed"] = datetime.now(timezone.utc).isoformat()
             report_path.write_text(json.dumps(report, indent=2))

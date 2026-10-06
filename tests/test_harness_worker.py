@@ -1464,6 +1464,16 @@ def test_sweep_removes_a_merged_clone_from_a_failed_run_report(tmp_path, monkeyp
     assert (run / "worker-1.jsonl").is_file()
 
 
+def test_sweep_preserves_follow_up_tests_before_removing_a_merged_clone(tmp_path, monkeypatch):
+    clone, run = _past_run(tmp_path, monkeypatch, "MERGED")
+    red_test = clone / ".atm" / "follow-ups" / "1" / "test_gap.py"
+    red_test.parent.mkdir(parents=True)
+    red_test.write_text("def test_gap():\n    assert False\n")
+    harness_worker.sweep_merged_clones(tmp_path / "current-run")
+    assert not clone.exists()
+    assert (run / "follow-ups" / "1" / "test_gap.py").read_text() == "def test_gap():\n    assert False\n"
+
+
 def test_sweep_continues_after_removal_fails_for_one_report(tmp_path, monkeypatch):
     failed, failed_run = _past_run(tmp_path, monkeypatch, "MERGED")
     succeeded = tmp_path / "atm-run-succeeded"
