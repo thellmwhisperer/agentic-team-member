@@ -102,9 +102,21 @@ func (a agentCall) run(brief string, log *runLog) agentRun {
 		}
 	}}
 	cmd.Stdout, cmd.Stderr = lines, lines
-	inOwnGroup(cmd)
 	cmd.WaitDelay = 5 * time.Second
-	err := cmd.Run()
+	afterStart, closeGroup, err := inOwnGroup(cmd)
+	if err == nil {
+		defer closeGroup()
+		err = cmd.Start()
+		if err == nil {
+			err = afterStart()
+			if err != nil {
+				_ = cmd.Process.Kill()
+				_ = cmd.Wait()
+			} else {
+				err = cmd.Wait()
+			}
+		}
+	}
 	lines.flush()
 	r.TimedOut = errors.Is(ctx.Err(), context.DeadlineExceeded)
 	if cmd.ProcessState != nil && !r.TimedOut {

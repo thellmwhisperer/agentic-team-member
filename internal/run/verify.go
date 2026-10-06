@@ -36,9 +36,21 @@ func runTest(clone string, argv []string, timeout time.Duration) testRun {
 	var out bytes.Buffer
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir, cmd.Stdout, cmd.Stderr = clone, &out, &out
-	inOwnGroup(cmd)
 	cmd.WaitDelay = 5 * time.Second
-	err := cmd.Run()
+	afterStart, closeGroup, err := inOwnGroup(cmd)
+	if err == nil {
+		defer closeGroup()
+		err = cmd.Start()
+		if err == nil {
+			err = afterStart()
+			if err != nil {
+				_ = cmd.Process.Kill()
+				_ = cmd.Wait()
+			} else {
+				err = cmd.Wait()
+			}
+		}
+	}
 	var exit *exec.ExitError
 	switch {
 	case errors.Is(ctx.Err(), context.DeadlineExceeded):
