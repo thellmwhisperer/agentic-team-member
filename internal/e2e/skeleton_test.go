@@ -7,6 +7,10 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/spf13/pflag"
+
+	"github.com/thellmwhisperer/agentic-team-member/internal/config"
 )
 
 // isolated is env with HOME in a temp dir whose ~/.config/atm/config.yaml is global, when global is not empty.
@@ -50,6 +54,14 @@ func TestInitTwiceChangesNothing(t *testing.T) {
 	if text := readFile(t, filepath.Join(repo, ".atm.yaml")); !strings.Contains(text, "#") {
 		t.Errorf("the .atm.yaml atm init writes has no comments:\n%s", text)
 	}
+	t.Setenv("HOME", t.TempDir())
+	cfg, err := config.Load(repo, pflag.NewFlagSet("atm", pflag.ContinueOnError))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(cfg.Delivery.Command, "axi run --yes") {
+		t.Errorf("atm init's delivery command omits --yes: %q", cfg.Delivery.Command)
+	}
 	// The file init writes is one the config loader accepts.
 	if out, exit := atm(t, repo, env, "doctor"); exit != 0 {
 		t.Errorf("atm doctor after atm init exits %d:\n%s", exit, out)
@@ -85,6 +97,17 @@ func TestDoctorChecksGhWhenOriginIsGitHub(t *testing.T) {
 	out, exit = atm(t, repo, gitOnly(t, env), "doctor")
 	if exit == 0 || !regexp.MustCompile(`(?m)^FAIL\s+gh\b`).MatchString(out) {
 		t.Errorf("exit %d, want non-zero and a FAIL line for gh:\n%s", exit, out)
+	}
+	writeFile(t, filepath.Join(repo, ".atm.yaml"), "timeouts:\n  test: 0\n")
+	out, exit = atm(t, repo, gitOnly(t, env), "doctor")
+	for _, check := range []string{`(?m)^ok\s+git\b`, `(?m)^FAIL\s+config\b`,
+		`(?m)^FAIL\s+claude\b`, `(?m)^FAIL\s+gh\b`} {
+		if !regexp.MustCompile(check).MatchString(out) {
+			t.Errorf("exit %d, want doctor to report %q despite invalid config:\n%s", exit, check, out)
+		}
+	}
+	if exit == 0 {
+		t.Errorf("invalid config and missing CLIs exit 0:\n%s", out)
 	}
 }
 
