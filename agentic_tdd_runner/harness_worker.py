@@ -571,6 +571,28 @@ def deliver(worktree: str, source_repo: str, title: str, unit_number: int, artif
     return result
 
 
+def sweep_merged_clones(artifact_dir: Path) -> None:
+    """Remove the clone of every other run next to `artifact_dir` whose branch has a merged PR on GitHub;
+    the run's directory stays and its report.json records when the clone went."""
+    for report_path in artifact_dir.parent.glob("*/report.json"):
+        if report_path.parent == artifact_dir:
+            continue
+        try:
+            report = json.loads(report_path.read_text())
+            clone = report.get("worktree") if isinstance(report, dict) else None
+            if not clone or report.get("clone_removed") or not Path(clone).is_dir():
+                continue
+            branch = git_lines(clone, "branch", "--show-current")
+            state = branch and subprocess.run(["gh", "pr", "view", branch[0], "--json", "state", "--jq", ".state"],
+                                              cwd=clone, capture_output=True, text=True, timeout=60).stdout.strip()
+        except (OSError, ValueError, subprocess.SubprocessError):
+            continue
+        if state == "MERGED":
+            shutil.rmtree(clone)
+            report["clone_removed"] = datetime.now(timezone.utc).isoformat()
+            report_path.write_text(json.dumps(report, indent=2))
+
+
 def stage_follow_up_as_unit(worktree: str, follow_up: dict, unit_number: int, log) -> str:
     """Move the chained follow-up's red test into place and park this unit's .atm/follow-ups so the
     next unit starts with an empty slot list. Returns the red test's repo-relative path."""
@@ -1112,6 +1134,7 @@ def main(argv: list[str] | None = None) -> int:
     run_log = RunLog(str(log_path), args.harness, render=renderer.render, visible=renderer.visible, monitor=monitor,
                      label=args.label or artifact_dir.name, report=str(artifact_dir / "report.json"))
     write, log = run_log.write, run_log.log
+    run_log.step("clone sweep", sweep_merged_clones, artifact_dir)
 
     run_log.begin("prepare")
     try:
@@ -1402,6 +1425,7 @@ def main(argv: list[str] | None = None) -> int:
         log("delivery", delivery)
     (artifact_dir / "report.json").write_text(json.dumps(result, indent=2))
     log("report", result)
+    run_log.step("clone sweep", sweep_merged_clones, artifact_dir)
     run_log.close()
     print("\n=== HARNESS WORKER SUMMARY ===")
     print(f"harness:    {args.harness} model={args.model or 'default'} effort={args.effort or 'default'} exit={last['harness_exit_code']}")
