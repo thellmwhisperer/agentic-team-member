@@ -55,9 +55,27 @@ Either way:
 4. Keep the diff as small as the change allows. No scaffolding for later, no
    speculative hardening, no helpers nobody calls. The repository's slopslint
    ceilings only go down.
-5. `scripts/test.sh` and `uvx ruff check .` must pass locally.
+5. `scripts/test.sh` and `scripts/lint.sh` must pass locally. Both run the
+   Go side too (`go test ./...`, `golangci-lint run`) when `go.mod` exists.
 6. PR titles use a conventional-commit subject (`fix:`, `feat:`, `docs:`,
    `chore:`, `refactor:`, `test:`). The body says why and links the issue.
+
+## CI
+
+| Workflow | Runs on | Runs when these change | Does |
+|---|---|---|---|
+| `pr.yml` | every PR to `main` | `**.py`, `pyproject.toml`, `requirements*.txt`, `ruff.toml`, `.python-version`, `scripts/test.sh`, `config/**`, `pr.yml` | pytest on Python 3.12, 3.13, 3.14 |
+| `cd.yml` | push to `main` | the same Python paths, `cd.yml` | pytest and a production config load |
+| `go.yml` | every PR to `main`, push to `main` | `**.go`, `go.mod`, `go.sum`, `.golangci.yml`, `Makefile`, `go.yml` | `make test` and `make lint` on ubuntu, macos, windows |
+| `auto-merge.yml` | every PR to `main` | always | arms auto-merge (below) |
+
+`pr.yml` and `go.yml` start on every PR and skip their test jobs when their
+paths did not change. Each reports one summary check that is always present:
+**Python checks** and **Go checks**. A summary is green when its tests passed
+or were skipped, red when they failed or were cancelled
+(`scripts/ci-summary.sh`). These two are the required checks on `main`; a
+path-filtered workflow that never starts would leave its check pending and
+block the merge.
 
 Auto-merge by rebase is armed when the PR body's `## Risk Assessment` says
 Low or Medium, and GitHub merges once CI is green. High risk, or a level it
