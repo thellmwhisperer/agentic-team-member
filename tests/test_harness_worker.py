@@ -1080,13 +1080,16 @@ def _committed(clone, *args):
     return subprocess.run(["git", *args], cwd=clone, capture_output=True, text=True, check=True).stdout
 
 
-def test_ponytail_pass_keeps_a_cut_that_passes_every_gate_and_tombstones_it(tmp_path, monkeypatch, capsys):
-    argv, artifacts = _delivery_setup(tmp_path, monkeypatch, _ponytail_harness())
-    source = tmp_path / "target"
+def _commit_slop(source):
     (source / ".slop" / "tombstones").mkdir(parents=True)
     (source / ".slop" / "tombstones" / "README.md").write_text("# Tombstones\n")
     _git(source, "add", ".slop")
     _git(source, "commit", "-q", "-m", "slop")
+
+
+def test_ponytail_pass_keeps_a_cut_that_passes_every_gate_and_tombstones_it(tmp_path, monkeypatch, capsys):
+    argv, artifacts = _delivery_setup(tmp_path, monkeypatch, _ponytail_harness())
+    _commit_slop(tmp_path / "target")
     assert harness_worker.main(argv) == 0
     report = json.loads((artifacts / "report.json").read_text())
     pony = report["ponytail"]
@@ -1098,7 +1101,8 @@ def test_ponytail_pass_keeps_a_cut_that_passes_every_gate_and_tombstones_it(tmp_
     assert _committed(clone, "show", "HEAD:calc.py") == FIXED_CALC
     committed = _committed(clone, "show", "--name-only", "--format=", "HEAD").split()
     (tombstone,) = [p for p in committed if p.startswith(".slop/tombstones/T-")]
-    assert sorted(set(committed) - {tombstone}) == ["calc.py", "tests/test_add.py"]
+    assert sorted(set(committed) - {tombstone}) == ["calc.py"]  # the cut; the unit commit below holds the rest
+    assert sorted(_committed(clone, "show", "--name-only", "--format=", "HEAD~1").split()) == ["calc.py", "tests/test_add.py"]
     text = _committed(clone, "show", f"HEAD:{tombstone}")
     assert "family: speculative_feature" in text and "artifact: calc.py" in text
     assert 'example: "unused() has no caller: deleted"' in text and "status: accepted" in text
@@ -1107,13 +1111,32 @@ def test_ponytail_pass_keeps_a_cut_that_passes_every_gate_and_tombstones_it(tmp_
     assert f"ponytail:   kept, {pony['net_lines_before'] - pony['net_lines_after']} net lines saved" in summary
 
 
+def test_kept_ponytail_cut_is_its_own_commit_and_delivery_gets_its_findings(tmp_path, monkeypatch):
+    argv, artifacts = _delivery_setup(tmp_path, monkeypatch, _ponytail_harness(), command='printf "%s" "$ATM_PONYTAIL"')
+    _commit_slop(tmp_path / "target")
+    assert harness_worker.main(argv) == 0
+    report = json.loads((artifacts / "report.json").read_text())
+    clone, pony = report["worktree"], report["ponytail"]
+    assert _committed(clone, "log", "--format=%s", f"{report['base_sha']}..HEAD").splitlines() == [
+        "ponytail: 1 cuts", "atm unit 1: add returns the difference"]
+    line = "- calc.py: unused() has no caller: deleted (speculative_feature)"
+    assert line in _committed(clone, "log", "-1", "--format=%B")
+    assert sorted(_committed(clone, "show", "--name-only", "--format=", "HEAD").split()) == sorted(["calc.py", *pony["tombstones"]])
+    assert _committed(clone, "show", "HEAD~1:calc.py") == FIXED_CALC + UNUSED  # the unit commit, pre-ponytail
+    assert pony["commit"] == report["head_sha"] == _committed(clone, "rev-parse", "HEAD").strip()
+    assert Path(report["delivery"]["output"]).read_text() == line
+
+
 def test_ponytail_cut_that_breaks_the_unit_test_is_discarded(tmp_path, monkeypatch, capsys):
     breaks = 'calc.write_text(calc.read_text().replace("a + b", "a - b"))'
-    argv, artifacts = _delivery_setup(tmp_path, monkeypatch, _ponytail_harness(breaks))
+    argv, artifacts = _delivery_setup(tmp_path, monkeypatch, _ponytail_harness(breaks), command='printf "[%s]" "$ATM_PONYTAIL"')
     assert harness_worker.main(argv) == 0
     report = json.loads((artifacts / "report.json").read_text())
     pony = report["ponytail"]
     assert pony["kept"] is False and "red/green" in pony["reason"], pony
+    assert pony["commit"] is None and Path(report["delivery"]["output"]).read_text() == "[]"
+    assert _committed(report["worktree"], "log", "--format=%s", f"{report['base_sha']}..HEAD").splitlines() == [
+        "atm unit 1: add returns the difference"]
     clone = report["worktree"]
     assert _committed(clone, "show", "HEAD:calc.py") == FIXED_CALC + UNUSED  # the pre-ponytail diff, delivered
     assert sorted(_committed(clone, "show", "--name-only", "--format=", "HEAD").split()) == ["calc.py", "tests/test_add.py"]

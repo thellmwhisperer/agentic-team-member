@@ -518,7 +518,10 @@ Your final message must be ONLY this JSON object, nothing else:
 def commit_unit(worktree: str, number: int, title: str, closes: int | None = None) -> str:
     """Record a passed unit in the clone so the next unit's red/green runs against it. `closes` is the GitHub
     issue the run came from: merging the delivered PR then closes it."""
-    message = f"atm unit {number}: {title}"[:200] + (f"\n\nCloses #{closes}" if closes else "")
+    return commit_all(worktree, f"atm unit {number}: {title}"[:200] + (f"\n\nCloses #{closes}" if closes else ""))
+
+
+def commit_all(worktree: str, message: str) -> str:
     # Add all, then unstage .atm: an exclude pathspec makes git add exit 1 when the target ignores .atm/.
     subprocess.run(["git", "add", "-A"], cwd=worktree, check=True, capture_output=True)
     subprocess.run(["git", "reset", "-q", "--", ".atm"], cwd=worktree, check=True, capture_output=True)
@@ -526,6 +529,13 @@ def commit_unit(worktree: str, number: int, title: str, closes: int | None = Non
                     "commit", "-q", "--no-verify", "-m", message],
                    cwd=worktree, check=True, capture_output=True)
     return git_lines(worktree, "rev-parse", "HEAD")[0]
+
+
+def ponytail_lines(ponytail: dict | None) -> list[str]:
+    """One line per kept ponytail finding: the ponytail commit message and ATM_PONYTAIL."""
+    if not (ponytail or {}).get("kept"):
+        return []
+    return [f"- {f['file']}: {f['finding']} ({f['family']})" for f in ponytail["findings"]]
 
 
 def deliver(worktree: str, source_repo: str, title: str, unit_number: int, artifact_dir: Path, command: str,
@@ -549,7 +559,8 @@ def deliver(worktree: str, source_repo: str, title: str, unit_number: int, artif
     report["head_sha"] = git_lines(worktree, "rev-parse", "HEAD")[0]
     (artifact_dir / "report.json").write_text(json.dumps(report, indent=2))
     env = build_command_env(config) | {"ATM_TITLE": title, "ATM_ISSUE": str(closes or ""), "ATM_BRANCH": result["branch"],
-                                      "ATM_CLONE": worktree, "ATM_REPORT": str(artifact_dir / "report.json")}
+                                      "ATM_CLONE": worktree, "ATM_REPORT": str(artifact_dir / "report.json"),
+                                      "ATM_PONYTAIL": "\n".join(ponytail_lines(report.get("ponytail")))}
     start = time.monotonic()
     with output.open("w") as sink:
         proc = subprocess.Popen(command, shell=True, cwd=worktree, env=env, text=True, bufsize=1,
@@ -1288,7 +1299,7 @@ def main(argv: list[str] | None = None) -> int:
         findings = [f for f in (pony_report or {}).get("findings") or [] if isinstance(f, dict)]
         after = run_log.step("ponytail snapshot", snapshot_commit, worktree)
         record = {"findings": findings, "net_lines_before": net_added_lines(worktree, base_sha, before),
-                  "net_lines_after": net_added_lines(worktree, base_sha, after), "kept": False, "tombstones": []}
+                  "net_lines_after": net_added_lines(worktree, base_sha, after), "kept": False, "tombstones": [], "commit": None}
         report_valid = (isinstance(pony_report, dict) and set(pony_report) == {"findings", "summary"}
                         and isinstance(pony_report.get("findings"), list) and isinstance(pony_report.get("summary"), str)
                         and all(isinstance(f, dict) and set(f) == {"file", "family", "finding"}
@@ -1311,6 +1322,13 @@ def main(argv: list[str] | None = None) -> int:
         else:
             record["kept"], reason = True, "shorter diff, every gate passed"
             record["tombstones"] = write_tombstones(worktree, findings)
+            # The unit commit holds the pre-ponytail tree, the ponytail commit only the cut, for the delivery reviewer.
+            cut = snapshot_commit(worktree)
+            subprocess.run(["git", "add", "-A"], cwd=worktree, capture_output=True)
+            subprocess.run(["git", "read-tree", "-u", "--reset", before], cwd=worktree, check=True, capture_output=True)
+            commit_unit(worktree, len(units), title, closes)
+            subprocess.run(["git", "read-tree", "-u", "--reset", cut], cwd=worktree, check=True, capture_output=True)
+            record["commit"] = commit_all(worktree, f"ponytail: {len(findings)} cuts\n\n" + "\n".join(ponytail_lines(record)))
         record["reason"] = reason
         log("ponytail", record)
         return record
