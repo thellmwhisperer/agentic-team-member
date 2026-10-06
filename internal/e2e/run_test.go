@@ -125,13 +125,8 @@ func TestRunWritesEveryStepStartBeforeItsEnd(t *testing.T) {
 	if len(open) != 0 {
 		t.Errorf("steps %v never ended", open)
 	}
-	rest := started
-	for _, step := range steps {
-		i := slices.Index(rest, step)
-		if i < 0 {
-			t.Fatalf("%q does not start after the steps before it; started: %v", step, started)
-		}
-		rest = rest[i+1:]
+	if !slices.Equal(started, steps) {
+		t.Fatalf("started steps %v, want exactly %v", started, steps)
 	}
 }
 
