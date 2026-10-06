@@ -581,7 +581,7 @@ def sweep_merged_clones(artifact_dir: Path) -> None:
             report = json.loads(report_path.read_text())
             clone = report.get("worktree") if isinstance(report, dict) else None
             clone_path = Path(clone) if clone else None
-            if (not clone_path or "delivery" not in report or report.get("clone_removed")
+            if (not clone_path or (report.get("delivery") or {}).get("running") is True or report.get("clone_removed")
                     or not clone_path.name.startswith("atm-run-") or not clone_path.is_dir()):
                 continue
             branch = git_lines(clone, "branch", "--show-current")
@@ -1426,6 +1426,7 @@ def main(argv: list[str] | None = None) -> int:
     if passed and not delivery_command:
         result["delivery"] = {"skipped": "no [delivery].command"}
     elif passed:
+        result["delivery"] = {"running": True}
         (artifact_dir / "report.json").write_text(json.dumps(result, indent=2))  # ATM_REPORT, for the command
         delivery = result["delivery"] = run_log.step("delivery", deliver, worktree, args.repo, title, len(units),
                                                      artifact_dir, delivery_command, config, result, closes,

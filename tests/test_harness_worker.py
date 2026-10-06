@@ -1449,10 +1449,19 @@ def test_sweep_does_not_remove_a_non_atm_directory_named_in_a_neighboring_report
 
 def test_sweep_skips_a_report_while_its_delivery_is_in_progress(tmp_path, monkeypatch):
     clone, run = _past_run(tmp_path, monkeypatch, "MERGED")
-    (run / "report.json").write_text(json.dumps({"worktree": str(clone)}))
+    (run / "report.json").write_text(json.dumps({"worktree": str(clone), "delivery": {"running": True}}))
     harness_worker.sweep_merged_clones(tmp_path / "current-run")
     assert clone.is_dir()
-    assert "delivery" not in json.loads((run / "report.json").read_text())
+    assert json.loads((run / "report.json").read_text())["delivery"] == {"running": True}
+
+
+def test_sweep_removes_a_merged_clone_from_a_failed_run_report(tmp_path, monkeypatch):
+    clone, run = _past_run(tmp_path, monkeypatch, "MERGED")
+    (run / "report.json").write_text(json.dumps({"worktree": str(clone)}))
+    harness_worker.sweep_merged_clones(tmp_path / "current-run")
+    assert not clone.exists()
+    assert json.loads((run / "report.json").read_text())["clone_removed"]
+    assert (run / "worker-1.jsonl").is_file()
 
 
 def test_sweep_continues_after_removal_fails_for_one_report(tmp_path, monkeypatch):
