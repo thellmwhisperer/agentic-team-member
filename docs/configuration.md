@@ -193,4 +193,32 @@ open. Next to each clone, `<clone>.pid` holds its run's pid and
 removes the clones of runs that are gone, except a delivered clone whose branch
 is not merged into its base (`git branch --merged` after a fetch from the
 repository) and whose PR `gh` does not report closed or merged, when origin is
-on GitHub. Later run steps are not yet implemented.
+on GitHub.
+
+The `agent` step follows the clone. The agent is `--harness` (`claude`, `codex`,
+`opencode` or `pi`; any other fails the config) with the run's model and effort,
+in its most minimal mode: `claude -p` with `--setting-sources project`,
+`--strict-mcp-config` and only `Read,Edit,Write,Bash,Glob,Grep,Skill`; `pi -p`
+with `--no-extensions --no-skills --no-prompt-templates --no-context-files
+--no-session`; `codex exec` and `opencode run --pure`, which still load the
+user's skills. Local models run through `pi`. `claude` reads the brief on
+stdin, the others as their last argument. `--harness-arg` (repeatable) adds an
+argument before the brief, `--env KEY=VALUE` (repeatable) a variable to the
+agent's environment; `CLAUDE_CODE_CHILD_SESSION` is removed from it.
+
+The agent always loads the bundled `ponytail` skill. ATM writes it into the
+clone, excluded from git: `.claude/skills/` for `claude`, `.agents/skills/` for
+`codex`, `.opencode/skills/` for `opencode`, and `.atm/skills/` passed with
+`--skill` for `pi`. The agent's log must prove it was used (a `Skill` tool call
+for `claude`, a read of its `SKILL.md` for `pi` and `codex`, a `skill` event for
+`opencode`), or the run dies.
+
+The agent runs in the clone in its own process group; past 30 minutes, or when
+ATM gets SIGINT or SIGTERM, the whole group is killed (on Windows, only the
+agent). Every line it writes goes to `.atm/worker-<timestamp>.jsonl`, named
+after the clone: JSON lines as they are, any other line as a JSON string. The
+report is the last JSON object of its final message (`codex`: its `-o` file,
+`.atm/worker-<timestamp>.final.md`) and must carry `test_file`: ATM never
+guesses it. A non-zero exit, a timeout, an interruption or no readable report
+fails the step and the run. Its end line carries `log` and `report`. Later run
+steps are not yet implemented.

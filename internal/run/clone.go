@@ -39,16 +39,7 @@ func clone(root, base, install, repo string) (dir, sha string, err error) {
 			return dir, sha, err
 		}
 	}
-	exclude := filepath.Join(dir, ".git", "info", "exclude")
-	if err = os.MkdirAll(filepath.Dir(exclude), 0o755); err != nil {
-		return dir, sha, err
-	}
-	f, err := os.OpenFile(exclude, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return dir, sha, err
-	}
-	_, err = f.WriteString("\n/.atm/\n") // ATM's scratch, invisible to git even when the target does not ignore it
-	if err = errors.Join(err, f.Close()); err != nil || install == "" {
+	if err = exclude(dir, "/.atm/"); err != nil || install == "" { // ATM's scratch
 		return dir, sha, err
 	}
 	if _, err = command(dir, "sh", "-c", install); err != nil {

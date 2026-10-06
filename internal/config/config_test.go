@@ -95,3 +95,11 @@ func TestLoadTestFileNeedsFileOrDir(t *testing.T) {
 		t.Fatalf("want a test_file error, got %v", err)
 	}
 }
+
+func TestLoadRejectsUnknownHarness(t *testing.T) {
+	root := t.TempDir()
+	write(t, filepath.Join(root, ".atm.yaml"), complete)
+	if _, err := Load(root, t.TempDir(), Agent{Harness: "aider"}); err == nil || !strings.Contains(err.Error(), "aider") {
+		t.Fatalf("want an unknown harness error, got %v", err)
+	}
+}
