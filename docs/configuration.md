@@ -172,11 +172,25 @@ line with a lowercase type: `fix` (or `hotfix`), `feature`,
 `gh issue view` from the repository `origin` names.
 
 The current Go port validates configuration before reading the issue, then
-emits start and result JSON lines for the `issue` and `contract` steps. The
+emits start and result JSON lines for the `issue`, `contract`, and `clone` steps. The
 `issue` result includes the title and task type on success, plus the issue
 number for GitHub issues. The `contract` step writes `.atm/brief.md` at the
 repository root and reports its path on success. The brief starts by directing
 the agent to read `AGENTS.md` if present, then gives the issue, task-type
 acceptance criteria, verification commands from `.atm.yaml`, style and
-forbidden actions, and the required JSON report. Later run steps are not yet
-implemented.
+forbidden actions, and the required JSON report.
+
+The `clone` step follows the contract. `--base-ref` (default `main`) is resolved to a SHA in
+the repository; the run claims `.atm/clones/atm-run-<timestamp>` (`-2`, `-3`
+for runs started in the same second), clones the repository there detached at
+that SHA, excludes `/.atm/` in the clone, and runs `install` in it with `sh -c`
+(empty: nothing to install). Any failure, or a command running past 10 minutes,
+fails the step and the run. Its end line carries `clone` and `sha`.
+
+The clone is removed when the run ends, unless the run delivered and its PR is
+open. Next to each clone, `<clone>.pid` holds its run's pid and
+`<clone>.delivered` holds `<branch> <base>` once it delivered. Each run first
+removes the clones of runs that are gone, except a delivered clone whose branch
+is not merged into its base (`git branch --merged` after a fetch from the
+repository) and whose PR `gh` does not report closed or merged, when origin is
+on GitHub. Later run steps are not yet implemented.
