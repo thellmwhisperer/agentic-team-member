@@ -147,23 +147,7 @@ func TestFakeAgentSpeaksTheProtocolOfItsName(t *testing.T) {
 			env, log := fakes(t, "fixing")
 			last := filepath.Join(t.TempDir(), "last.txt")
 			event, text := agentOutput(t, name, repo, env, issue, "exec", "-o", last)
-			valid := false
-			switch name {
-			case "claude":
-				valid = event.Type == "result" && event.Subtype == "success" && !event.IsError && event.Result != ""
-			case "codex":
-				valid = event.Type == "item.completed" && event.Item.Type == "agent_message" && event.Item.Text != ""
-			case "opencode":
-				valid = event.Type == "text" && event.Part.Text != ""
-			case "pi":
-				valid = event.Type == "message_end" && event.Message.Role == "assistant"
-				hasText := false
-				for _, block := range event.Message.Content {
-					hasText = hasText || block.Type == "text" && block.Text != ""
-				}
-				valid = valid && hasText
-			}
-			if !valid {
+			if !validAgentEvent(name, event) {
 				t.Errorf("%s emitted the wrong final event: %+v", name, event)
 			}
 			if reportOf(t, text).TestFile != "tests/test_add.py" {
@@ -178,6 +162,32 @@ func TestFakeAgentSpeaksTheProtocolOfItsName(t *testing.T) {
 			}
 		})
 	}
+}
+
+func validAgentEvent(name string, event agentEvent) bool {
+	switch name {
+	case "claude":
+		return event.Type == "result" && event.Subtype == "success" && !event.IsError && event.Result != ""
+	case "codex":
+		return event.Type == "item.completed" && event.Item.Type == "agent_message" && event.Item.Text != ""
+	case "opencode":
+		return event.Type == "text" && event.Part.Text != ""
+	case "pi":
+		return validPiEvent(event)
+	}
+	return false
+}
+
+func validPiEvent(event agentEvent) bool {
+	if event.Type != "message_end" || event.Message.Role != "assistant" {
+		return false
+	}
+	for _, block := range event.Message.Content {
+		if block.Type == "text" && block.Text != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func TestGhFailsClosed(t *testing.T) {
