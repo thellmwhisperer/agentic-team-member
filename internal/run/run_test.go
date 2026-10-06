@@ -11,16 +11,10 @@ import (
 	"runtime"
 	"strings"
 	"testing"
-	"time"
 )
 
-// TestMain doubles as a fake gh: fakeGH puts this test binary on PATH as gh. With FAKE_HANG it is a command
-// that outlives any timeout a test sets, and then exits on its own.
+// TestMain doubles as a fake gh: fakeGH puts this test binary on PATH as gh.
 func TestMain(m *testing.M) {
-	if os.Getenv("FAKE_HANG") != "" {
-		<-time.After(30 * time.Second)
-		os.Exit(0)
-	}
 	if out, ok := os.LookupEnv("FAKE_GH_OUT"); ok {
 		_ = os.WriteFile(os.Getenv("FAKE_GH_ARGS"), []byte(strings.Join(os.Args[1:], " ")), 0o600)
 		fmt.Print(out)
