@@ -95,13 +95,20 @@ with the function behind each one: [How a run flows](docs/how-a-run-flows.md).
 
 ## Run it
 
-The Go port currently provides `atm init` and `atm doctor`; issue runs still use
-the Python worker below. Build it with `go build -o atm ./cmd/atm`, then run
+The Go port provides `atm init`, `atm doctor`, and foreground `atm run <issue.md>`.
+Build it with `go build -o atm ./cmd/atm`, then run
 `./atm init` in a git repository to create a commented `.atm.yaml` and ignore
 `.atm/`. Running init again preserves both files. `./atm doctor` checks git,
 the configured agent CLI, and `gh` when the repository's origin is on GitHub.
-See [Configuration](docs/configuration.md#go-port-configuration) for the Go
-port's YAML layers and flags.
+From that repository, `/path/to/atm run path/to/issue.md` clones `main` under
+`.atm/clones/`, writes the agent contract and run report under `.atm/runs/`,
+and checks that the agent's test fails without its fix and passes with it.
+Use `--base-ref`, `--label`, `--scope`, or `--timeout` to override run defaults.
+The Go command stops after this verification; the later quality and delivery
+steps remain in the Python worker. See [Configuration](docs/configuration.md#go-port-configuration)
+for the Go port's YAML layers and flags.
+
+The Python worker remains available for the complete pipeline:
 
 ```bash
 git clone https://github.com/thellmwhisperer/agentic-team-member.git

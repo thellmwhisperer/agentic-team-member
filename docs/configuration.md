@@ -168,7 +168,9 @@ effort default to the agent CLI's choice. Effort accepts `low`, `medium`,
 |----------|------------------|---------|
 | `harness` | `claude` | Agent CLI checked by `atm doctor` |
 | `model`, `effort` | empty | Agent settings |
-| `commands.test`, `commands.lint`, `commands.typecheck` | empty | Commands reserved for later Go port steps |
+| `commands.test` | empty | Named in the `atm run` contract; used for red/green when no Python or JavaScript test runner is selected automatically |
+| `commands.typecheck` | empty | Included in the `atm run` agent contract when set; not run by this step |
+| `commands.lint` | empty | Reserved for a later Go port step |
 | `forbidden.python` | `type: ignore`, `noqa` | Forbidden added-line patterns |
 | `forbidden.typescript` | `as any`, `as unknown as`, `as never`, `{} as`, `: any`, `eslint-disable`, `@ts-ignore`, `@ts-expect-error` | Forbidden added-line patterns |
 | `timeouts.agent`, `timeouts.test` | `1800`, `300` | Positive durations in seconds |
