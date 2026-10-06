@@ -64,14 +64,16 @@ func suite(clone, test, typecheck string) (string, string) {
 }
 
 func packageManager(clone string, pkg packageJSON) string {
-	for lock, pm := range map[string]string{"bun.lockb": "bun", "bun.lock": "bun", "pnpm-lock.yaml": "pnpm",
-		"yarn.lock": "yarn", "package-lock.json": "npm"} {
-		if exists(clone, lock) {
-			return pm
-		}
-	}
-	if name, _, _ := strings.Cut(pkg.PackageManager, "@"); name == "bun" || name == "pnpm" || name == "yarn" {
+	if name, _, _ := strings.Cut(pkg.PackageManager, "@"); name == "bun" || name == "pnpm" || name == "yarn" || name == "npm" {
 		return name
+	}
+	for _, lock := range []struct{ file, manager string }{
+		{"bun.lock", "bun"}, {"bun.lockb", "bun"}, {"pnpm-lock.yaml", "pnpm"},
+		{"yarn.lock", "yarn"}, {"package-lock.json", "npm"},
+	} {
+		if exists(clone, lock.file) {
+			return lock.manager
+		}
 	}
 	return "npm"
 }

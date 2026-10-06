@@ -3,6 +3,8 @@ package e2e
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -212,14 +214,34 @@ func TestRunVerdicts(t *testing.T) {
 }
 
 func TestAgentTimeoutKillsTheProcessGroup(t *testing.T) {
+	repo := target(t)
+	env, _ := fakes(t, "sleeping")
+	pidFile := filepath.Join(t.TempDir(), "grandchild.pid")
+	markerFile := filepath.Join(t.TempDir(), "grandchild-survived")
+	env = append(env, "FAKEAGENT_GRANDCHILD_PID_FILE="+pidFile, "FAKEAGENT_GRANDCHILD_MARKER_FILE="+markerFile)
 	start := time.Now()
-	repo, out, exit := run(t, "sleeping", "slow", "--timeout", "2")
+	out, exit := atm(t, repo, env, "run", "--label", "slow", "--timeout", "2", issueFile(t, issue))
 	// The grandchild holds the agent's stdout for a minute unless the whole group dies.
 	if elapsed := time.Since(start); elapsed > 30*time.Second {
 		t.Errorf("the run took %s: the agent's process group outlived its timeout", elapsed)
 	}
 	if r := readReport(t, repo, "slow"); exit != 1 || !r.TimedOut {
 		t.Errorf("exit %d, timed_out %v, want 1 and true:\n%s", exit, r.TimedOut, out)
+	}
+	pidInfo, err := os.ReadFile(pidFile)
+	if err != nil {
+		t.Fatalf("fake grandchild did not record its PID: %v", err)
+	}
+	var pid int
+	var markerAt int64
+	if _, err := fmt.Sscan(string(pidInfo), &pid, &markerAt); err != nil || pid <= 0 {
+		t.Fatalf("invalid grandchild PID record %q", pidInfo)
+	}
+	if wait := time.Until(time.Unix(0, markerAt)); wait > 0 {
+		time.Sleep(wait)
+	}
+	if _, err := os.Stat(markerFile); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("grandchild %d survived the timeout: marker stat error %v", pid, err)
 	}
 }
 

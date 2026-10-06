@@ -112,6 +112,12 @@ func sleep() (string, error) {
 	if err := grandchild.Start(); err != nil {
 		return "", err
 	}
+	if path := os.Getenv("FAKEAGENT_GRANDCHILD_PID_FILE"); path != "" {
+		if err := os.WriteFile(path, []byte(fmt.Sprintf("%d %d", grandchild.Process.Pid,
+			time.Now().Add(5*time.Second).UnixNano())), 0o600); err != nil {
+			return "", err
+		}
+	}
 	time.Sleep(time.Minute)
 	return "", errors.New("slept a minute and was never killed")
 }
