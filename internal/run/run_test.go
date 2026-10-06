@@ -123,7 +123,7 @@ func TestRunReadsIssueFile(t *testing.T) {
 		name, issue string
 	}{
 		{name: "LF", issue: "# Retry on timeout\n\nType: hotfix\n\nRetry once.\n"},
-		{name: "CRLF", issue: "# Retry on timeout\r\n\r\nType: hotfix\r\n\r\nRetry once.\r\n"},
+		{name: "CRLF", issue: "# Retry on timeout\r\n\r\nType: hotfix  \r\n\r\nRetry once.\r\n"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			repo(t, "https://example.com/owner/repo.git", atmYAML)
