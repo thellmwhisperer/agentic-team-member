@@ -42,13 +42,12 @@ flowchart LR
 
 | Mechanism | Where | What it does |
 |-----------|-------|--------------|
-| `pr.yml` | GitHub Actions | pytest on Python 3.12, 3.13 and 3.14 for every PR to `main` |
-| `cd.yml` | GitHub Actions | pytest and a config load on every push to `main` |
+| `pr.yml`, `cd.yml`, `go.yml` | GitHub Actions | Change-filtered checks; see [CI](../CONTRIBUTING.md#ci) |
 | `auto-merge.yml` + `scripts/arm-auto-merge.sh` | GitHub Actions | Arms auto-merge with `AUTO_MERGE_TOKEN`, a fine-grained token for this repository only. The workflow token is never used: merges made with it start no workflow and close no issue |
-| `scripts/test.sh` | local and the gate | pytest under Python 3.12 with `requirements.txt` via `uv`, whatever `python3` comes first |
+| `scripts/test.sh`, `scripts/lint.sh` | local and the gate | Contribution checks; see [Contributing](../CONTRIBUTING.md) |
 | `tests/test_slop_gate.py` | pytest | `scripts/slopslint.sh check --classify --enforce`, so every test run enforces it |
 | `.githooks/pre-commit` | local, after `git config core.hooksPath .githooks` | The same slopslint check |
-| `.no-mistakes.yaml` | no-mistakes | `test: scripts/test.sh`, `lint: uvx ruff check . && slopslint`, review instructions per path, one re-run of a CI check GitHub cancelled without a verdict |
+| `.no-mistakes.yaml` | no-mistakes | Runs the contribution checks, sets review instructions per path, and allows one re-run of a CI check GitHub cancelled without a verdict |
 | `.slop/config.yml`, `.slop/ceilings.yml` | slopslint | Two duplication scopes, production and tests, under ceilings that may go down and never up |
 | `.slop/tombstones/` | slopslint | One record per slop incident, with its family and evidence |
 | `ruff.toml` | ruff | 120 columns, `E9` and `F` only |
