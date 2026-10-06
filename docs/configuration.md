@@ -1,6 +1,7 @@
 # Configuration
 
-Two sources, and they do not overlap.
+The Python worker uses two sources, and they do not overlap. The Go port reads
+[its own YAML layers](#go-port-configuration).
 
 - **The command line** chooses what varies per run.
 - **The TOML file** (`--config`, default `config/agent.toml`) holds what is
@@ -144,3 +145,27 @@ and is not chained.
 | `PYTHONDONTWRITEBYTECODE=1` | Set by the worker, so stale `.pyc` files cannot survive the red/green stash |
 | `CLAUDE_CODE_CHILD_SESSION` | Removed from the agent's environment, so a nested Claude Code session keeps its transcripts |
 | `ATM_*` | Set for `[monitor].command` and `[delivery].command`, as listed above |
+
+## Go port configuration
+
+`atm run <issue.md | number>` runs from inside the repository it works on. Its
+configuration is YAML in layers, each overriding the one before: built-in
+defaults (`harness: claude`), `~/.config/atm/config.yaml` (`harness`, `model`,
+`effort` only), `.atm.yaml` at the repository root, then `--harness`, `--model`
+and `--effort`. Unknown keys fail the run.
+
+`.atm.yaml` declares every command the run needs. Every key is required; an
+empty value is a deliberate "none"; a missing key fails with "config incomplete".
+Nothing is detected or defaulted per language.
+
+| Key | Meaning |
+|-----|---------|
+| `install`, `test`, `typecheck`, `lint` | Shell commands |
+| `test_file` | Runs one test; must contain `{file}` or `{dir}` |
+| `test_patterns`, `docs_patterns` | Lists of globs for test and doc files |
+| `delivery` | The delivery command |
+
+The issue's first line is its title (a leading `#` is dropped) and the rest its
+body, which must declare a `Type:` line: `fix` (or `hotfix`), `feature`,
+`greenfield`, `refactor`, `tests`, `docs` or `chore`. A number is read with
+`gh issue view` from the repository `origin` names.
