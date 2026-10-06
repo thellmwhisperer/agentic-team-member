@@ -1400,14 +1400,16 @@ def test_a_silent_step_gets_one_elapsed_line_every_30_seconds(tmp_path, monkeypa
 
 def _past_run(tmp_path, monkeypatch, state):
     """A past run next to the artifact dir whose clone is on atm/x, and a gh that answers the PR state in `state`."""
-    clone, run = tmp_path / "old-clone", tmp_path / "old-run"
+    clone, run, origin = tmp_path / "atm-run-old-clone", tmp_path / "old-run", tmp_path / "source-repo"
     _git(tmp_path, "init", "-q", "-b", "atm/x", str(clone))
+    _git(tmp_path, "init", "-q", "-b", "main", str(origin))
+    _git(clone, "remote", "add", "origin", str(origin))
     run.mkdir()
     (run / "worker-1.jsonl").write_text("{}\n")
     (run / "report.json").write_text(json.dumps({"worktree": str(clone)}))
     gh = tmp_path / "bin" / "gh"
     gh.parent.mkdir()
-    gh.write_text(f'#!/bin/sh\n[ "$*" = "pr view atm/x --json state --jq .state" ] && cat {tmp_path / "pr-state"}\n')
+    gh.write_text(f'#!/bin/sh\n[ "$PWD" = "{origin}" ] && [ "$*" = "pr view atm/x --json state --jq .state" ] && cat {tmp_path / "pr-state"}\n')
     gh.chmod(0o755)
     (tmp_path / "pr-state").write_text(state)
     monkeypatch.setenv("PATH", f"{gh.parent}{os.pathsep}{os.environ['PATH']}")
@@ -1433,3 +1435,36 @@ def test_a_run_ends_by_removing_the_clones_of_past_runs_merged_while_it_ran(tmp_
     assert harness_worker.main(argv) == 0
     assert not clone.exists() and json.loads((run / "report.json").read_text())["clone_removed"]
     assert Path(json.loads((artifacts / "report.json").read_text())["worktree"]).is_dir()  # its own clone stays
+
+
+def test_sweep_does_not_remove_a_non_atm_directory_named_in_a_neighboring_report(tmp_path, monkeypatch):
+    clone, run = _past_run(tmp_path, monkeypatch, "MERGED")
+    unrelated = tmp_path / "unrelated-repo"
+    clone.rename(unrelated)
+    (run / "report.json").write_text(json.dumps({"worktree": str(unrelated)}))
+    harness_worker.sweep_merged_clones(tmp_path / "current-run")
+    assert unrelated.is_dir()
+    assert "clone_removed" not in json.loads((run / "report.json").read_text())
+
+
+def test_sweep_continues_after_removal_fails_for_one_report(tmp_path, monkeypatch):
+    failed, failed_run = _past_run(tmp_path, monkeypatch, "MERGED")
+    succeeded = tmp_path / "atm-run-succeeded"
+    _git(tmp_path, "init", "-q", "-b", "atm/x", str(succeeded))
+    _git(succeeded, "remote", "add", "origin", str(tmp_path / "source-repo"))
+    succeeded_run = tmp_path / "succeeded-run"
+    succeeded_run.mkdir()
+    (succeeded_run / "report.json").write_text(json.dumps({"worktree": str(succeeded)}))
+    real_rmtree = harness_worker.shutil.rmtree
+
+    def fail_one(path, *args, **kwargs):
+        if Path(path) == failed:
+            raise OSError("permission denied")
+        return real_rmtree(path, *args, **kwargs)
+
+    monkeypatch.setattr(harness_worker.shutil, "rmtree", fail_one)
+    harness_worker.sweep_merged_clones(tmp_path / "current-run")
+    assert failed.is_dir()
+    assert not succeeded.exists()
+    assert "clone_removed" not in json.loads((failed_run / "report.json").read_text())
+    assert json.loads((succeeded_run / "report.json").read_text())["clone_removed"]
