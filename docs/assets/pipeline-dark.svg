@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 480" width="1000" height="480" role="img" aria-label="ATM pipeline. Issue, isolated clone, contract, coding agent (model), checks. FAIL stops the run. PASS goes to the slop detector, a code quality gate where a model may only cut, then to the delivery and code review gate, your delivery command. The shipped example is no-mistakes, whose own pipeline mixes code and models: intent, rebase, review (model), test (command plus a model judging the evidence), document (model), lint, push, PR (model writes title and body), CI. Rebase, lint and CI call a model only after a fix answer.">
+<defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#9198a1"/></marker></defs>
+<g font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="13" fill="#e6edf3">
+<text x="10" y="22" text-anchor="start" font-size="12" font-weight="700" fill="#9198a1">ATM</text>
+<rect x="10" y="50" width="135" height="60" rx="6" fill="#1c2b3d" stroke="#7aa2d6"/><text x="77.5" y="72" text-anchor="middle" font-weight="600">Issue</text><text x="77.5" y="89" text-anchor="middle" font-size="11" fill="#9198a1">GitHub or a text file</text>
+<rect x="165" y="50" width="135" height="60" rx="6" fill="#1c2b3d" stroke="#7aa2d6"/><text x="232.5" y="72" text-anchor="middle" font-weight="600">Isolated clone</text><text x="232.5" y="89" text-anchor="middle" font-size="11" fill="#9198a1">git clone + env prep</text>
+<rect x="320" y="50" width="135" height="60" rx="6" fill="#1c2b3d" stroke="#7aa2d6"/><text x="387.5" y="72" text-anchor="middle" font-weight="600">Contract</text><text x="387.5" y="89" text-anchor="middle" font-size="11" fill="#9198a1">brief.md</text>
+<rect x="475" y="40" width="160" height="80" rx="6" fill="#3d2e12" stroke="#e3a84a" stroke-width="2" stroke-dasharray="6 3"/><text x="555.0" y="62" text-anchor="middle" font-weight="700">Coding agent</text><text x="555.0" y="79" text-anchor="middle" font-size="11" fill="#9198a1">claude · codex · opencode · pi</text>
+<text x="555" y="111" text-anchor="middle" font-size="11" font-style="italic">writes the fix</text>
+<rect x="655" y="50" width="135" height="60" rx="6" fill="#1c2b3d" stroke="#7aa2d6"/><text x="722.5" y="72" text-anchor="middle" font-weight="600">Checks</text><text x="722.5" y="89" text-anchor="middle" font-size="11" fill="#9198a1">red/green · suite · scope</text>
+<rect x="840" y="50" width="115" height="60" rx="6" fill="none" stroke="#6e7681" stroke-dasharray="4 3"/><text x="897.5" y="72" text-anchor="middle" font-weight="600">Stop, exit 1</text><text x="897.5" y="89" text-anchor="middle" font-size="11" fill="#9198a1">report.json says why</text>
+<path d="M145 80H163" stroke="#9198a1" stroke-width="1.5" fill="none" marker-end="url(#ar)"/>
+<path d="M300 80H318" stroke="#9198a1" stroke-width="1.5" fill="none" marker-end="url(#ar)"/>
+<path d="M455 80H473" stroke="#9198a1" stroke-width="1.5" fill="none" marker-end="url(#ar)"/>
+<path d="M635 80H653" stroke="#9198a1" stroke-width="1.5" fill="none" marker-end="url(#ar)"/>
+<path d="M790 80H838" stroke="#9198a1" stroke-width="1.5" fill="none" marker-end="url(#ar)"/>
+<text x="814" y="72" text-anchor="middle" font-size="11" fill="#9198a1">FAIL</text>
+<path d="M722 50V22H555V38" stroke="#e3a84a" stroke-width="1.5" fill="none" marker-end="url(#ar)"/>
+<text x="638" y="16" text-anchor="middle" font-size="11" fill="#9198a1">PASS + a proven follow-up → next unit (max 3)</text>
+<rect x="645" y="160" width="155" height="84" rx="6" fill="#3d2e12" stroke="#e3a84a" stroke-width="2" stroke-dasharray="6 3"/><text x="722.5" y="182" text-anchor="middle" font-weight="700">Slop detector</text><text x="722.5" y="199" text-anchor="middle" font-size="11" fill="#9198a1">code quality gate</text><text x="722.5" y="214" text-anchor="middle" font-size="11" fill="#9198a1">(not code review)</text>
+<text x="722.5" y="234" text-anchor="middle" font-size="11" font-style="italic">may only cut; kept if green</text>
+<path d="M722 110V158" stroke="#9198a1" stroke-width="1.5" fill="none" marker-end="url(#ar)"/>
+<text x="732" y="140" text-anchor="start" font-size="11" fill="#9198a1">PASS</text>
+<rect x="10" y="150" width="14" height="14" rx="3" fill="#1c2b3d" stroke="#7aa2d6"/><text x="32" y="162" text-anchor="start" font-size="12">code: Python, git, your commands; no model</text>
+<rect x="10" y="174" width="14" height="14" rx="3" fill="#3d2e12" stroke="#e3a84a" stroke-dasharray="3 2"/><text x="32" y="186" text-anchor="start" font-size="12">a model does the work</text>
+<rect x="10" y="198" width="14" height="14" rx="3" fill="#1c2b3d" stroke="#7aa2d6"/><rect x="13" y="206" width="8" height="4" fill="#3d2e12" stroke="#e3a84a" stroke-width="1"/><text x="32" y="210" text-anchor="start" font-size="12">code runs it, a model does the part in the band</text>
+<text x="10" y="234" text-anchor="start" font-size="12" font-style="italic" fill="#9198a1">fix → model:</text><text x="90" y="234" text-anchor="start" font-size="12">a model only after someone answers fix</text>
+<path d="M722 244V283" stroke="#9198a1" stroke-width="1.5" fill="none" marker-end="url(#ar)"/>
+<text x="732" y="266" text-anchor="start" font-size="11" fill="#9198a1">branch atm/… runs [delivery].command</text>
+<rect x="10" y="285" width="980" height="185" rx="8" fill="#161b22" stroke="#6e7681" stroke-dasharray="2 3"/>
+<text x="24" y="307" text-anchor="start" font-size="12" font-weight="700">Delivery and code review gate · shipped example: no-mistakes</text>
+<text x="24" y="325" text-anchor="start" font-size="11" fill="#9198a1">Its own graph. A finding stops it until whoever launched the run answers; only some test and CI findings get fixed on their own.</text>
+<rect x="22" y="347" width="96" height="105" rx="6" fill="#1c2b3d" stroke="#7aa2d6"/><text x="70.0" y="369" text-anchor="middle" font-weight="600">intent</text><text x="70.0" y="386" text-anchor="middle" font-size="11" fill="#9198a1">ATM passes</text><text x="70.0" y="401" text-anchor="middle" font-size="11" fill="#9198a1">--intent</text>
+<path d="M118 399.5H128" stroke="#9198a1" stroke-width="1.5" fill="none" marker-end="url(#ar)"/>
+<rect x="130" y="347" width="96" height="105" rx="6" fill="#1c2b3d" stroke="#7aa2d6"/><text x="178.0" y="369" text-anchor="middle" font-weight="600">rebase</text><text x="178.0" y="386" text-anchor="middle" font-size="11" fill="#9198a1">onto main</text><text x="178.0" y="442" text-anchor="middle" font-size="10.5" font-style="italic" fill="#9198a1">fix → model</text>
+<path d="M226 399.5H236" stroke="#9198a1" stroke-width="1.5" fill="none" marker-end="url(#ar)"/>
+<rect x="238" y="347" width="96" height="105" rx="6" fill="#3d2e12" stroke="#e3a84a" stroke-width="2" stroke-dasharray="6 3"/><text x="286.0" y="369" text-anchor="middle" font-weight="700">review</text><text x="286.0" y="386" text-anchor="middle" font-size="11" fill="#9198a1">reads the diff,</text><text x="286.0" y="401" text-anchor="middle" font-size="11" fill="#9198a1">reports findings</text>
+<path d="M334 399.5H344" stroke="#9198a1" stroke-width="1.5" fill="none" marker-end="url(#ar)"/>
+<rect x="346" y="347" width="96" height="105" rx="6" fill="#1c2b3d" stroke="#7aa2d6"/><text x="394.0" y="369" text-anchor="middle" font-weight="600">test</text><text x="394.0" y="386" text-anchor="middle" font-size="11" fill="#9198a1">commands.test</text><rect x="351" y="423" width="86" height="24" rx="4" fill="#3d2e12" stroke="#e3a84a" stroke-width="1.5" stroke-dasharray="4 2"/><text x="394.0" y="439" text-anchor="middle" font-size="10.5" font-style="italic">judges evidence</text>
+<path d="M442 399.5H452" stroke="#9198a1" stroke-width="1.5" fill="none" marker-end="url(#ar)"/>
+<rect x="454" y="347" width="96" height="105" rx="6" fill="#3d2e12" stroke="#e3a84a" stroke-width="2" stroke-dasharray="6 3"/><text x="502.0" y="369" text-anchor="middle" font-weight="700">document</text><text x="502.0" y="386" text-anchor="middle" font-size="11" fill="#9198a1">updates the docs</text><text x="502.0" y="401" text-anchor="middle" font-size="11" fill="#9198a1">for the change</text>
+<path d="M550 399.5H560" stroke="#9198a1" stroke-width="1.5" fill="none" marker-end="url(#ar)"/>
+<rect x="562" y="347" width="96" height="105" rx="6" fill="#1c2b3d" stroke="#7aa2d6"/><text x="610.0" y="369" text-anchor="middle" font-weight="600">lint</text><text x="610.0" y="386" text-anchor="middle" font-size="11" fill="#9198a1">commands.lint</text><text x="610.0" y="442" text-anchor="middle" font-size="10.5" font-style="italic" fill="#9198a1">fix → model</text>
+<path d="M658 399.5H668" stroke="#9198a1" stroke-width="1.5" fill="none" marker-end="url(#ar)"/>
+<rect x="670" y="347" width="96" height="105" rx="6" fill="#1c2b3d" stroke="#7aa2d6"/><text x="718.0" y="369" text-anchor="middle" font-weight="600">push</text><text x="718.0" y="386" text-anchor="middle" font-size="11" fill="#9198a1">force-with-lease</text>
+<path d="M766 399.5H776" stroke="#9198a1" stroke-width="1.5" fill="none" marker-end="url(#ar)"/>
+<rect x="778" y="347" width="96" height="105" rx="6" fill="#1c2b3d" stroke="#7aa2d6"/><text x="826.0" y="369" text-anchor="middle" font-weight="600">PR</text><text x="826.0" y="386" text-anchor="middle" font-size="11" fill="#9198a1">opens or updates</text><rect x="783" y="423" width="86" height="24" rx="4" fill="#3d2e12" stroke="#e3a84a" stroke-width="1.5" stroke-dasharray="4 2"/><text x="826.0" y="439" text-anchor="middle" font-size="10.5" font-style="italic">title and body</text>
+<path d="M874 399.5H884" stroke="#9198a1" stroke-width="1.5" fill="none" marker-end="url(#ar)"/>
+<rect x="886" y="347" width="96" height="105" rx="6" fill="#1c2b3d" stroke="#7aa2d6"/><text x="934.0" y="369" text-anchor="middle" font-weight="600">CI</text><text x="934.0" y="386" text-anchor="middle" font-size="11" fill="#9198a1">waits for checks</text><text x="934.0" y="442" text-anchor="middle" font-size="10.5" font-style="italic" fill="#9198a1">fix → model</text>
+</g></svg>

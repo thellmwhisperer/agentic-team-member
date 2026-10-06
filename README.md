@@ -1,571 +1,122 @@
-# ATM — Agentic Team Member
+# ATM, Agentic Team Member
 
-> Point a local LLM at a bug. Get back a fix with tests, a verified red-green, and a PR.
+> The coding agent is one node. Every edge is decided by code.
 
-[![tests](https://img.shields.io/badge/tests-passing-brightgreen)](#status)
-[![python](https://img.shields.io/badge/python-3.12%2B-blue)](#requirements)
-[![license](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
-[![status](https://img.shields.io/badge/status-alpha-orange)](#status)
+[![PR checks](https://github.com/thellmwhisperer/agentic-team-member/actions/workflows/pr.yml/badge.svg)](https://github.com/thellmwhisperer/agentic-team-member/actions/workflows/pr.yml)
+![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)
+![Status: alpha](https://img.shields.io/badge/status-alpha-orange)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
-ATM is a small Python harness that turns a local code model (for example Qwen
-3.6 MTP on [llama-server](https://github.com/ggml-org/llama.cpp), or another
-OpenAI-compatible local endpoint)
-into a **TDD bug-fix agent** for your repository. No model API key — your code
-is never sent to a hosted inference provider. (GitHub auth via `gh` is still
-required for issue ingestion and PR creation.)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/pipeline-dark.svg">
+  <img alt="ATM pipeline: issue, isolated clone, contract, coding agent, checks. FAIL stops the run. PASS goes to the slop detector, a code quality gate where a model may only cut, then to the delivery and code review gate. The shipped example of that gate is no-mistakes, a graph of its own where review and document are models, test and PR are code with a model part, and rebase, lint and CI call a model only after a fix answer. A passed unit with a proven follow-up goes back to the agent, at most three units." src="docs/assets/pipeline-light.svg" width="1000">
+</picture>
 
-It does the work an engineer would do on a single, well-scoped issue: read
-the code, write a failing test, fix the bug, verify red-green, and open a PR.
+Give ATM an issue, from GitHub or a text file. It hands the issue to a coding
+agent you already pay for (Claude Code, Codex, OpenCode or pi) inside an
+isolated clone, with a written contract. Then code, not the agent, decides:
+does the new test fail without the fix and pass with it, do the suite and
+typecheck still pass, did the diff stay inside the issue. A green run gets one
+more agent call, the slop detector, that may only delete. Then the delivery and
+code review gate takes the branch.
 
-> **Status: alpha.** ATM is a research-grade harness. APIs, config
-> schema, prompt templates, and the verify contract can change without
-> notice. Empirical coverage is uneven across code shapes — see
-> [Coverage](#coverage) (25% strong / 40% partial / 35% weak). Not
-> production-ready. Use on disposable branches and review every PR
-> before merging.
+## A real run
 
----
-
-## Table of contents
-
-- [Why local-first](#why-local-first)
-- [Quick look](#quick-look)
-- [Execution targets](#execution-targets)
-- [How it works](#how-it-works)
-- [The cookbook](#the-cookbook)
-- [Skills](#skills)
-- [Coverage](#coverage)
-- [Language plugins](#language-plugins)
-- [Configuration](#configuration)
-- [Installation](#installation)
-- [Usage](#usage)
-- [Roadmap](#roadmap)
-- [Status](#status)
-- [License](#license)
-
----
-
-## Why local-first
-
-Most coding agents assume a frontier model behind a paid API. ATM assumes the
-opposite: a 4B–27B model running on your laptop or workstation, with a 32k
-context window and no network egress.
-
-That constraint shaped every design decision:
-
-- **Deterministic prep does the thinking the model can't.** Local models can
-  write code, but they get lost in dependency graphs. ATM parses imports,
-  traces factory calls, classifies module-level mutables, and hands the model
-  a ready mock recipe before the first turn.
-- **Phased prompting beats clever planning.** Two short, focused phases
-  (test-first, then quality-fix) outperform open-ended ReAct loops on a small
-  model.
-- **The contract is explicit.** Red-green verification and a deterministic
-  quality gate sit between the model and your branch. The model can't ship a
-  fix that doesn't reproduce and resolve the failure.
-
----
-
-## Quick look
-
-```bash
-# 1. Start a local model server with the local target profile
-cp targets/local/.env.example targets/local/.env.local
-# edit targets/local/.env.local for your llama-server binary and local config
-make -C targets/local start-model
-
-# 2. Point ATM at a GitHub issue
-python3.12 -m agentic_tdd_runner.agent \
-  --repo /path/to/your/repo \
-  --github-repo your-org/your-repo \
-  --issue-number 41
-```
-
-ATM clones a detached worktree under `your-repo/.worktree/`, runs environment
-prep, generates a cookbook for the target function, then drives the model
-through a two-phase TDD loop. If everything goes green, it commits and opens a
-PR via `gh`.
-
----
-
-## Execution targets
-
-ATM has one canonical harness: `agentic_tdd_runner`. Execution targets describe
-how to operate that harness in a specific environment without forking it.
-
-| Target | Path | Purpose |
-| --- | --- | --- |
-| Local | [`targets/local`](targets/local) | Run ATM on a developer machine with `llama-server` or another local OpenAI-compatible endpoint. |
-| AWS AgentCore | [`targets/aws-agentcore`](targets/aws-agentcore) | Optional hosted execution target for AWS AgentCore and Bedrock. |
-
-Target-specific settings belong in `.env.local`, `*.local.toml`, cloud secret
-stores, or target-local docs. The core harness remains AWS-agnostic and should
-not import deployment-specific code.
-
----
-
-## How it works
-
-```mermaid
-flowchart TB
-    A[python -m agentic_tdd_runner.agent<br/>--repo + issue + optional target] --> B
-    B[Environment Prep<br/><i>git worktree, package manager,<br/>install, preflight, runner bootstrap</i>]:::det --> C
-    C[Target Discovery<br/><i>issue text → source + symbol</i>]:::det --> D
-    D[Cookbook Generator<br/><i>imports, deps, mocks, seams</i>]:::det --> E
-    E[Phased Agent Loop<br/><i>P1: failing test → P2: quality fix</i>]:::llm --> F
-    F[Red-Green Verifier<br/><i>stash fix → FAIL, restore → PASS</i>]:::det --> G
-    G[Quality Gate<br/><i>typecheck + lint + format +<br/>forbidden patterns</i>]:::det --> H
-    H[PR Creation<br/><i>git commit + push + gh pr create</i>]:::det
-
-    classDef det fill:#e0f2fe,stroke:#0369a1,color:#0c4a6e
-    classDef llm fill:#fef3c7,stroke:#b45309,color:#7c2d12
-```
-
-Blue blocks are deterministic Python. The single yellow block is where the
-local model runs. Each deterministic block in front of the model is one less
-round-trip, one less chance for the model to drift, and one less surface for
-unverified output to slip through.
-
----
-
-## The cookbook
-
-Local models can fix source code but cannot resolve complex mocking graphs.
-The cookbook is the semantic prep that closes that gap — deterministic static
-analysis of the target function, emitted as ready-to-use context for the
-model.
-
-| Cookbook output        | What it solves                                                                                  |
-| ---------------------- | ----------------------------------------------------------------------------------------------- |
-| Import map             | Resolves `from x import y` and `import { y } from "x"` across TS/Python                         |
-| Dependency graph       | Factory results (`const log = getLogger()`) vs singletons vs mutable locals (`let client`)      |
-| Mock recipes           | `mock.module()` for imports, setter injection for module-level mutables                         |
-| Module-level factories | Includes deps that execute on import even if the target function doesn't use them directly     |
-| Assertion ranking      | Outbound calls scored (`say` > `emit` > `info` > `get`); calls on parameters skipped           |
-| Class vs function      | Detects methods vs top-level functions; emits correct import + instantiation in the scaffold    |
-| Test scaffold          | A ready-to-fill test file with imports, mocks, seams, and a single test block                   |
-
-Everything in the cookbook is deterministic Python — no LLM is involved in its
-generation. The model only sees the result.
-
----
-
-## Skills
-
-ATM is one agent with multiple skills. Each skill is a different cookbook —
-the agent loop, verifier, and language plugins are shared. Teaching ATM a new
-skill means writing a new cookbook, not a new agent.
-
-```mermaid
-flowchart LR
-    subgraph Shared
-        A[Agent Loop]
-        V[Verifier]
-        P[Language Plugins]
-    end
-    subgraph Per-skill
-        CF[fix cookbook]
-        CM[migrate cookbook]
-        CR[refactor cookbook]
-    end
-    CF --> A
-    CM --> A
-    CR --> A
-    A --> V
-    A --> P
-```
-
-| Skill      | Status     | What it does                                                                          |
-| ---------- | ---------- | ------------------------------------------------------------------------------------- |
-| `fix`      | ✅ shipped | Analyze a bug, write a failing test, fix the source, verify red-green, open a PR      |
-| `migrate`  | 🛠 planned | Read a dependency upgrade guide, extract rules, apply file-by-file with verification  |
-| `refactor` | 🛠 planned | Large-scale codemods guided by rules — an agent that understands the code, not regex  |
-
-### Why `migrate` matters
-
-Dependabot opens a PR bumping a dependency from v3 to v4, but it doesn't fix
-the breaking changes. You read the migration guide, understand what broke, and
-fix it file by file. Renovate doesn't fix this either. A local-first agent
-with a cookbook that ingests the upgrade guide is the right shape for that
-gap.
-
-### The skill pattern
-
-Every skill follows the same three-step architecture:
-
-1. **Cookbook** (deterministic) — analyze the problem, generate an artefact
-2. **Agent** (LLM) — execute the plan with tools
-3. **Verifier** (deterministic) — confirm the work is correct
-
-What changes between skills is step 1. The cookbook is the semantic layer —
-it's what turns a generic model into a specialist.
-
----
-
-## Coverage
-
-ATM works on the *shape* of code it has been proven against — not on
-"any TypeScript or Python bug." The matrix below tracks empirical
-coverage by code shape, weighted by how often that shape shows up in
-real issues.
-
-| Code shape                              | Weight | Status  | Evidence                                                                                  |
-| --------------------------------------- | -----: | ------- | ----------------------------------------------------------------------------------------- |
-| Handlers, callbacks, event listeners    |    25% | strong  | End-to-end fix on an event-handler function: incoming event → outbound client call        |
-| Services and classes with dependencies  |    20% | weak    | Multi-provider service class with constructor deps: invalid import shape, weak modeling   |
-| API and SDK integrations                |    20% | partial | Observed run shipped a retry utility but left the API callsites identified by discovery untouched |
-| CLI, scripts, and pipelines             |    15% | weak    | Discovery ranks `main()` entrypoints without classifying them as glue vs target           |
-| Persistence, config, filesystem         |    12% | partial | Env / config / schema facts exist, no unified fix strategy                                |
-| Pure functions and helpers              |     8% | partial | Generator-with-persistent-state shape: function found, but module-state ownership weak    |
-
-Weighted view: **25% strong / 40% partial / 35% weak**.
-
-Full ontology, signals per shape, test strategies, and the verify v2
-contract live in [`docs/code-shape-coverage.md`](docs/code-shape-coverage.md).
-
-### Verify v1.0 gate
-
-`verified=True` is **not** "a new test fails, a new file is added, and
-the test passes." It is:
-
-- If discovery produced candidates, the diff must touch at least one of
-  those paths.
-- If discovery produced nothing, the diff must touch at least one
-  pre-existing source path in the target repo — not only newly created
-  helper or test files.
-
-Issue-obligation-aware gating (v2.1, callsite-aware) is on the roadmap.
-
-### Known fail modes
-
-- **`body-identifies-but-fix-doesnt-address`** — observed in an
-  `api_sdk_integration` run. The PR body correctly identified that two
-  external API call families were missing retry logic, but the diff only
-  added a standalone retry utility and its unit tests. The v1.0 gate
-  rejects this run because the diff touches zero `discovery_candidates`
-  paths.
-
-### Defaults
-
-- **Partial PRs are off by default.** When obligations are missing, the
-  runner halts before PR creation unless partial mode is explicitly
-  enabled. A partial PR cannot be titled as a complete `fix`.
-- **Real `sleep()` in retry/backoff tests is a hard reject** for the
-  `api_sdk_integration` shape when the issue text contains retry or
-  backoff language. Other shapes start with a soft warning until more
-  empirical evidence accumulates.
-
----
-
-## Language plugins
-
-Languages are plugins. Adding a new language requires zero changes to existing
-code — drop a module in `agentic_tdd_runner/languages/` and implement nine
-hooks:
+Issue 141 of this repo, 6 October 2026, Claude Opus 5.5, effort high:
+268 s, red and green verified, two cuts kept by the slop detector,
+[PR 144](https://github.com/thellmwhisperer/agentic-team-member/pull/144)
+merged, issue closed.
 
 ```text
-agentic_tdd_runner/languages/
-  __init__.py
-  typescript.py   # TS/JS: bun:test/jest/vitest, mock.module(), export detection
-  python.py       # Python: pytest, unittest.mock, class method support
-  signature.py    # Shared helpers for parsing parameter lists
+PREPARE   worktree .worktrees/atm-run-20261006-102310   base aa50eeafe9   tests python3 -m pytest
+  ✓ prepare 0.9s
+
+AGENT  unit 1 claude
+  ▶ #3  Write  tests/test_test_script.py                      ✓ ok
+  ▶ #4  Bash   python3 -m pytest -q tests/test_test_script.py ✓ ok   1 failed   (red first)
+  ▶ #5  Bash   printf '3.12\n' > .python-version && cat > scripts/test.sh …
+  ▶ #21 Bash   python3 -m pytest -q                           ✓ ok   158 passed
+  ✓ agent unit 1 4m27s
+
+RED / GREEN VERIFICATION
+  ✓ without the fix   test fails    1 failed in 0.03s
+  ✓ with the fix      test passes   1 passed in 0.33s
+  ✓ quality  ✓ gate  ✓ full suite 1m32s  ✓ scope  ✓ follow-up validation
+
+AGENT  ponytail claude
+  ✎ cut a rule repeated in two places of .no-mistakes.yaml; README repeats CONTRIBUTING in three lines → one
+  ✓ ponytail agent 3m49s
+  ✓ ponytail re-checks 1m37s   red/green, quality, gate, full suite, scope: all green again
+
+SUMMARY
+  checks    ✓ red/green   ✓ quality   ✓ gate   ✓ scope   ✓ full suite   – typecheck n/a
+  ponytail  kept, 4 net lines saved, 2 tombstones written
+✓ RESULT  PASS
 ```
 
-Each plugin implements: `parse_imports`, `parse_assignments`, `test_path`,
-`is_exported`, `import_path`, `prepend_export`.
+The agent's own red (`#4`) is a courtesy. The verdict is the RED / GREEN
+block: ATM parks the fix, runs the test, brings the fix back, runs it again.
 
----
+## Who decides what
 
-## Configuration
+| Step | Who | Says no to |
+|------|-----|-----------|
+| Clone, environment, contract | code | a dirty clone, a missing test runner |
+| Write the fix | **model** | nothing: it decides nothing |
+| Red / green | code | a test that passes without the fix; a red that only fails on a missing import |
+| Gate and scope | code | agent commits; test-only diffs; files outside the issue |
+| Quality, suite, typecheck | code | lint, forbidden patterns, test smells, any failure |
+| Follow-ups | code (+ optional model) | a gap without a red test on code that already exists |
+| Slop detector (code quality gate, not code review) | **model**, may only cut | a cut that breaks any check or does not shrink the diff: the clone goes back |
+| Delivery and code review gate | your command | ATM branches, commits and runs it. The shipped example is no-mistakes, a graph of its own: models review, judge the test evidence, update the docs and write the PR; code rebases, runs your test and lint commands, pushes and watches CI |
 
-Per-run configuration is loaded directly from TOML. The authoritative set of
-checked-in defaults is [`config/agent.toml`](config/agent.toml); local overrides
-should use ignored `*.local.toml` files. The former separate `tools.json` file
-is no longer used.
+Two more optional model calls never pass a unit on their own: a local Ollama judge
+for duplicated test setup, and TypeSafe's Jev for follow-ups. Step by step,
+with the function behind each one: [How a run flows](docs/how-a-run-flows.md).
 
-### Repository profile
-
-Optional stable repository facts live in `.atm/profile.toml`. Use this file
-for callback frameworks, dependency contracts, import expectations, and mock
-recipes that are true for the repository across issues. ATM does not infer
-dependency-specific callback contracts from installed packages when no profile
-is present; repos that need those contracts should add a profile before relying
-on issue-only discovery.
-
-The `[prompt].quality_failed` message is configurable in `config/agent.toml`.
-Verification behavior is defined by the runner, not by a `[verification]`
-configuration section.
-An `INVALID RED` rejects a red test that fails on a missing import rather than
-the behavior under test. The runner recognizes import-error diagnostics in
-Python and JavaScript test output; quoted error text in an assertion or pytest
-captured output does not trigger this check.
-
-With environment prep enabled, ATM inspects the nearest `package.json` and
-lockfile before the model starts. For focused JS test runs it uses the detected
-runner when it is one of the supported families:
-
-| Detected runner | Focused command prefix |
-| --------------- | ---------------------- |
-| `bun:test`      | `bun test`             |
-| `vitest`        | package-manager wrapper + `vitest run` |
-| `jest`          | package-manager wrapper + `jest --runInBand --watchman=false --coverage=false` |
-| `node:test`     | `node --test`          |
-
-Bootstrap facts are the source of truth once detected: prompts, cookbooks,
-permission grants, and focused verification commands must not reintroduce
-stale language defaults such as `bun test`. Custom package scripts derive a
-focused prefix from the script when possible, otherwise they use the package
-manager's test script entrypoint. Unknown or ambiguous runner facts fall back to
-`[runner].command`.
-For detected JS runners, environment prep also runs a lightweight version
-preflight (`bun --version`, `node --version`, or package-manager wrapper +
-`runner --version`) before the first model tool call. That catches missing local
-runner installs while the failure is still deterministic setup, not agent work.
-Tool execution already runs inside the selected workdir, so generated commands
-should use relative paths directly (`bun test src/foo.test.ts`) instead of
-shelling through `cd path && ...`.
-When a Next.js Jest project has a TypeScript/workspace-coupled Jest config,
-environment prep writes a local `.atm-jest.config.cjs` shim and focused Jest
-runs pass it via `--config` instead of editing the original project config.
-That shim is a bootstrap fallback, not a pass-through clone of the original
-config: it does not preserve custom keys such as `moduleNameMapper`, custom
-`transform`, reporters, or coverage thresholds. For non-trivial Next.js Jest
-configs, set `[runner].command` explicitly until ATM can safely preserve those
-project-specific settings.
-
----
-
-## Installation
+## Run it
 
 ```bash
 git clone https://github.com/thellmwhisperer/agentic-team-member.git
-cd agentic-team-member
-pip install 'requests>=2.31,<3'
+cd agentic-team-member && pip install -r requirements.txt   # Python 3.12+, git, gh, one agent CLI
+
+# A GitHub issue
+python3 -m agentic_tdd_runner.harness_worker --repo /path/to/repo \
+  --github-repo owner/repo --issue-number 300 --harness claude --model claude-opus-5-5
+
+# A plan in a text file: first line the title, then the body and its acceptance criteria
+python3 -m agentic_tdd_runner.harness_worker --repo /path/to/repo \
+  --issue-file plans/retry-on-timeout.md --harness codex --model gpt-6 --label retry
 ```
 
-There is no published package yet — clone and run from source.
+| Exit | Meaning |
+|------|---------|
+| `0` | Every unit passed, and delivery, if configured, exited 0 |
+| `1` | A unit failed; nothing is delivered |
+| `2` | Preparation failed, the label is taken, or there is no monitor and no terminal |
+| `4` | Every unit passed, but the delivery command exited non-zero |
 
-Run the tests with `scripts/test.sh`, see [CONTRIBUTING.md](CONTRIBUTING.md#running-the-test-suite).
+ATM is built to be launched and watched by an agent. `[monitor].command` runs
+at every step start and end, so the launching agent knows where the run is
+without reading its output; with no monitor, the worker wants a terminal.
+`--dry-run` prints the contract and stops. `--label NAME` puts the run in
+`.tmp/harness-worker/NAME`. `scripts/tail-run.py --label NAME` follows it from
+another terminal. Delivery is whatever `[delivery].command` says; the shipped
+example hands the branch to [no-mistakes](https://github.com/kunchenguid/no-mistakes).
+Leave it empty and the green work stays in the clone.
 
----
+## Read more
 
-## Requirements
-
-- Python 3.12+
-- [`requests`](https://pypi.org/project/requests/)
-- A local LLM server — [llama-server](https://github.com/ggml-org/llama.cpp)
-  or another OpenAI-compatible endpoint
-- A model with tool-calling support. The local target documents the current
-  Qwen 3.6 MTP `llama-server` profile.
-- [`gh`](https://cli.github.com/) CLI for PR creation
-- [`rg`](https://github.com/BurntSushi/ripgrep) recommended for the agent's
-  search tool
-
----
-
-## Usage
-
-### Start the model server
-
-```bash
-cp targets/local/.env.example targets/local/.env.local
-# edit targets/local/.env.local for your machine
-make -C targets/local start-model
-```
-
-The local target keeps machine-specific model paths and `llama-server` build
-paths out of git. See [`targets/local`](targets/local) for the exact profile.
-
-### Run the agent
-
-```bash
-# Option A: pass an inline issue or a file path
-python3.12 -m agentic_tdd_runner.agent \
-  --repo /path/to/repo \
-  /path/to/issue.md
-
-# Option B: fetch a GitHub issue by number
-python3.12 -m agentic_tdd_runner.agent \
-  --repo /path/to/repo \
-  --github-repo owner/repo \
-  --issue-number 41
-```
-
-When `--repo` is supplied, ATM creates a detached run worktree under
-`REPO/.worktree/` by default, then runs environment prep there. That keeps all
-run filesystem access inside the target project. Pass `--run-root` to override
-the worktree location, or `--source` + `--symbol` to pin the target (skip
-discovery).
-
-### CLI reference
-
-| Flag                | Description                                                       |
-| ------------------- | ----------------------------------------------------------------- |
-| `issue` (positional) | Issue text, or path to a file containing the issue description    |
-| `--issue-number`    | GitHub issue number to load from the target repo                  |
-| `--github-repo`     | GitHub repo slug for `--issue-number`, e.g. `owner/repo`          |
-| `--repo`            | Existing git repo to materialize into an isolated run worktree    |
-| `--base-ref`        | Git ref used when creating a run worktree (default `main`)        |
-| `--run-root`        | Directory for generated run worktrees (default `REPO/.worktree`)  |
-| `--source`          | Source file path relative to workdir (e.g. `src/payments/processor.ts`) |
-| `--symbol`          | Target function/method name (e.g. `processPayment`)                |
-| `--workdir`         | Project root, or destination when `--repo` is used                |
-| `--config`          | Path to agent.toml config file                                    |
-| `--log-dir`         | Directory for JSONL logs (default `cwd`)                          |
-
-### Environment variables
-
-| Variable                       | Effect                                                |
-| ------------------------------ | ----------------------------------------------------- |
-| `AGENT_CONFIG` / `ATM_CONFIG`  | Default config path when `--config` is not passed     |
-| `AGENT_LOG_DIR` / `ATM_LOG_DIR` | Default log directory when `--log-dir` is not passed |
-| `AGENT_WORKDIR`                | Default project root                                  |
-
-The harness worker takes the model from `--model`, not from the TOML config;
-see [Configuration](#configuration) for what the TOML holds.
-
-### Harness worker: delivery and exit codes
-
-`python3 -m agentic_tdd_runner.harness_worker` hands the fix to a coding agent
-CLI and judges it. `--label NAME` writes the run to `.tmp/harness-worker/NAME`
-and exits 2 if that directory already exists; without it the directory is a
-timestamp. `command.txt` there holds the exact command, to repeat the run.
-
-The worker writes timestamped start and end events for these named steps:
-`prepare`, `agent unit N`, `red half` and
-`green half` of the verification, `quality`, `forbidden scan`, `gate`,
-`full suite`, `typecheck`, `scope`, `follow-up validation`, `ponytail snapshot`,
-`ponytail agent`, `ponytail re-checks`, `commit` and `delivery`. Some setup and
-verification work between these steps has no separate event. A step with no
-command (no typecheck, say) does not run and writes nothing.
-
-The worker renders its log live on its own stdout with the renderer in
-`scripts/tail-run.py`: `▶ <step>` when a step starts, `✓ <step> <duration>` or
-`✗ <step> <duration>` when it ends, between them the agent's numbered tool
-calls, the red/green block and, at the end, the checks line and `RESULT`. A step
-with no visible output for 30 s gets an elapsed line (`… full suite 1m30s`),
-repeated every 30 s while it stays quiet. `scripts/tail-run.py --label NAME`
-renders a log file the same way, from another pane.
-
-`[monitor].command` in `agent.toml` is a shell line ATM runs at every step
-start and end, with `ATM_LABEL`, `ATM_STEP`, `ATM_STATE` (`started`, `passed`,
-`failed`), `ATM_DURATION` (seconds) and `ATM_REPORT` (the run's `report.json`)
-in the environment. Its output is discarded and its exit code ignored. ATM
-times out the shell after 5 s; child processes may keep running. A launcher
-binds itself to the run with it, for example
-`herdr pane report-agent --state "$ATM_STATE"` or a script that wakes the
-launching agent; ATM knows no tool by name.
-
-A run nobody can watch is not launched: when stdout is not a terminal and
-`[monitor].command` is empty, the worker exits 2 with
-`no monitor: stdout is not a terminal and [monitor].command is empty`.
-
-When every unit passes, ATM runs a ponytail pass, then delivery.
-
-The ponytail pass is one more harness call, with no flag to skip it. Its brief
-is the ponytail-review rules applied to the run's diff against the base commit
-(`brief-ponytail.md`). The agent may only cut: delete, shrink, or replace with
-the standard library, a native feature or an existing helper. ATM keeps the cut
-only if the run's net added lines go down and every gate still passes: each
-unit's red test fails without the run's changes and passes with them, then the
-full test command, typecheck, quality, gate, scope (the files the run already
-touched) and the target's lint (`[delivery].lint_command`, when set).
-Otherwise ATM restores the pre-ponytail worktree.
-`report.json` gets `ponytail`: `findings`, `net_lines_before`,
-`net_lines_after`, `kept`, `reason`, `tombstones` and `commit`. When the target has
-`.slop/`, each finding of a kept cut that names an existing file becomes a
-standing slopslint tombstone in `.slop/tombstones/`, committed with the cut.
-
-A kept cut adds two final commits: `atm unit <n>: <title>` with the
-pre-ponytail tree, and on top `ponytail: <n> cuts` with only the cut and its
-tombstones. Earlier unit commits remain in chained runs. The ponytail commit
-message lists each finding as `- <file>: <finding> (<family>)`, and `commit` is
-its sha. With no kept cut there is no ponytail commit and `commit` is `null`.
-The delivery reviewer can then tell the agent's work from the cut, and why each
-cut was made.
-
-ATM excludes `.atm/` from Git in each run clone, so follow-up files there do
-not make delivery dirty when the target repository lacks that ignore rule.
-
-After the ponytail pass, delivery is the command in `[delivery].command`:
-
-1. ATM creates `atm/<slug>-<timestamp>`, commits any remaining work, and points
-   the clone's `origin` at the source repo's `origin`. A kept cut's two commits
-   already exist when ATM creates the branch. When the issue came from
-   `--issue-number`, the unit commit message ends with `Closes #<n>`.
-2. The command runs in the clone through the shell, with `ATM_TITLE`,
-   `ATM_ISSUE` (empty with `--issue-file`), `ATM_BRANCH`, `ATM_CLONE`,
-   `ATM_REPORT` and `ATM_PONYTAIL` in its environment. `ATM_PONYTAIL` is the
-   ponytail commit's finding lines joined by newlines, empty when no cut was
-   kept, so the command can hand them to the reviewer, for example inside
-   `--intent`. Its stdout and stderr go to the pane and
-   to `delivery-output.txt`. ATM does not read them: whether a PR is open or a
-   gate is waiting is in that output.
-3. `report.json` gets `delivery`: `command`, `branch`, `exit_code`,
-   `duration_seconds`, `output` (the path of that file), and `error` if the
-   branch could not be prepared.
-
-The checked-in [configuration](config/agent.toml) has a no-mistakes example.
-`--closes` puts the closing reference in the PR body, so the issue closes when
-the PR merges. Without `--yes`, `axi run` returns at a gate, and the agent that
-launched ATM answers it with `axi respond`.
-
-With no `[delivery].command`, `report.json` has
-`delivery: {"skipped": "no [delivery].command"}`. A kept ponytail cut leaves
-the final unit and ponytail commits in the clone; without a kept cut, the final
-unit's work stays uncommitted. Earlier unit commits remain in chained runs.
-
-| Exit code | Meaning                                                    |
-| --------- | ---------------------------------------------------------- |
-| `0`       | Every unit passed and delivery, if any, exited 0           |
-| `1`       | A unit failed; nothing is delivered                        |
-| `2`       | Preparation failed (issue, clone or environment)           |
-| `4`       | Every unit passed, but delivery exited non-zero            |
-
----
-
-## Roadmap
-
-Capabilities the project is moving toward before it can call itself
-production-grade:
-
-- **Lift the weak coverage rows.** Five of the six code shapes in the
-  [Coverage](#coverage) matrix are weak or partial. The highest-leverage
-  contribution right now is a failing real-world issue against one of
-  those rows.
-- **Verify v2.1 — callsite-aware gate.** Diff or callgraph evidence that
-  the named external callsite now flows through the new retry / fallback
-  / validation mechanism, not just that any discovery candidate was
-  touched.
-- **Distribution-grade packaging** — `pyproject.toml`, an `atm` CLI entry
-  point, a published version on PyPI, versioned releases, and a public
-  benchmark harness anyone can reproduce.
-- **Generalized discovery** — discovery heuristics that work across any repo
-  shape, not just the reference fixtures.
-- **More language plugins** — Go and Rust are the obvious next targets.
-- **The `migrate` and `refactor` skills** — both are designed but not
-  implemented.
-
----
+- [How a run flows](docs/how-a-run-flows.md): every step, the function, what it writes.
+- [Configuration](docs/configuration.md): every flag and key, its default, who reads it.
+- [ATM maintains itself](docs/self-maintenance.md): this repo's own fixes go through ATM; the hooks that hold the loop.
+- [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Code of conduct](CODE_OF_CONDUCT.md)
 
 ## Status
 
-Alpha. The TDD `fix` skill works end-to-end (cookbook → phased agent
-loop → verified red-green → quality gate → PR) on the code shapes
-listed in [Coverage](#coverage). One row is strong (handlers / event
-listeners). Three are partial (API/SDK integrations — foundation
-shipped, callsite integration pending; persistence/config; pure
-functions). Two are weak (services and classes; CLI and scripts).
-The `migrate` and `refactor` skills are designed but not implemented.
+Alpha. Full tooling for JavaScript and TypeScript; Python with pytest and
+ruff; Go with `go test` and `go vet` once the runner line is set. The contract,
+the report and the flags can still change. Open work is in the
+[issues](https://github.com/thellmwhisperer/agentic-team-member/issues).
 
-Expect the public surface (CLI flags, config schema) to shift before 1.0.
-
----
-
-## License
-
-Apache License 2.0 — see [LICENSE](LICENSE) for the full text and
-[NOTICE](NOTICE) for attribution. Contributions are accepted under the
-same terms; see [CONTRIBUTING.md](CONTRIBUTING.md) and
-[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). For security reports, see
-[SECURITY.md](SECURITY.md).
+Apache 2.0. [LICENSE](LICENSE) · [NOTICE](NOTICE)
