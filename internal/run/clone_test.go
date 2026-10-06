@@ -93,18 +93,12 @@ func TestRunDiesWhenCloneFails(t *testing.T) {
 	}{
 		{name: "missing base ref", atm: atmYAML, args: []string{"--base-ref", "nope"}, why: `base ref "nope"`},
 		{name: "install fails", atm: atmInstall("echo broken >&2; exit 3"), why: "broken"},
-		{name: "install times out", atm: atmInstall(`cd / && exec "$ATM_TEST_EXE"`), why: "timed out"},
+		{name: "install times out", atm: atmInstall(`while :; do :; done`), why: "timed out"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			root := repo(t, "https://example.com/owner/repo.git", c.atm)
 			if c.name == "install times out" {
-				exe, err := os.Executable()
-				if err != nil {
-					t.Fatal(err)
-				}
-				t.Setenv("ATM_TEST_EXE", exe)
-				t.Setenv("FAKE_HANG", "1")
 				defer func(d time.Duration) { timeout = d }(timeout)
 				timeout = 2 * time.Second
 			}
