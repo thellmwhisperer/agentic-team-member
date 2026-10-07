@@ -77,9 +77,10 @@ agent's environment; `CLAUDE_CODE_CHILD_SESSION` is removed from it.
 The agent always loads the bundled `ponytail` skill. ATM writes it into the
 clone, excluded from git: `.claude/skills/` for `claude`, `.agents/skills/` for
 `codex`, `.opencode/skills/` for `opencode`, and `.atm/skills/` passed with
-`--skill` for `pi`. The agent's log must prove it was used (a `Skill` tool call
-for `claude`, a read of its `SKILL.md` for `pi` and `codex`, a `skill` event for
-`opencode`), or the run dies.
+`--skill` for `pi`. The agent's log must prove it was used: an exact skill-name
+load whose result succeeded. For `claude`, this is a `Skill` tool call; for
+`pi` and `codex`, a read of the skill's `SKILL.md`; for `opencode`, a `skill`
+event. A missing, failed, or differently named load makes the run fail.
 
 The agent runs in the clone. Past 30 minutes, or when ATM gets SIGINT or
 SIGTERM, cancellation kills its process tree on Unix or Windows, including
