@@ -5,7 +5,6 @@ package run
 import (
 	"os"
 	"os/exec"
-	"syscall"
 
 	"golang.org/x/sys/windows"
 )
@@ -40,16 +39,9 @@ func tryLockCloneExclusive(f *os.File) (bool, error) {
 }
 
 func inheritCloneFile(cmd *exec.Cmd, f *os.File) error {
-	if err := windows.SetHandleInformation(windows.Handle(f.Fd()), windows.HANDLE_FLAG_INHERIT,
-		windows.HANDLE_FLAG_INHERIT); err != nil {
-		return err
-	}
-	attr := cmd.SysProcAttr
-	if attr == nil {
-		attr = &syscall.SysProcAttr{}
-		cmd.SysProcAttr = attr
-	}
-	attr.AdditionalInheritedHandles = append(attr.AdditionalInheritedHandles, syscall.Handle(f.Fd()))
+	// Windows keeps a live clone by refusing to rename its working directory.
+	// Passing the lock handle also lets unrelated later children keep its file open.
+	_, _ = cmd, f
 	return nil
 }
 
