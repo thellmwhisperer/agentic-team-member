@@ -165,14 +165,27 @@ func additions(clone string, paths []string) (map[string]string, error) {
 
 // additionsAt inserts diff additions at the start of each changed range in base.
 func additionsAt(base, diff string) (string, bool) {
-	var lines []string
-	if base != "" {
-		lines = strings.Split(base, "\n")
+	lines, trailingNewline := baseLines(base)
+	insertions, ok := additionLines(diff, len(lines))
+	if !ok {
+		return "", false
 	}
+	return insertAddedLines(lines, insertions, trailingNewline), true
+}
+
+func baseLines(base string) ([]string, bool) {
+	if base == "" {
+		return nil, false
+	}
+	lines := strings.Split(base, "\n")
 	trailingNewline := strings.HasSuffix(base, "\n")
 	if trailingNewline {
 		lines = lines[:len(lines)-1]
 	}
+	return lines, trailingNewline
+}
+
+func additionLines(diff string, lineCount int) (map[int][]string, bool) {
 	insertions := map[int][]string{}
 	var boundary int
 	inHunk := false
@@ -181,7 +194,7 @@ func additionsAt(base, diff string) (string, bool) {
 			var oldStart, oldCount int
 			if _, err := fmt.Sscanf(line, "@@ -%d,%d", &oldStart, &oldCount); err != nil {
 				if _, err = fmt.Sscanf(line, "@@ -%d", &oldStart); err != nil {
-					return "", false
+					return nil, false
 				}
 				oldCount = 1
 			}
@@ -189,8 +202,8 @@ func additionsAt(base, diff string) (string, bool) {
 			if oldCount == 0 {
 				boundary = oldStart
 			}
-			if boundary < 0 || boundary+oldCount > len(lines) {
-				return "", false
+			if boundary < 0 || boundary+oldCount > lineCount {
+				return nil, false
 			}
 			inHunk = true
 			continue
@@ -208,12 +221,20 @@ func additionsAt(base, diff string) (string, bool) {
 		default:
 			inHunk = false
 		}
-		if boundary > len(lines) {
-			return "", false
+		if boundary > lineCount {
+			return nil, false
 		}
 	}
+	return insertions, true
+}
+
+func insertAddedLines(lines []string, insertions map[int][]string, trailingNewline bool) string {
 	if len(insertions) == 0 {
-		return base, true
+		result := strings.Join(lines, "\n")
+		if trailingNewline || len(lines) > 0 {
+			result += "\n"
+		}
+		return result
 	}
 	var reconstructed []string
 	for i := 0; i <= len(lines); i++ {
@@ -226,7 +247,7 @@ func additionsAt(base, diff string) (string, bool) {
 	if trailingNewline || len(reconstructed) > 0 {
 		result += "\n"
 	}
-	return result, true
+	return result
 }
 
 // redGreen sets aside, in clone, the paths aside, runs test alone with tmpl, which must fail, brings the

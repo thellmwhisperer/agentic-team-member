@@ -48,8 +48,9 @@ var proofCases = []struct {
 	hang                            bool
 }{
 	{name: "fix whose test only exercises a function it adds", typ: "fix", base: oneLine,
-		work: `printf 'value() { echo changed; }\nhelper() { echo fixed; }\n' > lib.sh; echo '. ./lib.sh; test "$(helper)" = fixed' > a_test.sh`,
-		why:  "behaviour the base had"},
+		work: `printf 'value() { echo changed; }\nhelper() { echo fixed; }\n' > lib.sh; ` +
+			`echo '. ./lib.sh; test "$(helper)" = fixed' > a_test.sh`,
+		why: "behaviour the base had"},
 	{name: "fix that changes a line", typ: "fix", base: oneLine,
 		work: "echo 'value() { echo fixed; }' > lib.sh" + testValue},
 	{name: "fix that adds a line inside a function", typ: "fix", base: multiLine,
