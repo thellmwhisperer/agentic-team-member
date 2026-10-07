@@ -287,6 +287,39 @@ func TestBackgroundRemembersRunsAcrossRestarts(t *testing.T) {
 	}
 }
 
+// The history keeps the last 200 runs: a new one drops the oldest that ended, never one still running.
+func TestBackgroundKeepsTheLastRunsAndEveryRunning(t *testing.T) {
+	top := backgroundRepo(t)
+	wait, release := holdFakeAgents(t, 1)
+	held, err := Start(top, []string{issueFile(t, issue)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wait()
+	missing := filepath.Join(t.TempDir(), "missing.md") // each run fails at its issue
+	for range 201 {
+		o, err := Start(top, []string{missing})
+		if err == nil {
+			_, err = Attach(top, o.Run, &bytes.Buffer{})
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	runs, err := Runs(top)
+	if err != nil || len(runs) != 200 || runs[0].Run != held.Run || runs[0].Outcome != "running" ||
+		runs[1].Run != "missing-4" || runs[len(runs)-1].Run != "missing-202" {
+		t.Fatalf("Runs = %d runs, first %+v, %v", len(runs), runs[:min(len(runs), 2)], err)
+	}
+	release()
+	if end, err := Attach(top, held.Run, &bytes.Buffer{}); err != nil || end.Outcome != "passed" {
+		t.Fatalf("Attach = %+v, %v", end, err)
+	}
+	if saved, err := history(top); err != nil || len(saved) != 200 {
+		t.Fatalf("runs.jsonl holds %d runs, %v; want 200", len(saved), err)
+	}
+}
+
 func TestHistoryReadsLargeRecordsAndReturnsScannerErrors(t *testing.T) {
 	top := t.TempDir()
 	atmDir := filepath.Join(top, ".atm")

@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -79,6 +80,9 @@ type reply struct {
 	Runs  []Outcome `json:"runs,omitempty"`
 	Error string    `json:"error,omitempty"`
 }
+
+// maxRuns is the most runs the history keeps. ponytail: fixed; a key in .atm.yaml is the upgrade.
+const maxRuns = 200
 
 // idle is how long the background process waits without a run before it ends; tick is how often it checks.
 var idle, tick = 10 * time.Minute, 5 * time.Second
@@ -252,11 +256,23 @@ func (s *server) start(args []string) Outcome {
 		filepath.Ext(issue))), "-")
 	s.Lock()
 	defer s.Unlock()
+	n := 0 // the last run's number: its label's suffix
+	if len(s.runs) > 0 {
+		last := s.runs[len(s.runs)-1].Run
+		n, _ = strconv.Atoi(last[strings.LastIndex(last, "-")+1:])
+	}
 	r := &bgRun{more: make(chan struct{}), Outcome: Outcome{Outcome: "running", Issue: issue, Started: time.Now(),
-		Run: cmp.Or(strings.Trim(name, "-"), "run") + "-" + strconv.Itoa(len(s.runs)+1)}}
+		Run: cmp.Or(strings.Trim(name, "-"), "run") + "-" + strconv.Itoa(n+1)}}
 	r.Report = filepath.Join(runDir(s.root, r.Run), "report.json")
 	s.runs = append(s.runs, r)
-	s.save(r.Outcome)
+	for i := 0; len(s.runs) > maxRuns && i < len(s.runs); { // drop the oldest that ended
+		if s.runs[i].Ended.IsZero() {
+			i++
+		} else {
+			s.runs = slices.Delete(s.runs, i, i+1)
+		}
+	}
+	s.save()
 	go s.run(r, args)
 	return r.Outcome
 }
@@ -291,7 +307,7 @@ func (s *server) run(r *bgRun, args []string) {
 	default:
 		o.NextStep = "read why " + o.FailedNode + " failed in the report, fix it" + again
 	}
-	s.save(*o)
+	s.save()
 	close(r.more)
 }
 
@@ -473,13 +489,18 @@ func history(root string) ([]*bgRun, error) {
 	return runs, sc.Err()
 }
 
-// save appends o to runs.jsonl. ponytail: the file only grows; trimming it is the upgrade.
-func (s *server) save(o Outcome) {
-	b, _ := json.Marshal(o)
-	f, err := os.OpenFile(filepath.Join(s.root, ".atm", "runs.jsonl"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+// save writes the runs to runs.jsonl, through a file renamed over it, so a crash leaves the last one whole.
+// Under the server's lock.
+func (s *server) save() {
+	var b []byte
+	for _, r := range s.runs {
+		line, _ := json.Marshal(r.Outcome)
+		b = append(append(b, line...), '\n')
+	}
+	path := filepath.Join(s.root, ".atm", "runs.jsonl")
+	err := os.WriteFile(path+".tmp", b, 0o644)
 	if err == nil {
-		_, err = f.Write(append(b, '\n'))
-		err = errors.Join(err, f.Close())
+		err = os.Rename(path+".tmp", path)
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "atm serve:", err) // its log; the run goes on
