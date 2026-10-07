@@ -52,7 +52,7 @@ func TestRunTellsAWatchingScreenWhatItsAgentAndChecksDo(t *testing.T) {
 		"pi": `{"type":"message_end","message":{"role":"assistant","content":[{"type":"thinking",` +
 			`"thinking":"Read the test first."}]}}
 {"type":"tool_execution_start","toolCallId":"t1","toolName":"bash","args":{"command":"go test ./..."}}
-{"type":"tool_execution_end","toolCallId":"t1","toolName":"bash","isError":true}
+{"type":"tool_execution_end","toolCallId":"t1","toolName":"bash","result":{"isError":true}}
 `,
 	}
 	for harness, stream := range streams {
