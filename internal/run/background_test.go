@@ -53,7 +53,7 @@ func holdFakeAgents(t *testing.T, count int) (wait, release func()) {
 	release = func() { _ = os.WriteFile(unblock, nil, 0o600) }
 	t.Cleanup(release)
 	wait = func() {
-		deadline := time.Now().Add(10 * time.Second)
+		deadline := time.Now().Add(10*time.Second + time.Duration(count)*50*time.Millisecond)
 		for time.Now().Before(deadline) {
 			entries, err := os.ReadDir(ready)
 			if err == nil && len(entries) >= count {
@@ -344,6 +344,34 @@ func TestBackgroundKeepsTheLastRunsAndEveryRunning(t *testing.T) {
 	}
 	if saved, err := history(top); err != nil || len(saved) != 200 {
 		t.Fatalf("runs.jsonl holds %d runs, %v; want 200", len(saved), err)
+	}
+}
+
+// A run's end prunes the history too: 201 runs that end with no start after them leave 200.
+func TestBackgroundPrunesTheHistoryWhenRunsEnd(t *testing.T) {
+	top := backgroundRepo(t)
+	wait, release := holdFakeAgents(t, maxRuns+1)
+	path := issueFile(t, issue)
+	var started []Outcome
+	for range maxRuns + 1 {
+		o, err := Start(top, []string{path})
+		if err != nil {
+			t.Fatal(err)
+		}
+		started = append(started, o)
+	}
+	wait()
+	release()
+	for _, o := range started {
+		if _, err := Attach(top, o.Run, &bytes.Buffer{}); err != nil && !strings.HasPrefix(err.Error(), "no run ") {
+			t.Fatal(err)
+		}
+	}
+	if runs, err := Runs(top); err != nil || len(runs) != maxRuns {
+		t.Fatalf("Runs = %d runs, %v; want %d", len(runs), err, maxRuns)
+	}
+	if saved, err := history(top); err != nil || len(saved) != maxRuns {
+		t.Fatalf("runs.jsonl holds %d runs, %v; want %d", len(saved), err, maxRuns)
 	}
 }
 
