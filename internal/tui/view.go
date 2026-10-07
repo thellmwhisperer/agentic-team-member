@@ -135,22 +135,29 @@ func (m *Model) atm(width int) string {
 
 // row is r's line: its icon, its label and how long it took, then, right-aligned, its note and its state.
 func (m *Model) row(r *row, width int) string {
-	left := m.icon(r.state) + " " + r.label
+	prefix := m.icon(r.state) + " "
 	if r.check {
-		left = "  " + left
+		prefix = "  " + prefix
 	}
 	took := r.took
 	if r.state == "running" && !r.start.IsZero() {
 		took = m.now.Sub(r.start)
 	}
+	suffix := ""
 	if took > 0 || r.state == "running" || r.state == "passed" || r.state == "failed" {
-		left += "  " + paint(dim, run.Human(took))
+		suffix = "  " + paint(dim, run.Human(took))
 	}
 	word := r.state
-	if note := ansi.Truncate(r.note, width-lipgloss.Width(left)-len(word)-5, "…"); note != "" {
-		word = note + " · " + word
+	status := bold(states[word][1], word)
+	if r.note != "" {
+		room := width - lipgloss.Width(prefix) - lipgloss.Width(suffix) - lipgloss.Width(status) - 3
+		if room > 0 {
+			status = paint(dim, ansi.Truncate(r.note, room, "…")+" · ") + status
+		}
 	}
-	return spread(left, paint(dim, word), width)
+	left := prefix + ansi.Truncate(r.label, max(0, width-lipgloss.Width(prefix)-lipgloss.Width(suffix)-lipgloss.Width(status)-1), "…") + suffix
+	left = ansi.Truncate(left, max(0, width-lipgloss.Width(status)-1), "…")
+	return spread(left, status, width)
 }
 
 // sidebar says whether there is a box beside the ATM box to show.
@@ -209,7 +216,8 @@ func (m *Model) agentBox(width, lines int) string {
 			out = append(out, paint(dim, "∴ "+first))
 			continue
 		}
-		out = append(out, m.icon(cmp.Or(a.result, "running"))+" "+a.tool+" "+paint(dim, a.detail))
+		state := cmp.Or(a.result, "running")
+		out = append(out, m.icon(state)+" "+paint(states[state][1], state)+" "+a.tool+" "+paint(dim, a.detail))
 	}
 	if len(out) == 0 {
 		out = []string{paint(dim, "starting")}

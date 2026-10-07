@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The delivery command runs on the terminal attached to the run: what it prints goes to it as it is, its keys
@@ -60,5 +61,40 @@ func offATerminal(t *testing.T, top string) {
 	}
 	if s := screen.String(); !strings.Contains(s, "\nnot-a-terminal\n") || strings.Contains(s, "on-a-terminal") {
 		t.Fatalf("screen:\n%s", s)
+	}
+}
+
+func TestFollowDisconnectsWhenItsTerminalLeaves(t *testing.T) {
+	top := gitT(t, repo(t, t.TempDir(), atmSet(atmYAML, "delivery", "sleep 3")), "rev-parse", "--show-toplevel")
+	background(t, top)
+	o, err := Start(top, []string{issueFile(t, issue)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := make(chan Input)
+	first := make(chan struct{}, 1)
+	ended := make(chan error, 1)
+	go func() {
+		_, err := Follow(top, o.Run, &[2]int{100, 30}, in, func(Frame) {
+			select {
+			case first <- struct{}{}:
+			default:
+			}
+		})
+		ended <- err
+	}()
+	select {
+	case <-first:
+	case <-time.After(5 * time.Second):
+		t.Fatal("run did not send its first frame")
+	}
+	close(in)
+	select {
+	case err := <-ended:
+		if err == nil {
+			t.Fatal("detached Follow returned before the run ended without an error")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Follow kept the terminal attached after its input closed")
 	}
 }

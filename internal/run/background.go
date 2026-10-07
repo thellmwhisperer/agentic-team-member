@@ -63,6 +63,7 @@ type Frame struct {
 	Line  *string         `json:"line,omitempty"`  // a line of its plain screen
 	Event json.RawMessage `json:"event,omitempty"` // a node's start or end, or a live event inside it
 	Raw   []byte          `json:"raw,omitempty"`   // the delivery command's output on the attached terminal
+	PTY   bool            `json:"pty,omitempty"`   // the delivery command's terminal has started
 }
 
 // Input is what an attached terminal sends after its request: keys, and its new size, for the delivery
@@ -518,7 +519,7 @@ func Attach(root, label string, w io.Writer) (Outcome, error) {
 func Follow(root, label string, size *[2]int, in <-chan Input, fn func(Frame)) (Outcome, error) {
 	var o Outcome
 	err := call(root, request{Cmd: "attach", Run: label, Size: size}, in, func(r reply) {
-		if r.Line != nil || r.Event != nil || r.Raw != nil {
+		if r.Line != nil || r.Event != nil || r.Raw != nil || r.PTY {
 			fn(r.Frame)
 		}
 		if r.Run != nil {
@@ -555,7 +556,11 @@ func call(root string, req request, in <-chan Input, fn func(reply)) error {
 	go func() {
 		for {
 			select {
-			case i := <-in: // never, when in is nil
+			case i, ok := <-in: // never, when in is nil
+				if !ok {
+					_ = c.Close()
+					return
+				}
 				if enc.Encode(i) != nil {
 					return
 				}
