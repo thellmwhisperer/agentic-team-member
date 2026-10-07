@@ -17,7 +17,7 @@ import (
 func TestKilledBackgroundKeepsCloneForStartedAgent(t *testing.T) {
 	pidPath := filepath.Join(t.TempDir(), "agent-pid")
 	ready := filepath.Join(t.TempDir(), "agent-started")
-	t.Setenv("FAKE_AGENT", "hang")
+	t.Setenv("FAKE_AGENT", "grandchild")
 	t.Setenv("FAKE_AGENT_PID", pidPath)
 	t.Setenv("FAKE_AGENT_READY", ready)
 	t.Setenv("FAKE_AGENT_KILL_PARENT", "1")
@@ -38,7 +38,6 @@ func TestKilledBackgroundKeepsCloneForStartedAgent(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("the background request did not end after its process was killed")
 	}
-	until(t, "agent pid", func() bool { b, err := os.ReadFile(pidPath); return err == nil && len(b) > 0 })
 	proc := recordedProcess(t, pidPath)
 	t.Setenv("FAKE_AGENT", "fail")
 	t.Setenv("FAKE_AGENT_KILL_PARENT", "")

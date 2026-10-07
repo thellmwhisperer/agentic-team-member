@@ -4,11 +4,15 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
 
 func TestCloneLeaseIsInheritedByStartedProcess(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows keeps live clones through their working directory, not inherited lock handles")
+	}
 	clone := filepath.Join(t.TempDir(), "clone")
 	if err := os.Mkdir(clone, 0o755); err != nil {
 		t.Fatal(err)

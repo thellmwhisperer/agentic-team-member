@@ -319,19 +319,7 @@ func TestBackgroundRemembersRunsAcrossRestarts(t *testing.T) {
 // The history keeps the last 200 runs: a new one drops the oldest that ended, never one still running.
 func TestBackgroundKeepsTheLastRunsAndEveryRunning(t *testing.T) {
 	top := gitT(t, repo(t, "https://example.com/owner/repo.git", atmYAML), "rev-parse", "--show-toplevel")
-	if err := os.MkdirAll(filepath.Join(top, ".atm"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	var seeded bytes.Buffer
-	for n := 1; n <= 199; n++ {
-		if err := json.NewEncoder(&seeded).Encode(Outcome{Run: fmt.Sprintf("old-%d", n), Outcome: "failed",
-			Started: time.Now().Add(-time.Hour), Ended: time.Now()}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := os.WriteFile(filepath.Join(top, ".atm", "runs.jsonl"), seeded.Bytes(), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	seedHistory(t, top)
 	background(t, top)
 	wait, release := holdFakeAgents(t, 1)
 	held, err := Start(top, []string{issueFile(t, issue)})
@@ -349,17 +337,39 @@ func TestBackgroundKeepsTheLastRunsAndEveryRunning(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	runs, err := Runs(top)
-	if err != nil || len(runs) != 200 || runs[0].Run != "old-3" || runs[197].Run != held.Run ||
-		runs[197].Outcome != "running" || runs[len(runs)-1].Run != "missing-202" {
-		t.Fatalf("Runs = %d runs, first %+v, %v", len(runs), runs[:min(len(runs), 2)], err)
-	}
+	assertPrunedHistory(t, top, held.Run)
 	release()
 	if end, err := Attach(top, held.Run, &bytes.Buffer{}); err != nil || end.Outcome != "passed" {
 		t.Fatalf("Attach = %+v, %v", end, err)
 	}
 	if saved, err := history(top); err != nil || len(saved) != 200 {
 		t.Fatalf("runs.jsonl holds %d runs, %v; want 200", len(saved), err)
+	}
+}
+
+func seedHistory(t *testing.T, top string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(top, ".atm"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var seeded bytes.Buffer
+	for n := 1; n <= 199; n++ {
+		if err := json.NewEncoder(&seeded).Encode(Outcome{Run: fmt.Sprintf("old-%d", n), Outcome: "failed",
+			Started: time.Now().Add(-time.Hour), Ended: time.Now()}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(top, ".atm", "runs.jsonl"), seeded.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func assertPrunedHistory(t *testing.T, top, held string) {
+	t.Helper()
+	runs, err := Runs(top)
+	if err != nil || len(runs) != 200 || runs[0].Run != "old-3" || runs[197].Run != held ||
+		runs[197].Outcome != "running" || runs[len(runs)-1].Run != "missing-202" {
+		t.Fatalf("Runs = %d runs, first %+v, %v", len(runs), runs[:min(len(runs), 2)], err)
 	}
 }
 
