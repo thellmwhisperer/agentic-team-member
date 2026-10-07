@@ -223,7 +223,9 @@ var errTimeout = errors.New("timed out")
 // sh runs line with sh -c in dir, env added to its environment, in its own process group, killed past timeout.
 // tail is the last 60 lines of its output, which its error carries too.
 func sh(dir, line string, env ...string) (tail string, err error) {
-	return tee(nil, io.Discard, dir, line, env...)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	return tee(ctx, nil, io.Discard, dir, line, env...)
 }
 
 // terminal is the run's screen when a terminal can be attached to it: run runs cmd on the attached one, if
@@ -232,11 +234,9 @@ type terminal interface {
 	run(cmd *exec.Cmd) (bool, error)
 }
 
-// tee is sh, its output copied to w as it comes and, a line at a time, to the screen of the run in dir. It
-// runs on t's terminal when one is attached.
-func tee(t terminal, w io.Writer, dir, line string, env ...string) (tail string, err error) {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
+// tee is sh killed when ctx ends rather than past timeout, its output copied to w as it comes and, a line at a
+// time, to the screen of the run in dir. It runs on t's terminal when one is attached.
+func tee(ctx context.Context, t terminal, w io.Writer, dir, line string, env ...string) (tail string, err error) {
 	cmd := exec.CommandContext(ctx, "sh", "-c", line)
 	var out bytes.Buffer
 	live := liveIn(dir)
@@ -253,8 +253,11 @@ func tee(t terminal, w io.Writer, dir, line string, env ...string) (tail string,
 		err = cmd.Run()
 	}
 	log.flush()
-	if ctx.Err() != nil {
+	switch {
+	case errors.Is(ctx.Err(), context.DeadlineExceeded):
 		err = fmt.Errorf("%w after %s", errTimeout, Human(timeout))
+	case ctx.Err() != nil:
+		err = errors.New("interrupted")
 	}
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
 	if tail = strings.Join(lines[max(0, len(lines)-60):], "\n"); err != nil && tail != "" {
