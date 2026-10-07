@@ -38,10 +38,10 @@ var work = map[string]string{"fix": fixWork, "feature": fixWork, "greenfield": f
 // $FAKE_AGENT_CALL. The default plays a run that, when the ponytail skill is where name finds it and outside
 // git, uses it, does $FAKE_AGENT_WORK or else the work of the brief's task type, and reports what that work
 // left in .atm/fake-report.json, or else fakeReport; fail
-// exits 3; no-report, no-test-file and no-skill each break the run one way; hang starts a grandchild, whose pid
-// goes to $FAKE_AGENT_PID, and never ends; hang-session does the same with the grandchild in its own session;
-// hang-orphan starts it in its own session through a child that exits at once, so init adopts it.
-// The ponytail pass plays the same with the ponytail-review skill,
+// exits 3; no-report, no-test-file, no-skill, skill-error and wrong-skill each break the run one way; hang
+// starts a grandchild, whose pid goes to $FAKE_AGENT_PID, and never ends; hang-session does the same with the
+// grandchild in its own session; hang-orphan starts it in its own session through a child that exits at once,
+// so init adopts it. The ponytail pass plays the same with the ponytail-review skill,
 // $FAKE_PONYTAIL as its mode, $FAKE_PONYTAIL_WORK as its work and $FAKE_PONYTAIL_REPORT, or no findings, as
 // its report; its call goes to $FAKE_AGENT_CALL.ponytail. $FAKE_AGENT_STREAM goes to its stdout after its first line.
 func fakeAgent(name string) int {
@@ -147,20 +147,36 @@ func fakeAgentMode(mode string) (int, bool) {
 	return 0, false
 }
 
+// fakeAgentSkill loads skill, its result an error in mode skill-error, and loads another skill whose name has
+// skill's as a prefix instead in mode wrong-skill.
 func fakeAgentSkill(name string, args []string, skill, mode string) {
-	path := map[string]string{"claude": ".claude/skills/" + skill, "codex": ".agents/skills/" + skill,
-		"opencode": ".opencode/skills/" + skill, "pi": after(args, "--skill")}[name] + "/SKILL.md"
+	dir := map[string]string{"claude": ".claude/skills/" + skill, "codex": ".agents/skills/" + skill,
+		"opencode": ".opencode/skills/" + skill, "pi": after(args, "--skill")}[name]
+	path := dir + "/SKILL.md"
 	b, _ := os.ReadFile(path)
 	b = bytes.ReplaceAll(b, []byte("\r\n"), []byte("\n"))
-	if bytes.Contains(b, []byte("name: "+skill+"\n")) && mode != "no-skill" &&
-		exec.Command("git", "check-ignore", "-q", path).Run() == nil {
-		emit(map[string]obj{
-			"claude": {"type": "assistant", "message": obj{"content": []obj{{"type": "tool_use", "name": "Skill",
-				"input": obj{"skill": skill}}}}},
-			"codex":    {"type": "item.completed", "item": obj{"type": "command_execution", "command": "cat " + path}},
-			"opencode": {"type": "tool_use", "part": obj{"tool": "skill", "state": obj{"input": obj{"name": skill}}}},
-			"pi":       {"type": "tool_execution_start", "toolName": "read", "args": obj{"path": path}},
-		}[name])
+	if !bytes.Contains(b, []byte("name: "+skill+"\n")) || mode == "no-skill" ||
+		exec.Command("git", "check-ignore", "-q", path).Run() != nil {
+		return
+	}
+	if mode == "wrong-skill" {
+		skill, path = skill+"x", dir+"x/SKILL.md"
+	}
+	failed := mode == "skill-error"
+	exit := map[bool]int{true: 1}[failed]
+	for _, ev := range map[string][]obj{
+		"claude": {{"type": "assistant", "message": obj{"content": []obj{{"type": "tool_use", "id": "s1", "name": "Skill",
+			"input": obj{"skill": skill}}}}},
+			{"type": "user", "message": obj{"content": []obj{{"type": "tool_result", "tool_use_id": "s1",
+				"is_error": failed}}}}},
+		"codex": {{"type": "item.completed", "item": obj{"id": "s1", "type": "command_execution",
+			"command": "cat " + path, "exit_code": exit}}},
+		"opencode": {{"type": "tool_use", "part": obj{"callID": "s1", "tool": "skill", "state": obj{
+			"status": map[bool]string{true: "error", false: "completed"}[failed], "input": obj{"name": skill}}}}},
+		"pi": {{"type": "tool_execution_start", "toolCallId": "s1", "toolName": "read", "args": obj{"path": path}},
+			{"type": "tool_execution_end", "toolCallId": "s1", "toolName": "read", "isError": failed}},
+	}[name] {
+		emit(ev)
 	}
 }
 
@@ -267,7 +283,8 @@ func TestRunDrivesTheAgent(t *testing.T) {
 				t.Fatalf("env: want ATM_FAKE and no CLAUDE_CODE_CHILD_SESSION, got %v", got.Env)
 			}
 			lines := logLines(t, log)
-			if len(lines) != 4 || lines[1] != `"fake stderr"` {
+			if want := map[bool]int{true: 5, false: 4}[harness == "claude" || harness == "pi"]; len(lines) != want ||
+				lines[1] != `"fake stderr"` {
 				t.Fatalf("want every line of the agent in the log, got %q", lines)
 			}
 			if left := clones(t, root); len(left) != 0 {
@@ -325,6 +342,14 @@ func TestRunDiesWhenTheAgentFails(t *testing.T) {
 		{harness: "codex", mode: "no-skill", why: "ponytail"},
 		{harness: "opencode", mode: "no-skill", why: "ponytail"},
 		{harness: "pi", mode: "no-skill", why: "ponytail"},
+		{harness: "claude", mode: "skill-error", why: "ponytail"},
+		{harness: "codex", mode: "skill-error", why: "ponytail"},
+		{harness: "opencode", mode: "skill-error", why: "ponytail"},
+		{harness: "pi", mode: "skill-error", why: "ponytail"},
+		{harness: "claude", mode: "wrong-skill", why: "ponytail"},
+		{harness: "codex", mode: "wrong-skill", why: "ponytail"},
+		{harness: "opencode", mode: "wrong-skill", why: "ponytail"},
+		{harness: "pi", mode: "wrong-skill", why: "ponytail"},
 		{harness: "claude", why: "KEY=VALUE", args: []string{"--env", "NOVALUE"}},
 	}
 	for _, c := range cases {
