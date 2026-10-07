@@ -122,12 +122,16 @@ func (a agent) units(r *verdict, root, dir, sha, text string, i Issue, c config.
 		})
 		var in []followUp
 		r.step("checks", func() (map[string]any, error) {
+			ev := map[string]any{"unit": n}
 			if f != nil {
 				if b, err := os.ReadFile(filepath.Join(dir, test)); err != nil || string(b) != f.Test {
-					return nil, fmt.Errorf("unit %d edited its red test %s, which it must make pass as it is", n, test)
+					return ev, fmt.Errorf("unit %d edited its red test %s, which it must make pass as it is", n, test)
 				}
 			}
-			ev, err := checks(dir, head, unit.Type, test, c)
+			result, err := checks(dir, head, unit.Type, test, c)
+			for key, value := range result {
+				ev[key] = value
+			}
 			if err != nil {
 				return ev, err
 			}
@@ -218,9 +222,18 @@ func onBranch(root, clone, sha, name, title string) (cuts string, err error) {
 		if id, err = identity(root); err == nil {
 			_, err = git(clone, "add", "-A")
 		}
+		var n int
+		if err == nil {
+			commits, e := git(clone, "rev-list", "--count", sha+"..HEAD")
+			if e != nil {
+				err = e
+			} else {
+				n, err = strconv.Atoi(commits)
+			}
+		}
 		if err == nil {
 			_, err = git(clone, append(id, "commit", "-q", "--no-verify", "--cleanup=verbatim", "-m",
-				"atm unit 1: "+title)...)
+				fmt.Sprintf("atm unit %d: %s", n+1, title))...)
 		}
 	}
 	if err == nil {
