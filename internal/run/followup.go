@@ -57,6 +57,9 @@ func red(clone string, n int, f *followUp, tmpl string) (string, error) {
 	if !filepath.IsLocal(f.RedTest) {
 		return fmt.Sprintf("red_test %q is not a path in the clone", f.RedTest), nil
 	}
+	if err := newTestPath(clone, f.RedTest); err != nil {
+		return err.Error(), nil
+	}
 	line, err := testLine(tmpl, f.RedTest)
 	if err != nil {
 		return err.Error(), nil
@@ -89,6 +92,9 @@ func red(clone string, n int, f *followUp, tmpl string) (string, error) {
 
 // place writes f's red test at its path in clone.
 func place(clone string, f followUp) error {
+	if err := newTestPath(clone, f.RedTest); err != nil {
+		return err
+	}
 	path := filepath.Join(clone, filepath.FromSlash(f.RedTest))
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
@@ -96,10 +102,37 @@ func place(clone string, f followUp) error {
 	return os.WriteFile(path, []byte(f.Test), 0o644)
 }
 
+func newTestPath(clone, name string) error {
+	name = filepath.Clean(filepath.FromSlash(name))
+	if !filepath.IsLocal(name) {
+		return fmt.Errorf("red_test %s is not a new test path", name)
+	}
+	if rel, err := filepath.Rel(".atm", name); err == nil && (rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))) {
+		return fmt.Errorf("red_test %s is not a new test path", name)
+	}
+	if _, err := os.Lstat(filepath.Join(clone, name)); err == nil {
+		return fmt.Errorf("red_test %s is not a new test path", name)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
 // quoted says whether criterion is a whole sentence of body, verbatim but for line breaks.
 func quoted(body, criterion string) bool {
 	flat := func(s string) string { return strings.Join(strings.Fields(s), " ") }
 	c := flat(criterion)
+	if c == "" {
+		return false
+	}
+	marker := regexp.MustCompile(`^(?:[-*]|\d+[.)])\s+`)
+	for _, line := range strings.Split(body, "\n") {
+		line = strings.TrimSpace(line)
+		line = marker.ReplaceAllString(line, "")
+		if strings.TrimRight(flat(strings.TrimSpace(line)), ".!?") == strings.TrimRight(c, ".!?") {
+			return true
+		}
+	}
 	ok, _ := regexp.MatchString(`(?:^|[.!?:*-] )`+regexp.QuoteMeta(c)+`(?: |$)`, flat(body))
 	return ok && strings.ContainsAny(c[max(0, len(c)-1):], ".!?")
 }

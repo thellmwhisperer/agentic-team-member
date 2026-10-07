@@ -73,6 +73,38 @@ func TestRunSortsTheFollowUps(t *testing.T) {
 	}
 }
 
+func TestFollowUpRedTestMustBeNewOutsideATM(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		path string
+	}{
+		{name: "existing test", path: "a_test.sh"},
+		{name: "inside atm", path: ".atm/hidden_test.sh"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := repo(t, "https://example.com/owner/repo.git", atmYAML)
+			f := followUp{RedTest: tc.path}
+			source := filepath.Join(dir, ".atm", "follow-ups", "1", filepath.FromSlash(tc.path))
+			if err := os.MkdirAll(filepath.Dir(source), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(source, []byte("false\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			why, err := red(dir, 1, &f, "sh {file}")
+			if err != nil || why != "red_test "+tc.path+" is not a new test path" {
+				t.Fatalf("want new-path rejection, got %q, %v", why, err)
+			}
+		})
+	}
+}
+
+func TestQuotedAcceptsCriterionAsMarkedWholeLine(t *testing.T) {
+	if !quoted("Acceptance criteria:\n  7) Exit code is 0.\n", "Exit code is 0") {
+		t.Fatal("a criterion matching a whole numbered line should chain without punctuation")
+	}
+}
+
 // chainWork is unit k's work: unit 1 fixes a.txt with a line too many, each later unit makes the red test of
 // the one before pass by adding u<k> to a.txt. Each declares the follow-up c<k>_test.sh, red until a.txt has
 // u<k+1>, quoting $ATM_TEST_CRITERION. Unit 2 runs $ATM_TEST_EDIT first.
