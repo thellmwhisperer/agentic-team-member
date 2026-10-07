@@ -1,6 +1,7 @@
 package run
 
 import (
+	"bytes"
 	"cmp"
 	"encoding/json"
 	"errors"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -24,6 +26,7 @@ type verdict struct {
 	path       string
 	out        io.Writer // the log: each node's start and end, one JSON object a line
 	err        error     // the failed node's
+	at         string    // the node that runs
 }
 
 type node struct {
@@ -65,7 +68,7 @@ func (r *verdict) step(name string, fn func() (map[string]any, error)) {
 		return
 	}
 	n := r.node(name)
-	n.Result = "running"
+	n.Result, r.at = "running", name
 	r.emit(name, map[string]any{"state": "started"})
 	start := time.Now()
 	ev, err := fn()
@@ -88,6 +91,56 @@ func (r *verdict) emit(name string, ev map[string]any) {
 	b, _ := json.Marshal(ev)
 	_, _ = r.out.Write(append(b, '\n'))
 	_ = r.write() // the run's last write says whether report.json is on disk
+}
+
+// watcher is a log a screen watches: it takes the live events inside a node too, which the log leaves out.
+type watcher interface{ watch(ev []byte) }
+
+// live hands ev, an event inside the node that runs, to the screen that watches the log, if one does.
+func (r *verdict) live(ev map[string]any) {
+	if w, ok := r.out.(watcher); ok {
+		ev["ts"], ev["step"] = time.Now().UTC().Format(time.RFC3339Nano), r.at
+		b, _ := json.Marshal(ev)
+		w.watch(b)
+	}
+}
+
+// byClone is each run's verdict by its clone, which every node from clone on runs in. ponytail: what runs in a
+// clone finds its run's screen by it; the verdict down every call is the upgrade.
+var byClone sync.Map
+
+// liveIn is the live events of the run in clone dir, none when no run is there.
+func liveIn(dir string) func(map[string]any) {
+	if r, ok := byClone.Load(dir); ok {
+		return r.(*verdict).live
+	}
+	return func(map[string]any) {}
+}
+
+// lineWriter hands fn each line written to it, without its newline; flush hands it what is left.
+type lineWriter struct {
+	fn  func(string)
+	buf []byte
+}
+
+func (w *lineWriter) Write(p []byte) (int, error) {
+	w.buf = append(w.buf, p...)
+	for {
+		i := bytes.IndexByte(w.buf, '\n')
+		if i < 0 {
+			return len(p), nil
+		}
+		line := string(bytes.TrimSuffix(w.buf[:i], []byte("\r")))
+		w.buf = w.buf[i+1:]
+		w.fn(line)
+	}
+}
+
+func (w *lineWriter) flush() {
+	if len(w.buf) > 0 {
+		w.fn(string(w.buf))
+		w.buf = nil
+	}
 }
 
 func (r *verdict) write() error {
@@ -116,7 +169,7 @@ func (r *verdict) print(w io.Writer) {
 	for _, n := range r.Nodes {
 		mark, how := map[string]string{"passed": "✓", "failed": "✗"}[n.Result], n.Result
 		if mark != "" {
-			how = human(time.Duration(n.DurationMS) * time.Millisecond)
+			how = Human(time.Duration(n.DurationMS) * time.Millisecond)
 		}
 		_, _ = fmt.Fprintf(w, "%-9s %s %s\n", n.Name, cmp.Or(mark, "–"), how)
 	}
@@ -135,8 +188,8 @@ func outcome(err error) string {
 	return "passed"
 }
 
-// human is d as ATM prints every time: 0.9 s, 4 min 28 s, 1 h 02 min.
-func human(d time.Duration) string {
+// Human is d as ATM prints every time: 0.9 s, 4 min 28 s, 1 h 02 min.
+func Human(d time.Duration) string {
 	switch {
 	case d < time.Minute:
 		return fmt.Sprintf("%.1f s", d.Truncate(100*time.Millisecond).Seconds())

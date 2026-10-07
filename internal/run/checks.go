@@ -20,16 +20,21 @@ import (
 
 // checks is the verdict on the agent's work in clone, at base commit sha, for a task of type typ whose report
 // names test: HEAD has not moved, the type's proof holds, then install, test, typecheck and lint pass, the
-// commands no-mistakes runs. Install runs again: the agent may have changed dependencies.
+// commands no-mistakes runs. Install runs again: the agent may have changed dependencies. Each proof and
+// command is a row of the screen.
 func checks(clone, sha, typ, test string, c config.Config) (map[string]any, error) {
-	head, err := git(clone, "rev-parse", "HEAD")
+	live := liveIn(clone)
+	err := row(live, proofs[typ], func() error {
+		head, err := git(clone, "rev-parse", "HEAD")
+		if err == nil && head != sha {
+			err = fmt.Errorf("the agent made commits: HEAD is %s, not the base %s", head, sha)
+		}
+		if err == nil {
+			err = prove(clone, typ, filepath.ToSlash(test), c)
+		}
+		return err
+	})
 	if err != nil {
-		return nil, err
-	}
-	if head != sha {
-		return nil, fmt.Errorf("the agent made commits: HEAD is %s, not the base %s", head, sha)
-	}
-	if err := prove(clone, typ, filepath.ToSlash(test), c); err != nil {
 		return nil, err
 	}
 	var ran []cmdResult
@@ -38,12 +43,32 @@ func checks(clone, sha, typ, test string, c config.Config) (map[string]any, erro
 		if cmd[1] == "" {
 			continue
 		}
-		tail, err := sh(clone, cmd[1])
+		var tail string
+		err := row(live, cmd[0], func() (err error) {
+			tail, err = sh(clone, cmd[1])
+			return err
+		})
 		if ran = append(ran, cmdResult{cmd[0], cmd[1], outcome(err), tail}); err != nil {
 			return map[string]any{"commands": ran}, fmt.Errorf("%s: %w", cmd[0], err)
 		}
 	}
 	return map[string]any{"commands": ran}, nil
+}
+
+// proofs is the screen's row for the proof of each task type; a chore has none.
+var proofs = map[string]string{"fix": "red/green", "feature": "red/green", "greenfield": "red/green",
+	"refactor": "suite on the base", "tests": "test on the base", "docs": "docs only"}
+
+// row runs fn as the screen's row name, under the node that runs, when name is not "".
+func row(live func(map[string]any), name string, fn func() error) error {
+	if name == "" {
+		return fn()
+	}
+	live(map[string]any{"check": name, "state": "started"})
+	start := time.Now()
+	err := fn()
+	live(map[string]any{"check": name, "state": outcome(err), "duration_ms": time.Since(start).Milliseconds()})
+	return err
 }
 
 // prove runs the proof of task type typ on the agent's work in clone, all of it staged meanwhile.
@@ -198,22 +223,38 @@ var errTimeout = errors.New("timed out")
 // sh runs line with sh -c in dir, env added to its environment, in its own process group, killed past timeout.
 // tail is the last 60 lines of its output, which its error carries too.
 func sh(dir, line string, env ...string) (tail string, err error) {
-	return tee(io.Discard, dir, line, env...)
+	return tee(nil, io.Discard, dir, line, env...)
 }
 
-// tee is sh, its output copied to w as it comes.
-func tee(w io.Writer, dir, line string, env ...string) (tail string, err error) {
+// terminal is the run's screen when a terminal can be attached to it: run runs cmd on the attached one, if
+// one is, and says whether it did.
+type terminal interface {
+	run(cmd *exec.Cmd) (bool, error)
+}
+
+// tee is sh, its output copied to w as it comes and, a line at a time, to the screen of the run in dir. It
+// runs on t's terminal when one is attached.
+func tee(t terminal, w io.Writer, dir, line string, env ...string) (tail string, err error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "sh", "-c", line)
 	var out bytes.Buffer
+	live := liveIn(dir)
+	log := &lineWriter{fn: func(l string) { live(map[string]any{"output": l}) }}
 	cmd.Dir, cmd.Env, cmd.WaitDelay = dir, append(os.Environ(), env...), time.Second
-	cmd.Stdout = io.MultiWriter(&out, w)
+	cmd.Stdout = io.MultiWriter(&out, w, log)
 	cmd.Stderr = cmd.Stdout
 	ownGroup(cmd)
-	err = cmd.Run()
+	ran := false
+	if t != nil {
+		ran, err = t.run(cmd)
+	}
+	if !ran {
+		err = cmd.Run()
+	}
+	log.flush()
 	if ctx.Err() != nil {
-		err = fmt.Errorf("%w after %s", errTimeout, human(timeout))
+		err = fmt.Errorf("%w after %s", errTimeout, Human(timeout))
 	}
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
 	if tail = strings.Join(lines[max(0, len(lines)-60):], "\n"); err != nil && tail != "" {
