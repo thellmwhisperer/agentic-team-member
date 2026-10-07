@@ -3,6 +3,7 @@ package run
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"context"
 	"embed"
 	"encoding/json"
@@ -119,11 +120,11 @@ func (a agent) run(clone, name, skill, brief string, check func(map[string]any) 
 		return strings.HasPrefix(kv, "CLAUDE_CODE_CHILD_SESSION=") // set, the agent's transcripts are off
 	}), a.env...)
 	ownGroup(cmd)
-	s := stream{skill: skill}
+	s := stream{skill: skill, live: liveIn(clone)}
 	err = s.read(cmd, f, a.Harness)
 	switch {
 	case errors.Is(ctx.Err(), context.DeadlineExceeded):
-		return ev, fmt.Errorf("agent timed out after %s; log: %s", human(agentTimeout), path)
+		return ev, fmt.Errorf("agent timed out after %s; log: %s", Human(agentTimeout), path)
 	case ctx.Err() != nil:
 		return ev, fmt.Errorf("agent interrupted; log: %s", path)
 	case err != nil:
@@ -190,10 +191,12 @@ func exclude(clone, pattern string) error {
 	return errors.Join(err, f.Close())
 }
 
-// stream is what the agent's lines said: its final message and whether it used its skill.
+// stream is what the agent's lines said: its final message and whether it used its skill. Live gets what
+// each line tells the screen.
 type stream struct {
 	final, skill string
 	used         bool
+	live         func(map[string]any)
 }
 
 // read runs cmd and writes each line of its stdout and stderr to log, as it is when JSON, else as a JSON
@@ -236,18 +239,29 @@ type event struct {
 		Role    string
 		Content []block
 	}
-	ToolName string `json:"toolName"` // pi
-	Args     json.RawMessage
-	Item     struct{ Type, Command string } // codex
-	Part     struct {                       // opencode
+	ToolName   string `json:"toolName"` // pi
+	ToolCallID string `json:"toolCallId"`
+	IsError    bool   `json:"isError"`
+	Args       json.RawMessage
+	Item       struct { // codex
+		ID, Type, Command, Text, Status string
+		ExitCode                        *int `json:"exit_code"`
+	}
+	Part struct { // opencode
+		CallID     string `json:"callID"`
 		Tool, Text string
-		State      struct{ Input json.RawMessage }
+		State      struct {
+			Status string
+			Input  json.RawMessage
+		}
 	}
 }
 
 type block struct {
-	Type, Name, Text string
-	Input            json.RawMessage
+	Type, Name, Text, Thinking, ID string
+	ToolUseID                      string `json:"tool_use_id"`
+	IsError                        bool   `json:"is_error"`
+	Input                          json.RawMessage
 }
 
 // see reads one JSON line of harness's stream.
@@ -255,6 +269,9 @@ func (s *stream) see(harness string, line []byte) {
 	var e event
 	_ = json.Unmarshal(line, &e) // a field of another type is left empty, the rest is read
 	s.used = s.used || e.usedSkill(harness, s.skill)
+	for _, ev := range e.activity(harness) {
+		s.live(ev)
+	}
 	if text, ok := e.final(harness); ok {
 		s.final = text
 	}
@@ -313,4 +330,88 @@ func lastObject(text string) map[string]any {
 		}
 	}
 	return last
+}
+
+// activity is what e tells the screen the agent does: its thinking, and its tool calls, each by its id, with
+// its result once known: running, passed or failed.
+func (e event) activity(harness string) []map[string]any {
+	of := map[string]func(event) []map[string]any{"claude": event.blocks, "pi": event.pi, "codex": event.codex,
+		"opencode": event.opencode}[harness]
+	if of == nil {
+		return nil
+	}
+	return of(e)
+}
+
+func (e event) pi() []map[string]any {
+	switch e.Type {
+	case "message_end":
+		return e.blocks()
+	case "tool_execution_start":
+		return []map[string]any{toolCall(e.ToolCallID, e.ToolName, detail(e.Args), "running")}
+	case "tool_execution_end":
+		return []map[string]any{toolCall(e.ToolCallID, e.ToolName, "", result(e.IsError))}
+	}
+	return nil
+}
+
+func (e event) codex() []map[string]any {
+	switch {
+	case e.Item.Type == "reasoning" && e.Type == "item.completed":
+		return []map[string]any{{"thinking": e.Item.Text}}
+	case e.Item.Type != "command_execution":
+		return nil
+	case e.Type == "item.started":
+		return []map[string]any{toolCall(e.Item.ID, "shell", e.Item.Command, "running")}
+	}
+	failed := e.Item.Status == "failed" || e.Item.ExitCode != nil && *e.Item.ExitCode != 0
+	return []map[string]any{toolCall(e.Item.ID, "shell", e.Item.Command, result(failed))}
+}
+
+func (e event) opencode() []map[string]any {
+	switch e.Type {
+	case "reasoning":
+		return []map[string]any{{"thinking": e.Part.Text}}
+	case "tool_use":
+		r := map[string]string{"completed": "passed", "error": "failed"}[e.Part.State.Status]
+		return []map[string]any{toolCall(e.Part.CallID, e.Part.Tool, detail(e.Part.State.Input), cmp.Or(r, "running"))}
+	}
+	return nil
+}
+
+// blocks is the activity of claude's and pi's message content.
+func (e event) blocks() (evs []map[string]any) {
+	for _, b := range e.Message.Content {
+		switch b.Type {
+		case "thinking":
+			evs = append(evs, map[string]any{"thinking": b.Thinking})
+		case "tool_use":
+			evs = append(evs, toolCall(b.ID, b.Name, detail(b.Input), "running"))
+		case "tool_result":
+			evs = append(evs, toolCall(b.ToolUseID, "", "", result(b.IsError)))
+		}
+	}
+	return evs
+}
+
+// toolCall is a tool call's live event; a later one with its id and empty fields leaves those as they were.
+func toolCall(id, name, detail, result string) map[string]any {
+	return map[string]any{"id": id, "tool": name, "detail": detail, "result": result}
+}
+
+func result(failed bool) string {
+	return map[bool]string{true: "failed", false: "passed"}[failed]
+}
+
+// detail is what a tool call's input is about, in one line: its command, path, pattern or skill.
+func detail(input json.RawMessage) string {
+	var in map[string]any
+	_ = json.Unmarshal(input, &in)
+	for _, k := range []string{"command", "file_path", "filePath", "path", "pattern", "skill", "url", "query"} {
+		if s, ok := in[k].(string); ok {
+			line, _, _ := strings.Cut(s, "\n")
+			return line
+		}
+	}
+	return ""
 }

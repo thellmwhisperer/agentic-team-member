@@ -4,12 +4,14 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
 	"github.com/thellmwhisperer/agentic-team-member/internal/run"
+	"github.com/thellmwhisperer/agentic-team-member/internal/tui"
 )
 
 // runCmd is atm run: the run goes to the repository's background process and, on a terminal, atm stays on its
@@ -37,10 +39,29 @@ func terminal(f *os.File) bool {
 	return term.IsTerminal(int(f.Fd()))
 }
 
-// attach shows run label's screen on w until it ends and returns how it ended.
+// screen says whether w gets the run's screen rather than its plain lines: a terminal, unless NO_COLOR or
+// TERM=dumb asks for plain lines.
+func screen(w io.Writer) (*os.File, bool) {
+	f, ok := w.(*os.File)
+	return f, ok && terminal(f) && os.Getenv("NO_COLOR") == "" && os.Getenv("TERM") != "dumb"
+}
+
+// attach shows run label's screen on w until it ends and returns how it ended. Leaving leaves it going.
 func attach(root, label string, w io.Writer) error {
-	o, err := run.Attach(root, label, w)
-	if err != nil {
+	f, ok := screen(w)
+	if !ok {
+		o, err := run.Attach(root, label, w)
+		if err != nil {
+			return err
+		}
+		return o.Err()
+	}
+	o, detached, err := tui.Show(root, label, os.Stdin, f)
+	switch {
+	case err != nil:
+		return err
+	case detached:
+		_, err = fmt.Fprintln(w, "the run goes on:", strings.TrimSpace("atm attach "+label))
 		return err
 	}
 	return o.Err()

@@ -73,6 +73,8 @@ func Run(args []string, out, summary io.Writer) (err error) {
 		dir, sha, err = clone(root, *base, c.Install, repo)
 		return map[string]any{"clone": dir, "sha": sha}, err
 	})
+	byClone.Store(dir, r)
+	defer byClone.Delete(dir)
 	test, unit, pending := a.units(r, root, dir, sha, text, i, c)
 	if err := saveFollowUps(root, pending); err != nil {
 		return err
@@ -197,7 +199,8 @@ func deliver(r *verdict, root, clone, sha, base, line string, i Issue, screen io
 		if i.Number != 0 {
 			issue = strconv.Itoa(i.Number)
 		}
-		tail, err := tee(io.MultiWriter(f, screen), clone, line, "ATM_TITLE="+i.Title, "ATM_ISSUE="+issue,
+		t, _ := screen.(terminal)
+		tail, err := tee(t, io.MultiWriter(f, screen), clone, line, "ATM_TITLE="+i.Title, "ATM_ISSUE="+issue,
 			"ATM_BRANCH="+branch, "ATM_CLONE="+clone, "ATM_REPORT="+r.path, "ATM_PONYTAIL="+cuts)
 		ev["commands"] = []cmdResult{{"delivery", line, outcome(err), tail}}
 		return ev, wrap(err, "delivery")
@@ -289,7 +292,7 @@ func command(dir, name string, args ...string) (string, error) {
 	cmd.Dir, cmd.Stderr, cmd.WaitDelay = dir, &stderr, time.Second
 	out, err := cmd.Output()
 	if ctx.Err() != nil {
-		err = fmt.Errorf("timed out after %s", human(timeout))
+		err = fmt.Errorf("timed out after %s", Human(timeout))
 	}
 	if err != nil {
 		return "", fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))

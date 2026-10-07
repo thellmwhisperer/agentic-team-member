@@ -37,7 +37,7 @@ var work = map[string]string{"fix": fixWork, "feature": fixWork, "greenfield": f
 // exits 3; no-report, no-test-file and no-skill each break the run one way; hang starts a grandchild, whose pid
 // goes to $FAKE_AGENT_PID, and never ends. The ponytail pass plays the same with the ponytail-review skill,
 // $FAKE_PONYTAIL as its mode, $FAKE_PONYTAIL_WORK as its work and $FAKE_PONYTAIL_REPORT, or no findings, as
-// its report; its call goes to $FAKE_AGENT_CALL.ponytail.
+// its report; its call goes to $FAKE_AGENT_CALL.ponytail. $FAKE_AGENT_STREAM goes to its stdout after its first line.
 func fakeAgent(name string) int {
 	mode := os.Getenv("FAKE_AGENT")
 	if mode == "grandchild" {
@@ -61,7 +61,7 @@ func fakeAgent(name string) int {
 		b, _ := json.Marshal(obj{"args": args, "stdin": string(stdin), "env": os.Environ()})
 		_ = os.WriteFile(path+call, b, 0o600)
 	}
-	fmt.Println(`{"type": "system", "subtype": "init"}`)
+	fmt.Print(`{"type": "system", "subtype": "init"}`+"\n", os.Getenv("FAKE_AGENT_STREAM")) // the test's lines too
 	fmt.Fprintln(os.Stderr, "fake stderr")
 	switch mode {
 	case "fail":

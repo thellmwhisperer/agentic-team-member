@@ -18,7 +18,7 @@ func TestHuman(t *testing.T) {
 		0: "0.0 s", 900 * time.Millisecond: "0.9 s", 59999 * time.Millisecond: "59.9 s", time.Minute: "1 min 00 s",
 		4*time.Minute + 28*time.Second: "4 min 28 s", time.Hour + 2*time.Minute + 59*time.Second: "1 h 02 min",
 	} {
-		if got := human(d); got != want {
+		if got := Human(d); got != want {
 			t.Errorf("human(%v) = %q, want %q", d, got, want)
 		}
 	}
@@ -144,7 +144,7 @@ func checkSummary(t *testing.T, summary string, rep obj, results []string) {
 		want := results[i]
 		if want == "passed" || want == "failed" {
 			ms := reportNode(t, rep, name)["duration_ms"].(float64)
-			want = human(time.Duration(ms) * time.Millisecond)
+			want = Human(time.Duration(ms) * time.Millisecond)
 		}
 		if !regexp.MustCompile(`(?m)^` + name + ` +\S* *` + regexp.QuoteMeta(want) + `$`).MatchString(summary) {
 			t.Fatalf("summary lacks %s %s:\n%s", name, want, summary)
