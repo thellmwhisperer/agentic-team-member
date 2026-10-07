@@ -82,6 +82,9 @@ func reprove(clone, base string, proofs []proof, c config.Config) (string, error
 			return "", err
 		}
 		err := prove(clone, p.typ, filepath.ToSlash(p.test), c)
+		if e := moved(clone, p.base, "the commands"); e != nil {
+			return "", e
+		}
 		if _, e := git(clone, "reset", "-q", base); e != nil {
 			return "", e
 		}
