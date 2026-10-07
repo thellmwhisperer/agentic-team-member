@@ -1,21 +1,8 @@
 // atm is the Go port of ATM (#150): one binary in the PATH, run from inside the repository it works on.
 package main
 
-import (
-	"fmt"
-	"os"
-
-	"github.com/thellmwhisperer/agentic-team-member/internal/run"
-)
+import "github.com/thellmwhisperer/agentic-team-member/internal/cli"
 
 func main() {
-	if len(os.Args) < 2 || os.Args[1] != "run" {
-		fmt.Fprintln(os.Stderr, run.Usage)
-		os.Exit(2)
-	}
-	err := run.Run(os.Args[2:], os.Stdout, os.Stderr)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "atm:", err)
-	}
-	os.Exit(run.ExitCode(err))
+	cli.Execute()
 }
