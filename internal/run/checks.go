@@ -293,9 +293,17 @@ func keep(clone string) (string, error) {
 	return tree, err
 }
 
-// whole records every file in clone, ignored or not, as reset knows them, and is their tree.
+// whole records every file in clone, ignored or not, as reset knows them, byte for byte: no line ending is
+// converted, whatever core.autocrlf or .gitattributes say. It is their tree.
 func whole(clone string) (string, error) {
+	info := filepath.Join(clone, ".git", "atm-files", "info")
 	_, err := git(clone, "init", "-q", "--bare", ".git/atm-files")
+	if err == nil {
+		err = os.MkdirAll(info, 0o700)
+	}
+	if err == nil {
+		err = os.WriteFile(filepath.Join(info, "attributes"), []byte("* -text\n"), 0o600)
+	}
 	if err == nil {
 		_, err = every(clone, "add", "-A", "-f", ".")
 	}
@@ -305,25 +313,38 @@ func whole(clone string) (string, error) {
 	return every(clone, "write-tree")
 }
 
-// reset brings clone's working tree back to what keep recorded, new files gone, the ignored ones too. A file
-// keep recorded that was changed or deleted, ignored or not, is errVoid. diff hashes files above the configured
-// threshold in chunks.
+// reset brings clone's working tree back to what keep recorded, byte for byte, new files gone, the ignored ones
+// too. A file keep recorded that was changed or deleted, and that clone's index lacks, is errVoid: a file of
+// the index is the clone's own git's to check, which may rewrite its line endings. diff hashes files above the
+// configured threshold in chunks.
 func reset(clone string) error {
 	_, err := every(clone, "update-index", "-q", "--refresh")
 	if err != nil {
 		return err
 	}
-	_, changed := every(clone, "diff", "--quiet")
-	var changedPaths string
-	if changed != nil {
-		changedPaths, _ = every(clone, "diff", "--name-only")
+	changed, err := every(clone, "diff", "--name-only", "-z")
+	if err != nil {
+		return err
+	}
+	var void []string
+	if changed != "" {
+		index, err := git(clone, "ls-files", "-z")
+		if err != nil {
+			return err
+		}
+		index = "\x00" + index + "\x00"
+		for _, p := range strings.Split(changed, "\x00") {
+			if p != "" && !strings.Contains(index, "\x00"+p+"\x00") {
+				void = append(void, p)
+			}
+		}
 	}
 	_, err = every(clone, "clean", "-fdqx")
 	if err == nil {
 		_, err = every(clone, "checkout", "--", ".")
 	}
-	if err == nil && changed != nil {
-		err = fmt.Errorf("%w: %s", errVoid, changedPaths)
+	if err == nil && len(void) > 0 {
+		err = fmt.Errorf("%w: %s", errVoid, strings.Join(void, " "))
 	}
 	return err
 }
