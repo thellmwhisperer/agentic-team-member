@@ -15,7 +15,11 @@ Task type: {{.Type}}. The issue, verbatim:
   Every other file is source.
 
 ## ACCEPTANCE
-{{- if eq .Type "fix"}}
+{{- if .Next}}
+1. The previous unit is committed. Its follow-up "{{.Next.Title}}" left its red test, `{{.Next.RedTest}}`, in
+   place: it fails today. Do not edit it.
+2. Make it pass. Report `{{.Next.RedTest}}` as test_file.
+{{- else if eq .Type "fix"}}
 1. Write a test on the existing code that fails today on behaviour, not on a missing symbol or module.
    The fix may add files: the test must still fail with those files present and the fix reverted.
 2. Fix the source. The test passes.
@@ -54,7 +58,14 @@ Use the `ponytail` skill.
 - Deleting, skipping or weakening tests.
 - `sleep` in tests.
 
+## FOLLOW-UPS
+- A follow-up is a behaviour gap you found and did not fix. Write its failing test first, at
+  `.atm/follow-ups/<n>/<red_test>` (n is its 1-based position in follow_ups), never at `<red_test>` itself.
+  ATM runs it at `<red_test>`: one without its test, or whose test passes today, is rejected.
+- Its `criterion` is one sentence copied verbatim from the issue that the gap breaks: ATM then runs it as the
+  next unit. Any other goes to `follow-ups.json`, to become a new issue.
+
 ## REPORT
 Your final message must be ONLY this JSON object, nothing else:
-{"test_file": "<repo-relative path of the new test, or empty>", "changed_files": ["<path>"], "summary": "<one paragraph>", "commands_run": ["<command>"], "follow_ups": [{"title": "<gap>", "red_test": "<repo-relative path of its failing test>"}]}
+{"test_file": "<repo-relative path of the new test, or empty>", "changed_files": ["<path>"], "summary": "<one paragraph>", "commands_run": ["<command>"], "follow_ups": [{"title": "<gap>", "red_test": "<repo-relative path of its failing test>", "criterion": "<sentence copied from the issue>"}]}
 Use `"follow_ups": []` when there are none.

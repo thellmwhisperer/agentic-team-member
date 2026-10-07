@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,10 +22,15 @@ var families = []string{"agent_artifact_in_repo", "documented_as_convention", "e
 
 type finding struct{ File, Family, Finding string }
 
-// ponytail is the slop detector on the run's work in clone, at base commit sha, for issue i, whose test is
-// test: an agent that may only cut it. A cut that holds, a shorter diff that passes every check again, leaves
-// two commits, the unit then the cut with a tombstone per finding; any other cut is undone.
+// ponytail is the slop detector on the run's work in clone, from base commit sha, for issue i as its last unit
+// is proven, whose test is test: an agent that may only cut it. A cut that holds, a shorter diff that passes
+// every check again, leaves two commits on the units before, the last unit then the cut with a tombstone per
+// finding; any other cut is undone.
 func (a agent) ponytail(root, clone, sha, test string, i Issue, c config.Config) (map[string]any, error) {
+	base, err := git(clone, "rev-parse", "HEAD") // the last unit's
+	if err != nil {
+		return nil, err
+	}
 	before, files, text, err := review(root, clone, sha, i, c)
 	if err != nil {
 		return nil, err
@@ -41,8 +47,8 @@ func (a agent) ponytail(root, clone, sha, test string, i Issue, c config.Config)
 	if err != nil {
 		return ev, err
 	}
-	if head != sha {
-		return ev, fmt.Errorf("the ponytail agent made commits: HEAD is %s, not the base %s", head, sha)
+	if head != base {
+		return ev, fmt.Errorf("the ponytail agent made commits: HEAD is %s, not the base %s", head, base)
 	}
 	after, err := snapshot(clone)
 	if err != nil {
@@ -54,7 +60,7 @@ func (a agent) ponytail(root, clone, sha, test string, i Issue, c config.Config)
 	}
 	ev["net_lines"] = lines
 	if why == "" {
-		if _, err := checks(clone, sha, i.Type, test, c); err != nil {
+		if _, err := checks(clone, base, i.Type, test, c); err != nil {
 			why = err.Error()
 		}
 	}
@@ -187,13 +193,23 @@ func added(clone, sha, tree string) (int, error) {
 	return n, err
 }
 
-// commit commits in clone, on sha, the unit, tree unit, then the cut, the working tree with a tombstone per
-// finding, under the git identity of the repository at root, and returns both commits and the tombstones.
+// commit commits in clone, on HEAD, the run's last unit from base commit sha, tree unit, then the cut, the
+// working tree with a tombstone per finding, under the git identity of the repository at root, and returns
+// both commits and the tombstones.
 func commit(root, clone, sha, unit, title string, found []finding) (commits, tombs []string, err error) {
 	id, err := identity(root)
 	if err != nil {
 		return nil, nil, err
 	}
+	parent, err := git(clone, "rev-parse", "HEAD")
+	if err != nil {
+		return nil, nil, err
+	}
+	units, err := git(clone, "rev-list", "--count", sha+"..HEAD") // the units chained before it
+	if err != nil {
+		return nil, nil, err
+	}
+	n, _ := strconv.Atoi(units)
 	if tombs, err = tombstones(clone, found); err != nil {
 		return nil, tombs, err
 	}
@@ -205,9 +221,7 @@ func commit(root, clone, sha, unit, title string, found []finding) (commits, tom
 	for _, f := range found {
 		msg += fmt.Sprintf("\n- %s: %s (%s)", f.File, f.Finding, f.Family)
 	}
-	// ponytail: one unit, until the run chains its follow-ups.
-	parent := sha
-	for _, c := range [][2]string{{unit, "atm unit 1: " + title}, {cut, msg}} {
+	for _, c := range [][2]string{{unit, fmt.Sprintf("atm unit %d: %s", n+1, title)}, {cut, msg}} {
 		if parent, err = git(clone, append(id, "commit-tree", c[0], "-p", parent, "-m", c[1])...); err != nil {
 			return commits, tombs, err
 		}
