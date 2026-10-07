@@ -251,13 +251,15 @@ func tee(ctx context.Context, t terminal, w io.Writer, dir, line string, env ...
 	cmd.Stdout = io.MultiWriter(&out, w, log)
 	cmd.Stderr = cmd.Stdout
 	ownGroup(cmd)
+	if err := inheritCloneLease(cmd, dir); err != nil {
+		return "", err
+	}
 	ran := false
 	if t != nil {
 		ran, err = t.run(cmd)
 	}
 	if !ran {
 		if err = cmd.Start(); err == nil {
-			note(cmd)
 			err = cmd.Wait()
 		}
 	}

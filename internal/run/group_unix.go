@@ -3,7 +3,6 @@
 package run
 
 import (
-	"errors"
 	"os/exec"
 	"syscall"
 )
@@ -17,10 +16,4 @@ func ownGroup(cmd *exec.Cmd) {
 // detach starts cmd in a session of its own, so the terminal that started it can close.
 func detach(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-}
-
-// groupAlive says whether a process of group pgid runs.
-func groupAlive(pgid int) bool {
-	err := syscall.Kill(-pgid, 0)
-	return err == nil || errors.Is(err, syscall.EPERM)
 }

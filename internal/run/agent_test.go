@@ -41,6 +41,14 @@ var work = map[string]string{"fix": fixWork, "feature": fixWork, "greenfield": f
 // its report; its call goes to $FAKE_AGENT_CALL.ponytail. $FAKE_AGENT_STREAM goes to its stdout after its first line.
 func fakeAgent(name string) int {
 	mode := os.Getenv("FAKE_AGENT")
+	if ready := os.Getenv("FAKE_AGENT_READY"); ready != "" {
+		_ = os.WriteFile(ready, nil, 0o600)
+	}
+	if os.Getenv("FAKE_AGENT_KILL_PARENT") != "" {
+		parent, _ := os.FindProcess(os.Getppid())
+		_ = parent.Kill()
+		_ = os.Unsetenv("FAKE_AGENT_KILL_PARENT")
+	}
 	if mode == "grandchild" {
 		c := make(chan os.Signal, 1)
 		signal.Notify(c, os.Interrupt) // blocks until killed: ATM sends nothing but SIGKILL
@@ -70,6 +78,19 @@ func fakeAgent(name string) int {
 		grandchild.Env, grandchild.Stdout = append(os.Environ(), "FAKE_AGENT=grandchild"), os.Stdout
 		_ = grandchild.Run()
 		return 0
+	case "orphan":
+		grandchild := exec.Command(os.Args[0])
+		grandchild.Env = append(os.Environ(), "FAKE_AGENT=grandchild")
+		null, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+		if err != nil {
+			return 1
+		}
+		grandchild.Stdout, grandchild.Stderr = null, null
+		err = grandchild.Start()
+		_ = null.Close()
+		if err != nil {
+			return 1
+		}
 	}
 	path := map[string]string{"claude": ".claude/skills/" + skill, "codex": ".agents/skills/" + skill,
 		"opencode": ".opencode/skills/" + skill, "pi": after(args, "--skill")}[name] + "/SKILL.md"
