@@ -276,9 +276,11 @@ func trial(clone, tree string, aside []string, base, after string) (red, green, 
 }
 
 // every runs git in clone on .git/atm-files, a repository of its own that keeps every file of the working tree,
-// the ones git ignores too, which the clone's write-tree never sees.
+// the ones git ignores too, which the clone's write-tree never sees. It reads big files, every one above a
+// byte, in chunks: macOS kills git for mapping a binary that ran and whose signature, like slopslint's, is bad.
 func every(clone string, args ...string) (string, error) {
-	return git(clone, append([]string{"--git-dir=.git/atm-files", "--work-tree=."}, args...)...)
+	return git(clone, append([]string{"-c", "core.bigFileThreshold=1", "--git-dir=.git/atm-files", "--work-tree=."},
+		args...)...)
 }
 
 // keep is the tree of clone's index, and records every file in clone, ignored or not, for reset. ponytail: a
@@ -295,10 +297,15 @@ func keep(clone string) (string, error) {
 }
 
 // reset brings clone's working tree back to what keep recorded, new files gone, the ignored ones too. A file
-// keep recorded that was changed or deleted, ignored or not, is errVoid.
+// keep recorded that was changed or deleted, ignored or not, is errVoid. The refresh hashes, streaming, what diff
+// would map to compare.
 func reset(clone string) error {
-	_, changed := every(clone, "diff", "--quiet")
-	_, err := every(clone, "clean", "-fdqx")
+	_, err := every(clone, "update-index", "-q", "--refresh")
+	if err != nil {
+		return err
+	}
+	_, changed := every(clone, "diff-files", "--quiet")
+	_, err = every(clone, "clean", "-fdqx")
 	if err == nil {
 		_, err = every(clone, "checkout", "--", ".")
 	}

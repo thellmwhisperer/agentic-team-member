@@ -3,10 +3,14 @@ package run
 import (
 	"bytes"
 	"cmp"
+	"debug/macho"
+	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -57,7 +61,7 @@ func commitBase(t *testing.T, root, name, text string) {
 // proofCases are the task types' proofs at work: why, when not "", names the run's failure.
 var proofCases = []struct {
 	name, typ, work, atm, why, lib, ignore string
-	hang                                   bool
+	hang, binary                           bool // binary: $ATM_TEST_BINARY is executedBinary
 }{
 	{name: "fix whose test only calls a function it adds to an old file", typ: "fix", lib: lib,
 		work: "echo '" + helper + "' >> lib.sh" + testThrough("helper"), why: "depends on nothing the base had"},
@@ -91,6 +95,9 @@ var proofCases = []struct {
 		work: "echo fixed > a.txt; echo kept > cache.txt; " +
 			"echo 'grep -q fixed a.txt && ! grep -q broken a.txt && rm cache.txt' > a_test.sh; " +
 			reportJSON("a_test.sh")},
+	{name: "fix whose agent ran an ignored binary", typ: "fix", ignore: ".tmp/\n", binary: true,
+		work: `mkdir .tmp; cp "$ATM_TEST_BINARY" .tmp/bin; .tmp/bin; echo fixed > a.txt; ` +
+			"echo 'touch .tmp/bin; grep -q fixed a.txt && ! grep -q broken a.txt' > a_test.sh"},
 	{name: "fix whose test changes the clone", typ: "fix",
 		work: "echo fixed > a.txt; echo 'grep -q fixed a.txt && echo x >> a.txt' > a_test.sh", why: "void"},
 	{name: "fix without test_file", typ: "fix", atm: atmSet(atmYAML, "test_file", ""), why: "test_file"},
@@ -120,6 +127,43 @@ var proofCases = []struct {
 		work: "echo fixed > a.txt; echo '! grep -q broken a.txt' >> a_test.sh"},
 }
 
+// executedBinary is a program that runs but whose code signature, like slopslint's, does not match a page it
+// never runs: once it has run, macOS kills any process that maps that page. Only macOS does.
+func executedBinary(t *testing.T) string {
+	t.Helper()
+	if runtime.GOOS != "darwin" {
+		t.Skip("macOS only")
+	}
+	dir := t.TempDir()
+	src, bin := filepath.Join(dir, "main.go"), filepath.Join(dir, "bin")
+	if err := os.WriteFile(src, []byte("package main\n\nfunc main() {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("go", "build", "-o", bin, src).CombinedOutput(); err != nil {
+		t.Fatalf("%v: %s", err, out)
+	}
+	f, err := macho.Open(bin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dwarf := f.Segment("__DWARF") // signed, never loaded
+	if err = f.Close(); err != nil || dwarf == nil {
+		t.Fatalf("no __DWARF in %s: %v", bin, err)
+	}
+	b, err := os.OpenFile(bin, os.O_RDWR, 0)
+	if err == nil {
+		at, one := int64(dwarf.Offset+dwarf.Filesz/2), []byte{0}
+		if _, err = b.ReadAt(one, at); err == nil {
+			_, err = b.WriteAt([]byte{^one[0]}, at)
+		}
+		err = errors.Join(err, b.Close())
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	return bin
+}
+
 // shrunkTest names the failure of work that deletes or shortens a_test.sh, a test on the base.
 const shrunkTest = "the base's test a_test.sh is gone or shorter"
 
@@ -139,6 +183,9 @@ func reportJSON(test string) string {
 func TestRunChecksTheProofOfEachTaskType(t *testing.T) {
 	for _, c := range proofCases {
 		t.Run(c.name, func(t *testing.T) {
+			if c.binary {
+				t.Setenv("ATM_TEST_BINARY", executedBinary(t))
+			}
 			root := repo(t, "https://example.com/owner/repo.git", cmp.Or(c.atm, atmYAML))
 			commitBase(t, root, "lib.sh", c.lib)
 			commitBase(t, root, ".gitignore", c.ignore)
