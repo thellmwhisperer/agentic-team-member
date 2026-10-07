@@ -172,8 +172,8 @@ line with a lowercase type: `fix` (or `hotfix`), `feature`,
 `gh issue view` from the repository `origin` names.
 
 The current Go port validates configuration before reading the issue, then
-emits start and result JSON lines for the `issue`, `contract`, and `clone` steps. The
-`issue` result includes the title and task type on success, plus the issue
+emits start and result JSON lines for the `issue`, `contract`, `clone`, and
+`agent` steps. The `issue` result includes the title and task type on success, plus the issue
 number for GitHub issues. The `contract` step writes `.atm/brief.md` at the
 repository root and reports its path on success. The brief starts by directing
 the agent to read `AGENTS.md` if present, then gives the issue, task-type
@@ -213,9 +213,9 @@ clone, excluded from git: `.claude/skills/` for `claude`, `.agents/skills/` for
 for `claude`, a read of its `SKILL.md` for `pi` and `codex`, a `skill` event for
 `opencode`), or the run dies.
 
-The agent runs in the clone in its own process group; past 30 minutes, or when
-ATM gets SIGINT or SIGTERM, the whole group is killed. Every line it writes
-goes to `.atm/worker-<timestamp>.jsonl`, named
+The agent runs in the clone. Past 30 minutes, or when ATM gets SIGINT or
+SIGTERM, cancellation kills its process group on Unix or its process tree on
+Windows. Every line it writes goes to `.atm/worker-<timestamp>.jsonl`, named
 after the clone: JSON lines as they are, any other line as a JSON string. The
 report is the last JSON object of its final message (`codex`: its `-o` file,
 `.atm/worker-<timestamp>.final.md`) and must carry `test_file`: ATM never
