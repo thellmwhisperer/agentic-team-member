@@ -75,8 +75,8 @@ decided. Each line exists because a model got it wrong once:
 `.slop/tombstones/` holds one YAML record per incident: the pattern, what went
 wrong, the root cause, the rule it set, and the evidence as a slopslint family
 with an example and the file. Records named `T-PONYTAIL-*` are written by the
-ponytail pass, one per cut it kept. A tombstone is the shape the gate looks for
-next time.
+ponytail pass, one per finding in a kept cut. A tombstone is the shape the
+gate looks for next time.
 
 ## Before a PR merges
 

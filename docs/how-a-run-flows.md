@@ -221,22 +221,10 @@ editing it. The loop ends on a failed unit, no chainable follow-up, or
 A code quality gate, not a code review: it does not judge whether the fix is
 right, the checks already did. It looks for code the fix does not need.
 
-When every unit passed, `ponytail_pass` makes one more harness call with
-`brief-ponytail.md`: the run's diff against the base commit and the
-ponytail-review rules. The agent may only delete, shrink, or replace with the
-standard library, a native feature or an existing helper. No flag skips it.
-
-The cut is kept only if the run's net added lines went down and every check
-passes again on the cut: each unit's red/green, quality, gate, full suite,
-typecheck, scope (the files the run already touched) and
-`[delivery].lint_command` when set. Otherwise the pre-ponytail clone comes
-back exactly as it was.
-
-A kept cut leaves two commits: `atm unit <n>: <title>` with the pre-ponytail
-tree, then `ponytail: <n> cuts` with only the cut and one line per finding,
-`- <file>: <finding> (<family>)`. A reviewer can tell the agent's work from the
-cut. When the target has `.slop/`, each finding that names an existing file
-also becomes a slopslint tombstone in that commit.
+After the checks pass, the ponytail pass reviews the run's diff. A kept cut
+leaves a unit commit and a separate ponytail commit. See
+[configuration](configuration.md#go-port-configuration) for the current Go
+port's cut rules, checks, report, commits and tombstones.
 
 ## 13. Delivery and code review gate
 
