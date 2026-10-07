@@ -198,6 +198,7 @@ func exclude(clone, pattern string) error {
 // each line tells the screen.
 type stream struct {
 	final, skill string
+	loads        []string // the ids of the agent's calls that load its skill
 	used         bool
 	live         func(map[string]any)
 }
@@ -274,8 +275,10 @@ type block struct {
 func (s *stream) see(harness string, line []byte) {
 	var e event
 	_ = json.Unmarshal(line, &e) // a field of another type is left empty, the rest is read
-	s.used = s.used || e.usedSkill(harness, s.skill)
+	s.loads = append(s.loads, e.skillLoads(harness, s.skill)...)
 	for _, ev := range e.activity(harness) {
+		id, _ := ev["id"].(string)
+		s.used = s.used || ev["result"] == "passed" && slices.Contains(s.loads, id)
 		s.live(ev)
 	}
 	if text, ok := e.final(harness); ok {
@@ -283,24 +286,40 @@ func (s *stream) see(harness string, line []byte) {
 	}
 }
 
-// usedSkill says whether e proves the agent used skill: a Skill tool call for claude, a read of its SKILL.md
-// for pi and codex, a skill event for opencode.
-func (e event) usedSkill(harness, skill string) bool {
-	named := func(b []byte) bool { return bytes.Contains(b, []byte(skill)) }
-	read := func(b []byte) bool { return named(b) && bytes.Contains(b, []byte("SKILL.md")) }
-	switch harness {
-	case "claude":
-		return slices.ContainsFunc(e.Message.Content, func(b block) bool {
-			return b.Type == "tool_use" && b.Name == "Skill" && named(b.Input)
-		})
-	case "codex":
-		return e.Item.Type == "command_execution" && read([]byte(e.Item.Command))
-	case "opencode":
-		return e.Type == "tool_use" && e.Part.Tool == "skill" && named(e.Part.State.Input)
-	case "pi":
-		return e.Type == "tool_execution_start" && e.ToolName == "read" && read(e.Args)
+// skillLoads is the ids of e's calls that load skill, by its exact name: a Skill tool call for claude, a read
+// of its SKILL.md for pi and codex, a skill call for opencode. A load proves the agent used skill once its
+// result is not an error.
+func (e event) skillLoads(harness, skill string) []string {
+	read := func(path string) bool { return strings.Contains(filepath.ToSlash(path), "/"+skill+"/SKILL.md") }
+	switch {
+	case harness == "claude":
+		return e.skillCalls(skill)
+	case harness == "codex" && e.Item.Type == "command_execution" && read(e.Item.Command):
+		return []string{e.Item.ID}
+	case harness == "opencode" && e.Type == "tool_use" && e.Part.Tool == "skill" &&
+		names(e.Part.State.Input, "name", skill):
+		return []string{e.Part.CallID}
+	case harness == "pi" && e.Type == "tool_execution_start" && e.ToolName == "read" && read(detail(e.Args)):
+		return []string{e.ToolCallID}
 	}
-	return false
+	return nil
+}
+
+// skillCalls is the ids of claude's Skill tool calls in e that load skill.
+func (e event) skillCalls(skill string) (ids []string) {
+	for _, b := range e.Message.Content {
+		if b.Type == "tool_use" && b.Name == "Skill" && names(b.Input, "skill", skill) {
+			ids = append(ids, b.ID)
+		}
+	}
+	return ids
+}
+
+// names says whether a tool call's input has name as its key.
+func names(input json.RawMessage, key, name string) bool {
+	var in map[string]any
+	_ = json.Unmarshal(input, &in)
+	return in[key] == name
 }
 
 // final is the final message e ends, if it ends one; codex's is in its -o file instead.
