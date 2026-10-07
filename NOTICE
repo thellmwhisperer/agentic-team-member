@@ -4,5 +4,6 @@ Copyright 2026 Javier Mellado
 This product is licensed under the Apache License, Version 2.0
 (see LICENSE for the full text).
 
-internal/run/ponytail/SKILL.md is the ponytail skill
-(github.com/DietrichGebert/ponytail), licensed under the MIT License.
+internal/run/ponytail/SKILL.md and internal/run/ponytail-review/SKILL.md are the
+ponytail and ponytail-review skills (github.com/DietrichGebert/ponytail),
+licensed under the MIT License.

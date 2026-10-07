@@ -37,7 +37,7 @@ func reportNode(t *testing.T, rep obj, name string) obj {
 }
 
 // nodes is every node of a run, in order.
-var nodes = []string{"issue", "contract", "clone", "agent", "checks", "delivery"}
+var nodes = []string{"issue", "contract", "clone", "agent", "checks", "ponytail", "delivery"}
 
 func TestRunStopsAndReports(t *testing.T) {
 	cases := []struct {
@@ -63,6 +63,8 @@ func TestRunStopsAndReports(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			results := append(append([]string{}, c.results[:5]...),
+				cmp.Or(map[string]string{"passed": "passed"}[c.results[4]], "not run"), c.results[5])
 			root := repo(t, "https://example.com/owner/repo.git", cmp.Or(c.atm, atmYAML))
 			pre := filepath.Join(t.TempDir(), "pre.json")
 			t.Setenv("ATM_TEST_OUT", pre)
@@ -88,12 +90,12 @@ func TestRunStopsAndReports(t *testing.T) {
 			}
 			for i, name := range nodes {
 				n := reportNode(t, rep, name)
-				if _, ok := n["duration_ms"].(float64); n["result"] != c.results[i] || !ok {
-					t.Fatalf("node %s: %v, want %s with its duration_ms", name, n, c.results[i])
+				if _, ok := n["duration_ms"].(float64); n["result"] != results[i] || !ok {
+					t.Fatalf("node %s: %v, want %s with its duration_ms", name, n, results[i])
 				}
 			}
-			checkEvents(t, &out, c.results)
-			checkSummary(t, summary.String(), rep, c.results)
+			checkEvents(t, &out, results)
+			checkSummary(t, summary.String(), rep, results)
 			checkCommands(t, c.name, rep, pre)
 		})
 	}

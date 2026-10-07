@@ -18,11 +18,12 @@ func atmSet(atm, key, value string) string {
 	return regexp.MustCompile(`(?m)^`+key+`:.*$`).ReplaceAllLiteralString(atm, key+": '"+value+"'")
 }
 
-// checksStep is the checks step's end event, after checking the agent step passed and nothing followed.
+// checksStep is the checks step's end event, after checking the agent step passed and nothing followed a failure.
 func checksStep(t *testing.T, out *bytes.Buffer) obj {
 	t.Helper()
 	evs := events(t, out)
-	if len(evs) != 10 || evs[7]["step"] != "agent" || evs[7]["state"] != "passed" || evs[8]["step"] != "checks" ||
+	if len(evs) < 10 || evs[9]["state"] == "failed" && len(evs) != 10 || evs[7]["step"] != "agent" ||
+		evs[7]["state"] != "passed" || evs[8]["step"] != "checks" ||
 		evs[8]["state"] != "started" || evs[9]["step"] != "checks" {
 		t.Fatalf("want the agent step passed, then the checks step, got %v", evs)
 	}

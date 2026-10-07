@@ -79,12 +79,13 @@ func Run(args []string, out, summary io.Writer) (err error) {
 	})
 	var test string
 	r.step("agent", func() (map[string]any, error) {
-		ev, err := a.run(dir, text)
+		ev, err := a.run(dir, "worker", "ponytail", text, testFile)
 		report, _ := ev["report"].(map[string]any)
 		test, _ = report["test_file"].(string)
 		return ev, err
 	})
 	r.step("checks", func() (map[string]any, error) { return checks(dir, sha, i.Type, test, c) })
+	r.step("ponytail", func() (map[string]any, error) { return a.ponytail(root, dir, sha, test, i, c) })
 	deliver(r, dir, c.Delivery)
 	return r.err
 }

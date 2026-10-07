@@ -42,7 +42,7 @@ type cmdResult struct {
 // the last run's; a directory a run is the upgrade.
 func newVerdict(root string, out io.Writer) *verdict {
 	r := &verdict{path: filepath.Join(root, ".atm", "report.json"), out: out}
-	for _, name := range []string{"issue", "contract", "clone", "agent", "checks", "delivery"} {
+	for _, name := range []string{"issue", "contract", "clone", "agent", "checks", "ponytail", "delivery"} {
 		r.Nodes = append(r.Nodes, &node{Name: name, Result: "not run"})
 	}
 	return r

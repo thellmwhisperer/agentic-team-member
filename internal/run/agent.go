@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	_ "embed"
+	"embed"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -23,11 +23,11 @@ import (
 	"github.com/thellmwhisperer/agentic-team-member/internal/config"
 )
 
-// ponytailSkill is the ponytail skill (github.com/DietrichGebert/ponytail, MIT): the implementing agent
-// loads it, always.
+// skills are the ponytail skills (github.com/DietrichGebert/ponytail, MIT): the implementing agent loads
+// ponytail, the slop detector ponytail-review, always.
 //
-//go:embed ponytail/SKILL.md
-var ponytailSkill []byte
+//go:embed ponytail/SKILL.md ponytail-review/SKILL.md
+var skills embed.FS
 
 // skillDirs is where each harness finds a project skill; pi finds it where --skill points, under .atm/.
 var skillDirs = map[string]string{"claude": ".claude/skills", "codex": ".agents/skills",
@@ -91,14 +91,14 @@ func (a agent) argv(clone, skill, final, brief string) (argv []string, stdin str
 	return append(append(argv, a.args...), brief), ""
 }
 
-// run runs the agent on brief in clone, in its own process group, and returns its report. Every line it
-// writes goes to .atm/worker-<timestamp>.jsonl, named after the clone, so it is as unique, and outlives it.
-// The timeout, SIGINT and SIGTERM kill the group.
-func (a agent) run(clone, brief string) (map[string]any, error) {
+// run runs the agent on brief in clone with skill, in its own process group, and returns its report, which
+// check accepts. Every line it writes goes to .atm/<name>-<timestamp>.jsonl, named after the clone, so it is
+// as unique, and outlives it. The timeout, SIGINT and SIGTERM kill the group.
+func (a agent) run(clone, name, skill, brief string, check func(map[string]any) error) (map[string]any, error) {
 	path := filepath.Join(filepath.Dir(filepath.Dir(clone)),
-		"worker-"+strings.TrimPrefix(filepath.Base(clone), "atm-run-")+".jsonl")
+		name+"-"+strings.TrimPrefix(filepath.Base(clone), "atm-run-")+".jsonl")
 	ev := map[string]any{"log": path}
-	skill, err := placeSkill(clone, a.Harness)
+	dir, err := placeSkill(clone, a.Harness, skill)
 	if err != nil {
 		return ev, err
 	}
@@ -108,7 +108,7 @@ func (a agent) run(clone, brief string) (map[string]any, error) {
 	}
 	defer func() { _ = f.Close() }()
 	final := strings.TrimSuffix(path, ".jsonl") + ".final.md"
-	argv, stdin := a.argv(clone, skill, final, brief)
+	argv, stdin := a.argv(clone, dir, final, brief)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	ctx, cancel := context.WithTimeout(ctx, agentTimeout)
@@ -119,7 +119,7 @@ func (a agent) run(clone, brief string) (map[string]any, error) {
 		return strings.HasPrefix(kv, "CLAUDE_CODE_CHILD_SESSION=") // set, the agent's transcripts are off
 	}), a.env...)
 	ownGroup(cmd)
-	var s stream
+	s := stream{skill: skill}
 	err = s.read(cmd, f, a.Harness)
 	switch {
 	case errors.Is(ctx.Err(), context.DeadlineExceeded):
@@ -128,41 +128,49 @@ func (a agent) run(clone, brief string) (map[string]any, error) {
 		return ev, fmt.Errorf("agent interrupted; log: %s", path)
 	case err != nil:
 		return ev, fmt.Errorf("agent: %w; log: %s", err, path)
-	case !s.skill:
-		return ev, fmt.Errorf("agent left no proof it used the ponytail skill; log: %s", path)
+	case !s.used:
+		return ev, fmt.Errorf("agent left no proof it used the %s skill; log: %s", skill, path)
 	}
 	if a.Harness == "codex" {
 		b, _ := os.ReadFile(final) // none is no report
 		s.final = string(b)
 	}
-	ev["report"], err = report(s.final)
+	ev["report"], err = report(s.final, check)
 	if err != nil {
 		return ev, fmt.Errorf("%w; log: %s", err, path)
 	}
 	return ev, nil
 }
 
-// report is the agent's report, the last JSON object of its final message, with the test file it names: ATM
-// never guesses it.
-func report(final string) (map[string]any, error) {
+// report is the agent's report, the last JSON object of its final message, which check accepts.
+func report(final string, check func(map[string]any) error) (map[string]any, error) {
 	r := lastObject(final)
 	if r == nil {
 		return nil, errors.New("agent left no report: no JSON object in its final message")
 	}
-	if _, ok := r["test_file"].(string); !ok {
-		return nil, errors.New("agent report has no test_file")
-	}
-	return r, nil
+	return r, check(r)
 }
 
-// placeSkill puts the ponytail skill where harness finds it in clone, outside git, and returns its directory.
-func placeSkill(clone, harness string) (string, error) {
-	rel := skillDirs[harness] + "/ponytail"
-	dir := filepath.Join(clone, filepath.FromSlash(rel))
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return dir, err
+// testFile checks the implementing agent's report r names its test file: ATM never guesses it.
+func testFile(r map[string]any) error {
+	if _, ok := r["test_file"].(string); !ok {
+		return errors.New("agent report has no test_file")
 	}
-	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), ponytailSkill, 0o644); err != nil {
+	return nil
+}
+
+// placeSkill puts skill where harness finds it in clone, outside git, and returns its directory.
+func placeSkill(clone, harness, skill string) (string, error) {
+	rel := skillDirs[harness] + "/" + skill
+	dir := filepath.Join(clone, filepath.FromSlash(rel))
+	b, err := skills.ReadFile(skill + "/SKILL.md")
+	if err == nil {
+		err = os.MkdirAll(dir, 0o755)
+	}
+	if err == nil {
+		err = os.WriteFile(filepath.Join(dir, "SKILL.md"), b, 0o644)
+	}
+	if err != nil {
 		return dir, err
 	}
 	return dir, exclude(clone, "/"+rel+"/")
@@ -182,10 +190,10 @@ func exclude(clone, pattern string) error {
 	return errors.Join(err, f.Close())
 }
 
-// stream is what the agent's lines said: its final message and whether it used the ponytail skill.
+// stream is what the agent's lines said: its final message and whether it used its skill.
 type stream struct {
-	final string
-	skill bool
+	final, skill string
+	used         bool
 }
 
 // read runs cmd and writes each line of its stdout and stderr to log, as it is when JSON, else as a JSON
@@ -219,8 +227,8 @@ func (s *stream) read(cmd *exec.Cmd, log io.Writer, harness string) error {
 	return errors.Join(err, <-done)
 }
 
-// event is the fields of every harness's events that say what its final message is and that it used the
-// ponytail skill.
+// event is the fields of every harness's events that say what its final message is and that it used its
+// skill.
 type event struct {
 	Type    string
 	Result  string // claude
@@ -246,26 +254,26 @@ type block struct {
 func (s *stream) see(harness string, line []byte) {
 	var e event
 	_ = json.Unmarshal(line, &e) // a field of another type is left empty, the rest is read
-	s.skill = s.skill || e.usedSkill(harness)
+	s.used = s.used || e.usedSkill(harness, s.skill)
 	if text, ok := e.final(harness); ok {
 		s.final = text
 	}
 }
 
-// usedSkill says whether e proves the agent used the ponytail skill: a Skill tool call for claude, a read of
-// its SKILL.md for pi and codex, a skill event for opencode.
-func (e event) usedSkill(harness string) bool {
-	ponytail := func(b []byte) bool { return bytes.Contains(b, []byte("ponytail")) }
-	read := func(b []byte) bool { return ponytail(b) && bytes.Contains(b, []byte("SKILL.md")) }
+// usedSkill says whether e proves the agent used skill: a Skill tool call for claude, a read of its SKILL.md
+// for pi and codex, a skill event for opencode.
+func (e event) usedSkill(harness, skill string) bool {
+	named := func(b []byte) bool { return bytes.Contains(b, []byte(skill)) }
+	read := func(b []byte) bool { return named(b) && bytes.Contains(b, []byte("SKILL.md")) }
 	switch harness {
 	case "claude":
 		return slices.ContainsFunc(e.Message.Content, func(b block) bool {
-			return b.Type == "tool_use" && b.Name == "Skill" && ponytail(b.Input)
+			return b.Type == "tool_use" && b.Name == "Skill" && named(b.Input)
 		})
 	case "codex":
 		return e.Item.Type == "command_execution" && read([]byte(e.Item.Command))
 	case "opencode":
-		return e.Type == "tool_use" && e.Part.Tool == "skill" && ponytail(e.Part.State.Input)
+		return e.Type == "tool_use" && e.Part.Tool == "skill" && named(e.Part.State.Input)
 	case "pi":
 		return e.Type == "tool_execution_start" && e.ToolName == "read" && read(e.Args)
 	}
