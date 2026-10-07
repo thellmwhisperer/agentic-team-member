@@ -264,19 +264,22 @@ func onBranch(root, clone, sha, name, title string) (cuts string, err error) {
 // foreign is an error naming the first commit from base commit sha to HEAD in clone whose author or committer
 // is not the identity of the repository at root.
 func foreign(root, clone, sha string) error {
+	log, err := git(clone, "log", "--format=%h %an <%ae>, %cn <%ce>", sha+"..HEAD")
+	if err != nil || log == "" {
+		return err
+	}
 	id, err := identity(root)
 	if err != nil {
 		return err
 	}
 	v := func(n int) string { _, s, _ := strings.Cut(id[n], "="); return s } // id is -c key=value pairs
 	want := fmt.Sprintf("%s <%s>, %s <%s>", v(1), v(3), v(5), v(7))
-	log, err := git(clone, "log", "--format=%h %an <%ae>, %cn <%ce>", sha+"..HEAD")
 	for _, line := range strings.Split(log, "\n") {
-		if h, who, _ := strings.Cut(line, " "); err == nil && line != "" && who != want {
+		if h, who, _ := strings.Cut(line, " "); line != "" && who != want {
 			return fmt.Errorf("commit %s is by %s, not the repository's identity %s", h, who, want)
 		}
 	}
-	return err
+	return nil
 }
 
 // GitHubRepo is the owner/name of the GitHub repository origin names, "" when it names none. No origin is not
