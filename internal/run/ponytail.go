@@ -91,7 +91,8 @@ func review(root, clone, sha string, i Issue, c config.Config) (tree string, fil
 
 // fault says why the cut from tree before to tree after, on the run's work from sha, which changes files,
 // does not hold even before the checks, "" when it may: it must shorten the diff, report what it cut, and
-// add no file nor touch one outside files. lines are the net lines the run adds before and after it.
+// add or delete no file, touch no test nor file outside files. lines are the net lines the run adds before
+// and after it.
 func fault(clone, sha, before, after string, files []string, found []finding, tests []string) (why string, lines [2]int,
 	err error) {
 	for n, tree := range []string{before, after} {
@@ -235,8 +236,8 @@ func identity(root string) ([]string, error) {
 	return flags, nil
 }
 
-// tombstones writes in clone a slopslint tombstone for each finding and returns their paths. ponytail: a
-// finding on a file the cut deleted names an artifact slopslint refuses; dropping its tombstone is the upgrade.
+// tombstones writes in clone a slopslint tombstone for each finding and returns their paths. fault rejects
+// deleted files before this call so each tombstone names an existing artifact.
 func tombstones(clone string, found []finding) ([]string, error) {
 	now := time.Now()
 	var paths []string

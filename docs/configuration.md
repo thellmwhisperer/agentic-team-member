@@ -256,8 +256,9 @@ A timeout, a non-zero exit, no proof of the skill, an invalid report or a commit
 fails the step and the run.
 
 The cut is discarded, and the clone comes back exactly as before, when it does
-not lower the run's net added lines, reports no finding, adds a file, touches
-one outside the diff, or fails the `checks` step run again. A kept cut leaves
+not lower the run's net added lines, reports no finding, adds a file, deletes a
+file, touches a file matching `test_patterns` or one outside the diff, or fails
+the `checks` step run again. A kept cut leaves
 two commits: `atm unit 1: <title>` with the work before the cut, then
 `ponytail: <n> cuts` with the cut, one `- <file>: <finding> (<family>)` line per
 finding, and one slopslint tombstone per finding under `.slop/tombstones/`.
