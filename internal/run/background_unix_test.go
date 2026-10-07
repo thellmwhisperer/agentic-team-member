@@ -4,6 +4,7 @@ package run
 
 import (
 	"bytes"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -116,6 +117,88 @@ func TestAgentExitKeepsCloneUntilOrphanChildExits(t *testing.T) {
 	nextRun(t, top)
 	if _, err := os.Stat(clone); !os.IsNotExist(err) {
 		t.Fatalf("the sweep kept the clone after its child exited: %v", clones(t, top))
+	}
+}
+
+func TestKilledBackgroundDuringDeliveryKeepsCloneAndFailsAtDelivery(t *testing.T) {
+	pidFifo, _ := fifos(t)
+	t.Setenv("FAKE_AGENT", "")
+	top := gitT(t, repo(t, "https://example.com/owner/repo.git", atmSet(atmYAML, "delivery",
+		`echo $$ > "$ATM_TEST_PID"; cat "$ATM_TEST_GATE"`)), "rev-parse", "--show-toplevel")
+	t.Cleanup(func() { _ = os.Remove(socket(top)) })
+	o, err := Start(top, []string{issueFile(t, issue)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(pidFifo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	delivery, err := strconv.Atoi(strings.TrimSpace(string(b)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = syscall.Kill(-delivery, syscall.SIGKILL) })
+	log, err := os.ReadFile(filepath.Join(top, ".atm", "serve.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(log)), "\n")
+	server, err := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(lines[len(lines)-1], "atm serve pid:")))
+	if err != nil {
+		t.Fatalf("serve log %q: %v", log, err)
+	}
+	if err := syscall.Kill(server, syscall.SIGKILL); err != nil {
+		t.Fatal(err)
+	}
+	until(t, "the killed background server to stop answering", func() bool {
+		c, err := net.Dial("unix", short(socket(top)))
+		if err != nil {
+			return true
+		}
+		_ = c.Close()
+		return false
+	})
+	clone := theClone(t, top)
+	t.Setenv("FAKE_AGENT", "fail")
+	runs, err := Runs(top)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, run := range runs {
+		if run.Run == o.Run {
+			if run.Outcome != "failed" || run.FailedNode != "delivery" || run.Step != "delivery" ||
+				!run.Ended.After(run.Started) {
+				t.Fatalf("the interrupted run's history = %+v; want failure at delivery with a duration", run)
+			}
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("the interrupted run %q is missing from history: %+v", o.Run, runs)
+	}
+	nextRun(t, top)
+	if _, err := os.Stat(clone); err != nil {
+		t.Fatalf("the sweep removed the clone while delivery was alive: %v", err)
+	}
+	if _, err := os.Stat(clone + ".delivered"); !os.IsNotExist(err) {
+		t.Fatalf("the killed delivery marked the clone delivered: %v", err)
+	}
+	if err := syscall.Kill(-delivery, syscall.SIGKILL); err != nil && err != syscall.ESRCH {
+		t.Fatal(err)
+	}
+	until(t, "the delivery lease to be released", func() bool {
+		f, locked, err := tryCloneExclusive(clone)
+		if f != nil {
+			_ = f.Close()
+		}
+		return err == nil && locked
+	})
+	nextRun(t, top)
+	if _, err := os.Stat(clone); !os.IsNotExist(err) {
+		t.Fatalf("the sweep kept the clone after delivery exited: %v", clones(t, top))
 	}
 }
 
