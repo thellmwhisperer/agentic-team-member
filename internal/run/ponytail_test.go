@@ -132,7 +132,7 @@ func unitDone(t *testing.T, work string) (root, dir, sha string, c config.Config
 		dir, sha, err = clone(root, "main", "", "")
 	}
 	if err == nil {
-		_, err = sh(dir, "printf 'fixed\\nextra\\nmore\\n' > a.txt; echo 'grep -q fixed a.txt' > a_test.sh")
+		_, err = sh(dir, "printf 'fixed\\nextra\\nmore\\n' > a.txt"+fixTest)
 	}
 	if err != nil {
 		t.Fatal(err)

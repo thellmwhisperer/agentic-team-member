@@ -24,8 +24,11 @@ type obj = map[string]any
 const fakeReport = "Done.\n{\"draft\": true}\n" + `{"test_file": "a_test.sh", "changed_files": ["a.txt"], ` +
 	`"summary": "s", "commands_run": [], "follow_ups": [{"title": "t", "red_test": "b_test.sh"}]}`
 
-// fixWork fixes a.txt, which repo's base commit has broken, and tests it.
-const fixWork = "echo fixed > a.txt; echo 'grep -q fixed a.txt' > a_test.sh"
+// fixTest writes a test that a.txt, which repo's base commit has broken, is fixed and broken no longer.
+const fixTest = "; echo 'grep -q fixed a.txt && ! grep -q broken a.txt' > a_test.sh"
+
+// fixWork fixes a.txt and tests it.
+const fixWork = "echo fixed > a.txt" + fixTest
 
 // work is what the fake agent does in its clone for each task type, a shell line.
 var work = map[string]string{"fix": fixWork, "feature": fixWork, "greenfield": fixWork, "refactor": "echo b > b.txt",

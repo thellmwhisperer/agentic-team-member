@@ -96,7 +96,11 @@ func prove(clone, typ, test string, c config.Config) (err error) {
 	}
 	switch typ {
 	case "fix", "feature", "greenfield":
-		return redGreen(clone, tree, aside, test, c.TestFile)
+		err := redGreen(clone, tree, aside, test, c.TestFile)
+		if err == nil && typ == "fix" {
+			err = onBase(clone, tree, aside, test, c.TestFile)
+		}
+		return err
 	case "refactor":
 		if p := first(changed, c.TestPatterns, true); p != "" {
 			return fmt.Errorf("a refactor changed the test %s", p)
@@ -151,6 +155,59 @@ func redGreen(clone, tree string, aside []string, test, tmpl string) error {
 	return wrap(green, test+" fails with the fix")
 }
 
+// onBase runs test, after a fix's red and green, twice more with the files the fix adds kept and each old file
+// it changes, of the paths aside, rebuilt from its diff: first the base with every added line in place, before
+// the base lines it replaces, then the added lines alone. A test that passes on both depends on nothing the
+// base had. ponytail: added lines that cannot run alone, as in a compiled language, fail the second and let
+// such a test pass.
+func onBase(clone, tree string, aside []string, test, tmpl string) error {
+	line, err := testLine(tmpl, test)
+	if err != nil {
+		return err
+	}
+	both, alone := map[string]string{}, map[string]string{}
+	for _, p := range aside {
+		out, err := git(clone, "--literal-pathspecs", "diff", "--cached", "--no-color", "--no-ext-diff",
+			"--no-textconv", "--diff-filter=M", "-U2147483647", "HEAD", "--", p)
+		if err != nil {
+			return err
+		}
+		_, hunk, ok := strings.Cut(out, "\n@@")
+		if !ok {
+			continue // deleted, binary or only its mode changed
+		}
+		var b, a, cut strings.Builder
+		for _, l := range strings.Split(hunk, "\n")[1:] {
+			switch {
+			case strings.HasPrefix(l, "+"):
+				b.WriteString(l[1:] + "\n")
+				a.WriteString(l[1:] + "\n")
+			case strings.HasPrefix(l, "-"):
+				cut.WriteString(l[1:] + "\n")
+			case strings.HasPrefix(l, " "):
+				b.WriteString(cut.String() + l[1:] + "\n")
+				cut.Reset()
+			}
+		}
+		both[p], alone[p] = b.String()+cut.String(), a.String()
+	}
+	if len(both) == 0 {
+		return nil
+	}
+	for _, files := range []map[string]string{both, alone} {
+		for p, s := range files {
+			if err := os.WriteFile(filepath.Join(clone, p), []byte(s), 0o600); err != nil {
+				return err
+			}
+		}
+		if red, _, err := trial(clone, tree, nil, line, ""); err != nil || red != nil {
+			return err
+		}
+	}
+	return fmt.Errorf("%s depends on nothing the base had: it passes on the old files with the fix's added "+
+		"lines put in the base, and with only those lines", test)
+}
+
 // trial runs base with the paths aside as they are at HEAD, brings the agent's work, tree, back and runs
 // after, "" for nothing, and returns how each ended. A hang in either, or a clone that is no longer tree, is
 // err: the verdict is void.
@@ -163,10 +220,8 @@ func trial(clone, tree string, aside []string, base, after string) (red, green, 
 		}
 	}
 	_, red = sh(clone, base)
-	if len(aside) > 0 {
-		if _, err := git(clone, "restore", "--source="+tree, "--staged", "--worktree", "--", "."); err != nil {
-			return red, nil, err
-		}
+	if _, err := git(clone, "restore", "--source="+tree, "--staged", "--worktree", "--", "."); err != nil {
+		return red, nil, err
 	}
 	if errors.Is(red, errTimeout) {
 		return red, nil, red
