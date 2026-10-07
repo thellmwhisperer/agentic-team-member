@@ -311,11 +311,12 @@ most 40; the clone's timestamp), anything left uncommitted becomes
 for the ponytail commits, and
 the clone's `origin` is set to the repository's: no `origin` fails the step.
 `report.json` is rewritten with `head_sha`, the branch's final SHA. Then the
-command runs with `sh -c` in the clone, with no time limit (SIGINT or SIGTERM
-to ATM kills its process group), with
-`ATM_TITLE`, `ATM_ISSUE` (the issue number, empty for a file), `ATM_BRANCH`,
+command runs with `sh -c` in the clone without a time limit. SIGINT or SIGTERM
+to the ATM process cancels it, killing its process group on Unix or process
+tree on Windows. Its environment contains `ATM_TITLE`, `ATM_ISSUE` (the issue
+number, empty for a file), `ATM_BRANCH`,
 `ATM_CLONE`, `ATM_REPORT` and `ATM_PONYTAIL` (the kept cut's findings, one a
-line, or empty) in its environment. Its output goes to the run's screen and to
+line, or empty). Its output goes to the run's screen and to
 `delivery-output.txt` in the run's directory. ATM never pushes or opens a pull request: that is
 the command's business. Its end line carries `branch`. Empty, the step is
 skipped and the run ends there.
