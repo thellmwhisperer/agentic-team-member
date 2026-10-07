@@ -1,0 +1,18 @@
+schema: 1
+id: T-PONYTAIL-20261007-040342-2
+status: accepted
+category: alien_code
+title: "Removed the os.MkdirAll and error chaining in saveFollowUps, because report.json's first write alrea"
+created_at: 2026-10-07
+incident:
+  pattern: "Removed the os.MkdirAll and error chaining in saveFollowUps, because report.json's first write already creates root's .atm/ before any step runs. Also dropped the impossible MarshalIndent error on []followUp, leaving a single os.WriteFile."
+  what_went_wrong: "An ATM run wrote it and ATM's ponytail pass cut it before delivery."
+  root_cause: "The coding agent wrote more than the issue needed."
+  rule_established: "Cut by the ponytail pass; it does not come back."
+  evidence:
+    - family: speculative_hardening
+      example: "Removed the os.MkdirAll and error chaining in saveFollowUps, because report.json's first write already creates root's .atm/ before any step runs. Also dropped the impossible MarshalIndent error on []followUp, leaving a single os.WriteFile."
+      artifact: internal/run/followup.go
+match:
+  family: speculative_hardening
+  artifact: internal/run/followup.go
