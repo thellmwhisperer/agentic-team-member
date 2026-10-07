@@ -2,6 +2,7 @@ package run
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -31,7 +32,7 @@ func TestRunPonytailFollowsTheChecks(t *testing.T) {
 		t.Run(harness, func(t *testing.T) {
 			root := repo(t, "https://example.com/owner/repo.git", atmYAML)
 			var out bytes.Buffer
-			if err := Run([]string{"--harness", harness, issueFile(t, issue)}, &out); err != nil {
+			if err := Run([]string{"--harness", harness, issueFile(t, issue)}, &out, io.Discard); err != nil {
 				t.Fatal(err)
 			}
 			end := ponytailStep(t, &out)
@@ -59,7 +60,8 @@ func TestRunSkipsPonytailWhenAChecksFails(t *testing.T) {
 	call := filepath.Join(t.TempDir(), "call.json")
 	t.Setenv("FAKE_AGENT_CALL", call)
 	var out bytes.Buffer
-	if err := Run([]string{issueFile(t, issue)}, &out); err == nil || !strings.HasPrefix(err.Error(), "lint: ") {
+	if err := Run([]string{issueFile(t, issue)}, &out, io.Discard); err == nil ||
+		!strings.HasPrefix(err.Error(), "lint: ") {
 		t.Fatalf("want lint to fail, got %v", err)
 	}
 	if end := checksStep(t, &out); end["state"] != "failed" {
@@ -100,7 +102,7 @@ func TestRunDiesWhenThePonytailAgentFails(t *testing.T) {
 				agentTimeout = 3 * time.Second
 			}
 			var out bytes.Buffer
-			err := Run([]string{issueFile(t, issue)}, &out)
+			err := Run([]string{issueFile(t, issue)}, &out, io.Discard)
 			if err == nil || !strings.Contains(err.Error(), c.why) {
 				t.Fatalf("want an error naming %q, got %v", c.why, err)
 			}
@@ -129,7 +131,7 @@ func unitDone(t *testing.T, work string) (root, dir, sha string, c config.Config
 		dir, sha, err = clone(root, "main", "", "")
 	}
 	if err == nil {
-		err = sh(dir, "printf 'fixed\\nextra\\nmore\\n' > a.txt; echo 'grep -q fixed a.txt' > a_test.sh")
+		_, err = sh(dir, "printf 'fixed\\nextra\\nmore\\n' > a.txt; echo 'grep -q fixed a.txt' > a_test.sh")
 	}
 	if err != nil {
 		t.Fatal(err)
