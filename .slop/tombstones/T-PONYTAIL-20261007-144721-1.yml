@@ -1,0 +1,18 @@
+schema: 1
+id: T-PONYTAIL-20261007-144721-1
+status: accepted
+category: alien_code
+title: "Removed `formats: [tar.gz]` from the archive. tar.gz is already GoReleaser's default, so only the windows zip override is left."
+created_at: 2026-10-07
+incident:
+  pattern: "Removed `formats: [tar.gz]` from the archive. tar.gz is already GoReleaser's default, so only the windows zip override is left."
+  what_went_wrong: "An ATM run wrote it and ATM's ponytail pass cut it before delivery."
+  root_cause: "The coding agent wrote more than the issue needed."
+  rule_established: "Cut by the ponytail pass; it does not come back."
+  evidence:
+    - family: speculative_feature
+      example: "Removed `formats: [tar.gz]` from the archive. tar.gz is already GoReleaser's default, so only the windows zip override is left."
+      artifact: ".goreleaser.yaml"
+match:
+  family: speculative_feature
+  artifact: ".goreleaser.yaml"
