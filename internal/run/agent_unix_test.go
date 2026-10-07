@@ -24,6 +24,8 @@ func TestRunKillsTheAgentGroup(t *testing.T) {
 		{name: "SIGTERM", why: "interrupted", mode: "hang", sig: syscall.SIGTERM},
 		{name: "timeout, own session", why: "timed out", mode: "hang-session"},
 		{name: "SIGTERM, own session", why: "interrupted", mode: "hang-session", sig: syscall.SIGTERM},
+		{name: "timeout, orphan", why: "timed out", mode: "hang-orphan"},
+		{name: "SIGTERM, orphan", why: "interrupted", mode: "hang-orphan", sig: syscall.SIGTERM},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			root := repo(t, "https://example.com/owner/repo.git", atmYAML)

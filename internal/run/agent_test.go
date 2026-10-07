@@ -39,7 +39,8 @@ var work = map[string]string{"fix": fixWork, "feature": fixWork, "greenfield": f
 // git, uses it, does $FAKE_AGENT_WORK or else the work of the brief's task type, and reports what that work
 // left in .atm/fake-report.json, or else fakeReport; fail
 // exits 3; no-report, no-test-file and no-skill each break the run one way; hang starts a grandchild, whose pid
-// goes to $FAKE_AGENT_PID, and never ends; hang-session does the same with the grandchild in its own session.
+// goes to $FAKE_AGENT_PID, and never ends; hang-session does the same with the grandchild in its own session;
+// hang-orphan starts it in its own session through a child that exits at once, so init adopts it.
 // The ponytail pass plays the same with the ponytail-review skill,
 // $FAKE_PONYTAIL as its mode, $FAKE_PONYTAIL_WORK as its work and $FAKE_PONYTAIL_REPORT, or no findings, as
 // its report; its call goes to $FAKE_AGENT_CALL.ponytail. $FAKE_AGENT_STREAM goes to its stdout after its first line.
@@ -94,6 +95,13 @@ func fakeAgentSetup(mode string) bool {
 		_ = parent.Kill()
 		_ = os.Unsetenv("FAKE_AGENT_KILL_PARENT")
 	}
+	if mode == "orphan-parent" {
+		grandchild := exec.Command(os.Args[0])
+		grandchild.Env = append(os.Environ(), "FAKE_AGENT=grandchild")
+		detach(grandchild)
+		_ = grandchild.Start()
+		return true
+	}
 	if mode == "grandchild" {
 		c := make(chan os.Signal, 1)
 		signal.Notify(c, os.Interrupt) // blocks until killed: ATM sends nothing but SIGKILL
@@ -114,6 +122,12 @@ func fakeAgentMode(mode string) (int, bool) {
 			detach(grandchild)
 		}
 		_ = grandchild.Run()
+		return 0, true
+	case "hang-orphan":
+		parent := exec.Command(os.Args[0])
+		parent.Env = append(os.Environ(), "FAKE_AGENT=orphan-parent")
+		_ = parent.Run()
+		time.Sleep(time.Hour)
 		return 0, true
 	case "orphan":
 		grandchild := exec.Command(os.Args[0])
