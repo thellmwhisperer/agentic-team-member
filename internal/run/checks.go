@@ -291,6 +291,9 @@ func keep(clone string) (string, error) {
 		_, err = git(clone, "init", "-q", "--bare", ".git/atm-files")
 	}
 	if err == nil {
+		_, err = git(clone, "--git-dir=.git/atm-files", "config", "core.filemode", "false")
+	}
+	if err == nil {
 		_, err = every(clone, "add", "-A", "-f", ".")
 	}
 	return tree, err
