@@ -16,14 +16,16 @@ flowchart LR
     G --> P[PR]
     P -->|Low or Medium risk| M[auto-merge]
     P -->|High risk| L[risk-reviewed label] --> M
-    M --> C[CD on main, issue closed]
+    M --> C[merged on main, issue closed]
 ```
 
-1. **An issue with a contract.** Title, evidence, acceptance criteria a test
-   can check, and a `## Red test` section naming the test that fails today.
+1. **An issue with a contract.** Title, a `Type: fix` line, evidence,
+   acceptance criteria a test can check, and a `## Red test` section naming
+   the test that fails today.
    The agent gets exactly this text; a vague issue gives a vague run.
-2. **An ATM run.** A local config (`config/agent.*.local.toml`, ignored by git)
-   and `--scope` naming the files the issue allows.
+2. **An ATM run.** Run `atm init` and fill the repository's `.atm.yaml` with
+   its install, test, typecheck, lint and delivery commands and its test and
+   doc file patterns.
 3. **The verdict.** `report.json`, or the summary at the end of the run. A FAIL
    ends here: the report says which check failed and why, and the issue gets a
    better contract or the code a better check.
@@ -44,7 +46,7 @@ flowchart LR
 | `auto-merge.yml` + `scripts/arm-auto-merge.sh` | GitHub Actions | Arms auto-merge with `AUTO_MERGE_TOKEN`, a fine-grained token for this repository only. The workflow token is never used: merges made with it start no workflow and close no issue |
 | `scripts/test.sh`, `scripts/lint.sh` | local and the gate | Contribution checks; see [Contributing](../CONTRIBUTING.md) |
 | `.githooks/pre-commit` | local, after `git config core.hooksPath .githooks` | The same slopslint check |
-| `.no-mistakes.yaml` | no-mistakes | Runs the contribution checks, sets review instructions per path, and allows one re-run of a CI check GitHub cancelled without a verdict |
+| `.no-mistakes.yaml` | no-mistakes | Runs the contribution checks, sets review instructions, and allows one re-run of a CI check GitHub cancelled without a verdict |
 | `.slop/config.yml`, `.slop/ceilings.yml` | slopslint | Two duplication scopes, production and tests, under ceilings that may go down and never up |
 | `.slop/tombstones/` | slopslint | One record per slop incident, with its family and evidence |
 
@@ -82,7 +84,4 @@ Auto-merge is armed, so this is the last look, and it is short:
 
 ## Cleaning up
 
-Each run leaves a full clone under the run root (`--run-root .worktrees` in this
-repository's runs). ATM removes merged clones as described in
-[How a run flows](how-a-run-flows.md#what-a-run-leaves-on-disk). Run
-directories under [`[runs].dir`](configuration.md#runs) are the record of what happened.
+See [Configuration](configuration.md) for clone cleanup and retained run files.
