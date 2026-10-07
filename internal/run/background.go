@@ -254,6 +254,7 @@ func (s *server) start(args []string) Outcome {
 	defer s.Unlock()
 	r := &bgRun{more: make(chan struct{}), Outcome: Outcome{Outcome: "running", Issue: issue, Started: time.Now(),
 		Run: cmp.Or(strings.Trim(name, "-"), "run") + "-" + strconv.Itoa(len(s.runs)+1)}}
+	r.Report = filepath.Join(runDir(s.root, r.Run), "report.json")
 	s.runs = append(s.runs, r)
 	s.save(r.Outcome)
 	go s.run(r, args)
@@ -276,8 +277,8 @@ func (s *server) run(r *bgRun, args []string) {
 	if err != nil {
 		o.Reason, _, _ = strings.Cut(err.Error(), "\n")
 	}
-	if o.Step != "" { // its first node writes report.json
-		o.Report = filepath.Join(runDir(s.root, r.Run), "report.json")
+	if o.Step == "" { // no first node, so report.json was never written
+		o.Report = ""
 	}
 	again := ", then run it again: atm run " + o.Issue
 	switch {

@@ -54,8 +54,13 @@ func TestBackgroundRunsAndTellsHowEachEnded(t *testing.T) {
 			t.Setenv("FAKE_AGENT", c.agent)
 			path := issueFile(t, issue)
 			o, err := Start(top, []string{path})
-			if err != nil || o.Outcome != "running" || o.Run != "issue-1" || o.Issue != path {
+			if err != nil || o.Outcome != "running" || o.Run != "issue-1" || o.Issue != path ||
+				o.Report != filepath.Join(top, ".atm", "runs", o.Run, "report.json") {
 				t.Fatalf("Start = %+v, %v", o, err)
+			}
+			runs, err := Runs(top)
+			if err != nil || len(runs) != 1 || runs[0].Outcome != "running" || runs[0].Report != o.Report {
+				t.Fatalf("running Runs = %+v, %v", runs, err)
 			}
 			var screen bytes.Buffer
 			end, err := Attach(top, o.Run, &screen)
@@ -70,7 +75,7 @@ func TestBackgroundRunsAndTellsHowEachEnded(t *testing.T) {
 			if s := screen.String(); !strings.Contains(s, "clone     passed") || !strings.Contains(s, "RESULT  ") {
 				t.Fatalf("screen:\n%s", s)
 			}
-			runs, err := Runs(top)
+			runs, err = Runs(top)
 			if err != nil || len(runs) != 1 || runs[0].Outcome != c.outcome || runs[0].Duration() == "" {
 				t.Fatalf("Runs = %+v, %v", runs, err)
 			}
