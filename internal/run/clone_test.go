@@ -2,6 +2,7 @@ package run
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -65,7 +66,7 @@ func TestRunClonesBaseDetachedAndInstalls(t *testing.T) {
 			gitT(t, root, "commit", "-q", "--allow-empty", "-m", "feature")
 			sha := gitT(t, root, "rev-parse", c.base)
 			var out bytes.Buffer
-			if err := Run(append(c.args, issueFile(t, issue)), &out); err != nil {
+			if err := Run(append(c.args, issueFile(t, issue)), &out, io.Discard); err != nil {
 				t.Fatal(err)
 			}
 			end := cloneStep(t, &out)
@@ -108,7 +109,7 @@ func TestRunDiesWhenCloneFails(t *testing.T) {
 				timeout = 2 * time.Second
 			}
 			var out bytes.Buffer
-			err := Run(append(c.args, issueFile(t, issue)), &out)
+			err := Run(append(c.args, issueFile(t, issue)), &out, io.Discard)
 			if err == nil || !strings.Contains(err.Error(), c.why) {
 				t.Fatalf("want an error naming %q, got %v", c.why, err)
 			}
@@ -200,7 +201,7 @@ func TestRunSweepsClonesNoRunNeeds(t *testing.T) {
 			}
 			old := oldClone(t, root, pid, c.delivered, c.ahead)
 			var out bytes.Buffer
-			if err := Run([]string{issueFile(t, issue)}, &out); err != nil {
+			if err := Run([]string{issueFile(t, issue)}, &out, io.Discard); err != nil {
 				t.Fatal(err)
 			}
 			_, err := os.Stat(old)

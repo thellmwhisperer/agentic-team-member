@@ -243,3 +243,21 @@ only test and doc files. `docs` may change only files matching
 `docs_patterns`. `chore` has no proof beyond the commands. A hung test fails
 the run, and the clone must be the same after verification as before, or the
 verdict is void.
+
+The `delivery` step follows the checks when `delivery` is set: its command runs
+with `sh -c` in the clone, as the agent left it, with `ATM_REPORT` and
+`ATM_CLONE` in its environment, killed past 10 minutes. Empty, the step is
+skipped.
+
+Every step's end line carries `duration_ms`. `.atm/report.json` at the
+repository root is rewritten at every step's start and end, so it is on disk
+before delivery: `failed_node` and `reason` first, then `nodes` (each step's
+`result`: `passed`, `failed`, `running`, `skipped` or `not run`, and
+`duration_ms`), the task `type`, and `commands`: each `.atm.yaml` command the
+checks and delivery ran, its result and its last 60 lines. The summary goes to
+stderr: each step, how it ended and its duration (`0.9 s`, `4 min 28 s`,
+`1 h 02 min`, the one format ATM prints a time in), then the result and the
+report's path. `atm run` exits 0 when every step passed, 1 when `agent` or
+`checks` failed, 4 when `delivery` failed, and 2 for anything else: bad
+flags or config, an unreadable issue, a failed contract or clone. There is no
+`--label` yet.

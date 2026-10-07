@@ -5,7 +5,6 @@ package run
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -27,8 +26,9 @@ const Usage = "usage: atm run [--base-ref r] [--harness h] [--model m] [--effort
 	"[--env KEY=VALUE]... <issue.md | issue number>"
 
 // Run is atm run with args, its flags and then the issue: a file, or an issue number of origin's repository.
-// Each step's start and end go to out, one JSON object a line.
-func Run(args []string, out io.Writer) (err error) {
+// Each node's start and end go to out, one JSON object a line, and to .atm/report.json; the summary goes to
+// summary. ExitCode turns its error into atm's exit code.
+func Run(args []string, out, summary io.Writer) (err error) {
 	fs := flag.NewFlagSet("atm run", flag.ContinueOnError)
 	base := fs.String("base-ref", "main", "the ref the run starts from, resolved in the repository")
 	var a agent
@@ -54,42 +54,55 @@ func Run(args []string, out io.Writer) (err error) {
 		return err
 	}
 	a.Agent = c.Agent
+	r := newVerdict(root, out)
+	defer func() { err = r.finish(err, summary) }()
 	var i Issue
-	if err := step(out, "issue", func() (map[string]any, error) {
+	r.step("issue", func() (map[string]any, error) {
 		i, err = readIssue(fs.Arg(0), repo)
+		r.Type = i.Type
 		ev := map[string]any{"title": i.Title, "type": i.Type}
 		if i.Number != 0 {
 			ev["number"] = i.Number
 		}
 		return ev, err
-	}); err != nil {
-		return err
-	}
+	})
 	var text string
-	if err := step(out, "contract", func() (ev map[string]any, err error) {
+	r.step("contract", func() (ev map[string]any, err error) {
 		text, ev, err = writeBrief(root, i, c)
 		return ev, err
-	}); err != nil {
-		return err
-	}
+	})
 	var dir, sha string
 	defer func() { err = errors.Join(err, release(dir, repo)) }()
-	if err := step(out, "clone", func() (ev map[string]any, err error) {
+	r.step("clone", func() (ev map[string]any, err error) {
 		dir, sha, err = clone(root, *base, c.Install, repo)
 		return map[string]any{"clone": dir, "sha": sha}, err
-	}); err != nil {
-		return err
-	}
+	})
 	var test string
-	if err := step(out, "agent", func() (map[string]any, error) {
+	r.step("agent", func() (map[string]any, error) {
 		ev, err := a.run(dir, text)
 		report, _ := ev["report"].(map[string]any)
 		test, _ = report["test_file"].(string)
 		return ev, err
-	}); err != nil {
-		return err
+	})
+	r.step("checks", func() (map[string]any, error) { return checks(dir, sha, i.Type, test, c) })
+	deliver(r, dir, c.Delivery)
+	return r.err
+}
+
+// deliver runs the delivery command line in clone, ATM_REPORT naming report.json, which is on disk already.
+// ponytail: line gets the clone as the agent left it, under sh's timeout; the delivery node branches and commits
+// first, and a ceiling of its own is the upgrade.
+func deliver(r *verdict, clone, line string) {
+	if line == "" {
+		if r.err == nil {
+			r.node("delivery").Result = "skipped"
+		}
+		return
 	}
-	return step(out, "checks", func() (map[string]any, error) { return checks(dir, sha, i.Type, test, c) })
+	r.step("delivery", func() (map[string]any, error) {
+		tail, err := sh(clone, line, "ATM_REPORT="+r.path, "ATM_CLONE="+clone)
+		return map[string]any{"commands": []cmdResult{{"delivery", line, outcome(err), tail}}}, wrap(err, "delivery")
+	})
 }
 
 // githubRepo is the owner/name of the GitHub repository origin names, "" when it names none. No origin is not
@@ -133,7 +146,7 @@ func command(dir, name string, args ...string) (string, error) {
 	cmd.Dir, cmd.Stderr, cmd.WaitDelay = dir, &stderr, time.Second
 	out, err := cmd.Output()
 	if ctx.Err() != nil {
-		err = fmt.Errorf("timed out after %s", timeout)
+		err = fmt.Errorf("timed out after %s", human(timeout))
 	}
 	if err != nil {
 		return "", fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
@@ -143,22 +156,4 @@ func command(dir, name string, args ...string) (string, error) {
 
 func git(dir string, args ...string) (string, error) {
 	return command(dir, "git", args...)
-}
-
-// step writes name's start event, runs fn, and writes its end event with fn's fields or its error.
-func step(out io.Writer, name string, fn func() (map[string]any, error)) error {
-	emit := func(ev map[string]any) {
-		ev["ts"], ev["step"] = time.Now().UTC().Format(time.RFC3339Nano), name
-		b, _ := json.Marshal(ev)
-		_, _ = out.Write(append(b, '\n'))
-	}
-	emit(map[string]any{"state": "started"})
-	ev, err := fn()
-	if err != nil {
-		emit(map[string]any{"state": "failed", "error": err.Error()})
-		return err
-	}
-	ev["state"] = "passed"
-	emit(ev)
-	return nil
 }

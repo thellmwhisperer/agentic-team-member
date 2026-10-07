@@ -13,8 +13,9 @@ func main() {
 		fmt.Fprintln(os.Stderr, run.Usage)
 		os.Exit(2)
 	}
-	if err := run.Run(os.Args[2:], os.Stdout); err != nil {
+	err := run.Run(os.Args[2:], os.Stdout, os.Stderr)
+	if err != nil {
 		fmt.Fprintln(os.Stderr, "atm:", err)
-		os.Exit(2)
 	}
+	os.Exit(run.ExitCode(err))
 }
