@@ -194,6 +194,30 @@ func TestBackgroundRunThatNeverStartedHasNoReport(t *testing.T) {
 	}
 }
 
+// A start that finds .atm/atm.lock held serves nothing: it waits for the one that holds it to answer, here
+// for idle, none. Once its holder dies, the lock blocks no one.
+func TestServeLeavesTheRepositoryToTheStartThatHoldsTheLock(t *testing.T) {
+	top := gitT(t, repo(t, "https://example.com/owner/repo.git", atmYAML), "rev-parse", "--show-toplevel")
+	if err := os.MkdirAll(filepath.Join(top, ".atm"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	held, err := lock(filepath.Join(top, ".atm", "atm.lock"))
+	if err != nil || held == nil {
+		t.Fatalf("lock = %v, %v", held, err)
+	}
+	defer func(i, k time.Duration) { idle, tick = i, k }(idle, tick)
+	idle, tick = 0, time.Millisecond // a start that serves ends at its first tick
+	if err := Serve(top); err == nil {
+		t.Fatal("Serve served while another start held the lock")
+	}
+	if err := held.Close(); err != nil { // as its holder's death does
+		t.Fatal(err)
+	}
+	if err := Serve(top); err != nil {
+		t.Fatalf("Serve after the holder died = %v", err)
+	}
+}
+
 func TestStartRejectsABadCommandLineBeforeTheBackground(t *testing.T) {
 	top := backgroundRepo(t)
 	for _, args := range [][]string{{"--nope", "7"}, {}, {"7", "8"}} {

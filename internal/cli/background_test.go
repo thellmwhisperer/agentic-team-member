@@ -9,8 +9,10 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -154,6 +156,30 @@ func cleanBackgroundServer(t *testing.T, dir string) {
 		}
 		t.Errorf("background process still holds %s", log)
 	})
+}
+
+// Two atm run at once, with no background process yet, each start one: one serves both runs, and numbers them,
+// the other connects to it.
+func TestTwoRunsAtOnceShareOneBackgroundProcess(t *testing.T) {
+	dir := repo(t, "https://example.com/o/r.git")
+	cleanBackgroundServer(t, dir)
+	if err := os.WriteFile(filepath.Join(dir, "retry.md"), []byte("# Retry\nType: fix\nRetry.\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	outs, errs := make([]string, 2), make([]error, 2)
+	var wg sync.WaitGroup
+	for i := range outs {
+		wg.Go(func() { outs[i], errs[i] = atm(t, "run", "retry.md") })
+	}
+	wg.Wait()
+	slices.Sort(outs)
+	if err := errors.Join(errs...); err != nil || !reflect.DeepEqual(outs, []string{"retry-1\n", "retry-2\n"}) {
+		t.Fatalf("atm run twice at once: %q, %v", outs, err)
+	}
+	var runs struct{ Runs []map[string]string }
+	if err := json.Unmarshal([]byte(atmIn(t, 0, "axi", "runs", "--json")), &runs); err != nil || len(runs.Runs) != 2 {
+		t.Fatalf("atm axi runs --json: %+v, %v", runs, err)
+	}
 }
 
 func TestRunGoesToTheBackgroundAndEveryCommandSeesIt(t *testing.T) {
