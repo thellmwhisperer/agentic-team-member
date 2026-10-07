@@ -148,6 +148,31 @@ func TestRunChainsAFollowUpOnTheIssueUpToThreeUnits(t *testing.T) {
 	}
 }
 
+func TestRunLabelsDeliveredChainedUnitAndChecks(t *testing.T) {
+	repo(t, "https://example.com/owner/repo.git", atmSet(atmYAML, "delivery", deliveryLine))
+	got := t.TempDir()
+	t.Setenv("ATM_TEST_OUT", got)
+	t.Setenv("FAKE_AGENT_WORK", `if [ -f c1_test.sh ]; then echo u2 >> a.txt; `+
+		`printf '{"test_file":"a_test.sh","follow_ups":[]}' > .atm/fake-report.json; `+
+		`else printf 'fixed\nextra\n' > a.txt; echo 'grep -q fixed a.txt' > a_test.sh; `+
+		`mkdir -p .atm/follow-ups/1; echo 'grep -q u2 a.txt' > .atm/follow-ups/1/c1_test.sh; `+
+		`printf '{"test_file":"a_test.sh","follow_ups":[{"title":"gap","red_test":"c1_test.sh",`+
+		`"criterion":"A retry runs once after a timeout."}]}' > .atm/fake-report.json; fi`)
+	var out bytes.Buffer
+	if err := Run([]string{issueFile(t, followUpIssue)}, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	dev := "atm <atm@example.com>|atm <atm@example.com>"
+	want := "atm unit 2: Retry on timeout|" + dev + "\natm unit 1: Retry on timeout|" + dev
+	if b, err := os.ReadFile(filepath.Join(got, "log")); err != nil || string(b) != want+"\n" {
+		t.Fatalf("want delivered unit numbers in commit history, got %q, %v", b, err)
+	}
+	checks := ends(t, &out, "checks")
+	if len(checks) != 2 || checks[0]["unit"] != float64(1) || checks[1]["unit"] != float64(2) {
+		t.Fatalf("want unit numbers on both checks events, got %v", checks)
+	}
+}
+
 func TestRunDiesWhenAUnitEditsItsRedTest(t *testing.T) {
 	repo(t, "https://example.com/owner/repo.git", atmYAML)
 	t.Setenv("ATM_TEST_CRITERION", "The retry error is reported.")
