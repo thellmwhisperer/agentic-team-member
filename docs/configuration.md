@@ -347,7 +347,7 @@ background process and returns. Off a terminal it prints the run's label
 shows the run's screen and exits with the run's code once it ends. Closing the
 terminal, or leaving with Ctrl-C, leaves the run going. The run's screen is one
 line per step event (`clone     passed 0.9 s`, the error's first line after a
-failure), then the summary and the delivery's output.
+failure), then the delivery's output and summary.
 
 The background process is `atm serve`, one per repository, started on demand
 by the first command that needs it, and listening on `.atm/atm.sock` (mode
