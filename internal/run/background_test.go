@@ -1,0 +1,185 @@
+package run
+
+import (
+	"bytes"
+	"errors"
+	"net"
+	"os"
+	"path/filepath"
+	"reflect"
+	"strconv"
+	"strings"
+	"testing"
+)
+
+// background serves the repository at root, its git toplevel, in this test's process until stop or the end of
+// the test.
+func background(t *testing.T, root string) (stop func()) {
+	t.Helper()
+	sock := socket(root)
+	if err := os.MkdirAll(filepath.Dir(sock), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	l, err := net.Listen("unix", short(sock))
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() { _ = serve(l.(*net.UnixListener), root, sock); close(done) }()
+	stop = func() { _ = l.Close(); <-done }
+	t.Cleanup(stop)
+	return stop
+}
+
+// backgroundRepo is repo with atmYAML, served in the background; it returns its git toplevel.
+func backgroundRepo(t *testing.T) string {
+	t.Helper()
+	top := gitT(t, repo(t, "https://example.com/owner/repo.git", atmYAML), "rev-parse", "--show-toplevel")
+	background(t, top)
+	return top
+}
+
+func TestBackgroundRunsAndTellsHowEachEnded(t *testing.T) {
+	for _, c := range []struct {
+		name, agent, outcome, failed string
+		code                         int
+	}{
+		{name: "passed", outcome: "passed"},
+		{name: "agent fails", agent: "fail", outcome: "failed", failed: "agent", code: 1},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			top := backgroundRepo(t)
+			t.Setenv("FAKE_AGENT", c.agent)
+			path := issueFile(t, issue)
+			o, err := Start(top, []string{path})
+			if err != nil || o.Outcome != "running" || o.Run != "issue-1" || o.Issue != path {
+				t.Fatalf("Start = %+v, %v", o, err)
+			}
+			var screen bytes.Buffer
+			end, err := Attach(top, o.Run, &screen)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := []any{end.Outcome, end.Run, end.FailedNode, end.Report, ExitCode(end.Err()), end.NextStep != ""}
+			want := []any{c.outcome, o.Run, c.failed, filepath.Join(top, ".atm", "report.json"), c.code, true}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("outcome: %+v", end)
+			}
+			if s := screen.String(); !strings.Contains(s, "clone     passed") || !strings.Contains(s, "RESULT  ") {
+				t.Fatalf("screen:\n%s", s)
+			}
+			runs, err := Runs(top)
+			if err != nil || len(runs) != 1 || runs[0].Outcome != c.outcome || runs[0].Duration() == "" {
+				t.Fatalf("Runs = %+v, %v", runs, err)
+			}
+		})
+	}
+}
+
+func TestBackgroundRunThatNeverStartedHasNoReport(t *testing.T) {
+	root := repo(t, "https://example.com/owner/repo.git", "test: go test ./...\n")
+	top := gitT(t, root, "rev-parse", "--show-toplevel")
+	background(t, top)
+	o, err := Start(top, []string{issueFile(t, issue)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	end, err := Attach(top, "", &bytes.Buffer{})
+	if err != nil || end.Run != o.Run || end.Outcome != "failed" || end.FailedNode != "" || end.Report != "" ||
+		!strings.Contains(end.Reason, "config incomplete") || ExitCode(end.Err()) != 2 {
+		t.Fatalf("Attach = %+v, %v", end, err)
+	}
+}
+
+func TestStartRejectsABadCommandLineBeforeTheBackground(t *testing.T) {
+	top := backgroundRepo(t)
+	for _, args := range [][]string{{"--nope", "7"}, {}, {"7", "8"}} {
+		if _, err := Start(top, args); err == nil {
+			t.Fatalf("Start(%q) = nil, want an error", args)
+		}
+	}
+	if runs, err := Runs(top); err != nil || len(runs) != 0 {
+		t.Fatalf("Runs = %+v, %v; want none", runs, err)
+	}
+}
+
+// The background process holds every run it runs, all under its pid: a clone under that pid it holds no run
+// for is the clone of a run that died, or of one before it whose pid it got, and the next sweep removes it.
+func TestBackgroundSweepsTheCloneOfARunThatDied(t *testing.T) {
+	top := backgroundRepo(t)
+	old := oldClone(t, top, os.Getpid(), false, false)
+	o, err := Start(top, []string{issueFile(t, issue)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if end, err := Attach(top, o.Run, &bytes.Buffer{}); err != nil || end.Outcome != "passed" {
+		t.Fatalf("Attach = %+v, %v", end, err)
+	}
+	if _, err := os.Stat(old); !os.IsNotExist(err) {
+		t.Fatalf("the dead run's clone outlived the sweep: %v", clones(t, top))
+	}
+}
+
+func TestSweepKeepsOnlyTheRunsTheBackgroundHolds(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "clones")
+	clone := func(name string, pid int) string {
+		dir := filepath.Join(root, name)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(dir+".pid", []byte(strconv.Itoa(pid)), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return dir
+	}
+	held, dropped, other := clone("held", os.Getpid()), clone("dropped", os.Getpid()), clone("other", os.Getppid())
+	live.Lock()
+	live.dirs = map[string]bool{held: true}
+	live.Unlock()
+	t.Cleanup(func() { live.Lock(); live.dirs = nil; live.Unlock() })
+	sweep(root, "")
+	for dir, want := range map[string]bool{held: true, dropped: false, other: true} {
+		if _, err := os.Stat(dir); (err == nil) != want {
+			t.Fatalf("%s kept = %v, want %v", filepath.Base(dir), err == nil, want)
+		}
+	}
+}
+
+func TestBackgroundRemembersRunsAcrossRestarts(t *testing.T) {
+	top := gitT(t, repo(t, "https://example.com/owner/repo.git", atmYAML), "rev-parse", "--show-toplevel")
+	stop := background(t, top)
+	o, err := Start(top, []string{issueFile(t, issue)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Attach(top, o.Run, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	stop()
+	// A run the process before died in the middle of.
+	f, err := os.OpenFile(filepath.Join(top, ".atm", "runs.jsonl"), os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.WriteString(`{"outcome":"running","run":"7-2","issue":"7","step":"agent",` +
+		`"started":"2026-10-07T05:00:00Z","ended":"0001-01-01T00:00:00Z"}` + "\n")
+	if err := errors.Join(err, f.Close()); err != nil {
+		t.Fatal(err)
+	}
+	background(t, top)
+	runs, err := Runs(top)
+	var got [][]any
+	for _, o := range runs {
+		got = append(got, []any{o.Run, o.Outcome, o.FailedNode, o.Reason != "", o.Ended.IsZero()})
+	}
+	if want := [][]any{{"issue-1", "passed", "", false, false}, {"7-2", "failed", "agent", true, false}}; err != nil ||
+		!reflect.DeepEqual(got, want) {
+		t.Fatalf("Runs = %+v, %v", runs, err)
+	}
+	if o, err := Start(top, []string{"--harness", "pi", issueFile(t, issue)}); err != nil || o.Run != "issue-3" {
+		t.Fatalf("Start = %+v, %v; want the next label", o, err)
+	}
+	if _, err := Attach(top, "", &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -1,0 +1,6 @@
+outcome: failed
+run: retry-on-timeout-2
+failed_node: checks
+reason: "test: exit status 1"
+report: /repo/.atm/report.json
+next_step: "read why checks failed in the report, fix it, then run it again: atm run 7"
