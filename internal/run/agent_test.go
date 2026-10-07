@@ -74,6 +74,7 @@ func fakeAgent(name string) int {
 	path := map[string]string{"claude": ".claude/skills/" + skill, "codex": ".agents/skills/" + skill,
 		"opencode": ".opencode/skills/" + skill, "pi": after(args, "--skill")}[name] + "/SKILL.md"
 	b, _ := os.ReadFile(path)
+	b = bytes.ReplaceAll(b, []byte("\r\n"), []byte("\n"))
 	if bytes.Contains(b, []byte("name: "+skill+"\n")) && mode != "no-skill" &&
 		exec.Command("git", "check-ignore", "-q", path).Run() == nil {
 		emit(map[string]obj{
