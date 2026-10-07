@@ -87,11 +87,11 @@ var proofCases = []struct {
 	{name: "fix whose test writes ignored output", typ: "fix", ignore: "build/\n",
 		work: `echo fixed > a.txt; echo 'mkdir -p build; cp a.txt build; test "$(cat build/a.txt)" = fixed' > a_test.sh; ` +
 			reportJSON("a_test.sh")},
-	{name: "fix whose test changes an ignored file", typ: "fix", ignore: "cache.txt\n", why: "void",
+	{name: "fix whose test changes an ignored file", typ: "fix", ignore: "cache.txt\n", why: "void: cache.txt",
 		work: "echo fixed > a.txt; echo kept > cache.txt; " +
 			"echo 'grep -q fixed a.txt && ! grep -q broken a.txt && echo x >> cache.txt' > a_test.sh; " +
 			reportJSON("a_test.sh")},
-	{name: "fix whose test deletes an ignored file", typ: "fix", ignore: "cache.txt\n", why: "void",
+	{name: "fix whose test deletes an ignored file", typ: "fix", ignore: "cache.txt\n", why: "void: cache.txt",
 		work: "echo fixed > a.txt; echo kept > cache.txt; " +
 			"echo 'grep -q fixed a.txt && ! grep -q broken a.txt && rm cache.txt' > a_test.sh; " +
 			reportJSON("a_test.sh")},
