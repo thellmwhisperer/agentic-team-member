@@ -581,6 +581,9 @@ func call(root string, req request, in <-chan Input, fn func(reply)) error {
 			return errors.New(r.Error)
 		}
 		fn(r)
+		if req.Cmd != "attach" {
+			return nil // run and runs each have one reply
+		}
 	}
 }
 
