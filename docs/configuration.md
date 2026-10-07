@@ -375,7 +375,9 @@ after a failure), then the delivery's output and summary.
 
 The background process is `atm serve`, one per repository, started on demand
 by the first command that needs it, and listening on `.atm/atm.sock` (mode
-`0600`; a Unix socket on Windows too). It runs every run in itself and logs to
+`0600`; a Unix socket on Windows too). It holds `.atm/atm.lock` while serving,
+so commands started together use the same process; the operating system releases
+the lock when that process exits. It runs every run in itself and logs to
 `.atm/serve.log`. It ends after 10 minutes without a run, or once its socket is
 removed while no run goes. The latest state of each retained run is saved to
 `.atm/runs.jsonl`, so a new background process still lists them; a run left
