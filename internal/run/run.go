@@ -45,7 +45,7 @@ func Run(args []string, out, summary io.Writer) (err error) {
 	if err != nil {
 		return fmt.Errorf("not in a git repository: %w", err)
 	}
-	repo := githubRepo()
+	repo := GitHubRepo()
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return err
@@ -174,9 +174,9 @@ func onBranch(root, clone, sha, name, title string) (cuts string, err error) {
 	return cuts, err
 }
 
-// githubRepo is the owner/name of the GitHub repository origin names, "" when it names none. No origin is not
+// GitHubRepo is the owner/name of the GitHub repository origin names, "" when it names none. No origin is not
 // an error: the repository just has no GitHub issues.
-func githubRepo() string {
+func GitHubRepo() string {
 	url, err := git("", "remote", "get-url", "origin")
 	if m := githubURL.FindStringSubmatch(url); err == nil && m != nil {
 		return m[1]

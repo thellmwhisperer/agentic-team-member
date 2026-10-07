@@ -165,6 +165,13 @@ Nothing is detected or defaulted per language.
 | `test_patterns`, `docs_patterns` | Lists of globs for test and doc files |
 | `delivery` | The delivery command |
 
+`atm init` writes a commented `.atm.yaml` with every key empty, unless the
+repository has one, and adds `/.atm/` to `.gitignore` unless it is there; run
+twice, it changes nothing. `atm doctor` checks git, the configured agent CLI on
+`PATH`, `gh` when `origin` is on GitHub, and that `.atm.yaml` loads with every
+key, one `ok` or `fail` line each; every check runs, and any failure exits
+non-zero.
+
 For an issue file, the first line is its title (all leading `#` characters are
 dropped) and the rest its body. The body must declare a case-sensitive `Type:`
 line with a lowercase type: `fix` (or `hotfix`), `feature`,
