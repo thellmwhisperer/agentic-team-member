@@ -38,39 +38,14 @@ func TestKilledBackgroundKeepsCloneForStartedAgent(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("the background request did not end after its process was killed")
 	}
-	b, err := os.ReadFile(pidFifo)
-	if err != nil {
-		t.Fatal(err)
-	}
-	child, err := strconv.Atoi(strings.TrimSpace(string(b)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	proc, err := os.FindProcess(child)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = proc.Kill() })
+	proc := recordedProcess(t, pidFifo)
 	t.Setenv("FAKE_AGENT", "fail")
 	t.Setenv("FAKE_AGENT_KILL_PARENT", "")
-	nextRun(t, top)
-	if _, err := os.Stat(clone); err != nil {
-		t.Fatalf("the sweep removed the clone while its agent was alive: %v", err)
-	}
+	assertCloneKept(t, top, clone, "the sweep removed the clone while its agent was alive")
 	if err := proc.Kill(); err != nil {
 		t.Fatal(err)
 	}
-	until(t, "the clone lease to be released", func() bool {
-		f, locked, err := tryCloneExclusive(clone)
-		if f != nil {
-			_ = f.Close()
-		}
-		return err == nil && locked
-	})
-	nextRun(t, top)
-	if _, err := os.Stat(clone); !os.IsNotExist(err) {
-		t.Fatalf("the sweep kept the clone after the agent exited: %v", clones(t, top))
-	}
+	assertCloneSwept(t, top, clone, "the clone lease to be released", "the sweep kept the clone after the agent exited")
 }
 
 func TestAgentExitKeepsCloneUntilOrphanChildExits(t *testing.T) {
@@ -78,46 +53,18 @@ func TestAgentExitKeepsCloneUntilOrphanChildExits(t *testing.T) {
 	t.Setenv("FAKE_AGENT", "orphan")
 	t.Setenv("FAKE_AGENT_PID", pidFifo)
 	top := backgroundRepo(t)
-	o, err := Start(top, []string{issueFile(t, issue)})
-	if err != nil {
-		t.Fatal(err)
-	}
+	o := startBackgroundRun(t, top)
 	if end, err := Attach(top, o.Run, &bytes.Buffer{}); err != nil || end.Outcome != "passed" {
 		t.Fatalf("Attach = %+v, %v", end, err)
 	}
 	clone := theClone(t, top)
-	b, err := os.ReadFile(pidFifo)
-	if err != nil {
-		t.Fatal(err)
-	}
-	child, err := strconv.Atoi(strings.TrimSpace(string(b)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	proc, err := os.FindProcess(child)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = proc.Kill() })
+	proc := recordedProcess(t, pidFifo)
 	t.Setenv("FAKE_AGENT", "fail")
-	nextRun(t, top)
-	if _, err := os.Stat(clone); err != nil {
-		t.Fatalf("the sweep removed a clone whose agent child was alive: %v", err)
-	}
+	assertCloneKept(t, top, clone, "the sweep removed a clone whose agent child was alive")
 	if err := proc.Kill(); err != nil {
 		t.Fatal(err)
 	}
-	until(t, "the child lease to be released", func() bool {
-		f, locked, err := tryCloneExclusive(clone)
-		if f != nil {
-			_ = f.Close()
-		}
-		return err == nil && locked
-	})
-	nextRun(t, top)
-	if _, err := os.Stat(clone); !os.IsNotExist(err) {
-		t.Fatalf("the sweep kept the clone after its child exited: %v", clones(t, top))
-	}
+	assertCloneSwept(t, top, clone, "the child lease to be released", "the sweep kept the clone after its child exited")
 }
 
 func TestKilledBackgroundDuringDeliveryKeepsCloneAndFailsAtDelivery(t *testing.T) {
@@ -126,34 +73,66 @@ func TestKilledBackgroundDuringDeliveryKeepsCloneAndFailsAtDelivery(t *testing.T
 	top := gitT(t, repo(t, "https://example.com/owner/repo.git", atmSet(atmYAML, "delivery",
 		`echo $$ > "$ATM_TEST_PID"; cat "$ATM_TEST_GATE"`)), "rev-parse", "--show-toplevel")
 	t.Cleanup(func() { _ = os.Remove(socket(top)) })
-	o, err := Start(top, []string{issueFile(t, issue)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	b, err := os.ReadFile(pidFifo)
-	if err != nil {
-		t.Fatal(err)
-	}
-	delivery, err := strconv.Atoi(strings.TrimSpace(string(b)))
-	if err != nil {
-		t.Fatal(err)
-	}
+	o := startBackgroundRun(t, top)
+	delivery := recordedPID(t, pidFifo)
 	t.Cleanup(func() { _ = syscall.Kill(-delivery, syscall.SIGKILL) })
 	killDeliveryServer(t, top)
 	clone := theClone(t, top)
 	t.Setenv("FAKE_AGENT", "fail")
 	assertInterruptedDeliveryRun(t, top, o.Run)
-	nextRun(t, top)
-	if _, err := os.Stat(clone); err != nil {
-		t.Fatalf("the sweep removed the clone while delivery was alive: %v", err)
-	}
+	assertCloneKept(t, top, clone, "the sweep removed the clone while delivery was alive")
 	if _, err := os.Stat(clone + ".delivered"); !os.IsNotExist(err) {
 		t.Fatalf("the killed delivery marked the clone delivered: %v", err)
 	}
 	if err := syscall.Kill(-delivery, syscall.SIGKILL); err != nil && err != syscall.ESRCH {
 		t.Fatal(err)
 	}
-	until(t, "the delivery lease to be released", func() bool {
+	assertCloneSwept(t, top, clone, "the delivery lease to be released", "the sweep kept the clone after delivery exited")
+}
+
+func recordedPID(t *testing.T, path string) int {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(b)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return pid
+}
+
+func startBackgroundRun(t *testing.T, top string) Outcome {
+	t.Helper()
+	o, err := Start(top, []string{issueFile(t, issue)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return o
+}
+
+func recordedProcess(t *testing.T, path string) *os.Process {
+	t.Helper()
+	proc, err := os.FindProcess(recordedPID(t, path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = proc.Kill() })
+	return proc
+}
+
+func assertCloneKept(t *testing.T, top, clone, message string) {
+	t.Helper()
+	nextRun(t, top)
+	if _, err := os.Stat(clone); err != nil {
+		t.Fatalf("%s: %v", message, err)
+	}
+}
+
+func assertCloneSwept(t *testing.T, top, clone, lease, message string) {
+	t.Helper()
+	until(t, lease, func() bool {
 		f, locked, err := tryCloneExclusive(clone)
 		if f != nil {
 			_ = f.Close()
@@ -162,7 +141,7 @@ func TestKilledBackgroundDuringDeliveryKeepsCloneAndFailsAtDelivery(t *testing.T
 	})
 	nextRun(t, top)
 	if _, err := os.Stat(clone); !os.IsNotExist(err) {
-		t.Fatalf("the sweep kept the clone after delivery exited: %v", clones(t, top))
+		t.Fatalf("%s: %v", message, clones(t, top))
 	}
 }
 
