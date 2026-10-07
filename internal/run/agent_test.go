@@ -84,6 +84,7 @@ func fakeAgent(name string) int {
 	case "orphan":
 		grandchild := exec.Command(os.Args[0])
 		grandchild.Env = append(os.Environ(), "FAKE_AGENT=grandchild")
+		grandchild.ExtraFiles = append(grandchild.ExtraFiles, os.NewFile(3, "clone.lock"))
 		null, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
 		if err != nil {
 			return 1
