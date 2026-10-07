@@ -1,0 +1,18 @@
+schema: 1
+id: T-PONYTAIL-20261007-040342-1
+status: accepted
+category: alien_code
+title: "Removed the extra `git rev-parse HEAD` call and its error branch in commit. The parent now starts as"
+created_at: 2026-10-07
+incident:
+  pattern: "Removed the extra `git rev-parse HEAD` call and its error branch in commit. The parent now starts as the literal \"HEAD\", which `commit-tree -p` resolves on its own, the same way chain already does."
+  what_went_wrong: "An ATM run wrote it and ATM's ponytail pass cut it before delivery."
+  root_cause: "The coding agent wrote more than the issue needed."
+  rule_established: "Cut by the ponytail pass; it does not come back."
+  evidence:
+    - family: speculative_hardening
+      example: "Removed the extra `git rev-parse HEAD` call and its error branch in commit. The parent now starts as the literal \"HEAD\", which `commit-tree -p` resolves on its own, the same way chain already does."
+      artifact: internal/run/ponytail.go
+match:
+  family: speculative_hardening
+  artifact: internal/run/ponytail.go
