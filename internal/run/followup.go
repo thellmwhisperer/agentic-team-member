@@ -107,7 +107,8 @@ func newTestPath(clone, name string) error {
 	if !filepath.IsLocal(name) {
 		return fmt.Errorf("red_test %s is not a new test path", name)
 	}
-	if rel, err := filepath.Rel(".atm", name); err == nil && (rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))) {
+	s := filepath.ToSlash(name)
+	if s == ".atm" || strings.HasPrefix(s, ".atm/") {
 		return fmt.Errorf("red_test %s is not a new test path", name)
 	}
 	if _, err := os.Lstat(filepath.Join(clone, name)); err == nil {
