@@ -377,21 +377,23 @@ The background process is `atm serve`, one per repository, started on demand
 by the first command that needs it, and listening on `.atm/atm.sock` (mode
 `0600`; a Unix socket on Windows too). It runs every run in itself and logs to
 `.atm/serve.log`. It ends after 10 minutes without a run, or once its socket is
-removed while no run goes. Each run's start and end are saved to
+removed while no run goes. The latest state of each retained run is saved to
 `.atm/runs.jsonl`, so a new background process still lists them; a run left
-running there is shown failed at its last step. It keeps the last 200 runs: a
-new run drops the oldest that ended, never one still running. Every clone of its runs carries
-its pid: the sweep keeps one of those only while the background process holds
-its run, so the clone of a run that died, or of one in an earlier background
-process whose pid it got, is removed by the next sweep.
+running there is shown failed at its last step. On each new run, it drops the
+oldest ended runs while the list exceeds 200. It never drops a running run,
+and completion does not prune, so the history can exceed 200. Every clone of
+its runs carries its pid: the sweep keeps one of those only while the
+background process holds its run, so the clone of a run that died, or of one
+in an earlier background process whose pid it got, is removed by the next
+sweep.
 
 | Command | Prints |
 |---------|--------|
 | `atm status` | Each run going: label, step, duration, issue; or `nothing runs` |
 | `atm attach [run]` | The run's screen (the last one going by default) until it ends; leaving leaves it going |
-| `atm runs` | Every run: label, `running`, `passed` or `failed at <node>`, duration, issue and the report path when set |
+| `atm runs` | Retained runs: label, `running`, `passed` or `failed at <node>`, duration, issue and the report path when set |
 | `atm axi run [--json] <atm run's arguments>` | Waits for the end, then the outcome |
-| `atm axi status [--json]`, `atm axi runs [--json]` | The runs going, or every run, as a table |
+| `atm axi status [--json]`, `atm axi runs [--json]` | The runs going, or retained runs, as a table |
 
 `atm axi` prints TOON by default and JSON with `--json`. The outcome always
 carries every field, empty or not: `outcome`, `run`, `failed_node`, `reason`,
