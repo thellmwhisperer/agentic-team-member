@@ -113,10 +113,27 @@ func note(cmd *exec.Cmd) {
 
 // release ends the run's hold on its clone dir: removed, unless kept.
 func release(dir, repo string) error {
-	if dir == "" || kept(dir, repo) {
+	if dir == "" || heldExcept(dir, os.Getpid()) || kept(dir, repo) {
 		return nil
 	}
 	return remove(dir)
+}
+
+func heldExcept(dir string, except int) bool {
+	b, err := os.ReadFile(dir + ".pid")
+	if err != nil {
+		return false
+	}
+	pids := strings.Fields(string(b))
+	kept := pids[:0]
+	for _, p := range pids {
+		pid, err := strconv.Atoi(p)
+		if err == nil && pid == except {
+			continue
+		}
+		kept = append(kept, p)
+	}
+	return held(dir, kept)
 }
 
 // kept says whether the clone at dir delivered and its PR is still open: its branch is not merged into its
