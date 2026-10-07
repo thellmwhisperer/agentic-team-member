@@ -171,7 +171,8 @@ func TestPonytailKeepsAShorterGreenCut(t *testing.T) {
 	gitT(t, root, "config", "user.name", "Repo Dev")
 	gitT(t, root, "config", "user.email", "dev@example.com")
 	t.Setenv("FAKE_PONYTAIL_REPORT", cut)
-	ev, err := agent{Agent: c.Agent, dir: t.TempDir()}.ponytail(root, clone, sha, "a_test.sh", fixIssue, c)
+	ev, err := agent{Agent: c.Agent, dir: t.TempDir()}.ponytail(root, clone, sha,
+		[]proof{{sha, "a_test.sh", "fix"}}, fixIssue, c)
 	if err != nil || ev["kept"] != true {
 		t.Fatalf("want the cut kept, got %v, %v", err, ev)
 	}
@@ -223,7 +224,8 @@ func TestPonytailDiscardsACutThatDoesNotHold(t *testing.T) {
 			root, clone, sha, cfg := unitDone(t, c.work)
 			t.Setenv("FAKE_PONYTAIL_REPORT", c.report)
 			before := state(t, clone)
-			ev, err := agent{Agent: cfg.Agent, dir: t.TempDir()}.ponytail(root, clone, sha, "a_test.sh", fixIssue, cfg)
+			ev, err := agent{Agent: cfg.Agent, dir: t.TempDir()}.ponytail(root, clone, sha,
+				[]proof{{sha, "a_test.sh", "fix"}}, fixIssue, cfg)
 			reason, _ := ev["reason"].(string)
 			if err != nil || ev["kept"] != false || !strings.Contains(reason, c.why) {
 				t.Fatalf("want the cut discarded for %q, got %v, %v", c.why, err, ev)
@@ -248,7 +250,8 @@ func TestPonytailDiesWithoutTheRepositoryIdentityBeforeCommitting(t *testing.T) 
 				gitT(t, root, "config", "user.email", c.email)
 			}
 			t.Setenv("FAKE_PONYTAIL_REPORT", cut)
-			_, err := agent{Agent: cfg.Agent, dir: t.TempDir()}.ponytail(root, clone, sha, "a_test.sh", fixIssue, cfg)
+			_, err := agent{Agent: cfg.Agent, dir: t.TempDir()}.ponytail(root, clone, sha,
+				[]proof{{sha, "a_test.sh", "fix"}}, fixIssue, cfg)
 			if err == nil || !strings.Contains(err.Error(), c.why) {
 				t.Fatalf("want an error naming %q, got %v", c.why, err)
 			}

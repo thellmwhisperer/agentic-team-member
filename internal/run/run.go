@@ -78,11 +78,11 @@ func Run(label string, args []string, out, summary io.Writer) (err error) {
 	})
 	byClone.Store(dir, r)
 	defer byClone.Delete(dir)
-	test, unit, pending := a.units(r, root, dir, sha, text, i, c)
+	proofs, unit, pending := a.units(r, root, dir, sha, text, i, c)
 	if err := saveFollowUps(a.dir, pending); err != nil {
 		return err
 	}
-	r.step("ponytail", func() (map[string]any, error) { return a.ponytail(root, dir, sha, test, unit, c) })
+	r.step("ponytail", func() (map[string]any, error) { return a.ponytail(root, dir, sha, proofs, unit, c) })
 	deliver(r, root, dir, sha, *base, c.Delivery, i, summary)
 	return r.err
 }
@@ -99,14 +99,18 @@ func parseArgs(args []string) (fs *flag.FlagSet, base *string, a *agent, err err
 	return fs, base, a, err
 }
 
+// proof is how a unit was proven: on its base commit, with its test, as its task type.
+type proof struct{ base, test, typ string }
+
 // units runs the units of the run in clone dir, from base commit sha, for issue i under config c: the first on
 // brief text, each next one, up to maxUnits, on the first follow-up on the issue the one before proved. It
-// returns the last unit's test, the issue as that unit is proven, a chained one by its red test, and the
+// returns each unit's proof, the issue as the last unit is proven, a chained one by its red test, and the
 // accepted follow-ups it did not chain.
-func (a agent) units(r *verdict, root, dir, sha, text string, i Issue, c config.Config) (test string, unit Issue,
-	pending []followUp) {
+func (a agent) units(r *verdict, root, dir, sha, text string, i Issue, c config.Config) (proofs []proof,
+	unit Issue, pending []followUp) {
 	unit, head := i, sha
 	var f *followUp // the follow-up a chained unit makes pass
+	var test string
 	for n := 1; ; n++ {
 		var report map[string]any
 		r.step("agent", func() (map[string]any, error) {
@@ -139,6 +143,7 @@ func (a agent) units(r *verdict, root, dir, sha, text string, i Issue, c config.
 					return ev, fmt.Errorf("unit %d edited its red test %s, which it must make pass as it is", n, test)
 				}
 			}
+			proofs = append(proofs, proof{head, test, unit.Type})
 			result, err := checks(dir, head, unit.Type, test, c)
 			for key, value := range result {
 				ev[key] = value
@@ -152,10 +157,10 @@ func (a agent) units(r *verdict, root, dir, sha, text string, i Issue, c config.
 			return ev, err
 		})
 		if r.err != nil || len(in) == 0 {
-			return test, unit, pending
+			return proofs, unit, pending
 		}
 		if n == maxUnits {
-			return test, unit, append(pending, in...)
+			return proofs, unit, append(pending, in...)
 		}
 		f, pending = &in[0], append(pending, in[1:]...)
 	}
