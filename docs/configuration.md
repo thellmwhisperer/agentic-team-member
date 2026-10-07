@@ -174,12 +174,16 @@ A timeout, a non-zero exit, no proof of the skill, an invalid report or a commit
 by the ponytail agent fails the step and the run. A commit by a re-check command
 also fails the step and the run, even when the cut would otherwise be discarded.
 
-The cut is discarded, and the clone comes back exactly as before, when it does
-not lower the run's net added lines, reports no finding, adds a file, deletes a
-file, touches a file matching `test_patterns` or one outside the diff, changes
-a unit's test file since that unit was proven, fails an earlier unit's red test
+ATM snapshots every file in the clone before the slop detector, including
+ignored files. The cut is discarded and that snapshot is restored byte for
+byte if the agent adds any file, including an ignored file, or if the cut does
+not lower the run's net added lines, reports no finding, deletes a file,
+touches a file matching `test_patterns` or one outside the diff, changes a
+unit's test file since that unit was proven, fails an earlier unit's red test
 on its own base or its green test on the final tree with the cut, or fails the
-last unit's `checks` step run again without a command committing. A kept cut leaves two
+last unit's `checks` step run again without a command committing. Tracked files
+are checked through the clone's Git index; the separate snapshot records
+untracked and ignored files without line-ending conversion. A kept cut leaves two
 commits on the units before it: `atm unit <n>: <title>` with the last unit's
 work before the cut, then
 `ponytail: <n> cuts` with the cut, one `- <file>: <finding> (<family>)` line per
