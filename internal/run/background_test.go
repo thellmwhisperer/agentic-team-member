@@ -41,6 +41,32 @@ func backgroundRepo(t *testing.T) string {
 	return top
 }
 
+func holdFakeAgents(t *testing.T, count int) (wait, release func()) {
+	t.Helper()
+	dir := t.TempDir()
+	ready, unblock := filepath.Join(dir, "ready"), filepath.Join(dir, "release")
+	if err := os.Mkdir(ready, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FAKE_AGENT_BARRIER_READY", ready)
+	t.Setenv("FAKE_AGENT_BARRIER_RELEASE", unblock)
+	release = func() { _ = os.WriteFile(unblock, nil, 0o600) }
+	t.Cleanup(release)
+	wait = func() {
+		deadline := time.Now().Add(10 * time.Second)
+		for time.Now().Before(deadline) {
+			entries, err := os.ReadDir(ready)
+			if err == nil && len(entries) >= count {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		entries, err := os.ReadDir(ready)
+		t.Fatalf("only %d of %d fake agents reached the barrier: %v", len(entries), count, err)
+	}
+	return wait, release
+}
+
 func TestBackgroundRunsAndTellsHowEachEnded(t *testing.T) {
 	for _, c := range []struct {
 		name, agent, outcome, failed string
@@ -51,6 +77,10 @@ func TestBackgroundRunsAndTellsHowEachEnded(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			top := backgroundRepo(t)
+			var wait, release func()
+			if c.agent == "" {
+				wait, release = holdFakeAgents(t, 1)
+			}
 			t.Setenv("FAKE_AGENT", c.agent)
 			path := issueFile(t, issue)
 			o, err := Start(top, []string{path})
@@ -58,9 +88,13 @@ func TestBackgroundRunsAndTellsHowEachEnded(t *testing.T) {
 				o.Report != filepath.Join(top, ".atm", "runs", o.Run, "report.json") {
 				t.Fatalf("Start = %+v, %v", o, err)
 			}
-			runs, err := Runs(top)
-			if err != nil || len(runs) != 1 || runs[0].Outcome != "running" || runs[0].Report != o.Report {
-				t.Fatalf("running Runs = %+v, %v", runs, err)
+			if wait != nil {
+				wait()
+				runs, err := Runs(top)
+				if err != nil || len(runs) != 1 || runs[0].Outcome != "running" || runs[0].Report != o.Report {
+					t.Fatalf("running Runs = %+v, %v", runs, err)
+				}
+				release()
 			}
 			var screen bytes.Buffer
 			end, err := Attach(top, o.Run, &screen)
@@ -75,7 +109,7 @@ func TestBackgroundRunsAndTellsHowEachEnded(t *testing.T) {
 			if s := screen.String(); !strings.Contains(s, "clone     passed") || !strings.Contains(s, "RESULT  ") {
 				t.Fatalf("screen:\n%s", s)
 			}
-			runs, err = Runs(top)
+			runs, err := Runs(top)
 			if err != nil || len(runs) != 1 || runs[0].Outcome != c.outcome || runs[0].Duration() == "" {
 				t.Fatalf("Runs = %+v, %v", runs, err)
 			}
@@ -87,6 +121,7 @@ func TestBackgroundRunsAndTellsHowEachEnded(t *testing.T) {
 // process owns. The same work passes as a fix and fails as docs.
 func TestBackgroundRunsAtOnceEachInItsOwnDirectory(t *testing.T) {
 	top := backgroundRepo(t)
+	wait, release := holdFakeAgents(t, 2)
 	t.Setenv("FAKE_AGENT_WORK", fixWork)
 	var started []Outcome
 	for _, typ := range []string{"fix", "docs"} {
@@ -96,6 +131,18 @@ func TestBackgroundRunsAtOnceEachInItsOwnDirectory(t *testing.T) {
 		}
 		started = append(started, o)
 	}
+	wait()
+	runs, err := Runs(top)
+	if err != nil || len(runs) != len(started) {
+		t.Fatalf("running Runs = %+v, %v", runs, err)
+	}
+	for i, o := range started {
+		if runs[i].Outcome != "running" || runs[i].Run != o.Run ||
+			runs[i].Report != filepath.Join(top, ".atm", "runs", o.Run, "report.json") {
+			t.Fatalf("running run %d = %+v", i, runs[i])
+		}
+	}
+	release()
 	for i, want := range [][]string{{"fix", "", "passed"}, {"docs", "checks", "failed"}} {
 		end, err := Attach(top, started[i].Run, &bytes.Buffer{})
 		dir := filepath.Join(top, ".atm", "runs", started[i].Run)
