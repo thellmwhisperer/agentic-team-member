@@ -33,14 +33,14 @@ func TestRunWritesTheContractForTheTaskType(t *testing.T) {
 			root := repo(t, "https://example.com/owner/repo.git", briefYAML)
 			issue := "Retry once on timeout.\n\nType: " + typ
 			var out bytes.Buffer
-			if err := Run([]string{issueFile(t, "# Retry\n"+issue+"\n")}, &out, io.Discard); err != nil {
+			if err := Run("t", []string{issueFile(t, "# Retry\n"+issue+"\n")}, &out, io.Discard); err != nil {
 				t.Fatal(err)
 			}
 			evs := events(t, &out)
-			if evs[3]["step"] != "contract" || evs[3]["state"] != "passed" {
+			if evs[5]["step"] != "contract" || evs[5]["state"] != "passed" {
 				t.Fatalf("want the contract step passed, got %v", evs)
 			}
-			b, err := os.ReadFile(filepath.Join(root, ".atm", "brief.md"))
+			b, err := os.ReadFile(filepath.Join(root, ".atm", "runs", "t", "brief.md"))
 			if err != nil {
 				t.Fatal(err)
 			}

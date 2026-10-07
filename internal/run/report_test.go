@@ -37,7 +37,7 @@ func reportNode(t *testing.T, rep obj, name string) obj {
 }
 
 // nodes is every node of a run, in order.
-var nodes = []string{"issue", "contract", "clone", "agent", "checks", "ponytail", "delivery"}
+var nodes = []string{"issue", "clone", "contract", "agent", "checks", "ponytail", "delivery"}
 
 func TestRunStopsAndReports(t *testing.T) {
 	cases := []struct {
@@ -50,7 +50,7 @@ func TestRunStopsAndReports(t *testing.T) {
 		{name: "unreadable issue", args: []string{filepath.Join(t.TempDir(), "missing.md")}, code: 2,
 			failed: "issue", results: []string{"failed", "not run", "not run", "not run", "not run", "not run"}},
 		{name: "preparation fails", args: []string{"--base-ref", "nope"}, code: 2, failed: "clone", why: "nope",
-			results: []string{"passed", "passed", "failed", "not run", "not run", "not run"}},
+			results: []string{"passed", "failed", "not run", "not run", "not run", "not run"}},
 		{name: "agent fails", agent: "fail", code: 1, failed: "agent",
 			results: []string{"passed", "passed", "passed", "failed", "not run", "not run"}},
 		{name: "checks fail", atm: atmSet(atmYAML, "typecheck", "seq 100; exit 3"), code: 1, failed: "checks",
@@ -76,11 +76,11 @@ func TestRunStopsAndReports(t *testing.T) {
 				args = append(args, issueFile(t, issue))
 			}
 			var out, summary bytes.Buffer
-			err := Run(args, &out, &summary)
+			err := Run("t", args, &out, &summary)
 			if code := ExitCode(err); code != c.code || (c.code == 0) != (err == nil) {
 				t.Fatalf("exit %d, %v; want exit %d", code, err, c.code)
 			}
-			rep := readReport(t, filepath.Join(root, ".atm", "report.json"))
+			rep := readReport(t, filepath.Join(root, ".atm", "runs", "t", "report.json"))
 			if rep["failed_node"] != c.failed || c.failed != "" && rep["reason"] != err.Error() ||
 				!strings.Contains(rep["reason"].(string), c.why) {
 				t.Fatalf("want %s failed naming %q, got %v: %v", c.failed, c.why, rep["failed_node"], rep["reason"])

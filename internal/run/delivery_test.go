@@ -52,7 +52,7 @@ func TestRunDeliversTheBranch(t *testing.T) {
 				t.Setenv("FAKE_PONYTAIL_REPORT", cut)
 			}
 			var out, summary bytes.Buffer
-			if err := Run([]string{arg}, &out, &summary); err != nil {
+			if err := Run("t", []string{arg}, &out, &summary); err != nil {
 				t.Fatalf("%v\n%s", err, summary.String())
 			}
 			read := reader(t, got)
@@ -62,7 +62,7 @@ func TestRunDeliversTheBranch(t *testing.T) {
 				checkDeliveredMarker(t, read)
 			}
 			checkEnv(t, got, top, c.issue, c.ponytail)
-			printed, _ := os.ReadFile(filepath.Join(top, ".atm", "delivery-output.txt"))
+			printed, _ := os.ReadFile(filepath.Join(top, ".atm", "runs", "t", "delivery-output.txt"))
 			for _, line := range []string{"out-line", "err-line"} {
 				if !strings.Contains(summary.String(), line) || !strings.Contains(string(printed), line) {
 					t.Fatalf("want %q on the screen and in delivery-output.txt, got %q and %q", line, summary.String(),
@@ -126,7 +126,7 @@ func checkBranch(t *testing.T, read func(string) string, log, origin string) {
 func checkEnv(t *testing.T, got, top, issue, ponytail string) {
 	t.Helper()
 	read := reader(t, got)
-	report := filepath.Join(top, ".atm", "report.json")
+	report := filepath.Join(top, ".atm", "runs", "t", "report.json")
 	for k, want := range map[string]string{"ATM_TITLE": "Retry on timeout", "ATM_ISSUE": issue,
 		"ATM_REPORT": report, "ATM_PONYTAIL": ponytail} {
 		if v := read(k); v != want {
@@ -151,11 +151,11 @@ func TestRunDeliveryNeedsAnOrigin(t *testing.T) {
 	got := t.TempDir()
 	t.Setenv("ATM_TEST_OUT", got)
 	var out bytes.Buffer
-	err := Run([]string{issueFile(t, issue)}, &out, &bytes.Buffer{})
+	err := Run("t", []string{issueFile(t, issue)}, &out, &bytes.Buffer{})
 	if ExitCode(err) != 4 || !strings.Contains(err.Error(), "origin") {
 		t.Fatalf("want exit 4 naming origin, got %d: %v", ExitCode(err), err)
 	}
-	if rep := readReport(t, filepath.Join(root, ".atm", "report.json")); rep["failed_node"] != "delivery" {
+	if rep := readReport(t, filepath.Join(root, ".atm", "runs", "t", "report.json")); rep["failed_node"] != "delivery" {
 		t.Fatalf("want delivery failed, got %v", rep["failed_node"])
 	}
 	if _, err := os.Stat(filepath.Join(got, "branch")); err == nil {
