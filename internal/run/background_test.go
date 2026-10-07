@@ -375,6 +375,29 @@ func TestBackgroundPrunesTheHistoryWhenRunsEnd(t *testing.T) {
 	}
 }
 
+func TestBackgroundKeepsNewestLabelWhenItEndsFirst(t *testing.T) {
+	top := gitT(t, repo(t, "https://example.com/owner/repo.git", atmYAML), "rev-parse", "--show-toplevel")
+	if err := os.MkdirAll(filepath.Join(top, ".atm"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s := &server{root: top}
+	for n := 1; n <= maxRuns; n++ {
+		s.runs = append(s.runs, &bgRun{Outcome: Outcome{Run: fmt.Sprintf("issue-%d", n), Outcome: "running",
+			Started: time.Now()}})
+	}
+	s.runs = append(s.runs, &bgRun{Outcome: Outcome{Run: fmt.Sprintf("issue-%d", maxRuns+1), Outcome: "passed",
+		Started: time.Now(), Ended: time.Now()}})
+	s.save()
+	if saved, err := history(top); err != nil || len(saved) != maxRuns+1 || saved[len(saved)-1].Run != "issue-201" {
+		t.Fatalf("history after newest run ended = %d runs, %v; want newest issue-201 retained", len(saved), err)
+	}
+	t.Setenv("FAKE_AGENT", "fail")
+	started := s.start([]string{issueFile(t, issue)})
+	if started.Run != "issue-202" || started.Report != filepath.Join(top, ".atm", "runs", "issue-202", "report.json") {
+		t.Fatalf("Start = %+v; want issue-202 and its unique run directory", started)
+	}
+}
+
 func seedHistory(t *testing.T, top string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Join(top, ".atm"), 0o755); err != nil {
