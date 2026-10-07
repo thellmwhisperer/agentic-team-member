@@ -4,9 +4,7 @@ import (
 	"bytes"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -42,6 +40,19 @@ func clones(t *testing.T, root string) []string {
 		names = append(names, e.Name())
 	}
 	return names
+}
+
+func startTestCloneLease(dir string) error {
+	f, err := os.OpenFile(dir+".lock", os.O_RDWR, 0o600)
+	if err != nil {
+		return err
+	}
+	if err := lockCloneShared(f); err != nil {
+		_ = f.Close()
+		return err
+	}
+	cloneLeases.Store(dir, f)
+	return nil
 }
 
 func TestRunClonesBaseDetachedAndInstalls(t *testing.T) {
@@ -131,19 +142,8 @@ func TestClaimSuffixesRunsInTheSameSecond(t *testing.T) {
 	}
 }
 
-// deadPID is the pid of a process that has exited.
-func deadPID(t *testing.T) int {
-	t.Helper()
-	cmd := exec.Command("git", "--version")
-	if err := cmd.Run(); err != nil {
-		t.Fatal(err)
-	}
-	return cmd.Process.Pid
-}
-
-// oldClone is a clone an earlier run left under root, with its run's pid and, when delivered, branch atm/fix,
-// one commit ahead of main when ahead.
-func oldClone(t *testing.T, root string, pid int, delivered, ahead bool) string {
+// oldClone is an earlier run's clone, optionally still held by a live process.
+func oldClone(t *testing.T, root string, live, delivered, ahead bool) string {
 	t.Helper()
 	old := filepath.Join(root, ".atm", "clones", "atm-run-20261001-120000")
 	if delivered {
@@ -158,8 +158,14 @@ func oldClone(t *testing.T, root string, pid int, delivered, ahead bool) string 
 	} else if err := os.MkdirAll(old, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(old+".pid", []byte(strconv.Itoa(pid)), 0o600); err != nil {
-		t.Fatal(err)
+	if live {
+		if err := os.WriteFile(old+".lock", nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := startTestCloneLease(old); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { closeCloneLease(old) })
 	}
 	return old
 }
@@ -192,11 +198,7 @@ func TestRunSweepsClonesNoRunNeeds(t *testing.T) {
 			if c.pr != "" {
 				args = fakeGH(t, c.pr, false)
 			}
-			pid := deadPID(t)
-			if c.live {
-				pid = os.Getpid()
-			}
-			old := oldClone(t, root, pid, c.delivered, c.ahead)
+			old := oldClone(t, root, c.live, c.delivered, c.ahead)
 			var out bytes.Buffer
 			if err := Run("t", []string{issueFile(t, issue)}, &out, io.Discard); err != nil {
 				t.Fatal(err)
@@ -211,6 +213,12 @@ func TestRunSweepsClonesNoRunNeeds(t *testing.T) {
 			if c.pr != "" {
 				if got, _ := os.ReadFile(args); string(got) != "pr view atm/fix --repo owner/repo --json state --jq .state" {
 					t.Fatalf("gh args: %q", got)
+				}
+			}
+			if c.live {
+				closeCloneLease(old)
+				if err := release(old, ""); err != nil {
+					t.Fatal(err)
 				}
 			}
 		})

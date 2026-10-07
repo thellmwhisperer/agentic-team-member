@@ -116,6 +116,9 @@ func (a agent) run(clone, name, skill, brief string, check func(map[string]any) 
 	defer cancel()
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir, cmd.Stdin, cmd.WaitDelay = clone, strings.NewReader(stdin), time.Second
+	if err := inheritCloneLease(cmd, clone); err != nil {
+		return ev, err
+	}
 	cmd.Env = append(slices.DeleteFunc(os.Environ(), func(kv string) bool {
 		return strings.HasPrefix(kv, "CLAUDE_CODE_CHILD_SESSION=") // set, the agent's transcripts are off
 	}), a.env...)
@@ -227,7 +230,6 @@ func (s *stream) read(cmd *exec.Cmd, log io.Writer, harness string) error {
 	}()
 	err := cmd.Start()
 	if err == nil {
-		note(cmd)
 		err = cmd.Wait()
 	}
 	_ = pw.Close()
