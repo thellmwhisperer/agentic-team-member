@@ -108,7 +108,7 @@ func listCmd(going bool) *cobra.Command {
 			}
 			n++
 			report := ""
-			if o.Report != "" {
+			if !going && o.Report != "" {
 				report = "\t" + o.Report
 			}
 			_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s%s\n", o.Run, how, o.Duration(), o.Issue, report)
