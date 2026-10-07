@@ -66,7 +66,7 @@ func Run(label string, args []string, out, summary io.Writer) (err error) {
 		return ev, err
 	})
 	var dir, sha string
-	defer func() { err = errors.Join(err, release(dir, repo)); hold(dir, false) }()
+	defer func() { err = errors.Join(err, release(dir, repo)) }()
 	r.step("clone", func() (ev map[string]any, err error) {
 		dir, sha, err = clone(root, *base, c.Install, repo)
 		return map[string]any{"clone": dir, "sha": sha}, err
@@ -207,7 +207,7 @@ func deliver(r *verdict, root, clone, sha, base, line string, i Issue, screen io
 		t, _ := screen.(terminal)
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
-		tail, err := tee(ctx, t,io.MultiWriter(f, screen), clone, line, "ATM_TITLE="+i.Title, "ATM_ISSUE="+issue,
+		tail, err := tee(ctx, t, io.MultiWriter(f, screen), clone, line, "ATM_TITLE="+i.Title, "ATM_ISSUE="+issue,
 			"ATM_BRANCH="+branch, "ATM_CLONE="+clone, "ATM_REPORT="+r.path, "ATM_PONYTAIL="+cuts)
 		ev["commands"] = []cmdResult{{"delivery", line, outcome(err), tail}}
 		// Once it ended: one whose background process died never did, and its clone goes.
@@ -317,11 +317,18 @@ var agentTimeout = 30 * time.Minute
 // command runs name in dir, "" for the working directory, and returns its trimmed stdout; a failure or a
 // timeout carries stderr.
 func command(dir, name string, args ...string) (string, error) {
+	return commandFor(dir, dir, name, args...)
+}
+
+func commandFor(lockDir, dir, name string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, name, args...)
 	var stderr bytes.Buffer
 	cmd.Dir, cmd.Stderr, cmd.WaitDelay = dir, &stderr, time.Second
+	if err := inheritCloneLease(cmd, lockDir); err != nil {
+		return "", err
+	}
 	out, err := cmd.Output()
 	if ctx.Err() != nil {
 		err = fmt.Errorf("timed out after %s", Human(timeout))

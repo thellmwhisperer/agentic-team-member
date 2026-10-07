@@ -87,35 +87,6 @@ const maxRuns = 200
 // idle is how long the background process waits without a run before it ends; tick is how often it checks.
 var idle, tick = 10 * time.Minute, 5 * time.Second
 
-// live holds the clones of the runs the background process runs, nil outside it.
-var live struct {
-	sync.Mutex
-	dirs map[string]bool
-}
-
-// hold marks the run of clone dir alive in the background process, or, when on is false, gone.
-func hold(dir string, on bool) {
-	live.Lock()
-	defer live.Unlock()
-	if !on {
-		delete(live.dirs, dir)
-	} else if live.dirs != nil {
-		live.dirs[dir] = true
-	}
-}
-
-// running says whether the run that wrote pid next to clone dir still runs. In the background process, its
-// runs all have its pid and it holds those alive: one with its pid it does not hold died, or ran in the process
-// before it whose pid it got.
-func running(dir string, pid int) bool {
-	live.Lock()
-	defer live.Unlock()
-	if live.dirs != nil && pid == os.Getpid() {
-		return live.dirs[dir]
-	}
-	return alive(pid)
-}
-
 // socket is the background process's socket for the repository at root.
 func socket(root string) string { return filepath.Join(root, ".atm", "atm.sock") }
 
@@ -201,10 +172,6 @@ func serve(l *net.UnixListener, root, sock string) error {
 		return err
 	}
 	s := &server{root: root, runs: runs, last: time.Now()}
-	live.Lock()
-	live.dirs = map[string]bool{}
-	live.Unlock()
-	defer func() { live.Lock(); live.dirs = nil; live.Unlock() }()
 	for {
 		_ = l.SetDeadline(time.Now().Add(tick))
 		c, err := l.Accept()

@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -230,11 +229,10 @@ func TestStartRejectsABadCommandLineBeforeTheBackground(t *testing.T) {
 	}
 }
 
-// The background process holds every run it runs, all under its pid: a clone under that pid it holds no run
-// for is the clone of a run that died, or of one before it whose pid it got, and the next sweep removes it.
+// A later start sweeps a clone after its inherited process lock has ended.
 func TestBackgroundSweepsTheCloneOfARunThatDied(t *testing.T) {
 	top := backgroundRepo(t)
-	old := oldClone(t, top, os.Getpid(), false, false)
+	old := oldClone(t, top, false, false, false)
 	o, err := Start(top, []string{issueFile(t, issue)})
 	if err != nil {
 		t.Fatal(err)
@@ -247,28 +245,34 @@ func TestBackgroundSweepsTheCloneOfARunThatDied(t *testing.T) {
 	}
 }
 
-func TestSweepKeepsOnlyTheRunsTheBackgroundHolds(t *testing.T) {
+func TestSweepKeepsOnlyClonesWithLiveLeases(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "clones")
-	clone := func(name string, pid int) string {
+	clone := func(name string, live bool) string {
 		dir := filepath.Join(root, name)
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(dir+".pid", []byte(strconv.Itoa(pid)), 0o600); err != nil {
-			t.Fatal(err)
+		if live {
+			if err := os.WriteFile(dir+".lock", nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := startTestCloneLease(dir); err != nil {
+				t.Fatal(err)
+			}
 		}
 		return dir
 	}
-	held, dropped, other := clone("held", os.Getpid()), clone("dropped", os.Getpid()), clone("other", os.Getppid())
-	live.Lock()
-	live.dirs = map[string]bool{held: true}
-	live.Unlock()
-	t.Cleanup(func() { live.Lock(); live.dirs = nil; live.Unlock() })
+	held, dropped := clone("held", true), clone("dropped", false)
 	sweep(root, "")
-	for dir, want := range map[string]bool{held: true, dropped: false, other: true} {
+	for dir, want := range map[string]bool{held: true, dropped: false} {
 		if _, err := os.Stat(dir); (err == nil) != want {
 			t.Fatalf("%s kept = %v, want %v", filepath.Base(dir), err == nil, want)
 		}
+	}
+	closeCloneLease(held)
+	sweep(root, "")
+	if _, err := os.Stat(held); !os.IsNotExist(err) {
+		t.Fatalf("clone remained after its lease closed: %v", err)
 	}
 }
 

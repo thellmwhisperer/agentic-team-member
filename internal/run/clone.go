@@ -5,21 +5,21 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
-	"strconv"
 	"strings"
-	"syscall"
+	"sync"
 	"time"
 )
 
 // clone sweeps root/.atm/clones, then claims a clone there of root at base's commit, detached, with install
 // run in it. It returns the clone even when a later step fails, so the caller can release it.
 //
-// Next to each clone, <clone>.pid holds its run's pid, then each process group the run started there, negative,
-// and, once its run's delivery command ended, <clone>.delivered holds
+// Next to each clone, <clone>.lock holds a shared lock while its run has any live processes, and
+// <clone>.delivered holds
 // "<branch> <base>": what tells a later run whether the clone is still needed.
+
+var cloneLeases sync.Map
+
 func clone(root, base, install, repo string) (dir, sha string, err error) {
 	if sha, err = git(root, "rev-parse", "--verify", base+"^{commit}"); err != nil {
 		return "", "", fmt.Errorf("base ref %q: %w", base, err)
@@ -29,23 +29,19 @@ func clone(root, base, install, repo string) (dir, sha string, err error) {
 	if dir, err = claim(clones, time.Now()); err != nil {
 		return "", sha, err
 	}
-	hold(dir, true) // before its pid file, which a sweep needs to remove it
-	if err = os.WriteFile(dir+".pid", []byte(strconv.Itoa(os.Getpid())), 0o644); err != nil {
-		return dir, sha, err
-	}
 	for _, args := range [][]string{
 		{"clone", "-q", "--local", "--no-checkout", root, dir},
 		{"-C", dir, "fetch", "-q", root, sha},
 		{"-C", dir, "checkout", "-q", "--detach", sha},
 	} {
-		if _, err = git("", args...); err != nil {
+		if _, err = commandFor(dir, "", "git", args...); err != nil {
 			return dir, sha, err
 		}
 	}
 	if err = exclude(dir, "/.atm/"); err != nil || install == "" { // ATM's scratch
 		return dir, sha, err
 	}
-	if _, err = command(dir, "sh", "-c", install); err != nil {
+	if _, err = commandFor(dir, dir, "sh", "-c", install); err != nil {
 		return dir, sha, fmt.Errorf("install: %w", err)
 	}
 	return dir, sha, nil
@@ -63,9 +59,28 @@ func claim(root string, now time.Time) (string, error) {
 		if n > 1 {
 			dir = fmt.Sprintf("%s-%d", base, n)
 		}
-		if err := os.Mkdir(dir, 0o755); !errors.Is(err, fs.ErrExist) {
-			return dir, err
+		f, err := os.OpenFile(dir+".lock", os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o600)
+		if errors.Is(err, fs.ErrExist) {
+			continue
 		}
+		if err != nil {
+			return "", err
+		}
+		if err = lockCloneShared(f); err != nil {
+			_ = f.Close()
+			_ = os.Remove(dir + ".lock")
+			return "", err
+		}
+		if err = os.Mkdir(dir, 0o755); err != nil {
+			_ = f.Close()
+			_ = os.Remove(dir + ".lock")
+			if errors.Is(err, fs.ErrExist) {
+				continue
+			}
+			return "", err
+		}
+		cloneLeases.Store(dir, f)
+		return dir, nil
 	}
 }
 
@@ -77,63 +92,35 @@ func sweep(clones, repo string) {
 			continue
 		}
 		dir := filepath.Join(clones, e.Name())
-		b, err := os.ReadFile(dir + ".pid")
-		// No pid yet is a run between its claim and its pid file. ponytail: a run that died right there
-		// leaves its empty clone for good; removing pid-less clones by age is the upgrade.
-		if err != nil {
+		lock, locked, err := tryCloneExclusive(dir)
+		if err != nil || !locked {
 			continue
 		}
-		if held(dir, strings.Fields(string(b))) || kept(dir, repo) {
+		if kept(dir, repo) {
+			_ = lock.Close()
 			continue
 		}
-		_ = remove(dir) // a clone that will not go is tried again by the next run
-	}
-}
-
-// held says whether a process of the run of clone dir still runs, from pids, its pid file: the run's own, or,
-// negative, a process group the run started, which outlives it when it dies.
-func held(dir string, pids []string) bool {
-	for _, p := range pids {
-		pid, err := strconv.Atoi(p)
-		if err != nil || pid > 0 && running(dir, pid) || pid < 0 && groupAlive(-pid) {
-			return true
-		}
-	}
-	return len(pids) == 0 // a pid file being written
-}
-
-// note adds the process group of cmd, just started, to the pid file of the clone it runs in, if it runs in one.
-func note(cmd *exec.Cmd) {
-	f, err := os.OpenFile(cmd.Dir+".pid", os.O_APPEND|os.O_WRONLY, 0)
-	if err == nil {
-		_, _ = fmt.Fprintf(f, " -%d", cmd.Process.Pid) // it leads its group
-		_ = f.Close()
+		_ = lock.Close()
+		_ = remove(dir)
 	}
 }
 
 // release ends the run's hold on its clone dir: removed, unless kept.
 func release(dir, repo string) error {
-	if dir == "" || heldExcept(dir, os.Getpid()) || kept(dir, repo) {
+	if dir == "" {
 		return nil
 	}
+	closeCloneLease(dir)
+	lock, locked, err := tryCloneExclusive(dir)
+	if err != nil || !locked {
+		return err
+	}
+	defer lock.Close()
+	if kept(dir, repo) {
+		return nil
+	}
+	_ = lock.Close()
 	return remove(dir)
-}
-
-func heldExcept(dir string, except int) bool {
-	b, err := os.ReadFile(dir + ".pid")
-	if err != nil {
-		return false
-	}
-	pids := strings.Fields(string(b))
-	kept := pids[:0]
-	for _, p := range pids {
-		pid, err := strconv.Atoi(p)
-		if err == nil && pid == except {
-			continue
-		}
-		kept = append(kept, p)
-	}
-	return held(dir, kept)
 }
 
 // kept says whether the clone at dir delivered and its PR is still open: its branch is not merged into its
@@ -158,20 +145,6 @@ func kept(dir, repo string) bool {
 }
 
 func remove(dir string) error {
-	return errors.Join(os.RemoveAll(dir), os.RemoveAll(dir+".pid"), os.RemoveAll(dir+".delivered"))
-}
-
-// alive says whether process pid runs. ponytail: outside the background process, a dead run's pid the OS gave
-// to another process reads as alive and keeps its clone until that process ends; comparing start times is the
-// upgrade.
-func alive(pid int) bool {
-	p, err := os.FindProcess(pid) // on Windows, fails for a process that is gone
-	if err != nil {
-		return false
-	}
-	if runtime.GOOS == "windows" {
-		return true
-	}
-	err = p.Signal(syscall.Signal(0))
-	return err == nil || errors.Is(err, syscall.EPERM)
+	return errors.Join(os.RemoveAll(dir), os.RemoveAll(dir+".lock"), os.RemoveAll(dir+".pid"),
+		os.RemoveAll(dir+".delivered"))
 }

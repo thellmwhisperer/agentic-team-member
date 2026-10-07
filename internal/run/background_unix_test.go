@@ -4,9 +4,7 @@ package run
 
 import (
 	"bytes"
-	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -15,61 +13,31 @@ import (
 	"time"
 )
 
-// A background process killed in the middle of a run leaves the run's clone to what the run started, which goes
-// on: the next background process's sweep removes it only once nothing of the run is alive, delivered or not, as
-// its delivery never ended. It lists the run failed at the node it was in, for as long as it ran.
-func TestBackgroundKilledMidRunLeavesTheCloneToWhatTheRunStarted(t *testing.T) {
-	for _, c := range []struct{ node, delivery string }{
-		{node: "agent"},
-		{node: "delivery", delivery: `cat "$ATM_TEST_GATE" & echo $! > "$ATM_TEST_PID"; wait $!`},
-	} {
-		t.Run(c.node, func(t *testing.T) {
-			top, clone, pid, group, killed := killMidRun(t, c.node, c.delivery)
-			nextRun(t, top)
-			if _, err := os.Stat(clone); err != nil {
-				t.Fatalf("the sweep removed the clone of a run whose %s still runs: %v", c.node, err)
-			}
-			runs, err := Runs(top)
-			if err != nil || len(runs) != 2 || runs[0].Outcome != "failed" || runs[0].FailedNode != c.node ||
-				!runs[0].Started.Before(runs[0].Ended) || runs[0].Ended.After(killed) {
-				t.Fatalf("Runs = %+v, %v; want the first failed at %s, for as long as it ran", runs, err, c.node)
-			}
-			if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
-				t.Fatal(err)
-			}
-			until(t, "the run's "+c.node+" died", func() bool {
-				return errors.Is(syscall.Kill(-group, 0), syscall.ESRCH)
-			})
-			nextRun(t, top)
-			if _, err := os.Stat(clone); !os.IsNotExist(err) {
-				t.Fatalf("the sweep kept the clone of a run nothing of which runs: %v", clones(t, top))
-			}
-		})
+func TestKilledBackgroundKeepsCloneForStartedAgent(t *testing.T) {
+	pidFifo, _ := fifos(t)
+	ready := filepath.Join(t.TempDir(), "agent-started")
+	t.Setenv("FAKE_AGENT", "hang")
+	t.Setenv("FAKE_AGENT_PID", pidFifo)
+	t.Setenv("FAKE_AGENT_READY", ready)
+	t.Setenv("FAKE_AGENT_KILL_PARENT", "1")
+	top := gitT(t, repo(t, "https://example.com/owner/repo.git", atmYAML), "rev-parse", "--show-toplevel")
+	t.Cleanup(func() { _ = os.Remove(socket(top)) })
+	done := make(chan error, 1)
+	go func() {
+		_, err := Start(top, []string{issueFile(t, issue)})
+		done <- err
+	}()
+	until(t, "agent start", func() bool {
+		_, err := os.Stat(ready)
+		return err == nil
+	})
+	clone := theClone(t, top)
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the background request did not end after its process was killed")
 	}
-}
-
-func TestSweepAndReleaseKeepCloneForChildAfterGroupLeaderExits(t *testing.T) {
-	clonesDir := filepath.Join(t.TempDir(), "clones")
-	clone := filepath.Join(clonesDir, "atm-run-child")
-	if err := os.MkdirAll(clone, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(clone+".pid", []byte(strconv.Itoa(deadPID(t))), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	childFile := filepath.Join(t.TempDir(), "child.pid")
-	cmd := exec.Command("sh", "-c", "sleep 30 & echo $! > \"$CHILD_PID\"; exit")
-	cmd.Dir = clone
-	cmd.Env = append(os.Environ(), "CHILD_PID="+childFile)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	note(cmd)
-	if err := cmd.Wait(); err != nil {
-		t.Fatal(err)
-	}
-	b, err := os.ReadFile(childFile)
+	b, err := os.ReadFile(pidFifo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,63 +45,78 @@ func TestSweepAndReleaseKeepCloneForChildAfterGroupLeaderExits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = syscall.Kill(child, syscall.SIGKILL) })
-
-	if err := release(clone, ""); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(clone); err != nil {
-		t.Fatalf("release removed a clone while its child was alive: %v", err)
-	}
-	sweep(clonesDir, "")
-	if _, err := os.Stat(clone); err != nil {
-		t.Fatalf("sweep removed a clone while its child was alive: %v", err)
-	}
-	if err := syscall.Kill(child, syscall.SIGKILL); err != nil {
-		t.Fatal(err)
-	}
-	until(t, "the child process group to exit", func() bool { return !groupAlive(cmd.Process.Pid) })
-	sweep(clonesDir, "")
-	if _, err := os.Stat(clone); !os.IsNotExist(err) {
-		t.Fatalf("sweep kept the clone after its child exited: %v", err)
-	}
-}
-
-// killMidRun starts a run in a background process of its own, with delivery, and kills that process once the
-// run's node runs. It returns the repository, the run's clone, the pid and group of what the run started, and
-// when it killed the process. The next runs end at their agent.
-func killMidRun(t *testing.T, node, delivery string) (top, clone string, pid, group int, killed time.Time) {
-	t.Helper()
-	// What the run started writes its pid to a fifo, then waits on another, which no one opens.
-	pidFifo, _ := fifos(t)
-	t.Setenv("FAKE_AGENT_PID", pidFifo)
-	if node == "agent" {
-		t.Setenv("FAKE_AGENT", "hang")
-	}
-	// A local origin, which no fetch reaches, so a delivered clone is kept.
-	top = gitT(t, repo(t, t.TempDir(), atmSet(atmYAML, "delivery", delivery)), "rev-parse", "--show-toplevel")
-	t.Cleanup(func() { _ = os.Remove(socket(top)) }) // the background process ends at its next tick
-	if _, err := Start(top, []string{issueFile(t, issue)}); err != nil {
-		t.Fatal(err)
-	}
-	b, _ := os.ReadFile(pidFifo)
-	pid, _ = strconv.Atoi(strings.TrimSpace(string(b)))
-	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
-	group, err := syscall.Getpgid(pid)
+	proc, err := os.FindProcess(child)
 	if err != nil {
 		t.Fatal(err)
 	}
-	clone = theClone(t, top)
-	if b, err = os.ReadFile(clone + ".pid"); err != nil {
-		t.Fatal(err)
-	}
-	server, _ := strconv.Atoi(strings.Fields(string(b))[0])
-	if err := syscall.Kill(server, syscall.SIGKILL); err != nil {
-		t.Fatal(err)
-	}
-	until(t, "the background process died", func() bool { return !alive(server) })
+	t.Cleanup(func() { _ = proc.Kill() })
 	t.Setenv("FAKE_AGENT", "fail")
-	return top, clone, pid, group, time.Now()
+	t.Setenv("FAKE_AGENT_KILL_PARENT", "")
+	nextRun(t, top)
+	if _, err := os.Stat(clone); err != nil {
+		t.Fatalf("the sweep removed the clone while its agent was alive: %v", err)
+	}
+	if err := proc.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	until(t, "the clone lease to be released", func() bool {
+		f, locked, err := tryCloneExclusive(clone)
+		if f != nil {
+			_ = f.Close()
+		}
+		return err == nil && locked
+	})
+	nextRun(t, top)
+	if _, err := os.Stat(clone); !os.IsNotExist(err) {
+		t.Fatalf("the sweep kept the clone after the agent exited: %v", clones(t, top))
+	}
+}
+
+func TestAgentExitKeepsCloneUntilOrphanChildExits(t *testing.T) {
+	pidFifo, _ := fifos(t)
+	t.Setenv("FAKE_AGENT", "orphan")
+	t.Setenv("FAKE_AGENT_PID", pidFifo)
+	top := backgroundRepo(t)
+	o, err := Start(top, []string{issueFile(t, issue)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if end, err := Attach(top, o.Run, &bytes.Buffer{}); err != nil || end.Outcome != "passed" {
+		t.Fatalf("Attach = %+v, %v", end, err)
+	}
+	clone := theClone(t, top)
+	b, err := os.ReadFile(pidFifo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := strconv.Atoi(strings.TrimSpace(string(b)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	proc, err := os.FindProcess(child)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = proc.Kill() })
+	t.Setenv("FAKE_AGENT", "fail")
+	nextRun(t, top)
+	if _, err := os.Stat(clone); err != nil {
+		t.Fatalf("the sweep removed a clone whose agent child was alive: %v", err)
+	}
+	if err := proc.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	until(t, "the child lease to be released", func() bool {
+		f, locked, err := tryCloneExclusive(clone)
+		if f != nil {
+			_ = f.Close()
+		}
+		return err == nil && locked
+	})
+	nextRun(t, top)
+	if _, err := os.Stat(clone); !os.IsNotExist(err) {
+		t.Fatalf("the sweep kept the clone after its child exited: %v", clones(t, top))
+	}
 }
 
 // theClone is the one clone under root.
@@ -156,6 +139,11 @@ func nextRun(t *testing.T, root string) {
 	if err != nil || o.FailedNode != "agent" {
 		t.Fatalf("next run = %+v, %v", o, err)
 	}
+}
+
+func alive(pid int) bool {
+	err := syscall.Kill(pid, 0)
+	return err == nil || err == syscall.EPERM
 }
 
 // until fails t unless cond holds within 5 s: a killed process is not yet reaped, its new parent reaps it soon
