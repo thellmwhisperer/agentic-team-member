@@ -209,6 +209,20 @@ func TestPonytailKeepsAShorterGreenCut(t *testing.T) {
 	}
 }
 
+func TestReproveFailsWhenAPriorUnitTestCommits(t *testing.T) {
+	_, clone, sha, cfg := unitDone(t, "echo fixed > a.txt")
+	cfg.TestFile = "sh {file} && git -c user.name=Test -c user.email=test@example.com commit --allow-empty -qm test"
+	proofs := []proof{{sha, "a_test.sh", "fix"}, {sha, "a_test.sh", "fix"}}
+
+	_, err := reprove(clone, sha, proofs, cfg)
+	if err == nil || !strings.Contains(err.Error(), "the commands made commits") {
+		t.Fatalf("want the prior unit's test commit to fail re-proving, got %v", err)
+	}
+	if head := gitT(t, clone, "rev-parse", "HEAD"); head == sha {
+		t.Fatal("the test commit was hidden by resetting to the last unit's base")
+	}
+}
+
 func TestPonytailDiscardsACutThatDoesNotHold(t *testing.T) {
 	cases := []struct{ name, work, report, why string }{
 		{name: "longer", work: "echo extra >> a.txt", report: cut, why: "shorten"},
