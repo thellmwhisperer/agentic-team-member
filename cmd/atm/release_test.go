@@ -35,7 +35,10 @@ func TestGoReleaserBuildsAtmForTheFiveTargets(t *testing.T) {
 	if len(cfg.Builds) != 1 || cfg.Builds[0].Main != "./cmd/atm" {
 		t.Fatalf("builds = %+v, want one build of ./cmd/atm", cfg.Builds)
 	}
-	want := map[string]bool{"darwin_arm64": true, "darwin_amd64": true, "linux_amd64": true, "linux_arm64": true, "windows_amd64": true}
+	want := map[string]bool{
+		"darwin_arm64": true, "darwin_amd64": true,
+		"linux_amd64": true, "linux_arm64": true, "windows_amd64": true,
+	}
 	got := make(map[string]bool, len(cfg.Builds[0].Targets))
 	for _, target := range cfg.Builds[0].Targets {
 		got[target] = true
