@@ -155,7 +155,8 @@ func (m *Model) row(r *row, width int) string {
 			status = paint(dim, ansi.Truncate(r.note, room, "…")+" · ") + status
 		}
 	}
-	left := prefix + ansi.Truncate(r.label, max(0, width-lipgloss.Width(prefix)-lipgloss.Width(suffix)-lipgloss.Width(status)-1), "…") + suffix
+	labelWidth := max(0, width-lipgloss.Width(prefix)-lipgloss.Width(suffix)-lipgloss.Width(status)-1)
+	left := prefix + ansi.Truncate(r.label, labelWidth, "…") + suffix
 	left = ansi.Truncate(left, max(0, width-lipgloss.Width(status)-1), "…")
 	return spread(left, status, width)
 }
