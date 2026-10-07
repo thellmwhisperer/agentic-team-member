@@ -235,10 +235,15 @@ func onBase(clone, tree string, aside []string, test, tmpl string) error {
 }
 
 // trial runs base with the paths aside as they are at HEAD, brings the agent's work, tree, back and runs
-// after, "" for nothing, and returns how each ended. A hang in either, or a clone that is no longer tree, is
-// err: the verdict is void. After each run, the files git ignores are back as keep left them.
+// after, "" for nothing, and returns how each ended. A hang in either, a clone that is no longer tree, or a
+// file keep recorded, ignored or not, changed by either, is err: the verdict is void. After each run, the files
+// git ignores are back as keep left them.
 func trial(clone, tree string, aside []string, base, after string) (red, green, err error) {
-	defer func() { err = errors.Join(err, reset(clone)) }()
+	defer func() {
+		if e := reset(clone); !errors.Is(err, e) { // void once
+			err = errors.Join(err, e)
+		}
+	}()
 	if len(aside) > 0 {
 		args := append([]string{"--literal-pathspecs", "restore", "--source=HEAD", "--staged", "--worktree", "--"},
 			aside...)
@@ -265,7 +270,7 @@ func trial(clone, tree string, aside []string, base, after string) (red, green, 
 		return red, green, err
 	}
 	if now, err := git(clone, "write-tree"); err != nil || now != tree {
-		return red, green, errors.Join(err, errors.New("the clone changed during verification: the verdict is void"))
+		return red, green, errors.Join(err, errVoid)
 	}
 	return red, green, nil
 }
@@ -289,14 +294,21 @@ func keep(clone string) (string, error) {
 	return tree, err
 }
 
-// reset brings clone's working tree back to what keep recorded, new files gone, the ignored ones too.
+// reset brings clone's working tree back to what keep recorded, new files gone, the ignored ones too. A file
+// keep recorded that was changed or deleted, ignored or not, is errVoid.
 func reset(clone string) error {
+	_, changed := every(clone, "diff", "--quiet")
 	_, err := every(clone, "clean", "-fdqx")
 	if err == nil {
 		_, err = every(clone, "checkout", "--", ".")
 	}
+	if err == nil && changed != nil {
+		err = errVoid
+	}
 	return err
 }
+
+var errVoid = errors.New("the clone changed during verification: the verdict is void")
 
 // testLine is test_file, tmpl, for test, a path in the clone.
 func testLine(tmpl, test string) (string, error) {
