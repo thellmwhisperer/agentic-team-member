@@ -30,26 +30,26 @@ of your repository, then runs your repository's own install, test, lint and
 typecheck commands.
 
 The agent is not sandboxed by ATM. Claude Code, OpenCode and pi run with the
-rights of the user who started the worker, and Claude Code loads that user's
-own settings and hooks. Codex runs in its `workspace-write` sandbox. Run ATM
+rights of the user who started ATM. Claude Code loads the target repository's
+project settings and hooks. Codex runs in its `workspace-write` sandbox. Run ATM
 only on issues and repositories you would let that agent work on unattended.
 
 Reports in this area are in scope:
 
-- ATM's own path handling: `resolve_repo_path` refuses report paths outside
-  the clone, follow-up tests are confined to `.atm/follow-ups/`, and the gate
-  fails a unit whose HEAD moved. A way around any of those is a vulnerability.
-- Command construction: test and typecheck commands are built from the
-  target's `package.json`, lockfile and config, then run with `shlex.split`
-  and no shell. The quality step runs detected tools with a shell. Injection
-  through a crafted target repository is in scope.
-- Delivery: ATM commits on a branch and runs `[delivery].command` from your
-  config through the shell; it never pushes or opens a PR itself. Anything
-  that makes ATM do so, or runs a command the config did not name, is in
-  scope. The same holds for `[monitor].command`.
-- Network: `scripts/slopslint.sh` downloads a
-  pinned release and verifies its SHA256. Anything else that sends data off the
-  machine is a bug.
+- ATM's own path handling: the reported `test_file` must be a local path;
+  follow-up red tests must be new paths outside `.atm/`, and a unit fails if
+  its agent moved HEAD. A way around these checks is a vulnerability.
+- Command execution: ATM runs the target repository's `install`, `test`,
+  `typecheck`, `lint`, `test_file` and `delivery` lines from `.atm.yaml` with
+  `sh -c`. Running an unconfigured command or allowing a crafted report to
+  escape the clone is in scope.
+- Delivery: ATM commits on a branch and runs the configured `delivery`
+  command. It never pushes or opens a PR itself. Anything that makes ATM do
+  either without that command is in scope.
+- Network: `gh` reads GitHub issues, the selected agent CLI handles the issue
+  and code, and the configured commands may use the network.
+  `scripts/slopslint.sh` downloads a pinned release and verifies its SHA256.
+  An unexpected transfer by ATM itself is in scope.
 
 Out of scope:
 

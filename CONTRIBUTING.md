@@ -2,7 +2,7 @@
 
 ATM is small and alpha. The contributions that help most are concrete: a
 repository and an issue where a run failed, a gate that let something through,
-a language whose tests ATM cannot yet run.
+a target repository whose configured commands ATM cannot run.
 
 ## Filing an issue
 
@@ -27,7 +27,9 @@ git config core.hooksPath .githooks
 scripts/test.sh
 ```
 
-The suite runs real git and fake harness subprocesses; expect about two minutes.
+Use the Go version in [go.mod](go.mod). `golangci-lint` must be on `PATH` to
+run `scripts/lint.sh`.
+The suite runs real git and fake harness subprocesses.
 The pre-commit hook runs slopslint; its first run downloads the pinned binary
 into `.tmp/slopslint/` and needs the network.
 
@@ -51,8 +53,8 @@ Either way:
 4. Keep the diff as small as the change allows. No scaffolding for later, no
    speculative hardening, no helpers nobody calls. The repository's slopslint
    ceilings only go down.
-5. `scripts/test.sh` and `scripts/lint.sh` must pass locally. Both run the
-   Go side too (`go test ./...`, `golangci-lint run`) when `go.mod` exists.
+5. `scripts/test.sh` and `scripts/lint.sh` must pass locally. They run
+   `go test ./...` and `golangci-lint run` plus slopslint, respectively.
 6. PR titles use a conventional-commit subject (`fix:`, `feat:`, `docs:`,
    `chore:`, `refactor:`, `test:`). The body says why and links the issue.
 
@@ -60,7 +62,7 @@ Either way:
 
 | Workflow | Runs on | Runs when these change | Does |
 |---|---|---|---|
-| `go.yml` | every PR to `main`, push to `main` | Go paths, `go.yml`, or `scripts/changed-areas.sh`, when `go.mod` exists | `make test` and `make lint` on ubuntu, macos, windows |
+| `go.yml` | every PR to `main`, push to `main` | Go paths, `go.yml`, `scripts/changed-areas.sh`, `scripts/test.sh` or `scripts/lint.sh` | `make test` and `make lint` on ubuntu, macos, windows |
 | `auto-merge.yml` | every PR to `main` | always | arms auto-merge (below) |
 
 `go.yml` starts on every PR and skips its test jobs when its paths did not
@@ -85,9 +87,8 @@ The label is the switch; the comment is the record.
 ## What is accepted
 
 - **Yes**: bug fixes with a red test, a new gate with the slop it catches
-  documented, test-runner detection for a framework ATM misreads, language
-  support (environment prep, test and typecheck commands, quality tools) with
-  a real repository it was tried on, documentation that matches the code.
+  documented, language support through repository commands with a real
+  repository it was tried on, documentation that matches the code.
 - **Discuss first**: changes to the contract the agent receives, to the
   report format, to the CLI flags, a new model call anywhere in the pipeline.
 - **No without prior discussion**: heavy dependencies, a different test
