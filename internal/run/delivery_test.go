@@ -104,7 +104,7 @@ func TestRunFailsOnAForeignCommit(t *testing.T) {
 		{node: "checks", work: fixWork + suite(committing)},
 		{node: "ponytail", work: fixWork + suite("sh a_test.sh", "# padding", "# padding"), ponytail: suite(committing)},
 		{node: "delivery", work: fixWork + suite("sh a_test.sh") + "; hook=.git/hooks/post-checkout; printf '%s\\n' " +
-			"'[ \"$3\" = 1 ] || exit 0' '" + commit + " --allow-empty -m hook-commit' > $hook; chmod +x $hook"},
+			"'#!/bin/sh' '[ \"$3\" = 1 ] || exit 0' '" + commit + " --allow-empty -m hook-commit' > $hook; chmod +x $hook"},
 	}
 	for _, c := range cases {
 		t.Run(c.node, func(t *testing.T) {
@@ -124,6 +124,9 @@ func TestRunFailsOnAForeignCommit(t *testing.T) {
 			rep := readReport(t, filepath.Join(root, ".atm", "runs", "t", "report.json"))
 			if err == nil || rep["failed_node"] != c.node {
 				t.Fatalf("want the run failed at %s, got %v at %v", c.node, err, rep["failed_node"])
+			}
+			if c.node == "delivery" && !strings.Contains(err.Error(), "not the repository's identity") {
+				t.Fatalf("want delivery to reject the hook's foreign commit, got %v", err)
 			}
 			if _, err := os.Stat(filepath.Join(got, "branch")); err == nil {
 				t.Fatal("the delivery command ran on a foreign commit")
