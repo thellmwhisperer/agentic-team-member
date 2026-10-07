@@ -234,7 +234,7 @@ func (s *stream) read(cmd *exec.Cmd, log io.Writer, harness string) error {
 // skill.
 type event struct {
 	Type    string
-	Result  string // claude
+	Result  json.RawMessage // claude and pi
 	Message struct {
 		Role    string
 		Content []block
@@ -301,7 +301,9 @@ func (e event) usedSkill(harness, skill string) bool {
 func (e event) final(harness string) (string, bool) {
 	switch {
 	case harness == "claude" && e.Type == "result":
-		return e.Result, true
+		var text string
+		_ = json.Unmarshal(e.Result, &text)
+		return text, true
 	case harness == "opencode" && e.Type == "text":
 		return e.Part.Text, true
 	case harness == "pi" && e.Type == "message_end" && e.Message.Role == "assistant":
@@ -346,7 +348,9 @@ func (e event) pi() []map[string]any {
 	case "tool_execution_start":
 		return []map[string]any{toolCall(e.ToolCallID, e.ToolName, detail(e.Args), "running")}
 	case "tool_execution_end":
-		return []map[string]any{toolCall(e.ToolCallID, e.ToolName, "", result(e.IsError))}
+		var r struct{ IsError bool }
+		_ = json.Unmarshal(e.Result, &r)
+		return []map[string]any{toolCall(e.ToolCallID, e.ToolName, "", result(e.IsError || r.IsError))}
 	}
 	return nil
 }
