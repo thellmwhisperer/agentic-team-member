@@ -84,7 +84,7 @@ because of it.
 | Write the fix | **model** | nothing: it decides nothing |
 | Red / green | code | a test that passes without the fix; a red that only fails on a missing import |
 | The project's own `test`, `typecheck` and `lint` commands | code | any failure |
-| Follow-ups | code | a gap without a red test on code that already exists |
+| Follow-ups | code | a gap without a red test |
 | Slop detector (code quality gate, not code review) | **model**, may only cut | a cut that breaks any check or does not shrink the diff: the clone goes back |
 | Delivery and code review gate | your command | ATM branches, commits and runs it. The shipped example is no-mistakes, a graph of its own: models review, judge the test evidence, update the docs and write the PR; code rebases, runs your test and lint commands, pushes and watches CI |
 
