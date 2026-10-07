@@ -29,7 +29,7 @@ func ends(t *testing.T, out *bytes.Buffer, step string) []obj {
 // readFollowUps is root's .atm/follow-ups.json.
 func readFollowUps(t *testing.T, root string) []obj {
 	t.Helper()
-	b, err := os.ReadFile(filepath.Join(root, ".atm", "follow-ups.json"))
+	b, err := os.ReadFile(filepath.Join(root, ".atm", "runs", "t", "follow-ups.json"))
 	var got []obj
 	if err == nil {
 		err = json.Unmarshal(b, &got)
@@ -52,7 +52,7 @@ func TestRunSortsTheFollowUps(t *testing.T) {
 		"echo 'test -f e.txt' > .atm/follow-ups/4/t/e_test.sh; "+
 		`printf %s "$ATM_TEST_REPORT" > .atm/fake-report.json`)
 	var out bytes.Buffer
-	if err := Run([]string{issueFile(t, followUpIssue)}, &out, io.Discard); err != nil {
+	if err := Run("t", []string{issueFile(t, followUpIssue)}, &out, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	if agents := ends(t, bytes.NewBuffer(out.Bytes()), "agent"); len(agents) != 1 {
@@ -125,7 +125,7 @@ func TestRunChainsAFollowUpOnTheIssueUpToThreeUnits(t *testing.T) {
 	t.Setenv("FAKE_PONYTAIL_WORK", "grep -v extra a.txt > cut; mv cut a.txt")
 	t.Setenv("FAKE_PONYTAIL_REPORT", cut)
 	var out bytes.Buffer
-	if err := Run([]string{issueFile(t, followUpIssue)}, &out, io.Discard); err != nil {
+	if err := Run("t", []string{issueFile(t, followUpIssue)}, &out, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	agents := ends(t, &out, "agent")
@@ -138,7 +138,7 @@ func TestRunChainsAFollowUpOnTheIssueUpToThreeUnits(t *testing.T) {
 	if string(b) != want {
 		t.Fatalf("want each unit committed on the one before, then the cut, got\n%s\nwant\n%s", b, want)
 	}
-	brief, err := os.ReadFile(filepath.Join(root, ".atm", "brief-unit-2.md"))
+	brief, err := os.ReadFile(filepath.Join(root, ".atm", "runs", "t", "brief-unit-2.md"))
 	if err != nil || !strings.Contains(string(brief), "`c1_test.sh`") {
 		t.Fatalf("want unit 2's brief to name its red test, got %v\n%s", err, brief)
 	}
@@ -159,7 +159,7 @@ func TestRunLabelsDeliveredChainedUnitAndChecks(t *testing.T) {
 		`printf '{"test_file":"a_test.sh","follow_ups":[{"title":"gap","red_test":"c1_test.sh",`+
 		`"criterion":"A retry runs once after a timeout."}]}' > .atm/fake-report.json; fi`)
 	var out bytes.Buffer
-	if err := Run([]string{issueFile(t, followUpIssue)}, &out, io.Discard); err != nil {
+	if err := Run("t", []string{issueFile(t, followUpIssue)}, &out, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	dev := "atm <atm@example.com>|atm <atm@example.com>"
@@ -179,7 +179,7 @@ func TestRunDiesWhenAUnitEditsItsRedTest(t *testing.T) {
 	t.Setenv("ATM_TEST_EDIT", "echo 'grep -q u2 a.txt # edited' > c1_test.sh;")
 	t.Setenv("FAKE_AGENT_WORK", chainWork)
 	var out bytes.Buffer
-	err := Run([]string{issueFile(t, followUpIssue)}, &out, io.Discard)
+	err := Run("t", []string{issueFile(t, followUpIssue)}, &out, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "c1_test.sh") || !strings.Contains(err.Error(), "edit") {
 		t.Fatalf("want unit 2 to fail for editing its red test, got %v", err)
 	}

@@ -31,7 +31,7 @@ func (a agent) ponytail(root, clone, sha, test string, i Issue, c config.Config)
 	if err != nil {
 		return nil, err
 	}
-	before, files, text, err := review(root, clone, sha, i, c)
+	before, files, text, err := review(a.dir, clone, sha, i, c)
 	if err != nil {
 		return nil, err
 	}
@@ -74,8 +74,8 @@ func (a agent) ponytail(root, clone, sha, test string, i Issue, c config.Config)
 }
 
 // review is the run's work in clone, at base commit sha, as a tree, the files it changes, and its
-// brief-ponytail.md for issue i under config c, written next to brief.md in root.
-func review(root, clone, sha string, i Issue, c config.Config) (tree string, files []string, text string,
+// brief-ponytail.md for issue i under config c, written next to brief.md in the run's directory dir.
+func review(dir, clone, sha string, i Issue, c config.Config) (tree string, files []string, text string,
 	err error) {
 	if tree, err = snapshot(clone); err != nil {
 		return
@@ -90,7 +90,7 @@ func review(root, clone, sha string, i Issue, c config.Config) (tree string, fil
 	}
 	files = strings.Split(strings.TrimRight(names, "\x00"), "\x00")
 	if text, err = ponytailBrief(i, c, diff); err == nil {
-		err = os.WriteFile(filepath.Join(root, ".atm", "brief-ponytail.md"), []byte(text), 0o644)
+		err = os.WriteFile(filepath.Join(dir, "brief-ponytail.md"), []byte(text), 0o644)
 	}
 	return
 }

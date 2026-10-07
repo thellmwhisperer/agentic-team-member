@@ -267,7 +267,7 @@ func (s *server) run(r *bgRun, args []string) {
 				err = fmt.Errorf("atm crashed: %v", p)
 			}
 		}()
-		return Run(args, &screen{s: s, r: r, events: true}, &screen{s: s, r: r})
+		return Run(r.Run, args, &screen{s: s, r: r, events: true}, &screen{s: s, r: r})
 	}()
 	s.Lock()
 	defer s.Unlock()
@@ -277,7 +277,7 @@ func (s *server) run(r *bgRun, args []string) {
 		o.Reason, _, _ = strings.Cut(err.Error(), "\n")
 	}
 	if o.Step != "" { // its first node writes report.json
-		o.Report = filepath.Join(s.root, ".atm", "report.json")
+		o.Report = filepath.Join(runDir(s.root, r.Run), "report.json")
 	}
 	again := ", then run it again: atm run " + o.Issue
 	switch {

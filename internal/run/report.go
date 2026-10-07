@@ -42,11 +42,10 @@ type cmdResult struct {
 	Tail    string `json:"tail"` // the last 60 lines of its output
 }
 
-// newVerdict is the report of a run in root, every node not run yet. ponytail: one report.json a repository,
-// the last run's; a directory a run is the upgrade.
-func newVerdict(root string, out io.Writer) *verdict {
-	r := &verdict{path: filepath.Join(root, ".atm", "report.json"), out: out}
-	for _, name := range []string{"issue", "contract", "clone", "agent", "checks", "ponytail", "delivery"} {
+// newVerdict is the report of a run in its directory dir, every node not run yet.
+func newVerdict(dir string, out io.Writer) *verdict {
+	r := &verdict{path: filepath.Join(dir, "report.json"), out: out}
+	for _, name := range []string{"issue", "clone", "contract", "agent", "checks", "ponytail", "delivery"} {
 		r.Nodes = append(r.Nodes, &node{Name: name, Result: "not run"})
 	}
 	return r

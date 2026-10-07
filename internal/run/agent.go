@@ -37,11 +37,12 @@ var skillDirs = map[string]string{"claude": ".claude/skills", "codex": ".agents/
 // tools is all claude needs for a unit.
 const tools = "Read,Edit,Write,Bash,Glob,Grep,Skill"
 
-// agent is the coding agent of the run: its harness, model and effort, and the --harness-arg and --env of
-// the run.
+// agent is the coding agent of the run: its harness, model and effort, the --harness-arg and --env of the run,
+// and the run's directory, where its logs go.
 type agent struct {
 	config.Agent
 	args, env []string
+	dir       string
 }
 
 // flags adds the agent's flags to fs.
@@ -93,11 +94,10 @@ func (a agent) argv(clone, skill, final, brief string) (argv []string, stdin str
 }
 
 // run runs the agent on brief in clone with skill, in its own process group, and returns its report, which
-// check accepts. Every line it writes goes to .atm/<name>-<timestamp>.jsonl, named after the clone, so it is
-// as unique, and outlives it. The timeout, SIGINT and SIGTERM kill the group.
+// check accepts. Every line it writes goes to <name>.jsonl in the run's directory, which outlives the clone.
+// The timeout, SIGINT and SIGTERM kill the group.
 func (a agent) run(clone, name, skill, brief string, check func(map[string]any) error) (map[string]any, error) {
-	path := filepath.Join(filepath.Dir(filepath.Dir(clone)),
-		name+"-"+strings.TrimPrefix(filepath.Base(clone), "atm-run-")+".jsonl")
+	path := filepath.Join(a.dir, name+".jsonl")
 	ev := map[string]any{"log": path}
 	dir, err := placeSkill(clone, a.Harness, skill)
 	if err != nil {

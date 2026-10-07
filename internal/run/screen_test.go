@@ -60,7 +60,7 @@ func TestRunTellsAWatchingScreenWhatItsAgentAndChecksDo(t *testing.T) {
 			repo(t, "https://example.com/owner/repo.git", atmSet(atmYAML, "test", "echo suite-ok; sh a_test.sh"))
 			t.Setenv("FAKE_AGENT_STREAM", stream)
 			var w watched
-			if err := Run([]string{"--harness", harness, issueFile(t, issue)}, &w, io.Discard); err != nil {
+			if err := Run("t", []string{"--harness", harness, issueFile(t, issue)}, &w, io.Discard); err != nil {
 				t.Fatal(err)
 			}
 			for _, want := range []obj{

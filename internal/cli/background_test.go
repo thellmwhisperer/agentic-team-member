@@ -65,19 +65,20 @@ func TestAxiPrintsTheSameOutcomeAsTOONAndJSON(t *testing.T) {
 	cases := map[string]func(w io.Writer, asJSON bool) error{
 		"outcome-failed": func(w io.Writer, asJSON bool) error {
 			return outcome(w, asJSON, run.Outcome{Outcome: "failed", Run: "retry-on-timeout-2", FailedNode: "checks",
-				Reason: "test: exit status 1", Report: "/repo/.atm/report.json", Issue: "7",
+				Reason: "test: exit status 1", Report: "/repo/.atm/runs/retry-on-timeout-2/report.json", Issue: "7",
 				NextStep: "read why checks failed in the report, fix it, then run it again: atm run 7"})
 		},
 		// Empty fields are printed all the same: compaction hides none.
 		"outcome-passed": func(w io.Writer, asJSON bool) error {
-			return outcome(w, asJSON, run.Outcome{Outcome: "passed", Run: "7-1", Report: "/repo/.atm/report.json",
+			return outcome(w, asJSON, run.Outcome{Outcome: "passed", Run: "7-1", Report: "/repo/.atm/runs/7-1/report.json",
 				NextStep: "review the branch the delivery command got"})
 		},
 		"runs": func(w io.Writer, asJSON bool) error {
 			return list(w, asJSON, false, []run.Outcome{
-				{Outcome: "passed", Run: "7-1", Issue: "7", Started: end.Add(-268 * time.Second), Ended: end},
+				{Outcome: "passed", Run: "7-1", Issue: "7", Report: "/repo/.atm/runs/7-1/report.json",
+					Started: end.Add(-268 * time.Second), Ended: end},
 				{Outcome: "failed", Run: "retry-2", Issue: "/repo/a, b.md", FailedNode: "checks",
-					Started: end.Add(-900 * time.Millisecond), Ended: end},
+					Report: "/repo/.atm/runs/retry-2/report.json", Started: end.Add(-900 * time.Millisecond), Ended: end},
 			})
 		},
 		"axi-status": func(w io.Writer, asJSON bool) error {

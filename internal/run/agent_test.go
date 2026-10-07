@@ -125,16 +125,15 @@ func after(args []string, flag string) string {
 func agentStep(t *testing.T, out *bytes.Buffer) (end obj, clone, log string) {
 	t.Helper()
 	evs := events(t, out)
-	if len(evs) < 8 || evs[7]["state"] == "failed" && len(evs) != 8 || evs[5]["step"] != "clone" ||
-		evs[5]["state"] != "passed" || evs[6]["step"] != "agent" ||
+	if len(evs) < 8 || evs[7]["state"] == "failed" && len(evs) != 8 || evs[3]["step"] != "clone" ||
+		evs[3]["state"] != "passed" || evs[6]["step"] != "agent" ||
 		evs[6]["state"] != "started" || evs[7]["step"] != "agent" {
 		t.Fatalf("want the clone step passed, then the agent step, got %v", evs)
 	}
-	clone = evs[5]["clone"].(string)
-	logs, _ := filepath.Glob(filepath.Join(filepath.Dir(filepath.Dir(clone)), "worker-*.jsonl"))
-	want := "worker-" + strings.TrimPrefix(filepath.Base(clone), "atm-run-") + ".jsonl"
-	if len(logs) != 1 || filepath.Base(logs[0]) != want {
-		t.Fatalf("want one worker-<timestamp>.jsonl next to the clones, got %v", logs)
+	clone = evs[3]["clone"].(string)
+	logs, _ := filepath.Glob(filepath.Join(filepath.Dir(filepath.Dir(clone)), "runs", "t", "worker*.jsonl"))
+	if len(logs) != 1 || filepath.Base(logs[0]) != "worker.jsonl" {
+		t.Fatalf("want one worker.jsonl in the run's directory, got %v", logs)
 	}
 	return evs[7], clone, logs[0]
 }
@@ -157,7 +156,7 @@ func TestRunDrivesTheAgent(t *testing.T) {
 			t.Setenv("FAKE_AGENT_CALL", call)
 			t.Setenv("CLAUDE_CODE_CHILD_SESSION", "1")
 			var out bytes.Buffer
-			err := Run([]string{"--harness", harness, "--model", "m", "--effort", "e", "--harness-arg", "--x",
+			err := Run("t", []string{"--harness", harness, "--model", "m", "--effort", "e", "--harness-arg", "--x",
 				"--harness-arg", "y", "--env", "ATM_FAKE=a=b", issueFile(t, issue)}, &out, io.Discard)
 			if err != nil {
 				t.Fatal(err)
@@ -167,7 +166,7 @@ func TestRunDrivesTheAgent(t *testing.T) {
 			if end["state"] != "passed" || end["log"] != log || report["test_file"] != "a_test.sh" {
 				t.Fatalf("end event: %v", end)
 			}
-			brief, err := os.ReadFile(filepath.Join(root, ".atm", "brief.md"))
+			brief, err := os.ReadFile(filepath.Join(root, ".atm", "runs", "t", "brief.md"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -252,7 +251,7 @@ func TestRunDiesWhenTheAgentFails(t *testing.T) {
 			root := repo(t, "https://example.com/owner/repo.git", atmYAML)
 			t.Setenv("FAKE_AGENT", c.mode)
 			var out bytes.Buffer
-			err := Run(append(c.args, "--harness", c.harness, issueFile(t, issue)), &out, io.Discard)
+			err := Run("t", append(c.args, "--harness", c.harness, issueFile(t, issue)), &out, io.Discard)
 			if err == nil || !strings.Contains(err.Error(), c.why) {
 				t.Fatalf("want an error naming %q, got %v", c.why, err)
 			}

@@ -164,12 +164,12 @@ func chain(root, clone string, n int, title string, f followUp) (string, error) 
 	return head, err
 }
 
-// saveFollowUps writes follow-ups.json in root's .atm/: the run's accepted follow-ups it did not chain, each
+// saveFollowUps writes follow-ups.json in the run's directory dir: the run's accepted follow-ups it did not chain, each
 // with its red test, to become new issues.
-func saveFollowUps(root string, fs []followUp) error {
+func saveFollowUps(dir string, fs []followUp) error {
 	if fs == nil {
 		fs = []followUp{}
 	}
 	b, _ := json.MarshalIndent(fs, "", "  ")
-	return os.WriteFile(filepath.Join(root, ".atm", "follow-ups.json"), append(b, '\n'), 0o644)
+	return os.WriteFile(filepath.Join(dir, "follow-ups.json"), append(b, '\n'), 0o644)
 }

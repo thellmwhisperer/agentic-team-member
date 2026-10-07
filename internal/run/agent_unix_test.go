@@ -46,7 +46,7 @@ func TestRunKillsTheAgentGroup(t *testing.T) {
 				pids <- pid
 			}()
 			var out bytes.Buffer
-			err := Run([]string{issueFile(t, issue)}, &out, io.Discard)
+			err := Run("t", []string{issueFile(t, issue)}, &out, io.Discard)
 			if err == nil || !strings.Contains(err.Error(), c.why) {
 				t.Fatalf("want an error naming %q, got %v", c.why, err)
 			}

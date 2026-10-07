@@ -2,5 +2,5 @@ outcome: passed
 run: 7-1
 failed_node: ""
 reason: ""
-report: /repo/.atm/report.json
+report: /repo/.atm/runs/7-1/report.json
 next_step: review the branch the delivery command got

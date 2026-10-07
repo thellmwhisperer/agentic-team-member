@@ -179,15 +179,17 @@ line with a lowercase type: `fix` (or `hotfix`), `feature`,
 `gh issue view` from the repository `origin` names.
 
 The current Go port validates configuration before reading the issue, then
-emits start and result events for the `issue`, `contract`, `clone`, `agent`,
+emits start and result events for the `issue`, `clone`, `contract`, `agent`,
 `checks`, `ponytail` and `delivery` steps. The `issue` result includes the title and task type on success, plus the issue
-number for GitHub issues. The `contract` step writes `.atm/brief.md` at the
-repository root and reports its path on success. The brief starts by directing
+number for GitHub issues. Everything a run writes goes to its own directory,
+`.atm/runs/<label>/`, `<label>` being the run's label in `atm runs`; nothing
+removes it. The `contract` step follows the clone, writes `brief.md` in the
+run's directory and reports its path on success. The brief starts by directing
 the agent to read `AGENTS.md` if present, then gives the issue, task-type
 acceptance criteria, verification commands from `.atm.yaml`, style and
 forbidden actions, and the required JSON report.
 
-The `clone` step follows the contract. `--base-ref` (default `main`) is resolved to a SHA in
+The `clone` step follows the issue. `--base-ref` (default `main`) is resolved to a SHA in
 the repository; the run claims `.atm/clones/atm-run-<timestamp>` (`-2`, `-3`
 for runs started in the same second), clones the repository there detached at
 that SHA, excludes `/.atm/` in the clone, and runs `install` in it with `sh -c`
@@ -222,10 +224,10 @@ for `claude`, a read of its `SKILL.md` for `pi` and `codex`, a `skill` event for
 
 The agent runs in the clone. Past 30 minutes, or when ATM gets SIGINT or
 SIGTERM, cancellation kills its process group on Unix or its process tree on
-Windows. Every line it writes goes to `.atm/worker-<timestamp>.jsonl`, named
-after the clone: JSON lines as they are, any other line as a JSON string. The
+Windows. Every line it writes goes to `worker.jsonl` in the run's directory:
+JSON lines as they are, any other line as a JSON string. The
 report is the last JSON object of its final message (`codex`: its `-o` file,
-`.atm/worker-<timestamp>.final.md`) and must carry `test_file`: ATM never
+`worker.final.md`) and must carry `test_file`: ATM never
 guesses it. A non-zero exit, a timeout, an interruption or no readable report
 fails the step and the run. Its end line carries `log` and `report`.
 
@@ -261,24 +263,24 @@ test passes or hangs, is rejected. No model judges a follow-up and nothing
 checks what code its test calls. An accepted follow-up whose `criterion` is a
 whole sentence of the issue, verbatim but for line breaks, or a whole issue
 line after a list marker and final punctuation are removed, runs as the next
-unit; any other goes to `.atm/follow-ups.json` at the repository root, with its
+unit; any other goes to `follow-ups.json` in the run's directory, with its
 test's text, to become a new issue. The checks' end line carries `follow_ups`,
 where each one went.
 
 The next unit runs in the same clone: the unit before is committed on HEAD as
 `atm unit <n>: <title>` under the repository's git identity, its
 `.atm/follow-ups` removed, and the first chained follow-up's red test put in
-place. Its brief, `.atm/brief-unit-<n>.md`, asks to make that test pass without
-editing it; its log is `.atm/worker-unit<n>-<timestamp>.jsonl`. The `agent` and
+place. Its brief, `brief-unit-<n>.md`, asks to make that test pass without
+editing it; its log is `worker-unit<n>.jsonl`. The `agent` and
 `checks` steps run again, their end lines with `unit`; the checks prove it
 red/green with that test, as a `feature`, and fail when it changed. A run makes
 at most 3 units: the accepted follow-ups not chained, the third unit's
 included, go to `follow-ups.json`, rewritten at the end of every run.
 
 The `ponytail` step, the slop detector, runs only after the checks passed. It
-writes `.atm/brief-ponytail.md` (the issue and the run's diff against the base)
+writes `brief-ponytail.md` (the issue and the run's diff against the base)
 and runs the same agent with the bundled `ponytail-review` skill, placed and
-proven in its log the same way, logging to `.atm/ponytail-<timestamp>.jsonl`.
+proven in its log the same way, logging to `ponytail.jsonl`.
 The agent may only cut: delete, shrink, or replace with the standard library or
 an existing helper, in the diff's files, adding none, every test kept. Its
 report is `{"findings": [{"file", "family", "finding"}], "summary"}`, each
@@ -311,7 +313,7 @@ command runs with `sh -c` in the clone, killed past 10 minutes, with
 `ATM_TITLE`, `ATM_ISSUE` (the issue number, empty for a file), `ATM_BRANCH`,
 `ATM_CLONE`, `ATM_REPORT` and `ATM_PONYTAIL` (the kept cut's findings, one a
 line, or empty) in its environment. Its output goes to the run's screen and to
-`.atm/delivery-output.txt`. ATM never pushes or opens a pull request: that is
+`delivery-output.txt` in the run's directory. ATM never pushes or opens a pull request: that is
 the command's business. Its end line carries `branch`. Empty, the step is
 skipped and the run ends there.
 
@@ -324,8 +326,8 @@ delivery: 'no-mistakes axi run --intent "$ATM_TITLE"'
 Without `--yes`, no-mistakes only reports: whoever launched the run answers
 each finding.
 
-Every step's end line carries `duration_ms`. `.atm/report.json` at the
-repository root is rewritten at every step's start and end, so it is on disk
+Every step's end line carries `duration_ms`. `report.json` in the run's
+directory is rewritten at every step's start and end, so it is on disk
 before delivery: `failed_node` and `reason` first, then `nodes` (each step's
 `result`: `passed`, `failed`, `running`, `skipped` or `not run`, and
 `duration_ms`, the last unit's for `agent` and `checks`), the task `type`, and `commands`: the configured `install`, `test`,
@@ -382,7 +384,7 @@ process whose pid it got, is removed by the next sweep.
 |---------|--------|
 | `atm status` | Each run going: label, step, duration, issue; or `nothing runs` |
 | `atm attach [run]` | The run's screen (the last one going by default) until it ends; leaving leaves it going |
-| `atm runs` | Every run: label, `running`, `passed` or `failed at <node>`, duration, issue |
+| `atm runs` | Every run: label, `running`, `passed` or `failed at <node>`, duration, issue, its `report.json` once it ended |
 | `atm axi run [--json] <atm run's arguments>` | Waits for the end, then the outcome |
 | `atm axi status [--json]`, `atm axi runs [--json]` | The runs going, or every run, as a table |
 
@@ -391,4 +393,4 @@ carries every field, empty or not: `outcome`, `run`, `failed_node`, `reason`,
 `report` (empty when the run failed before its first step) and `next_step`.
 `atm axi run` exits with the run's code. The tables are `runs` with `run`,
 `issue`, `step` and `duration` for `status`, and `run`, `issue`, `outcome`,
-`failed_node` and `duration` for `runs`.
+`failed_node`, `duration` and `report` for `runs`.

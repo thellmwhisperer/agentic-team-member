@@ -28,9 +28,10 @@ const Usage = "usage: atm run [--base-ref r] [--harness h] [--model m] [--effort
 	"[--env KEY=VALUE]... <issue.md | issue number>"
 
 // Run is atm run with args, its flags and then the issue: a file, or an issue number of origin's repository.
-// Each node's start and end go to out, one JSON object a line, and to .atm/report.json; the summary goes to
-// summary. ExitCode turns its error into atm's exit code.
-func Run(args []string, out, summary io.Writer) (err error) {
+// Everything it writes goes to .atm/runs/<label>/ (runDir): each node's start and end go to out, one JSON
+// object a line, and to report.json there; the summary goes to summary. ExitCode turns its error into atm's
+// exit code.
+func Run(label string, args []string, out, summary io.Writer) (err error) {
 	fs, base, a, err := parseArgs(args)
 	if err != nil {
 		return err
@@ -49,8 +50,8 @@ func Run(args []string, out, summary io.Writer) (err error) {
 	if err != nil {
 		return err
 	}
-	a.Agent = c.Agent
-	r := newVerdict(root, out)
+	a.Agent, a.dir = c.Agent, runDir(root, label)
+	r := newVerdict(a.dir, out)
 	defer func() { err = r.finish(err, summary) }()
 	var i Issue
 	r.step("issue", func() (map[string]any, error) {
@@ -62,21 +63,21 @@ func Run(args []string, out, summary io.Writer) (err error) {
 		}
 		return ev, err
 	})
-	var text string
-	r.step("contract", func() (ev map[string]any, err error) {
-		text, ev, err = writeBrief(filepath.Join(root, ".atm", "brief.md"), i, c, nil)
-		return ev, err
-	})
 	var dir, sha string
 	defer func() { err = errors.Join(err, release(dir, repo)); hold(dir, false) }()
 	r.step("clone", func() (ev map[string]any, err error) {
 		dir, sha, err = clone(root, *base, c.Install, repo)
 		return map[string]any{"clone": dir, "sha": sha}, err
 	})
+	var text string
+	r.step("contract", func() (ev map[string]any, err error) {
+		text, ev, err = writeBrief(filepath.Join(a.dir, "brief.md"), i, c, nil)
+		return ev, err
+	})
 	byClone.Store(dir, r)
 	defer byClone.Delete(dir)
 	test, unit, pending := a.units(r, root, dir, sha, text, i, c)
-	if err := saveFollowUps(root, pending); err != nil {
+	if err := saveFollowUps(a.dir, pending); err != nil {
 		return err
 	}
 	r.step("ponytail", func() (map[string]any, error) { return a.ponytail(root, dir, sha, test, unit, c) })
@@ -114,7 +115,7 @@ func (a agent) units(r *verdict, root, dir, sha, text string, i Issue, c config.
 					return nil, err
 				}
 				unit.Type, name = "feature", "worker-unit"+strconv.Itoa(n)
-				path := filepath.Join(root, ".atm", "brief-unit-"+strconv.Itoa(n)+".md")
+				path := filepath.Join(a.dir, "brief-unit-"+strconv.Itoa(n)+".md")
 				if text, _, err = writeBrief(path, unit, c, f); err != nil {
 					return nil, err
 				}
@@ -263,7 +264,6 @@ func GitHubRepo() string {
 
 // writeBrief writes at path the brief for issue i under config c, whose unit makes follow-up next pass, if any.
 func writeBrief(path string, i Issue, c config.Config, next *followUp) (string, map[string]any, error) {
-	// ponytail: the briefs go to the repository's .atm/ until node 2 gives the run its clone.
 	b, err := brief(i, c, next)
 	if err == nil {
 		err = os.MkdirAll(filepath.Dir(path), 0o755)
@@ -273,6 +273,9 @@ func writeBrief(path string, i Issue, c config.Config, next *followUp) (string, 
 	}
 	return b, map[string]any{"brief": path}, err
 }
+
+// runDir is the directory of run label in the repository at root, which nothing removes.
+func runDir(root, label string) string { return filepath.Join(root, ".atm", "runs", label) }
 
 // timeout bounds every command a step runs. ponytail: one fixed ceiling, and on timeout command kills only
 // the command itself, not what it started, while sh kills its group; a key in .atm.yaml and a process group

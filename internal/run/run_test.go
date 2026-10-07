@@ -189,7 +189,7 @@ func TestRunReadsIssueFile(t *testing.T) {
 			repo(t, "https://example.com/owner/repo.git", atmYAML)
 			path := issueFile(t, c.issue)
 			var out bytes.Buffer
-			if err := Run([]string{path}, &out, io.Discard); err != nil {
+			if err := Run("t", []string{path}, &out, io.Discard); err != nil {
 				t.Fatal(err)
 			}
 			end := issueStep(t, &out)
@@ -207,7 +207,7 @@ func TestRunReadsGitHubIssueFromOrigin(t *testing.T) {
 	repo(t, "git@github.com:owner/repo.git", atmYAML)
 	args := fakeGH(t, `{"title":"Retry","body":"Type: feature\nRetry once."}`, false)
 	var out bytes.Buffer
-	if err := Run([]string{"--model", "m", "7"}, &out, io.Discard); err != nil {
+	if err := Run("t", []string{"--model", "m", "7"}, &out, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	end := issueStep(t, &out)
@@ -245,7 +245,7 @@ func TestRunDiesWhenIssueIsUnusable(t *testing.T) {
 				arg = "3"
 			}
 			var out bytes.Buffer
-			err := Run([]string{arg}, &out, io.Discard)
+			err := Run("t", []string{arg}, &out, io.Discard)
 			if err == nil || !strings.Contains(err.Error(), c.why) {
 				t.Fatalf("want an error naming %q, got %v", c.why, err)
 			}
@@ -259,7 +259,7 @@ func TestRunDiesWhenIssueIsUnusable(t *testing.T) {
 func TestRunNumberNeedsGitHubOrigin(t *testing.T) {
 	repo(t, "https://gitlab.com/owner/repo.git", atmYAML)
 	var out bytes.Buffer
-	if err := Run([]string{"7"}, &out, io.Discard); err == nil || !strings.Contains(err.Error(), "GitHub") {
+	if err := Run("t", []string{"7"}, &out, io.Discard); err == nil || !strings.Contains(err.Error(), "GitHub") {
 		t.Fatalf("want a GitHub origin error, got %v", err)
 	}
 }
@@ -267,7 +267,7 @@ func TestRunNumberNeedsGitHubOrigin(t *testing.T) {
 func TestRunDiesOnIncompleteConfigBeforeReadingIssue(t *testing.T) {
 	repo(t, "https://github.com/owner/repo", "test: go test ./...\n")
 	var out bytes.Buffer
-	err := Run([]string{issueFile(t, "# T\nType: fix\nbody")}, &out, io.Discard)
+	err := Run("t", []string{issueFile(t, "# T\nType: fix\nbody")}, &out, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "config incomplete") {
 		t.Fatalf("want config incomplete, got %v", err)
 	}
