@@ -133,15 +133,29 @@ func short(path string) string {
 }
 
 // Serve is the background process of the repository at root, its working directory. It ends when it has had
-// no run for idle, when its socket is removed while no run goes, or at once when another one serves root.
+// no run for idle, when its socket is removed while no run goes, or at once when another one serves root. Only
+// the one that holds .atm/atm.lock serves: another waits for it to answer, then ends, so the atm command that
+// started it connects to that one.
 func Serve(root string) error {
 	sock := socket(root)
-	if c, err := net.Dial("unix", short(sock)); err == nil {
-		_ = c.Close()
-		return errors.New("a background process already serves " + root)
+	for start := time.Now(); ; time.Sleep(20 * time.Millisecond) {
+		f, err := lock(filepath.Join(root, ".atm", "atm.lock")) // connect, which starts it, made .atm
+		if err != nil {
+			return err
+		}
+		if f != nil {
+			defer func() { _ = f.Close() }()
+			break
+		}
+		if c, err := net.Dial("unix", short(sock)); err == nil {
+			_ = c.Close()
+			return errors.New("a background process already serves " + root)
+		}
+		if time.Since(start) > idle {
+			return errors.New("the background process that holds .atm/atm.lock does not answer")
+		}
 	}
-	// ponytail: two started at once may both get here and the second one's socket wins; a lock file is the upgrade.
-	_ = os.Remove(sock) // a dead one's; connect, which starts it, made .atm
+	_ = os.Remove(sock) // a dead one's
 	l, err := net.Listen("unix", short(sock))
 	if err != nil {
 		return err
