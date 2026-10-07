@@ -91,7 +91,7 @@ func TestAxiPrintsTheSameOutcomeAsTOONAndJSON(t *testing.T) {
 				t.Fatal(err)
 			}
 			for out, golden := range map[*bytes.Buffer]string{&toonOut: name + ".toon", &jsonOut: name + ".json"} {
-				if want := read(t, filepath.Join("testdata", golden)); out.String() != want {
+				if want := strings.ReplaceAll(read(t, filepath.Join("testdata", golden)), "\r\n", "\n"); out.String() != want {
 					t.Fatalf("%s: got\n%s\nwant\n%s", golden, out, want)
 				}
 			}
@@ -141,6 +141,18 @@ func atmIn(t *testing.T, code int, args ...string) string {
 // The background process is this test binary, as atm serve, which ends once its socket is gone with the test.
 func TestRunGoesToTheBackgroundAndEveryCommandSeesIt(t *testing.T) {
 	dir := repo(t, "https://example.com/o/r.git") // no .atm.yaml: every run fails at once
+	t.Cleanup(func() {
+		if err := os.Remove(filepath.Join(dir, ".atm", "atm.sock")); err != nil && !os.IsNotExist(err) {
+			t.Error(err)
+		}
+		log := filepath.Join(dir, ".atm", "serve.log")
+		for deadline := time.Now().Add(7 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+			if err := os.Remove(log); err == nil || os.IsNotExist(err) {
+				return
+			}
+		}
+		t.Errorf("background process still holds %s", log)
+	})
 	if err := os.WriteFile(filepath.Join(dir, "retry.md"), []byte("# Retry\nType: fix\nRetry.\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +163,8 @@ func TestRunGoesToTheBackgroundAndEveryCommandSeesIt(t *testing.T) {
 	if out := atmIn(t, 0, "status"); out != "nothing runs\n" {
 		t.Fatalf("atm status: %q", out)
 	}
-	if out := atmIn(t, 0, "runs"); !strings.HasPrefix(out, "retry-1  failed  ") || !strings.Contains(out, " s  /") {
+	if out := atmIn(t, 0, "runs"); !strings.HasPrefix(out, "retry-1  failed  ") ||
+		!strings.Contains(out, " s  "+string(filepath.Separator)) {
 		t.Fatalf("atm runs: %q", out)
 	}
 	out := atmIn(t, 2, "axi", "run", "retry.md")
