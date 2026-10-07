@@ -13,7 +13,7 @@ import (
 )
 
 func TestRunKillsAChildHoldingTheAgentsStdout(t *testing.T) {
-	repo(t,"https://example.com/owner/repo.git", atmYAML)
+	repo(t, "https://example.com/owner/repo.git", atmYAML)
 	// Each claude call starts a grandchild that inherits its stdout and never ends, its pid in pids/<call's pid>,
 	// then plays the default fake agent, which exits 0 with a valid report.
 	pids, bin := t.TempDir(), t.TempDir()
