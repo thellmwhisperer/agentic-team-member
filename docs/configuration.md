@@ -172,8 +172,8 @@ line with a lowercase type: `fix` (or `hotfix`), `feature`,
 `gh issue view` from the repository `origin` names.
 
 The current Go port validates configuration before reading the issue, then
-emits start and result JSON lines for the `issue`, `contract`, `clone`, and
-`agent` steps. The `issue` result includes the title and task type on success, plus the issue
+emits start and result JSON lines for the `issue`, `contract`, `clone`, `agent`
+and `checks` steps. The `issue` result includes the title and task type on success, plus the issue
 number for GitHub issues. The `contract` step writes `.atm/brief.md` at the
 repository root and reports its path on success. The brief starts by directing
 the agent to read `AGENTS.md` if present, then gives the issue, task-type
@@ -220,5 +220,26 @@ after the clone: JSON lines as they are, any other line as a JSON string. The
 report is the last JSON object of its final message (`codex`: its `-o` file,
 `.atm/worker-<timestamp>.final.md`) and must carry `test_file`: ATM never
 guesses it. A non-zero exit, a timeout, an interruption or no readable report
-fails the step and the run. Its end line carries `log` and `report`. Later run
-steps are not yet implemented.
+fails the step and the run. Its end line carries `log` and `report`.
+
+The `checks` step follows the agent, in the clone. The agent must not have
+committed: HEAD still the base SHA. Then the task type's proof, then the
+`.atm.yaml` commands `install` (again: the agent may have changed
+dependencies), `test`, `typecheck` and `lint`, each with `sh -c`, empty
+skipped. The first failure fails the step and the run, with that command's last
+60 lines. Each command runs in its own process group, killed past 10 minutes.
+
+`fix`, `feature` and `greenfield` prove red/green: the agent's changes are set
+aside except the report's `test_file`, which runs alone through `test_file`
+(`{file}` is its path, `{dir}` its directory as `./dir`) and must fail; the
+changes come back and it must pass. A `fix` sets aside only the files the base
+has, so the files the fix added stay and the red fails on behaviour: a test
+that only exercises a new file passes without the fix and is rejected (so is a
+fix made only of new files). `feature` and `greenfield` set aside everything,
+so the red may fail on a missing symbol or module. `refactor` runs `test` on
+the base, which must pass, and may not change a file matching `test_patterns`.
+`tests` runs the new test on the base and after, both must pass, and may change
+only test and doc files. `docs` may change only files matching
+`docs_patterns`. `chore` has no proof beyond the commands. A hung test fails
+the run, and the clone must be the same after verification as before, or the
+verdict is void.

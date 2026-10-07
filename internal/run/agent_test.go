@@ -3,6 +3,7 @@ package run
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -19,13 +20,21 @@ import (
 type obj = map[string]any
 
 // fakeReport is the fake agent's final message: a draft object, then the report, the last top-level object.
-const fakeReport = "Done.\n{\"draft\": true}\n" + `{"test_file": "a_test.go", "changed_files": ["a.go"], ` +
-	`"summary": "s", "commands_run": [], "follow_ups": [{"title": "t", "red_test": "b_test.go"}]}`
+const fakeReport = "Done.\n{\"draft\": true}\n" + `{"test_file": "a_test.sh", "changed_files": ["a.txt"], ` +
+	`"summary": "s", "commands_run": [], "follow_ups": [{"title": "t", "red_test": "b_test.sh"}]}`
+
+// fixWork fixes a.txt, which repo's base commit has broken, and tests it.
+const fixWork = "echo fixed > a.txt; echo 'grep -q fixed a.txt' > a_test.sh"
+
+// work is what the fake agent does in its clone for each task type, a shell line.
+var work = map[string]string{"fix": fixWork, "feature": fixWork, "greenfield": fixWork, "refactor": "echo b > b.txt",
+	"tests": "echo 'grep -q broken a.txt' > a_test.sh", "docs": "echo doc > README.md", "chore": "echo d > deps.txt"}
 
 // fakeAgent plays the agent CLI name in its working directory, as $FAKE_AGENT says. Its call goes to
 // $FAKE_AGENT_CALL. The default plays a run that, when the ponytail skill is where name finds it and outside
-// git, uses it, and reports fakeReport; fail exits 3; no-report, no-test-file and no-skill each break the run
-// one way; hang starts a grandchild, whose pid goes to $FAKE_AGENT_PID, and never ends.
+// git, uses it, does $FAKE_AGENT_WORK or else the work of the brief's task type, and reports fakeReport; fail
+// exits 3; no-report, no-test-file and no-skill each break the run one way; hang starts a grandchild, whose pid
+// goes to $FAKE_AGENT_PID, and never ends.
 func fakeAgent(name string) int {
 	mode := os.Getenv("FAKE_AGENT")
 	if mode == "grandchild" {
@@ -64,6 +73,13 @@ func fakeAgent(name string) int {
 			"pi":       {"type": "tool_execution_start", "toolName": "read", "args": obj{"path": skill}},
 		}[name])
 	}
+	brief := string(stdin)
+	if name != "claude" {
+		brief = args[len(args)-1]
+	}
+	_, typ, _ := strings.Cut(brief, "Task type: ")
+	typ, _, _ = strings.Cut(typ, ".")
+	_ = exec.Command("sh", "-c", cmp.Or(os.Getenv("FAKE_AGENT_WORK"), work[typ])).Run()
 	text := map[string]string{"no-report": "Done, nothing to report.", "no-test-file": `{"summary": "s"}`}[mode]
 	if text == "" {
 		text = fakeReport
@@ -97,7 +113,8 @@ func after(args []string, flag string) string {
 func agentStep(t *testing.T, out *bytes.Buffer) (end obj, clone, log string) {
 	t.Helper()
 	evs := events(t, out)
-	if len(evs) != 8 || evs[5]["step"] != "clone" || evs[5]["state"] != "passed" || evs[6]["step"] != "agent" ||
+	if len(evs) < 8 || evs[7]["state"] == "failed" && len(evs) != 8 || evs[5]["step"] != "clone" ||
+		evs[5]["state"] != "passed" || evs[6]["step"] != "agent" ||
 		evs[6]["state"] != "started" || evs[7]["step"] != "agent" {
 		t.Fatalf("want the clone step passed, then the agent step, got %v", evs)
 	}
@@ -135,7 +152,7 @@ func TestRunDrivesTheAgent(t *testing.T) {
 			}
 			end, clone, log := agentStep(t, &out)
 			report, _ := end["report"].(map[string]any)
-			if end["state"] != "passed" || end["log"] != log || report["test_file"] != "a_test.go" {
+			if end["state"] != "passed" || end["log"] != log || report["test_file"] != "a_test.sh" {
 				t.Fatalf("end event: %v", end)
 			}
 			brief, err := os.ReadFile(filepath.Join(root, ".atm", "brief.md"))

@@ -94,17 +94,17 @@ func fakeGH(t *testing.T, out string, fail bool) string {
 }
 
 const atmYAML = `install: ""
-test: go test ./...
-typecheck: go vet ./...
+test: sh a_test.sh
+typecheck: ""
 lint: ""
-test_file: go test {dir}
-test_patterns: ["**/*_test.go"]
+test_file: sh {file}
+test_patterns: ["**/*_test.sh"]
 docs_patterns: ["**/*.md"]
 delivery: ""
 `
 
-// repo is a git repository with one commit on main, origin and .atm.yaml, the working directory for the
-// rest of the test, whose agents are the fakes.
+// repo is a git repository with one commit on main, where a.txt is broken and a_test.sh passes, origin and
+// .atm.yaml, the working directory for the rest of the test, whose agents are the fakes.
 func repo(t *testing.T, origin, atm string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -116,8 +116,13 @@ func repo(t *testing.T, origin, atm string) string {
 	t.Setenv("GIT_COMMITTER_NAME", "atm")
 	t.Setenv("GIT_COMMITTER_EMAIL", "atm@example.com")
 	t.Setenv("PATH", fakes+string(os.PathListSeparator)+os.Getenv("PATH"))
-	for _, args := range [][]string{{"init", "-q", "-b", "main"}, {"remote", "add", "origin", origin},
-		{"commit", "-q", "--allow-empty", "-m", "init"}} {
+	gitT(t, dir, "init", "-q", "-b", "main")
+	for name, text := range map[string]string{"a.txt": "broken\n", "a_test.sh": "test -f a.txt\n"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(text), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, args := range [][]string{{"remote", "add", "origin", origin}, {"add", "."}, {"commit", "-q", "-m", "init"}} {
 		gitT(t, dir, args...)
 	}
 	if atm != "" {
