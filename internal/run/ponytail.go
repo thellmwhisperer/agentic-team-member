@@ -201,10 +201,7 @@ func commit(root, clone, sha, unit, title string, found []finding) (commits, tom
 	if err != nil {
 		return nil, nil, err
 	}
-	parent, err := git(clone, "rev-parse", "HEAD")
-	if err != nil {
-		return nil, nil, err
-	}
+	parent := "HEAD"
 	units, err := git(clone, "rev-list", "--count", sha+"..HEAD") // the units chained before it
 	if err != nil {
 		return nil, nil, err

@@ -135,13 +135,6 @@ func saveFollowUps(root string, fs []followUp) error {
 	if fs == nil {
 		fs = []followUp{}
 	}
-	b, err := json.MarshalIndent(fs, "", "  ")
-	path := filepath.Join(root, ".atm", "follow-ups.json")
-	if err == nil {
-		err = os.MkdirAll(filepath.Dir(path), 0o755)
-	}
-	if err == nil {
-		err = os.WriteFile(path, append(b, '\n'), 0o644)
-	}
-	return err
+	b, _ := json.MarshalIndent(fs, "", "  ")
+	return os.WriteFile(filepath.Join(root, ".atm", "follow-ups.json"), append(b, '\n'), 0o644)
 }
