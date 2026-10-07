@@ -219,6 +219,8 @@ func serve(l *net.UnixListener, root, sock string) error {
 		if s.Lock(); s.busy() == 0 && (gone != nil || time.Since(s.last) > idle) {
 			s.Unlock()
 			return nil
+		} else if s.busy() > 0 {
+			s.save() // runs.jsonl's time is when its runs last ran, should this process die before they end
 		}
 		s.Unlock()
 	}
@@ -435,6 +437,7 @@ func (w *screen) line(line string) {
 	if w.events {
 		plain := w.r.event(line)
 		f = Frame{Line: &plain, Event: json.RawMessage(line)}
+		w.s.save() // its node, should this process die before the run ends
 	}
 	w.r.add(f)
 }
@@ -479,6 +482,10 @@ func history(root string) ([]*bgRun, error) {
 		return nil, err
 	}
 	defer func() { _ = f.Close() }()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
 	var runs []*bgRun
 	at := map[string]int{}
 	sc := bufio.NewScanner(f)
@@ -489,7 +496,7 @@ func history(root string) ([]*bgRun, error) {
 			continue
 		}
 		if o.Ended.IsZero() {
-			o.Outcome, o.FailedNode, o.Ended = "failed", o.Step, o.Started
+			o.Outcome, o.FailedNode, o.Ended = "failed", o.Step, info.ModTime() // when it last ran
 			o.Reason = "the background process ended before the run did"
 			o.NextStep = "run it again: atm run " + o.Issue
 		}

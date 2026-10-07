@@ -337,7 +337,10 @@ func tee(ctx context.Context, t terminal, w io.Writer, dir, line string, env ...
 		ran, err = t.run(cmd)
 	}
 	if !ran {
-		err = cmd.Run()
+		if err = cmd.Start(); err == nil {
+			note(cmd)
+			err = cmd.Wait()
+		}
 	}
 	log.flush()
 	switch {

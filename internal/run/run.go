@@ -187,9 +187,6 @@ func deliver(r *verdict, root, clone, sha, base, line string, i Issue, screen io
 			err = foreign(root, clone, sha)
 		}
 		if err == nil {
-			err = os.WriteFile(clone+".delivered", []byte(branch+" "+base+"\n"), 0o644)
-		}
-		if err == nil {
 			r.HeadSHA, err = git(clone, "rev-parse", "HEAD")
 		}
 		if err == nil {
@@ -213,7 +210,9 @@ func deliver(r *verdict, root, clone, sha, base, line string, i Issue, screen io
 		tail, err := tee(ctx, t,io.MultiWriter(f, screen), clone, line, "ATM_TITLE="+i.Title, "ATM_ISSUE="+issue,
 			"ATM_BRANCH="+branch, "ATM_CLONE="+clone, "ATM_REPORT="+r.path, "ATM_PONYTAIL="+cuts)
 		ev["commands"] = []cmdResult{{"delivery", line, outcome(err), tail}}
-		return ev, wrap(err, "delivery")
+		// Once it ended: one whose background process died never did, and its clone goes.
+		return ev, errors.Join(wrap(err, "delivery"), os.WriteFile(clone+".delivered", []byte(branch+" "+base+"\n"),
+			0o644))
 	})
 }
 

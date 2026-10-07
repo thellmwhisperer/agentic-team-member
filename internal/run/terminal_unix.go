@@ -27,6 +27,7 @@ func (w *screen) run(cmd *exec.Cmd) (bool, error) {
 	if err != nil {
 		return true, err
 	}
+	note(cmd)
 	w.s.Lock()
 	w.r.pty = p
 	w.r.add(Frame{PTY: true})
