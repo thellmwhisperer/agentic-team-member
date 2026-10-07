@@ -14,9 +14,8 @@ import (
 // clone sweeps root/.atm/clones, then claims a clone there of root at base's commit, detached, with install
 // run in it. It returns the clone even when a later step fails, so the caller can release it.
 //
-// Next to each clone, <clone>.lock holds a shared lock while its run has any live processes, and
-// <clone>.delivered holds
-// "<branch> <base>": what tells a later run whether the clone is still needed.
+// Next to each clone, <clone>.lock guards cleanup while the run or an inheriting process holds it.
+// <clone>.delivered holds "<branch> <base>": what tells a later run whether the clone is still needed.
 
 var cloneLeases sync.Map
 

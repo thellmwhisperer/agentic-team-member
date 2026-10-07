@@ -51,14 +51,17 @@ that SHA, excludes `/.atm/` in the clone, and runs `install` in it with `sh -c`
 fails the step and the run. Its end line carries `clone` and `sha`.
 
 The clone is removed when the run ends, unless the run delivered and its PR is
-open. Each run's commands inherit a shared lock in `<clone>.lock`; cleanup
-removes the clone only after it can take an exclusive lock. `<clone>.delivered`
-holds `<branch> <base>` once it delivered. Each run first removes the clones of
-runs that are gone, except a delivered clone whose branch is not merged into
-its base (`git branch --merged` after a fetch from the repository) and whose PR
-`gh` does not report closed or merged, when origin is on GitHub. A descendant
-that closes its inherited descriptors (for example a Python subprocess with
-`close_fds`) does not hold the clone.
+open. On Unix, each run's commands inherit a shared lock in `<clone>.lock`;
+cleanup removes the clone only after it can take an exclusive lock. On Windows,
+cleanup also renames the clone before removing it, leaving it in place if the
+rename fails because a live process is using it. `<clone>.delivered` holds
+`<branch> <base>` after the delivery command ends, including when it exits
+non-zero. Each run first removes the clones of runs that are gone, except a
+delivered clone whose branch is not merged into its base (`git branch --merged`
+after a fetch from the repository) and whose PR
+`gh` does not report closed or merged, when origin is on GitHub. On Unix, a
+descendant that closes its inherited descriptors (for example a Python
+subprocess with `close_fds`) does not hold the clone.
 
 The `agent` step follows the contract. The agent is `--harness` (`claude`,
 `codex`, `opencode` or `pi`; any other fails the config) with the run's model
@@ -245,12 +248,12 @@ the lock when that process exits. It runs every run in itself and logs to
 `.atm/serve.log`. It ends after 10 minutes without a run, or once its socket is
 removed while no run goes. The latest state of each retained run is saved to
 `.atm/runs.jsonl`, so a new background process still lists them; a run left
-running there is shown failed at its last step. On each new run, it drops the
-oldest ended runs while the list exceeds 200. It never drops a running run,
-and completion does not prune, so the history can exceed 200. Each clone has a
-`<clone>.lock` file; commands started by its run inherit a shared lock on it.
-The next sweep removes a clone after it can take the exclusive lock, even when
-the background process that started the run has exited.
+running there is shown failed at its last saved step, with its duration measured
+through the last save. On each new run, it drops the oldest ended runs while the
+list exceeds 200. It never drops a running run, and completion does not prune,
+so the history can exceed 200. Clone cleanup uses the locks described above,
+even when the background process that started
+the run has exited.
 
 | Command | Prints |
 |---------|--------|
