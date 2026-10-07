@@ -2,6 +2,7 @@ package run
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -32,7 +33,7 @@ func TestRunWritesTheContractForTheTaskType(t *testing.T) {
 			root := repo(t, "https://example.com/owner/repo.git", briefYAML)
 			issue := "Retry once on timeout.\n\nType: " + typ
 			var out bytes.Buffer
-			if err := Run([]string{issueFile(t, "# Retry\n"+issue+"\n")}, &out); err != nil {
+			if err := Run([]string{issueFile(t, "# Retry\n"+issue+"\n")}, &out, io.Discard); err != nil {
 				t.Fatal(err)
 			}
 			evs := events(t, &out)

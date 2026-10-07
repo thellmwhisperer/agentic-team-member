@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"path"
 	"path/filepath"
@@ -29,16 +30,18 @@ func checks(clone, sha, typ, test string, c config.Config) (map[string]any, erro
 	if err := prove(clone, typ, filepath.ToSlash(test), c); err != nil {
 		return nil, err
 	}
+	var ran []cmdResult
 	for _, cmd := range [][2]string{{"install", c.Install}, {"test", c.Test}, {"typecheck", c.Typecheck},
 		{"lint", c.Lint}} {
 		if cmd[1] == "" {
 			continue
 		}
-		if err := sh(clone, cmd[1]); err != nil {
-			return nil, fmt.Errorf("%s: %w", cmd[0], err)
+		tail, err := sh(clone, cmd[1])
+		if ran = append(ran, cmdResult{cmd[0], cmd[1], outcome(err), tail}); err != nil {
+			return map[string]any{"commands": ran}, fmt.Errorf("%s: %w", cmd[0], err)
 		}
 	}
-	return map[string]any{}, nil
+	return map[string]any{"commands": ran}, nil
 }
 
 // prove runs the proof of task type typ on the agent's work in clone, all of it staged meanwhile.
@@ -126,7 +129,7 @@ func trial(clone, tree string, aside []string, base, after string) (red, green, 
 			return nil, nil, err
 		}
 	}
-	red = sh(clone, base)
+	_, red = sh(clone, base)
 	if len(aside) > 0 {
 		if _, err := git(clone, "restore", "--source="+tree, "--staged", "--worktree", "--", "."); err != nil {
 			return red, nil, err
@@ -136,7 +139,7 @@ func trial(clone, tree string, aside []string, base, after string) (red, green, 
 		return red, nil, red
 	}
 	if after != "" {
-		if green = sh(clone, after); errors.Is(green, errTimeout) {
+		if _, green = sh(clone, after); errors.Is(green, errTimeout) {
 			return red, green, green
 		}
 	}
@@ -190,21 +193,21 @@ func wrap(err error, msg string) error {
 
 var errTimeout = errors.New("timed out")
 
-// sh runs line with sh -c in dir, in its own process group, killed past timeout. Its error carries the last
-// 60 lines of its output.
-func sh(dir, line string) error {
+// sh runs line with sh -c in dir, env added to its environment, in its own process group, killed past timeout.
+// tail is the last 60 lines of its output, which its error carries too.
+func sh(dir, line string, env ...string) (tail string, err error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "sh", "-c", line)
-	cmd.Dir, cmd.WaitDelay = dir, time.Second
+	cmd.Dir, cmd.Env, cmd.WaitDelay = dir, append(os.Environ(), env...), time.Second
 	ownGroup(cmd)
 	out, err := cmd.CombinedOutput()
 	if ctx.Err() != nil {
-		err = fmt.Errorf("%w after %s", errTimeout, timeout)
-	}
-	if err == nil {
-		return nil
+		err = fmt.Errorf("%w after %s", errTimeout, human(timeout))
 	}
 	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-	return fmt.Errorf("%w\n%s", err, strings.Join(lines[max(0, len(lines)-60):], "\n"))
+	if tail = strings.Join(lines[max(0, len(lines)-60):], "\n"); err != nil && tail != "" {
+		err = fmt.Errorf("%w\n%s", err, tail)
+	}
+	return tail, err
 }
