@@ -243,7 +243,8 @@ func (s *stream) read(cmd *exec.Cmd, log io.Writer, harness string) error {
 		}
 	}
 	if errors.Is(err, exec.ErrWaitDelay) { // exited 0, but left something holding its output: kill what it left
-		err = cmd.Cancel()
+		_ = cmd.Cancel() // its group may be empty already, which is no failure
+		err = nil
 	}
 	_ = pw.Close()
 	return errors.Join(err, <-done)

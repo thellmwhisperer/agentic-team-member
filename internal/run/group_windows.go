@@ -37,7 +37,7 @@ func ownGroup(cmd *exec.Cmd) (func() error, func(), error) {
 			_ = cmd.Process.Kill()
 			return err
 		}
-		defer windows.CloseHandle(process)
+		defer func() { _ = windows.CloseHandle(process) }()
 		if err := windows.AssignProcessToJobObject(job, process); err != nil {
 			_ = cmd.Process.Kill()
 			return err
