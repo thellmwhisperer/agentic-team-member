@@ -59,10 +59,7 @@ func TestRunDeliversTheBranch(t *testing.T) {
 			top := gitT(t, root, "rev-parse", "--show-toplevel")
 			checkBranch(t, read, c.log, c.origin)
 			if c.origin == bare {
-				marker, err := os.ReadFile(read("ATM_CLONE") + ".delivered")
-				if err != nil || string(marker) != read("ATM_BRANCH")+" main\n" {
-					t.Fatalf("want delivered marker for branch and base, got %q, %v", marker, err)
-				}
+				checkDeliveredMarker(t, read)
 			}
 			checkEnv(t, got, top, c.issue, c.ponytail)
 			printed, _ := os.ReadFile(filepath.Join(top, ".atm", "delivery-output.txt"))
@@ -81,6 +78,14 @@ func TestRunDeliversTheBranch(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func checkDeliveredMarker(t *testing.T, read func(string) string) {
+	t.Helper()
+	marker, err := os.ReadFile(read("ATM_CLONE") + ".delivered")
+	if err != nil || string(marker) != read("ATM_BRANCH")+" main\n" {
+		t.Fatalf("want delivered marker for branch and base, got %q, %v", marker, err)
 	}
 }
 
