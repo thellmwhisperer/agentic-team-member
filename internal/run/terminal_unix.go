@@ -29,6 +29,7 @@ func (w *screen) run(cmd *exec.Cmd) (bool, error) {
 	}
 	w.s.Lock()
 	w.r.pty = p
+	w.r.add(Frame{PTY: true})
 	w.s.Unlock()
 	_, _ = io.Copy(out, p) // until nothing holds the terminal: EOF, or EIO on Linux
 	err = cmd.Wait()

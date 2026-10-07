@@ -97,11 +97,14 @@ func TestScreenLaysOutAsNoMistakes(t *testing.T) {
 	if s := view(screen(80, 29, running...)); connector.MatchString(s) {
 		t.Fatalf("under 30 rows, want no connector:\n%s", s)
 	}
+	if s := view(screen(100, 40, unit...)); !strings.Contains(s, "4 min 28 s") || !strings.Contains(s, "passed") {
+		t.Fatalf("at 100 columns, want the full state and duration:\n%s", s)
+	}
 }
 
 func TestScreenShowsTheAgentThenTheLogOfTheRunningNode(t *testing.T) {
 	s := view(screen(120, 40, unit[:10]...))
-	if !order(s, "╭─ Agent", "∴ Read the test first.", "✗ Bash go test ./...") || !strings.Contains(s, "q detach") {
+	if !order(s, "╭─ Agent", "∴ Read the test first.", "✗ failed Bash go test ./...") || !strings.Contains(s, "q detach") {
 		t.Fatalf("agent box:\n%s", s)
 	}
 	s = view(screen(120, 40, unit...))

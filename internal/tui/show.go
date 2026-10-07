@@ -31,6 +31,7 @@ func Show(root, label string, in, out *os.File) (o run.Outcome, detached bool, e
 		d.giveBack()
 		p.Send(ended{o, err})
 	}()
+	defer close(keys)
 	if _, err := p.Run(); err != nil {
 		return o, false, err
 	}
@@ -52,10 +53,11 @@ type delivery struct {
 
 // frame takes frame f: the delivery command's output goes to the terminal, everything else to the screen.
 func (d *delivery) frame(f run.Frame) {
+	if f.PTY {
+		d.take()
+		return
+	}
 	if f.Raw != nil {
-		if d.read == nil {
-			d.take()
-		}
 		_, _ = d.out.Write(f.Raw)
 		return
 	}
