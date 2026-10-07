@@ -188,6 +188,7 @@ func setupConcurrentRunRepo(t *testing.T) string {
 		{"config", "user.name", "atm"},
 		{"add", "."},
 		{"commit", "-m", "retry"},
+		{"branch", "-M", "main"},
 	} {
 		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
 		if out, err := cmd.CombinedOutput(); err != nil {
