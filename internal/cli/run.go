@@ -7,6 +7,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	"github.com/thellmwhisperer/agentic-team-member/internal/run"
 )
@@ -33,8 +34,7 @@ func runCmd() *cobra.Command {
 }
 
 func terminal(f *os.File) bool {
-	fi, err := f.Stat()
-	return err == nil && fi.Mode()&os.ModeCharDevice != 0
+	return term.IsTerminal(int(f.Fd()))
 }
 
 // attach shows run label's screen on w until it ends and returns how it ended.

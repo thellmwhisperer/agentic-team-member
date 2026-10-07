@@ -80,6 +80,9 @@ func TestAxiPrintsTheSameOutcomeAsTOONAndJSON(t *testing.T) {
 					Started: end.Add(-900 * time.Millisecond), Ended: end},
 			})
 		},
+		"axi-status": func(w io.Writer, asJSON bool) error {
+			return list(w, asJSON, true, nil)
+		},
 	}
 	for name, print := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -100,6 +103,28 @@ func TestAxiPrintsTheSameOutcomeAsTOONAndJSON(t *testing.T) {
 				t.Fatalf("TOON and JSON differ:\n%v\n%v", fromTOON, fromJSON)
 			}
 		})
+	}
+}
+
+func TestAxiRunPreservesJSONHarnessArgument(t *testing.T) {
+	args, asJSON := axiRunArgs([]string{"--harness-arg", "--json", "issue.md"})
+	if asJSON || !reflect.DeepEqual(args, []string{"--harness-arg", "--json", "issue.md"}) {
+		t.Fatalf("axiRunArgs = %v, %t", args, asJSON)
+	}
+	args, asJSON = axiRunArgs([]string{"--harness-arg", "--json", "--json", "issue.md"})
+	if !asJSON || !reflect.DeepEqual(args, []string{"--harness-arg", "--json", "issue.md"}) {
+		t.Fatalf("axiRunArgs with format flag = %v, %t", args, asJSON)
+	}
+}
+
+func TestDevNullIsNotATerminal(t *testing.T) {
+	f, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	if terminal(f) {
+		t.Fatal("the null device was detected as a terminal")
 	}
 }
 

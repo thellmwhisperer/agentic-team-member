@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"io"
 	"regexp"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -19,12 +18,12 @@ func axiCmd() *cobra.Command {
 	c.AddCommand(&cobra.Command{Use: "run [--json] " + strings.TrimPrefix(run.Usage, "usage: atm run "),
 		Short: "Run an issue and print its outcome", DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			asJSON := slices.Contains(args, "--json")
+			args, asJSON := axiRunArgs(args)
 			root, err := toplevel()
 			if err != nil {
 				return err
 			}
-			o, err := run.Start(root, slices.DeleteFunc(args, func(a string) bool { return a == "--json" }))
+			o, err := run.Start(root, args)
 			if err == nil {
 				o, err = run.Attach(root, o.Run, io.Discard)
 			}
@@ -37,6 +36,25 @@ func axiCmd() *cobra.Command {
 			return o.Err()
 		}}, axiList(true), axiList(false))
 	return c
+}
+
+func axiRunArgs(args []string) ([]string, bool) {
+	filtered := make([]string, 0, len(args))
+	asJSON, harnessArg := false, false
+	for _, arg := range args {
+		if harnessArg {
+			filtered = append(filtered, arg)
+			harnessArg = false
+			continue
+		}
+		if arg == "--json" {
+			asJSON = true
+			continue
+		}
+		filtered = append(filtered, arg)
+		harnessArg = arg == "--harness-arg"
+	}
+	return filtered, asJSON
 }
 
 // axiList is atm axi status, the runs going, when going, else atm axi runs, every run.
