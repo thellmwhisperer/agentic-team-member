@@ -82,8 +82,10 @@ for `claude`, a read of its `SKILL.md` for `pi` and `codex`, a `skill` event for
 `opencode`), or the run dies.
 
 The agent runs in the clone. Past 30 minutes, or when ATM gets SIGINT or
-SIGTERM, cancellation kills its process group on Unix or its process tree on
-Windows. Every line it writes goes to `worker.jsonl` in the run's directory:
+SIGTERM, cancellation kills its process tree on Unix or Windows, including
+descendants that start a session or process group of their own. On Unix, this
+does not catch a descendant already orphaned to init before cancellation.
+Every line it writes goes to `worker.jsonl` in the run's directory:
 JSON lines as they are, any other line as a JSON string. The
 report is the last JSON object of its final message (`codex`: its `-o` file,
 `worker.final.md`) and must carry `test_file`: ATM never
