@@ -1,9 +1,11 @@
 package run
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path"
@@ -196,16 +198,24 @@ var errTimeout = errors.New("timed out")
 // sh runs line with sh -c in dir, env added to its environment, in its own process group, killed past timeout.
 // tail is the last 60 lines of its output, which its error carries too.
 func sh(dir, line string, env ...string) (tail string, err error) {
+	return tee(io.Discard, dir, line, env...)
+}
+
+// tee is sh, its output copied to w as it comes.
+func tee(w io.Writer, dir, line string, env ...string) (tail string, err error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "sh", "-c", line)
+	var out bytes.Buffer
 	cmd.Dir, cmd.Env, cmd.WaitDelay = dir, append(os.Environ(), env...), time.Second
+	cmd.Stdout = io.MultiWriter(&out, w)
+	cmd.Stderr = cmd.Stdout
 	ownGroup(cmd)
-	out, err := cmd.CombinedOutput()
+	err = cmd.Run()
 	if ctx.Err() != nil {
 		err = fmt.Errorf("%w after %s", errTimeout, human(timeout))
 	}
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
 	if tail = strings.Join(lines[max(0, len(lines)-60):], "\n"); err != nil && tail != "" {
 		err = fmt.Errorf("%w\n%s", err, tail)
 	}

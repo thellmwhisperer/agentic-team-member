@@ -20,6 +20,7 @@ type verdict struct {
 	Nodes      []*node     `json:"nodes"`
 	Type       string      `json:"type"`
 	Commands   []cmdResult `json:"commands"`
+	HeadSHA    string      `json:"head_sha,omitempty"` // the delivered branch's
 	path       string
 	out        io.Writer // the log: each node's start and end, one JSON object a line
 	err        error     // the failed node's
