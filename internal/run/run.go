@@ -167,7 +167,8 @@ var nonSlug = regexp.MustCompile(`[^a-z0-9]+`)
 // deliver puts the run's work in clone, at base commit sha, on branch atm/<slug>-<timestamp> (onBranch),
 // rewrites report.json with its SHA and runs the delivery command line in clone, its output on screen and in
 // delivery-output.txt next to report.json. ATM never pushes: that is line's business.
-// line has no ceiling: it lasts as long as what it hands the work to. SIGINT and SIGTERM kill its group.
+// line has no ceiling: it lasts as long as what it hands the work to. SIGINT and SIGTERM cancel its
+// process group on Unix or process tree on Windows.
 // ponytail: line gets the clone after the slop detector.
 func deliver(r *verdict, root, clone, sha, base, line string, i Issue, screen io.Writer) {
 	if line == "" {
