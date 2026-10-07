@@ -280,27 +280,20 @@ func every(clone string, args ...string) (string, error) {
 // copy of each, node_modules too; links or reflinks if a large one makes it slow.
 func keep(clone string) (string, error) {
 	tree, err := git(clone, "write-tree")
-	all := ""
 	if err == nil {
 		_, err = git(clone, "init", "-q", "--bare", ".git/atm-files")
 	}
 	if err == nil {
 		_, err = every(clone, "add", "-A", "-f", ".")
 	}
-	if err == nil {
-		all, err = every(clone, "write-tree")
-	}
-	if err == nil {
-		_, err = every(clone, "update-ref", "refs/kept", all)
-	}
 	return tree, err
 }
 
 // reset brings clone's working tree back to what keep recorded, new files gone, the ignored ones too.
 func reset(clone string) error {
-	_, err := every(clone, "add", "-A", "-f", ".")
+	_, err := every(clone, "clean", "-fdqx")
 	if err == nil {
-		_, err = every(clone, "read-tree", "-u", "--reset", "refs/kept")
+		_, err = every(clone, "checkout", "--", ".")
 	}
 	return err
 }
