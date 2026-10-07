@@ -225,7 +225,11 @@ func (s *stream) read(cmd *exec.Cmd, log io.Writer, harness string) error {
 			}
 		}
 	}()
-	err := cmd.Run()
+	err := cmd.Start()
+	if err == nil {
+		note(cmd)
+		err = cmd.Wait()
+	}
 	_ = pw.Close()
 	return errors.Join(err, <-done)
 }

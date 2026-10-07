@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -16,7 +17,8 @@ import (
 // clone sweeps root/.atm/clones, then claims a clone there of root at base's commit, detached, with install
 // run in it. It returns the clone even when a later step fails, so the caller can release it.
 //
-// Next to each clone, <clone>.pid holds its run's pid and, once its run delivered, <clone>.delivered holds
+// Next to each clone, <clone>.pid holds its run's pid, then each process group the run started there, negative,
+// and, once its run's delivery command ended, <clone>.delivered holds
 // "<branch> <base>": what tells a later run whether the clone is still needed.
 func clone(root, base, install, repo string) (dir, sha string, err error) {
 	if sha, err = git(root, "rev-parse", "--verify", base+"^{commit}"); err != nil {
@@ -81,10 +83,31 @@ func sweep(clones, repo string) {
 		if err != nil {
 			continue
 		}
-		if pid, err := strconv.Atoi(strings.TrimSpace(string(b))); err != nil || running(dir, pid) || kept(dir, repo) {
+		if held(dir, strings.Fields(string(b))) || kept(dir, repo) {
 			continue
 		}
 		_ = remove(dir) // a clone that will not go is tried again by the next run
+	}
+}
+
+// held says whether a process of the run of clone dir still runs, from pids, its pid file: the run's own, or,
+// negative, a process group the run started, which outlives it when it dies.
+func held(dir string, pids []string) bool {
+	for _, p := range pids {
+		pid, err := strconv.Atoi(p)
+		if err != nil || pid > 0 && running(dir, pid) || pid < 0 && groupAlive(-pid) {
+			return true
+		}
+	}
+	return len(pids) == 0 // a pid file being written
+}
+
+// note adds the process group of cmd, just started, to the pid file of the clone it runs in, if it runs in one.
+func note(cmd *exec.Cmd) {
+	f, err := os.OpenFile(cmd.Dir+".pid", os.O_APPEND|os.O_WRONLY, 0)
+	if err == nil {
+		_, _ = fmt.Fprintf(f, " -%d", cmd.Process.Pid) // it leads its group
+		_ = f.Close()
 	}
 }
 
