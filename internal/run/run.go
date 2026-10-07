@@ -4,6 +4,7 @@ package run
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"flag"
@@ -13,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -86,13 +88,17 @@ func Run(args []string, out, summary io.Writer) (err error) {
 	})
 	r.step("checks", func() (map[string]any, error) { return checks(dir, sha, i.Type, test, c) })
 	r.step("ponytail", func() (map[string]any, error) { return a.ponytail(root, dir, sha, test, i, c) })
-	deliver(r, dir, c.Delivery)
+	deliver(r, root, dir, sha, c.Delivery, i, summary)
 	return r.err
 }
 
-// deliver runs the delivery command line in clone, ATM_REPORT naming report.json, which is on disk already.
+var nonSlug = regexp.MustCompile(`[^a-z0-9]+`)
+
+// deliver puts the run's work in clone, at base commit sha, on branch atm/<slug>-<timestamp> (onBranch),
+// rewrites report.json with its SHA and runs the delivery command line in clone, its output on screen and in
+// delivery-output.txt next to report.json. ATM never pushes: that is line's business.
 // ponytail: line gets the clone after the slop detector, under sh's timeout; a ceiling of its own is the upgrade.
-func deliver(r *verdict, clone, line string) {
+func deliver(r *verdict, root, clone, sha, line string, i Issue, screen io.Writer) {
 	if line == "" {
 		if r.err == nil {
 			r.node("delivery").Result = "skipped"
@@ -100,9 +106,78 @@ func deliver(r *verdict, clone, line string) {
 		return
 	}
 	r.step("delivery", func() (map[string]any, error) {
-		tail, err := sh(clone, line, "ATM_REPORT="+r.path, "ATM_CLONE="+clone)
-		return map[string]any{"commands": []cmdResult{{"delivery", line, outcome(err), tail}}}, wrap(err, "delivery")
+		s := nonSlug.ReplaceAllString(strings.ToLower(i.Title), "-")
+		branch := "atm/" + cmp.Or(strings.Trim(s[:min(len(s), 40)], "-"), "run") + "-" +
+			strings.TrimPrefix(filepath.Base(clone), "atm-run-") // the clone's timestamp, as unique
+		ev := map[string]any{"branch": branch}
+		cuts, err := onBranch(root, clone, sha, branch, i.Title)
+		if err == nil {
+			r.HeadSHA, err = git(clone, "rev-parse", "HEAD")
+		}
+		if err == nil {
+			err = r.write()
+		}
+		if err != nil {
+			return ev, err
+		}
+		f, err := os.Create(filepath.Join(filepath.Dir(r.path), "delivery-output.txt"))
+		if err != nil {
+			return ev, err
+		}
+		defer func() { _ = f.Close() }()
+		issue := ""
+		if i.Number != 0 {
+			issue = strconv.Itoa(i.Number)
+		}
+		tail, err := tee(io.MultiWriter(f, screen), clone, line, "ATM_TITLE="+i.Title, "ATM_ISSUE="+issue,
+			"ATM_BRANCH="+branch, "ATM_CLONE="+clone, "ATM_REPORT="+r.path, "ATM_PONYTAIL="+cuts)
+		ev["commands"] = []cmdResult{{"delivery", line, outcome(err), tail}}
+		return ev, wrap(err, "delivery")
 	})
+}
+
+// onBranch puts clone, at base commit sha, on a new branch name, what is left uncommitted committed as the
+// unit under the identity of the repository at root, and points clone's origin at root's. cuts are the slop
+// detector's findings, one a line, when it committed a cut.
+func onBranch(root, clone, sha, name, title string) (cuts string, err error) {
+	origin, err := git(root, "remote", "get-url", "origin")
+	if err != nil {
+		return "", fmt.Errorf("no origin to deliver to: %w", err)
+	}
+	head, err := git(clone, "rev-parse", "HEAD")
+	if err == nil && head != sha {
+		cuts, err = git(clone, "log", "-1", "--format=%b") // the ponytail commit's body: its findings
+	}
+	if err == nil {
+		_, err = git(clone, "checkout", "-q", "-b", name)
+	}
+	var left string
+	if err == nil {
+		left, err = git(clone, "status", "--porcelain")
+	}
+	if err == nil && left != "" {
+		err = commitAll(root, clone, head, "atm unit 1: "+title)
+	}
+	if err == nil {
+		_, err = git(clone, "remote", "set-url", "origin", origin)
+	}
+	return cuts, err
+}
+
+// commitAll commits clone's working tree on head, the commit it is at, with msg under root's identity.
+func commitAll(root, clone, head, msg string) error {
+	id, err := identity(root)
+	if err != nil {
+		return err
+	}
+	tree, err := snapshot(clone)
+	if err == nil {
+		head, err = git(clone, append(id, "commit-tree", tree, "-p", head, "-m", msg)...)
+	}
+	if err == nil {
+		_, err = git(clone, "reset", "-q", head)
+	}
+	return err
 }
 
 // githubRepo is the owner/name of the GitHub repository origin names, "" when it names none. No origin is not
