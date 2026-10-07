@@ -23,8 +23,7 @@ flowchart LR
    can check, and a `## Red test` section naming the test that fails today.
    The agent gets exactly this text; a vague issue gives a vague run.
 2. **An ATM run.** A local config (`config/agent.*.local.toml`, ignored by git)
-   with `timeouts.test_run` raised to 300, because
-   `tests/test_harness_worker.py` runs real git and fake agents. `--scope` names
+   `--scope` names
    the files the issue allows.
 3. **The verdict.** `report.json`, or the summary at the end of the run. A FAIL
    ends here: the report says which check failed and why, and the issue gets a
@@ -42,15 +41,13 @@ flowchart LR
 
 | Mechanism | Where | What it does |
 |-----------|-------|--------------|
-| `pr.yml`, `cd.yml`, `go.yml` | GitHub Actions | Change-filtered checks; see [CI](../CONTRIBUTING.md#ci) |
+| `go.yml` | GitHub Actions | Change-filtered checks; see [CI](../CONTRIBUTING.md#ci) |
 | `auto-merge.yml` + `scripts/arm-auto-merge.sh` | GitHub Actions | Arms auto-merge with `AUTO_MERGE_TOKEN`, a fine-grained token for this repository only. The workflow token is never used: merges made with it start no workflow and close no issue |
 | `scripts/test.sh`, `scripts/lint.sh` | local and the gate | Contribution checks; see [Contributing](../CONTRIBUTING.md) |
-| `tests/test_slop_gate.py` | pytest | `scripts/slopslint.sh check --classify --enforce`, so every test run enforces it |
 | `.githooks/pre-commit` | local, after `git config core.hooksPath .githooks` | The same slopslint check |
 | `.no-mistakes.yaml` | no-mistakes | Runs the contribution checks, sets review instructions per path, and allows one re-run of a CI check GitHub cancelled without a verdict |
 | `.slop/config.yml`, `.slop/ceilings.yml` | slopslint | Two duplication scopes, production and tests, under ceilings that may go down and never up |
 | `.slop/tombstones/` | slopslint | One record per slop incident, with its family and evidence |
-| `ruff.toml` | ruff | 120 columns, `E9` and `F` only |
 
 `scripts/slopslint.sh` downloads the pinned slopslint release into
 `.tmp/slopslint/`, checks its SHA256 and runs it. The first run needs the
@@ -61,13 +58,6 @@ network.
 `.no-mistakes.yaml` tells the review model what this repository has already
 decided. Each line exists because a model got it wrong once:
 
-- `agentic_tdd_runner/**`: branch names carry a timestamp to the second and
-  every run has its own clone, so they are unique by construction: no uuid,
-  nonce or random suffix, no tests for concurrency the design rules out. The
-  delivery gate has a fixed `--wait` ceiling: no polling loops, never a loop
-  without an upper bound. A speculative hardening is a note, not a change.
-- `tests/**`: never delete or weaken a test the issue's acceptance criteria or
-  red test ask for.
 - `**`: general review criteria and test invocation; see
   [`.no-mistakes.yaml`](../.no-mistakes.yaml).
 

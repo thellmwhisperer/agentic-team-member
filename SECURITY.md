@@ -47,9 +47,7 @@ Reports in this area are in scope:
   config through the shell; it never pushes or opens a PR itself. Anything
   that makes ATM do so, or runs a command the config did not name, is in
   scope. The same holds for `[monitor].command`.
-- Network: `judge.py` posts issue and follow-up text to TypeSafe when
-  `[follow_ups.judge]` is enabled; the duplicated-setup judge posts test lines
-  to the configured Ollama URL when enabled; `scripts/slopslint.sh` downloads a
+- Network: `scripts/slopslint.sh` downloads a
   pinned release and verifies its SHA256. Anything else that sends data off the
   machine is a bug.
 

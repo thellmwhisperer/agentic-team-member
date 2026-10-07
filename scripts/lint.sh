@@ -1,9 +1,6 @@
 #!/bin/sh
-# The gate's lint: ruff and slopslint, plus golangci-lint when go.mod exists.
+# The gate's lint: golangci-lint and slopslint.
 set -eu
 cd "$(dirname "$0")/.."
-uvx ruff check .
+golangci-lint run
 scripts/slopslint.sh check --classify --enforce > /dev/null
-if [ -f go.mod ]; then
-  golangci-lint run
-fi

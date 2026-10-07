@@ -3,24 +3,9 @@ commands:
   lint: scripts/lint.sh
 review:
   path_instructions:
-    - path: "agentic_tdd_runner/**"
-      instructions: |
-        Generated branch names carry a timestamp to the second and every run works in its own clone,
-        so they are unique by construction. Do not add uuid, nonce or random suffixes to them, and do
-        not add tests for concurrency cases the design rules out. When a hardening is speculative,
-        report it as a note and change nothing.
-        The delivery step bounds `no-mistakes axi run` with a fixed --wait ceiling on purpose (see its
-        ponytail comment): a longer run ends as exit 3 and `axi status` has the rest. Do not replace that
-        ceiling with polling loops, and never add a loop without an upper bound.
-    - path: "tests/**"
-      instructions: |
-        Never delete or weaken a test that the linked issue's acceptance criteria or red test ask for,
-        even when it looks heuristic. If such a test seems unreliable, report it as a note and change nothing.
     - path: "**"
       instructions: |
-        Run tests only through `scripts/test.sh` (it passes its arguments to pytest). It runs pytest
-        under Python 3.12 with requirements.txt; a bare `python3 -m pytest` may pick a Python older
-        than ATM supports and fail before collecting a test.
+        Run tests through `scripts/test.sh` (`go test ./...`) and lint through `scripts/lint.sh`.
         A finding is a defect against the linked issue's acceptance criteria, or one that breaks the
         repository's test, typecheck or lint commands. Hardening for a case the issue does not name is
         reported as a note and changes nothing.

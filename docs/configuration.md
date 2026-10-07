@@ -8,9 +8,6 @@ The Python worker uses two sources, and they do not overlap. The Go port reads
   true for a target repository across runs. Copy it to a `*.local.toml`, which
   git ignores, and pass it with `--config`.
 
-`tests/test_config.py` asserts that every key in `config/agent.toml` is read by
-some module in the package. A key nobody reads fails the suite.
-
 ## Command line
 
 | Flag | Default | Meaning |
@@ -65,7 +62,7 @@ not know. Python test files always run with `python3 -m pytest`.
 
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `dir` | `"~/.atm/runs"` in the shipped config | Base directory for runs, independent of the caller's working directory. `~` is expanded; a relative path makes the worker exit 2. `scripts/tail-run.py` reads the same key from its `--config` file (default `config/agent.toml`) when finding a run by label or choosing the newest run |
+| `dir` | `"~/.atm/runs"` in the shipped config | Base directory for runs, independent of the caller's working directory. `~` is expanded; a relative path makes the worker exit 2. |
 
 ## `[monitor]`
 
