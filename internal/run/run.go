@@ -70,7 +70,7 @@ func Run(args []string, out, summary io.Writer) (err error) {
 	})
 	var text string
 	r.step("contract", func() (ev map[string]any, err error) {
-		text, ev, err = writeBrief(root, i, c)
+		text, ev, err = writeBrief(filepath.Join(root, ".atm", "brief.md"), i, c, nil)
 		return ev, err
 	})
 	var dir, sha string
@@ -79,19 +79,74 @@ func Run(args []string, out, summary io.Writer) (err error) {
 		dir, sha, err = clone(root, *base, c.Install, repo)
 		return map[string]any{"clone": dir, "sha": sha}, err
 	})
-	var test string
-	r.step("agent", func() (map[string]any, error) {
-		ev, err := a.run(dir, "worker", "ponytail", text, testFile)
-		report, _ := ev["report"].(map[string]any)
-		test, _ = report["test_file"].(string)
-		return ev, err
-	})
-	r.step("checks", func() (map[string]any, error) { return checks(dir, sha, i.Type, test, c) })
-	r.step("ponytail", func() (map[string]any, error) { return a.ponytail(root, dir, sha, test, i, c) })
+	test, unit, pending := a.units(r, root, dir, sha, text, i, c)
+	if err := saveFollowUps(root, pending); err != nil {
+		return err
+	}
+	r.step("ponytail", func() (map[string]any, error) { return a.ponytail(root, dir, sha, test, unit, c) })
 	deliver(r, root, dir, sha, *base, c.Delivery, i, summary)
 	return r.err
 }
 
+// units runs the units of the run in clone dir, from base commit sha, for issue i under config c: the first on
+// brief text, each next one, up to maxUnits, on the first follow-up on the issue the one before proved. It
+// returns the last unit's test, the issue as that unit is proven, a chained one by its red test, and the
+// accepted follow-ups it did not chain.
+func (a agent) units(r *verdict, root, dir, sha, text string, i Issue, c config.Config) (test string, unit Issue,
+	pending []followUp) {
+	unit, head := i, sha
+	var f *followUp // the follow-up a chained unit makes pass
+	for n := 1; ; n++ {
+		var report map[string]any
+		r.step("agent", func() (map[string]any, error) {
+			name, text := "worker", text
+			if f != nil {
+				var err error
+				if head, err = chain(root, dir, n-1, i.Title, *f); err != nil {
+					return nil, err
+				}
+				unit.Type, name = "feature", "worker-unit"+strconv.Itoa(n)
+				path := filepath.Join(root, ".atm", "brief-unit-"+strconv.Itoa(n)+".md")
+				if text, _, err = writeBrief(path, unit, c, f); err != nil {
+					return nil, err
+				}
+			}
+			ev, err := a.run(dir, name, "ponytail", text, testFile)
+			ev["unit"] = n
+			report, _ = ev["report"].(map[string]any)
+			test, _ = report["test_file"].(string)
+			if f != nil {
+				test = f.RedTest
+			}
+			return ev, err
+		})
+		var in []followUp
+		r.step("checks", func() (map[string]any, error) {
+			if f != nil {
+				if b, err := os.ReadFile(filepath.Join(dir, test)); err != nil || string(b) != f.Test {
+					return nil, fmt.Errorf("unit %d edited its red test %s, which it must make pass as it is", n, test)
+				}
+			}
+			ev, err := checks(dir, head, unit.Type, test, c)
+			if err != nil {
+				return ev, err
+			}
+			var out []followUp
+			in, out, ev["follow_ups"], err = followUps(dir, report, i.Body, c.TestFile)
+			pending = append(pending, out...)
+			return ev, err
+		})
+		if r.err != nil || len(in) == 0 {
+			return test, unit, pending
+		}
+		if n == maxUnits {
+			return test, unit, append(pending, in...)
+		}
+		f, pending = &in[0], append(pending, in[1:]...)
+	}
+}
+
+// deliver runs the delivery command line in clone, ATM_REPORT naming report.json, which is on disk already.
 var nonSlug = regexp.MustCompile(`[^a-z0-9]+`)
 
 // deliver puts the run's work in clone, at base commit sha, on branch atm/<slug>-<timestamp> (onBranch),
@@ -184,10 +239,10 @@ func githubRepo() string {
 	return ""
 }
 
-func writeBrief(root string, i Issue, c config.Config) (string, map[string]any, error) {
-	// ponytail: brief.md goes to the repository's .atm/ until node 2 gives the run its clone.
-	path := filepath.Join(root, ".atm", "brief.md")
-	b, err := brief(i, c)
+// writeBrief writes at path the brief for issue i under config c, whose unit makes follow-up next pass, if any.
+func writeBrief(path string, i Issue, c config.Config, next *followUp) (string, map[string]any, error) {
+	// ponytail: the briefs go to the repository's .atm/ until node 2 gives the run its clone.
+	b, err := brief(i, c, next)
 	if err == nil {
 		err = os.MkdirAll(filepath.Dir(path), 0o755)
 	}

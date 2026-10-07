@@ -32,7 +32,8 @@ var work = map[string]string{"fix": fixWork, "feature": fixWork, "greenfield": f
 
 // fakeAgent plays the agent CLI name in its working directory, as $FAKE_AGENT says. Its call goes to
 // $FAKE_AGENT_CALL. The default plays a run that, when the ponytail skill is where name finds it and outside
-// git, uses it, does $FAKE_AGENT_WORK or else the work of the brief's task type, and reports fakeReport; fail
+// git, uses it, does $FAKE_AGENT_WORK or else the work of the brief's task type, and reports what that work
+// left in .atm/fake-report.json, or else fakeReport; fail
 // exits 3; no-report, no-test-file and no-skill each break the run one way; hang starts a grandchild, whose pid
 // goes to $FAKE_AGENT_PID, and never ends. The ponytail pass plays the same with the ponytail-review skill,
 // $FAKE_PONYTAIL as its mode, $FAKE_PONYTAIL_WORK as its work and $FAKE_PONYTAIL_REPORT, or no findings, as
@@ -87,7 +88,7 @@ func fakeAgent(name string) int {
 	}
 	_ = exec.Command("sh", "-c", todo).Run()
 	text = cmp.Or(map[string]string{"no-report": "Done, nothing to report.", "no-test-file": `{"summary": "s"}`}[mode],
-		text)
+		workReport(call), text)
 	if name == "codex" {
 		_ = os.WriteFile(after(args, "-o"), []byte(text), 0o600)
 	}
@@ -99,6 +100,13 @@ func fakeAgent(name string) int {
 			"content": []obj{{"type": "text", "text": text}}}},
 	}[name])
 	return 0
+}
+
+// workReport is the report the worker's work left in .atm/fake-report.json, "" for none or for the ponytail
+// pass, whose call is ".ponytail".
+func workReport(call string) string {
+	b, _ := os.ReadFile(".atm/fake-report.json")
+	return map[bool]string{true: string(b)}[call == ""]
 }
 
 func emit(ev obj) {
