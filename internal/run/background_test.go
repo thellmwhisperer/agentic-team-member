@@ -193,7 +193,9 @@ func TestHistoryReadsLargeRecordsAndReturnsScannerErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(atmDir, "runs.jsonl")
-	first, err := json.Marshal(Outcome{Outcome: "failed", Run: "large", Reason: strings.Repeat("x", 70*1024), Ended: time.Now()})
+	first, err := json.Marshal(Outcome{
+		Outcome: "failed", Run: "large", Reason: strings.Repeat("x", 70*1024), Ended: time.Now(),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
