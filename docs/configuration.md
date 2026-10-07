@@ -161,10 +161,10 @@ also fails the step and the run, even when the cut would otherwise be discarded.
 
 The cut is discarded, and the clone comes back exactly as before, when it does
 not lower the run's net added lines, reports no finding, adds a file, deletes a
-file, touches a file matching `test_patterns` or one outside the diff, fails
-the proof of a unit before the last, each on its own base with its own test and
-type, or fails the last unit's `checks` step run again without a command
-committing. A kept cut leaves two
+file, touches a file matching `test_patterns` or one outside the diff, changes
+a unit's test file since that unit was proven, fails an earlier unit's red test
+on its own base or its green test on the final tree with the cut, or fails the
+last unit's `checks` step run again without a command committing. A kept cut leaves two
 commits on the units before it: `atm unit <n>: <title>` with the last unit's
 work before the cut, then
 `ponytail: <n> cuts` with the cut, one `- <file>: <finding> (<family>)` line per

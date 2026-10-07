@@ -99,8 +99,8 @@ func parseArgs(args []string) (fs *flag.FlagSet, base *string, a *agent, err err
 	return fs, base, a, err
 }
 
-// proof is how a unit was proven: on its base commit, with its test, as its task type.
-type proof struct{ base, test, typ string }
+// proof is how a unit was proven: on its base commit, with its test's content and task type.
+type proof struct{ base, test, typ, testContent string }
 
 // units runs the units of the run in clone dir, from base commit sha, for issue i under config c: the first on
 // brief text, each next one, up to maxUnits, on the first follow-up on the issue the one before proved. It
@@ -143,7 +143,10 @@ func (a agent) units(r *verdict, root, dir, sha, text string, i Issue, c config.
 					return ev, fmt.Errorf("unit %d edited its red test %s, which it must make pass as it is", n, test)
 				}
 			}
-			proofs = append(proofs, proof{head, test, unit.Type})
+			testContent, err := os.ReadFile(filepath.Join(dir, test))
+			if err != nil {
+				return ev, err
+			}
 			result, err := checks(dir, head, unit.Type, test, c)
 			for key, value := range result {
 				ev[key] = value
@@ -151,6 +154,7 @@ func (a agent) units(r *verdict, root, dir, sha, text string, i Issue, c config.
 			if err != nil {
 				return ev, err
 			}
+			proofs = append(proofs, proof{head, test, unit.Type, string(testContent)})
 			var out []followUp
 			in, out, ev["follow_ups"], err = followUps(dir, report, i.Body, c.TestFile)
 			pending = append(pending, out...)
