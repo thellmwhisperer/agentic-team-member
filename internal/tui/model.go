@@ -152,9 +152,6 @@ func (m *Model) current(step string) *row {
 func (m *Model) started(step string, at time.Time) {
 	m.state, m.output = "running", nil
 	r := m.current(step)
-	if r == nil {
-		return
-	}
 	if step == "agent" && r.state != "pending" { // a chained unit: its rows again, after the last unit's
 		i := slices.IndexFunc(m.rows, func(r *row) bool { return r.step == "ponytail" })
 		m.rows = slices.Insert(m.rows, i, &row{step: "agent", label: fmt.Sprintf("Agent · unit %d", m.units()+1)},
@@ -189,9 +186,6 @@ func (m *Model) tools() (n int) {
 
 func (m *Model) ended(e event) {
 	r := m.current(e.Step)
-	if r == nil {
-		return
-	}
 	r.state, r.took = e.State, time.Duration(e.DurationMS)*time.Millisecond
 	switch e.Step {
 	case "issue":
@@ -232,9 +226,6 @@ func (m *Model) failedAt(r *row) string {
 // checkRow is the row of proof or command name under the current row of node step, added when new.
 func (m *Model) checkRow(step, name string) *row {
 	i := slices.Index(m.rows, m.current(step))
-	if i < 0 {
-		i = len(m.rows) - 1
-	}
 	for i++; i < len(m.rows) && m.rows[i].check; i++ {
 		if m.rows[i].label == name {
 			return m.rows[i]

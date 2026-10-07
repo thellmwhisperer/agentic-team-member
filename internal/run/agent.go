@@ -335,12 +335,8 @@ func lastObject(text string) map[string]any {
 // activity is what e tells the screen the agent does: its thinking, and its tool calls, each by its id, with
 // its result once known: running, passed or failed.
 func (e event) activity(harness string) []map[string]any {
-	of := map[string]func(event) []map[string]any{"claude": event.blocks, "pi": event.pi, "codex": event.codex,
-		"opencode": event.opencode}[harness]
-	if of == nil {
-		return nil
-	}
-	return of(e)
+	return map[string]func(event) []map[string]any{"claude": event.blocks, "pi": event.pi, "codex": event.codex,
+		"opencode": event.opencode}[harness](e)
 }
 
 func (e event) pi() []map[string]any {

@@ -1,0 +1,18 @@
+schema: 1
+id: T-PONYTAIL-20261007-073924-1
+status: accepted
+category: alien_code
+title: "Removed the PASS/ok green and FAIL red colouring of Log lines. DESIGN.md says the Log tail is dim co"
+created_at: 2026-10-07
+incident:
+  pattern: "Removed the PASS/ok green and FAIL red colouring of Log lines. DESIGN.md says the Log tail is dim content, so every line is now painted dim."
+  what_went_wrong: "An ATM run wrote it and ATM's ponytail pass cut it before delivery."
+  root_cause: "The coding agent wrote more than the issue needed."
+  rule_established: "Cut by the ponytail pass; it does not come back."
+  evidence:
+    - family: speculative_feature
+      example: "Removed the PASS/ok green and FAIL red colouring of Log lines. DESIGN.md says the Log tail is dim content, so every line is now painted dim."
+      artifact: internal/tui/view.go
+match:
+  family: speculative_feature
+  artifact: internal/tui/view.go

@@ -1,0 +1,18 @@
+schema: 1
+id: T-PONYTAIL-20261007-073924-3
+status: accepted
+category: alien_code
+title: "Removed checkRow's fallback to the last row when the node has no row. Check events only come under c"
+created_at: 2026-10-07
+incident:
+  pattern: "Removed checkRow's fallback to the last row when the node has no row. Check events only come under checks, which always has a row."
+  what_went_wrong: "An ATM run wrote it and ATM's ponytail pass cut it before delivery."
+  root_cause: "The coding agent wrote more than the issue needed."
+  rule_established: "Cut by the ponytail pass; it does not come back."
+  evidence:
+    - family: speculative_hardening
+      example: "Removed checkRow's fallback to the last row when the node has no row. Check events only come under checks, which always has a row."
+      artifact: internal/tui/model.go
+match:
+  family: speculative_hardening
+  artifact: internal/tui/model.go

@@ -241,18 +241,12 @@ func (m *Model) findingsBox(width int) string {
 	return box(title, strings.Join(out, "\n"), width)
 }
 
-// logBox is the last lines of the running node's output: PASS lines green, FAIL lines red, the rest dim.
+// logBox is the last lines of the running node's output, dim.
 func (m *Model) logBox(width, lines int) string {
 	out := m.output[max(0, len(m.output)-lines):]
 	styled := make([]string, len(out))
 	for i, l := range out {
-		color := dim
-		if strings.HasPrefix(l, "PASS") || strings.HasPrefix(l, "ok") {
-			color = green
-		} else if strings.HasPrefix(l, "FAIL") {
-			color = red
-		}
-		styled[i] = paint(color, l)
+		styled[i] = paint(dim, l)
 	}
 	return box(bold(cyan, "Log"), strings.Join(styled, "\n"), width)
 }
