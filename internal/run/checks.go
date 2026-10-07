@@ -96,12 +96,18 @@ func prove(clone, typ, test string, c config.Config) (err error) {
 	}
 	switch typ {
 	case "fix", "feature", "greenfield":
-		return redGreen(clone, tree, aside, test, c.TestFile)
+		var added map[string]string
+		if typ == "fix" {
+			if added, err = additions(clone, aside); err != nil {
+				return err
+			}
+		}
+		return redGreen(clone, tree, aside, added, test, c.TestFile)
 	case "refactor":
 		if p := first(changed, c.TestPatterns, true); p != "" {
 			return fmt.Errorf("a refactor changed the test %s", p)
 		}
-		base, _, err := trial(clone, tree, changed, c.Test, "")
+		base, _, err := trial(clone, tree, changed, nil, c.Test, "")
 		return errors.Join(err, wrap(base, "the suite fails on the base"))
 	case "tests":
 		if p := first(changed, slices.Concat(c.TestPatterns, c.DocsPatterns), false); p != "" {
@@ -111,7 +117,7 @@ func prove(clone, typ, test string, c config.Config) (err error) {
 		if err != nil {
 			return err
 		}
-		base, after, err := trial(clone, tree, aside, line, line)
+		base, after, err := trial(clone, tree, aside, nil, line, line)
 		return errors.Join(err, wrap(base, test+" fails on the base"), wrap(after, test+" fails after the change"))
 	case "docs":
 		if p := first(changed, c.DocsPatterns, false); p != "" {
@@ -134,27 +140,68 @@ func changes(clone, typ, test string) (changed, aside []string, err error) {
 	return changed, aside, err
 }
 
+// additions is, for each of paths the base has and the staged work in clone adds lines to without removing
+// any there, the base's content with those lines at its end: what the work adds, cut off from what the base
+// had. A new function still runs there; a line added inside an old one no longer does. ponytail: lines added
+// next to removed ones are left out, so a new function in a hunk that also edits an old line goes unseen.
+func additions(clone string, paths []string) (map[string]string, error) {
+	added := map[string]string{}
+	for _, p := range paths {
+		diff, err := git(clone, "--literal-pathspecs", "diff", "--cached", "-U0", "--no-renames", "HEAD", "--", p)
+		if err != nil {
+			return nil, err
+		}
+		var lines []string
+		pure := false
+		for _, l := range strings.Split(diff, "\n") {
+			if f := strings.Fields(l); len(f) > 1 && f[0] == "@@" {
+				pure = strings.HasSuffix(f[1], ",0")
+			} else if pure && strings.HasPrefix(l, "+") {
+				lines = append(lines, l[1:])
+			}
+		}
+		if len(lines) > 0 {
+			base, err := git(clone, "show", "HEAD:"+p)
+			if err != nil {
+				return nil, err
+			}
+			added[p] = base + "\n" + strings.Join(lines, "\n") + "\n"
+		}
+	}
+	return added, nil
+}
+
 // redGreen sets aside, in clone, the paths aside, runs test alone with tmpl, which must fail, brings the
-// agent's work, tree, back and runs test again, which must pass.
-func redGreen(clone, tree string, aside []string, test, tmpl string) error {
+// agent's work, tree, back and runs test again, which must pass. With the files added, paths to their
+// content, written over the base, test must fail too: else it fails on the base only for what the work adds.
+func redGreen(clone, tree string, aside []string, added map[string]string, test, tmpl string) error {
 	line, err := testLine(tmpl, test)
 	if err != nil {
 		return err
 	}
-	red, green, err := trial(clone, tree, aside, line, line)
+	red, green, err := trial(clone, tree, aside, nil, line, line)
 	switch {
 	case err != nil:
 		return err
 	case red == nil:
 		return fmt.Errorf("%s passes without the fix", test)
+	case len(added) > 0:
+		alone, _, err := trial(clone, tree, aside, added, line, "")
+		if err != nil {
+			return err
+		}
+		if alone == nil {
+			return fmt.Errorf("%s passes on the base plus only the lines the fix adds to its files, at their end: "+
+				"its red is a missing addition, not behaviour the base had", test)
+		}
 	}
 	return wrap(green, test+" fails with the fix")
 }
 
-// trial runs base with the paths aside as they are at HEAD, brings the agent's work, tree, back and runs
-// after, "" for nothing, and returns how each ended. A hang in either, or a clone that is no longer tree, is
-// err: the verdict is void.
-func trial(clone, tree string, aside []string, base, after string) (red, green, err error) {
+// trial runs base with the paths aside as they are at HEAD, then the files over, paths to their content,
+// written, brings the agent's work, tree, back and runs after, "" for nothing, and returns how each ended. A
+// hang in either, or a clone that is no longer tree, is err: the verdict is void. over must be among aside.
+func trial(clone, tree string, aside []string, over map[string]string, base, after string) (red, green, err error) {
 	if len(aside) > 0 {
 		args := append([]string{"--literal-pathspecs", "restore", "--source=HEAD", "--staged", "--worktree", "--"},
 			aside...)
@@ -162,10 +209,17 @@ func trial(clone, tree string, aside []string, base, after string) (red, green, 
 			return nil, nil, err
 		}
 	}
-	_, red = sh(clone, base)
+	for p, s := range over {
+		if err = os.WriteFile(filepath.Join(clone, p), []byte(s), 0o644); err != nil {
+			break
+		}
+	}
+	if err == nil {
+		_, red = sh(clone, base)
+	}
 	if len(aside) > 0 {
-		if _, err := git(clone, "restore", "--source="+tree, "--staged", "--worktree", "--", "."); err != nil {
-			return red, nil, err
+		if _, e := git(clone, "restore", "--source="+tree, "--staged", "--worktree", "--", "."); e != nil || err != nil {
+			return red, nil, errors.Join(err, e)
 		}
 	}
 	if errors.Is(red, errTimeout) {

@@ -100,7 +100,11 @@ aside except the report's `test_file`, which runs alone through `test_file`
 changes come back and it must pass. A `fix` sets aside only the files the base
 has, so the files the fix added stay and the red fails on behaviour: a test
 that only exercises a new file passes without the fix and is rejected (so is a
-fix made only of new files). `feature` and `greenfield` set aside everything,
+fix made only of new files). A `fix` red runs a second time, on the base with
+the lines the fix only adds to an old file (hunks that remove nothing) moved to
+that file's end, and must fail there too: a test that only exercises a function
+the fix adds to an old file passes there and is rejected, while a line added
+inside an old function no longer runs there. `feature` and `greenfield` set aside everything,
 so the red may fail on a missing symbol or module. `refactor` runs `test` on
 the base, which must pass, and may not change a file matching `test_patterns`.
 `tests` runs the new test on the base and after, both must pass, and may change

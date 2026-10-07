@@ -5,6 +5,7 @@ import (
 	"cmp"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -33,40 +34,60 @@ func checksStep(t *testing.T, out *bytes.Buffer) obj {
 // newFile makes b.txt and tests only it.
 const newFile = "echo fixed > b.txt; echo 'grep -q fixed b.txt' > a_test.sh"
 
+// oneLine and multiLine commit a lib.sh whose value is broken, on one line or over a block; testValue tests value.
+const (
+	oneLine   = "echo 'value() { echo broken; }' > lib.sh; git add lib.sh; git commit -qm lib"
+	multiLine = `printf 'value() {\n  v=broken\n  echo $v\n}\n' > lib.sh; git add lib.sh; git commit -qm lib`
+	testValue = `; echo '. ./lib.sh; test "$(value)" = fixed' > a_test.sh`
+)
+
+// proofCases are, by task type, a line committed on the base, the agent's work, and what the run's failure
+// names, "" for a run that passes.
+var proofCases = []struct {
+	name, typ, base, work, atm, why string
+	hang                            bool
+}{
+	{name: "fix whose test only exercises a function it adds", typ: "fix", base: oneLine,
+		work: `echo 'helper() { echo fixed; }' >> lib.sh; echo '. ./lib.sh; test "$(helper)" = fixed' > a_test.sh`,
+		why:  "behaviour the base had"},
+	{name: "fix that changes a line", typ: "fix", base: oneLine,
+		work: "echo 'value() { echo fixed; }' > lib.sh" + testValue},
+	{name: "fix that adds a line inside a function", typ: "fix", base: multiLine,
+		work: `printf 'value() {\n  v=broken\n  v=fixed\n  echo $v\n}\n' > lib.sh` + testValue},
+	{name: "fix", typ: "fix"},
+	{name: "fix that adds a file", typ: "fix",
+		work: `echo fixed > conf.txt; echo conf.txt > a.txt; echo 'grep -q fixed "$(cat a.txt)"' > a_test.sh`},
+	{name: "fix whose test only exercises a new file", typ: "fix", work: newFile, why: "passes without the fix"},
+	{name: "fix whose test fails with it", typ: "fix", work: "echo fixed > a.txt; echo false > a_test.sh",
+		why: "fails with the fix"},
+	{name: "fix whose test hangs without it", typ: "fix", why: "timed out", hang: true,
+		work: "echo fixed > a.txt; echo 'grep -q fixed a.txt || while :; do :; done' > a_test.sh"},
+	{name: "fix whose test changes the clone", typ: "fix",
+		work: "echo fixed > a.txt; echo 'grep -q fixed a.txt && echo x >> a.txt' > a_test.sh", why: "void"},
+	{name: "fix without test_file", typ: "fix", atm: atmSet(atmYAML, "test_file", ""), why: "test_file"},
+	{name: "feature red on a missing file", typ: "feature", work: newFile},
+	{name: "greenfield red on a missing file", typ: "greenfield", work: newFile},
+	{name: "agent commits", typ: "fix", work: fixWork + "; git add -A; git commit -qm fix", why: "commits"},
+	{name: "refactor", typ: "refactor"},
+	{name: "refactor that touches a test", typ: "refactor", work: "echo true > a_test.sh", why: "a_test.sh"},
+	{name: "refactor on a red suite", typ: "refactor", atm: atmSet(atmYAML, "test", "test -f b.txt"),
+		why: "fails on the base"},
+	{name: "tests", typ: "tests"},
+	{name: "tests that touch source", typ: "tests", work: "echo b > b.txt; echo 'test -f b.txt' > b_test.sh",
+		why: "b.txt"},
+	{name: "tests failing on the base", typ: "tests", work: "echo false > a_test.sh", why: "fails on the base"},
+	{name: "docs", typ: "docs"},
+	{name: "docs that touch code", typ: "docs", work: "echo doc > README.md; echo fixed > a.txt", why: "a.txt"},
+	{name: "chore", typ: "chore"},
+}
+
 func TestRunChecksTheProofOfEachTaskType(t *testing.T) {
-	cases := []struct {
-		name, typ, work, atm, why string
-		hang                      bool
-	}{
-		{name: "fix", typ: "fix"},
-		{name: "fix that adds a file", typ: "fix",
-			work: `echo fixed > conf.txt; echo conf.txt > a.txt; echo 'grep -q fixed "$(cat a.txt)"' > a_test.sh`},
-		{name: "fix whose test only exercises a new file", typ: "fix", work: newFile, why: "passes without the fix"},
-		{name: "fix whose test fails with it", typ: "fix", work: "echo fixed > a.txt; echo false > a_test.sh",
-			why: "fails with the fix"},
-		{name: "fix whose test hangs without it", typ: "fix", why: "timed out", hang: true,
-			work: "echo fixed > a.txt; echo 'grep -q fixed a.txt || while :; do :; done' > a_test.sh"},
-		{name: "fix whose test changes the clone", typ: "fix",
-			work: "echo fixed > a.txt; echo 'grep -q fixed a.txt && echo x >> a.txt' > a_test.sh", why: "void"},
-		{name: "fix without test_file", typ: "fix", atm: atmSet(atmYAML, "test_file", ""), why: "test_file"},
-		{name: "feature red on a missing file", typ: "feature", work: newFile},
-		{name: "greenfield red on a missing file", typ: "greenfield", work: newFile},
-		{name: "agent commits", typ: "fix", work: fixWork + "; git add -A; git commit -qm fix", why: "commits"},
-		{name: "refactor", typ: "refactor"},
-		{name: "refactor that touches a test", typ: "refactor", work: "echo true > a_test.sh", why: "a_test.sh"},
-		{name: "refactor on a red suite", typ: "refactor", atm: atmSet(atmYAML, "test", "test -f b.txt"),
-			why: "fails on the base"},
-		{name: "tests", typ: "tests"},
-		{name: "tests that touch source", typ: "tests", work: "echo b > b.txt; echo 'test -f b.txt' > b_test.sh",
-			why: "b.txt"},
-		{name: "tests failing on the base", typ: "tests", work: "echo false > a_test.sh", why: "fails on the base"},
-		{name: "docs", typ: "docs"},
-		{name: "docs that touch code", typ: "docs", work: "echo doc > README.md; echo fixed > a.txt", why: "a.txt"},
-		{name: "chore", typ: "chore"},
-	}
-	for _, c := range cases {
+	for _, c := range proofCases {
 		t.Run(c.name, func(t *testing.T) {
 			root := repo(t, "https://example.com/owner/repo.git", cmp.Or(c.atm, atmYAML))
+			if b, err := exec.Command("sh", "-c", c.base).CombinedOutput(); err != nil {
+				t.Fatalf("base: %v\n%s", err, b)
+			}
 			if c.work != "" {
 				t.Setenv("FAKE_AGENT_WORK", c.work)
 			}
