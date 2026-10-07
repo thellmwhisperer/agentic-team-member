@@ -58,19 +58,8 @@ func fakeAgent(name string) int {
 		mode, skill, call, todo = os.Getenv("FAKE_PONYTAIL"), "ponytail-review", ".ponytail", os.Getenv("FAKE_PONYTAIL_WORK")
 		text = cmp.Or(os.Getenv("FAKE_PONYTAIL_REPORT"), `{"findings": [], "summary": "Lean already."}`)
 	}
-	if path := os.Getenv("FAKE_AGENT_CALL"); path != "" {
-		b, _ := json.Marshal(obj{"args": args, "stdin": string(stdin), "env": os.Environ()})
-		_ = os.WriteFile(path+call, b, 0o600)
-	}
-	if ready := os.Getenv("FAKE_AGENT_BARRIER_READY"); ready != "" {
-		_ = os.WriteFile(filepath.Join(ready, strconv.Itoa(os.Getpid())), nil, 0o600)
-		for {
-			if _, err := os.Stat(os.Getenv("FAKE_AGENT_BARRIER_RELEASE")); err == nil {
-				break
-			}
-			time.Sleep(10 * time.Millisecond)
-		}
-	}
+	recordFakeAgentCall(args, stdin, call)
+	waitForFakeAgentRelease()
 	fmt.Print(`{"type": "system", "subtype": "init"}`+"\n", os.Getenv("FAKE_AGENT_STREAM")) // the test's lines too
 	fmt.Fprintln(os.Stderr, "fake stderr")
 	switch mode {
@@ -110,6 +99,25 @@ func fakeAgent(name string) int {
 			"content": []obj{{"type": "text", "text": text}}}},
 	}[name])
 	return 0
+}
+
+func recordFakeAgentCall(args []string, stdin []byte, call string) {
+	if path := os.Getenv("FAKE_AGENT_CALL"); path != "" {
+		b, _ := json.Marshal(obj{"args": args, "stdin": string(stdin), "env": os.Environ()})
+		_ = os.WriteFile(path+call, b, 0o600)
+	}
+}
+
+func waitForFakeAgentRelease() {
+	if ready := os.Getenv("FAKE_AGENT_BARRIER_READY"); ready != "" {
+		_ = os.WriteFile(filepath.Join(ready, strconv.Itoa(os.Getpid())), nil, 0o600)
+		for {
+			if _, err := os.Stat(os.Getenv("FAKE_AGENT_BARRIER_RELEASE")); err == nil {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
 }
 
 // workReport is the report the worker's work left in .atm/fake-report.json, "" for none or for the ponytail
