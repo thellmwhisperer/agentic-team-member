@@ -51,12 +51,14 @@ that SHA, excludes `/.atm/` in the clone, and runs `install` in it with `sh -c`
 fails the step and the run. Its end line carries `clone` and `sha`.
 
 The clone is removed when the run ends, unless the run delivered and its PR is
-open. Next to each clone, `<clone>.pid` holds its run's pid and
-`<clone>.delivered` holds `<branch> <base>` once it delivered. Each run first
-removes the clones of runs that are gone, except a delivered clone whose branch
-is not merged into its base (`git branch --merged` after a fetch from the
-repository) and whose PR `gh` does not report closed or merged, when origin is
-on GitHub.
+open. Each run's commands inherit a shared lock in `<clone>.lock`; cleanup
+removes the clone only after it can take an exclusive lock. `<clone>.delivered`
+holds `<branch> <base>` once it delivered. Each run first removes the clones of
+runs that are gone, except a delivered clone whose branch is not merged into
+its base (`git branch --merged` after a fetch from the repository) and whose PR
+`gh` does not report closed or merged, when origin is on GitHub. A descendant
+that closes its inherited descriptors (for example a Python subprocess with
+`close_fds`) does not hold the clone.
 
 The `agent` step follows the contract. The agent is `--harness` (`claude`,
 `codex`, `opencode` or `pi`; any other fails the config) with the run's model
