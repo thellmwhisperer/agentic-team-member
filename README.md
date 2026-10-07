@@ -2,27 +2,27 @@
 
 > The coding agent is one node. Every edge is decided by code.
 
-![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)
 ![Status: alpha](https://img.shields.io/badge/status-alpha-orange)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/pipeline-dark.svg">
-  <img alt="ATM pipeline: issue, isolated clone, contract, coding agent, checks. FAIL stops the run. PASS goes to the slop detector, a code quality gate where a model may only cut, then to the delivery and code review gate. The shipped example of that gate is no-mistakes, a graph of its own where review and document are models, test and PR are code with a model part, and rebase, lint and CI call a model only after a fix answer. A passed unit with a proven follow-up goes back to the agent, at most three units." src="docs/assets/pipeline-light.svg" width="1000">
+  <img alt="ATM pipeline: issue, isolated clone, contract, coding agent, checks. FAIL stops the run. PASS goes to the slop detector, a code quality gate where a model may only cut, then to the delivery and code review gate. The documented example of that gate is no-mistakes, a graph of its own where review and document are models, test and PR are code with a model part, and rebase, lint and CI call a model only after a fix answer. A passed unit with a proven follow-up goes back to the agent, at most three units." src="docs/assets/pipeline-light.svg" width="1000">
 </picture>
 
 Give ATM an issue, from GitHub or a text file. It hands the issue to a coding
 agent you already pay for (Claude Code, Codex, OpenCode or pi) inside an
 isolated clone, with a written contract. Then code, not the agent, decides:
-does the new test fail without the fix and pass with it, do the suite and
-typecheck still pass, did the diff stay inside the issue. A green run gets one
-more agent call, the slop detector, that may only delete. Then the delivery and
+does the new test fail without the fix and pass with it, do the configured
+checks still pass, and does the task type's proof hold. A green run gets one
+more agent call, the slop detector, that may only cut. Then the delivery and
 code review gate takes the branch.
 
 ## A real run
 
-Issue 130 of this repo, 5 October 2026, Claude Opus 5.5, effort high: every
-step of a run reports live, and no run starts without a monitor. 14 min 01 s,
+An earlier Python-worker run on issue 130 of this repo, 5 October 2026,
+used Claude Opus 5.5 at high effort. It reported steps live and required a
+monitor. 14 min 01 s,
 55 agent turns, five red tests first, red and green verified, 3 cuts kept by
 the slop detector, [PR 136](https://github.com/thellmwhisperer/agentic-team-member/pull/136)
 merged, issue closed.
@@ -71,57 +71,70 @@ SUMMARY
 The agent's own red (`#18`) is a courtesy. The verdict is the RED / GREEN
 block: ATM parks the fix, runs the test, brings the fix back, runs it again.
 The `Aviso` line is the agent catching itself editing outside the clone; the
-scope check would have caught it too. This run is the one that taught ATM to
-print its steps live: the lines with a duration in the runs after it exist
-because of it.
+scope check would have caught it too. This was the Python worker's original
+live-step implementation. The Go worker has its own report and screen.
 
 ## Who decides what
 
 | Step | Who | Says no to |
 |------|-----|-----------|
-| Clone, environment, contract | code | a dirty clone, a missing test runner |
+| Clone and contract | code | a failed clone or install, an incomplete configuration |
 | Write the fix | **model** | nothing: it decides nothing |
-| Red / green | code | a test that passes without the fix; a red that only fails on a missing import |
-| The project's own `test`, `typecheck` and `lint` commands | code | any failure |
+| Red / green | code | a test that passes without the fix or fails with it |
+| The project's configured `install`, `test`, `typecheck` and `lint` commands | code | any failure |
 | Follow-ups | code | a gap without a red test |
 | Slop detector (code quality gate, not code review) | **model**, may only cut | a cut that breaks any check or does not shrink the diff: the clone goes back |
-| Delivery and code review gate | your command | ATM branches, commits and runs it. The shipped example is no-mistakes, a graph of its own: models review, judge the test evidence, update the docs and write the PR; code rebases, runs your test and lint commands, pushes and watches CI |
+| Delivery and code review gate | your command | ATM branches, commits and runs it. The documented example is no-mistakes, a graph of its own: models review, judge the test evidence, update the docs and write the PR; code rebases, runs your test and lint commands, pushes and watches CI |
 
-Step by step, with the function behind each one: [How a run flows](docs/how-a-run-flows.md).
+Step by step: [How a run flows](docs/how-a-run-flows.md).
 
 ## Run it
 
 ```bash
 git clone https://github.com/thellmwhisperer/agentic-team-member.git
+cd agentic-team-member
+go build -o atm ./cmd/atm
+ATM_BIN="$PWD/atm"
+
+cd /path/to/your/repo
+"$ATM_BIN" init
+# Fill in the required commands and file patterns in .atm.yaml.
+"$ATM_BIN" run 300
+# Or: "$ATM_BIN" run plans/retry-on-timeout.md
 ```
+
+Use the Go version in [go.mod](go.mod) to build ATM. Run it from the target
+repository. A local issue file needs a `Type:` line; see
+[Configuration](docs/configuration.md).
+`atm run` shows the run on a terminal and returns its label off a terminal;
+`atm status`, `atm attach` and `atm runs` let you follow it. `atm axi run` waits
+for the result when another program launches ATM.
 
 | Exit | Meaning |
 |------|---------|
 | `0` | Every unit passed, and delivery, if configured, exited 0 |
 | `1` | A unit failed; nothing is delivered |
-| `2` | Preparation failed, the label is taken, or there is no monitor and no terminal |
+| `2` | Configuration, issue, clone or contract failed |
 | `4` | Every unit passed, but the delivery command exited non-zero |
 
-ATM is built to be launched and watched by an agent. `[monitor].command` runs
-at every step start and end, so the launching agent knows where the run is
-without reading its output; with no monitor, the worker wants a terminal.
-`--dry-run` prints the contract and stops. `--label NAME` puts the run in
-`<[runs].dir>/NAME` (`~/.atm/runs` as shipped). Delivery is whatever `[delivery].command` says; the shipped
-example hands the branch to [no-mistakes](https://github.com/kunchenguid/no-mistakes).
-Leave it empty and the green work stays in the clone.
+The target repository retains run reports; [Configuration](docs/configuration.md)
+describes their location and cleanup. Delivery runs the `delivery` command
+in `.atm.yaml`; its configuration example hands the branch to
+[no-mistakes](https://github.com/kunchenguid/no-mistakes).
+Leave it empty to skip delivery.
 
 ## Read more
 
-- [How a run flows](docs/how-a-run-flows.md): every step, the function, what it writes.
-- [Configuration](docs/configuration.md): every flag and key, its default, who reads it.
+- [How a run flows](docs/how-a-run-flows.md): step order and implementation.
+- [Configuration](docs/configuration.md): YAML keys, run flags and detailed behavior.
 - [ATM maintains itself](docs/self-maintenance.md): this repo's own fixes go through ATM; the hooks that hold the loop.
 - [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Code of conduct](CODE_OF_CONDUCT.md)
 
 ## Status
 
-Alpha. Full tooling for JavaScript and TypeScript; Python with pytest and
-ruff; Go with `go test` and `go vet` once the runner line is set. The contract,
-the report and the flags can still change. Open work is in the
+Alpha. Each target repository declares its own install, test, typecheck and
+lint commands in `.atm.yaml`; ATM does not detect a language's tooling. The
+contract, the report and the flags can still change. Open work is in the
 [issues](https://github.com/thellmwhisperer/agentic-team-member/issues).
 
 Apache 2.0. [LICENSE](LICENSE) · [NOTICE](NOTICE)
