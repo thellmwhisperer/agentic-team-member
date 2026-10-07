@@ -213,7 +213,11 @@ func (s *server) handle(c net.Conn) {
 	enc := json.NewEncoder(c)
 	switch req.Cmd {
 	case "run":
-		o := s.start(req.Args)
+		o, err := s.start(req.Args)
+		if err != nil {
+			_ = enc.Encode(reply{Error: err.Error()})
+			return
+		}
 		_ = enc.Encode(reply{Run: &o})
 	case "runs":
 		s.Lock()
@@ -231,7 +235,7 @@ func (s *server) handle(c net.Conn) {
 }
 
 // start runs args, atm run's command line, in the background and returns the run, just started.
-func (s *server) start(args []string) Outcome {
+func (s *server) start(args []string) (Outcome, error) {
 	issue := ""
 	if len(args) > 0 {
 		issue = args[len(args)-1]
@@ -240,18 +244,33 @@ func (s *server) start(args []string) Outcome {
 		filepath.Ext(issue))), "-")
 	s.Lock()
 	defer s.Unlock()
-	n := 0 // the last run's number: its label's suffix
-	if len(s.runs) > 0 {
-		last := s.runs[len(s.runs)-1].Run
-		n, _ = strconv.Atoi(last[strings.LastIndex(last, "-")+1:])
+	n := 0
+	max := func(label string) {
+		if number, err := strconv.Atoi(label[strings.LastIndex(label, "-")+1:]); err == nil && number > n {
+			n = number
+		}
+	}
+	for _, r := range s.runs {
+		max(r.Run)
+	}
+	runsDir := filepath.Join(s.root, ".atm", "runs")
+	entries, err := os.ReadDir(runsDir)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return Outcome{}, err
+	}
+	for _, entry := range entries {
+		max(entry.Name())
 	}
 	r := &bgRun{more: make(chan struct{}), Outcome: Outcome{Outcome: "running", Issue: issue, Started: time.Now(),
 		Run: cmp.Or(strings.Trim(name, "-"), "run") + "-" + strconv.Itoa(n+1)}}
 	r.Report = filepath.Join(runDir(s.root, r.Run), "report.json")
+	if err := os.MkdirAll(filepath.Dir(r.Report), 0o755); err != nil {
+		return Outcome{}, err
+	}
 	s.runs = append(s.runs, r)
 	s.save()
 	go s.run(r, args)
-	return r.Outcome
+	return r.Outcome, nil
 }
 
 func (s *server) run(r *bgRun, args []string) {
@@ -474,7 +493,7 @@ func history(root string) ([]*bgRun, error) {
 // save drops the oldest runs that ended past maxRuns, then writes the runs to runs.jsonl, through a file renamed
 // over it, so a crash leaves the last one whole. Under the server's lock.
 func (s *server) save() {
-	for i := 0; len(s.runs) > maxRuns && i < len(s.runs)-1; {
+	for i := 0; len(s.runs) > maxRuns && i < len(s.runs); {
 		if s.runs[i].Ended.IsZero() {
 			i++
 		} else {

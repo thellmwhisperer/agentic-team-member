@@ -375,7 +375,7 @@ func TestBackgroundPrunesTheHistoryWhenRunsEnd(t *testing.T) {
 	}
 }
 
-func TestBackgroundKeepsNewestLabelWhenItEndsFirst(t *testing.T) {
+func TestBackgroundKeepsLabelMonotonicWhenNewestIsPruned(t *testing.T) {
 	top := gitT(t, repo(t, "https://example.com/owner/repo.git", atmYAML), "rev-parse", "--show-toplevel")
 	if err := os.MkdirAll(filepath.Join(top, ".atm"), 0o755); err != nil {
 		t.Fatal(err)
@@ -385,16 +385,24 @@ func TestBackgroundKeepsNewestLabelWhenItEndsFirst(t *testing.T) {
 		s.runs = append(s.runs, &bgRun{Outcome: Outcome{Run: fmt.Sprintf("issue-%d", n), Outcome: "running",
 			Started: time.Now()}})
 	}
+	if err := os.MkdirAll(runDir(top, "issue-201"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	s.runs = append(s.runs, &bgRun{Outcome: Outcome{Run: fmt.Sprintf("issue-%d", maxRuns+1), Outcome: "passed",
 		Started: time.Now(), Ended: time.Now()}})
 	s.save()
-	if saved, err := history(top); err != nil || len(saved) != maxRuns+1 || saved[len(saved)-1].Run != "issue-201" {
-		t.Fatalf("history after newest run ended = %d runs, %v; want newest issue-201 retained", len(saved), err)
+	if saved, err := history(top); err != nil || len(saved) != maxRuns || saved[len(saved)-1].Run != "issue-200" {
+		t.Fatalf("history after newest run ended = %d runs, %v; want 200 with issue-201 pruned", len(saved), err)
 	}
 	t.Setenv("FAKE_AGENT", "fail")
-	started := s.start([]string{issueFile(t, issue)})
-	if started.Run != "issue-202" || started.Report != filepath.Join(top, ".atm", "runs", "issue-202", "report.json") {
-		t.Fatalf("Start = %+v; want issue-202 and its unique run directory", started)
+	started, err := s.start([]string{issueFile(t, issue)})
+	if err != nil || started.Run != "issue-202" || started.Report != filepath.Join(top, ".atm", "runs", "issue-202", "report.json") {
+		t.Fatalf("Start = %+v, %v; want issue-202 and its unique run directory", started, err)
+	}
+	for _, label := range []string{"issue-201", "issue-202"} {
+		if info, err := os.Stat(runDir(top, label)); err != nil || !info.IsDir() {
+			t.Fatalf("run directory %s: %v; want distinct existing directories", label, err)
+		}
 	}
 }
 
