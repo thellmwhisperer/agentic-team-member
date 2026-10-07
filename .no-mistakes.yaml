@@ -21,6 +21,9 @@ review:
         Run tests only through `scripts/test.sh` (it passes its arguments to pytest). It runs pytest
         under Python 3.12 with requirements.txt; a bare `python3 -m pytest` may pick a Python older
         than ATM supports and fail before collecting a test.
+        A finding is a defect against the linked issue's acceptance criteria, or one that breaks the
+        repository's test, typecheck or lint commands. Hardening for a case the issue does not name is
+        reported as a note and changes nothing.
 auto_fix:
   review: 0  # the reviewer only reports; the agent that launched ATM answers every finding (Javi, 5-oct-2026)
 ci:
