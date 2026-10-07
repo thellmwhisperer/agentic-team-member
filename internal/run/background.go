@@ -48,7 +48,7 @@ func (o Outcome) Err() error {
 	if o.Outcome == "passed" {
 		return nil
 	}
-	return exitError{cmp.Or(codes[o.FailedNode], 2), errors.New(cmp.Or(o.Reason, "the run "+o.Outcome))}
+	return exitError{cmp.Or(codes[o.FailedNode], 2), errors.New(o.Reason)}
 }
 
 type request struct {
@@ -121,10 +121,7 @@ func Serve(root string) error {
 		return errors.New("a background process already serves " + root)
 	}
 	// ponytail: two started at once may both get here and the second one's socket wins; a lock file is the upgrade.
-	_ = os.Remove(sock) // a dead one's
-	if err := os.MkdirAll(filepath.Dir(sock), 0o755); err != nil {
-		return err
-	}
+	_ = os.Remove(sock) // a dead one's; connect, which starts it, made .atm
 	l, err := net.Listen("unix", short(sock))
 	if err != nil {
 		return err
@@ -377,8 +374,7 @@ func history(root string) []*bgRun {
 			o.Reason = "the background process ended before the run did"
 			o.NextStep = "run it again: atm run " + o.Issue
 		}
-		r := &bgRun{Outcome: o, more: make(chan struct{})}
-		close(r.more)
+		r := &bgRun{Outcome: o} // ended: attach never waits on its more
 		if i, ok := at[o.Run]; ok {
 			runs[i] = r
 			continue

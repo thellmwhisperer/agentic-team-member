@@ -66,13 +66,13 @@ func outcome(w io.Writer, asJSON bool, o run.Outcome) error {
 	values := []string{o.Outcome, o.Run, o.FailedNode, o.Reason, o.Report, o.NextStep}
 	var b strings.Builder
 	if asJSON {
-		b.WriteString(jsonObject(keys, values))
+		b.WriteString(jsonObject(keys, values) + "\n")
 	} else {
 		for i, k := range keys {
 			b.WriteString(k + ": " + toon(values[i]) + "\n")
 		}
 	}
-	_, err := io.WriteString(w, strings.TrimSuffix(b.String(), "\n")+"\n")
+	_, err := io.WriteString(w, b.String())
 	return err
 }
 
