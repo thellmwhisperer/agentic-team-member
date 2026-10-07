@@ -97,4 +97,7 @@ func TestFollowDisconnectsWhenItsTerminalLeaves(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("Follow kept the terminal attached after its input closed")
 	}
+	if _, err := Attach(top, o.Run, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
 }
