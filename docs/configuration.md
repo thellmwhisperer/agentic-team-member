@@ -247,11 +247,10 @@ removed while no run goes. The latest state of each retained run is saved to
 `.atm/runs.jsonl`, so a new background process still lists them; a run left
 running there is shown failed at its last step. On each new run, it drops the
 oldest ended runs while the list exceeds 200. It never drops a running run,
-and completion does not prune, so the history can exceed 200. Every clone of
-its runs carries its pid: the sweep keeps one of those only while the
-background process holds its run, so the clone of a run that died, or of one
-in an earlier background process whose pid it got, is removed by the next
-sweep.
+and completion does not prune, so the history can exceed 200. Each clone has a
+`<clone>.lock` file; commands started by its run inherit a shared lock on it.
+The next sweep removes a clone after it can take the exclusive lock, even when
+the background process that started the run has exited.
 
 | Command | Prints |
 |---------|--------|

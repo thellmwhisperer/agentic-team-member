@@ -142,10 +142,18 @@ func kept(dir, repo string) bool {
 }
 
 func remove(dir string, lock *os.File) error {
+	opened, err := lock.Stat()
+	if err != nil {
+		return errors.Join(err, lock.Close())
+	}
+	current, err := os.Stat(dir + ".lock")
+	if err != nil || !os.SameFile(opened, current) {
+		return errors.Join(err, lock.Close())
+	}
 	removed, err := removeCloneDir(dir)
 	if err != nil || !removed {
 		return errors.Join(err, lock.Close())
 	}
-	err = errors.Join(os.RemoveAll(dir+".pid"), os.RemoveAll(dir+".delivered"), lock.Close())
-	return errors.Join(err, os.RemoveAll(dir+".lock"))
+	err = errors.Join(os.RemoveAll(dir+".pid"), os.RemoveAll(dir+".delivered"), os.RemoveAll(dir+".lock"))
+	return errors.Join(err, lock.Close())
 }
