@@ -16,12 +16,14 @@ import (
 
 func TestRunKillsTheAgentGroup(t *testing.T) {
 	for _, c := range []struct {
-		name, why string
-		sig       syscall.Signal
+		name, why, mode string
+		sig             syscall.Signal
 	}{
-		{name: "timeout", why: "timed out"},
-		{name: "SIGINT", why: "interrupted", sig: syscall.SIGINT},
-		{name: "SIGTERM", why: "interrupted", sig: syscall.SIGTERM},
+		{name: "timeout", why: "timed out", mode: "hang"},
+		{name: "SIGINT", why: "interrupted", mode: "hang", sig: syscall.SIGINT},
+		{name: "SIGTERM", why: "interrupted", mode: "hang", sig: syscall.SIGTERM},
+		{name: "timeout, own session", why: "timed out", mode: "hang-session"},
+		{name: "SIGTERM, own session", why: "interrupted", mode: "hang-session", sig: syscall.SIGTERM},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			root := repo(t, "https://example.com/owner/repo.git", atmYAML)
@@ -34,7 +36,7 @@ func TestRunKillsTheAgentGroup(t *testing.T) {
 			if err := syscall.Mkfifo(fifo, 0o600); err != nil {
 				t.Fatal(err)
 			}
-			t.Setenv("FAKE_AGENT", "hang")
+			t.Setenv("FAKE_AGENT", c.mode)
 			t.Setenv("FAKE_AGENT_PID", fifo)
 			pids := make(chan int, 1)
 			go func() {

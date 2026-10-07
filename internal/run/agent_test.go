@@ -39,7 +39,8 @@ var work = map[string]string{"fix": fixWork, "feature": fixWork, "greenfield": f
 // git, uses it, does $FAKE_AGENT_WORK or else the work of the brief's task type, and reports what that work
 // left in .atm/fake-report.json, or else fakeReport; fail
 // exits 3; no-report, no-test-file and no-skill each break the run one way; hang starts a grandchild, whose pid
-// goes to $FAKE_AGENT_PID, and never ends. The ponytail pass plays the same with the ponytail-review skill,
+// goes to $FAKE_AGENT_PID, and never ends; hang-session does the same with the grandchild in its own session.
+// The ponytail pass plays the same with the ponytail-review skill,
 // $FAKE_PONYTAIL as its mode, $FAKE_PONYTAIL_WORK as its work and $FAKE_PONYTAIL_REPORT, or no findings, as
 // its report; its call goes to $FAKE_AGENT_CALL.ponytail. $FAKE_AGENT_STREAM goes to its stdout after its first line.
 func fakeAgent(name string) int {
@@ -106,9 +107,12 @@ func fakeAgentMode(mode string) (int, bool) {
 	switch mode {
 	case "fail":
 		return 3, true
-	case "hang":
+	case "hang", "hang-session":
 		grandchild := exec.Command(os.Args[0])
 		grandchild.Env, grandchild.Stdout = append(os.Environ(), "FAKE_AGENT=grandchild"), os.Stdout
+		if mode == "hang-session" {
+			detach(grandchild)
+		}
 		_ = grandchild.Run()
 		return 0, true
 	case "orphan":
