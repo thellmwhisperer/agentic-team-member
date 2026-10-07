@@ -384,7 +384,7 @@ process whose pid it got, is removed by the next sweep.
 |---------|--------|
 | `atm status` | Each run going: label, step, duration, issue; or `nothing runs` |
 | `atm attach [run]` | The run's screen (the last one going by default) until it ends; leaving leaves it going |
-| `atm runs` | Every run: label, `running`, `passed` or `failed at <node>`, duration, issue, its `report.json` once it ended |
+| `atm runs` | Every run: label, `running`, `passed` or `failed at <node>`, duration, issue and its `report.json` path |
 | `atm axi run [--json] <atm run's arguments>` | Waits for the end, then the outcome |
 | `atm axi status [--json]`, `atm axi runs [--json]` | The runs going, or every run, as a table |
 
