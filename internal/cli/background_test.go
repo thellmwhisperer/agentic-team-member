@@ -139,8 +139,8 @@ func atmIn(t *testing.T, code int, args ...string) string {
 }
 
 // The background process is this test binary, as atm serve, which ends once its socket is gone with the test.
-func TestRunGoesToTheBackgroundAndEveryCommandSeesIt(t *testing.T) {
-	dir := repo(t, "https://example.com/o/r.git") // no .atm.yaml: every run fails at once
+func cleanBackgroundServer(t *testing.T, dir string) {
+	t.Helper()
 	t.Cleanup(func() {
 		if err := os.Remove(filepath.Join(dir, ".atm", "atm.sock")); err != nil && !os.IsNotExist(err) {
 			t.Error(err)
@@ -153,6 +153,11 @@ func TestRunGoesToTheBackgroundAndEveryCommandSeesIt(t *testing.T) {
 		}
 		t.Errorf("background process still holds %s", log)
 	})
+}
+
+func TestRunGoesToTheBackgroundAndEveryCommandSeesIt(t *testing.T) {
+	dir := repo(t, "https://example.com/o/r.git") // no .atm.yaml: every run fails at once
+	cleanBackgroundServer(t, dir)
 	if err := os.WriteFile(filepath.Join(dir, "retry.md"), []byte("# Retry\nType: fix\nRetry.\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +169,7 @@ func TestRunGoesToTheBackgroundAndEveryCommandSeesIt(t *testing.T) {
 		t.Fatalf("atm status: %q", out)
 	}
 	if out := atmIn(t, 0, "runs"); !strings.HasPrefix(out, "retry-1  failed  ") ||
-		!strings.Contains(out, " s  "+string(filepath.Separator)) {
+		!strings.HasSuffix(out, " s  "+filepath.Join(dir, "retry.md")+"\n") {
 		t.Fatalf("atm runs: %q", out)
 	}
 	out := atmIn(t, 2, "axi", "run", "retry.md")
