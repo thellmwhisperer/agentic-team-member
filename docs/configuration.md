@@ -345,9 +345,27 @@ flags or config, an unreadable issue, a failed contract or clone. There is no
 background process and returns. Off a terminal it prints the run's label
 (`<issue name>-<n>`, `n` counting the repository's runs); on a terminal it
 shows the run's screen and exits with the run's code once it ends. Closing the
-terminal, or leaving with Ctrl-C, leaves the run going. The run's screen is one
-line per step event (`clone     passed 0.9 s`, the error's first line after a
-failure), then the delivery's output and summary.
+terminal, or leaving with `q` or Ctrl-C, leaves the run going.
+
+On a terminal, the run's screen is no-mistakes' screen, built to its
+`internal/tui/DESIGN.md`: ANSI colours 1 to 8, rounded boxes titled in their
+top border. The ATM box has the issue and the run's state, then a row per node:
+Issue, Clone, Contract, Agent · unit n and Checks (again for each chained unit,
+the checks with a row per proof and command), Slop detector, Delivery. Each row
+has its state's icon (`○` pending, a spinner running, `⏸` waiting, `✓` passed,
+`✗` failed, `–` skipped), its duration and, right-aligned, its note and its
+state's word. Beside it from 100 columns (a third of the width, 38 to 48), below
+it under that: the Agent box while an agent runs, each tool call with its
+result and its thinking; the Findings box once a node failed, its reason, or
+once the slop detector kept a cut, each cut with its slop family; the Log box
+with the running node's output. Connectors between nodes need 30 rows. While
+the delivery command runs, the terminal is the command's, on a pseudo-terminal
+of its size with its keys (Unix only): a command that attaches no-mistakes
+shows no-mistakes' own screen there, and ATM's screen comes back when it exits.
+
+Off a terminal, or with `NO_COLOR` set or `TERM=dumb`, the screen is plain
+lines: one per step event (`clone     passed 0.9 s`, the error's first line
+after a failure), then the delivery's output and summary.
 
 The background process is `atm serve`, one per repository, started on demand
 by the first command that needs it, and listening on `.atm/atm.sock` (mode
