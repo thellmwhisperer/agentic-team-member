@@ -2,7 +2,6 @@
 
 > The coding agent is one node. Every edge is decided by code.
 
-[![PR checks](https://github.com/thellmwhisperer/agentic-team-member/actions/workflows/pr.yml/badge.svg)](https://github.com/thellmwhisperer/agentic-team-member/actions/workflows/pr.yml)
 ![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)
 ![Status: alpha](https://img.shields.io/badge/status-alpha-orange)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
@@ -94,15 +93,6 @@ Step by step, with the function behind each one: [How a run flows](docs/how-a-ru
 
 ```bash
 git clone https://github.com/thellmwhisperer/agentic-team-member.git
-cd agentic-team-member && pip install -r requirements.txt   # Python 3.12+, git, gh, one agent CLI
-
-# A GitHub issue
-python3 -m agentic_tdd_runner.harness_worker --repo /path/to/repo \
-  --github-repo owner/repo --issue-number 300 --harness claude --model claude-opus-5-5
-
-# A plan in a text file: first line the title, then the body and its acceptance criteria
-python3 -m agentic_tdd_runner.harness_worker --repo /path/to/repo \
-  --issue-file plans/retry-on-timeout.md --harness codex --model gpt-6 --label retry
 ```
 
 | Exit | Meaning |
@@ -116,8 +106,7 @@ ATM is built to be launched and watched by an agent. `[monitor].command` runs
 at every step start and end, so the launching agent knows where the run is
 without reading its output; with no monitor, the worker wants a terminal.
 `--dry-run` prints the contract and stops. `--label NAME` puts the run in
-`<[runs].dir>/NAME` (`~/.atm/runs` as shipped). `scripts/tail-run.py --label NAME`
-reads the same `[runs].dir` and follows it from another terminal. Delivery is whatever `[delivery].command` says; the shipped
+`<[runs].dir>/NAME` (`~/.atm/runs` as shipped). Delivery is whatever `[delivery].command` says; the shipped
 example hands the branch to [no-mistakes](https://github.com/kunchenguid/no-mistakes).
 Leave it empty and the green work stays in the clone.
 
