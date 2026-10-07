@@ -156,28 +156,19 @@ func onBranch(root, clone, sha, name, title string) (cuts string, err error) {
 		left, err = git(clone, "status", "--porcelain")
 	}
 	if err == nil && left != "" {
-		err = commitAll(root, clone, head, "atm unit 1: "+title)
+		var id []string
+		if id, err = identity(root); err == nil {
+			_, err = git(clone, "add", "-A")
+		}
+		if err == nil {
+			_, err = git(clone, append(id, "commit", "-q", "--no-verify", "--cleanup=verbatim", "-m",
+				"atm unit 1: "+title)...)
+		}
 	}
 	if err == nil {
 		_, err = git(clone, "remote", "set-url", "origin", origin)
 	}
 	return cuts, err
-}
-
-// commitAll commits clone's working tree on head, the commit it is at, with msg under root's identity.
-func commitAll(root, clone, head, msg string) error {
-	id, err := identity(root)
-	if err != nil {
-		return err
-	}
-	tree, err := snapshot(clone)
-	if err == nil {
-		head, err = git(clone, append(id, "commit-tree", tree, "-p", head, "-m", msg)...)
-	}
-	if err == nil {
-		_, err = git(clone, "reset", "-q", head)
-	}
-	return err
 }
 
 // githubRepo is the owner/name of the GitHub repository origin names, "" when it names none. No origin is not
