@@ -112,7 +112,9 @@ so the red may fail on a missing symbol or module. `refactor` runs `test` on
 the base, which must pass, and may not change a file matching `test_patterns`.
 `tests` runs the new test on the base and after, both must pass, and may change
 only test and doc files. `docs` may change only files matching
-`docs_patterns`. `chore` has no proof beyond the commands. A hung test fails
+`docs_patterns`. `chore` has no proof beyond the commands. After its proof,
+every type fails, naming the file, when a file matching `test_patterns` that the
+base has is deleted or ends with fewer bytes. A hung test fails
 the run, and the clone must be the same after verification as before, or the
 verdict is void.
 

@@ -93,6 +93,32 @@ var proofCases = []struct {
 	{name: "docs", typ: "docs"},
 	{name: "docs that touch code", typ: "docs", work: "echo doc > README.md; echo fixed > a.txt", why: "a.txt"},
 	{name: "chore", typ: "chore"},
+	{name: "fix that deletes a test", typ: "fix", atm: atmSet(atmYAML, "test", suite),
+		work: "echo fixed > a.txt; rm a_test.sh" + reportTest("regression_test.sh"), why: shrunkTest},
+	{name: "feature that shortens a test", typ: "feature", why: shrunkTest,
+		work: "echo fixed > a.txt; echo true > a_test.sh" + reportTest("b_test.sh")},
+	{name: "tests that shorten a test", typ: "tests", why: shrunkTest,
+		work: "echo true > a_test.sh; echo 'grep -q broken a.txt' > b_test.sh; " + reportJSON("b_test.sh")},
+	{name: "chore that deletes a test", typ: "chore", atm: atmSet(atmYAML, "test", "true"), work: "rm a_test.sh",
+		why: shrunkTest},
+	{name: "fix that adds a line to a test", typ: "fix",
+		work: "echo fixed > a.txt; echo '! grep -q broken a.txt' >> a_test.sh"},
+}
+
+// shrunkTest names the failure of work that deletes or shortens a_test.sh, a test on the base.
+const shrunkTest = "the base's test a_test.sh is gone or shorter"
+
+// suite runs every *_test.sh.
+const suite = "for f in *_test.sh; do sh $f || exit 1; done"
+
+// reportTest writes test, which wants a.txt fixed and broken no longer, and reports it as the test.
+func reportTest(test string) string {
+	return "; echo 'grep -q fixed a.txt && ! grep -q broken a.txt' > " + test + "; " + reportJSON(test)
+}
+
+// reportJSON is the shell line that leaves the fake agent's report, naming test.
+func reportJSON(test string) string {
+	return `mkdir -p .atm; printf '{"test_file":"` + test + `","follow_ups":[]}' > .atm/fake-report.json`
 }
 
 func TestRunChecksTheProofOfEachTaskType(t *testing.T) {
