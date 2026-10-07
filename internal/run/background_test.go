@@ -41,6 +41,15 @@ func backgroundRepo(t *testing.T) string {
 	return top
 }
 
+func atmRepo(t *testing.T) string {
+	t.Helper()
+	top := gitT(t, repo(t, "https://example.com/owner/repo.git", atmYAML), "rev-parse", "--show-toplevel")
+	if err := os.MkdirAll(filepath.Join(top, ".atm"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return top
+}
+
 func holdFakeAgents(t *testing.T, count int) (wait, release func()) {
 	t.Helper()
 	dir := t.TempDir()
@@ -197,10 +206,7 @@ func TestBackgroundRunThatNeverStartedHasNoReport(t *testing.T) {
 // A start that finds .atm/atm.lock held serves nothing: it waits for the one that holds it to answer, here
 // for idle, none. Once its holder dies, the lock blocks no one.
 func TestServeLeavesTheRepositoryToTheStartThatHoldsTheLock(t *testing.T) {
-	top := gitT(t, repo(t, "https://example.com/owner/repo.git", atmYAML), "rev-parse", "--show-toplevel")
-	if err := os.MkdirAll(filepath.Join(top, ".atm"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	top := atmRepo(t)
 	held, err := lock(filepath.Join(top, ".atm", "atm.lock"))
 	if err != nil || held == nil {
 		t.Fatalf("lock = %v, %v", held, err)
@@ -376,10 +382,7 @@ func TestBackgroundPrunesTheHistoryWhenRunsEnd(t *testing.T) {
 }
 
 func TestBackgroundKeepsLabelMonotonicWhenNewestIsPruned(t *testing.T) {
-	top := gitT(t, repo(t, "https://example.com/owner/repo.git", atmYAML), "rev-parse", "--show-toplevel")
-	if err := os.MkdirAll(filepath.Join(top, ".atm"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	top := atmRepo(t)
 	s := &server{root: top}
 	for _, outcome := range numberedOutcomes("issue", maxRuns, "running", time.Now(), time.Time{}) {
 		s.runs = append(s.runs, &bgRun{Outcome: outcome})
