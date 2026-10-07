@@ -101,7 +101,11 @@ dependencies), `test`, `typecheck` and `lint`, each with `sh -c`, empty
 skipped. The first failure fails the step and the run, with that command's last
 60 lines. After the commands, HEAD must still be the unit's base SHA: a command
 that commits fails `checks` and prevents delivery. Each command runs in its own
-process group, killed past 10 minutes.
+process group. Past 10 minutes, cancellation kills its process tree on Unix or
+Windows, including descendants that start a session or process group of their
+own. On Unix, ATM marks the command's environment with `ATM_RUN_MARK` and also
+kills every process of the user that bears the mark, so a descendant already
+orphaned to init dies too, unless it cleared its environment.
 
 `fix`, `feature` and `greenfield` prove red/green: the agent's changes are set
 aside except the report's `test_file`, which runs alone through `test_file`
@@ -194,8 +198,12 @@ delivery does not require a git identity.
 
 `report.json` is rewritten with `head_sha`, the branch's final SHA. Then the
 command runs with `sh -c` in the clone without a time limit. SIGINT or SIGTERM
-to the ATM process cancels it, killing its process group on Unix or process
-tree on Windows. Its environment contains `ATM_TITLE`, `ATM_ISSUE` (the issue
+to the ATM process cancels it, killing its process tree on Unix or Windows,
+including descendants that start a session or process group of their own. On
+Unix, ATM marks the command's environment with `ATM_RUN_MARK` and also kills
+every process of the user that bears the mark, so a descendant already orphaned
+to init dies too, unless it cleared its environment. Its environment contains
+`ATM_TITLE`, `ATM_ISSUE` (the issue
 number, empty for a file), `ATM_BRANCH`,
 `ATM_CLONE`, `ATM_REPORT` and `ATM_PONYTAIL` (the kept cut's findings, one a
 line, or empty). Its output goes to the run's screen and to
