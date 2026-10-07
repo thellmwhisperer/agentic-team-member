@@ -88,7 +88,7 @@ func Run(args []string, out, summary io.Writer) (err error) {
 	})
 	r.step("checks", func() (map[string]any, error) { return checks(dir, sha, i.Type, test, c) })
 	r.step("ponytail", func() (map[string]any, error) { return a.ponytail(root, dir, sha, test, i, c) })
-	deliver(r, root, dir, sha, c.Delivery, i, summary)
+	deliver(r, root, dir, sha, *base, c.Delivery, i, summary)
 	return r.err
 }
 
@@ -98,7 +98,7 @@ var nonSlug = regexp.MustCompile(`[^a-z0-9]+`)
 // rewrites report.json with its SHA and runs the delivery command line in clone, its output on screen and in
 // delivery-output.txt next to report.json. ATM never pushes: that is line's business.
 // ponytail: line gets the clone after the slop detector, under sh's timeout; a ceiling of its own is the upgrade.
-func deliver(r *verdict, root, clone, sha, line string, i Issue, screen io.Writer) {
+func deliver(r *verdict, root, clone, sha, base, line string, i Issue, screen io.Writer) {
 	if line == "" {
 		if r.err == nil {
 			r.node("delivery").Result = "skipped"
@@ -111,6 +111,9 @@ func deliver(r *verdict, root, clone, sha, line string, i Issue, screen io.Write
 			strings.TrimPrefix(filepath.Base(clone), "atm-run-") // the clone's timestamp, as unique
 		ev := map[string]any{"branch": branch}
 		cuts, err := onBranch(root, clone, sha, branch, i.Title)
+		if err == nil {
+			err = os.WriteFile(clone+".delivered", []byte(branch+" "+base+"\n"), 0o644)
+		}
 		if err == nil {
 			r.HeadSHA, err = git(clone, "rev-parse", "HEAD")
 		}
