@@ -474,7 +474,7 @@ func history(root string) ([]*bgRun, error) {
 // save drops the oldest runs that ended past maxRuns, then writes the runs to runs.jsonl, through a file renamed
 // over it, so a crash leaves the last one whole. Under the server's lock.
 func (s *server) save() {
-	for i := 0; len(s.runs) > maxRuns && i < len(s.runs); {
+	for i := 0; len(s.runs) > maxRuns && i < len(s.runs)-1; {
 		if s.runs[i].Ended.IsZero() {
 			i++
 		} else {
