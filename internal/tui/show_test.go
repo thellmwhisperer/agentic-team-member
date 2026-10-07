@@ -15,8 +15,8 @@ func TestDeliveryTakesTheTerminalAtItsStartEvent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer in.Close()
-	defer out.Close()
+	defer func() { _ = in.Close() }()
+	defer func() { _ = out.Close() }()
 	p := tea.NewProgram(New("issue-1", 80, 24), tea.WithInput(in), tea.WithOutput(out))
 	d := &delivery{p: p, in: in, out: &bytes.Buffer{}, keys: make(chan run.Input, 1)}
 	d.frame(run.Frame{PTY: true})
