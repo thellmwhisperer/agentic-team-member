@@ -1,7 +1,7 @@
-# Duplication tolerated today, measured on 5-oct-2026. A change may lower these, never raise them.
+# Duplication tolerated today, measured on 7-oct-2026. A change may lower these, never raise them.
 schema: 1
 scopes:
-  python_production:
+  go_production:
     active_clones_ceiling: 1
-  python_tests:
-    active_clones_ceiling: 19
+  go_tests:
+    active_clones_ceiling: 7

@@ -23,14 +23,10 @@ An issue without a red test gets one before any code is written.
 ```bash
 git clone https://github.com/<your-fork>/agentic-team-member.git
 cd agentic-team-member
-pip install -r requirements.txt uv
 git config core.hooksPath .githooks
 scripts/test.sh
 ```
 
-`scripts/test.sh` runs pytest under Python 3.12 with `requirements.txt`
-through [`uv`](https://docs.astral.sh/uv/), whatever `python3` comes first on
-your `PATH`; its arguments go to pytest (`scripts/test.sh tests/test_config.py`).
 The suite runs real git and fake harness subprocesses; expect about two minutes.
 The pre-commit hook runs slopslint; its first run downloads the pinned binary
 into `.tmp/slopslint/` and needs the network.
@@ -64,16 +60,14 @@ Either way:
 
 | Workflow | Runs on | Runs when these change | Does |
 |---|---|---|---|
-| `pr.yml` | every PR to `main` | Python paths, `pr.yml`, or `scripts/changed-areas.sh` | pytest on Python 3.12, 3.13, 3.14 |
-| `cd.yml` | push to `main` | Python paths, `cd.yml`, or `scripts/changed-areas.sh` | pytest and a production config load |
 | `go.yml` | every PR to `main`, push to `main` | Go paths, `go.yml`, or `scripts/changed-areas.sh`, when `go.mod` exists | `make test` and `make lint` on ubuntu, macos, windows |
 | `auto-merge.yml` | every PR to `main` | always | arms auto-merge (below) |
 
-`pr.yml` and `go.yml` start on every PR and skip their test jobs when their
-paths did not change. Each reports one summary check that is always present:
-**Python checks** and **Go checks**. A summary is green when its tests passed
-or were skipped, red when they failed or were cancelled
-(`scripts/ci-summary.sh`). These two are the required checks on `main`; a
+`go.yml` starts on every PR and skips its test jobs when its paths did not
+change. It reports one summary check that is always present: **Go checks**.
+The summary is green when its tests passed or were skipped, red when they
+failed or were cancelled (`scripts/ci-summary.sh`). It is the required check
+on `main`; a
 path-filtered workflow that never starts would leave its check pending and
 block the merge.
 

@@ -26,8 +26,8 @@ flowchart LR
 ## Live steps and the monitor
 
 Every step below is a named step: the worker writes a start and an end event
-for it to `worker-<timestamp>.jsonl` and renders it on its own stdout with the
-renderer in `scripts/tail-run.py`: `▶ <step>` when it starts, `✓` or
+for it to `worker-<timestamp>.jsonl` and renders it on its own stdout:
+`▶ <step>` when it starts, `✓` or
 `✗ <step> <duration>` when it ends. A step with no visible output for 30 s
 gets an elapsed line (`… full suite 1m30s`), every 30 s while it stays quiet.
 

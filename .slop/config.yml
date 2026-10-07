@@ -1,7 +1,7 @@
 # What the slop gate measures in this repository.
 #
 # Two duplication scopes, measured independently so production code cannot hide
-# inside the test scope. Production is the package plus scripts/*.py.
+# inside the test scope. Production is every Go file that is not a test.
 schema: 1
 
 detector:
@@ -9,7 +9,7 @@ detector:
   version: "4.2.5" # must match the detector linked into the binary
 
 defaults:
-  format: python
+  format: go
   mode: mild
   min_lines: 5
   min_tokens: 50
@@ -25,10 +25,12 @@ global_ignore:
   - "targets/**"
 
 scopes:
-  python_production:
+  go_production:
     scan_path: .
-    pattern: "{agentic_tdd_runner/**/*.py,scripts/*.py}"
+    pattern: "{cmd,internal}/**/*.go"
+    ignore:
+      - "**/*_test.go"
 
-  python_tests:
+  go_tests:
     scan_path: .
-    pattern: "tests/**/*.py"
+    pattern: "{cmd,internal}/**/*_test.go"
