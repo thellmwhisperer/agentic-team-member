@@ -238,7 +238,9 @@ committed: HEAD still the base SHA. Then the task type's proof, then the
 `.atm.yaml` commands `install` (again: the agent may have changed
 dependencies), `test`, `typecheck` and `lint`, each with `sh -c`, empty
 skipped. The first failure fails the step and the run, with that command's last
-60 lines. Each command runs in its own process group, killed past 10 minutes.
+60 lines. After the commands, HEAD must still be the unit's base SHA: a command
+that commits fails `checks` and prevents delivery. Each command runs in its own
+process group, killed past 10 minutes.
 
 `fix`, `feature` and `greenfield` prove red/green: the agent's changes are set
 aside except the report's `test_file`, which runs alone through `test_file`
@@ -288,13 +290,15 @@ an existing helper, in the diff's files, adding none, every test kept. Its
 report is `{"findings": [{"file", "family", "finding"}], "summary"}`, each
 `file` in the diff, each `family` a slopslint family, each `finding` one line.
 A timeout, a non-zero exit, no proof of the skill, an invalid report or a commit
-fails the step and the run.
+by the ponytail agent fails the step and the run. A commit by a re-check command
+also fails the step and the run, even when the cut would otherwise be discarded.
 
 The cut is discarded, and the clone comes back exactly as before, when it does
 not lower the run's net added lines, reports no finding, adds a file, deletes a
 file, touches a file matching `test_patterns` or one outside the diff, or fails
-the `checks` step run again. A kept cut leaves two commits on the units
-before it: `atm unit <n>: <title>` with the last unit's work before the cut, then
+the `checks` step run again without a command committing. A kept cut leaves two
+commits on the units before it: `atm unit <n>: <title>` with the last unit's
+work before the cut, then
 `ponytail: <n> cuts` with the cut, one `- <file>: <finding> (<family>)` line per
 finding, and one slopslint tombstone per finding under `.slop/tombstones/`.
 Both use the repository's git identity (`git var` at its root, never one of
@@ -310,6 +314,12 @@ most 40; the clone's timestamp), anything left uncommitted becomes
 `atm unit <n>: <title>` (the next unit number) under the repository's identity, as
 for the ponytail commits, and
 the clone's `origin` is set to the repository's: no `origin` fails the step.
+Before running the delivery command, ATM checks the author and committer of
+every commit after the base SHA through HEAD against the repository's git
+identity. A mismatch fails delivery; with commits to check, a missing identity
+also fails delivery. If there are no such commits and nothing to commit,
+delivery does not require a git identity.
+
 `report.json` is rewritten with `head_sha`, the branch's final SHA. Then the
 command runs with `sh -c` in the clone without a time limit. SIGINT or SIGTERM
 to the ATM process cancels it, killing its process group on Unix or process
