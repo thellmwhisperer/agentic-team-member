@@ -13,8 +13,7 @@ builds:
       - windows_amd64
 
 archives:
-  - formats: [tar.gz]
-    format_overrides:
+  - format_overrides:
       - goos: windows
         formats: [zip]
 
