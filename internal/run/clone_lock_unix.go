@@ -22,3 +22,8 @@ func inheritCloneFile(cmd *exec.Cmd, f *os.File) error {
 	cmd.ExtraFiles = append(cmd.ExtraFiles, f)
 	return nil
 }
+
+func removeCloneDir(dir string) (bool, error) {
+	err := os.RemoveAll(dir)
+	return err == nil, err
+}

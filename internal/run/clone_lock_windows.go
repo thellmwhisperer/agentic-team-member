@@ -38,3 +38,15 @@ func inheritCloneFile(cmd *exec.Cmd, f *os.File) error {
 	attr.AdditionalInheritedHandles = append(attr.AdditionalInheritedHandles, syscall.Handle(f.Fd()))
 	return nil
 }
+
+func removeCloneDir(dir string) (bool, error) {
+	removing := dir + ".removing"
+	if err := os.Rename(dir, removing); err != nil {
+		return false, nil
+	}
+	if err := os.RemoveAll(removing); err != nil {
+		_ = os.Rename(removing, dir)
+		return false, err
+	}
+	return true, nil
+}

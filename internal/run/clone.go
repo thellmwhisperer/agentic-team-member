@@ -100,8 +100,7 @@ func sweep(clones, repo string) {
 			_ = lock.Close()
 			continue
 		}
-		_ = lock.Close()
-		_ = remove(dir)
+		_ = remove(dir, lock)
 	}
 }
 
@@ -115,12 +114,10 @@ func release(dir, repo string) error {
 	if err != nil || !locked {
 		return err
 	}
-	defer lock.Close()
 	if kept(dir, repo) {
-		return nil
+		return lock.Close()
 	}
-	_ = lock.Close()
-	return remove(dir)
+	return remove(dir, lock)
 }
 
 // kept says whether the clone at dir delivered and its PR is still open: its branch is not merged into its
@@ -144,7 +141,11 @@ func kept(dir, repo string) bool {
 	return err != nil || state == "OPEN"
 }
 
-func remove(dir string) error {
-	return errors.Join(os.RemoveAll(dir), os.RemoveAll(dir+".lock"), os.RemoveAll(dir+".pid"),
-		os.RemoveAll(dir+".delivered"))
+func remove(dir string, lock *os.File) error {
+	removed, err := removeCloneDir(dir)
+	if err != nil || !removed {
+		return errors.Join(err, lock.Close())
+	}
+	err = errors.Join(os.RemoveAll(dir+".pid"), os.RemoveAll(dir+".delivered"), lock.Close())
+	return errors.Join(err, os.RemoveAll(dir+".lock"))
 }
