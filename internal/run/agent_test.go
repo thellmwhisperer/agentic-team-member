@@ -82,6 +82,9 @@ func fakeAgent(name string) int {
 }
 
 func fakeAgentSetup(mode string) bool {
+	if mode == "grandchild" {
+		_ = os.WriteFile(os.Getenv("FAKE_AGENT_PID"), []byte(strconv.Itoa(os.Getpid())), 0o600)
+	}
 	if ready := os.Getenv("FAKE_AGENT_READY"); ready != "" {
 		_ = os.WriteFile(ready, nil, 0o600)
 	}
@@ -93,7 +96,6 @@ func fakeAgentSetup(mode string) bool {
 	if mode == "grandchild" {
 		c := make(chan os.Signal, 1)
 		signal.Notify(c, os.Interrupt) // blocks until killed: ATM sends nothing but SIGKILL
-		_ = os.WriteFile(os.Getenv("FAKE_AGENT_PID"), []byte(strconv.Itoa(os.Getpid())), 0o600)
 		<-c
 		return true
 	}
