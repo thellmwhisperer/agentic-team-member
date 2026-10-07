@@ -11,7 +11,7 @@ it:
 
 - **Title**: what should be true and is not.
 - **Evidence**: what happened. For a failed run, the `report.json` of the run
-  and the relevant lines of `worker-*.jsonl`, with the harness and model
+  and the relevant lines of `worker*.jsonl`, with the harness and model
   named. Strip paths and hostnames you do not want published.
 - **Acceptance criteria**: numbered, each one checkable by a test.
 - **Red test**: the test that fails today, or a sentence describing it.
