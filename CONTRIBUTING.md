@@ -67,9 +67,8 @@ Either way:
 change. It reports one summary check that is always present: **Go checks**.
 The summary is green when its tests passed or were skipped, red when they
 failed or were cancelled (`scripts/ci-summary.sh`). It is the required check
-on `main`; a
-path-filtered workflow that never starts would leave its check pending and
-block the merge.
+on `main`; a path-filtered workflow that never starts would leave its check
+pending and block the merge.
 
 Auto-merge by rebase is armed when the PR body's `## Risk Assessment` says
 Low or Medium, and GitHub merges once CI is green. High risk, or a level it
