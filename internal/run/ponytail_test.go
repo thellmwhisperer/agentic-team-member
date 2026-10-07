@@ -255,11 +255,14 @@ func TestPonytailDiscardsCutWhenAChainedUnitChangesEarlierTest(t *testing.T) {
 }
 
 func TestPonytailDiscardsACutThatDoesNotHold(t *testing.T) {
+	inject := "; echo injected > cache/injected.txt; echo new > cache/old.txt"
 	cases := []struct{ name, work, report, why string }{
 		{name: "longer", work: "echo extra >> a.txt", report: cut, why: "shorten"},
 		{name: "no findings", work: "echo fixed > a.txt", why: "no finding"},
 		{name: "breaks a check", work: "echo broken > a.txt", report: cut, why: "fails with the fix"},
 		{name: "new file", work: "echo fixed > a.txt; echo c > c.txt", report: cut, why: "c.txt"},
+		{name: "new ignored file", work: "echo fixed > a.txt" + inject, report: cut, why: "adds cache/injected.txt"},
+		{name: "longer with ignored files", work: "echo extra >> a.txt" + inject, report: cut, why: "shorten"},
 		{name: "outside the diff", work: "echo fixed > a.txt; rm b.txt", report: cut, why: "b.txt"},
 		{name: "touches test", work: "echo fixed > a.txt; echo bad > a_test.sh",
 			report: cut, why: "touches the test a_test.sh"},
@@ -269,6 +272,9 @@ func TestPonytailDiscardsACutThatDoesNotHold(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			root, clone, sha, cfg := unitDone(t, c.work)
 			t.Setenv("FAKE_PONYTAIL_REPORT", c.report)
+			if _, err := sh(clone, "echo cache/ >> .git/info/exclude; mkdir cache; echo old > cache/old.txt"); err != nil {
+				t.Fatal(err)
+			}
 			before := state(t, clone)
 			ev, err := agent{Agent: cfg.Agent, dir: t.TempDir()}.ponytail(root, clone, sha,
 				[]proof{unitProof(t, clone, sha)}, fixIssue, cfg)
@@ -278,6 +284,12 @@ func TestPonytailDiscardsACutThatDoesNotHold(t *testing.T) {
 			}
 			if after := state(t, clone); after != before {
 				t.Fatalf("the clone did not come back:\n%s\nwant\n%s", after, before)
+			}
+			if _, err := os.Stat(filepath.Join(clone, "cache", "injected.txt")); !os.IsNotExist(err) {
+				t.Fatalf("the ignored file the cut added is still in the clone: %v", err)
+			}
+			if b, err := os.ReadFile(filepath.Join(clone, "cache", "old.txt")); err != nil || string(b) != "old\n" {
+				t.Fatalf("the ignored file the cut changed did not come back: %q, %v", b, err)
 			}
 		})
 	}
