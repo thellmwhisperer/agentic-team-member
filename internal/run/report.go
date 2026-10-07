@@ -113,14 +113,11 @@ func (r *verdict) finish(err error, summary io.Writer) error {
 // print writes the summary to w: each node, how it ended and its duration, then the result.
 func (r *verdict) print(w io.Writer) {
 	for _, n := range r.Nodes {
-		switch n.Result {
-		case "passed":
-			_, _ = fmt.Fprintf(w, "%-9s ✓ %s\n", n.Name, human(time.Duration(n.DurationMS)*time.Millisecond))
-		case "failed":
-			_, _ = fmt.Fprintf(w, "%-9s ✗ %s\n", n.Name, human(time.Duration(n.DurationMS)*time.Millisecond))
-		default:
-			_, _ = fmt.Fprintf(w, "%-9s – %s\n", n.Name, n.Result)
+		mark, how := map[string]string{"passed": "✓", "failed": "✗"}[n.Result], n.Result
+		if mark != "" {
+			how = human(time.Duration(n.DurationMS) * time.Millisecond)
 		}
+		_, _ = fmt.Fprintf(w, "%-9s %s %s\n", n.Name, cmp.Or(mark, "–"), how)
 	}
 	result := "PASS"
 	if r.FailedNode != "" {
