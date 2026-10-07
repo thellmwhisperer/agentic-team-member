@@ -28,7 +28,7 @@ const Usage = "usage: atm run [--base-ref r] [--harness h] [--model m] [--effort
 	"[--env KEY=VALUE]... <issue.md | issue number>"
 
 // Run is atm run with args, its flags and then the issue: a file, or an issue number of origin's repository.
-// Everything it writes goes to .atm/runs/<label>/ (runDir): each node's start and end go to out, one JSON
+// Its report, briefs and logs go to .atm/runs/<label>/ (runDir): each node's start and end go to out, one JSON
 // object a line, and to report.json there; the summary goes to summary. ExitCode turns its error into atm's
 // exit code.
 func Run(label string, args []string, out, summary io.Writer) (err error) {

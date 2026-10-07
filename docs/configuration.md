@@ -180,13 +180,15 @@ line with a lowercase type: `fix` (or `hotfix`), `feature`,
 
 The current Go port validates configuration before reading the issue, then
 emits start and result events for the `issue`, `clone`, `contract`, `agent`,
-`checks`, `ponytail` and `delivery` steps. The `issue` result includes the title and task type on success, plus the issue
-number for GitHub issues. Everything a run writes goes to its own directory,
-`.atm/runs/<label>/`, `<label>` being the run's label in `atm runs`; nothing
-removes it. The `contract` step follows the clone, writes `brief.md` in the
-run's directory and reports its path on success. The brief starts by directing
-the agent to read `AGENTS.md` if present, then gives the issue, task-type
-acceptance criteria, verification commands from `.atm.yaml`, style and
+`checks`, `ponytail` and `delivery` steps. The `issue` result includes the title
+and task type on success, plus the issue number for GitHub issues. Each run
+keeps its report, briefs, agent logs, follow-ups and delivery output in
+`.atm/runs/<label>/`, where `<label>` is its label in `atm runs`; the directory
+remains after the run. Clones and background process state stay elsewhere under
+`.atm/`. The `contract` step follows the clone, writes `brief.md` in the run's
+directory and reports its path on success. The brief starts by directing the
+agent to read `AGENTS.md` if present, then gives the issue, task-type acceptance
+criteria, verification commands from `.atm.yaml`, style and
 forbidden actions, and the required JSON report.
 
 The `clone` step follows the issue. `--base-ref` (default `main`) is resolved to a SHA in
@@ -204,9 +206,9 @@ is not merged into its base (`git branch --merged` after a fetch from the
 repository) and whose PR `gh` does not report closed or merged, when origin is
 on GitHub.
 
-The `agent` step follows the clone. The agent is `--harness` (`claude`, `codex`,
-`opencode` or `pi`; any other fails the config) with the run's model and effort,
-in its most minimal mode: `claude -p` with `--setting-sources project`,
+The `agent` step follows the contract. The agent is `--harness` (`claude`,
+`codex`, `opencode` or `pi`; any other fails the config) with the run's model
+and effort, in its most minimal mode: `claude -p` with `--setting-sources project`,
 `--strict-mcp-config` and only `Read,Edit,Write,Bash,Glob,Grep,Skill`; `pi -p`
 with `--no-extensions --no-skills --no-prompt-templates --no-context-files
 --no-session`; `codex exec` and `opencode run --pure`, which still load the
@@ -384,7 +386,7 @@ process whose pid it got, is removed by the next sweep.
 |---------|--------|
 | `atm status` | Each run going: label, step, duration, issue; or `nothing runs` |
 | `atm attach [run]` | The run's screen (the last one going by default) until it ends; leaving leaves it going |
-| `atm runs` | Every run: label, `running`, `passed` or `failed at <node>`, duration, issue and its `report.json` path |
+| `atm runs` | Every run: label, `running`, `passed` or `failed at <node>`, duration, issue and the report path when set |
 | `atm axi run [--json] <atm run's arguments>` | Waits for the end, then the outcome |
 | `atm axi status [--json]`, `atm axi runs [--json]` | The runs going, or every run, as a table |
 
