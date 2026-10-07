@@ -114,8 +114,11 @@ aside except the report's `test_file`, which runs alone through `test_file`
 changes come back and it must pass. Before each trial, ATM restores tracked
 files and existing ignored files to their snapshot from before the first trial.
 Changes or deletions to those files void the verdict. New ignored output is
-cleaned up without voiding the verdict. A `fix` sets aside only the files the base
-has, so the files the fix added stay and the red fails on behaviour: a test
+cleaned up without voiding the verdict. ATM records and checks this snapshot
+through a separate Git index, using chunked reads so executed binaries with
+invalidated macOS code signatures are not memory-mapped. A `fix` sets aside only
+the files the base has, so the files the fix added stay and the red fails on
+behaviour: a test
 that only exercises a new file passes without the fix and is rejected (so is a
 fix made only of new files). A `fix` then runs its test twice more, the new
 files kept and each old file it changes rebuilt from its diff: the base with
