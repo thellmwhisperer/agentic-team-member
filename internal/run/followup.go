@@ -70,7 +70,7 @@ func red(clone string, n int, f *followUp, tmpl string) (string, error) {
 		return "no red test at " + filepath.ToSlash(rel), nil
 	}
 	f.Test = string(b)
-	tree, err := snapshot(clone)
+	tree, err := whole(clone)
 	if err != nil {
 		return "", err
 	}
