@@ -110,7 +110,7 @@ func TestQuotedAcceptsCriterionAsMarkedWholeLine(t *testing.T) {
 // u<k+1>, quoting $ATM_TEST_CRITERION. Unit 2 runs $ATM_TEST_EDIT first.
 const chainWork = `if [ -f c2_test.sh ]; then k=3; echo u3 >> a.txt; elif [ -f c1_test.sh ]; then k=2; ` +
 	`eval "$ATM_TEST_EDIT"; echo u2 >> a.txt; else k=1; printf 'fixed\nextra\n' > a.txt; ` +
-	`echo 'grep -q fixed a.txt' > a_test.sh; fi; mkdir -p .atm/follow-ups/1; ` +
+	`echo 'grep -q fixed a.txt && ! grep -q broken a.txt' > a_test.sh; fi; mkdir -p .atm/follow-ups/1; ` +
 	`echo "grep -q u$((k+1)) a.txt" > .atm/follow-ups/1/c${k}_test.sh; ` +
 	`printf '{"test_file": "a_test.sh", "follow_ups": [{"title": "gap %s", "red_test": "c%s_test.sh", ` +
 	`"criterion": "%s"}]}' $k $k "$ATM_TEST_CRITERION" > .atm/fake-report.json`
@@ -154,7 +154,7 @@ func TestRunLabelsDeliveredChainedUnitAndChecks(t *testing.T) {
 	t.Setenv("ATM_TEST_OUT", got)
 	t.Setenv("FAKE_AGENT_WORK", `if [ -f c1_test.sh ]; then echo u2 >> a.txt; `+
 		`printf '{"test_file":"a_test.sh","follow_ups":[]}' > .atm/fake-report.json; `+
-		`else printf 'fixed\nextra\n' > a.txt; echo 'grep -q fixed a.txt' > a_test.sh; `+
+		`else printf 'fixed\nextra\n' > a.txt; echo 'grep -q fixed a.txt && ! grep -q broken a.txt' > a_test.sh; `+
 		`mkdir -p .atm/follow-ups/1; echo 'grep -q u2 a.txt' > .atm/follow-ups/1/c1_test.sh; `+
 		`printf '{"test_file":"a_test.sh","follow_ups":[{"title":"gap","red_test":"c1_test.sh",`+
 		`"criterion":"A retry runs once after a timeout."}]}' > .atm/fake-report.json; fi`)
