@@ -258,9 +258,9 @@ the lock when that process exits. It runs every run in itself and logs to
 removed while no run goes. The latest state of each retained run is saved to
 `.atm/runs.jsonl`, so a new background process still lists them; a run left
 running there is shown failed at its last saved step, with its duration measured
-through the last save. On each new run, it drops the oldest ended runs while the
-list exceeds 200. It never drops a running run, and completion does not prune,
-so the history can exceed 200. Clone cleanup uses the locks described above,
+through the last save. On each new run and when a run ends, it drops the oldest
+ended runs while the list exceeds 200. It never drops a running run. Clone
+cleanup uses the locks described above,
 even when the background process that started
 the run has exited.
 
