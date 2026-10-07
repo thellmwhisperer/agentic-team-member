@@ -34,7 +34,9 @@ var work = map[string]string{"fix": fixWork, "feature": fixWork, "greenfield": f
 // $FAKE_AGENT_CALL. The default plays a run that, when the ponytail skill is where name finds it and outside
 // git, uses it, does $FAKE_AGENT_WORK or else the work of the brief's task type, and reports fakeReport; fail
 // exits 3; no-report, no-test-file and no-skill each break the run one way; hang starts a grandchild, whose pid
-// goes to $FAKE_AGENT_PID, and never ends.
+// goes to $FAKE_AGENT_PID, and never ends. The ponytail pass plays the same with the ponytail-review skill,
+// $FAKE_PONYTAIL as its mode, $FAKE_PONYTAIL_WORK as its work and $FAKE_PONYTAIL_REPORT, or no findings, as
+// its report; its call goes to $FAKE_AGENT_CALL.ponytail.
 func fakeAgent(name string) int {
 	mode := os.Getenv("FAKE_AGENT")
 	if mode == "grandchild" {
@@ -46,9 +48,17 @@ func fakeAgent(name string) int {
 	}
 	args := os.Args[1:]
 	stdin, _ := io.ReadAll(os.Stdin)
+	brief := map[bool]string{true: string(stdin), false: args[len(args)-1]}[name == "claude"]
+	_, typ, _ := strings.Cut(brief, "Task type: ")
+	typ, _, _ = strings.Cut(typ, ".")
+	skill, call, todo, text := "ponytail", "", cmp.Or(os.Getenv("FAKE_AGENT_WORK"), work[typ]), fakeReport
+	if strings.Contains(brief, "`ponytail-review`") {
+		mode, skill, call, todo = os.Getenv("FAKE_PONYTAIL"), "ponytail-review", ".ponytail", os.Getenv("FAKE_PONYTAIL_WORK")
+		text = cmp.Or(os.Getenv("FAKE_PONYTAIL_REPORT"), `{"findings": [], "summary": "Lean already."}`)
+	}
 	if path := os.Getenv("FAKE_AGENT_CALL"); path != "" {
 		b, _ := json.Marshal(obj{"args": args, "stdin": string(stdin), "env": os.Environ()})
-		_ = os.WriteFile(path, b, 0o600)
+		_ = os.WriteFile(path+call, b, 0o600)
 	}
 	fmt.Println(`{"type": "system", "subtype": "init"}`)
 	fmt.Fprintln(os.Stderr, "fake stderr")
@@ -61,29 +71,22 @@ func fakeAgent(name string) int {
 		_ = grandchild.Run()
 		return 0
 	}
-	skill := map[string]string{"claude": ".claude/skills/ponytail", "codex": ".agents/skills/ponytail",
-		"opencode": ".opencode/skills/ponytail", "pi": after(args, "--skill")}[name] + "/SKILL.md"
-	untracked, _ := exec.Command("git", "status", "--porcelain", "--untracked-files=all").Output()
-	if _, err := os.Stat(skill); err == nil && len(untracked) == 0 && mode != "no-skill" {
+	path := map[string]string{"claude": ".claude/skills/" + skill, "codex": ".agents/skills/" + skill,
+		"opencode": ".opencode/skills/" + skill, "pi": after(args, "--skill")}[name] + "/SKILL.md"
+	b, _ := os.ReadFile(path)
+	if bytes.Contains(b, []byte("name: "+skill+"\n")) && mode != "no-skill" &&
+		exec.Command("git", "check-ignore", "-q", path).Run() == nil {
 		emit(map[string]obj{
 			"claude": {"type": "assistant", "message": obj{"content": []obj{{"type": "tool_use", "name": "Skill",
-				"input": obj{"skill": "ponytail"}}}}},
-			"codex":    {"type": "item.completed", "item": obj{"type": "command_execution", "command": "cat " + skill}},
-			"opencode": {"type": "tool_use", "part": obj{"tool": "skill", "state": obj{"input": obj{"name": "ponytail"}}}},
-			"pi":       {"type": "tool_execution_start", "toolName": "read", "args": obj{"path": skill}},
+				"input": obj{"skill": skill}}}}},
+			"codex":    {"type": "item.completed", "item": obj{"type": "command_execution", "command": "cat " + path}},
+			"opencode": {"type": "tool_use", "part": obj{"tool": "skill", "state": obj{"input": obj{"name": skill}}}},
+			"pi":       {"type": "tool_execution_start", "toolName": "read", "args": obj{"path": path}},
 		}[name])
 	}
-	brief := string(stdin)
-	if name != "claude" {
-		brief = args[len(args)-1]
-	}
-	_, typ, _ := strings.Cut(brief, "Task type: ")
-	typ, _, _ = strings.Cut(typ, ".")
-	_ = exec.Command("sh", "-c", cmp.Or(os.Getenv("FAKE_AGENT_WORK"), work[typ])).Run()
-	text := map[string]string{"no-report": "Done, nothing to report.", "no-test-file": `{"summary": "s"}`}[mode]
-	if text == "" {
-		text = fakeReport
-	}
+	_ = exec.Command("sh", "-c", todo).Run()
+	text = cmp.Or(map[string]string{"no-report": "Done, nothing to report.", "no-test-file": `{"summary": "s"}`}[mode],
+		text)
 	if name == "codex" {
 		_ = os.WriteFile(after(args, "-o"), []byte(text), 0o600)
 	}

@@ -172,8 +172,8 @@ line with a lowercase type: `fix` (or `hotfix`), `feature`,
 `gh issue view` from the repository `origin` names.
 
 The current Go port validates configuration before reading the issue, then
-emits start and result JSON lines for the `issue`, `contract`, `clone`, `agent`
-and `checks` steps. The `issue` result includes the title and task type on success, plus the issue
+emits start and result JSON lines for the `issue`, `contract`, `clone`, `agent`,
+`checks` and `ponytail` steps. The `issue` result includes the title and task type on success, plus the issue
 number for GitHub issues. The `contract` step writes `.atm/brief.md` at the
 repository root and reports its path on success. The brief starts by directing
 the agent to read `AGENTS.md` if present, then gives the issue, task-type
@@ -244,7 +244,30 @@ only test and doc files. `docs` may change only files matching
 the run, and the clone must be the same after verification as before, or the
 verdict is void.
 
-The `delivery` step follows the checks when `delivery` is set: its command runs
+The `ponytail` step, the slop detector, runs only after the checks passed. It
+writes `.atm/brief-ponytail.md` (the issue and the run's diff against the base)
+and runs the same agent with the bundled `ponytail-review` skill, placed and
+proven in its log the same way, logging to `.atm/ponytail-<timestamp>.jsonl`.
+The agent may only cut: delete, shrink, or replace with the standard library or
+an existing helper, in the diff's files, adding none, every test kept. Its
+report is `{"findings": [{"file", "family", "finding"}], "summary"}`, each
+`file` in the diff, each `family` a slopslint family, each `finding` one line.
+A timeout, a non-zero exit, no proof of the skill, an invalid report or a commit
+fails the step and the run.
+
+The cut is discarded, and the clone comes back exactly as before, when it does
+not lower the run's net added lines, reports no finding, adds a file, touches
+one outside the diff, or fails the `checks` step run again. A kept cut leaves
+two commits: `atm unit 1: <title>` with the work before the cut, then
+`ponytail: <n> cuts` with the cut, one `- <file>: <finding> (<family>)` line per
+finding, and one slopslint tombstone per finding under `.slop/tombstones/`.
+Both use the repository's git identity (`git var` at its root, never one of
+ATM's own); none, or an email ending in `@localhost`, fails the run before the
+commit. Its end line carries `log`, `report`, `net_lines` (before and after the
+cut) and `kept`, then `reason` when discarded or `commits` and `tombstones` when
+kept.
+
+The `delivery` step follows the ponytail step when `delivery` is set: its command runs
 with `sh -c` in the clone, as the agent left it, with `ATM_REPORT` and
 `ATM_CLONE` in its environment, killed past 10 minutes. Empty, the step is
 skipped.
