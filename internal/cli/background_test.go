@@ -7,9 +7,9 @@ import (
 	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -166,20 +166,85 @@ func TestTwoRunsAtOnceShareOneBackgroundProcess(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "retry.md"), []byte("# Retry\nType: fix\nRetry.\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	config := "harness: codex\ninstall: \"\"\ntest: \"\"\ntypecheck: \"\"\nlint: \"\"\n" +
+		"test_file: \"\"\ntest_patterns: []\ndocs_patterns: []\ndelivery: \"\"\n"
+	if err := os.WriteFile(filepath.Join(dir, ".atm.yaml"), []byte(config), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"config", "user.email", "atm@example.com"}, {"config", "user.name", "atm"}, {"add", "."}, {"commit", "-m", "retry"}} {
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	cmd := exec.Command("git", "-C", dir, "remote", "set-url", "origin", dir)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git remote set-url: %v\n%s", err, out)
+	}
+	bin := t.TempDir()
+	agent := filepath.Join(bin, "codex")
+	if err := os.WriteFile(agent, []byte("#!/bin/sh\n: > \"$FAKE_AGENT_BARRIER_READY/$$\"\n"+
+		"while [ ! -e \"$FAKE_AGENT_BARRIER_RELEASE\" ]; do sleep 0.01; done\nexit 1\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	barrier := t.TempDir()
+	ready, release := filepath.Join(barrier, "ready"), filepath.Join(barrier, "release")
+	if err := os.Mkdir(ready, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FAKE_AGENT_BARRIER_READY", ready)
+	t.Setenv("FAKE_AGENT_BARRIER_RELEASE", release)
+	t.Cleanup(func() { _ = os.WriteFile(release, nil, 0o600) })
 	outs, errs := make([]string, 2), make([]error, 2)
 	var wg sync.WaitGroup
 	for i := range outs {
 		wg.Go(func() { outs[i], errs[i] = atm(t, "run", "retry.md") })
 	}
 	wg.Wait()
-	slices.Sort(outs)
-	if err := errors.Join(errs...); err != nil || !reflect.DeepEqual(outs, []string{"retry-1\n", "retry-2\n"}) {
+	if err := errors.Join(errs...); err != nil || !reflect.DeepEqual(map[string]bool{outs[0]: true, outs[1]: true},
+		map[string]bool{"retry-1\n": true, "retry-2\n": true}) {
 		t.Fatalf("atm run twice at once: %q, %v", outs, err)
+	}
+	barrierReached := false
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		entries, err := os.ReadDir(ready)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(entries) == 2 {
+			barrierReached = true
+			break
+		}
+	}
+	if !barrierReached {
+		entries, _ := os.ReadDir(ready)
+		t.Fatalf("only %d fake agents reached the barrier", len(entries))
 	}
 	var runs struct{ Runs []map[string]string }
 	if err := json.Unmarshal([]byte(atmIn(t, 0, "axi", "runs", "--json")), &runs); err != nil || len(runs.Runs) != 2 {
-		t.Fatalf("atm axi runs --json: %+v, %v", runs, err)
+		t.Fatalf("atm axi runs --json while both run: %+v, %v", runs, err)
 	}
+	for _, r := range runs.Runs {
+		if r["outcome"] != "running" {
+			t.Fatalf("atm axi runs --json while both run: %+v", runs)
+		}
+	}
+	if out := atmIn(t, 0, "status"); !strings.Contains(out, "retry-1  agent  ") || !strings.Contains(out, "retry-2  agent  ") {
+		t.Fatalf("atm status while both run: %q", out)
+	}
+	if err := os.WriteFile(release, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		if err := json.Unmarshal([]byte(atmIn(t, 0, "axi", "runs", "--json")), &runs); err != nil {
+			t.Fatal(err)
+		}
+		if len(runs.Runs) == 2 && runs.Runs[0]["outcome"] == "failed" && runs.Runs[1]["outcome"] == "failed" {
+			return
+		}
+	}
+	t.Fatalf("both runs did not finish after release: %+v", runs)
 }
 
 func TestRunGoesToTheBackgroundAndEveryCommandSeesIt(t *testing.T) {
