@@ -79,8 +79,7 @@ func attachCmd() *cobra.Command {
 		}}
 }
 
-// listCmd is atm status, the runs going, when going, else atm runs, every run, with its report.json if it has
-// one; one line each.
+// listCmd is atm status, the runs going, when going, else atm runs, every run and its report.json; one line each.
 func listCmd(going bool) *cobra.Command {
 	c := &cobra.Command{Use: "runs", Short: "List the repository's runs: running, passed and failed", Args: cobra.NoArgs}
 	if going {
@@ -109,7 +108,7 @@ func listCmd(going bool) *cobra.Command {
 			}
 			n++
 			report := ""
-			if !going && o.Report != "" {
+			if o.Report != "" {
 				report = "\t" + o.Report
 			}
 			_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s%s\n", o.Run, how, o.Duration(), o.Issue, report)
