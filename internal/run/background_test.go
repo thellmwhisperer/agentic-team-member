@@ -62,7 +62,7 @@ func holdFakeAgents(t *testing.T, count int) (wait, release func()) {
 	release = func() { _ = os.WriteFile(unblock, nil, 0o600) }
 	t.Cleanup(release)
 	wait = func() {
-		deadline := time.Now().Add(10*time.Second + time.Duration(count)*50*time.Millisecond)
+		deadline := time.Now().Add(10*time.Second + time.Duration(count)*500*time.Millisecond)
 		for time.Now().Before(deadline) {
 			entries, err := os.ReadDir(ready)
 			if err == nil && len(entries) >= count {
