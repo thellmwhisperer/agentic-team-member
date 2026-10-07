@@ -118,7 +118,8 @@ func newTestPath(clone, name string) error {
 	return nil
 }
 
-// quoted says whether criterion is a whole sentence of body, verbatim but for line breaks.
+// quoted accepts a whole issue line after list markers and final punctuation are removed, or a
+// whole sentence of body, verbatim but for line breaks.
 func quoted(body, criterion string) bool {
 	flat := func(s string) string { return strings.Join(strings.Fields(s), " ") }
 	c := flat(criterion)

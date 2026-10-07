@@ -247,11 +247,13 @@ verdict is void.
 Once the checks pass, they sort the report's `follow_ups`, each `{"title",
 "red_test", "criterion"}`: a behaviour gap the agent found and did not fix.
 Follow-up `n`'s test must be on disk at `.atm/follow-ups/<n>/<red_test>` in the
-clone; it runs alone at `red_test` through `test_file` on the unit's work and
+clone; `red_test` must be a new path outside `.atm/`. It runs alone at
+`red_test` through `test_file` on the unit's work and
 must fail, then the clone comes back as it was. One without its test, or whose
 test passes or hangs, is rejected. No model judges a follow-up and nothing
 checks what code its test calls. An accepted follow-up whose `criterion` is a
-whole sentence of the issue, verbatim but for line breaks, runs as the next
+whole sentence of the issue, verbatim but for line breaks, or a whole issue
+line after a list marker and final punctuation are removed, runs as the next
 unit; any other goes to `.atm/follow-ups.json` at the repository root, with its
 test's text, to become a new issue. The checks' end line carries `follow_ups`,
 where each one went.
