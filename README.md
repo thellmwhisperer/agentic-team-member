@@ -90,21 +90,21 @@ Step by step: [How a run flows](docs/how-a-run-flows.md).
 
 ## Run it
 
+Download the archive for your platform from
+[Releases](https://github.com/thellmwhisperer/agentic-team-member/releases) and
+put `atm` in your PATH, or build it with the Go version in [go.mod](go.mod):
+
 ```bash
-git clone https://github.com/thellmwhisperer/agentic-team-member.git
-cd agentic-team-member
-go build -o atm ./cmd/atm
-ATM_BIN="$PWD/atm"
+go install github.com/thellmwhisperer/agentic-team-member/cmd/atm@latest
 
 cd /path/to/your/repo
-"$ATM_BIN" init
+atm init
 # Fill in the required commands and file patterns in .atm.yaml.
-"$ATM_BIN" run 300
-# Or: "$ATM_BIN" run plans/retry-on-timeout.md
+atm run 300
+# Or: atm run plans/retry-on-timeout.md
 ```
 
-Use the Go version in [go.mod](go.mod) to build ATM. Run it from the target
-repository. A local issue file needs a `Type:` line; see
+Run it from the target repository. A local issue file needs a `Type:` line; see
 [Configuration](docs/configuration.md).
 `atm run` shows the run on a terminal and returns its label off a terminal;
 `atm status`, `atm attach` and `atm runs` let you follow it. `atm axi run` waits

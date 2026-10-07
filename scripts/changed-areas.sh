@@ -4,7 +4,7 @@ cd "$(dirname "$0")/.."
 base=${1:?base commit is required}
 classify_path() {
   case "$1" in
-    *.go|go.mod|go.sum|.golangci.yml|Makefile|scripts/changed-areas.sh|scripts/test.sh|scripts/lint.sh|.github/workflows/go.yml)
+    *.go|go.mod|go.sum|.golangci.yml|Makefile|scripts/changed-areas.sh|scripts/test.sh|scripts/lint.sh|.github/workflows/go.yml|.goreleaser.yaml|.github/workflows/release.yml)
       go=true
       ;;
   esac
