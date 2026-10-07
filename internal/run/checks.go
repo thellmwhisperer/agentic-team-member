@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -94,6 +95,11 @@ func prove(clone, typ, test string, c config.Config) (err error) {
 	if err != nil {
 		return err
 	}
+	defer func() { // every type, after its own proof, which names a failure better
+		if err == nil {
+			err = shrunk(clone, changed, c.TestPatterns)
+		}
+	}()
 	switch typ {
 	case "fix", "feature", "greenfield":
 		err := redGreen(clone, tree, aside, test, c.TestFile)
@@ -136,6 +142,26 @@ func changes(clone, typ, test string) (changed, aside []string, err error) {
 		}
 	}
 	return changed, aside, err
+}
+
+// shrunk is an error naming the first of changed that matches one of tests, is in the base and is not staged in
+// clone with as many bytes.
+func shrunk(clone string, changed, tests []string) error {
+	for _, p := range changed {
+		if first([]string{p}, tests, true) == "" {
+			continue
+		}
+		was, err := git(clone, "cat-file", "-s", "HEAD:"+p)
+		if err != nil {
+			continue // new
+		}
+		is, err := git(clone, "cat-file", "-s", ":"+p) // staged: an error when deleted
+		n, _ := strconv.Atoi(is)
+		if m, _ := strconv.Atoi(was); err != nil || n < m {
+			return fmt.Errorf("the base's test %s is gone or shorter", p)
+		}
+	}
+	return nil
 }
 
 // redGreen sets aside, in clone, the paths aside, runs test alone with tmpl, which must fail, brings the
