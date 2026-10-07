@@ -416,7 +416,11 @@ func tee(ctx context.Context, t terminal, w io.Writer, dir, line string, env ...
 	cmd.Dir, cmd.Env, cmd.WaitDelay = dir, append(os.Environ(), env...), time.Second
 	cmd.Stdout = io.MultiWriter(&out, w, log)
 	cmd.Stderr = cmd.Stdout
-	ownGroup(cmd)
+	attach, closeGroup, err := ownGroup(cmd)
+	if err != nil {
+		return "", err
+	}
+	defer closeGroup()
 	if err := inheritCloneLease(cmd, dir); err != nil {
 		return "", err
 	}
@@ -426,7 +430,12 @@ func tee(ctx context.Context, t terminal, w io.Writer, dir, line string, env ...
 	}
 	if !ran {
 		if err = cmd.Start(); err == nil {
-			err = cmd.Wait()
+			if err = attach(); err != nil {
+				_ = cmd.Cancel()
+				err = errors.Join(err, cmd.Wait())
+			} else {
+				err = cmd.Wait()
+			}
 		}
 	}
 	log.flush()

@@ -122,7 +122,6 @@ func (a agent) run(clone, name, skill, brief string, check func(map[string]any) 
 	cmd.Env = append(slices.DeleteFunc(os.Environ(), func(kv string) bool {
 		return strings.HasPrefix(kv, "CLAUDE_CODE_CHILD_SESSION=") // set, the agent's transcripts are off
 	}), a.env...)
-	ownGroup(cmd)
 	s := stream{skill: skill, live: liveIn(clone)}
 	err = s.read(cmd, f, a.Harness)
 	switch {
@@ -206,6 +205,11 @@ type stream struct {
 // read runs cmd and writes each line of its stdout and stderr to log, as it is when JSON, else as a JSON
 // string, reading the stream of harness from it.
 func (s *stream) read(cmd *exec.Cmd, log io.Writer, harness string) error {
+	attach, closeGroup, err := ownGroup(cmd)
+	if err != nil {
+		return err
+	}
+	defer closeGroup()
 	pr, pw := io.Pipe()
 	cmd.Stdout, cmd.Stderr = pw, pw
 	done := make(chan error, 1)
@@ -229,12 +233,17 @@ func (s *stream) read(cmd *exec.Cmd, log io.Writer, harness string) error {
 			}
 		}
 	}()
-	err := cmd.Start()
+	err = cmd.Start()
 	if err == nil {
-		err = cmd.Wait()
+		if err = attach(); err != nil {
+			_ = cmd.Cancel()
+			err = errors.Join(err, cmd.Wait())
+		} else {
+			err = cmd.Wait()
+		}
 	}
 	if errors.Is(err, exec.ErrWaitDelay) { // exited 0, but left something holding its output: kill what it left
-		_, err = cmd.Cancel(), nil
+		err = cmd.Cancel()
 	}
 	_ = pw.Close()
 	return errors.Join(err, <-done)

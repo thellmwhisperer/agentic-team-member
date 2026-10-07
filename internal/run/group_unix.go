@@ -17,11 +17,12 @@ import (
 // ownGroup starts cmd as the leader of a new process group, marks its environment with a variable of its own,
 // which every process it starts inherits, and makes its cancel kill the whole group, every descendant and every
 // process that bears the mark, even one in a session of its own that init has adopted.
-func ownGroup(cmd *exec.Cmd) {
+func ownGroup(cmd *exec.Cmd) (func() error, func(), error) {
 	mark := "ATM_RUN_MARK=" + rand.Text()
 	cmd.Env = append(cmd.Environ(), mark)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return killTree(cmd.Process.Pid, mark) }
+	return func() error { return nil }, func() {}, nil
 }
 
 // killTree kills the group led by pid, every descendant of pid and every process whose environment holds mark.
