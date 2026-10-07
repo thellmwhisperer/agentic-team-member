@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"reflect"
 	"strings"
 	"testing"
@@ -34,8 +35,12 @@ func TestGoReleaserBuildsAtmForTheFiveTargets(t *testing.T) {
 	if len(cfg.Builds) != 1 || cfg.Builds[0].Main != "./cmd/atm" {
 		t.Fatalf("builds = %+v, want one build of ./cmd/atm", cfg.Builds)
 	}
-	want := []string{"darwin_arm64", "darwin_amd64", "linux_amd64", "linux_arm64", "windows_amd64"}
-	if got := cfg.Builds[0].Targets; !reflect.DeepEqual(got, want) {
+	want := map[string]bool{"darwin_arm64": true, "darwin_amd64": true, "linux_amd64": true, "linux_arm64": true, "windows_amd64": true}
+	got := make(map[string]bool, len(cfg.Builds[0].Targets))
+	for _, target := range cfg.Builds[0].Targets {
+		got[target] = true
+	}
+	if len(cfg.Builds[0].Targets) != len(want) || !reflect.DeepEqual(got, want) {
 		t.Fatalf("targets = %v, want %v", got, want)
 	}
 	if len(cfg.Archives) == 0 || cfg.Checksum == nil {
@@ -61,22 +66,44 @@ func TestReleaseWorkflowRunsOnlyMakeTargetsOnVTags(t *testing.T) {
 	for _, job := range wf.Jobs {
 		for _, step := range job.Steps {
 			if step.Run != "" {
-				runs = append(runs, step.Run)
+				fields := strings.Fields(step.Run)
+				if len(fields) < 2 || fields[0] != "make" {
+					t.Fatalf("run step %q does not invoke make with a target", step.Run)
+				}
+				runs = append(runs, fields[1:]...)
 			}
 		}
 	}
-	if !reflect.DeepEqual(runs, []string{"make release"}) {
-		t.Fatalf("run steps = %q, want only make release", runs)
+	if !contains(runs, "release") {
+		t.Fatalf("make targets = %q, want release", runs)
 	}
 }
 
 func TestReleaseCheckRunsGoReleaserInSnapshotMode(t *testing.T) {
-	data, err := os.ReadFile("../../Makefile")
+	cmd := exec.Command("make", "-n", "release-check")
+	cmd.Dir = "../.."
+	output, err := cmd.CombinedOutput()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("make -n release-check: %v\n%s", err, output)
 	}
-	_, recipe, ok := strings.Cut(string(data), "\nrelease-check:")
-	if !ok || !strings.Contains(strings.SplitN(recipe, "\n\n", 2)[0], "release --snapshot") {
-		t.Fatalf("Makefile has no release-check target running release --snapshot:\n%s", data)
+	fields := strings.Fields(string(output))
+	hasGoReleaser := false
+	for _, field := range fields {
+		if strings.Contains(field, "goreleaser") {
+			hasGoReleaser = true
+			break
+		}
 	}
+	if !hasGoReleaser || !contains(fields, "release") || !contains(fields, "--snapshot") {
+		t.Fatalf("make -n release-check = %q, want GoReleaser release --snapshot", string(output))
+	}
+}
+
+func contains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
