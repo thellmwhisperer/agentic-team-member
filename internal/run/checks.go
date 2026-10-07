@@ -279,7 +279,7 @@ func trial(clone, tree string, aside []string, base, after string) (red, green, 
 // the ones git ignores too, which the clone's write-tree never sees. It reads big files, every one above a
 // byte, in chunks: macOS kills git for mapping a binary that ran and whose signature, like slopslint's, is bad.
 func every(clone string, args ...string) (string, error) {
-	return git(clone, append([]string{"-c", "core.bigFileThreshold=1", "-c", "core.filemode=false",
+	return git(clone, append([]string{"-c", "core.bigFileThreshold=1",
 		"--git-dir=.git/atm-files", "--work-tree=."}, args...)...)
 }
 
