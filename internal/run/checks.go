@@ -291,9 +291,6 @@ func keep(clone string) (string, error) {
 		_, err = git(clone, "init", "-q", "--bare", ".git/atm-files")
 	}
 	if err == nil {
-		_, err = git(clone, "--git-dir=.git/atm-files", "config", "core.filemode", "false")
-	}
-	if err == nil {
 		_, err = every(clone, "add", "-A", "-f", ".")
 	}
 	return tree, err
@@ -307,13 +304,17 @@ func reset(clone string) error {
 	if err != nil {
 		return err
 	}
-	_, changed := every(clone, "diff-files", "--quiet")
+	_, changed := every(clone, "diff", "--quiet")
+	var changedPaths string
+	if changed != nil {
+		changedPaths, _ = every(clone, "diff", "--name-only")
+	}
 	_, err = every(clone, "clean", "-fdqx")
 	if err == nil {
 		_, err = every(clone, "checkout", "--", ".")
 	}
 	if err == nil && changed != nil {
-		err = errVoid
+		err = fmt.Errorf("%w: %s", errVoid, changedPaths)
 	}
 	return err
 }
