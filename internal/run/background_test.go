@@ -381,9 +381,8 @@ func TestBackgroundKeepsLabelMonotonicWhenNewestIsPruned(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := &server{root: top}
-	for n := 1; n <= maxRuns; n++ {
-		s.runs = append(s.runs, &bgRun{Outcome: Outcome{Run: fmt.Sprintf("issue-%d", n), Outcome: "running",
-			Started: time.Now()}})
+	for _, outcome := range numberedOutcomes("issue", maxRuns, "running", time.Now(), time.Time{}) {
+		s.runs = append(s.runs, &bgRun{Outcome: outcome})
 	}
 	if err := os.MkdirAll(runDir(top, "issue-201"), 0o755); err != nil {
 		t.Fatal(err)
@@ -413,15 +412,22 @@ func seedHistory(t *testing.T, top string) {
 		t.Fatal(err)
 	}
 	var seeded bytes.Buffer
-	for n := 1; n <= 199; n++ {
-		if err := json.NewEncoder(&seeded).Encode(Outcome{Run: fmt.Sprintf("old-%d", n), Outcome: "failed",
-			Started: time.Now().Add(-time.Hour), Ended: time.Now()}); err != nil {
+	for _, outcome := range numberedOutcomes("old", 199, "failed", time.Now().Add(-time.Hour), time.Now()) {
+		if err := json.NewEncoder(&seeded).Encode(outcome); err != nil {
 			t.Fatal(err)
 		}
 	}
 	if err := os.WriteFile(filepath.Join(top, ".atm", "runs.jsonl"), seeded.Bytes(), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func numberedOutcomes(prefix string, count int, status string, started, ended time.Time) []Outcome {
+	outcomes := make([]Outcome, count)
+	for n := range count {
+		outcomes[n] = Outcome{Run: fmt.Sprintf("%s-%d", prefix, n+1), Outcome: status, Started: started, Ended: ended}
+	}
+	return outcomes
 }
 
 func assertPrunedHistory(t *testing.T, top, held string) {
