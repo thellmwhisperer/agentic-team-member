@@ -25,7 +25,8 @@ type finding struct{ File, Family, Finding string }
 // ponytail is the slop detector on the run's work in clone, from base commit sha, for issue i as its last unit
 // is proven, whose test is test: an agent that may only cut it. A cut that holds, a shorter diff that passes
 // every check again, leaves two commits on the units before, the last unit then the cut with a tombstone per
-// finding; any other cut is undone.
+// finding; a cut rejected by policy or checks is undone, while a commit by the agent or a re-check command
+// fails the run.
 func (a agent) ponytail(root, clone, sha, test string, i Issue, c config.Config) (map[string]any, error) {
 	base, err := git(clone, "rev-parse", "HEAD") // the last unit's
 	if err != nil {
