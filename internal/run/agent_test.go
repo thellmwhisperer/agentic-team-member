@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 type obj = map[string]any
@@ -60,6 +61,15 @@ func fakeAgent(name string) int {
 	if path := os.Getenv("FAKE_AGENT_CALL"); path != "" {
 		b, _ := json.Marshal(obj{"args": args, "stdin": string(stdin), "env": os.Environ()})
 		_ = os.WriteFile(path+call, b, 0o600)
+	}
+	if ready := os.Getenv("FAKE_AGENT_BARRIER_READY"); ready != "" {
+		_ = os.WriteFile(filepath.Join(ready, strconv.Itoa(os.Getpid())), nil, 0o600)
+		for {
+			if _, err := os.Stat(os.Getenv("FAKE_AGENT_BARRIER_RELEASE")); err == nil {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
 	}
 	fmt.Print(`{"type": "system", "subtype": "init"}`+"\n", os.Getenv("FAKE_AGENT_STREAM")) // the test's lines too
 	fmt.Fprintln(os.Stderr, "fake stderr")
