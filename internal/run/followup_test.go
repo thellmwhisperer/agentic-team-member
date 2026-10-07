@@ -3,6 +3,7 @@ package run
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -182,5 +183,32 @@ func TestRunDiesWhenAUnitEditsItsRedTest(t *testing.T) {
 	err := Run("t", []string{issueFile(t, followUpIssue)}, &out, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "c1_test.sh") || !strings.Contains(err.Error(), "edit") {
 		t.Fatalf("want unit 2 to fail for editing its red test, got %v", err)
+	}
+}
+
+func TestRunDiscardsACutThatUndoesAnEarlierUnit(t *testing.T) {
+	root := repo(t, "https://example.com/owner/repo.git", atmSet(atmSet(atmYAML, "test", ""), "delivery",
+		"sh regression_test.sh && sh second_test.sh"))
+	if err := os.WriteFile(filepath.Join(root, "source.txt"), []byte("broken\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitT(t, root, "add", "source.txt")
+	gitT(t, root, "commit", "-q", "-m", "source")
+	t.Setenv("FAKE_AGENT_WORK", `if [ -f second_test.sh ]; then echo second >> source.txt; `+
+		`printf '{"test_file":"second_test.sh","follow_ups":[]}' > .atm/fake-report.json; `+
+		`else printf 'fixed\nextra\nmore\n' > source.txt; `+
+		`echo 'grep -q fixed source.txt && ! grep -q broken source.txt' > regression_test.sh; `+
+		`mkdir -p .atm/follow-ups/1; echo 'grep -q second source.txt' > .atm/follow-ups/1/second_test.sh; `+
+		`printf '{"test_file":"regression_test.sh","follow_ups":[{"title":"gap","red_test":"second_test.sh",`+
+		`"criterion":"A retry runs once after a timeout."}]}' > .atm/fake-report.json; fi`)
+	t.Setenv("FAKE_PONYTAIL_WORK", `printf 'broken\nsecond\n' > source.txt`)
+	t.Setenv("FAKE_PONYTAIL_REPORT", strings.Replace(cut, "a.txt", "source.txt", 1))
+	var out bytes.Buffer
+	if err := Run("t", []string{issueFile(t, followUpIssue)}, &out, io.Discard); err != nil {
+		t.Fatalf("want the cut discarded and both units' tests passing at delivery, got %v", err)
+	}
+	if p := ends(t, &out, "ponytail"); len(p) != 1 || p[0]["kept"] != false ||
+		!strings.Contains(fmt.Sprint(p[0]["reason"]), "regression_test.sh") {
+		t.Fatalf("want the cut discarded by unit 1's proof, got %v", p)
 	}
 }

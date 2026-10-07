@@ -23,11 +23,12 @@ var families = []string{"agent_artifact_in_repo", "documented_as_convention", "e
 type finding struct{ File, Family, Finding string }
 
 // ponytail is the slop detector on the run's work in clone, from base commit sha, for issue i as its last unit
-// is proven, whose test is test: an agent that may only cut it. A cut that holds, a shorter diff that passes
-// every check again, leaves two commits on the units before, the last unit then the cut with a tombstone per
-// finding; a cut rejected by policy or checks is undone, while a commit by the agent or a re-check command
-// fails the run.
-func (a agent) ponytail(root, clone, sha, test string, i Issue, c config.Config) (map[string]any, error) {
+// is proven, whose units were proven as proofs: an agent that may only cut it. A cut that holds, a shorter diff
+// that passes every unit's proof and every check again, leaves two commits on the units before, the last unit
+// then the cut with a tombstone per finding; a cut rejected by policy or checks is undone, while a commit by
+// the agent or a re-check command fails the run.
+func (a agent) ponytail(root, clone, sha string, proofs []proof, i Issue, c config.Config) (map[string]any,
+	error) {
 	base, err := git(clone, "rev-parse", "HEAD") // the last unit's
 	if err != nil {
 		return nil, err
@@ -57,8 +58,8 @@ func (a agent) ponytail(root, clone, sha, test string, i Issue, c config.Config)
 	}
 	ev["net_lines"] = lines
 	if why == "" {
-		if _, err := checks(clone, base, i.Type, test, c); err != nil {
-			why = err.Error()
+		if why, err = reprove(clone, base, proofs, c); err != nil {
+			return ev, err
 		}
 	}
 	if err := moved(clone, base, "the commands"); err != nil {
@@ -71,6 +72,28 @@ func (a agent) ponytail(root, clone, sha, test string, i Issue, c config.Config)
 	}
 	ev["commits"], ev["tombstones"], err = commit(root, clone, sha, before, i.Title, found)
 	return ev, err
+}
+
+// reprove says why the work in clone, on HEAD base, the last unit's, fails a unit's proof again, each unit
+// before the last on its own base, or the last unit's checks, "" when it fails none.
+func reprove(clone, base string, proofs []proof, c config.Config) (string, error) {
+	for n, p := range proofs[:len(proofs)-1] {
+		if _, err := git(clone, "reset", "-q", p.base); err != nil {
+			return "", err
+		}
+		err := prove(clone, p.typ, filepath.ToSlash(p.test), c)
+		if _, e := git(clone, "reset", "-q", base); e != nil {
+			return "", e
+		}
+		if err != nil {
+			return fmt.Sprintf("unit %d: %v", n+1, err), nil
+		}
+	}
+	last := proofs[len(proofs)-1]
+	if _, err := checks(clone, base, last.typ, last.test, c); err != nil {
+		return err.Error(), nil
+	}
+	return "", nil
 }
 
 // review is the run's work in clone, at base commit sha, as a tree, the files it changes, and its
