@@ -211,6 +211,8 @@ func TestPonytailDiscardsACutThatDoesNotHold(t *testing.T) {
 		{name: "breaks a check", work: "echo broken > a.txt", report: cut, why: "fails with the fix"},
 		{name: "new file", work: "echo fixed > a.txt; echo c > c.txt", report: cut, why: "c.txt"},
 		{name: "outside the diff", work: "echo fixed > a.txt; rm b.txt", report: cut, why: "b.txt"},
+		{name: "touches test", work: "echo fixed > a.txt; echo bad > a_test.sh", report: cut, why: "touches the test a_test.sh"},
+		{name: "deletes file", work: "rm a.txt", report: cut, why: "deletes a.txt"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

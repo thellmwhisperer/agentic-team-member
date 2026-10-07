@@ -48,7 +48,7 @@ func (a agent) ponytail(root, clone, sha, test string, i Issue, c config.Config)
 	if err != nil {
 		return ev, err
 	}
-	why, lines, err := fault(clone, sha, before, after, files, found)
+	why, lines, err := fault(clone, sha, before, after, files, found, c.TestPatterns)
 	if err != nil {
 		return ev, err
 	}
@@ -92,7 +92,7 @@ func review(root, clone, sha string, i Issue, c config.Config) (tree string, fil
 // fault says why the cut from tree before to tree after, on the run's work from sha, which changes files,
 // does not hold even before the checks, "" when it may: it must shorten the diff, report what it cut, and
 // add no file nor touch one outside files. lines are the net lines the run adds before and after it.
-func fault(clone, sha, before, after string, files []string, found []finding) (why string, lines [2]int,
+func fault(clone, sha, before, after string, files []string, found []finding, tests []string) (why string, lines [2]int,
 	err error) {
 	for n, tree := range []string{before, after} {
 		if lines[n], err = added(clone, sha, tree); err != nil {
@@ -108,6 +108,12 @@ func fault(clone, sha, before, after string, files []string, found []finding) (w
 		return "the cut reports no finding", lines, err
 	}
 	for f := strings.Split(changed, "\x00"); len(f) > 1; f = f[2:] {
+		if f[0] == "D" {
+			return "the cut deletes " + f[1], lines, err
+		}
+		if first([]string{f[1]}, tests, true) != "" {
+			return "the cut touches the test " + f[1], lines, err
+		}
 		if f[0] == "A" {
 			return "the cut adds " + f[1], lines, err
 		}
