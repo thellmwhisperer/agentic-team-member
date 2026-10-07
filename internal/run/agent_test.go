@@ -146,7 +146,7 @@ func TestRunDrivesTheAgent(t *testing.T) {
 			t.Setenv("CLAUDE_CODE_CHILD_SESSION", "1")
 			var out bytes.Buffer
 			err := Run([]string{"--harness", harness, "--model", "m", "--effort", "e", "--harness-arg", "--x",
-				"--harness-arg", "y", "--env", "ATM_FAKE=a=b", issueFile(t, issue)}, &out)
+				"--harness-arg", "y", "--env", "ATM_FAKE=a=b", issueFile(t, issue)}, &out, io.Discard)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -240,7 +240,7 @@ func TestRunDiesWhenTheAgentFails(t *testing.T) {
 			root := repo(t, "https://example.com/owner/repo.git", atmYAML)
 			t.Setenv("FAKE_AGENT", c.mode)
 			var out bytes.Buffer
-			err := Run(append(c.args, "--harness", c.harness, issueFile(t, issue)), &out)
+			err := Run(append(c.args, "--harness", c.harness, issueFile(t, issue)), &out, io.Discard)
 			if err == nil || !strings.Contains(err.Error(), c.why) {
 				t.Fatalf("want an error naming %q, got %v", c.why, err)
 			}

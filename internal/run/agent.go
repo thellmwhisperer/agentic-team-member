@@ -123,7 +123,7 @@ func (a agent) run(clone, brief string) (map[string]any, error) {
 	err = s.read(cmd, f, a.Harness)
 	switch {
 	case errors.Is(ctx.Err(), context.DeadlineExceeded):
-		return ev, fmt.Errorf("agent timed out after %s; log: %s", agentTimeout, path)
+		return ev, fmt.Errorf("agent timed out after %s; log: %s", human(agentTimeout), path)
 	case ctx.Err() != nil:
 		return ev, fmt.Errorf("agent interrupted; log: %s", path)
 	case err != nil:
