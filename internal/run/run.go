@@ -143,16 +143,19 @@ func (a agent) units(r *verdict, root, dir, sha, text string, i Issue, c config.
 					return ev, fmt.Errorf("unit %d edited its red test %s, which it must make pass as it is", n, test)
 				}
 			}
-			testContent, err := os.ReadFile(filepath.Join(dir, test))
-			if err != nil {
-				return ev, err
-			}
 			result, err := checks(dir, head, unit.Type, test, c)
 			for key, value := range result {
 				ev[key] = value
 			}
 			if err != nil {
 				return ev, err
+			}
+			var testContent []byte
+			if unit.Type == "fix" || unit.Type == "feature" || unit.Type == "greenfield" || unit.Type == "tests" {
+				testContent, err = os.ReadFile(filepath.Join(dir, test))
+				if err != nil {
+					return ev, err
+				}
 			}
 			proofs = append(proofs, proof{head, test, unit.Type, string(testContent)})
 			var out []followUp
