@@ -150,7 +150,11 @@ type bgRun struct {
 }
 
 func serve(l *net.UnixListener, root, sock string) error {
-	s := &server{root: root, runs: history(root), last: time.Now()}
+	runs, err := history(root)
+	if err != nil {
+		return err
+	}
+	s := &server{root: root, runs: runs, last: time.Now()}
 	live.Lock()
 	live.dirs = map[string]bool{}
 	live.Unlock()
@@ -355,15 +359,19 @@ func (r *bgRun) event(line string) string {
 
 // history is the runs in root's .atm/runs.jsonl, how each last stood. One still running there ran in a
 // background process that ended before it did.
-func history(root string) []*bgRun {
+func history(root string) ([]*bgRun, error) {
 	f, err := os.Open(filepath.Join(root, ".atm", "runs.jsonl"))
 	if err != nil {
-		return nil // no run yet
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil // no run yet
+		}
+		return nil, err
 	}
 	defer func() { _ = f.Close() }()
 	var runs []*bgRun
 	at := map[string]int{}
 	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 64*1024), 1024*1024)
 	for sc.Scan() {
 		var o Outcome
 		if json.Unmarshal(sc.Bytes(), &o) != nil {
@@ -382,7 +390,7 @@ func history(root string) []*bgRun {
 		at[o.Run] = len(runs)
 		runs = append(runs, r)
 	}
-	return runs
+	return runs, sc.Err()
 }
 
 // save appends o to runs.jsonl. ponytail: the file only grows; trimming it is the upgrade.
