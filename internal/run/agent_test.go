@@ -44,19 +44,7 @@ var work = map[string]string{"fix": fixWork, "feature": fixWork, "greenfield": f
 // its report; its call goes to $FAKE_AGENT_CALL.ponytail. $FAKE_AGENT_STREAM goes to its stdout after its first line.
 func fakeAgent(name string) int {
 	mode := os.Getenv("FAKE_AGENT")
-	if ready := os.Getenv("FAKE_AGENT_READY"); ready != "" {
-		_ = os.WriteFile(ready, nil, 0o600)
-	}
-	if os.Getenv("FAKE_AGENT_KILL_PARENT") != "" {
-		parent, _ := os.FindProcess(os.Getppid())
-		_ = parent.Kill()
-		_ = os.Unsetenv("FAKE_AGENT_KILL_PARENT")
-	}
-	if mode == "grandchild" {
-		c := make(chan os.Signal, 1)
-		signal.Notify(c, os.Interrupt) // blocks until killed: ATM sends nothing but SIGKILL
-		_ = os.WriteFile(os.Getenv("FAKE_AGENT_PID"), []byte(strconv.Itoa(os.Getpid())), 0o600)
-		<-c
+	if fakeAgentSetup(mode) {
 		return 0
 	}
 	args := os.Args[1:]
@@ -73,43 +61,10 @@ func fakeAgent(name string) int {
 	waitForFakeAgentRelease()
 	fmt.Print(`{"type": "system", "subtype": "init"}`+"\n", os.Getenv("FAKE_AGENT_STREAM")) // the test's lines too
 	fmt.Fprintln(os.Stderr, "fake stderr")
-	switch mode {
-	case "fail":
-		return 3
-	case "hang":
-		grandchild := exec.Command(os.Args[0])
-		grandchild.Env, grandchild.Stdout = append(os.Environ(), "FAKE_AGENT=grandchild"), os.Stdout
-		_ = grandchild.Run()
-		return 0
-	case "orphan":
-		grandchild := exec.Command(os.Args[0])
-		grandchild.Env = append(os.Environ(), "FAKE_AGENT=grandchild")
-		grandchild.ExtraFiles = append(grandchild.ExtraFiles, os.NewFile(3, "clone.lock"))
-		null, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
-		if err != nil {
-			return 1
-		}
-		grandchild.Stdout, grandchild.Stderr = null, null
-		err = grandchild.Start()
-		_ = null.Close()
-		if err != nil {
-			return 1
-		}
+	if exit, done := fakeAgentMode(mode); done {
+		return exit
 	}
-	path := map[string]string{"claude": ".claude/skills/" + skill, "codex": ".agents/skills/" + skill,
-		"opencode": ".opencode/skills/" + skill, "pi": after(args, "--skill")}[name] + "/SKILL.md"
-	b, _ := os.ReadFile(path)
-	b = bytes.ReplaceAll(b, []byte("\r\n"), []byte("\n"))
-	if bytes.Contains(b, []byte("name: "+skill+"\n")) && mode != "no-skill" &&
-		exec.Command("git", "check-ignore", "-q", path).Run() == nil {
-		emit(map[string]obj{
-			"claude": {"type": "assistant", "message": obj{"content": []obj{{"type": "tool_use", "name": "Skill",
-				"input": obj{"skill": skill}}}}},
-			"codex":    {"type": "item.completed", "item": obj{"type": "command_execution", "command": "cat " + path}},
-			"opencode": {"type": "tool_use", "part": obj{"tool": "skill", "state": obj{"input": obj{"name": skill}}}},
-			"pi":       {"type": "tool_execution_start", "toolName": "read", "args": obj{"path": path}},
-		}[name])
-	}
+	fakeAgentSkill(name, args, skill, mode)
 	_ = exec.Command("sh", "-c", todo).Run()
 	text = cmp.Or(map[string]string{"no-report": "Done, nothing to report.", "no-test-file": `{"summary": "s"}`}[mode],
 		workReport(call), text)
@@ -124,6 +79,69 @@ func fakeAgent(name string) int {
 			"content": []obj{{"type": "text", "text": text}}}},
 	}[name])
 	return 0
+}
+
+func fakeAgentSetup(mode string) bool {
+	if ready := os.Getenv("FAKE_AGENT_READY"); ready != "" {
+		_ = os.WriteFile(ready, nil, 0o600)
+	}
+	if os.Getenv("FAKE_AGENT_KILL_PARENT") != "" {
+		parent, _ := os.FindProcess(os.Getppid())
+		_ = parent.Kill()
+		_ = os.Unsetenv("FAKE_AGENT_KILL_PARENT")
+	}
+	if mode == "grandchild" {
+		c := make(chan os.Signal, 1)
+		signal.Notify(c, os.Interrupt) // blocks until killed: ATM sends nothing but SIGKILL
+		_ = os.WriteFile(os.Getenv("FAKE_AGENT_PID"), []byte(strconv.Itoa(os.Getpid())), 0o600)
+		<-c
+		return true
+	}
+	return false
+}
+
+func fakeAgentMode(mode string) (int, bool) {
+	switch mode {
+	case "fail":
+		return 3, true
+	case "hang":
+		grandchild := exec.Command(os.Args[0])
+		grandchild.Env, grandchild.Stdout = append(os.Environ(), "FAKE_AGENT=grandchild"), os.Stdout
+		_ = grandchild.Run()
+		return 0, true
+	case "orphan":
+		grandchild := exec.Command(os.Args[0])
+		grandchild.Env = append(os.Environ(), "FAKE_AGENT=grandchild")
+		grandchild.ExtraFiles = append(grandchild.ExtraFiles, os.NewFile(3, "clone.lock"))
+		null, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+		if err != nil {
+			return 1, true
+		}
+		grandchild.Stdout, grandchild.Stderr = null, null
+		err = grandchild.Start()
+		_ = null.Close()
+		if err != nil {
+			return 1, true
+		}
+	}
+	return 0, false
+}
+
+func fakeAgentSkill(name string, args []string, skill, mode string) {
+	path := map[string]string{"claude": ".claude/skills/" + skill, "codex": ".agents/skills/" + skill,
+		"opencode": ".opencode/skills/" + skill, "pi": after(args, "--skill")}[name] + "/SKILL.md"
+	b, _ := os.ReadFile(path)
+	b = bytes.ReplaceAll(b, []byte("\r\n"), []byte("\n"))
+	if bytes.Contains(b, []byte("name: "+skill+"\n")) && mode != "no-skill" &&
+		exec.Command("git", "check-ignore", "-q", path).Run() == nil {
+		emit(map[string]obj{
+			"claude": {"type": "assistant", "message": obj{"content": []obj{{"type": "tool_use", "name": "Skill",
+				"input": obj{"skill": skill}}}}},
+			"codex":    {"type": "item.completed", "item": obj{"type": "command_execution", "command": "cat " + path}},
+			"opencode": {"type": "tool_use", "part": obj{"tool": "skill", "state": obj{"input": obj{"name": skill}}}},
+			"pi":       {"type": "tool_execution_start", "toolName": "read", "args": obj{"path": path}},
+		}[name])
+	}
 }
 
 func recordFakeAgentCall(args []string, stdin []byte, call string) {
