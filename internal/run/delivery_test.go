@@ -81,6 +81,17 @@ func TestRunDeliversTheBranch(t *testing.T) {
 	}
 }
 
+func TestForeignAllowsNoCommitsWithoutIdentity(t *testing.T) {
+	root := repo(t, t.TempDir(), "")
+	noIdentity(t)
+	clone := filepath.Join(t.TempDir(), "clone")
+	gitT(t, root, "clone", "-q", root, clone)
+	sha := gitT(t, root, "rev-parse", "HEAD")
+	if err := foreign(root, clone, sha); err != nil {
+		t.Fatalf("no commits need an identity check: %v", err)
+	}
+}
+
 // A commit by anyone but the repository identity, made by a command the run runs, never reaches delivery: the
 // run fails at the node where it appeared.
 func TestRunFailsOnAForeignCommit(t *testing.T) {
