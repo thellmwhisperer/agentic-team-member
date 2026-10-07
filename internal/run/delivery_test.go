@@ -47,7 +47,7 @@ func TestRunDeliversTheBranch(t *testing.T) {
 				fakeGH(t, `{"title":"Retry on timeout","body":"Type: fix\nRetry once."}`, false)
 			}
 			if c.kept {
-				t.Setenv("FAKE_AGENT_WORK", "printf 'fixed\\nextra\\nmore\\n' > a.txt; echo 'grep -q fixed a.txt' > a_test.sh")
+				t.Setenv("FAKE_AGENT_WORK", "printf 'fixed\\nextra\\nmore\\n' > a.txt"+fixTest)
 				t.Setenv("FAKE_PONYTAIL_WORK", "echo fixed > a.txt")
 				t.Setenv("FAKE_PONYTAIL_REPORT", cut)
 			}

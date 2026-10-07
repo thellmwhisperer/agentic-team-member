@@ -100,7 +100,14 @@ aside except the report's `test_file`, which runs alone through `test_file`
 changes come back and it must pass. A `fix` sets aside only the files the base
 has, so the files the fix added stay and the red fails on behaviour: a test
 that only exercises a new file passes without the fix and is rejected (so is a
-fix made only of new files). `feature` and `greenfield` set aside everything,
+fix made only of new files). A `fix` then runs its test twice more, the new
+files kept and each old file it changes rebuilt from its diff: the base with
+every added line in place (a changed line goes before the base line it
+replaces), then only the added lines. A test that passes on both depends on
+nothing the base had, such as one that only calls a function the fix adds to an
+old file, and is rejected. Known limit: where a file's added lines cannot run
+alone, as in a compiled language that needs the base's declarations, the
+second trial fails and such a test passes. `feature` and `greenfield` set aside everything,
 so the red may fail on a missing symbol or module. `refactor` runs `test` on
 the base, which must pass, and may not change a file matching `test_patterns`.
 `tests` runs the new test on the base and after, both must pass, and may change

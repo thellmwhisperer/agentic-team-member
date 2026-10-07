@@ -33,40 +33,73 @@ func checksStep(t *testing.T, out *bytes.Buffer) obj {
 // newFile makes b.txt and tests only it.
 const newFile = "echo fixed > b.txt; echo 'grep -q fixed b.txt' > a_test.sh"
 
-func TestRunChecksTheProofOfEachTaskType(t *testing.T) {
-	cases := []struct {
-		name, typ, work, atm, why string
-		hang                      bool
-	}{
-		{name: "fix", typ: "fix"},
-		{name: "fix that adds a file", typ: "fix",
-			work: `echo fixed > conf.txt; echo conf.txt > a.txt; echo 'grep -q fixed "$(cat a.txt)"' > a_test.sh`},
-		{name: "fix whose test only exercises a new file", typ: "fix", work: newFile, why: "passes without the fix"},
-		{name: "fix whose test fails with it", typ: "fix", work: "echo fixed > a.txt; echo false > a_test.sh",
-			why: "fails with the fix"},
-		{name: "fix whose test hangs without it", typ: "fix", why: "timed out", hang: true,
-			work: "echo fixed > a.txt; echo 'grep -q fixed a.txt || while :; do :; done' > a_test.sh"},
-		{name: "fix whose test changes the clone", typ: "fix",
-			work: "echo fixed > a.txt; echo 'grep -q fixed a.txt && echo x >> a.txt' > a_test.sh", why: "void"},
-		{name: "fix without test_file", typ: "fix", atm: atmSet(atmYAML, "test_file", ""), why: "test_file"},
-		{name: "feature red on a missing file", typ: "feature", work: newFile},
-		{name: "greenfield red on a missing file", typ: "greenfield", work: newFile},
-		{name: "agent commits", typ: "fix", work: fixWork + "; git add -A; git commit -qm fix", why: "commits"},
-		{name: "refactor", typ: "refactor"},
-		{name: "refactor that touches a test", typ: "refactor", work: "echo true > a_test.sh", why: "a_test.sh"},
-		{name: "refactor on a red suite", typ: "refactor", atm: atmSet(atmYAML, "test", "test -f b.txt"),
-			why: "fails on the base"},
-		{name: "tests", typ: "tests"},
-		{name: "tests that touch source", typ: "tests", work: "echo b > b.txt; echo 'test -f b.txt' > b_test.sh",
-			why: "b.txt"},
-		{name: "tests failing on the base", typ: "tests", work: "echo false > a_test.sh", why: "fails on the base"},
-		{name: "docs", typ: "docs"},
-		{name: "docs that touch code", typ: "docs", work: "echo doc > README.md; echo fixed > a.txt", why: "a.txt"},
-		{name: "chore", typ: "chore"},
+// lib is lib.sh on the base, value broken, and helper the line that adds a function nothing on the base calls.
+const lib, helper = "# lib\nvalue() { echo broken; }\n", "helper() { echo fixed; }"
+
+// testThrough writes a_test.sh, which calls fn from lib.sh and wants fixed.
+func testThrough(fn string) string {
+	return `; echo '. ./lib.sh; test "$(` + fn + `)" = fixed' > a_test.sh`
+}
+
+// commitLib commits lib.sh, holding text, on root's base, when text is not "".
+func commitLib(t *testing.T, root, text string) {
+	t.Helper()
+	if text == "" {
+		return
 	}
-	for _, c := range cases {
+	if err := os.WriteFile(filepath.Join(root, "lib.sh"), []byte(text), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitT(t, root, "add", "lib.sh")
+	gitT(t, root, "commit", "-qm", "lib")
+}
+
+// proofCases are the task types' proofs at work: why, when not "", names the run's failure.
+var proofCases = []struct {
+	name, typ, work, atm, why, lib string
+	hang                           bool
+}{
+	{name: "fix whose test only calls a function it adds to an old file", typ: "fix", lib: lib,
+		work: "echo '" + helper + "' >> lib.sh" + testThrough("helper"), why: "depends on nothing the base had"},
+	{name: "fix whose test only calls a function it adds next to a changed line", typ: "fix", lib: lib,
+		work: "printf '# lib, v2\\n" + helper + "\\nvalue() { echo broken; }\\n' > lib.sh" + testThrough("helper"),
+		why:  "depends on nothing the base had"},
+	{name: "fix that changes a line", typ: "fix", lib: lib,
+		work: "printf '# lib\\nvalue() { echo fixed; }\\n' > lib.sh" + testThrough("value")},
+	{name: "fix that adds a line inside a function", typ: "fix", lib: "value() {\n  v=broken\n  echo $v\n}\n",
+		work: "printf 'value() {\\n  v=broken\\n  v=fixed\\n  echo $v\\n}\\n' > lib.sh" + testThrough("value")},
+	{name: "fix", typ: "fix"},
+	{name: "fix that adds a file", typ: "fix",
+		work: `echo fixed > conf.txt; echo conf.txt > a.txt; echo 'grep -q fixed "$(cat a.txt)"' > a_test.sh`},
+	{name: "fix whose test only exercises a new file", typ: "fix", work: newFile, why: "passes without the fix"},
+	{name: "fix whose test fails with it", typ: "fix", work: "echo fixed > a.txt; echo false > a_test.sh",
+		why: "fails with the fix"},
+	{name: "fix whose test hangs without it", typ: "fix", why: "timed out", hang: true,
+		work: "echo fixed > a.txt; echo 'grep -q fixed a.txt || while :; do :; done' > a_test.sh"},
+	{name: "fix whose test changes the clone", typ: "fix",
+		work: "echo fixed > a.txt; echo 'grep -q fixed a.txt && echo x >> a.txt' > a_test.sh", why: "void"},
+	{name: "fix without test_file", typ: "fix", atm: atmSet(atmYAML, "test_file", ""), why: "test_file"},
+	{name: "feature red on a missing file", typ: "feature", work: newFile},
+	{name: "greenfield red on a missing file", typ: "greenfield", work: newFile},
+	{name: "agent commits", typ: "fix", work: fixWork + "; git add -A; git commit -qm fix", why: "commits"},
+	{name: "refactor", typ: "refactor"},
+	{name: "refactor that touches a test", typ: "refactor", work: "echo true > a_test.sh", why: "a_test.sh"},
+	{name: "refactor on a red suite", typ: "refactor", atm: atmSet(atmYAML, "test", "test -f b.txt"),
+		why: "fails on the base"},
+	{name: "tests", typ: "tests"},
+	{name: "tests that touch source", typ: "tests", work: "echo b > b.txt; echo 'test -f b.txt' > b_test.sh",
+		why: "b.txt"},
+	{name: "tests failing on the base", typ: "tests", work: "echo false > a_test.sh", why: "fails on the base"},
+	{name: "docs", typ: "docs"},
+	{name: "docs that touch code", typ: "docs", work: "echo doc > README.md; echo fixed > a.txt", why: "a.txt"},
+	{name: "chore", typ: "chore"},
+}
+
+func TestRunChecksTheProofOfEachTaskType(t *testing.T) {
+	for _, c := range proofCases {
 		t.Run(c.name, func(t *testing.T) {
 			root := repo(t, "https://example.com/owner/repo.git", cmp.Or(c.atm, atmYAML))
+			commitLib(t, root, c.lib)
 			if c.work != "" {
 				t.Setenv("FAKE_AGENT_WORK", c.work)
 			}
