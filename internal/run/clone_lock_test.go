@@ -57,6 +57,45 @@ func TestCloneLeaseIsInheritedByStartedProcess(t *testing.T) {
 	}
 }
 
+func TestRemoveDoesNotDeleteCloneWithReplacedLock(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "clone")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := dir + ".lock"
+	old, err := openCloneLock(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = old.Close() })
+	locked, err := tryLockCloneExclusive(old)
+	if err != nil || !locked {
+		t.Fatalf("lock old clone: %v, %v", locked, err)
+	}
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(path, path+".old"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(dir, "alive")
+	if err := os.WriteFile(marker, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := remove(dir, old); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("remove deleted a clone with a different lock file: %v", err)
+	}
+}
+
 func TestCloneLeaseChild(t *testing.T) {
 	ready, ok := os.LookupEnv("ATM_CLONE_LEASE_READY")
 	if !ok {

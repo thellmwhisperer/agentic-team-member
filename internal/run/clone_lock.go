@@ -12,7 +12,7 @@ func closeCloneLease(dir string) {
 }
 
 func tryCloneExclusive(dir string) (*os.File, bool, error) {
-	f, err := os.OpenFile(dir+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	f, err := openCloneLock(dir + ".lock")
 	if err != nil {
 		return nil, false, err
 	}
