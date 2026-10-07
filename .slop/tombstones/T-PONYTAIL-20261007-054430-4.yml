@@ -1,0 +1,18 @@
+schema: 1
+id: T-PONYTAIL-20261007-054430-4
+status: accepted
+category: alien_code
+title: "outcome() no longer trims a trailing newline only to add it back. The JSON branch now writes its own"
+created_at: 2026-10-07
+incident:
+  pattern: "outcome() no longer trims a trailing newline only to add it back. The JSON branch now writes its own newline and the builder is written as is."
+  what_went_wrong: "An ATM run wrote it and ATM's ponytail pass cut it before delivery."
+  root_cause: "The coding agent wrote more than the issue needed."
+  rule_established: "Cut by the ponytail pass; it does not come back."
+  evidence:
+    - family: speculative_feature
+      example: "outcome() no longer trims a trailing newline only to add it back. The JSON branch now writes its own newline and the builder is written as is."
+      artifact: internal/cli/axi.go
+match:
+  family: speculative_feature
+  artifact: internal/cli/axi.go
