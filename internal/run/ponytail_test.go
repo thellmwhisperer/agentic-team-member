@@ -141,6 +141,15 @@ func unitDone(t *testing.T, work string) (root, dir, sha string, c config.Config
 	return root, dir, sha, c
 }
 
+func unitProof(t *testing.T, clone, base string) proof {
+	t.Helper()
+	content, err := os.ReadFile(filepath.Join(clone, "a_test.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return proof{base, "a_test.sh", "fix", string(content)}
+}
+
 var fixIssue = Issue{Title: "Retry on timeout", Body: "Type: fix\nRetry once.", Type: "fix"}
 
 // state is everything a pass could change in dir: HEAD, the index and the working tree.
@@ -172,7 +181,7 @@ func TestPonytailKeepsAShorterGreenCut(t *testing.T) {
 	gitT(t, root, "config", "user.email", "dev@example.com")
 	t.Setenv("FAKE_PONYTAIL_REPORT", cut)
 	ev, err := agent{Agent: c.Agent, dir: t.TempDir()}.ponytail(root, clone, sha,
-		[]proof{{sha, "a_test.sh", "fix"}}, fixIssue, c)
+		[]proof{unitProof(t, clone, sha)}, fixIssue, c)
 	if err != nil || ev["kept"] != true {
 		t.Fatalf("want the cut kept, got %v, %v", err, ev)
 	}
@@ -211,7 +220,7 @@ func TestPonytailKeepsAShorterGreenCut(t *testing.T) {
 func TestReproveFailsWhenAPriorUnitTestCommits(t *testing.T) {
 	_, clone, sha, cfg := unitDone(t, "echo fixed > a.txt")
 	cfg.TestFile = "sh {file} && git -c user.name=Test -c user.email=test@example.com commit --allow-empty -qm test"
-	proofs := []proof{{sha, "a_test.sh", "fix"}, {sha, "a_test.sh", "fix"}}
+	proofs := []proof{unitProof(t, clone, sha), unitProof(t, clone, sha)}
 
 	_, err := reprove(clone, sha, proofs, cfg)
 	if err == nil || !strings.Contains(err.Error(), "the commands made commits") {
@@ -219,6 +228,26 @@ func TestReproveFailsWhenAPriorUnitTestCommits(t *testing.T) {
 	}
 	if head := gitT(t, clone, "rev-parse", "HEAD"); head == sha {
 		t.Fatal("the test commit was hidden by resetting to the last unit's base")
+	}
+}
+
+func TestPonytailDiscardsCutWhenAChainedUnitChangesEarlierTest(t *testing.T) {
+	root, clone, sha, cfg := unitDone(t, "echo fixed > a.txt")
+	earlier := unitProof(t, clone, sha)
+	if err := os.WriteFile(filepath.Join(clone, "a_test.sh"), []byte(earlier.testContent+"# unit 2\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	proofs := []proof{earlier, unitProof(t, clone, sha)}
+	t.Setenv("FAKE_PONYTAIL_WORK", "echo fixed > a.txt")
+	t.Setenv("FAKE_PONYTAIL_REPORT", cut)
+	before := state(t, clone)
+
+	ev, err := agent{Agent: cfg.Agent, dir: t.TempDir()}.ponytail(root, clone, sha, proofs, fixIssue, cfg)
+	if err != nil || ev["kept"] != false || !strings.Contains(ev["reason"].(string), "unit 1: test a_test.sh changed") {
+		t.Fatalf("want the cut discarded because unit 2 changed unit 1's test, got %v, %v", err, ev)
+	}
+	if after := state(t, clone); after != before {
+		t.Fatalf("the clone did not come back:\n%s\nwant\n%s", after, before)
 	}
 }
 
@@ -239,7 +268,7 @@ func TestPonytailDiscardsACutThatDoesNotHold(t *testing.T) {
 			t.Setenv("FAKE_PONYTAIL_REPORT", c.report)
 			before := state(t, clone)
 			ev, err := agent{Agent: cfg.Agent, dir: t.TempDir()}.ponytail(root, clone, sha,
-				[]proof{{sha, "a_test.sh", "fix"}}, fixIssue, cfg)
+				[]proof{unitProof(t, clone, sha)}, fixIssue, cfg)
 			reason, _ := ev["reason"].(string)
 			if err != nil || ev["kept"] != false || !strings.Contains(reason, c.why) {
 				t.Fatalf("want the cut discarded for %q, got %v, %v", c.why, err, ev)
@@ -265,7 +294,7 @@ func TestPonytailDiesWithoutTheRepositoryIdentityBeforeCommitting(t *testing.T) 
 			}
 			t.Setenv("FAKE_PONYTAIL_REPORT", cut)
 			_, err := agent{Agent: cfg.Agent, dir: t.TempDir()}.ponytail(root, clone, sha,
-				[]proof{{sha, "a_test.sh", "fix"}}, fixIssue, cfg)
+				[]proof{unitProof(t, clone, sha)}, fixIssue, cfg)
 			if err == nil || !strings.Contains(err.Error(), c.why) {
 				t.Fatalf("want an error naming %q, got %v", c.why, err)
 			}

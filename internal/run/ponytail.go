@@ -77,6 +77,12 @@ func (a agent) ponytail(root, clone, sha string, proofs []proof, i Issue, c conf
 // reprove says why the work in clone, on HEAD base, the last unit's, fails a unit's proof again, each unit
 // before the last on its own base, or the last unit's checks, "" when it fails none.
 func reprove(clone, base string, proofs []proof, c config.Config) (string, error) {
+	for n, p := range proofs {
+		content, err := os.ReadFile(filepath.Join(clone, p.test))
+		if err != nil || string(content) != p.testContent {
+			return fmt.Sprintf("unit %d: test %s changed since it was proven", n+1, p.test), nil
+		}
+	}
 	for n, p := range proofs[:len(proofs)-1] {
 		if _, err := git(clone, "reset", "-q", p.base); err != nil {
 			return "", err
