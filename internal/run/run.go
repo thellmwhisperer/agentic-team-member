@@ -184,6 +184,9 @@ func deliver(r *verdict, root, clone, sha, base, line string, i Issue, screen io
 		ev := map[string]any{"branch": branch}
 		cuts, err := onBranch(root, clone, sha, branch, i.Title)
 		if err == nil {
+			err = foreign(root, clone, sha)
+		}
+		if err == nil {
 			err = os.WriteFile(clone+".delivered", []byte(branch+" "+base+"\n"), 0o644)
 		}
 		if err == nil {
@@ -256,6 +259,24 @@ func onBranch(root, clone, sha, name, title string) (cuts string, err error) {
 		_, err = git(clone, "remote", "set-url", "origin", origin)
 	}
 	return cuts, err
+}
+
+// foreign is an error naming the first commit from base commit sha to HEAD in clone whose author or committer
+// is not the identity of the repository at root.
+func foreign(root, clone, sha string) error {
+	id, err := identity(root)
+	if err != nil {
+		return err
+	}
+	v := func(n int) string { _, s, _ := strings.Cut(id[n], "="); return s } // id is -c key=value pairs
+	want := fmt.Sprintf("%s <%s>, %s <%s>", v(1), v(3), v(5), v(7))
+	log, err := git(clone, "log", "--format=%h %an <%ae>, %cn <%ce>", sha+"..HEAD")
+	for _, line := range strings.Split(log, "\n") {
+		if h, who, _ := strings.Cut(line, " "); err == nil && line != "" && who != want {
+			return fmt.Errorf("commit %s is by %s, not the repository's identity %s", h, who, want)
+		}
+	}
+	return err
 }
 
 // GitHubRepo is the owner/name of the GitHub repository origin names, "" when it names none. No origin is not
