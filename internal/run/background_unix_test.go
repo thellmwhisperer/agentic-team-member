@@ -38,6 +38,7 @@ func TestKilledBackgroundKeepsCloneForStartedAgent(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("the background request did not end after its process was killed")
 	}
+	waitForDeadServer(t, top)
 	proc := recordedProcess(t, pidPath)
 	t.Setenv("FAKE_AGENT", "fail")
 	t.Setenv("FAKE_AGENT_KILL_PARENT", "")
@@ -159,6 +160,11 @@ func killDeliveryServer(t *testing.T, top string) {
 	if err := syscall.Kill(server, syscall.SIGKILL); err != nil {
 		t.Fatal(err)
 	}
+	waitForDeadServer(t, top)
+}
+
+func waitForDeadServer(t *testing.T, top string) {
+	t.Helper()
 	until(t, "the killed background server to stop answering", func() bool {
 		c, err := net.Dial("unix", short(socket(top)))
 		if err != nil {
