@@ -87,7 +87,7 @@ func prove(clone, typ, test string, c config.Config) (err error) {
 		_, e := git(clone, "reset", "-q") // the agent's work back to unstaged
 		err = errors.Join(err, e)
 	}()
-	tree, err := git(clone, "write-tree")
+	tree, err := keep(clone)
 	if err != nil {
 		return err
 	}
@@ -236,8 +236,9 @@ func onBase(clone, tree string, aside []string, test, tmpl string) error {
 
 // trial runs base with the paths aside as they are at HEAD, brings the agent's work, tree, back and runs
 // after, "" for nothing, and returns how each ended. A hang in either, or a clone that is no longer tree, is
-// err: the verdict is void.
+// err: the verdict is void. After each run, the files git ignores are back as keep left them.
 func trial(clone, tree string, aside []string, base, after string) (red, green, err error) {
+	defer func() { err = errors.Join(err, reset(clone)) }()
 	if len(aside) > 0 {
 		args := append([]string{"--literal-pathspecs", "restore", "--source=HEAD", "--staged", "--worktree", "--"},
 			aside...)
@@ -247,6 +248,9 @@ func trial(clone, tree string, aside []string, base, after string) (red, green, 
 	}
 	_, red = sh(clone, base)
 	if _, err := git(clone, "restore", "--source="+tree, "--staged", "--worktree", "--", "."); err != nil {
+		return red, nil, err
+	}
+	if err := reset(clone); err != nil {
 		return red, nil, err
 	}
 	if errors.Is(red, errTimeout) {
@@ -264,6 +268,41 @@ func trial(clone, tree string, aside []string, base, after string) (red, green, 
 		return red, green, errors.Join(err, errors.New("the clone changed during verification: the verdict is void"))
 	}
 	return red, green, nil
+}
+
+// every runs git in clone on .git/atm-files, a repository of its own that keeps every file of the working tree,
+// the ones git ignores too, which the clone's write-tree never sees.
+func every(clone string, args ...string) (string, error) {
+	return git(clone, append([]string{"--git-dir=.git/atm-files", "--work-tree=."}, args...)...)
+}
+
+// keep is the tree of clone's index, and records every file in clone, ignored or not, for reset. ponytail: a
+// copy of each, node_modules too; links or reflinks if a large one makes it slow.
+func keep(clone string) (string, error) {
+	tree, err := git(clone, "write-tree")
+	all := ""
+	if err == nil {
+		_, err = git(clone, "init", "-q", "--bare", ".git/atm-files")
+	}
+	if err == nil {
+		_, err = every(clone, "add", "-A", "-f", ".")
+	}
+	if err == nil {
+		all, err = every(clone, "write-tree")
+	}
+	if err == nil {
+		_, err = every(clone, "update-ref", "refs/kept", all)
+	}
+	return tree, err
+}
+
+// reset brings clone's working tree back to what keep recorded, new files gone, the ignored ones too.
+func reset(clone string) error {
+	_, err := every(clone, "add", "-A", "-f", ".")
+	if err == nil {
+		_, err = every(clone, "read-tree", "-u", "--reset", "refs/kept")
+	}
+	return err
 }
 
 // testLine is test_file, tmpl, for test, a path in the clone.
