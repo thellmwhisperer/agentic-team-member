@@ -244,6 +244,28 @@ only test and doc files. `docs` may change only files matching
 the run, and the clone must be the same after verification as before, or the
 verdict is void.
 
+Once the checks pass, they sort the report's `follow_ups`, each `{"title",
+"red_test", "criterion"}`: a behaviour gap the agent found and did not fix.
+Follow-up `n`'s test must be on disk at `.atm/follow-ups/<n>/<red_test>` in the
+clone; it runs alone at `red_test` through `test_file` on the unit's work and
+must fail, then the clone comes back as it was. One without its test, or whose
+test passes or hangs, is rejected. No model judges a follow-up and nothing
+checks what code its test calls. An accepted follow-up whose `criterion` is a
+whole sentence of the issue, verbatim but for line breaks, runs as the next
+unit; any other goes to `.atm/follow-ups.json` at the repository root, with its
+test's text, to become a new issue. The checks' end line carries `follow_ups`,
+where each one went.
+
+The next unit runs in the same clone: the unit before is committed on HEAD as
+`atm unit <n>: <title>` under the repository's git identity, its
+`.atm/follow-ups` removed, and the first chained follow-up's red test put in
+place. Its brief, `.atm/brief-unit-<n>.md`, asks to make that test pass without
+editing it; its log is `.atm/worker-unit<n>-<timestamp>.jsonl`. The `agent` and
+`checks` steps run again, their end lines with `unit`; the checks prove it
+red/green with that test, as a `feature`, and fail when it changed. A run makes
+at most 3 units: the accepted follow-ups not chained, the third unit's
+included, go to `follow-ups.json`, rewritten at the end of every run.
+
 The `ponytail` step, the slop detector, runs only after the checks passed. It
 writes `.atm/brief-ponytail.md` (the issue and the run's diff against the base)
 and runs the same agent with the bundled `ponytail-review` skill, placed and
@@ -258,8 +280,8 @@ fails the step and the run.
 The cut is discarded, and the clone comes back exactly as before, when it does
 not lower the run's net added lines, reports no finding, adds a file, deletes a
 file, touches a file matching `test_patterns` or one outside the diff, or fails
-the `checks` step run again. A kept cut leaves
-two commits: `atm unit 1: <title>` with the work before the cut, then
+the `checks` step run again. A kept cut leaves two commits on the units
+before it: `atm unit <n>: <title>` with the last unit's work before the cut, then
 `ponytail: <n> cuts` with the cut, one `- <file>: <finding> (<family>)` line per
 finding, and one slopslint tombstone per finding under `.slop/tombstones/`.
 Both use the repository's git identity (`git var` at its root, never one of
@@ -296,7 +318,7 @@ Every step's end line carries `duration_ms`. `.atm/report.json` at the
 repository root is rewritten at every step's start and end, so it is on disk
 before delivery: `failed_node` and `reason` first, then `nodes` (each step's
 `result`: `passed`, `failed`, `running`, `skipped` or `not run`, and
-`duration_ms`), the task `type`, and `commands`: the configured `install`, `test`,
+`duration_ms`, the last unit's for `agent` and `checks`), the task `type`, and `commands`: the configured `install`, `test`,
 `typecheck`, `lint` and `delivery` commands that ran during checks or delivery,
 each with its result and last 60 lines. After a delivery got its branch, `head_sha`
 is that branch's final SHA. The summary goes to
