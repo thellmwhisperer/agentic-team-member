@@ -68,7 +68,8 @@ decided. Each line exists because a model got it wrong once:
   without an upper bound. A speculative hardening is a note, not a change.
 - `tests/**`: never delete or weaken a test the issue's acceptance criteria or
   red test ask for.
-- `**`: run tests only through `scripts/test.sh`.
+- `**`: general review criteria and test invocation; see
+  [`.no-mistakes.yaml`](../.no-mistakes.yaml).
 
 ## The tombstones
 
