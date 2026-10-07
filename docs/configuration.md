@@ -179,7 +179,7 @@ line with a lowercase type: `fix` (or `hotfix`), `feature`,
 `gh issue view` from the repository `origin` names.
 
 The current Go port validates configuration before reading the issue, then
-emits start and result JSON lines for the `issue`, `contract`, `clone`, `agent`,
+emits start and result events for the `issue`, `contract`, `clone`, `agent`,
 `checks`, `ponytail` and `delivery` steps. The `issue` result includes the title and task type on success, plus the issue
 number for GitHub issues. The `contract` step writes `.atm/brief.md` at the
 repository root and reports its path on success. The brief starts by directing
@@ -310,7 +310,7 @@ the clone's `origin` is set to the repository's: no `origin` fails the step.
 command runs with `sh -c` in the clone, killed past 10 minutes, with
 `ATM_TITLE`, `ATM_ISSUE` (the issue number, empty for a file), `ATM_BRANCH`,
 `ATM_CLONE`, `ATM_REPORT` and `ATM_PONYTAIL` (the kept cut's findings, one a
-line, or empty) in its environment. Its output goes to stderr and to
+line, or empty) in its environment. Its output goes to the run's screen and to
 `.atm/delivery-output.txt`. ATM never pushes or opens a pull request: that is
 the command's business. Its end line carries `branch`. Empty, the step is
 skipped and the run ends there.
@@ -332,9 +332,45 @@ before delivery: `failed_node` and `reason` first, then `nodes` (each step's
 `typecheck`, `lint` and `delivery` commands that ran during checks or delivery,
 each with its result and last 60 lines. After a delivery got its branch, `head_sha`
 is that branch's final SHA. The summary goes to
-stderr: each step, how it ended and its duration (`0.9 s`, `4 min 28 s`,
+the run's screen: each step, how it ended and its duration (`0.9 s`, `4 min 28 s`,
 `1 h 02 min`, the one format ATM prints a time in), then the result and the
-report's path. `atm run` exits 0 when every executed step passed, 1 when `agent` or
+report's path. A run ends with exit code 0 when every executed step passed, 1 when `agent` or
 `checks` failed, 4 when `delivery` failed, and 2 for anything else: bad
 flags or config, an unreadable issue, a failed contract or clone. There is no
 `--label` yet.
+
+### Runs in the background
+
+`atm run` checks its command line, hands the run to the repository's
+background process and returns. Off a terminal it prints the run's label
+(`<issue name>-<n>`, `n` counting the repository's runs); on a terminal it
+shows the run's screen and exits with the run's code once it ends. Closing the
+terminal, or leaving with Ctrl-C, leaves the run going. The run's screen is one
+line per step event (`clone     passed 0.9 s`, the error's first line after a
+failure), then the summary and the delivery's output.
+
+The background process is `atm serve`, one per repository, started on demand
+by the first command that needs it, and listening on `.atm/atm.sock` (mode
+`0600`; a Unix socket on Windows too). It runs every run in itself and logs to
+`.atm/serve.log`. It ends after 10 minutes without a run, or once its socket is
+removed while no run goes. Each run's start and end are appended to
+`.atm/runs.jsonl`, so a new background process still lists them; a run left
+running there is shown failed at its last step. Every clone of its runs carries
+its pid: the sweep keeps one of those only while the background process holds
+its run, so the clone of a run that died, or of one in an earlier background
+process whose pid it got, is removed by the next sweep.
+
+| Command | Prints |
+|---------|--------|
+| `atm status` | Each run going: label, step, duration, issue; or `nothing runs` |
+| `atm attach [run]` | The run's screen (the last one going by default) until it ends; leaving leaves it going |
+| `atm runs` | Every run: label, `running`, `passed` or `failed at <node>`, duration, issue |
+| `atm axi run [--json] <atm run's arguments>` | Waits for the end, then the outcome |
+| `atm axi status [--json]`, `atm axi runs [--json]` | The runs going, or every run, as a table |
+
+`atm axi` prints TOON by default and JSON with `--json`. The outcome always
+carries every field, empty or not: `outcome`, `run`, `failed_node`, `reason`,
+`report` (empty when the run failed before its first step) and `next_step`.
+`atm axi run` exits with the run's code. The tables are `runs` with `run`,
+`issue`, `step` and `duration` for `status`, and `run`, `issue`, `outcome`,
+`failed_node` and `duration` for `runs`.

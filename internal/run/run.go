@@ -31,15 +31,9 @@ const Usage = "usage: atm run [--base-ref r] [--harness h] [--model m] [--effort
 // Each node's start and end go to out, one JSON object a line, and to .atm/report.json; the summary goes to
 // summary. ExitCode turns its error into atm's exit code.
 func Run(args []string, out, summary io.Writer) (err error) {
-	fs := flag.NewFlagSet("atm run", flag.ContinueOnError)
-	base := fs.String("base-ref", "main", "the ref the run starts from, resolved in the repository")
-	var a agent
-	a.flags(fs)
-	if err := fs.Parse(args); err != nil {
+	fs, base, a, err := parseArgs(args)
+	if err != nil {
 		return err
-	}
-	if fs.NArg() != 1 {
-		return errors.New(Usage)
 	}
 	root, err := git("", "rev-parse", "--show-toplevel")
 	if err != nil {
@@ -74,7 +68,7 @@ func Run(args []string, out, summary io.Writer) (err error) {
 		return ev, err
 	})
 	var dir, sha string
-	defer func() { err = errors.Join(err, release(dir, repo)) }()
+	defer func() { err = errors.Join(err, release(dir, repo)); hold(dir, false) }()
 	r.step("clone", func() (ev map[string]any, err error) {
 		dir, sha, err = clone(root, *base, c.Install, repo)
 		return map[string]any{"clone": dir, "sha": sha}, err
@@ -86,6 +80,18 @@ func Run(args []string, out, summary io.Writer) (err error) {
 	r.step("ponytail", func() (map[string]any, error) { return a.ponytail(root, dir, sha, test, unit, c) })
 	deliver(r, root, dir, sha, *base, c.Delivery, i, summary)
 	return r.err
+}
+
+// parseArgs is atm run's command line: its flags, then the issue.
+func parseArgs(args []string) (fs *flag.FlagSet, base *string, a *agent, err error) {
+	fs = flag.NewFlagSet("atm run", flag.ContinueOnError)
+	base = fs.String("base-ref", "main", "the ref the run starts from, resolved in the repository")
+	a = &agent{}
+	a.flags(fs)
+	if err = fs.Parse(args); err == nil && fs.NArg() != 1 {
+		err = errors.New(Usage)
+	}
+	return fs, base, a, err
 }
 
 // units runs the units of the run in clone dir, from base commit sha, for issue i under config c: the first on

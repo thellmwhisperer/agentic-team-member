@@ -27,6 +27,7 @@ func clone(root, base, install, repo string) (dir, sha string, err error) {
 	if dir, err = claim(clones, time.Now()); err != nil {
 		return "", sha, err
 	}
+	hold(dir, true) // before its pid file, which a sweep needs to remove it
 	if err = os.WriteFile(dir+".pid", []byte(strconv.Itoa(os.Getpid())), 0o644); err != nil {
 		return dir, sha, err
 	}
@@ -80,7 +81,7 @@ func sweep(clones, repo string) {
 		if err != nil {
 			continue
 		}
-		if pid, err := strconv.Atoi(strings.TrimSpace(string(b))); err != nil || alive(pid) || kept(dir, repo) {
+		if pid, err := strconv.Atoi(strings.TrimSpace(string(b))); err != nil || running(dir, pid) || kept(dir, repo) {
 			continue
 		}
 		_ = remove(dir) // a clone that will not go is tried again by the next run
@@ -120,8 +121,9 @@ func remove(dir string) error {
 	return errors.Join(os.RemoveAll(dir), os.RemoveAll(dir+".pid"), os.RemoveAll(dir+".delivered"))
 }
 
-// alive says whether process pid runs. ponytail: a dead run's pid the OS gave to another process reads as
-// alive and keeps its clone until that process ends; comparing start times is the upgrade.
+// alive says whether process pid runs. ponytail: outside the background process, a dead run's pid the OS gave
+// to another process reads as alive and keeps its clone until that process ends; comparing start times is the
+// upgrade.
 func alive(pid int) bool {
 	p, err := os.FindProcess(pid) // on Windows, fails for a process that is gone
 	if err != nil {
