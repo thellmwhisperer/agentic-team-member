@@ -1,0 +1,210 @@
+package run
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os/exec"
+	"path"
+	"path/filepath"
+	"regexp"
+	"slices"
+	"strings"
+	"time"
+
+	"github.com/thellmwhisperer/agentic-team-member/internal/config"
+)
+
+// checks is the verdict on the agent's work in clone, at base commit sha, for a task of type typ whose report
+// names test: HEAD has not moved, the type's proof holds, then install, test, typecheck and lint pass, the
+// commands no-mistakes runs. Install runs again: the agent may have changed dependencies.
+func checks(clone, sha, typ, test string, c config.Config) (map[string]any, error) {
+	head, err := git(clone, "rev-parse", "HEAD")
+	if err != nil {
+		return nil, err
+	}
+	if head != sha {
+		return nil, fmt.Errorf("the agent made commits: HEAD is %s, not the base %s", head, sha)
+	}
+	if err := prove(clone, typ, filepath.ToSlash(test), c); err != nil {
+		return nil, err
+	}
+	for _, cmd := range [][2]string{{"install", c.Install}, {"test", c.Test}, {"typecheck", c.Typecheck},
+		{"lint", c.Lint}} {
+		if cmd[1] == "" {
+			continue
+		}
+		if err := sh(clone, cmd[1]); err != nil {
+			return nil, fmt.Errorf("%s: %w", cmd[0], err)
+		}
+	}
+	return map[string]any{}, nil
+}
+
+// prove runs the proof of task type typ on the agent's work in clone, all of it staged meanwhile.
+func prove(clone, typ, test string, c config.Config) (err error) {
+	if _, err := git(clone, "add", "-A"); err != nil {
+		return err
+	}
+	defer func() {
+		_, e := git(clone, "reset", "-q") // the agent's work back to unstaged
+		err = errors.Join(err, e)
+	}()
+	tree, err := git(clone, "write-tree")
+	if err != nil {
+		return err
+	}
+	changed, aside, err := changes(clone, typ, test)
+	if err != nil {
+		return err
+	}
+	switch typ {
+	case "fix", "feature", "greenfield":
+		return redGreen(clone, tree, aside, test, c.TestFile)
+	case "refactor":
+		if p := first(changed, c.TestPatterns, true); p != "" {
+			return fmt.Errorf("a refactor changed the test %s", p)
+		}
+		base, _, err := trial(clone, tree, changed, c.Test, "")
+		return errors.Join(err, wrap(base, "the suite fails on the base"))
+	case "tests":
+		if p := first(changed, slices.Concat(c.TestPatterns, c.DocsPatterns), false); p != "" {
+			return fmt.Errorf("a tests task changed the source %s", p)
+		}
+		line, err := testLine(c.TestFile, test)
+		if err != nil {
+			return err
+		}
+		base, after, err := trial(clone, tree, aside, line, line)
+		return errors.Join(err, wrap(base, test+" fails on the base"), wrap(after, test+" fails after the change"))
+	case "docs":
+		if p := first(changed, c.DocsPatterns, false); p != "" {
+			return fmt.Errorf("a docs task changed %s, which is not docs", p)
+		}
+	}
+	return nil
+}
+
+// changes is every path the staged work in clone changes and what the base run sets aside: all but the test;
+// for a fix, only what the base has. A test that fails without the fix's new files alone then passes without
+// the fix. ponytail: so a fix made only of new files is rejected too.
+func changes(clone, typ, test string) (changed, aside []string, err error) {
+	out, err := git(clone, "diff", "--cached", "--name-status", "--no-renames", "-z", "HEAD")
+	for f := strings.Split(out, "\x00"); len(f) > 1; f = f[2:] {
+		if changed = append(changed, f[1]); f[1] != test && (typ != "fix" || f[0] != "A") {
+			aside = append(aside, f[1])
+		}
+	}
+	return changed, aside, err
+}
+
+// redGreen sets aside, in clone, the paths aside, runs test alone with tmpl, which must fail, brings the
+// agent's work, tree, back and runs test again, which must pass.
+func redGreen(clone, tree string, aside []string, test, tmpl string) error {
+	line, err := testLine(tmpl, test)
+	if err != nil {
+		return err
+	}
+	red, green, err := trial(clone, tree, aside, line, line)
+	switch {
+	case err != nil:
+		return err
+	case red == nil:
+		return fmt.Errorf("%s passes without the fix", test)
+	}
+	return wrap(green, test+" fails with the fix")
+}
+
+// trial runs base with the paths aside as they are at HEAD, brings the agent's work, tree, back and runs
+// after, "" for nothing, and returns how each ended. A hang in either, or a clone that is no longer tree, is
+// err: the verdict is void.
+func trial(clone, tree string, aside []string, base, after string) (red, green, err error) {
+	if len(aside) > 0 {
+		args := append([]string{"--literal-pathspecs", "restore", "--source=HEAD", "--staged", "--worktree", "--"},
+			aside...)
+		if _, err := git(clone, args...); err != nil {
+			return nil, nil, err
+		}
+	}
+	red = sh(clone, base)
+	if len(aside) > 0 {
+		if _, err := git(clone, "restore", "--source="+tree, "--staged", "--worktree", "--", "."); err != nil {
+			return red, nil, err
+		}
+	}
+	if errors.Is(red, errTimeout) {
+		return red, nil, red
+	}
+	if after != "" {
+		if green = sh(clone, after); errors.Is(green, errTimeout) {
+			return red, green, green
+		}
+	}
+	if _, err := git(clone, "add", "-A"); err != nil {
+		return red, green, err
+	}
+	if now, err := git(clone, "write-tree"); err != nil || now != tree {
+		return red, green, errors.Join(err, errors.New("the clone changed during verification: the verdict is void"))
+	}
+	return red, green, nil
+}
+
+// testLine is test_file, tmpl, for test, a path in the clone.
+func testLine(tmpl, test string) (string, error) {
+	switch {
+	case tmpl == "":
+		return "", errors.New("test_file is empty in .atm.yaml: this task type runs its test alone")
+	case test == "" || !filepath.IsLocal(test):
+		return "", fmt.Errorf("the report's test_file %q is not a path in the clone", test)
+	}
+	quote := func(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
+	return strings.NewReplacer("{file}", quote(test), "{dir}", quote("./"+path.Dir(test))).Replace(tmpl), nil
+}
+
+// first is the first path that matches one of globs, when want, or matches none, when not; "" when none is.
+func first(paths, globs []string, want bool) string {
+	for _, p := range paths {
+		if slices.ContainsFunc(globs, func(g string) bool { return match(g, p) }) == want {
+			return p
+		}
+	}
+	return ""
+}
+
+// glob turns a glob into a regular expression: ** spans directories, * and ? do not. ponytail: no character
+// classes; path.Match per segment is the upgrade.
+var glob = strings.NewReplacer(`\*\*/`, `(.*/)?`, `\*\*`, `.*`, `\*`, `[^/]*`, `\?`, `[^/]`)
+
+// match says whether the slash-separated path p matches the glob g.
+func match(g, p string) bool {
+	ok, _ := regexp.MatchString("^"+glob.Replace(regexp.QuoteMeta(g))+"$", p)
+	return ok
+}
+
+func wrap(err error, msg string) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%s: %w", msg, err)
+}
+
+var errTimeout = errors.New("timed out")
+
+// sh runs line with sh -c in dir, in its own process group, killed past timeout. Its error carries the last
+// 60 lines of its output.
+func sh(dir, line string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "sh", "-c", line)
+	cmd.Dir, cmd.WaitDelay = dir, time.Second
+	ownGroup(cmd)
+	out, err := cmd.CombinedOutput()
+	if ctx.Err() != nil {
+		err = fmt.Errorf("%w after %s", errTimeout, timeout)
+	}
+	if err == nil {
+		return nil
+	}
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	return fmt.Errorf("%w\n%s", err, strings.Join(lines[max(0, len(lines)-60):], "\n"))
+}

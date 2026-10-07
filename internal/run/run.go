@@ -43,13 +43,7 @@ func Run(args []string, out io.Writer) (err error) {
 	if err != nil {
 		return fmt.Errorf("not in a git repository: %w", err)
 	}
-	repo := ""
-	// No origin is not an error: the repository just has no GitHub issues.
-	if url, err := git("", "remote", "get-url", "origin"); err == nil {
-		if m := githubURL.FindStringSubmatch(url); m != nil {
-			repo = m[1]
-		}
-	}
+	repo := githubRepo()
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return err
@@ -78,16 +72,34 @@ func Run(args []string, out io.Writer) (err error) {
 	}); err != nil {
 		return err
 	}
-	var dir string
+	var dir, sha string
 	defer func() { err = errors.Join(err, release(dir, repo)) }()
-	if err := step(out, "clone", func() (map[string]any, error) {
-		d, sha, err := clone(root, *base, c.Install, repo)
-		dir = d
-		return map[string]any{"clone": d, "sha": sha}, err
+	if err := step(out, "clone", func() (ev map[string]any, err error) {
+		dir, sha, err = clone(root, *base, c.Install, repo)
+		return map[string]any{"clone": dir, "sha": sha}, err
 	}); err != nil {
 		return err
 	}
-	return step(out, "agent", func() (map[string]any, error) { return a.run(dir, text) })
+	var test string
+	if err := step(out, "agent", func() (map[string]any, error) {
+		ev, err := a.run(dir, text)
+		report, _ := ev["report"].(map[string]any)
+		test, _ = report["test_file"].(string)
+		return ev, err
+	}); err != nil {
+		return err
+	}
+	return step(out, "checks", func() (map[string]any, error) { return checks(dir, sha, i.Type, test, c) })
+}
+
+// githubRepo is the owner/name of the GitHub repository origin names, "" when it names none. No origin is not
+// an error: the repository just has no GitHub issues.
+func githubRepo() string {
+	url, err := git("", "remote", "get-url", "origin")
+	if m := githubURL.FindStringSubmatch(url); err == nil && m != nil {
+		return m[1]
+	}
+	return ""
 }
 
 func writeBrief(root string, i Issue, c config.Config) (string, map[string]any, error) {
@@ -103,8 +115,9 @@ func writeBrief(root string, i Issue, c config.Config) (string, map[string]any, 
 	return b, map[string]any{"brief": path}, err
 }
 
-// timeout bounds every command a step runs. ponytail: one fixed ceiling, and on timeout only the command
-// itself is killed, not what it started; a key in .atm.yaml and a process group are the upgrades.
+// timeout bounds every command a step runs. ponytail: one fixed ceiling, and on timeout command kills only
+// the command itself, not what it started, while sh kills its group; a key in .atm.yaml and a process group
+// for command are the upgrades.
 var timeout = 10 * time.Minute
 
 // agentTimeout bounds the agent. ponytail: one fixed ceiling; a flag or a key in .atm.yaml is the upgrade.

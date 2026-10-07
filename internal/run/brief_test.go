@@ -9,11 +9,11 @@ import (
 )
 
 const briefYAML = `install: "true"
-test: go test ./...
-typecheck: go vet ./...
+test: sh a_test.sh
+typecheck: sh -n a_test.sh
 lint: ""
-test_file: go test {dir}
-test_patterns: ["**/*_test.go"]
+test_file: sh {file}
+test_patterns: ["**/*_test.sh"]
 docs_patterns: ["**/*.md", "docs/**"]
 delivery: ""
 `
@@ -49,7 +49,7 @@ func TestRunWritesTheContractForTheTaskType(t *testing.T) {
 				t.Errorf("first line does not point to AGENTS.md: %q", first)
 			}
 			for _, want := range []string{"Task type: " + typ, "### Retry\n\n" + issue + "\n", proof,
-				"`**/*_test.go`", "`**/*.md`, `docs/**`", "- Test: `go test ./...`", "- Typecheck: `go vet ./...`",
+				"`**/*_test.sh`", "`**/*.md`, `docs/**`", "- Test: `sh a_test.sh`", "- Typecheck: `sh -n a_test.sh`",
 				"- Lint: none", "`ponytail` skill", "`git commit`, `git push`, `git rebase`, any `gh` command",
 				"`sleep` in tests", `"test_file"`, `"follow_ups"`} {
 				if !strings.Contains(got, want) {
