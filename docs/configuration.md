@@ -110,7 +110,10 @@ orphaned to init dies too, unless it cleared its environment.
 `fix`, `feature` and `greenfield` prove red/green: the agent's changes are set
 aside except the report's `test_file`, which runs alone through `test_file`
 (`{file}` is its path, `{dir}` its directory as `./dir`) and must fail; the
-changes come back and it must pass. A `fix` sets aside only the files the base
+changes come back and it must pass. Before each trial, ATM restores the clone's
+working tree, including ignored files, to the snapshot taken after staging the
+agent's work. This prevents output from the red test from changing the green
+result. A `fix` sets aside only the files the base
 has, so the files the fix added stay and the red fails on behaviour: a test
 that only exercises a new file passes without the fix and is rejected (so is a
 fix made only of new files). A `fix` then runs its test twice more, the new
