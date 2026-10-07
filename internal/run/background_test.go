@@ -63,7 +63,7 @@ func TestBackgroundRunsAndTellsHowEachEnded(t *testing.T) {
 				t.Fatal(err)
 			}
 			got := []any{end.Outcome, end.Run, end.FailedNode, end.Report, ExitCode(end.Err()), end.NextStep != ""}
-			want := []any{c.outcome, o.Run, c.failed, filepath.Join(top, ".atm", "report.json"), c.code, true}
+			want := []any{c.outcome, o.Run, c.failed, filepath.Join(top, ".atm", "runs", o.Run, "report.json"), c.code, true}
 			if !reflect.DeepEqual(got, want) {
 				t.Fatalf("outcome: %+v", end)
 			}
@@ -75,6 +75,45 @@ func TestBackgroundRunsAndTellsHowEachEnded(t *testing.T) {
 				t.Fatalf("Runs = %+v, %v", runs, err)
 			}
 		})
+	}
+}
+
+// Two runs at once in one repository each write under .atm/runs/<label>/, sharing only what the background
+// process owns. The same work passes as a fix and fails as docs.
+func TestBackgroundRunsAtOnceEachInItsOwnDirectory(t *testing.T) {
+	top := backgroundRepo(t)
+	t.Setenv("FAKE_AGENT_WORK", fixWork)
+	var started []Outcome
+	for _, typ := range []string{"fix", "docs"} {
+		o, err := Start(top, []string{issueFile(t, "# Retry\nType: "+typ+"\nRetry once.\n")})
+		if err != nil {
+			t.Fatal(err)
+		}
+		started = append(started, o)
+	}
+	for i, want := range [][]string{{"fix", "", "passed"}, {"docs", "checks", "failed"}} {
+		end, err := Attach(top, started[i].Run, &bytes.Buffer{})
+		dir := filepath.Join(top, ".atm", "runs", started[i].Run)
+		if err != nil || end.Outcome != want[2] || end.Report != filepath.Join(dir, "report.json") {
+			t.Fatalf("Attach = %+v, %v", end, err)
+		}
+		rep := readReport(t, end.Report)
+		if got := []string{rep["type"].(string), rep["failed_node"].(string), end.Outcome}; !reflect.DeepEqual(got,
+			want) {
+			t.Fatalf("%s: report %v", end.Run, got)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "brief.md")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	entries, err := os.ReadDir(filepath.Join(top, ".atm"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if !map[string]bool{"atm.sock": true, "runs.jsonl": true, "runs": true, "clones": true}[e.Name()] {
+			t.Errorf("the runs share .atm/%s", e.Name())
+		}
 	}
 }
 

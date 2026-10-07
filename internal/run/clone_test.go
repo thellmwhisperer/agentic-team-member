@@ -19,18 +19,15 @@ func atmInstall(line string) string {
 	return strings.Replace(atmYAML, `install: ""`, "install: '"+line+"'", 1)
 }
 
-// cloneStep is the clone step's end event, after checking issue and contract passed and nothing followed a
-// failure.
+// cloneStep is the clone step's end event, after checking issue passed and nothing followed a failure.
 func cloneStep(t *testing.T, out *bytes.Buffer) map[string]any {
 	t.Helper()
 	evs := events(t, out)
-	if len(evs) < 6 || evs[5]["state"] == "failed" && len(evs) != 6 || evs[1]["state"] != "passed" ||
-		evs[2]["step"] != "contract" || evs[3]["state"] != "passed" ||
-		evs[4]["step"] != "clone" || evs[4]["state"] != "started" ||
-		evs[5]["step"] != "clone" {
-		t.Fatalf("want the issue, contract, and clone steps, got %v", evs)
+	if len(evs) < 4 || evs[3]["state"] == "failed" && len(evs) != 4 || evs[1]["state"] != "passed" ||
+		evs[2]["step"] != "clone" || evs[2]["state"] != "started" || evs[3]["step"] != "clone" {
+		t.Fatalf("want the issue and clone steps, got %v", evs)
 	}
-	return evs[5]
+	return evs[3]
 }
 
 // clones is what is left under root's .atm/clones.
@@ -66,7 +63,7 @@ func TestRunClonesBaseDetachedAndInstalls(t *testing.T) {
 			gitT(t, root, "commit", "-q", "--allow-empty", "-m", "feature")
 			sha := gitT(t, root, "rev-parse", c.base)
 			var out bytes.Buffer
-			if err := Run(append(c.args, issueFile(t, issue)), &out, io.Discard); err != nil {
+			if err := Run("t", append(c.args, issueFile(t, issue)), &out, io.Discard); err != nil {
 				t.Fatal(err)
 			}
 			end := cloneStep(t, &out)
@@ -109,7 +106,7 @@ func TestRunDiesWhenCloneFails(t *testing.T) {
 				timeout = 2 * time.Second
 			}
 			var out bytes.Buffer
-			err := Run(append(c.args, issueFile(t, issue)), &out, io.Discard)
+			err := Run("t", append(c.args, issueFile(t, issue)), &out, io.Discard)
 			if err == nil || !strings.Contains(err.Error(), c.why) {
 				t.Fatalf("want an error naming %q, got %v", c.why, err)
 			}
@@ -201,7 +198,7 @@ func TestRunSweepsClonesNoRunNeeds(t *testing.T) {
 			}
 			old := oldClone(t, root, pid, c.delivered, c.ahead)
 			var out bytes.Buffer
-			if err := Run([]string{issueFile(t, issue)}, &out, io.Discard); err != nil {
+			if err := Run("t", []string{issueFile(t, issue)}, &out, io.Discard); err != nil {
 				t.Fatal(err)
 			}
 			_, err := os.Stat(old)

@@ -75,7 +75,7 @@ func TestRunChecksTheProofOfEachTaskType(t *testing.T) {
 				timeout = 2 * time.Second
 			}
 			var out bytes.Buffer
-			err := Run([]string{issueFile(t, "# Retry\nType: "+c.typ+"\nRetry once.\n")}, &out, io.Discard)
+			err := Run("t", []string{issueFile(t, "# Retry\nType: "+c.typ+"\nRetry once.\n")}, &out, io.Discard)
 			end := checksStep(t, &out)
 			switch {
 			case c.why == "" && (err != nil || end["state"] != "passed"):
@@ -102,7 +102,7 @@ func TestRunChecksRunTheCommandsInOrderAndDieOnTheFirstFailure(t *testing.T) {
 	atm = atmSet(atm, "typecheck", `echo typecheck >> "$ATM_TEST_OUT"; seq 100; exit 3`)
 	repo(t, "https://example.com/owner/repo.git", atm)
 	var out bytes.Buffer
-	err := Run([]string{issueFile(t, issue)}, &out, io.Discard)
+	err := Run("t", []string{issueFile(t, issue)}, &out, io.Discard)
 	var tail []string
 	for n := 41; n <= 100; n++ {
 		tail = append(tail, strconv.Itoa(n))

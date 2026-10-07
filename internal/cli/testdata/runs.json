@@ -1,1 +1,1 @@
-{"runs":[{"run":"7-1","issue":"7","outcome":"passed","failed_node":"","duration":"4 min 28 s"},{"run":"retry-2","issue":"/repo/a, b.md","outcome":"failed","failed_node":"checks","duration":"0.9 s"}]}
+{"runs":[{"run":"7-1","issue":"7","outcome":"passed","failed_node":"","duration":"4 min 28 s","report":"/repo/.atm/runs/7-1/report.json"},{"run":"retry-2","issue":"/repo/a, b.md","outcome":"failed","failed_node":"checks","duration":"0.9 s","report":"/repo/.atm/runs/retry-2/report.json"}]}

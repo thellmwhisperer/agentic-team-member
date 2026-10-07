@@ -32,16 +32,16 @@ func TestRunPonytailFollowsTheChecks(t *testing.T) {
 		t.Run(harness, func(t *testing.T) {
 			root := repo(t, "https://example.com/owner/repo.git", atmYAML)
 			var out bytes.Buffer
-			if err := Run([]string{"--harness", harness, issueFile(t, issue)}, &out, io.Discard); err != nil {
+			if err := Run("t", []string{"--harness", harness, issueFile(t, issue)}, &out, io.Discard); err != nil {
 				t.Fatal(err)
 			}
 			end := ponytailStep(t, &out)
 			top := gitT(t, root, "rev-parse", "--show-toplevel")
-			logs, _ := filepath.Glob(filepath.Join(top, ".atm", "ponytail-*.jsonl"))
+			logs, _ := filepath.Glob(filepath.Join(top, ".atm", "runs", "t", "ponytail.jsonl"))
 			if end["state"] != "passed" || end["kept"] != false || len(logs) != 1 || end["log"] != logs[0] {
-				t.Fatalf("want a lean run's pass discarded, logged in .atm/ponytail-*.jsonl, got %v, logs %v", end, logs)
+				t.Fatalf("want a lean run's pass discarded, logged in .atm/runs/t/ponytail.jsonl, got %v, logs %v", end, logs)
 			}
-			b, err := os.ReadFile(filepath.Join(root, ".atm", "brief-ponytail.md"))
+			b, err := os.ReadFile(filepath.Join(root, ".atm", "runs", "t", "brief-ponytail.md"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -61,7 +61,7 @@ func TestRunSkipsPonytailWhenAChecksFails(t *testing.T) {
 	call := filepath.Join(t.TempDir(), "call.json")
 	t.Setenv("FAKE_AGENT_CALL", call)
 	var out bytes.Buffer
-	if err := Run([]string{issueFile(t, issue)}, &out, io.Discard); err == nil ||
+	if err := Run("t", []string{issueFile(t, issue)}, &out, io.Discard); err == nil ||
 		!strings.HasPrefix(err.Error(), "lint: ") {
 		t.Fatalf("want lint to fail, got %v", err)
 	}
@@ -103,7 +103,7 @@ func TestRunDiesWhenThePonytailAgentFails(t *testing.T) {
 				agentTimeout = 3 * time.Second
 			}
 			var out bytes.Buffer
-			err := Run([]string{issueFile(t, issue)}, &out, io.Discard)
+			err := Run("t", []string{issueFile(t, issue)}, &out, io.Discard)
 			if err == nil || !strings.Contains(err.Error(), c.why) {
 				t.Fatalf("want an error naming %q, got %v", c.why, err)
 			}
@@ -171,7 +171,7 @@ func TestPonytailKeepsAShorterGreenCut(t *testing.T) {
 	gitT(t, root, "config", "user.name", "Repo Dev")
 	gitT(t, root, "config", "user.email", "dev@example.com")
 	t.Setenv("FAKE_PONYTAIL_REPORT", cut)
-	ev, err := agent{Agent: c.Agent}.ponytail(root, clone, sha, "a_test.sh", fixIssue, c)
+	ev, err := agent{Agent: c.Agent, dir: t.TempDir()}.ponytail(root, clone, sha, "a_test.sh", fixIssue, c)
 	if err != nil || ev["kept"] != true {
 		t.Fatalf("want the cut kept, got %v, %v", err, ev)
 	}
@@ -223,7 +223,7 @@ func TestPonytailDiscardsACutThatDoesNotHold(t *testing.T) {
 			root, clone, sha, cfg := unitDone(t, c.work)
 			t.Setenv("FAKE_PONYTAIL_REPORT", c.report)
 			before := state(t, clone)
-			ev, err := agent{Agent: cfg.Agent}.ponytail(root, clone, sha, "a_test.sh", fixIssue, cfg)
+			ev, err := agent{Agent: cfg.Agent, dir: t.TempDir()}.ponytail(root, clone, sha, "a_test.sh", fixIssue, cfg)
 			reason, _ := ev["reason"].(string)
 			if err != nil || ev["kept"] != false || !strings.Contains(reason, c.why) {
 				t.Fatalf("want the cut discarded for %q, got %v, %v", c.why, err, ev)
@@ -248,7 +248,7 @@ func TestPonytailDiesWithoutTheRepositoryIdentityBeforeCommitting(t *testing.T) 
 				gitT(t, root, "config", "user.email", c.email)
 			}
 			t.Setenv("FAKE_PONYTAIL_REPORT", cut)
-			_, err := agent{Agent: cfg.Agent}.ponytail(root, clone, sha, "a_test.sh", fixIssue, cfg)
+			_, err := agent{Agent: cfg.Agent, dir: t.TempDir()}.ponytail(root, clone, sha, "a_test.sh", fixIssue, cfg)
 			if err == nil || !strings.Contains(err.Error(), c.why) {
 				t.Fatalf("want an error naming %q, got %v", c.why, err)
 			}
