@@ -140,10 +140,7 @@ func changes(clone, typ, test string) (changed, aside []string, err error) {
 	return changed, aside, err
 }
 
-// additions is, for each of paths the base has and the staged work in clone adds lines to without removing
-// any there, the base's content with those lines at its end: what the work adds, cut off from what the base
-// had. A new function still runs there; a line added inside an old one no longer does. ponytail: lines added
-// next to removed ones are left out, so a new function in a hunk that also edits an old line goes unseen.
+// additions is each path's base content with every added line inserted at its position in the staged work.
 func additions(clone string, paths []string) (map[string]string, error) {
 	added := map[string]string{}
 	for _, p := range paths {
@@ -151,29 +148,90 @@ func additions(clone string, paths []string) (map[string]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		var lines []string
-		pure := false
-		for _, l := range strings.Split(diff, "\n") {
-			if f := strings.Fields(l); len(f) > 1 && f[0] == "@@" {
-				pure = strings.HasSuffix(f[1], ",0")
-			} else if pure && strings.HasPrefix(l, "+") {
-				lines = append(lines, l[1:])
-			}
+		base, err := git(clone, "show", "HEAD:"+p)
+		if err != nil {
+			return nil, err
 		}
-		if len(lines) > 0 {
-			base, err := git(clone, "show", "HEAD:"+p)
-			if err != nil {
-				return nil, err
-			}
-			added[p] = base + "\n" + strings.Join(lines, "\n") + "\n"
+		content, ok := additionsAt(base, diff)
+		if !ok {
+			return nil, fmt.Errorf("cannot reconstruct additions to %s", p)
+		}
+		if content != base {
+			added[p] = content
 		}
 	}
 	return added, nil
 }
 
+// additionsAt inserts diff additions at the start of each changed range in base.
+func additionsAt(base, diff string) (string, bool) {
+	var lines []string
+	if base != "" {
+		lines = strings.Split(base, "\n")
+	}
+	trailingNewline := strings.HasSuffix(base, "\n")
+	if trailingNewline {
+		lines = lines[:len(lines)-1]
+	}
+	insertions := map[int][]string{}
+	var boundary int
+	inHunk := false
+	for _, line := range strings.Split(diff, "\n") {
+		if strings.HasPrefix(line, "@@ ") {
+			var oldStart, oldCount int
+			if _, err := fmt.Sscanf(line, "@@ -%d,%d", &oldStart, &oldCount); err != nil {
+				if _, err = fmt.Sscanf(line, "@@ -%d", &oldStart); err != nil {
+					return "", false
+				}
+				oldCount = 1
+			}
+			boundary = oldStart - 1
+			if oldCount == 0 {
+				boundary = oldStart
+			}
+			if boundary < 0 || boundary+oldCount > len(lines) {
+				return "", false
+			}
+			inHunk = true
+			continue
+		}
+		if !inHunk || line == "" {
+			continue
+		}
+		switch line[0] {
+		case ' ':
+			boundary++
+		case '-':
+		case '+':
+			insertions[boundary] = append(insertions[boundary], line[1:])
+		case '\\':
+		default:
+			inHunk = false
+		}
+		if boundary > len(lines) {
+			return "", false
+		}
+	}
+	if len(insertions) == 0 {
+		return base, true
+	}
+	var reconstructed []string
+	for i := 0; i <= len(lines); i++ {
+		reconstructed = append(reconstructed, insertions[i]...)
+		if i < len(lines) {
+			reconstructed = append(reconstructed, lines[i])
+		}
+	}
+	result := strings.Join(reconstructed, "\n")
+	if trailingNewline || len(reconstructed) > 0 {
+		result += "\n"
+	}
+	return result, true
+}
+
 // redGreen sets aside, in clone, the paths aside, runs test alone with tmpl, which must fail, brings the
-// agent's work, tree, back and runs test again, which must pass. With the files added, paths to their
-// content, written over the base, test must fail too: else it fails on the base only for what the work adds.
+// agent's work, tree, back and runs test again, which must pass. If the red reports a missing symbol, it also
+// checks whether the added lines alone make the test pass on the base.
 func redGreen(clone, tree string, aside []string, added map[string]string, test, tmpl string) error {
 	line, err := testLine(tmpl, test)
 	if err != nil {
@@ -185,17 +243,26 @@ func redGreen(clone, tree string, aside []string, added map[string]string, test,
 		return err
 	case red == nil:
 		return fmt.Errorf("%s passes without the fix", test)
-	case len(added) > 0:
+	case len(added) > 0 && missingSymbol(red):
 		alone, _, err := trial(clone, tree, aside, added, line, "")
 		if err != nil {
 			return err
 		}
 		if alone == nil {
-			return fmt.Errorf("%s passes on the base plus only the lines the fix adds to its files, at their end: "+
+			return fmt.Errorf("%s passes on the base plus only the lines the fix adds to its files, in their added positions: "+
 				"its red is a missing addition, not behaviour the base had", test)
 		}
 	}
 	return wrap(green, test+" fails with the fix")
+}
+
+// missingSymbol reports whether the red output says the test cannot resolve a referenced symbol.
+func missingSymbol(err error) bool {
+	if err == nil {
+		return false
+	}
+	out := err.Error()
+	return strings.Contains(out, "not found") || strings.Contains(out, "undefined:")
 }
 
 // trial runs base with the paths aside as they are at HEAD, then the files over, paths to their content,
