@@ -96,24 +96,29 @@ func TestBackgroundRunsAndTellsHowEachEnded(t *testing.T) {
 				}
 				release()
 			}
-			var screen bytes.Buffer
-			end, err := Attach(top, o.Run, &screen)
-			if err != nil {
-				t.Fatal(err)
-			}
-			got := []any{end.Outcome, end.Run, end.FailedNode, end.Report, ExitCode(end.Err()), end.NextStep != ""}
-			want := []any{c.outcome, o.Run, c.failed, filepath.Join(top, ".atm", "runs", o.Run, "report.json"), c.code, true}
-			if !reflect.DeepEqual(got, want) {
-				t.Fatalf("outcome: %+v", end)
-			}
-			if s := screen.String(); !strings.Contains(s, "clone     passed") || !strings.Contains(s, "RESULT  ") {
-				t.Fatalf("screen:\n%s", s)
-			}
-			runs, err := Runs(top)
-			if err != nil || len(runs) != 1 || runs[0].Outcome != c.outcome || runs[0].Duration() == "" {
-				t.Fatalf("Runs = %+v, %v", runs, err)
-			}
+			checkBackgroundRunEnd(t, top, o, c.outcome, c.failed, c.code)
 		})
+	}
+}
+
+func checkBackgroundRunEnd(t *testing.T, top string, o Outcome, outcome, failed string, code int) {
+	t.Helper()
+	var screen bytes.Buffer
+	end, err := Attach(top, o.Run, &screen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := []any{end.Outcome, end.Run, end.FailedNode, end.Report, ExitCode(end.Err()), end.NextStep != ""}
+	want := []any{outcome, o.Run, failed, filepath.Join(top, ".atm", "runs", o.Run, "report.json"), code, true}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("outcome: %+v", end)
+	}
+	if s := screen.String(); !strings.Contains(s, "clone     passed") || !strings.Contains(s, "RESULT  ") {
+		t.Fatalf("screen:\n%s", s)
+	}
+	runs, err := Runs(top)
+	if err != nil || len(runs) != 1 || runs[0].Outcome != outcome || runs[0].Duration() == "" {
+		t.Fatalf("Runs = %+v, %v", runs, err)
 	}
 }
 
@@ -143,6 +148,20 @@ func TestBackgroundRunsAtOnceEachInItsOwnDirectory(t *testing.T) {
 		}
 	}
 	release()
+	checkConcurrentBackgroundReports(t, top, started)
+	entries, err := os.ReadDir(filepath.Join(top, ".atm"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if !map[string]bool{"atm.sock": true, "runs.jsonl": true, "runs": true, "clones": true}[e.Name()] {
+			t.Errorf("the runs share .atm/%s", e.Name())
+		}
+	}
+}
+
+func checkConcurrentBackgroundReports(t *testing.T, top string, started []Outcome) {
+	t.Helper()
 	for i, want := range [][]string{{"fix", "", "passed"}, {"docs", "checks", "failed"}} {
 		end, err := Attach(top, started[i].Run, &bytes.Buffer{})
 		dir := filepath.Join(top, ".atm", "runs", started[i].Run)
@@ -156,15 +175,6 @@ func TestBackgroundRunsAtOnceEachInItsOwnDirectory(t *testing.T) {
 		}
 		if _, err := os.Stat(filepath.Join(dir, "brief.md")); err != nil {
 			t.Fatal(err)
-		}
-	}
-	entries, err := os.ReadDir(filepath.Join(top, ".atm"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, e := range entries {
-		if !map[string]bool{"atm.sock": true, "runs.jsonl": true, "runs": true, "clones": true}[e.Name()] {
-			t.Errorf("the runs share .atm/%s", e.Name())
 		}
 	}
 }
