@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -44,6 +45,57 @@ func TestBackgroundKilledMidRunLeavesTheCloneToWhatTheRunStarted(t *testing.T) {
 				t.Fatalf("the sweep kept the clone of a run nothing of which runs: %v", clones(t, top))
 			}
 		})
+	}
+}
+
+func TestSweepAndReleaseKeepCloneForChildAfterGroupLeaderExits(t *testing.T) {
+	clonesDir := filepath.Join(t.TempDir(), "clones")
+	clone := filepath.Join(clonesDir, "atm-run-child")
+	if err := os.MkdirAll(clone, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(clone+".pid", []byte(strconv.Itoa(deadPID(t))), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	childFile := filepath.Join(t.TempDir(), "child.pid")
+	cmd := exec.Command("sh", "-c", "sleep 30 & echo $! > \"$CHILD_PID\"; exit")
+	cmd.Dir = clone
+	cmd.Env = append(os.Environ(), "CHILD_PID="+childFile)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	note(cmd)
+	if err := cmd.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(childFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := strconv.Atoi(strings.TrimSpace(string(b)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = syscall.Kill(child, syscall.SIGKILL) })
+
+	if err := release(clone, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(clone); err != nil {
+		t.Fatalf("release removed a clone while its child was alive: %v", err)
+	}
+	sweep(clonesDir, "")
+	if _, err := os.Stat(clone); err != nil {
+		t.Fatalf("sweep removed a clone while its child was alive: %v", err)
+	}
+	if err := syscall.Kill(child, syscall.SIGKILL); err != nil {
+		t.Fatal(err)
+	}
+	until(t, "the child process group to exit", func() bool { return !groupAlive(cmd.Process.Pid) })
+	sweep(clonesDir, "")
+	if _, err := os.Stat(clone); !os.IsNotExist(err) {
+		t.Fatalf("sweep kept the clone after its child exited: %v", err)
 	}
 }
 
