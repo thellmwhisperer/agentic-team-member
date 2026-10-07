@@ -20,15 +20,12 @@ import (
 
 // checks is the verdict on the agent's work in clone, at base commit sha, for a task of type typ whose report
 // names test: HEAD has not moved, the type's proof holds, then install, test, typecheck and lint pass, the
-// commands no-mistakes runs. Install runs again: the agent may have changed dependencies. Each proof and
-// command is a row of the screen.
+// commands no-mistakes runs, and HEAD has not moved still. Install runs again: the agent may have changed
+// dependencies. Each proof and command is a row of the screen.
 func checks(clone, sha, typ, test string, c config.Config) (map[string]any, error) {
 	live := liveIn(clone)
 	err := row(live, proofs[typ], func() error {
-		head, err := git(clone, "rev-parse", "HEAD")
-		if err == nil && head != sha {
-			err = fmt.Errorf("the agent made commits: HEAD is %s, not the base %s", head, sha)
-		}
+		err := moved(clone, sha, "the agent")
 		if err == nil {
 			err = prove(clone, typ, filepath.ToSlash(test), c)
 		}
@@ -52,7 +49,16 @@ func checks(clone, sha, typ, test string, c config.Config) (map[string]any, erro
 			return map[string]any{"commands": ran}, fmt.Errorf("%s: %w", cmd[0], err)
 		}
 	}
-	return map[string]any{"commands": ran}, nil
+	return map[string]any{"commands": ran}, moved(clone, sha, "the commands")
+}
+
+// moved is an error when HEAD in clone is not want: who made commits.
+func moved(clone, want, who string) error {
+	head, err := git(clone, "rev-parse", "HEAD")
+	if err == nil && head != want {
+		err = fmt.Errorf("%s made commits: HEAD is %s, not the base %s", who, head, want)
+	}
+	return err
 }
 
 // proofs is the screen's row for the proof of each task type; a chore has none.
