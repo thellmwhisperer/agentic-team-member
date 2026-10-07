@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -317,7 +318,21 @@ func TestBackgroundRemembersRunsAcrossRestarts(t *testing.T) {
 
 // The history keeps the last 200 runs: a new one drops the oldest that ended, never one still running.
 func TestBackgroundKeepsTheLastRunsAndEveryRunning(t *testing.T) {
-	top := backgroundRepo(t)
+	top := gitT(t, repo(t, "https://example.com/owner/repo.git", atmYAML), "rev-parse", "--show-toplevel")
+	if err := os.MkdirAll(filepath.Join(top, ".atm"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var seeded bytes.Buffer
+	for n := 1; n <= 199; n++ {
+		if err := json.NewEncoder(&seeded).Encode(Outcome{Run: fmt.Sprintf("old-%d", n), Outcome: "failed",
+			Started: time.Now().Add(-time.Hour), Ended: time.Now()}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(top, ".atm", "runs.jsonl"), seeded.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	background(t, top)
 	wait, release := holdFakeAgents(t, 1)
 	held, err := Start(top, []string{issueFile(t, issue)})
 	if err != nil {
@@ -325,7 +340,7 @@ func TestBackgroundKeepsTheLastRunsAndEveryRunning(t *testing.T) {
 	}
 	wait()
 	missing := filepath.Join(t.TempDir(), "missing.md") // each run fails at its issue
-	for range 201 {
+	for range 2 {
 		o, err := Start(top, []string{missing})
 		if err == nil {
 			_, err = Attach(top, o.Run, &bytes.Buffer{})
@@ -335,8 +350,8 @@ func TestBackgroundKeepsTheLastRunsAndEveryRunning(t *testing.T) {
 		}
 	}
 	runs, err := Runs(top)
-	if err != nil || len(runs) != 200 || runs[0].Run != held.Run || runs[0].Outcome != "running" ||
-		runs[1].Run != "missing-4" || runs[len(runs)-1].Run != "missing-202" {
+	if err != nil || len(runs) != 200 || runs[0].Run != "old-3" || runs[197].Run != held.Run ||
+		runs[197].Outcome != "running" || runs[len(runs)-1].Run != "missing-202" {
 		t.Fatalf("Runs = %d runs, first %+v, %v", len(runs), runs[:min(len(runs), 2)], err)
 	}
 	release()

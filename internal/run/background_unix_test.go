@@ -15,10 +15,10 @@ import (
 )
 
 func TestKilledBackgroundKeepsCloneForStartedAgent(t *testing.T) {
-	pidFifo, _ := fifos(t)
+	pidPath := filepath.Join(t.TempDir(), "agent-pid")
 	ready := filepath.Join(t.TempDir(), "agent-started")
 	t.Setenv("FAKE_AGENT", "hang")
-	t.Setenv("FAKE_AGENT_PID", pidFifo)
+	t.Setenv("FAKE_AGENT_PID", pidPath)
 	t.Setenv("FAKE_AGENT_READY", ready)
 	t.Setenv("FAKE_AGENT_KILL_PARENT", "1")
 	top := gitT(t, repo(t, "https://example.com/owner/repo.git", atmYAML), "rev-parse", "--show-toplevel")
@@ -38,7 +38,8 @@ func TestKilledBackgroundKeepsCloneForStartedAgent(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("the background request did not end after its process was killed")
 	}
-	proc := recordedProcess(t, pidFifo)
+	until(t, "agent pid", func() bool { b, err := os.ReadFile(pidPath); return err == nil && len(b) > 0 })
+	proc := recordedProcess(t, pidPath)
 	t.Setenv("FAKE_AGENT", "fail")
 	t.Setenv("FAKE_AGENT_KILL_PARENT", "")
 	assertCloneKept(t, top, clone, "the sweep removed the clone while its agent was alive")
