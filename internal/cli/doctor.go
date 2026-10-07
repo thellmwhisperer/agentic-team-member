@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -24,6 +25,7 @@ func doctorCmd() *cobra.Command {
 					failed++
 					line = "fail " + name + ": " + err.Error()
 				}
+				line = strings.Join(strings.Fields(line), " ")
 				_, _ = fmt.Fprintln(cmd.OutOrStdout(), line)
 			}
 			root, err := toplevel()

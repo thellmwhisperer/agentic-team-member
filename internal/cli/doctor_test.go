@@ -95,4 +95,19 @@ func TestDoctorRunsEveryCheckAndFailsWhenAnyFails(t *testing.T) {
 			t.Fatal("want a non-zero exit")
 		}
 	})
+	t.Run("duplicate keys", func(t *testing.T) {
+		dir := repo(t, "https://github.com/o/r.git")
+		onPath(t, "claude", "gh")
+		if err := os.WriteFile(filepath.Join(dir, ".atm.yaml"), []byte("install: ''\ninstall: ''\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		out, err := atm(t, "doctor")
+		ls := lines(t, out)
+		if len(ls) != 4 || !strings.HasPrefix(ls[3], "fail .atm.yaml") {
+			t.Fatalf("want four one-line checks and .atm.yaml failing, got\n%s", out)
+		}
+		if run.ExitCode(err) == 0 {
+			t.Fatal("want a non-zero exit")
+		}
+	})
 }
