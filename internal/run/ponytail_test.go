@@ -45,9 +45,10 @@ func TestRunPonytailFollowsTheChecks(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			brief := strings.ReplaceAll(string(b), "\r\n", "\n")
 			for _, want := range []string{"### Retry on timeout\n\nType: fix\nRetry once.", "-broken\n+fixed",
 				"`ponytail-review`", "`speculative_feature`", "no new files", "`git commit`"} {
-				if !strings.Contains(string(b), want) {
+				if !strings.Contains(brief, want) {
 					t.Errorf("brief-ponytail.md lacks %q:\n%s", want, b)
 				}
 			}
