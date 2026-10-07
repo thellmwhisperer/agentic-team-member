@@ -1,0 +1,35 @@
+Read `AGENTS.md` at the clone root if it exists. Where it and this brief disagree, this brief wins.
+
+# Ponytail pass
+
+## GOAL
+The diff below did this issue and passed every check. Cut what the issue does not need from it, including
+anything the issue did not ask for. If nothing is worth cutting, change nothing.
+
+### {{.Title}}
+
+{{.Body}}
+
+## RULES
+Use the `ponytail-review` skill, and make its cuts yourself: this brief wins over its "only lists them".
+- You may only cut: delete, shrink, or replace with the standard library or a helper that already exists in
+  this repository.
+- Only files in the diff, no new files.
+- Every test stays: do not delete, skip or weaken one.
+- ATM runs every check again and throws the cut away if one fails or the diff does not get shorter:
+  - Test: {{cmd .Test}}
+  - Typecheck: {{cmd .Typecheck}}
+  - Lint: {{cmd .Lint}}
+
+## FORBIDDEN
+- `git commit`, `git push`, `git rebase`, any `gh` command.
+
+## DIFF
+```diff
+{{.Diff}}
+```
+
+## REPORT
+Your final message must be ONLY this JSON object, nothing else, one finding per cut you made:
+{"findings": [{"file": "<repo-relative path in the diff>", "family": "<its slop family>", "finding": "<one line: what you cut and what replaces it>"}], "summary": "<one paragraph>"}
+The family is one of {{code .Families}}. Use `"findings": []` when you cut nothing.
