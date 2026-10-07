@@ -41,23 +41,23 @@ func testThrough(fn string) string {
 	return `; echo '. ./lib.sh; test "$(` + fn + `)" = fixed' > a_test.sh`
 }
 
-// commitLib commits lib.sh, holding text, on root's base, when text is not "".
-func commitLib(t *testing.T, root, text string) {
+// commitBase commits name, holding text, on root's base, when text is not "".
+func commitBase(t *testing.T, root, name, text string) {
 	t.Helper()
 	if text == "" {
 		return
 	}
-	if err := os.WriteFile(filepath.Join(root, "lib.sh"), []byte(text), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, name), []byte(text), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	gitT(t, root, "add", "lib.sh")
-	gitT(t, root, "commit", "-qm", "lib")
+	gitT(t, root, "add", name)
+	gitT(t, root, "commit", "-qm", name)
 }
 
 // proofCases are the task types' proofs at work: why, when not "", names the run's failure.
 var proofCases = []struct {
-	name, typ, work, atm, why, lib string
-	hang                           bool
+	name, typ, work, atm, why, lib, ignore string
+	hang                                   bool
 }{
 	{name: "fix whose test only calls a function it adds to an old file", typ: "fix", lib: lib,
 		work: "echo '" + helper + "' >> lib.sh" + testThrough("helper"), why: "depends on nothing the base had"},
@@ -76,6 +76,13 @@ var proofCases = []struct {
 		why: "fails with the fix"},
 	{name: "fix whose test hangs without it", typ: "fix", why: "timed out", hang: true,
 		work: "echo fixed > a.txt; echo 'grep -q fixed a.txt || while :; do :; done' > a_test.sh"},
+	{name: "fix-less test that passes on its second run", typ: "fix", ignore: ".atm/\n",
+		why: "regression_test.sh fails with the fix",
+		work: "echo 'if test -f .atm/seen; then exit 0; fi; touch .atm/seen; exit 1' > regression_test.sh; " +
+			reportJSON("regression_test.sh")},
+	{name: "fix whose test writes ignored output", typ: "fix", ignore: "build/\n",
+		work: `echo fixed > a.txt; echo 'mkdir -p build; cp a.txt build; test "$(cat build/a.txt)" = fixed' > a_test.sh; ` +
+			reportJSON("a_test.sh")},
 	{name: "fix whose test changes the clone", typ: "fix",
 		work: "echo fixed > a.txt; echo 'grep -q fixed a.txt && echo x >> a.txt' > a_test.sh", why: "void"},
 	{name: "fix without test_file", typ: "fix", atm: atmSet(atmYAML, "test_file", ""), why: "test_file"},
@@ -125,7 +132,8 @@ func TestRunChecksTheProofOfEachTaskType(t *testing.T) {
 	for _, c := range proofCases {
 		t.Run(c.name, func(t *testing.T) {
 			root := repo(t, "https://example.com/owner/repo.git", cmp.Or(c.atm, atmYAML))
-			commitLib(t, root, c.lib)
+			commitBase(t, root, "lib.sh", c.lib)
+			commitBase(t, root, ".gitignore", c.ignore)
 			if c.work != "" {
 				t.Setenv("FAKE_AGENT_WORK", c.work)
 			}
