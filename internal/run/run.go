@@ -12,10 +12,12 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/thellmwhisperer/agentic-team-member/internal/config"
@@ -165,7 +167,8 @@ var nonSlug = regexp.MustCompile(`[^a-z0-9]+`)
 // deliver puts the run's work in clone, at base commit sha, on branch atm/<slug>-<timestamp> (onBranch),
 // rewrites report.json with its SHA and runs the delivery command line in clone, its output on screen and in
 // delivery-output.txt next to report.json. ATM never pushes: that is line's business.
-// ponytail: line gets the clone after the slop detector, under sh's timeout; a ceiling of its own is the upgrade.
+// line has no ceiling: it lasts as long as what it hands the work to. SIGINT and SIGTERM kill its group.
+// ponytail: line gets the clone after the slop detector.
 func deliver(r *verdict, root, clone, sha, base, line string, i Issue, screen io.Writer) {
 	if line == "" {
 		if r.err == nil {
@@ -201,7 +204,9 @@ func deliver(r *verdict, root, clone, sha, base, line string, i Issue, screen io
 			issue = strconv.Itoa(i.Number)
 		}
 		t, _ := screen.(terminal)
-		tail, err := tee(t, io.MultiWriter(f, screen), clone, line, "ATM_TITLE="+i.Title, "ATM_ISSUE="+issue,
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		tail, err := tee(ctx, t,io.MultiWriter(f, screen), clone, line, "ATM_TITLE="+i.Title, "ATM_ISSUE="+issue,
 			"ATM_BRANCH="+branch, "ATM_CLONE="+clone, "ATM_REPORT="+r.path, "ATM_PONYTAIL="+cuts)
 		ev["commands"] = []cmdResult{{"delivery", line, outcome(err), tail}}
 		return ev, wrap(err, "delivery")
@@ -277,9 +282,9 @@ func writeBrief(path string, i Issue, c config.Config, next *followUp) (string, 
 // runDir is the directory of run label in the repository at root, which nothing removes.
 func runDir(root, label string) string { return filepath.Join(root, ".atm", "runs", label) }
 
-// timeout bounds every command a step runs. ponytail: one fixed ceiling, and on timeout command kills only
-// the command itself, not what it started, while sh kills its group; a key in .atm.yaml and a process group
-// for command are the upgrades.
+// timeout bounds every command a step runs but the delivery command. ponytail: one fixed ceiling, and on
+// timeout command kills only the command itself, not what it started, while sh kills its group; a key in
+// .atm.yaml and a process group for command are the upgrades.
 var timeout = 10 * time.Minute
 
 // agentTimeout bounds the agent. ponytail: one fixed ceiling; a flag or a key in .atm.yaml is the upgrade.
