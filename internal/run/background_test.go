@@ -2,6 +2,7 @@ package run
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"net"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // background serves the repository at root, its git toplevel, in this test's process until stop or the end of
@@ -181,5 +183,38 @@ func TestBackgroundRemembersRunsAcrossRestarts(t *testing.T) {
 	}
 	if _, err := Attach(top, "", &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestHistoryReadsLargeRecordsAndReturnsScannerErrors(t *testing.T) {
+	top := t.TempDir()
+	atmDir := filepath.Join(top, ".atm")
+	if err := os.Mkdir(atmDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(atmDir, "runs.jsonl")
+	first, err := json.Marshal(Outcome{Outcome: "failed", Run: "large", Reason: strings.Repeat("x", 70*1024), Ended: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := json.Marshal(Outcome{Outcome: "passed", Run: "later"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, append(append(first, '\n'), append(second, '\n')...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runs, err := history(top)
+	if err != nil || len(runs) != 2 || len(runs[0].Reason) != 70*1024 || runs[1].Run != "later" {
+		t.Fatalf("history = %d records, %v", len(runs), err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(path, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := history(top); err == nil {
+		t.Fatal("history did not return the scanner's read error")
 	}
 }
