@@ -377,9 +377,10 @@ The background process is `atm serve`, one per repository, started on demand
 by the first command that needs it, and listening on `.atm/atm.sock` (mode
 `0600`; a Unix socket on Windows too). It runs every run in itself and logs to
 `.atm/serve.log`. It ends after 10 minutes without a run, or once its socket is
-removed while no run goes. Each run's start and end are appended to
+removed while no run goes. Each run's start and end are saved to
 `.atm/runs.jsonl`, so a new background process still lists them; a run left
-running there is shown failed at its last step. Every clone of its runs carries
+running there is shown failed at its last step. It keeps the last 200 runs: a
+new run drops the oldest that ended, never one still running. Every clone of its runs carries
 its pid: the sweep keeps one of those only while the background process holds
 its run, so the clone of a run that died, or of one in an earlier background
 process whose pid it got, is removed by the next sweep.
