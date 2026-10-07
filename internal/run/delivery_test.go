@@ -14,6 +14,7 @@ import (
 const deliveryLine = `echo out-line; echo err-line >&2; ` +
 	`for v in ATM_TITLE ATM_ISSUE ATM_BRANCH ATM_CLONE ATM_REPORT ATM_PONYTAIL; do ` +
 	`printenv $v > "$ATM_TEST_OUT/$v" || echo unset > "$ATM_TEST_OUT/$v"; done; ` +
+	`(test -e cache/injected.txt && echo present || echo absent) > "$ATM_TEST_OUT/injected"; ` +
 	`git rev-parse --abbrev-ref HEAD > "$ATM_TEST_OUT/branch"; git rev-parse HEAD > "$ATM_TEST_OUT/head"; ` +
 	`git status --porcelain > "$ATM_TEST_OUT/status"; git remote get-url origin > "$ATM_TEST_OUT/origin"; ` +
 	`git log -2 --format="%s|%an <%ae>|%cn <%ce>" > "$ATM_TEST_OUT/log"; cp "$ATM_REPORT" "$ATM_TEST_OUT/report.json"`
@@ -78,6 +79,32 @@ func TestRunDeliversTheBranch(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestRunDeliveryDoesNotGetIgnoredFileFromRejectedPonytail(t *testing.T) {
+	root := repo(t, "https://example.com/owner/repo.git", atmSet(atmYAML, "delivery", deliveryLine))
+	noIdentity(t)
+	gitT(t, root, "config", "user.name", "Repo Dev")
+	gitT(t, root, "config", "user.email", "dev@example.com")
+	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("cache/\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitT(t, root, "add", ".gitignore")
+	gitT(t, root, "commit", "-q", "-m", "ignore cache")
+	got := t.TempDir()
+	t.Setenv("ATM_TEST_OUT", got)
+	t.Setenv("FAKE_AGENT_WORK", fixWork)
+	t.Setenv("FAKE_PONYTAIL_WORK", "echo fixed > a.txt; mkdir cache; echo injected > cache/injected.txt")
+	t.Setenv("FAKE_PONYTAIL_REPORT", cut)
+	if err := Run("t", []string{issueFile(t, issue)}, &bytes.Buffer{}, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := reader(t, got)("injected"); got != "absent" {
+		t.Fatalf("delivery received the ignored file from the rejected cut: %s", got)
+	}
+	if _, err := os.Stat(filepath.Join(reader(t, got)("ATM_CLONE"), "cache", "injected.txt")); !os.IsNotExist(err) {
+		t.Fatalf("the delivered clone still has the ignored file: %v", err)
 	}
 }
 
