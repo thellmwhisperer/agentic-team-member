@@ -295,8 +295,9 @@ kept.
 The `delivery` step follows the ponytail step when `delivery` is set, so only
 after every unit and the slop detector passed. The clone goes on a new branch
 `atm/<slug>-<timestamp>` (the title in lowercase letters, digits and dashes, at
-most 40; the clone's timestamp), anything left uncommitted becomes `atm unit 1:
-<title>` under the repository's git identity, as for the ponytail commits, and
+most 40; the clone's timestamp), anything left uncommitted becomes
+`atm unit <n>: <title>` (the next unit number) under the repository's identity, as
+for the ponytail commits, and
 the clone's `origin` is set to the repository's: no `origin` fails the step.
 `report.json` is rewritten with `head_sha`, the branch's final SHA. Then the
 command runs with `sh -c` in the clone, killed past 10 minutes, with
