@@ -62,7 +62,8 @@ Either way:
 
 | Workflow | Runs on | Runs when these change | Does |
 |---|---|---|---|
-| `go.yml` | every PR to `main`, push to `main` | Go paths, `go.yml`, `scripts/changed-areas.sh`, `scripts/test.sh` or `scripts/lint.sh` | `make test` and `make lint` on ubuntu, macos, windows |
+| `go.yml` | every PR to `main`, push to `main` | Paths classified by [`scripts/changed-areas.sh`](scripts/changed-areas.sh) | `make test` and `make lint` on ubuntu, macos, windows |
+| `release.yml` | push of a `v*` tag | always | `make release` publishes the archives and checksums through GoReleaser |
 | `auto-merge.yml` | every PR to `main` | always | arms auto-merge (below) |
 
 `go.yml` starts on every PR and skips its test jobs when its paths did not
