@@ -91,8 +91,7 @@ func Run(args []string, out, summary io.Writer) (err error) {
 }
 
 // deliver runs the delivery command line in clone, ATM_REPORT naming report.json, which is on disk already.
-// ponytail: line gets the clone as the agent left it, under sh's timeout; the delivery node branches and commits
-// first, and a ceiling of its own is the upgrade.
+// ponytail: line gets the clone after the slop detector, under sh's timeout; a ceiling of its own is the upgrade.
 func deliver(r *verdict, clone, line string) {
 	if line == "" {
 		if r.err == nil {

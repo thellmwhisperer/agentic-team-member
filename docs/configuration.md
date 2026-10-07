@@ -269,7 +269,7 @@ cut) and `kept`, then `reason` when discarded or `commits` and `tombstones` when
 kept.
 
 The `delivery` step follows the ponytail step when `delivery` is set: its command runs
-with `sh -c` in the clone, as the agent left it, with `ATM_REPORT` and
+with `sh -c` in the clone after the slop detector, with `ATM_REPORT` and
 `ATM_CLONE` in its environment, killed past 10 minutes. Empty, the step is
 skipped.
 
