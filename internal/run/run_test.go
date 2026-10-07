@@ -22,6 +22,17 @@ func TestMain(m *testing.M) {
 	case "claude", "codex", "opencode", "pi":
 		os.Exit(fakeAgent(name))
 	}
+	if len(os.Args) > 1 && os.Args[1] == "serve" { // the background process connect starts, as atm serve
+		root, err := git("", "rev-parse", "--show-toplevel")
+		if err == nil {
+			err = Serve(root)
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
 	if out, ok := os.LookupEnv("FAKE_GH_OUT"); ok {
 		_ = os.WriteFile(os.Getenv("FAKE_GH_ARGS"), []byte(strings.Join(os.Args[1:], " ")), 0o600)
 		fmt.Print(out)

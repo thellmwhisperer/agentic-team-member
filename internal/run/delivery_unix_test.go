@@ -26,15 +26,7 @@ func TestDeliveryOutlastsTheCeilingAndDiesOnInterrupt(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			// The delivery's grandchild writes its pid to a fifo, then waits on another until the test opens it.
-			dir := t.TempDir()
-			pidFifo, gate := filepath.Join(dir, "pid"), filepath.Join(dir, "gate")
-			for _, f := range []string{pidFifo, gate} {
-				if err := syscall.Mkfifo(f, 0o600); err != nil {
-					t.Fatal(err)
-				}
-			}
-			t.Setenv("ATM_TEST_PID", pidFifo)
-			t.Setenv("ATM_TEST_GATE", gate)
+			pidFifo, gate := fifos(t)
 			repo(t,"https://example.com/owner/repo.git", atmSet(atmYAML, "delivery",
 				`cat "$ATM_TEST_GATE" & echo $! > "$ATM_TEST_PID"; wait $!`))
 			defer func(d time.Duration) { timeout = d }(timeout)
@@ -78,4 +70,19 @@ func dead(t *testing.T, pid int) {
 			t.Fatalf("the delivery's grandchild %d outlived the run", pid)
 		}
 	}
+}
+
+// fifos are two new fifos: pid, in ATM_TEST_PID, and gate, in ATM_TEST_GATE.
+func fifos(t *testing.T) (pid, gate string) {
+	t.Helper()
+	dir := t.TempDir()
+	pid, gate = filepath.Join(dir, "pid"), filepath.Join(dir, "gate")
+	for _, f := range []string{pid, gate} {
+		if err := syscall.Mkfifo(f, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("ATM_TEST_PID", pid)
+	t.Setenv("ATM_TEST_GATE", gate)
+	return pid, gate
 }
