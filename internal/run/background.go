@@ -164,6 +164,7 @@ func Serve(root string) error {
 	if err := os.Chmod(sock, 0o600); err != nil { // whoever reaches it runs agents as this user
 		return err
 	}
+	fmt.Fprintln(os.Stderr, "atm serve pid:", os.Getpid())
 	return serve(l.(*net.UnixListener), root, sock)
 }
 

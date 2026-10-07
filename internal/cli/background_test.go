@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -21,6 +22,18 @@ import (
 
 // TestMain doubles as atm serve, the background process atm starts as this binary.
 func TestMain(m *testing.M) {
+	if strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe") == "codex" && os.Getenv("FAKE_AGENT") == "fail" {
+		ready := os.Getenv("FAKE_AGENT_BARRIER_READY")
+		if ready != "" {
+			_ = os.WriteFile(filepath.Join(ready, strconv.Itoa(os.Getpid())), nil, 0o600)
+			for {
+				if _, err := os.Stat(os.Getenv("FAKE_AGENT_BARRIER_RELEASE")); err == nil {
+					os.Exit(1)
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+		}
+	}
 	if len(os.Args) > 1 && os.Args[1] == "serve" {
 		Execute()
 	}
@@ -182,10 +195,18 @@ func TestTwoRunsAtOnceShareOneBackgroundProcess(t *testing.T) {
 		t.Fatalf("git remote set-url: %v\n%s", err, out)
 	}
 	bin := t.TempDir()
-	agent := filepath.Join(bin, "codex")
-	if err := os.WriteFile(agent, []byte("#!/bin/sh\n: > \"$FAKE_AGENT_BARRIER_READY/$$\"\n"+
-		"while [ ! -e \"$FAKE_AGENT_BARRIER_RELEASE\" ]; do sleep 0.01; done\nexit 1\n"), 0o700); err != nil {
+	exe, err := os.Executable()
+	if err != nil {
 		t.Fatal(err)
+	}
+	agentName := "codex"
+	if runtime.GOOS == "windows" {
+		agentName += ".exe"
+	}
+	if err := os.Symlink(exe, filepath.Join(bin, agentName)); err != nil {
+		if err := os.Link(exe, filepath.Join(bin, agentName)); err != nil {
+			t.Fatal(err)
+		}
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	barrier := t.TempDir()
@@ -195,6 +216,7 @@ func TestTwoRunsAtOnceShareOneBackgroundProcess(t *testing.T) {
 	}
 	t.Setenv("FAKE_AGENT_BARRIER_READY", ready)
 	t.Setenv("FAKE_AGENT_BARRIER_RELEASE", release)
+	t.Setenv("FAKE_AGENT", "fail")
 	t.Cleanup(func() { _ = os.WriteFile(release, nil, 0o600) })
 	outs, errs := make([]string, 2), make([]error, 2)
 	var wg sync.WaitGroup
@@ -232,6 +254,19 @@ func TestTwoRunsAtOnceShareOneBackgroundProcess(t *testing.T) {
 	}
 	if out := atmIn(t, 0, "status"); !strings.Contains(out, "retry-1  agent  ") || !strings.Contains(out, "retry-2  agent  ") {
 		t.Fatalf("atm status while both run: %q", out)
+	}
+	var served []int
+	for _, line := range strings.Split(read(t, filepath.Join(dir, ".atm", "serve.log")), "\n") {
+		if pid, ok := strings.CutPrefix(line, "atm serve pid: "); ok {
+			n, err := strconv.Atoi(pid)
+			if err != nil {
+				t.Fatalf("background process record %q: %v", line, err)
+			}
+			served = append(served, n)
+		}
+	}
+	if len(served) != 1 || served[0] <= 0 {
+		t.Fatalf("background process pids = %v, want one serving process", served)
 	}
 	if err := os.WriteFile(release, nil, 0o600); err != nil {
 		t.Fatal(err)
