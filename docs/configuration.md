@@ -173,7 +173,7 @@ line with a lowercase type: `fix` (or `hotfix`), `feature`,
 
 The current Go port validates configuration before reading the issue, then
 emits start and result JSON lines for the `issue`, `contract`, `clone`, `agent`,
-`checks` and `ponytail` steps. The `issue` result includes the title and task type on success, plus the issue
+`checks`, `ponytail` and `delivery` steps. The `issue` result includes the title and task type on success, plus the issue
 number for GitHub issues. The `contract` step writes `.atm/brief.md` at the
 repository root and reports its path on success. The brief starts by directing
 the agent to read `AGENTS.md` if present, then gives the issue, task-type
@@ -268,10 +268,29 @@ commit. Its end line carries `log`, `report`, `net_lines` (before and after the
 cut) and `kept`, then `reason` when discarded or `commits` and `tombstones` when
 kept.
 
-The `delivery` step follows the ponytail step when `delivery` is set: its command runs
-with `sh -c` in the clone after the slop detector, with `ATM_REPORT` and
-`ATM_CLONE` in its environment, killed past 10 minutes. Empty, the step is
-skipped.
+The `delivery` step follows the ponytail step when `delivery` is set, so only
+after every unit and the slop detector passed. The clone goes on a new branch
+`atm/<slug>-<timestamp>` (the title in lowercase letters, digits and dashes, at
+most 40; the clone's timestamp), anything left uncommitted becomes `atm unit 1:
+<title>` under the repository's git identity, as for the ponytail commits, and
+the clone's `origin` is set to the repository's: no `origin` fails the step.
+`report.json` is rewritten with `head_sha`, the branch's final SHA. Then the
+command runs with `sh -c` in the clone, killed past 10 minutes, with
+`ATM_TITLE`, `ATM_ISSUE` (the issue number, empty for a file), `ATM_BRANCH`,
+`ATM_CLONE`, `ATM_REPORT` and `ATM_PONYTAIL` (the kept cut's findings, one a
+line, or empty) in its environment. Its output goes to stderr and to
+`.atm/delivery-output.txt`. ATM never pushes or opens a pull request: that is
+the command's business. Its end line carries `branch`. Empty, the step is
+skipped and the run ends there.
+
+The documented example hands the branch to no-mistakes:
+
+```yaml
+delivery: 'no-mistakes axi run --intent "$ATM_TITLE"'
+```
+
+Without `--yes`, no-mistakes only reports: whoever launched the run answers
+each finding.
 
 Every step's end line carries `duration_ms`. `.atm/report.json` at the
 repository root is rewritten at every step's start and end, so it is on disk
@@ -279,7 +298,8 @@ before delivery: `failed_node` and `reason` first, then `nodes` (each step's
 `result`: `passed`, `failed`, `running`, `skipped` or `not run`, and
 `duration_ms`), the task `type`, and `commands`: the configured `install`, `test`,
 `typecheck`, `lint` and `delivery` commands that ran during checks or delivery,
-each with its result and last 60 lines. The summary goes to
+each with its result and last 60 lines. After a delivery got its branch, `head_sha`
+is that branch's final SHA. The summary goes to
 stderr: each step, how it ended and its duration (`0.9 s`, `4 min 28 s`,
 `1 h 02 min`, the one format ATM prints a time in), then the result and the
 report's path. `atm run` exits 0 when every executed step passed, 1 when `agent` or
