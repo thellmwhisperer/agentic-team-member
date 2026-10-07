@@ -81,6 +81,46 @@ func TestRunDeliversTheBranch(t *testing.T) {
 	}
 }
 
+// A commit by anyone but the repository identity, made by a command the run runs, never reaches delivery: the
+// run fails at the node where it appeared.
+func TestRunFailsOnAForeignCommit(t *testing.T) {
+	const commit = "git -c user.name=Agent -c user.email=agent@localhost commit -q"
+	suite := func(lines ...string) string {
+		return "; printf '%s\\n' '" + strings.Join(lines, "' '") + "' > suite.sh"
+	}
+	committing := "sh a_test.sh && git add -A && " + commit + " -m indirect-agent-commit"
+	cases := []struct{ node, work, ponytail string }{
+		{node: "checks", work: fixWork + suite(committing)},
+		{node: "ponytail", work: fixWork + suite("sh a_test.sh", "# padding", "# padding"), ponytail: suite(committing)},
+		{node: "delivery", work: fixWork + suite("sh a_test.sh") + "; hook=.git/hooks/post-checkout; printf '%s\\n' " +
+			"'[ \"$3\" = 1 ] || exit 0' '" + commit + " --allow-empty -m hook-commit' > $hook; chmod +x $hook"},
+	}
+	for _, c := range cases {
+		t.Run(c.node, func(t *testing.T) {
+			root := repo(t, t.TempDir(), atmSet(atmSet(atmYAML, "delivery", deliveryLine), "test", "sh suite.sh"))
+			noIdentity(t)
+			gitT(t, root, "config", "user.name", "Repo Identity")
+			gitT(t, root, "config", "user.email", "repo@example.test")
+			got := t.TempDir()
+			t.Setenv("ATM_TEST_OUT", got)
+			t.Setenv("FAKE_AGENT_WORK", c.work)
+			if c.ponytail != "" {
+				t.Setenv("FAKE_PONYTAIL_WORK", strings.TrimPrefix(c.ponytail, "; "))
+				t.Setenv("FAKE_PONYTAIL_REPORT", `{"findings": [{"file": "suite.sh", "family": "speculative_feature", `+
+					`"finding": "dropped the padding"}], "summary": "s"}`)
+			}
+			err := Run("t", []string{issueFile(t, issue)}, &bytes.Buffer{}, &bytes.Buffer{})
+			rep := readReport(t, filepath.Join(root, ".atm", "runs", "t", "report.json"))
+			if err == nil || rep["failed_node"] != c.node {
+				t.Fatalf("want the run failed at %s, got %v at %v", c.node, err, rep["failed_node"])
+			}
+			if _, err := os.Stat(filepath.Join(got, "branch")); err == nil {
+				t.Fatal("the delivery command ran on a foreign commit")
+			}
+		})
+	}
+}
+
 func checkDeliveredMarker(t *testing.T, read func(string) string) {
 	t.Helper()
 	marker, err := os.ReadFile(read("ATM_CLONE") + ".delivered")

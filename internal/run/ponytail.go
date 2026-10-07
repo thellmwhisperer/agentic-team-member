@@ -43,12 +43,8 @@ func (a agent) ponytail(root, clone, sha, test string, i Issue, c config.Config)
 	if err != nil {
 		return ev, err
 	}
-	head, err := git(clone, "rev-parse", "HEAD")
-	if err != nil {
+	if err := moved(clone, base, "the ponytail agent"); err != nil {
 		return ev, err
-	}
-	if head != base {
-		return ev, fmt.Errorf("the ponytail agent made commits: HEAD is %s, not the base %s", head, base)
 	}
 	after, err := snapshot(clone)
 	if err != nil {
@@ -63,6 +59,9 @@ func (a agent) ponytail(root, clone, sha, test string, i Issue, c config.Config)
 		if _, err := checks(clone, base, i.Type, test, c); err != nil {
 			why = err.Error()
 		}
+	}
+	if err := moved(clone, base, "the commands"); err != nil {
+		return ev, err
 	}
 	ev["kept"] = why == ""
 	if why != "" {
