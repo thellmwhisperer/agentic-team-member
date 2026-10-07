@@ -59,7 +59,7 @@ func TestRunClonesBaseDetachedAndInstalls(t *testing.T) {
 			got := filepath.Join(t.TempDir(), "install")
 			t.Setenv("ATM_TEST_OUT", got)
 			root := repo(t, "https://example.com/owner/repo.git", atmInstall(`{ basename "$PWD"; git rev-parse HEAD; `+
-				`git symbolic-ref -q HEAD || echo detached; tail -n 1 .git/info/exclude; } > "$ATM_TEST_OUT"`))
+				`git symbolic-ref -q HEAD || echo detached; tail -n 1 .git/info/exclude; } >> "$ATM_TEST_OUT"`))
 			// The source is on feature, one commit ahead of main: the clone follows the base, not HEAD.
 			gitT(t, root, "checkout", "-q", "-b", "feature")
 			gitT(t, root, "commit", "-q", "--allow-empty", "-m", "feature")
@@ -79,7 +79,9 @@ func TestRunClonesBaseDetachedAndInstalls(t *testing.T) {
 			if err != nil {
 				t.Fatal("install did not run: ", err)
 			}
-			if want := filepath.Base(dir) + "\n" + sha + "\ndetached\n/.atm/\n"; string(b) != want {
+			// Install runs again in the checks, after the agent, whose skill is the last line excluded.
+			saw := filepath.Base(dir) + "\n" + sha + "\ndetached\n"
+			if want := saw + "/.atm/\n" + saw + "/.claude/skills/ponytail/\n"; string(b) != want {
 				t.Fatalf("install saw %q, want %q", b, want)
 			}
 			if left := clones(t, root); len(left) != 0 {
