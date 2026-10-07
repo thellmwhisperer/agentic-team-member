@@ -288,12 +288,21 @@ func every(clone string, args ...string) (string, error) {
 func keep(clone string) (string, error) {
 	tree, err := git(clone, "write-tree")
 	if err == nil {
-		_, err = git(clone, "init", "-q", "--bare", ".git/atm-files")
+		_, err = whole(clone)
 	}
+	return tree, err
+}
+
+// whole records every file in clone, ignored or not, as reset knows them, and is their tree.
+func whole(clone string) (string, error) {
+	_, err := git(clone, "init", "-q", "--bare", ".git/atm-files")
 	if err == nil {
 		_, err = every(clone, "add", "-A", "-f", ".")
 	}
-	return tree, err
+	if err != nil {
+		return "", err
+	}
+	return every(clone, "write-tree")
 }
 
 // reset brings clone's working tree back to what keep recorded, new files gone, the ignored ones too. A file

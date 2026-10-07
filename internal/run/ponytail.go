@@ -37,6 +37,13 @@ func (a agent) ponytail(root, clone, sha string, proofs []proof, i Issue, c conf
 	if err != nil {
 		return nil, err
 	}
+	if _, err := placeSkill(clone, a.Harness, "ponytail-review"); err != nil { // ATM's file, before the cut
+		return nil, err
+	}
+	all, err := whole(clone) // the ignored files too
+	if err != nil {
+		return nil, err
+	}
 	var found []finding
 	ev, err := a.run(clone, "ponytail", "ponytail-review", text, func(r map[string]any) (err error) {
 		found, err = findings(r, files)
@@ -58,6 +65,11 @@ func (a agent) ponytail(root, clone, sha string, proofs []proof, i Issue, c conf
 	}
 	ev["net_lines"] = lines
 	if why == "" {
+		if why, err = fresh(clone, all); err != nil {
+			return ev, err
+		}
+	}
+	if why == "" {
 		if why, err = reprove(clone, base, proofs, c); err != nil {
 			return ev, err
 		}
@@ -68,7 +80,7 @@ func (a agent) ponytail(root, clone, sha string, proofs []proof, i Issue, c conf
 	ev["kept"] = why == ""
 	if why != "" {
 		ev["reason"] = why
-		return ev, restore(clone, before)
+		return ev, restore(clone, all)
 	}
 	ev["commits"], ev["tombstones"], err = commit(root, clone, sha, before, i.Title, found)
 	return ev, err
@@ -202,14 +214,29 @@ func snapshot(clone string) (string, error) {
 	return tree, errors.Join(err, e)
 }
 
-// restore brings clone's working tree back to tree, new files gone, and its index to HEAD.
+// fresh names the first file in clone, ignored or not, that tree, whole's before the cut, lacks: "" for none.
+func fresh(clone, tree string) (string, error) {
+	now, err := whole(clone)
+	if err != nil {
+		return "", err
+	}
+	out, err := every(clone, "diff", "--name-only", "--diff-filter=A", "-z", tree, now)
+	if f, _, _ := strings.Cut(out, "\x00"); f != "" {
+		return "the cut adds " + f, err
+	}
+	return "", err
+}
+
+// restore brings clone's working tree back to tree, whole's, new files gone, the ignored ones too, and its
+// index to HEAD.
 func restore(clone, tree string) error {
-	for _, args := range [][]string{{"add", "-A"}, {"read-tree", "-u", "--reset", tree}, {"reset", "-q"}} {
-		if _, err := git(clone, args...); err != nil {
+	for _, args := range [][]string{{"add", "-A", "-f", "."}, {"read-tree", "-u", "--reset", tree}} {
+		if _, err := every(clone, args...); err != nil {
 			return err
 		}
 	}
-	return nil
+	_, err := git(clone, "reset", "-q")
+	return err
 }
 
 // added is the net lines the diff from sha to tree adds; a binary file adds none.
