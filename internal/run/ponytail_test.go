@@ -275,6 +275,10 @@ func TestPonytailDiscardsACutThatDoesNotHold(t *testing.T) {
 			if _, err := sh(clone, "echo cache/ >> .git/info/exclude; mkdir cache; echo old > cache/old.txt"); err != nil {
 				t.Fatal(err)
 			}
+			old, err := os.ReadFile(filepath.Join(clone, "cache", "old.txt"))
+			if err != nil {
+				t.Fatal(err)
+			}
 			before := state(t, clone)
 			ev, err := agent{Agent: cfg.Agent, dir: t.TempDir()}.ponytail(root, clone, sha,
 				[]proof{unitProof(t, clone, sha)}, fixIssue, cfg)
@@ -288,7 +292,7 @@ func TestPonytailDiscardsACutThatDoesNotHold(t *testing.T) {
 			if _, err := os.Stat(filepath.Join(clone, "cache", "injected.txt")); !os.IsNotExist(err) {
 				t.Fatalf("the ignored file the cut added is still in the clone: %v", err)
 			}
-			if b, err := os.ReadFile(filepath.Join(clone, "cache", "old.txt")); err != nil || string(b) != "old\n" {
+			if b, err := os.ReadFile(filepath.Join(clone, "cache", "old.txt")); err != nil || !bytes.Equal(b, old) {
 				t.Fatalf("the ignored file the cut changed did not come back: %q, %v", b, err)
 			}
 		})
