@@ -1,0 +1,18 @@
+schema: 1
+id: T-PONYTAIL-20261007-035753-1
+status: accepted
+category: alien_code
+title: "Removed the one-caller commitAll helper, which rebuilt `git commit` from snapshot, commit-tree and r"
+created_at: 2026-10-07
+incident:
+  pattern: "Removed the one-caller commitAll helper, which rebuilt `git commit` from snapshot, commit-tree and reset by hand. onBranch now runs `git add -A` and then `git commit --no-verify --cleanup=verbatim` with the existing identity() flags, already on the new branch."
+  what_went_wrong: "An ATM run wrote it and ATM's ponytail pass cut it before delivery."
+  root_cause: "The coding agent wrote more than the issue needed."
+  rule_established: "Cut by the ponytail pass; it does not come back."
+  evidence:
+    - family: speculative_feature
+      example: "Removed the one-caller commitAll helper, which rebuilt `git commit` from snapshot, commit-tree and reset by hand. onBranch now runs `git add -A` and then `git commit --no-verify --cleanup=verbatim` with the existing identity() flags, already on the new branch."
+      artifact: internal/run/run.go
+match:
+  family: speculative_feature
+  artifact: internal/run/run.go
