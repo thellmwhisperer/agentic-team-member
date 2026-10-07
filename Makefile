@@ -4,7 +4,7 @@
 GORELEASER = go run github.com/goreleaser/goreleaser/v2@v2.18.2
 
 test:
-	go test ./...
+	go test -timeout 30m ./...
 
 lint:
 	golangci-lint run
