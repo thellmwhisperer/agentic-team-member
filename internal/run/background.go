@@ -249,13 +249,6 @@ func (s *server) start(args []string) Outcome {
 		Run: cmp.Or(strings.Trim(name, "-"), "run") + "-" + strconv.Itoa(n+1)}}
 	r.Report = filepath.Join(runDir(s.root, r.Run), "report.json")
 	s.runs = append(s.runs, r)
-	for i := 0; len(s.runs) > maxRuns && i < len(s.runs); { // drop the oldest that ended
-		if s.runs[i].Ended.IsZero() {
-			i++
-		} else {
-			s.runs = slices.Delete(s.runs, i, i+1)
-		}
-	}
 	s.save()
 	go s.run(r, args)
 	return r.Outcome
@@ -478,9 +471,16 @@ func history(root string) ([]*bgRun, error) {
 	return runs, sc.Err()
 }
 
-// save writes the runs to runs.jsonl, through a file renamed over it, so a crash leaves the last one whole.
-// Under the server's lock.
+// save drops the oldest runs that ended past maxRuns, then writes the runs to runs.jsonl, through a file renamed
+// over it, so a crash leaves the last one whole. Under the server's lock.
 func (s *server) save() {
+	for i := 0; len(s.runs) > maxRuns && i < len(s.runs); {
+		if s.runs[i].Ended.IsZero() {
+			i++
+		} else {
+			s.runs = slices.Delete(s.runs, i, i+1)
+		}
+	}
 	var b []byte
 	for _, r := range s.runs {
 		line, _ := json.Marshal(r.Outcome)
