@@ -171,9 +171,8 @@ func cleanBackgroundServer(t *testing.T, dir string) {
 	})
 }
 
-// Two atm run at once, with no background process yet, each start one: one serves both runs, and numbers them,
-// the other connects to it.
-func TestTwoRunsAtOnceShareOneBackgroundProcess(t *testing.T) {
+func setupConcurrentRunRepo(t *testing.T) string {
+	t.Helper()
 	dir := repo(t, "https://example.com/o/r.git")
 	cleanBackgroundServer(t, dir)
 	if err := os.WriteFile(filepath.Join(dir, "retry.md"), []byte("# Retry\nType: fix\nRetry.\n"), 0o600); err != nil {
@@ -184,7 +183,12 @@ func TestTwoRunsAtOnceShareOneBackgroundProcess(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, ".atm.yaml"), []byte(config), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	for _, args := range [][]string{{"config", "user.email", "atm@example.com"}, {"config", "user.name", "atm"}, {"add", "."}, {"commit", "-m", "retry"}} {
+	for _, args := range [][]string{
+		{"config", "user.email", "atm@example.com"},
+		{"config", "user.name", "atm"},
+		{"add", "."},
+		{"commit", "-m", "retry"},
+	} {
 		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
@@ -194,6 +198,11 @@ func TestTwoRunsAtOnceShareOneBackgroundProcess(t *testing.T) {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git remote set-url: %v\n%s", err, out)
 	}
+	return dir
+}
+
+func setupBarrierAgent(t *testing.T) (string, string) {
+	t.Helper()
 	bin := t.TempDir()
 	exe, err := os.Executable()
 	if err != nil {
@@ -218,6 +227,14 @@ func TestTwoRunsAtOnceShareOneBackgroundProcess(t *testing.T) {
 	t.Setenv("FAKE_AGENT_BARRIER_RELEASE", release)
 	t.Setenv("FAKE_AGENT", "fail")
 	t.Cleanup(func() { _ = os.WriteFile(release, nil, 0o600) })
+	return ready, release
+}
+
+// Two atm run at once, with no background process yet, each start one: one serves both runs, and numbers them,
+// the other connects to it.
+func TestTwoRunsAtOnceShareOneBackgroundProcess(t *testing.T) {
+	dir := setupConcurrentRunRepo(t)
+	ready, release := setupBarrierAgent(t)
 	outs, errs := make([]string, 2), make([]error, 2)
 	var wg sync.WaitGroup
 	for i := range outs {
@@ -228,6 +245,12 @@ func TestTwoRunsAtOnceShareOneBackgroundProcess(t *testing.T) {
 		map[string]bool{"retry-1\n": true, "retry-2\n": true}) {
 		t.Fatalf("atm run twice at once: %q, %v", outs, err)
 	}
+	assertBothRunsServed(t, dir, ready)
+	assertBothRunsFinish(t, release)
+}
+
+func assertBothRunsServed(t *testing.T, dir, ready string) {
+	t.Helper()
 	barrierReached := false
 	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
 		entries, err := os.ReadDir(ready)
@@ -252,9 +275,16 @@ func TestTwoRunsAtOnceShareOneBackgroundProcess(t *testing.T) {
 			t.Fatalf("atm axi runs --json while both run: %+v", runs)
 		}
 	}
-	if out := atmIn(t, 0, "status"); !strings.Contains(out, "retry-1  agent  ") || !strings.Contains(out, "retry-2  agent  ") {
+	out := atmIn(t, 0, "status")
+	if !strings.Contains(out, "retry-1  agent  ") ||
+		!strings.Contains(out, "retry-2  agent  ") {
 		t.Fatalf("atm status while both run: %q", out)
 	}
+	assertOneBackgroundProcess(t, dir)
+}
+
+func assertOneBackgroundProcess(t *testing.T, dir string) {
+	t.Helper()
 	var served []int
 	for _, line := range strings.Split(read(t, filepath.Join(dir, ".atm", "serve.log")), "\n") {
 		if pid, ok := strings.CutPrefix(line, "atm serve pid: "); ok {
@@ -268,9 +298,14 @@ func TestTwoRunsAtOnceShareOneBackgroundProcess(t *testing.T) {
 	if len(served) != 1 || served[0] <= 0 {
 		t.Fatalf("background process pids = %v, want one serving process", served)
 	}
+}
+
+func assertBothRunsFinish(t *testing.T, release string) {
+	t.Helper()
 	if err := os.WriteFile(release, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	var runs struct{ Runs []map[string]string }
 	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
 		if err := json.Unmarshal([]byte(atmIn(t, 0, "axi", "runs", "--json")), &runs); err != nil {
 			t.Fatal(err)
