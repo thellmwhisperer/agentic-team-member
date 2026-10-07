@@ -92,7 +92,7 @@ func TestFollowUpRedTestMustBeNewOutsideATM(t *testing.T) {
 				t.Fatal(err)
 			}
 			why, err := red(dir, 1, &f, "sh {file}")
-			if err != nil || why != "red_test "+tc.path+" is not a new test path" {
+			if err != nil || why != "red_test "+filepath.FromSlash(tc.path)+" is not a new test path" {
 				t.Fatalf("want new-path rejection, got %q, %v", why, err)
 			}
 		})
