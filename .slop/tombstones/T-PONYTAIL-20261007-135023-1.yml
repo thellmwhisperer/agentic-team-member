@@ -1,0 +1,18 @@
+schema: 1
+id: T-PONYTAIL-20261007-135023-1
+status: accepted
+category: alien_code
+title: "Merged the broken 'A local config (...)' / '`--scope` names' / 'the files the issue allows.' lines left behind when the test_harness_worker.py sentence was cut into one line: 'and `--scope` naming the files the issue allows.'"
+created_at: 2026-10-07
+incident:
+  pattern: "Merged the broken 'A local config (...)' / '`--scope` names' / 'the files the issue allows.' lines left behind when the test_harness_worker.py sentence was cut into one line: 'and `--scope` naming the files the issue allows.'"
+  what_went_wrong: "An ATM run wrote it and ATM's ponytail pass cut it before delivery."
+  root_cause: "The coding agent wrote more than the issue needed."
+  rule_established: "Cut by the ponytail pass; it does not come back."
+  evidence:
+    - family: format_churn
+      example: "Merged the broken 'A local config (...)' / '`--scope` names' / 'the files the issue allows.' lines left behind when the test_harness_worker.py sentence was cut into one line: 'and `--scope` naming the files the issue allows.'"
+      artifact: "docs/self-maintenance.md"
+match:
+  family: format_churn
+  artifact: "docs/self-maintenance.md"

@@ -1,0 +1,18 @@
+schema: 1
+id: T-PONYTAIL-20261007-135023-2
+status: accepted
+category: alien_code
+title: "Reflowed the rewritten CI paragraph so 'on `main`; a' no longer sits alone on its own line. The wording is unchanged and the paragraph is one line shorter."
+created_at: 2026-10-07
+incident:
+  pattern: "Reflowed the rewritten CI paragraph so 'on `main`; a' no longer sits alone on its own line. The wording is unchanged and the paragraph is one line shorter."
+  what_went_wrong: "An ATM run wrote it and ATM's ponytail pass cut it before delivery."
+  root_cause: "The coding agent wrote more than the issue needed."
+  rule_established: "Cut by the ponytail pass; it does not come back."
+  evidence:
+    - family: format_churn
+      example: "Reflowed the rewritten CI paragraph so 'on `main`; a' no longer sits alone on its own line. The wording is unchanged and the paragraph is one line shorter."
+      artifact: "CONTRIBUTING.md"
+match:
+  family: format_churn
+  artifact: "CONTRIBUTING.md"

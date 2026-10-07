@@ -23,8 +23,7 @@ flowchart LR
    can check, and a `## Red test` section naming the test that fails today.
    The agent gets exactly this text; a vague issue gives a vague run.
 2. **An ATM run.** A local config (`config/agent.*.local.toml`, ignored by git)
-   `--scope` names
-   the files the issue allows.
+   and `--scope` naming the files the issue allows.
 3. **The verdict.** `report.json`, or the summary at the end of the run. A FAIL
    ends here: the report says which check failed and why, and the issue gets a
    better contract or the code a better check.
