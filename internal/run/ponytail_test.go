@@ -235,7 +235,8 @@ func TestReproveFailsWhenAPriorUnitTestCommits(t *testing.T) {
 func TestPonytailDiscardsCutWhenAChainedUnitChangesEarlierTest(t *testing.T) {
 	root, clone, sha, cfg := unitDone(t, "echo fixed > a.txt")
 	earlier := unitProof(t, clone, sha)
-	if err := os.WriteFile(filepath.Join(clone, "a_test.sh"), []byte(earlier.testContent+"# unit 2\n"), 0o600); err != nil {
+	content := earlier.testContent + "# unit 2\n"
+	if err := os.WriteFile(filepath.Join(clone, "a_test.sh"), []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	proofs := []proof{earlier, unitProof(t, clone, sha)}

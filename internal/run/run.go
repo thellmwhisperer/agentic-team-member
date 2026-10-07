@@ -114,19 +114,12 @@ func (a agent) units(r *verdict, root, dir, sha, text string, i Issue, c config.
 	for n := 1; ; n++ {
 		var report map[string]any
 		r.step("agent", func() (map[string]any, error) {
-			name, text := "worker", text
-			if f != nil {
-				var err error
-				if head, err = chain(root, dir, n-1, i.Title, *f); err != nil {
-					return nil, err
-				}
-				unit.Type, name = "feature", "worker-unit"+strconv.Itoa(n)
-				path := filepath.Join(a.dir, "brief-unit-"+strconv.Itoa(n)+".md")
-				if text, _, err = writeBrief(path, unit, c, f); err != nil {
-					return nil, err
-				}
+			var err error
+			var ev map[string]any
+			head, unit, text, ev, err = a.runUnit(root, dir, head, text, unit, f, n, i, c)
+			if ev == nil {
+				return nil, err
 			}
-			ev, err := a.run(dir, name, "ponytail", text, testFile)
 			ev["unit"] = n
 			report, _ = ev["report"].(map[string]any)
 			test, _ = report["test_file"].(string)
@@ -137,29 +130,12 @@ func (a agent) units(r *verdict, root, dir, sha, text string, i Issue, c config.
 		})
 		var in []followUp
 		r.step("checks", func() (map[string]any, error) {
-			ev := map[string]any{"unit": n}
-			if f != nil {
-				if b, err := os.ReadFile(filepath.Join(dir, test)); err != nil || string(b) != f.Test {
-					return ev, fmt.Errorf("unit %d edited its red test %s, which it must make pass as it is", n, test)
-				}
-			}
-			result, err := checks(dir, head, unit.Type, test, c)
-			for key, value := range result {
-				ev[key] = value
-			}
-			if err != nil {
-				return ev, err
-			}
-			var testContent []byte
-			if unit.Type == "fix" || unit.Type == "feature" || unit.Type == "greenfield" || unit.Type == "tests" {
-				testContent, err = os.ReadFile(filepath.Join(dir, test))
-				if err != nil {
-					return ev, err
-				}
-			}
-			proofs = append(proofs, proof{head, test, unit.Type, string(testContent)})
+			var err error
+			var p proof
 			var out []followUp
-			in, out, ev["follow_ups"], err = followUps(dir, report, i.Body, c.TestFile)
+			var ev map[string]any
+			p, in, out, ev, err = checkUnit(dir, head, test, unit.Type, f, n, report, i.Body, c)
+			proofs = append(proofs, p)
 			pending = append(pending, out...)
 			return ev, err
 		})
@@ -171,6 +147,56 @@ func (a agent) units(r *verdict, root, dir, sha, text string, i Issue, c config.
 		}
 		f, pending = &in[0], append(pending, in[1:]...)
 	}
+}
+
+func checkUnit(
+	dir, head, test, typ string, f *followUp, n int, report map[string]any, body string, c config.Config,
+) (proof, []followUp, []followUp, map[string]any, error) {
+	ev := map[string]any{"unit": n}
+	if f != nil {
+		if b, err := os.ReadFile(filepath.Join(dir, test)); err != nil || string(b) != f.Test {
+			return proof{}, nil, nil, ev, fmt.Errorf("unit %d edited its red test %s, which it must make pass as it is", n, test)
+		}
+	}
+	result, err := checks(dir, head, typ, test, c)
+	for key, value := range result {
+		ev[key] = value
+	}
+	if err != nil {
+		return proof{}, nil, nil, ev, err
+	}
+	var testContent []byte
+	if typ == "fix" || typ == "feature" || typ == "greenfield" || typ == "tests" {
+		testContent, err = os.ReadFile(filepath.Join(dir, test))
+		if err != nil {
+			return proof{}, nil, nil, ev, err
+		}
+	}
+	p := proof{head, test, typ, string(testContent)}
+	in, out, followUpEvent, err := followUps(dir, report, body, c.TestFile)
+	ev["follow_ups"] = followUpEvent
+	return p, in, out, ev, err
+}
+
+func (a agent) runUnit(
+	root, dir, head, text string, unit Issue, f *followUp, n int, i Issue, c config.Config,
+) (string, Issue, string, map[string]any, error) {
+	name := "worker"
+	if f != nil {
+		var err error
+		head, err = chain(root, dir, n-1, i.Title, *f)
+		if err != nil {
+			return head, unit, text, nil, err
+		}
+		unit.Type, name = "feature", "worker-unit"+strconv.Itoa(n)
+		path := filepath.Join(a.dir, "brief-unit-"+strconv.Itoa(n)+".md")
+		text, _, err = writeBrief(path, unit, c, f)
+		if err != nil {
+			return head, unit, text, nil, err
+		}
+	}
+	ev, err := a.run(dir, name, "ponytail", text, testFile)
+	return head, unit, text, ev, err
 }
 
 // deliver runs the delivery command line in clone, ATM_REPORT naming report.json, which is on disk already.
