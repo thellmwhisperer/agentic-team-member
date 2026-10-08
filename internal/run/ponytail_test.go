@@ -228,7 +228,7 @@ func TestReproveFailsWhenAPriorUnitTestCommits(t *testing.T) {
 	cfg.TestFile = "sh {file} && git -c user.name=Test -c user.email=test@example.com commit --allow-empty -qm test"
 	proofs := []proof{unitProof(t, clone, sha), unitProof(t, clone, sha)}
 
-	_, _, err := reprove(clone, sha, proofs, cfg)
+	_, _, _, err := reprove(clone, sha, proofs, cfg)
 	if err == nil || !strings.Contains(err.Error(), "the commands made commits") {
 		t.Fatalf("want the prior unit's test commit to fail re-proving, got %v", err)
 	}

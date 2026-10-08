@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"io"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
+	"time"
 )
 
 // checkProof checks rep's proof of unit n, on base, with test and type typ: red, then green, then passed.
@@ -24,8 +26,10 @@ func checkProof(t *testing.T, what string, got any, n int, base, test, typ strin
 	}
 }
 
-func TestReportKeepsEveryUnitTheReproofsAndTheInstall(t *testing.T) {
-	root := repo(t, "https://example.com/owner/repo.git", atmInstall("true"))
+// chainedCut runs two chained units under .atm.yaml atm, whose cut is kept, and returns root and its report.
+func chainedCut(t *testing.T, atm string) (string, obj) {
+	t.Helper()
+	root := repo(t, "https://example.com/owner/repo.git", atm)
 	t.Setenv("FAKE_PONYTAIL_REPORT", cut)
 	t.Setenv("FAKE_PONYTAIL_WORK", "grep -v extra a.txt > cut; mv cut a.txt")
 	t.Setenv("FAKE_AGENT_WORK", chainWork)
@@ -38,7 +42,57 @@ func TestReportKeepsEveryUnitTheReproofsAndTheInstall(t *testing.T) {
 	if p := ends(t, &out, "ponytail"); len(p) != 1 || p[0]["kept"] != true {
 		t.Fatalf("want the cut kept, got %v", p)
 	}
-	rep := readReport(t, filepath.Join(root, ".atm", "runs", "t", "report.json"))
+	return root, readReport(t, filepath.Join(root, ".atm", "runs", "t", "report.json"))
+}
+
+func TestReportKeepsWhenEveryNodeTrialAndCommandStartedAndTook(t *testing.T) {
+	_, rep := chainedCut(t, atmSet(atmInstall("true"), "delivery", "true"))
+	var timed []obj // in the order they ran
+	for _, n := range rep["nodes"].([]any) {
+		timed = append(timed, n.(obj))
+	}
+	trials := func(key string, n int) {
+		u := rep[key].([]any)[n].(obj)
+		timed = append(timed, u["red"].(obj), u["green"].(obj))
+	}
+	var groups [][]obj // the commands of the clone, each unit's checks, the re-run checks and the delivery
+	for _, c := range rep["commands"].([]any) {
+		if c := c.(obj); c["name"] == "install" || len(groups) == 0 {
+			groups = append(groups, []obj{c})
+		} else {
+			groups[len(groups)-1] = append(groups[len(groups)-1], c)
+		}
+	}
+	if len(groups) != 4 || len(groups[3]) != 3 || groups[3][2]["name"] != "delivery" {
+		t.Fatalf("want the clone's install, each unit's checks, the re-run checks and the delivery, got %v", groups)
+	}
+	timed = append(timed, groups[0]...)
+	trials("units", 0)
+	timed = append(timed, groups[1]...)
+	trials("units", 1)
+	timed = append(timed, groups[2]...)
+	trials("reproofs", 0)
+	trials("reproofs", 1)
+	timed = append(timed, groups[3]...)
+	ms := regexp.MustCompile(`^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$`)
+	var last time.Time
+	for i, x := range timed {
+		s, _ := x["started_at"].(string)
+		at, err := time.Parse(time.RFC3339, s)
+		if _, ok := x["duration_ms"].(float64); !ok || err != nil || !ms.MatchString(s) {
+			t.Fatalf("want a started_at in UTC with milliseconds and a duration_ms, got %v", x)
+		}
+		if i >= len(rep["nodes"].([]any)) { // the nodes are listed by name, the rest as they ran
+			if at.Before(last) {
+				t.Fatalf("want %v to start no earlier than %s", x, last)
+			}
+			last = at
+		}
+	}
+}
+
+func TestReportKeepsEveryUnitTheReproofsAndTheInstall(t *testing.T) {
+	root, rep := chainedCut(t, atmInstall("true"))
 	units, _ := rep["units"].([]any)
 	if len(units) != 2 {
 		t.Fatalf("want both units in the report, got %v", rep["units"])
@@ -62,7 +116,7 @@ func TestReportKeepsEveryUnitTheReproofsAndTheInstall(t *testing.T) {
 			installs++
 		}
 	}
-	if installs != 3 {
-		t.Fatalf("want the clone's install, then each unit's, got %v", rep["commands"])
+	if installs != 4 {
+		t.Fatalf("want the clone's install, then each unit's and the re-run checks', got %v", rep["commands"])
 	}
 }
