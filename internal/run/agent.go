@@ -124,6 +124,11 @@ func (a agent) run(clone, name, skill, brief string, check func(map[string]any) 
 	}), a.env...)
 	s := stream{skill: skill, live: liveIn(clone)}
 	err = s.read(cmd, f, a.Harness)
+	if a.Harness == "codex" {
+		b, _ := os.ReadFile(final) // none is no report
+		s.final = string(b)
+	}
+	s.finish()
 	switch {
 	case errors.Is(ctx.Err(), context.DeadlineExceeded):
 		return ev, fmt.Errorf("agent timed out after %s; log: %s", Human(agentTimeout), path)
@@ -133,10 +138,6 @@ func (a agent) run(clone, name, skill, brief string, check func(map[string]any) 
 		return ev, fmt.Errorf("agent: %w; log: %s", err, path)
 	case !s.used:
 		return ev, fmt.Errorf("agent left no proof it used the %s skill; log: %s", skill, path)
-	}
-	if a.Harness == "codex" {
-		b, _ := os.ReadFile(final) // none is no report
-		s.final = string(b)
 	}
 	ev["report"], err = report(s.final, check)
 	if err != nil {
@@ -200,6 +201,8 @@ type stream struct {
 	loads        []string // the ids of the agent's calls that load its skill
 	used         bool
 	live         func(map[string]any)
+	pending      string
+	hasPending   bool
 }
 
 // read runs cmd and writes each line of its stdout and stderr to log, as it is when JSON, else as a JSON
@@ -291,14 +294,46 @@ type block struct {
 func (s *stream) see(harness string, line []byte) {
 	var e event
 	_ = json.Unmarshal(line, &e) // a field of another type is left empty, the rest is read
+	final, ends := e.final(harness)
+	if ends {
+		s.final = final
+	}
+	if s.hasPending {
+		s.flush(harness == "claude" && e.Type == "result" && ends && final == s.pending)
+	}
 	s.loads = append(s.loads, e.skillLoads(harness, s.skill)...)
 	for _, ev := range e.activity(harness) {
 		id, _ := ev["id"].(string)
 		s.used = s.used || ev["result"] == "passed" && slices.Contains(s.loads, id)
-		s.live(ev)
+		if says, ok := ev["says"].(string); ok {
+			if s.hasPending {
+				s.flush(false)
+			}
+			s.pending, s.hasPending = says, true
+		} else {
+			if s.hasPending {
+				s.flush(false)
+			}
+			s.live(ev)
+		}
 	}
-	if text, ok := e.final(harness); ok {
-		s.final = text
+}
+
+func (s *stream) finish() { s.flush(true) }
+
+func (s *stream) flush(report bool) {
+	if !s.hasPending {
+		return
+	}
+	text := s.pending
+	if report && strings.HasSuffix(strings.TrimSpace(s.final), strings.TrimSpace(text)) {
+		if _, at := lastObject(text); at >= 0 {
+			text = strings.TrimSpace(text[:at])
+		}
+	}
+	s.pending, s.hasPending = "", false
+	if text != "" {
+		s.live(map[string]any{"says": text})
 	}
 }
 
@@ -444,11 +479,8 @@ func (e event) blocks() (evs []map[string]any) {
 	return evs
 }
 
-// says is the agent saying text, without its report, the JSON object that may end it, if anything is left.
+// says is the agent saying text, before the stream knows whether it ends with a report.
 func says(text string) []map[string]any {
-	if _, at := lastObject(text); at >= 0 {
-		text = text[:at]
-	}
 	if text = strings.TrimSpace(text); text == "" {
 		return nil
 	}
