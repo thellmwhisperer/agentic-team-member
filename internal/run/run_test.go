@@ -231,6 +231,21 @@ func TestRunReadsGitHubIssueFromOrigin(t *testing.T) {
 	}
 }
 
+func TestRunReadsFlagsAfterTheIssue(t *testing.T) {
+	root := repo(t, "git@github.com:owner/repo.git", atmYAML)
+	fakeGH(t, `{"title":"Retry","body":"Type: fix\nRetry once."}`, false)
+	gitT(t, root, "checkout", "-q", "-b", "feature")
+	gitT(t, root, "commit", "-q", "--allow-empty", "-m", "feature")
+	sha := gitT(t, root, "rev-parse", "feature")
+	var out bytes.Buffer
+	if err := Run("t", []string{"7", "--base-ref", "feature"}, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if end := cloneStep(t, &out); end["state"] != "passed" || end["sha"] != sha {
+		t.Fatalf("want the clone on feature %s, got %v", sha, end)
+	}
+}
+
 func TestRunDiesWhenIssueIsUnusable(t *testing.T) {
 	cases := []struct {
 		name, file, gh, why string
