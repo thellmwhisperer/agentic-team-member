@@ -20,59 +20,81 @@ code review gate takes the branch.
 
 ## A real run
 
-An earlier Python-worker run on issue 130 of this repo, 5 October 2026,
-used Claude Opus 5.5 at high effort. It reported steps live and required a
-monitor. 14 min 01 s,
-55 agent turns, five red tests first, red and green verified, 3 cuts kept by
-the slop detector, [PR 136](https://github.com/thellmwhisperer/agentic-team-member/pull/136)
-merged, issue closed.
+Issue 218 of this repository, run 218-32 of the binary built from main at
+`c0a1d53`, 8 October 2026, Claude Opus 5.5 at high effort from
+`~/.config/atm/config.yaml`. 54 min 15 s in all: agent 11 min 16 s, 30 tool
+calls; red and green verified; the slop detector kept 1 cut and re-proved it;
+delivery through no-mistakes opened
+[PR 244](https://github.com/thellmwhisperer/agentic-team-member/pull/244),
+CI green on ubuntu, macOS and Windows, merged, issue closed. It was the second
+run of the issue: the first, 218-29, failed at checks because the agent
+shortened an existing test file.
+
+The final screen in a terminal, as it is:
 
 ```text
-PREPARE   worktree .worktrees/atm-run-20261005-225238-2   base 670a60faa0   tests python3 -m pytest
-
-AGENT  unit 1 claude
-  ✎ Reading the worker, the renderer and the tests before writing the red test.
-  ✎ Writing the red tests first.
-  ▶ #13 Edit  tests/test_harness_worker.py                                    ✓ ok
-  ▶ #17 Bash  cat >> tests/test_tail_run.py <<'EOF' def test_tail_renders_step_starts_ends_…
-  ▶ #18 Bash  python3 -m pytest -q tests/test_harness_worker.py -k "full_suite_says"   ✗ AssertionError: '▶ full suite' not in …
-  ✎ All five red. Now the worker: a `RunLog` that replaces `make_logger`.
-  ▶ #19 … #31 Edit  agentic_tdd_runner/harness_worker.py                         ✓ ok
-  ✎ Now wiring the steps into `main`.
-  ✎ Now the ponytail pass.
-  ✎ Now the renderer side in `scripts/tail-run.py`.
-  ▶ #38 Bash  python3 -m pytest -q tests/test_tail_run.py tests/test_harness_worker.py  ✓ ok
-  ▶ #43 Edit  config/agent.toml                                                 ✓ ok
-  ✎ Aviso: I edited the README of the main checkout by mistake, not the worktree one. Reverting it there and applying it in the worktree.
-  ✎ No other launcher in the repo. Running the full lint and the full suite.
-  ✓ agent finished  turns=55
-
-RED / GREEN VERIFICATION
-  ✓ without the fix   test fails    4 failed, 64 passed in 1 min 34 s
-  ✓ with the fix      test passes
-  ✓ quality  ✓ gate  ✓ full suite  ✓ scope  ✓ follow-up validation
-
-AGENT  ponytail claude
-  ✎ harness_worker.py: `elif run_log.steps and …` is now a plain `else`; verify_red_green always prints the half (speculative_hardening)
-  ✎ harness_worker.py: removed the `self.steps and` guard in `RunLog.tick`; both callers check under the lock (speculative_hardening)
-  ✎ harness_worker.py: inlined the `NO_MONITOR` constant into its one `print` (speculative_feature)
-  ✓ agent finished  turns=6
-  ✓ ponytail re-checks   red/green, quality, gate, full suite, scope: all green again
-
-SUMMARY
-  harness   claude model=claude-opus-5-5 effort=high exit=0
-  duration  14 min 01 s   units=1/3
-  changed   harness_worker.py, tail-run.py, agent.toml, README.md, test_harness_worker.py, test_tail_run.py   +369 −56
-  checks    ✓ red/green   ✓ quality   ✓ gate   ✓ scope   ✓ full suite   – typecheck n/a
-  ponytail  kept, 1 net line saved, 3 tombstones written
-✓ RESULT  PASS
+╭─ ATM ──────────────────────────────────────╮  ╭─ Findings - W 1 ───────────────────────────────────────────────────────────────────────╮
+│ #218 Go port: report.json keeps … ✓ passed │  │   W internal/run/run.go · speculative_hardening                                        │
+│                                            │  │     In units, removed the `unitResult` that was built in three places (`Unit` before   │
+│ ✓ Issue  0.3 s                fix · passed │  │     the checks step, `Red`/`Green` set inside the step, the other fields after it).    │
+│ │                                          │  │     `ev` now lives outside the step, red and green are read from it afterwards, and    │
+│ ✓ Clone  1.0 s           c0a1d53d · passed │  │     one `unitResult{...}` literal is appended. The diff is 2 lines shorter.            │
+│ │                                          │  ╰────────────────────────────────────────────────────────────────────────────────────────╯
+│ ✓ Contract  0.0 s                   passed │
+│ │                                          │
+│ ✓ Agent · …  11 min 16 s 30 tools · passed │
+│ │                                          │
+│ ✓ Checks  8 min 20 s                passed │
+│   ✓ red/green  5 min 23 s           passed │
+│   ✓ test  2 min 55 s                passed │
+│   ✓ typecheck  0.2 s                passed │
+│   ✓ lint  1.6 s                     passed │
+│ │                                          │
+│ ✓ Slop detec…  11 min 35 s 1 cuts · passed │
+│   ✓ red/green  5 min 09 s           passed │
+│   ✓ test  2 min 52 s                passed │
+│   ✓ typecheck  0.1 s                passed │
+│   ✓ lint  1.6 s                     passed │
+│ │                                          │
+│ ✓   22 min 59… atm/go-port-repor… · passed │
+╰────────────────────────────────────────────╯
 ```
 
-The agent's own red (`#18`) is a courtesy. The verdict is the RED / GREEN
-block: ATM parks the fix, runs the test, brings the fix back, runs it again.
-The `Aviso` line is the agent catching itself editing outside the clone; the
-scope check would have caught it too. This was the Python worker's original
-live-step implementation. The Go worker has its own report and screen.
+The same run outside a terminal, `atm attach 218-32` piped. Between
+`delivery started` and `delivery passed` sits delivery's own no-mistakes
+screen, left out here: in a terminal it is the pipeline screen (intent,
+rebase, review, test, document, lint, push, PR, CI); outside one it prints as
+terminal redraws.
+
+```text
+issue     started
+issue     passed 0.3 s
+clone     started
+clone     passed 1.0 s
+contract  started
+contract  passed 0.0 s
+agent     started
+agent     passed 11 min 16 s
+checks    started
+checks    passed 8 min 20 s
+ponytail  started
+ponytail  passed 11 min 35 s
+delivery  started
+delivery  passed 22 min 59 s
+issue     ✓ 0.3 s
+clone     ✓ 1.0 s
+contract  ✓ 0.0 s
+agent     ✓ 11 min 16 s
+checks    ✓ 8 min 20 s
+ponytail  ✓ 11 min 35 s
+delivery  ✓ 22 min 59 s
+RESULT  PASS
+report  .atm/runs/218-32/report.json
+```
+
+The red/green rows are the verdict: ATM sets the fix aside, runs the agent's
+test, brings the fix back and runs it again. The slop detector's cut is in the
+Findings box; after it, every check ran again before the cut was kept.
 
 ## Who decides what
 
@@ -88,27 +110,46 @@ live-step implementation. The Go worker has its own report and screen.
 
 Step by step: [How a run flows](docs/how-a-run-flows.md).
 
-## Run it
+## Install
 
 Download the archive for your platform from
-[Releases](https://github.com/thellmwhisperer/agentic-team-member/releases) and
-put `atm` in your PATH, or build it with the Go version in [go.mod](go.mod):
+[Releases](https://github.com/thellmwhisperer/agentic-team-member/releases)
+(macOS and Linux on amd64 and arm64, Windows on amd64) and put `atm` on your
+`PATH`, or build it with the Go version in [go.mod](go.mod):
 
 ```bash
 go install github.com/thellmwhisperer/agentic-team-member/cmd/atm@latest
-
-cd /path/to/your/repo
-atm init
-# Fill in the required commands and file patterns in .atm.yaml.
-atm run 300
-# Or: atm run plans/retry-on-timeout.md
 ```
 
-Run it from the target repository. A local issue file needs a `Type:` line; see
-[Configuration](docs/configuration.md).
-`atm run` shows the run on a terminal and returns its label off a terminal;
-`atm status`, `atm attach` and `atm runs` let you follow it. `atm axi run` waits
-for the result when another program launches ATM.
+You also need one coding agent CLI (`claude`, `codex`, `opencode` or `pi`),
+and `gh` for GitHub issues.
+
+## Run it
+
+```bash
+cd /path/to/your/repo
+atm init     # writes .atm.yaml: fill in its commands and file patterns
+atm doctor   # checks git, the agent CLI, gh and .atm.yaml
+atm run 300  # or: atm run plans/retry-on-timeout.md
+```
+
+`.atm.yaml` declares the repository's `install`, `test`, `typecheck` and
+`lint` commands, how to run one test, which files are tests and docs, and the
+`delivery` command; `~/.config/atm/config.yaml` picks your agent, model and
+effort. Both are in [Configuration](docs/configuration.md).
+
+| Command | Does |
+|---------|------|
+| `atm init` | Writes a commented `.atm.yaml` and ignores `.atm/` |
+| `atm doctor` | Checks that a run can start |
+| `atm run [flags] <issue>` | Runs an issue: a GitHub number or a file with a `Type:` line |
+| `atm status` | The runs going |
+| `atm attach [run]` | A run's screen until it ends |
+| `atm runs` | Every retained run and its report |
+| `atm axi run`, `atm axi status`, `atm axi runs` | The same for programs, in TOON or JSON |
+
+A run goes on in the background: leaving its screen or closing the terminal
+does not stop it.
 
 | Exit | Meaning |
 |------|---------|
@@ -117,16 +158,10 @@ for the result when another program launches ATM.
 | `2` | Configuration, issue, clone or contract failed |
 | `4` | Every unit passed, but the delivery command exited non-zero |
 
-The target repository retains run reports; [Configuration](docs/configuration.md)
-describes their location and cleanup. Delivery runs the `delivery` command
-in `.atm.yaml`; its configuration example hands the branch to
-[no-mistakes](https://github.com/kunchenguid/no-mistakes).
-Leave it empty to skip delivery.
-
 ## Read more
 
-- [How a run flows](docs/how-a-run-flows.md): step order and implementation.
-- [Configuration](docs/configuration.md): YAML keys, run flags and detailed behavior.
+- [Configuration](docs/configuration.md): both YAML files, the commands and their flags, what a run leaves on disk.
+- [How a run flows](docs/how-a-run-flows.md): each step, what each task type proves, the report.
 - [ATM maintains itself](docs/self-maintenance.md): this repo's own fixes go through ATM; the hooks that hold the loop.
 - [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Code of conduct](CODE_OF_CONDUCT.md)
 
