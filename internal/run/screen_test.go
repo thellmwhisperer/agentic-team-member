@@ -118,7 +118,8 @@ func TestOnlyTheAgentMessageIsShownInACombinedStream(t *testing.T) {
 	}
 	report := `{"test_file":"a_test.go","summary":"done"}`
 	skill := `"content":[{"type":"text","text":"Base directory for this skill: /x"}]}}`
-	tool := `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"go test ./..."}}]}}`
+	tool := `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use",` +
+		`"id":"t1","name":"Bash","input":{"command":"go test ./..."}}]}}`
 	userSkill := `{"type":"user","message":{"role":"user",` + skill
 	streams := map[string][]string{
 		"claude": {userSkill,
@@ -126,7 +127,8 @@ func TestOnlyTheAgentMessageIsShownInACombinedStream(t *testing.T) {
 			`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]}}`,
 			says["claude"](report), `{"type":"result","result":` + q(report) + `}`},
 		"codex": {userSkill, says["codex"]("I'll run the tests."),
-			`{"type":"item.started","item":{"id":"t1","type":"command_execution","command":"go test ./...","status":"in_progress"}}`,
+			`{"type":"item.started","item":{"id":"t1","type":"command_execution",` +
+				`"command":"go test ./...","status":"in_progress"}}`,
 			`{"type":"item.completed","item":{"id":"t1","type":"command_execution","command":"go test ./...","exit_code":0}}`,
 			says["codex"](report)},
 		"opencode": {userSkill, says["opencode"]("I'll run the tests."),
@@ -165,17 +167,22 @@ func TestOnlyTheAgentMessageIsShownInACombinedStream(t *testing.T) {
 func TestIntermediateJSONMessagesRemainWholeForEveryHarness(t *testing.T) {
 	message := `Config is {"name":"x"}; next I'll test it`
 	tool := map[string]string{
-		"claude":   `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"go test ./..."}}]}}`,
-		"codex":    `{"type":"item.completed","item":{"id":"t1","type":"command_execution","command":"go test ./...","exit_code":0}}`,
-		"opencode": `{"type":"tool_use","part":{"callID":"t1","tool":"bash","state":{"status":"completed","input":{"command":"go test ./..."}}}}`,
-		"pi":       `{"type":"tool_execution_start","toolCallId":"t1","toolName":"bash","args":{"command":"go test ./..."}}`,
+		"claude": `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use",` +
+			`"id":"t1","name":"Bash","input":{"command":"go test ./..."}}]}}`,
+		"codex": `{"type":"item.completed","item":{"id":"t1","type":"command_execution",` +
+			`"command":"go test ./...","exit_code":0}}`,
+		"opencode": `{"type":"tool_use","part":{"callID":"t1","tool":"bash","state":` +
+			`{"status":"completed","input":{"command":"go test ./..."}}}}`,
+		"pi": `{"type":"tool_execution_start","toolCallId":"t1","toolName":"bash","args":{"command":"go test ./..."}}`,
 	}
 	encode := func(s string) string { b, _ := json.Marshal(s); return string(b) }
 	says := map[string]string{
-		"claude":   `{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":` + encode(message) + `}]}}`,
+		"claude": `{"type":"assistant","message":{"role":"assistant","content":[{"type":"text",` +
+			`"text":` + encode(message) + `}]}}`,
 		"codex":    `{"type":"item.completed","item":{"id":"m","type":"agent_message","text":` + encode(message) + `}}`,
 		"opencode": `{"type":"text","part":{"text":` + encode(message) + `}}`,
-		"pi":       `{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":` + encode(message) + `}]}}`,
+		"pi": `{"type":"message_end","message":{"role":"assistant","content":[{"type":"text",` +
+			`"text":` + encode(message) + `}]}}`,
 	}
 	for harness := range says {
 		t.Run(harness, func(t *testing.T) {
