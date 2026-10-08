@@ -81,8 +81,9 @@ voids the verdict, and a test that hangs fails it. Known limit of the `fix`
 proof: where added lines cannot run alone, as in a compiled language that
 needs the base's declarations, that trial fails and the test passes it.
 
-Every type then fails, naming the file, when a test file the base has is
-deleted or shorter.
+Every type then fails, naming the old path, when a test file the base has is
+deleted or shorter. If Git detects a rename, ATM checks the staged file at its
+new path, so moving an unchanged or longer test is allowed.
 
 ## Follow-ups
 
