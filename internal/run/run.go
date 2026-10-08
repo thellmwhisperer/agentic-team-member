@@ -143,21 +143,19 @@ func (a agent) units(r *verdict, root, dir, sha, text string, i Issue, c config.
 			return ev, err
 		})
 		var in []followUp
-		u := unitResult{Unit: n}
+		var ev map[string]any
 		r.step("checks", func() (map[string]any, error) {
 			var err error
 			var p proof
 			var out []followUp
-			var ev map[string]any
 			p, in, out, ev, err = checkUnit(dir, head, test, unit.Type, f, n, report, i.Body, c)
-			u.Red, _ = ev["red"].(try)
-			u.Green, _ = ev["green"].(try)
 			proofs = append(proofs, p)
 			pending = append(pending, out...)
 			return ev, err
 		})
-		u.Base, u.TestFile, u.Type, u.Result = head, test, unit.Type, outcome(r.err)
-		r.Units = append(r.Units, u)
+		red, _ := ev["red"].(try)
+		green, _ := ev["green"].(try)
+		r.Units = append(r.Units, unitResult{n, head, test, unit.Type, red, green, outcome(r.err)})
 		if r.err != nil || len(in) == 0 {
 			return proofs, unit, pending
 		}
