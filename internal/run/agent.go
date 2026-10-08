@@ -375,8 +375,8 @@ func lastObject(text string) map[string]any {
 	return last
 }
 
-// activity is what e tells the screen the agent does: its thinking, and its tool calls, each by its id, with
-// its result once known: running, passed or failed.
+// activity is what e tells the screen the agent does: what it says, its thinking, and its tool calls, each by
+// its id, with its result once known: running, passed or failed.
 func (e event) activity(harness string) []map[string]any {
 	return map[string]func(event) []map[string]any{"claude": event.blocks, "pi": event.pi, "codex": event.codex,
 		"opencode": event.opencode}[harness](e)
@@ -400,6 +400,8 @@ func (e event) codex() []map[string]any {
 	switch {
 	case e.Item.Type == "reasoning" && e.Type == "item.completed":
 		return []map[string]any{{"thinking": e.Item.Text}}
+	case e.Item.Type == "agent_message" && e.Type == "item.completed":
+		return []map[string]any{{"says": e.Item.Text}}
 	case e.Item.Type != "command_execution":
 		return nil
 	case e.Type == "item.started":
@@ -413,6 +415,8 @@ func (e event) opencode() []map[string]any {
 	switch e.Type {
 	case "reasoning":
 		return []map[string]any{{"thinking": e.Part.Text}}
+	case "text":
+		return []map[string]any{{"says": e.Part.Text}}
 	case "tool_use":
 		r := map[string]string{"completed": "passed", "error": "failed"}[e.Part.State.Status]
 		return []map[string]any{toolCall(e.Part.CallID, e.Part.Tool, detail(e.Part.State.Input), cmp.Or(r, "running"))}
@@ -424,6 +428,8 @@ func (e event) opencode() []map[string]any {
 func (e event) blocks() (evs []map[string]any) {
 	for _, b := range e.Message.Content {
 		switch b.Type {
+		case "text":
+			evs = append(evs, map[string]any{"says": b.Text})
 		case "thinking":
 			evs = append(evs, map[string]any{"thinking": b.Thinking})
 		case "tool_use":
