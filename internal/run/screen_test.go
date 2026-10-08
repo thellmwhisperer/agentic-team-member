@@ -101,3 +101,65 @@ func TestRunTellsAWatchingScreenWhatItsAgentAndChecksDo(t *testing.T) {
 		})
 	}
 }
+
+// Only the agent's own words are what it says: not a skill's text or a tool result, which the conversation gives
+// the user, nor its report, the JSON object ending its final message, while its prose before the report still is.
+func TestTheAgentSaysOnlyItsOwnWords(t *testing.T) {
+	q := func(s string) string { b, _ := json.Marshal(s); return string(b) }
+	says := map[string]func(string) string{ // a line where the agent says text
+		"claude": func(s string) string {
+			return `{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":` + q(s) + `}]}}`
+		},
+		"codex": func(s string) string {
+			return `{"type":"item.completed","item":{"id":"m","type":"agent_message","text":` + q(s) + `}}`
+		},
+		"opencode": func(s string) string { return `{"type":"text","part":{"text":` + q(s) + `}}` },
+		"pi": func(s string) string {
+			return `{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":` + q(s) + `}]}}`
+		},
+	}
+	report := `{"test_file": "a_test.go", "summary": "done"}`
+	skill := `"content":[{"type":"text","text":"Base directory for this skill: /x"}]}}`
+	streams := map[string][]string{
+		"claude": {`{"type":"user","message":{"role":"user",` + skill,
+			says["claude"]("I'll run the tests."),
+			`{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Bash",` +
+				`"input":{"command":"go test ./..."}}]}}`,
+			`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]}}`,
+			says["claude"](report), `{"type":"result","result":` + q(report) + `}`},
+		"codex": {says["codex"]("I'll run the tests."),
+			`{"type":"item.completed","item":{"id":"t1","type":"command_execution","command":"go test ./...","exit_code":0}}`,
+			says["codex"](report)},
+		"opencode": {says["opencode"]("I'll run the tests."),
+			`{"type":"tool_use","part":{"callID":"t1","tool":"bash","state":{"status":"completed",` +
+				`"input":{"command":"go test ./..."}}}}`,
+			says["opencode"](report)},
+		"pi": {`{"type":"message_end","message":{"role":"user",` + skill,
+			says["pi"]("I'll run the tests."),
+			`{"type":"tool_execution_start","toolCallId":"t1","toolName":"bash","args":{"command":"go test ./..."}}`,
+			`{"type":"tool_execution_end","toolCallId":"t1","toolName":"bash","result":{"isError":false}}`,
+			`{"type":"message_end","message":{"role":"toolResult","content":[{"type":"text","text":"ok"}]}}`,
+			says["pi"](report)},
+	}
+	for harness, lines := range streams {
+		t.Run(harness, func(t *testing.T) {
+			var said []any
+			s := stream{live: func(ev map[string]any) {
+				if ev["says"] != nil {
+					said = append(said, ev["says"])
+				}
+			}}
+			for _, line := range lines {
+				s.see(harness, []byte(line))
+			}
+			if !reflect.DeepEqual(said, []any{"I'll run the tests."}) {
+				t.Fatalf("the agent says %q, want only %q", said, "I'll run the tests.")
+			}
+			said = nil
+			s.see(harness, []byte(says[harness]("All green.\n"+report)))
+			if !reflect.DeepEqual(said, []any{"All green."}) {
+				t.Fatalf("the agent's final message says %q, want %q", said, "All green.")
+			}
+		})
+	}
+}
