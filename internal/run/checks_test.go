@@ -415,6 +415,28 @@ func assertAuditCase(t *testing.T, c struct {
 	}
 }
 
+func runAuditCase(t *testing.T, atm, gocache string, c struct {
+	name, mode, work, ponytail, report, atm, why, node, delivered string
+	base                                                          map[string]string
+}) {
+	t.Helper()
+	t.Setenv("GOCACHE", gocache) // repo moves HOME, and the cache with it
+	got := filepath.Join(t.TempDir(), "delivered")
+	t.Setenv("ATM_TEST_OUT", got)
+	root := repo(t, "https://example.com/owner/repo.git", atmSet(cmp.Or(c.atm, atmYAML), "delivery",
+		`{ git rev-parse HEAD; git log --format="%s|%an <%ae>|%cn <%ce>"; `+
+			`git ls-files -co -x .tmp; cat *.txt; } > "$ATM_TEST_OUT"`))
+	commitFiles(t, root, atm, c.base)
+	t.Setenv("FAKE_AGENT", c.mode)
+	t.Setenv("FAKE_AGENT_WORK", c.work)
+	t.Setenv("FAKE_PONYTAIL_WORK", c.ponytail)
+	t.Setenv("FAKE_PONYTAIL_REPORT", c.report)
+	var out bytes.Buffer
+	err := Run("t", []string{issueFile(t, followUpIssue)}, &out, io.Discard)
+	node, head := runResult(t, root)
+	assertAuditCase(t, c, &out, err, node, head, got)
+}
+
 func TestRunGivesTheAuditsAdversarialAgentsNoPass(t *testing.T) {
 	atm, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
@@ -425,23 +447,6 @@ func TestRunGivesTheAuditsAdversarialAgentsNoPass(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, c := range auditCases {
-		t.Run(c.name, func(t *testing.T) {
-			t.Setenv("GOCACHE", strings.TrimSpace(string(gocache))) // repo moves HOME, and the cache with it
-			got := filepath.Join(t.TempDir(), "delivered")
-			t.Setenv("ATM_TEST_OUT", got)
-			root := repo(t, "https://example.com/owner/repo.git", atmSet(cmp.Or(c.atm, atmYAML), "delivery",
-				`{ git rev-parse HEAD; git log --format="%s|%an <%ae>|%cn <%ce>"; `+
-					`git ls-files -co -x .tmp; cat *.txt; } `+
-					`> "$ATM_TEST_OUT"`))
-			commitFiles(t, root, atm, c.base)
-			t.Setenv("FAKE_AGENT", c.mode)
-			t.Setenv("FAKE_AGENT_WORK", c.work)
-			t.Setenv("FAKE_PONYTAIL_WORK", c.ponytail)
-			t.Setenv("FAKE_PONYTAIL_REPORT", c.report)
-			var out bytes.Buffer
-			err := Run("t", []string{issueFile(t, followUpIssue)}, &out, io.Discard)
-			node, head := runResult(t, root)
-			assertAuditCase(t, c, &out, err, node, head, got)
-		})
+		t.Run(c.name, func(t *testing.T) { runAuditCase(t, atm, strings.TrimSpace(string(gocache)), c) })
 	}
 }
