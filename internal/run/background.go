@@ -518,13 +518,12 @@ func (s *server) save() {
 // Start checks args, atm run's command line, and has the background process of the repository at root run it.
 // It returns the run, just started.
 func Start(root string, args []string) (Outcome, error) {
-	fs, _, _, err := parseArgs(args)
+	args, _, _, err := parseArgs(args)
 	if err != nil {
 		return Outcome{}, err
 	}
-	args = append([]string(nil), args...)
-	if _, err := strconv.Atoi(fs.Arg(0)); err != nil { // a file, which the background process reads from root
-		if args[len(args)-1], err = filepath.Abs(fs.Arg(0)); err != nil {
+	if _, err := strconv.Atoi(args[len(args)-1]); err != nil { // a file, which the background process reads from root
+		if args[len(args)-1], err = filepath.Abs(args[len(args)-1]); err != nil {
 			return Outcome{}, err
 		}
 	}

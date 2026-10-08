@@ -29,12 +29,12 @@ var githubURL = regexp.MustCompile(`^(?:[a-z][a-z0-9+.-]*://)?(?:[^/@]+@)?github
 const Usage = "usage: atm run [--base-ref r] [--harness h] [--model m] [--effort e] [--harness-arg a]... " +
 	"[--env KEY=VALUE]... <issue.md | issue number>"
 
-// Run is atm run with args, its flags and then the issue: a file, or an issue number of origin's repository.
+// Run is atm run with args, its flags and the issue: a file, or an issue number of origin's repository.
 // Its report, briefs and logs go to .atm/runs/<label>/ (runDir): each node's start and end go to out, one JSON
 // object a line, and to report.json there; the summary goes to summary. ExitCode turns its error into atm's
 // exit code.
 func Run(label string, args []string, out, summary io.Writer) (err error) {
-	fs, base, a, err := parseArgs(args)
+	args, base, a, err := parseArgs(args)
 	if err != nil {
 		return err
 	}
@@ -57,7 +57,7 @@ func Run(label string, args []string, out, summary io.Writer) (err error) {
 	defer func() { err = r.finish(err, summary) }()
 	var i Issue
 	r.step("issue", func() (map[string]any, error) {
-		i, err = readIssue(fs.Arg(0), repo)
+		i, err = readIssue(args[len(args)-1], repo)
 		r.Type = i.Type
 		ev := map[string]any{"title": i.Title, "type": i.Type}
 		if i.Number != 0 {
@@ -87,16 +87,25 @@ func Run(label string, args []string, out, summary io.Writer) (err error) {
 	return r.err
 }
 
-// parseArgs is atm run's command line: its flags, then the issue.
-func parseArgs(args []string) (fs *flag.FlagSet, base *string, a *agent, err error) {
-	fs = flag.NewFlagSet("atm run", flag.ContinueOnError)
+// parseArgs is atm run's command line: its flags and the issue, in any order. It returns them as flags, then the
+// issue, last.
+func parseArgs(args []string) (ordered []string, base *string, a *agent, err error) {
+	fs := flag.NewFlagSet("atm run", flag.ContinueOnError)
 	base = fs.String("base-ref", "main", "the ref the run starts from, resolved in the repository")
 	a = &agent{}
 	a.flags(fs)
-	if err = fs.Parse(args); err == nil && fs.NArg() != 1 {
+	// flag stops at the first argument that is not one: the issue, after which the flags go on.
+	for err = fs.Parse(args); err == nil && fs.NArg() > 0; err = fs.Parse(fs.Args()[1:]) {
+		if ordered != nil {
+			return nil, nil, nil, errors.New(Usage)
+		}
+		i := len(args) - fs.NArg()
+		ordered = append(append(args[:i:i], args[i+1:]...), args[i])
+	}
+	if err == nil && ordered == nil {
 		err = errors.New(Usage)
 	}
-	return fs, base, a, err
+	return ordered, base, a, err
 }
 
 // proof is how a unit was proven: on its base commit, with its test's content and task type.
