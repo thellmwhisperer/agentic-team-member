@@ -184,8 +184,10 @@ On a terminal the screen is the ATM box, a row per step with its icon (`○`
 pending, a spinner running, `⏸` waiting, `✓` passed, `✗` failed, `–` skipped), duration and
 note, and beside it, from 100 columns, the Agent box while an agent works,
 the Findings box with a failure or the slop detector's cuts, and the Log box.
-On Unix, while the delivery command runs, ATM gives it the attached terminal,
-so no-mistakes shows its own screen on Unix; ATM's comes back when it ends.
+On Unix, ATM keeps its screen live while the delivery command is silent. From
+the command's first output until it ends, ATM gives it the attached terminal
+and its keys, so no-mistakes shows its own screen there; ATM's screen comes
+back when the command ends.
 On Windows, the delivery command runs without ATM's attached terminal, so its
 output appears as lines.
 
