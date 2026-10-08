@@ -389,6 +389,32 @@ func runResult(t *testing.T, root string) (string, string) {
 	return r.FailedNode, r.HeadSHA
 }
 
+func assertAuditCase(t *testing.T, c struct {
+	name, mode, work, ponytail, report, atm, why, node, delivered string
+	base                                                          map[string]string
+}, out *bytes.Buffer, err error, failedNode, head, got string) {
+	t.Helper()
+	switch {
+	case failedNode != c.node:
+		t.Fatalf("want the failed node %q, got %q: %v", c.node, failedNode, err)
+	case c.node != "" && (err == nil || !strings.Contains(err.Error(), c.why)):
+		t.Fatalf("want an error naming %q, got %v", c.why, err)
+	case c.node == "" && err != nil:
+		t.Fatalf("want a pass, got %v", err)
+	}
+	if p := ends(t, out, "ponytail"); c.node == "" && c.why != "" &&
+		(p[0]["kept"] != false || !strings.Contains(fmt.Sprint(p[0]["reason"]), c.why)) {
+		t.Fatalf("want the cut rejected for %q, got %v", c.why, p)
+	}
+	want := c.delivered
+	if c.node == "" {
+		want = head + "\n" + want
+	}
+	if d, _ := os.ReadFile(got); string(d) != want {
+		t.Fatalf("delivery got\n%s\nwant\n%s", d, want)
+	}
+}
+
 func TestRunGivesTheAuditsAdversarialAgentsNoPass(t *testing.T) {
 	atm, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
@@ -415,25 +441,7 @@ func TestRunGivesTheAuditsAdversarialAgentsNoPass(t *testing.T) {
 			var out bytes.Buffer
 			err := Run("t", []string{issueFile(t, followUpIssue)}, &out, io.Discard)
 			node, head := runResult(t, root)
-			switch {
-			case node != c.node:
-				t.Fatalf("want the failed node %q, got %q: %v", c.node, node, err)
-			case c.node != "" && (err == nil || !strings.Contains(err.Error(), c.why)):
-				t.Fatalf("want an error naming %q, got %v", c.why, err)
-			case c.node == "" && err != nil:
-				t.Fatalf("want a pass, got %v", err)
-			}
-			if p := ends(t, &out, "ponytail"); c.node == "" && c.why != "" &&
-				(p[0]["kept"] != false || !strings.Contains(fmt.Sprint(p[0]["reason"]), c.why)) {
-				t.Fatalf("want the cut rejected for %q, got %v", c.why, p)
-			}
-			want := c.delivered
-			if c.node == "" {
-				want = head + "\n" + want
-			}
-			if d, _ := os.ReadFile(got); string(d) != want {
-				t.Fatalf("delivery got\n%s\nwant\n%s", d, want)
-			}
+			assertAuditCase(t, c, &out, err, node, head, got)
 		})
 	}
 }
