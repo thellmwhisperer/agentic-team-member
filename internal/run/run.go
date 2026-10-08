@@ -155,7 +155,9 @@ func (a agent) units(r *verdict, root, dir, sha, text string, i Issue, c config.
 		})
 		red, _ := ev["red"].(try)
 		green, _ := ev["green"].(try)
-		r.Units = append(r.Units, unitResult{n, head, test, unit.Type, red, green, outcome(r.err)})
+		proofSpan, _ := ev["proof_span"].(span)
+		r.Units = append(r.Units, unitResult{Unit: n, Base: head, TestFile: test, Type: unit.Type,
+			Red: red, Green: green, Result: outcome(r.err), span: proofSpan})
 		if r.err != nil || len(in) == 0 {
 			return proofs, unit, pending
 		}

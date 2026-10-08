@@ -40,7 +40,7 @@ type node struct {
 // span is when a node, trial or command started, in UTC to the millisecond, and how long it took: "" and 0 when
 // it never ran.
 type span struct {
-	StartedAt  string `json:"started_at"`
+	StartedAt  string `json:"started_at,omitempty"`
 	DurationMS int64  `json:"duration_ms"`
 }
 
@@ -60,6 +60,7 @@ type unitResult struct {
 	Red      try    `json:"red,omitzero"`
 	Green    try    `json:"green,omitzero"`
 	Result   string `json:"result"`
+	span
 }
 
 type cmdResult struct {
@@ -96,10 +97,13 @@ func (r *verdict) step(name string, fn func() (map[string]any, error)) {
 	}
 	n := r.node(name)
 	n.Result, r.at = "running", name
+	start := time.Now()
+	n.StartedAt = start.UTC().Format("2006-01-02T15:04:05.000Z07:00")
 	r.emit(name, map[string]any{"state": "started"})
 	var ev map[string]any
 	var err error
-	n.span = timed(func() { ev, err = fn() })
+	ev, err = fn()
+	n.DurationMS = time.Since(start).Milliseconds()
 	if ev == nil {
 		ev = map[string]any{}
 	}
