@@ -168,11 +168,11 @@ it is on disk before delivery reads it.
 | Field | Holds |
 |-------|-------|
 | `failed_node`, `reason` | The step that failed and why |
-| `nodes` | Each step's `result` (`passed`, `failed`, `running`, `skipped` or `not run`) and `duration_ms` |
+| `nodes` | Each step's `result` (`passed`, `failed`, `running`, `skipped` or `not run`), `started_at` (UTC, RFC 3339 with milliseconds) when it starts, and `duration_ms` when it ends |
 | `type` | The task type |
-| `units` | Each unit's number, base commit, test file, type, result, and its red and green trials: command, exit code and last 60 lines |
-| `reproofs` | The same proofs, run again after a kept cut |
-| `commands` | Every configured command that ran, the clone's `install` included, with its result and last 60 lines |
+| `units` | Each unit's number, base commit, test file, type, result, red/green proof row span, and red and green trials: command, exit code, last 60 lines, `started_at` and `duration_ms` |
+| `reproofs` | The same proof rows and spans, run again after a kept cut |
+| `commands` | Every configured command that ran, the clone's `install` included, with its result, last 60 lines, `started_at` and `duration_ms` |
 | `head_sha` | The delivered branch's final commit |
 
 ## The screen
