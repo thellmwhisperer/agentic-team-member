@@ -242,8 +242,11 @@ func (s *stream) read(cmd *exec.Cmd, log io.Writer, harness string) error {
 			err = cmd.Wait()
 		}
 	}
-	if errors.Is(err, exec.ErrWaitDelay) { // exited 0, but left something holding its output: kill what it left
+	// Exited but failed, or left something holding its output: kill what it left, whatever its exit.
+	if err != nil && cmd.ProcessState != nil {
 		_ = cmd.Cancel() // its group may be empty already, which is no failure
+	}
+	if errors.Is(err, exec.ErrWaitDelay) { // exited 0, and only left something holding its output
 		err = nil
 	}
 	_ = pw.Close()
