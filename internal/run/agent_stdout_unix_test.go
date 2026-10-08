@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -22,17 +23,20 @@ func init() {
 }
 
 func TestRunKillsAChildHoldingTheAgentsStdout(t *testing.T) {
-	for _, tc := range []struct{ name, env string }{
+	for _, tc := range []struct{ name, env, mode, why string }{
 		{name: "in the agent's group"},
 		// The agent's group is empty once it exits: killing it finds nothing, which is no failure.
 		{name: "in its own session", env: "FAKE_AGENT_SETSID=1 "},
+		// What it left is killed whatever its exit, and its exit still fails the node.
+		{name: "agent exits non-zero", mode: "fail", why: "exit status 3"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			defer func(d time.Duration) { agentTimeout = d }(agentTimeout)
 			agentTimeout = 10 * time.Second // bounds the run
 			repo(t, "https://example.com/owner/repo.git", atmYAML)
 			// Each claude call starts a grandchild that inherits its stdout and never ends, its pid in
-			// pids/<call's pid>, then plays the default fake agent, which exits 0 with a valid report.
+			// pids/<call's pid>, then plays the fake agent in tc.mode, by default one that exits 0 with a valid
+			// report.
 			pids, bin := t.TempDir(), t.TempDir()
 			script := "#!/bin/sh\n" + tc.env + "FAKE_AGENT=grandchild FAKE_AGENT_PID=" + pids + "/$$ " +
 				filepath.Join(fakes, "claude") + " &\nexec " + filepath.Join(fakes, "claude") + ` "$@"` + "\n"
@@ -40,6 +44,7 @@ func TestRunKillsAChildHoldingTheAgentsStdout(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+			t.Setenv("FAKE_AGENT", tc.mode)
 			grandchildren := func() (got []int) {
 				files, _ := filepath.Glob(filepath.Join(pids, "*"))
 				for _, f := range files {
@@ -56,10 +61,14 @@ func TestRunKillsAChildHoldingTheAgentsStdout(t *testing.T) {
 				}
 			})
 			var out bytes.Buffer
-			if err := Run("t", []string{issueFile(t, issue)}, &out, io.Discard); err != nil {
+			err := Run("t", []string{issueFile(t, issue)}, &out, io.Discard)
+			if tc.why == "" && err != nil {
 				t.Fatalf("the run failed: %v", err)
 			}
-			if end, _, _ := agentStep(t, &out); end["state"] != "passed" {
+			if tc.why != "" && (err == nil || !strings.Contains(err.Error(), tc.why)) {
+				t.Fatalf("want an error naming %q, got %v", tc.why, err)
+			}
+			if end, _, _ := agentStep(t, &out); end["state"] != map[bool]string{true: "passed", false: "failed"}[tc.why == ""] {
 				t.Fatalf("end event: %v", end)
 			}
 			until(t, "a grandchild wrote its pid", func() bool { return len(grandchildren()) > 0 })
