@@ -1,0 +1,18 @@
+schema: 1
+id: T-PONYTAIL-20261008-130456-1
+status: accepted
+category: alien_code
+title: "Cut the new `says` branch in agentBox, which copied the thinking branch line for line. One branch now takes cmp.Or(a.says, a.thinking) and picks the `✎` plain prefix or the `∴` dim prefix with the repo's map[bool]string idiom."
+created_at: 2026-10-08
+incident:
+  pattern: "Cut the new `says` branch in agentBox, which copied the thinking branch line for line. One branch now takes cmp.Or(a.says, a.thinking) and picks the `✎` plain prefix or the `∴` dim prefix with the repo's map[bool]string idiom."
+  what_went_wrong: "An ATM run wrote it and ATM's ponytail pass cut it before delivery."
+  root_cause: "The coding agent wrote more than the issue needed."
+  rule_established: "Cut by the ponytail pass; it does not come back."
+  evidence:
+    - family: speculative_feature
+      example: "Cut the new `says` branch in agentBox, which copied the thinking branch line for line. One branch now takes cmp.Or(a.says, a.thinking) and picks the `✎` plain prefix or the `∴` dim prefix with the repo's map[bool]string idiom."
+      artifact: "internal/tui/view.go"
+match:
+  family: speculative_feature
+  artifact: "internal/tui/view.go"

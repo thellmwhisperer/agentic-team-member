@@ -214,14 +214,9 @@ func (m *Model) agentRuns() bool {
 func (m *Model) agentBox(width, lines int) string {
 	var out []string
 	for _, a := range m.agent {
-		if a.says != "" {
-			first, _, _ := strings.Cut(strings.TrimSpace(a.says), "\n")
-			out = append(out, "✎ "+first)
-			continue
-		}
-		if a.thinking != "" {
-			first, _, _ := strings.Cut(strings.TrimSpace(a.thinking), "\n")
-			out = append(out, paint(dim, "∴ "+first))
+		if text := cmp.Or(a.says, a.thinking); text != "" {
+			first, _, _ := strings.Cut(strings.TrimSpace(text), "\n")
+			out = append(out, map[bool]string{true: "✎ " + first, false: paint(dim, "∴ "+first)}[a.says != ""])
 			continue
 		}
 		state := cmp.Or(a.result, "running")
