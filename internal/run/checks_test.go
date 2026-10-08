@@ -410,7 +410,8 @@ func assertAuditCase(t *testing.T, c struct {
 	if c.node == "" {
 		want = head + "\n" + want
 	}
-	if d, _ := os.ReadFile(got); string(d) != want {
+	// Git checkouts use CRLF on Windows, but delivery asserts file contents rather than line endings.
+	if d, _ := os.ReadFile(got); strings.ReplaceAll(string(d), "\r\n", "\n") != want {
 		t.Fatalf("delivery got\n%s\nwant\n%s", d, want)
 	}
 }
