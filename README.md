@@ -5,11 +5,6 @@
 ![Status: alpha](https://img.shields.io/badge/status-alpha-orange)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/pipeline-dark.svg">
-  <img alt="ATM pipeline: issue, isolated clone, contract, coding agent, checks. FAIL stops the run. PASS goes to the slop detector, a code quality gate where a model may only cut, then to the delivery and code review gate. The documented example of that gate is no-mistakes, a graph of its own where review and document are models, test and PR are code with a model part, and rebase, lint and CI call a model only after a fix answer. A passed unit with a proven follow-up goes back to the agent, at most three units." src="docs/assets/pipeline-light.svg" width="1000">
-</picture>
-
 Give ATM an issue, from GitHub or a text file. It hands the issue to a coding
 agent you already pay for (Claude Code, Codex, OpenCode or pi) inside an
 isolated clone, with a written contract. Then code, not the agent, decides:
@@ -17,6 +12,11 @@ does the new test fail without the fix and pass with it, do the configured
 checks still pass, and does the task type's proof hold. A green run gets one
 more agent call, the slop detector, that may only cut. Then the delivery and
 code review gate takes the branch.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/pipeline-dark.svg">
+  <img alt="ATM pipeline: issue, isolated clone, contract, coding agent, checks. FAIL stops the run. PASS goes to the slop detector, a code quality gate where a model may only cut, then to the delivery and code review gate. The documented example of that gate is no-mistakes, a graph of its own where review and document are models, test and PR are code with a model part, and rebase, lint and CI call a model only after a fix answer. A passed unit with a proven follow-up goes back to the agent, at most three units." src="docs/assets/pipeline-light.svg" width="1000">
+</picture>
 
 ## A real run
 
@@ -29,36 +29,6 @@ delivery through no-mistakes opened
 CI green on ubuntu, macOS and Windows, merged, issue closed. It was the second
 run of the issue: the first, 218-29, failed at checks because the agent
 shortened an existing test file.
-
-The final screen in a terminal, as it is:
-
-```text
-╭─ ATM ──────────────────────────────────────╮  ╭─ Findings - W 1 ───────────────────────────────────────────────────────────────────────╮
-│ #218 Go port: report.json keeps … ✓ passed │  │   W internal/run/run.go · speculative_hardening                                        │
-│                                            │  │     In units, removed the `unitResult` that was built in three places (`Unit` before   │
-│ ✓ Issue  0.3 s                fix · passed │  │     the checks step, `Red`/`Green` set inside the step, the other fields after it).    │
-│ │                                          │  │     `ev` now lives outside the step, red and green are read from it afterwards, and    │
-│ ✓ Clone  1.0 s           c0a1d53d · passed │  │     one `unitResult{...}` literal is appended. The diff is 2 lines shorter.            │
-│ │                                          │  ╰────────────────────────────────────────────────────────────────────────────────────────╯
-│ ✓ Contract  0.0 s                   passed │
-│ │                                          │
-│ ✓ Agent · …  11 min 16 s 30 tools · passed │
-│ │                                          │
-│ ✓ Checks  8 min 20 s                passed │
-│   ✓ red/green  5 min 23 s           passed │
-│   ✓ test  2 min 55 s                passed │
-│   ✓ typecheck  0.2 s                passed │
-│   ✓ lint  1.6 s                     passed │
-│ │                                          │
-│ ✓ Slop detec…  11 min 35 s 1 cuts · passed │
-│   ✓ red/green  5 min 09 s           passed │
-│   ✓ test  2 min 52 s                passed │
-│   ✓ typecheck  0.1 s                passed │
-│   ✓ lint  1.6 s                     passed │
-│ │                                          │
-│ ✓   22 min 59… atm/go-port-repor… · passed │
-╰────────────────────────────────────────────╯
-```
 
 The same run outside a terminal, `atm attach 218-32` piped. Between
 `delivery started` and `delivery passed` sits delivery's own no-mistakes
@@ -93,8 +63,8 @@ report  .atm/runs/218-32/report.json
 ```
 
 The red/green rows are the verdict: ATM sets the fix aside, runs the agent's
-test, brings the fix back and runs it again. The slop detector's cut is in the
-Findings box; after it, every check ran again before the cut was kept.
+test, brings the fix back and runs it again. The slop detector kept one cut,
+and every check ran again before it was kept.
 
 ## Who decides what
 
