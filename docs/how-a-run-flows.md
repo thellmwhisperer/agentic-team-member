@@ -7,7 +7,7 @@ the slop detector cuts it. What you set before a run is in
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/red-green-dark.svg">
-  <img alt="Red/green proof for fix and hotfix tasks. ATM sets aside changes to files already in the base, while keeping the test and newly added files: the test must fail. ATM brings the changes back: the same test must pass. A test that passes without the fix, or fails with it, fails the run. The agent's own claim is not asked." src="assets/red-green-light.svg" width="900">
+  <img alt="For fix and hotfix tasks, ATM sets aside changes to files already in the base while keeping the test and new files: the test must fail. ATM restores the changes and runs the test again: it must pass. A test that passes without the fix or fails with it fails the run." src="assets/red-green-light.svg" width="900">
 </picture>
 
 ## The steps
@@ -185,10 +185,10 @@ pending, a spinner running, `⏸` waiting, `✓` passed, `✗` failed, `–` ski
 note, and beside it, from 100 columns, the Agent box while an agent works,
 the Findings box with a failure or the slop detector's cuts, and the Log box.
 On Unix, while the delivery command runs, ATM gives it the attached terminal,
-so no-mistakes shows its own screen; ATM's comes back when it ends. On Windows,
-delivery output appears as lines.
+so no-mistakes shows its own screen on Unix; ATM's comes back when it ends.
+On Windows, the delivery command runs without ATM's attached terminal, so its
+output appears as lines.
 
 Off a terminal, or with `NO_COLOR` or `TERM=dumb`, the screen is plain lines:
 one per step start and end, then the delivery's output and the summary. Every
-duration ATM prints reads like `0.9 s`, `4 min 28 s` or `1 h 02 min`. The
-README shows [both from a real run](../README.md#a-real-run).
+duration ATM prints reads like `0.9 s`, `4 min 28 s` or `1 h 02 min`.

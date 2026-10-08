@@ -30,11 +30,7 @@ CI green on ubuntu, macOS and Windows, merged, issue closed. It was the second
 run of the issue: the first, 218-29, failed at checks because the agent
 shortened an existing test file.
 
-The same run outside a terminal, `atm attach 218-32` piped. Between
-`delivery started` and `delivery passed` sits delivery's own no-mistakes
-screen, left out here: in a terminal it is the pipeline screen (intent,
-rebase, review, test, document, lint, push, PR, CI); outside one it prints as
-terminal redraws.
+The same run outside a terminal, `atm attach 218-32` piped. Its output:
 
 ```text
 issue     started
@@ -62,9 +58,8 @@ RESULT  PASS
 report  .atm/runs/218-32/report.json
 ```
 
-The red/green rows are the verdict: ATM sets the fix aside, runs the agent's
-test, brings the fix back and runs it again. The slop detector kept one cut,
-and every check ran again before it was kept.
+The red/green proof confirmed the fix. The slop detector kept one cut, and
+every check ran again before it was kept.
 
 ## Who decides what
 
