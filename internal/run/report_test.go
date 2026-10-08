@@ -40,6 +40,7 @@ func reportNode(t *testing.T, rep obj, name string) obj {
 
 // nodes is every node of a run, in order.
 var nodes = []string{"issue", "clone", "contract", "agent", "checks", "ponytail", "delivery"}
+var startedAtPattern = regexp.MustCompile(`^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$`)
 
 func TestRunStopsAndReports(t *testing.T) {
 	cases := []struct {
@@ -65,46 +66,71 @@ func TestRunStopsAndReports(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			results := append(append([]string{}, c.results[:5]...),
-				cmp.Or(map[string]string{"passed": "passed"}[c.results[4]], "not run"), c.results[5])
-			root := repo(t, "https://example.com/owner/repo.git", cmp.Or(c.atm, atmYAML))
-			pre := filepath.Join(t.TempDir(), "pre.json")
-			t.Setenv("ATM_TEST_OUT", pre)
-			if c.agent != "" {
-				t.Setenv("FAKE_AGENT", c.agent)
-			}
-			args := c.args
-			if len(args) != 1 {
-				args = append(args, issueFile(t, issue))
-			}
-			var out, summary bytes.Buffer
-			err := Run("t", args, &out, &summary)
-			if code := ExitCode(err); code != c.code || (c.code == 0) != (err == nil) {
-				t.Fatalf("exit %d, %v; want exit %d", code, err, c.code)
-			}
-			rep := readReport(t, filepath.Join(root, ".atm", "runs", "t", "report.json"))
-			if rep["failed_node"] != c.failed || c.failed != "" && rep["reason"] != err.Error() ||
-				!strings.Contains(rep["reason"].(string), c.why) {
-				t.Fatalf("want %s failed naming %q, got %v: %v", c.failed, c.why, rep["failed_node"], rep["reason"])
-			}
-			if c.failed != "issue" && rep["type"] != "fix" {
-				t.Fatalf("want the task type, got %v", rep["type"])
-			}
-			for i, name := range nodes {
-				n := reportNode(t, rep, name)
-				if _, ok := n["duration_ms"].(float64); n["result"] != results[i] || !ok {
-					t.Fatalf("node %s: %v, want %s with its duration_ms", name, n, results[i])
-				}
-				startedAt, ok := n["started_at"].(string)
-				running := results[i] == "passed" || results[i] == "failed"
-				if !running && ok || running && (!ok || !regexp.MustCompile(`^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$`).MatchString(startedAt)) {
-					t.Fatalf("node %s: want started_at only when it ran, with UTC milliseconds, got %v", name, n)
-				}
-			}
-			checkEvents(t, &out, results)
-			checkSummary(t, summary.String(), rep, results)
-			checkCommands(t, c.name, rep, pre)
+			runStopCase(t, c)
 		})
+	}
+}
+
+func runStopCase(t *testing.T, c struct {
+	name, atm, agent, failed, why string
+	args                          []string
+	code                          int
+	results                       []string
+}) {
+	t.Helper()
+	results := append(append([]string{}, c.results[:5]...),
+		cmp.Or(map[string]string{"passed": "passed"}[c.results[4]], "not run"), c.results[5])
+	root := repo(t, "https://example.com/owner/repo.git", cmp.Or(c.atm, atmYAML))
+	pre := filepath.Join(t.TempDir(), "pre.json")
+	t.Setenv("ATM_TEST_OUT", pre)
+	if c.agent != "" {
+		t.Setenv("FAKE_AGENT", c.agent)
+	}
+	args := c.args
+	if len(args) != 1 {
+		args = append(args, issueFile(t, issue))
+	}
+	var out, summary bytes.Buffer
+	err := Run("t", args, &out, &summary)
+	if code := ExitCode(err); code != c.code || (c.code == 0) != (err == nil) {
+		t.Fatalf("exit %d, %v; want exit %d", code, err, c.code)
+	}
+	rep := readReport(t, filepath.Join(root, ".atm", "runs", "t", "report.json"))
+	checkStopReport(t, c, rep, err, results)
+	checkEvents(t, &out, results)
+	checkSummary(t, summary.String(), rep, results)
+	checkCommands(t, c.name, rep, pre)
+}
+
+func checkStopReport(t *testing.T, c struct {
+	name, atm, agent, failed, why string
+	args                          []string
+	code                          int
+	results                       []string
+}, rep obj, err error, results []string) {
+	t.Helper()
+	if rep["failed_node"] != c.failed || c.failed != "" && rep["reason"] != err.Error() ||
+		!strings.Contains(rep["reason"].(string), c.why) {
+		t.Fatalf("want %s failed naming %q, got %v: %v", c.failed, c.why, rep["failed_node"], rep["reason"])
+	}
+	if c.failed != "issue" && rep["type"] != "fix" {
+		t.Fatalf("want the task type, got %v", rep["type"])
+	}
+	for i, name := range nodes {
+		n := reportNode(t, rep, name)
+		checkStopNode(t, n, name, results[i])
+	}
+}
+
+func checkStopNode(t *testing.T, n obj, name, result string) {
+	t.Helper()
+	if _, ok := n["duration_ms"].(float64); n["result"] != result || !ok {
+		t.Fatalf("node %s: %v, want %s with its duration_ms", name, n, result)
+	}
+	startedAt, ok := n["started_at"].(string)
+	running := result == "passed" || result == "failed"
+	if !running && ok || running && (!ok || !startedAtPattern.MatchString(startedAt)) {
+		t.Fatalf("node %s: want started_at only when it ran, with UTC milliseconds, got %v", name, n)
 	}
 }
 
@@ -128,7 +154,7 @@ func TestRunningNodeIsPersistedWithStartedAt(t *testing.T) {
 			}
 		}
 		startedAt, ok := issue["started_at"].(string)
-		if !ok || !regexp.MustCompile(`^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$`).MatchString(startedAt) || issue["result"] != "running" {
+		if !ok || !startedAtPattern.MatchString(startedAt) || issue["result"] != "running" {
 			return nil, fmt.Errorf("running node lacks its start time: %v", issue)
 		}
 		return nil, nil

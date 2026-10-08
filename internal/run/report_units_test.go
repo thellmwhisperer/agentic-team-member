@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"io"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -68,6 +67,12 @@ func chainedCut(t *testing.T, atm string) (string, obj, []obj) {
 
 func TestReportKeepsWhenEveryNodeTrialAndCommandStartedAndTook(t *testing.T) {
 	_, rep, events := chainedCut(t, atmSet(atmSet(atmInstall("true"), "typecheck", "true"), "delivery", "true"))
+	timed := reportTimeline(t, rep)
+	checkTimeline(t, rep, events, timed)
+}
+
+func reportTimeline(t *testing.T, rep obj) []obj {
+	t.Helper()
 	var timed []obj // in the order they ran
 	for _, n := range rep["nodes"].([]any) {
 		timed = append(timed, n.(obj))
@@ -96,21 +101,36 @@ func TestReportKeepsWhenEveryNodeTrialAndCommandStartedAndTook(t *testing.T) {
 	trials("reproofs", 0)
 	trials("reproofs", 1)
 	timed = append(timed, groups[3]...)
-	ms := regexp.MustCompile(`^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$`)
+	return timed
+}
+
+func checkTimeline(t *testing.T, rep obj, events []obj, timed []obj) {
+	t.Helper()
+	checkTimedSpans(t, timed, len(rep["nodes"].([]any)))
+	checkProofScreenSpans(t, rep, events)
+	checkCommandScreenSpans(t, rep, events)
+}
+
+func checkTimedSpans(t *testing.T, timed []obj, nodeCount int) {
+	t.Helper()
 	var last time.Time
 	for i, x := range timed {
 		s, _ := x["started_at"].(string)
 		at, err := time.Parse(time.RFC3339, s)
-		if _, ok := x["duration_ms"].(float64); !ok || err != nil || !ms.MatchString(s) {
+		if _, ok := x["duration_ms"].(float64); !ok || err != nil || !startedAtPattern.MatchString(s) {
 			t.Fatalf("want a started_at in UTC with milliseconds and a duration_ms, got %v", x)
 		}
-		if i >= len(rep["nodes"].([]any)) { // the nodes are listed by name, the rest as they ran
+		if i >= nodeCount { // the nodes are listed by name, the rest as they ran
 			if at.Before(last) {
 				t.Fatalf("want %v to start no earlier than %s", x, last)
 			}
 			last = at
 		}
 	}
+}
+
+func checkProofScreenSpans(t *testing.T, rep obj, events []obj) {
+	t.Helper()
 	var proofRows []obj
 	for _, ev := range events {
 		if ev["check"] == "red/green" && ev["state"] == "passed" {
@@ -128,39 +148,65 @@ func TestReportKeepsWhenEveryNodeTrialAndCommandStartedAndTook(t *testing.T) {
 			}
 		}
 	}
+}
+
+func checkCommandScreenSpans(t *testing.T, rep obj, events []obj) {
+	t.Helper()
+	commands := rep["commands"].([]any)
+	rows := append([]obj{cloneInstallEvent(events)}, configuredCommandEvents(events)...)
+	checkReportedCommandSpans(t, commands[:len(commands)-1], rows)
+	checkDeliverySpan(t, commands[len(commands)-1].(obj), events)
+}
+
+func cloneInstallEvent(events []obj) obj {
+	for _, ev := range events {
+		if ev["step"] == "clone" && ev["check"] == "install" && ev["duration_ms"] != nil && ev["state"] != "started" {
+			return ev
+		}
+	}
+	return nil
+}
+
+func configuredCommandEvents(events []obj) []obj {
 	var commandRows []obj
 	for _, ev := range events {
-		if ev["check"] != nil && ev["check"] != "red/green" && ev["state"] != "started" && ev["step"] != "clone" && ev["step"] != "delivery" {
+		if isConfiguredCommandEvent(ev) {
 			commandRows = append(commandRows, ev)
 		}
 	}
-	var cloneInstall obj
-	for _, ev := range events {
-		if ev["step"] == "clone" && ev["check"] == "install" && ev["duration_ms"] != nil && ev["state"] != "started" {
-			cloneInstall = ev
-		}
-	}
-	commands := rep["commands"].([]any)
-	rows := append([]obj{cloneInstall}, commandRows...)
-	if len(rows)+1 != len(commands) {
+	return commandRows
+}
+
+func checkReportedCommandSpans(t *testing.T, commands []any, rows []obj) {
+	t.Helper()
+	if len(rows) != len(commands) {
 		t.Fatalf("want screen rows for all non-delivery commands, got %d rows for %d commands", len(rows), len(commands))
 	}
-	for i, c := range commands[:len(commands)-1] {
+	for i, c := range commands {
 		command, row := c.(obj), rows[i]
 		if command["name"] != row["check"] || command["duration_ms"] != row["duration_ms"] {
 			t.Fatalf("command report differs from its screen row: %v vs %v", command, row)
 		}
 	}
+}
+
+func checkDeliverySpan(t *testing.T, last obj, events []obj) {
+	t.Helper()
 	var deliveryEvent obj
 	for _, ev := range events {
 		if ev["step"] == "delivery" && ev["state"] != "started" && ev["duration_ms"] != nil {
 			deliveryEvent = ev
 		}
 	}
-	if last := commands[len(commands)-1].(obj); last["name"] != "delivery" ||
+	if last["name"] != "delivery" ||
 		last["duration_ms"] != deliveryEvent["commands"].([]any)[0].(obj)["duration_ms"] {
 		t.Fatalf("delivery report differs from its screen row: %v vs %v", last, deliveryEvent)
 	}
+}
+
+func isConfiguredCommandEvent(ev obj) bool {
+	return ev["check"] != nil && ev["check"] != "red/green" && ev["state"] != "started" &&
+		ev["step"] != "clone" && ev["step"] != "delivery"
 }
 
 func TestReportKeepsEveryUnitTheReproofsAndTheInstall(t *testing.T) {
