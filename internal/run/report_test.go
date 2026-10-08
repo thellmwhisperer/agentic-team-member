@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"cmp"
 	"encoding/json"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -93,11 +95,46 @@ func TestRunStopsAndReports(t *testing.T) {
 				if _, ok := n["duration_ms"].(float64); n["result"] != results[i] || !ok {
 					t.Fatalf("node %s: %v, want %s with its duration_ms", name, n, results[i])
 				}
+				startedAt, ok := n["started_at"].(string)
+				running := results[i] == "passed" || results[i] == "failed"
+				if !running && ok || running && (!ok || !regexp.MustCompile(`^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$`).MatchString(startedAt)) {
+					t.Fatalf("node %s: want started_at only when it ran, with UTC milliseconds, got %v", name, n)
+				}
 			}
 			checkEvents(t, &out, results)
 			checkSummary(t, summary.String(), rep, results)
 			checkCommands(t, c.name, rep, pre)
 		})
+	}
+}
+
+func TestRunningNodeIsPersistedWithStartedAt(t *testing.T) {
+	dir := t.TempDir()
+	r := newVerdict(dir, io.Discard)
+	r.step("issue", func() (map[string]any, error) {
+		b, err := os.ReadFile(r.path)
+		if err != nil {
+			return nil, err
+		}
+		var rep obj
+		if err := json.Unmarshal(b, &rep); err != nil {
+			return nil, err
+		}
+		var issue obj
+		for _, n := range rep["nodes"].([]any) {
+			if n := n.(obj); n["name"] == "issue" {
+				issue = n
+				break
+			}
+		}
+		startedAt, ok := issue["started_at"].(string)
+		if !ok || !regexp.MustCompile(`^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$`).MatchString(startedAt) || issue["result"] != "running" {
+			return nil, fmt.Errorf("running node lacks its start time: %v", issue)
+		}
+		return nil, nil
+	})
+	if r.node("issue").Result != "passed" {
+		t.Fatalf("want issue node to complete after its running report, got %s", r.node("issue").Result)
 	}
 }
 
