@@ -202,7 +202,6 @@ type stream struct {
 	used         bool
 	live         func(map[string]any)
 	pending      string
-	hasPending   bool
 }
 
 // read runs cmd and writes each line of its stdout and stderr to log, as it is when JSON, else as a JSON
@@ -298,20 +297,24 @@ func (s *stream) see(harness string, line []byte) {
 	if ends {
 		s.final = final
 	}
-	if s.hasPending {
-		s.flush(harness == "claude" && e.Type == "result" && ends && final == s.pending)
+	if s.pending != "" {
+		s.flush(harness == "claude" && e.Type == "result" && ends)
 	}
 	s.loads = append(s.loads, e.skillLoads(harness, s.skill)...)
 	for _, ev := range e.activity(harness) {
 		id, _ := ev["id"].(string)
 		s.used = s.used || ev["result"] == "passed" && slices.Contains(s.loads, id)
 		if says, ok := ev["says"].(string); ok {
-			if s.hasPending {
+			if s.pending != "" {
 				s.flush(false)
 			}
-			s.pending, s.hasPending = says, true
+			if _, at := lastObject(says); at < 0 {
+				s.live(ev)
+			} else {
+				s.pending = says
+			}
 		} else {
-			if s.hasPending {
+			if s.pending != "" {
 				s.flush(false)
 			}
 			s.live(ev)
@@ -322,7 +325,7 @@ func (s *stream) see(harness string, line []byte) {
 func (s *stream) finish() { s.flush(true) }
 
 func (s *stream) flush(report bool) {
-	if !s.hasPending {
+	if s.pending == "" {
 		return
 	}
 	text := s.pending
@@ -331,7 +334,7 @@ func (s *stream) flush(report bool) {
 			text = strings.TrimSpace(text[:at])
 		}
 	}
-	s.pending, s.hasPending = "", false
+	s.pending = ""
 	if text != "" {
 		s.live(map[string]any{"says": text})
 	}
