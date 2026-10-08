@@ -20,7 +20,7 @@ import (
 
 var cloneLeases sync.Map
 
-func clone(root, base, install, repo string) (dir, sha string, ran []cmdResult, err error) {
+func clone(root, base, install, repo string, live func(map[string]any)) (dir, sha string, ran []cmdResult, err error) {
 	if sha, err = git(root, "rev-parse", "--verify", base+"^{commit}"); err != nil {
 		return "", "", nil, fmt.Errorf("base ref %q: %w", base, err)
 	}
@@ -42,7 +42,10 @@ func clone(root, base, install, repo string) (dir, sha string, ran []cmdResult, 
 		return dir, sha, nil, err
 	}
 	var tail string
-	s := timed(func() { tail, err = sh(dir, install) })
+	s, err := row(live, "install", func() error {
+		tail, err = sh(dir, install)
+		return err
+	})
 	return dir, sha, []cmdResult{{"install", install, outcome(err), tail, s}}, wrap(err, "install")
 }
 
