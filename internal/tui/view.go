@@ -209,17 +209,23 @@ func (m *Model) agentRuns() bool {
 	return false
 }
 
-// agentBox is the agent's last tool calls, each with its result, and its thinking, in at most lines lines.
+// agentBox is the agent's last tool calls, each with its result and dimmer than what it says, and its
+// thinking, in at most lines lines.
 func (m *Model) agentBox(width, lines int) string {
 	var out []string
 	for _, a := range m.agent {
+		if a.says != "" {
+			first, _, _ := strings.Cut(strings.TrimSpace(a.says), "\n")
+			out = append(out, "✎ "+first)
+			continue
+		}
 		if a.thinking != "" {
 			first, _, _ := strings.Cut(strings.TrimSpace(a.thinking), "\n")
 			out = append(out, paint(dim, "∴ "+first))
 			continue
 		}
 		state := cmp.Or(a.result, "running")
-		out = append(out, m.icon(state)+" "+paint(states[state][1], state)+" "+a.tool+" "+paint(dim, a.detail))
+		out = append(out, m.icon(state)+" "+paint(states[state][1], state)+" "+paint(dim, a.tool+" "+a.detail))
 	}
 	if len(out) == 0 {
 		out = []string{paint(dim, "starting")}
