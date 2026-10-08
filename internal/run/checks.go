@@ -26,14 +26,14 @@ import (
 func checks(clone, sha, typ, test string, c config.Config) (map[string]any, error) {
 	live := liveIn(clone)
 	var red, green try
-	_, err := row(live, proofs[typ], func() error {
+	proofSpan, err := row(live, proofs[typ], func() error {
 		err := moved(clone, sha, "the agent")
 		if err == nil {
 			red, green, err = prove(clone, typ, filepath.ToSlash(test), c)
 		}
 		return err
 	})
-	result := map[string]any{"red": red, "green": green}
+	result := map[string]any{"red": red, "green": green, "proof_span": proofSpan}
 	if err != nil {
 		return result, err
 	}

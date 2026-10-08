@@ -2,6 +2,7 @@ package run
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"path/filepath"
 	"regexp"
@@ -9,6 +10,18 @@ import (
 	"testing"
 	"time"
 )
+
+type capturedRun struct {
+	bytes.Buffer
+	events []obj
+}
+
+func (c *capturedRun) watch(b []byte) {
+	var ev obj
+	if json.Unmarshal(b, &ev) == nil {
+		c.events = append(c.events, ev)
+	}
+}
 
 // checkProof checks rep's proof of unit n, on base, with test and type typ: red, then green, then passed.
 func checkProof(t *testing.T, what string, got any, n int, base, test, typ string) {
@@ -27,7 +40,7 @@ func checkProof(t *testing.T, what string, got any, n int, base, test, typ strin
 }
 
 // chainedCut runs two chained units under .atm.yaml atm, whose cut is kept, and returns root and its report.
-func chainedCut(t *testing.T, atm string) (string, obj) {
+func chainedCut(t *testing.T, atm string) (string, obj, []obj) {
 	t.Helper()
 	root := repo(t, "https://example.com/owner/repo.git", atm)
 	t.Setenv("FAKE_PONYTAIL_REPORT", cut)
@@ -35,24 +48,25 @@ func chainedCut(t *testing.T, atm string) (string, obj) {
 	t.Setenv("FAKE_AGENT_WORK", chainWork)
 	t.Setenv("ATM_TEST_CRITERION", "A retry runs once after a timeout.")
 	t.Setenv("ATM_TEST_EDIT", "ATM_TEST_CRITERION=none") // unit 2's follow-up quotes no criterion: two units
-	var out bytes.Buffer
+	var out capturedRun
 	if err := Run("t", []string{issueFile(t, followUpIssue)}, &out, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if p := ends(t, &out, "ponytail"); len(p) != 1 || p[0]["kept"] != true {
+	if p := ends(t, &out.Buffer, "ponytail"); len(p) != 1 || p[0]["kept"] != true {
 		t.Fatalf("want the cut kept, got %v", p)
 	}
-	return root, readReport(t, filepath.Join(root, ".atm", "runs", "t", "report.json"))
+	return root, readReport(t, filepath.Join(root, ".atm", "runs", "t", "report.json")), out.events
 }
 
 func TestReportKeepsWhenEveryNodeTrialAndCommandStartedAndTook(t *testing.T) {
-	_, rep := chainedCut(t, atmSet(atmInstall("true"), "delivery", "true"))
+	_, rep, events := chainedCut(t, atmSet(atmInstall("true"), "delivery", "true"))
 	var timed []obj // in the order they ran
 	for _, n := range rep["nodes"].([]any) {
 		timed = append(timed, n.(obj))
 	}
 	trials := func(key string, n int) {
 		u := rep[key].([]any)[n].(obj)
+		timed = append(timed, u)
 		timed = append(timed, u["red"].(obj), u["green"].(obj))
 	}
 	var groups [][]obj // the commands of the clone, each unit's checks, the re-run checks and the delivery
@@ -89,10 +103,27 @@ func TestReportKeepsWhenEveryNodeTrialAndCommandStartedAndTook(t *testing.T) {
 			last = at
 		}
 	}
+	var proofRows []obj
+	for _, ev := range events {
+		if ev["check"] == "red/green" && ev["state"] == "passed" {
+			proofRows = append(proofRows, ev)
+		}
+	}
+	if len(proofRows) != 4 {
+		t.Fatalf("want screen events for two unit proofs and two reproofs, got %v", proofRows)
+	}
+	for i, key := range []string{"units", "reproofs"} {
+		for n := 0; n < 2; n++ {
+			row := rep[key].([]any)[n].(obj)
+			if row["duration_ms"] != proofRows[i*2+n]["duration_ms"] {
+				t.Fatalf("%s %d report span differs from screen row: %v vs %v", key, n+1, row, proofRows[i*2+n])
+			}
+		}
+	}
 }
 
 func TestReportKeepsEveryUnitTheReproofsAndTheInstall(t *testing.T) {
-	root, rep := chainedCut(t, atmInstall("true"))
+	root, rep, _ := chainedCut(t, atmInstall("true"))
 	units, _ := rep["units"].([]any)
 	if len(units) != 2 {
 		t.Fatalf("want both units in the report, got %v", rep["units"])

@@ -89,35 +89,43 @@ func (a agent) ponytail(root, clone, sha string, proofs []proof, i Issue, c conf
 // reprove says why the work in clone, on HEAD base, the last unit's, fails a unit's proof again, each unit
 // before the last on its own base, or the last unit's checks, "" when it fails none, each proof it re-ran and
 // the commands of those checks.
-func reprove(clone, base string, proofs []proof, c config.Config) (string, []unitResult, []cmdResult, error) {
-	for n, p := range proofs {
+func reprove(clone, base string, history []proof, c config.Config) (string, []unitResult, []cmdResult, error) {
+	for n, p := range history {
 		content, err := os.ReadFile(filepath.Join(clone, p.test))
 		if err != nil || string(content) != p.testContent {
 			return fmt.Sprintf("unit %d: test %s changed since it was proven", n+1, p.test), nil, nil, nil
 		}
 	}
 	var ran []unitResult
-	for n, p := range proofs[:len(proofs)-1] {
+	for n, p := range history[:len(history)-1] {
 		if _, err := git(clone, "reset", "-q", p.base); err != nil {
 			return "", ran, nil, err
 		}
-		red, green, err := prove(clone, p.typ, filepath.ToSlash(p.test), c)
-		ran = append(ran, unitResult{n + 1, p.base, p.test, p.typ, red, green, outcome(err)})
+		var red, green try
+		var proofErr error
+		proofSpan, proofErr := row(liveIn(clone), proofs[p.typ], func() error {
+			red, green, proofErr = prove(clone, p.typ, filepath.ToSlash(p.test), c)
+			return proofErr
+		})
+		ran = append(ran, unitResult{Unit: n + 1, Base: p.base, TestFile: p.test, Type: p.typ,
+			Red: red, Green: green, Result: outcome(proofErr), span: proofSpan})
 		if e := moved(clone, p.base, "the commands"); e != nil {
 			return "", ran, nil, e
 		}
 		if _, e := git(clone, "reset", "-q", base); e != nil {
 			return "", ran, nil, e
 		}
-		if err != nil {
-			return fmt.Sprintf("unit %d: %v", n+1, err), ran, nil, nil
+		if proofErr != nil {
+			return fmt.Sprintf("unit %d: %v", n+1, proofErr), ran, nil, nil
 		}
 	}
-	last := proofs[len(proofs)-1]
+	last := history[len(history)-1]
 	result, err := checks(clone, base, last.typ, last.test, c)
 	red, _ := result["red"].(try)
 	green, _ := result["green"].(try)
-	ran = append(ran, unitResult{len(proofs), last.base, last.test, last.typ, red, green, outcome(err)})
+	proofSpan, _ := result["proof_span"].(span)
+	ran = append(ran, unitResult{Unit: len(history), Base: last.base, TestFile: last.test, Type: last.typ,
+		Red: red, Green: green, Result: outcome(err), span: proofSpan})
 	cmds, _ := result["commands"].([]cmdResult)
 	if err != nil {
 		return err.Error(), ran, cmds, nil
