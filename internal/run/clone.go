@@ -12,21 +12,22 @@ import (
 )
 
 // clone sweeps root/.atm/clones, then claims a clone there of root at base's commit, detached, with install
-// run in it. It returns the clone even when a later step fails, so the caller can release it.
+// run in it, whose result it returns when it ran. It returns the clone even when a later step fails, so the
+// caller can release it.
 //
 // Next to each clone, <clone>.lock guards cleanup while the run or an inheriting process holds it.
 // <clone>.delivered holds "<branch> <base>": what tells a later run whether the clone is still needed.
 
 var cloneLeases sync.Map
 
-func clone(root, base, install, repo string) (dir, sha string, err error) {
+func clone(root, base, install, repo string) (dir, sha string, ran []cmdResult, err error) {
 	if sha, err = git(root, "rev-parse", "--verify", base+"^{commit}"); err != nil {
-		return "", "", fmt.Errorf("base ref %q: %w", base, err)
+		return "", "", nil, fmt.Errorf("base ref %q: %w", base, err)
 	}
 	clones := filepath.Join(root, ".atm", "clones")
 	sweep(clones, repo)
 	if dir, err = claim(clones, time.Now()); err != nil {
-		return "", sha, err
+		return "", sha, nil, err
 	}
 	for _, args := range [][]string{
 		{"clone", "-q", "--local", "--no-checkout", root, dir},
@@ -34,16 +35,14 @@ func clone(root, base, install, repo string) (dir, sha string, err error) {
 		{"-C", dir, "checkout", "-q", "--detach", sha},
 	} {
 		if _, err = commandFor(dir, "", "git", args...); err != nil {
-			return dir, sha, err
+			return dir, sha, nil, err
 		}
 	}
 	if err = exclude(dir, "/.atm/"); err != nil || install == "" { // ATM's scratch
-		return dir, sha, err
+		return dir, sha, nil, err
 	}
-	if _, err = commandFor(dir, dir, "sh", "-c", install); err != nil {
-		return dir, sha, fmt.Errorf("install: %w", err)
-	}
-	return dir, sha, nil
+	tail, err := sh(dir, install)
+	return dir, sha, []cmdResult{{"install", install, outcome(err), tail}}, wrap(err, "install")
 }
 
 // claim makes a fresh atm-run-<now> directory under root: mkdir either succeeds or the name is taken, so two

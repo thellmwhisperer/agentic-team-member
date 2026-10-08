@@ -15,13 +15,15 @@ import (
 )
 
 // verdict is report.json, written at every node's start and end: why the run stopped, then each node's result,
-// the task type and each command's result.
+// the task type, each unit's proof, the proofs the slop detector re-ran and each command's result.
 type verdict struct {
-	FailedNode string      `json:"failed_node"`
-	Reason     string      `json:"reason"`
-	Nodes      []*node     `json:"nodes"`
-	Type       string      `json:"type"`
-	Commands   []cmdResult `json:"commands"`
+	FailedNode string       `json:"failed_node"`
+	Reason     string       `json:"reason"`
+	Nodes      []*node      `json:"nodes"`
+	Type       string       `json:"type"`
+	Units      []unitResult `json:"units"`
+	Reproofs   []unitResult `json:"reproofs"`
+	Commands   []cmdResult  `json:"commands"`
 	HeadSHA    string      `json:"head_sha,omitempty"` // the delivered branch's
 	path       string
 	out        io.Writer // the log: each node's start and end, one JSON object a line
@@ -33,6 +35,17 @@ type node struct {
 	Name       string `json:"name"`
 	Result     string `json:"result"` // passed, failed, running, skipped or not run
 	DurationMS int64  `json:"duration_ms"`
+}
+
+// unitResult is a unit's proof: the unit, its base commit, test and task type, its trials and how it ended.
+type unitResult struct {
+	Unit     int    `json:"unit"`
+	Base     string `json:"base"`
+	TestFile string `json:"test_file"`
+	Type     string `json:"type"`
+	Red      try    `json:"red,omitzero"`
+	Green    try    `json:"green,omitzero"`
+	Result   string `json:"result"`
 }
 
 type cmdResult struct {
