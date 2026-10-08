@@ -185,6 +185,9 @@ On a terminal the screen is the ATM box, a row per step with its icon (`○`
 pending, a spinner running, `⏸` waiting, `✓` passed, `✗` failed, `–` skipped), duration and
 note, and beside it, from 100 columns, the Agent box while an agent works,
 the Findings box with a failure or the slop detector's cuts, and the Log box.
+The Agent box shows the agent's own messages and thinking, and its tool calls
+with their results. It omits user messages, skill text, tool results and the
+JSON report at the end of the agent's final message.
 On Unix, ATM keeps its screen live while the delivery command is silent. From
 the command's first output until it ends, ATM gives it the attached terminal
 and its keys, so no-mistakes shows its own screen there; ATM's screen comes
