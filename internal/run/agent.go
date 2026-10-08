@@ -147,7 +147,7 @@ func (a agent) run(clone, name, skill, brief string, check func(map[string]any) 
 
 // report is the agent's report, the last JSON object of its final message, which check accepts.
 func report(final string, check func(map[string]any) error) (map[string]any, error) {
-	r := lastObject(final)
+	r, _ := lastObject(final)
 	if r == nil {
 		return nil, errors.New("agent left no report: no JSON object in its final message")
 	}
@@ -359,9 +359,10 @@ func (e event) final(harness string) (string, bool) {
 	return "", false
 }
 
-// lastObject is the last top-level JSON object in text, nil when there is none.
-func lastObject(text string) map[string]any {
+// lastObject is the last top-level JSON object in text and where it starts, nil and -1 when there is none.
+func lastObject(text string) (map[string]any, int) {
 	var last map[string]any
+	at := -1
 	for i := 0; i < len(text); i++ {
 		if text[i] != '{' {
 			continue
@@ -369,10 +370,10 @@ func lastObject(text string) map[string]any {
 		dec := json.NewDecoder(strings.NewReader(text[i:]))
 		var v map[string]any
 		if dec.Decode(&v) == nil {
-			last, i = v, i+int(dec.InputOffset())-1
+			last, at, i = v, i, i+int(dec.InputOffset())-1
 		}
 	}
-	return last
+	return last, at
 }
 
 // activity is what e tells the screen the agent does: what it says, its thinking, and its tool calls, each by
@@ -401,7 +402,7 @@ func (e event) codex() []map[string]any {
 	case e.Item.Type == "reasoning" && e.Type == "item.completed":
 		return []map[string]any{{"thinking": e.Item.Text}}
 	case e.Item.Type == "agent_message" && e.Type == "item.completed":
-		return []map[string]any{{"says": e.Item.Text}}
+		return says(e.Item.Text)
 	case e.Item.Type != "command_execution":
 		return nil
 	case e.Type == "item.started":
@@ -416,7 +417,7 @@ func (e event) opencode() []map[string]any {
 	case "reasoning":
 		return []map[string]any{{"thinking": e.Part.Text}}
 	case "text":
-		return []map[string]any{{"says": e.Part.Text}}
+		return says(e.Part.Text)
 	case "tool_use":
 		r := map[string]string{"completed": "passed", "error": "failed"}[e.Part.State.Status]
 		return []map[string]any{toolCall(e.Part.CallID, e.Part.Tool, detail(e.Part.State.Input), cmp.Or(r, "running"))}
@@ -429,7 +430,9 @@ func (e event) blocks() (evs []map[string]any) {
 	for _, b := range e.Message.Content {
 		switch b.Type {
 		case "text":
-			evs = append(evs, map[string]any{"says": b.Text})
+			if e.Type == "assistant" || e.Message.Role == "assistant" { // not a skill's text or a tool result
+				evs = append(evs, says(b.Text)...)
+			}
 		case "thinking":
 			evs = append(evs, map[string]any{"thinking": b.Thinking})
 		case "tool_use":
@@ -439,6 +442,17 @@ func (e event) blocks() (evs []map[string]any) {
 		}
 	}
 	return evs
+}
+
+// says is the agent saying text, without its report, the JSON object that may end it, if anything is left.
+func says(text string) []map[string]any {
+	if _, at := lastObject(text); at >= 0 {
+		text = text[:at]
+	}
+	if text = strings.TrimSpace(text); text == "" {
+		return nil
+	}
+	return []map[string]any{{"says": text}}
 }
 
 // toolCall is a tool call's live event; a later one with its id and empty fields leaves those as they were.
