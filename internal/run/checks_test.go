@@ -257,8 +257,20 @@ const chainedSource = `if [ -f second_test.sh ]; then echo second >> source.txt;
 // realTools is a worker that, before its fix, does what a real one does inside the clone: runs the
 // repository's own lint, which downloads slopslint under the ignored .tmp/ and runs it, then builds and runs
 // the repository's Go program there.
-const realTools = "sh scripts/lint.sh && go build -o .tmp/m . && .tmp/m && echo fixed > a.txt && " +
-	"echo 'grep -q fixed a.txt && ! grep -q broken a.txt' > a_test.sh"
+func realToolsWork() string {
+	binary := ".tmp/m"
+	tools := "go build -o " + binary + " . && " + binary
+	switch runtime.GOOS {
+	case "darwin", "linux":
+		tools = "sh scripts/lint.sh && " + tools
+	case "windows":
+		binary += ".exe"
+		tools = "mkdir -p .tmp && go build -o " + binary + " . && " + binary
+	default:
+		tools = "mkdir -p .tmp && " + tools
+	}
+	return tools + " && echo fixed > a.txt && echo 'grep -q fixed a.txt && ! grep -q broken a.txt' > a_test.sh"
+}
 
 // auditCases are the adversarial agents of the audit of 7 Oct 2026, and one that behaves. base is the files
 // committed on main, the ATM repository's file when the value is "atm"; why, when not "", names the failure
@@ -297,7 +309,7 @@ var auditCases = []struct {
 		work: chainedSource, report: strings.Replace(cut, "a.txt", "source.txt", 1),
 		ponytail: "printf 'broken\\nsecond\\n' > source.txt", why: "regression_test.sh"},
 	{name: "failed skill load", mode: "skill-error", why: "no proof it used the ponytail skill", node: "agent"},
-	{name: "runs real tools in the clone", work: realTools, delivered: unit1 + based + placed +
+	{name: "runs real tools in the clone", work: realToolsWork(), delivered: unit1 + based + placed +
 		".atm.yaml\n.gitignore\n.slop/ceilings.yml\n.slop/config.yml\n.slop/tombstones/README.md\n" +
 		"a.txt\na_test.sh\ngo.mod\ninternal/probe1/probe.go\ninternal/probe2/probe.go\nmain.go\nscripts/lint.sh\n" +
 		"scripts/slopslint.sh\nfixed\n",
