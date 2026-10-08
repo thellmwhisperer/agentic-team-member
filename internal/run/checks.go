@@ -22,18 +22,20 @@ import (
 // checks is the verdict on the agent's work in clone, at base commit sha, for a task of type typ whose report
 // names test: HEAD has not moved, the type's proof holds, then install, test, typecheck and lint pass, the
 // commands no-mistakes runs, and HEAD has not moved still. Install runs again: the agent may have changed
-// dependencies. Each proof and command is a row of the screen.
+// dependencies. Each proof and command is a row of the screen. Its result holds the proof's red and green trials.
 func checks(clone, sha, typ, test string, c config.Config) (map[string]any, error) {
 	live := liveIn(clone)
+	var red, green try
 	err := row(live, proofs[typ], func() error {
 		err := moved(clone, sha, "the agent")
 		if err == nil {
-			err = prove(clone, typ, filepath.ToSlash(test), c)
+			red, green, err = prove(clone, typ, filepath.ToSlash(test), c)
 		}
 		return err
 	})
+	result := map[string]any{"red": red, "green": green}
 	if err != nil {
-		return nil, err
+		return result, err
 	}
 	var ran []cmdResult
 	for _, cmd := range [][2]string{{"install", c.Install}, {"test", c.Test}, {"typecheck", c.Typecheck},
@@ -47,10 +49,12 @@ func checks(clone, sha, typ, test string, c config.Config) (map[string]any, erro
 			return err
 		})
 		if ran = append(ran, cmdResult{cmd[0], cmd[1], outcome(err), tail}); err != nil {
-			return map[string]any{"commands": ran}, fmt.Errorf("%s: %w", cmd[0], err)
+			result["commands"] = ran
+			return result, fmt.Errorf("%s: %w", cmd[0], err)
 		}
 	}
-	return map[string]any{"commands": ran}, moved(clone, sha, "the commands")
+	result["commands"] = ran
+	return result, moved(clone, sha, "the commands")
 }
 
 // moved is an error when HEAD in clone is not want: who made commits.
@@ -78,10 +82,11 @@ func row(live func(map[string]any), name string, fn func() error) error {
 	return err
 }
 
-// prove runs the proof of task type typ on the agent's work in clone, all of it staged meanwhile.
-func prove(clone, typ, test string, c config.Config) (err error) {
+// prove runs the proof of task type typ on the agent's work in clone, all of it staged meanwhile, and returns its
+// trials: red without the work, green with it, each zero when not run.
+func prove(clone, typ, test string, c config.Config) (red, green try, err error) {
 	if _, err := git(clone, "add", "-A"); err != nil {
-		return err
+		return red, green, err
 	}
 	defer func() {
 		_, e := git(clone, "reset", "-q") // the agent's work back to unstaged
@@ -89,11 +94,11 @@ func prove(clone, typ, test string, c config.Config) (err error) {
 	}()
 	tree, err := keep(clone)
 	if err != nil {
-		return err
+		return red, green, err
 	}
 	changed, aside, err := changes(clone, typ, test)
 	if err != nil {
-		return err
+		return red, green, err
 	}
 	defer func() { // every type, after its own proof, which names a failure better
 		if err == nil {
@@ -102,33 +107,34 @@ func prove(clone, typ, test string, c config.Config) (err error) {
 	}()
 	switch typ {
 	case "fix", "feature", "greenfield":
-		err := redGreen(clone, tree, aside, test, c.TestFile)
+		red, green, err := redGreen(clone, tree, aside, test, c.TestFile)
 		if err == nil && typ == "fix" {
 			err = onBase(clone, tree, aside, test, c.TestFile)
 		}
-		return err
+		return red, green, err
 	case "refactor":
 		if p := first(changed, c.TestPatterns, true); p != "" {
-			return fmt.Errorf("a refactor changed the test %s", p)
+			return red, green, fmt.Errorf("a refactor changed the test %s", p)
 		}
 		base, _, err := trial(clone, tree, changed, c.Test, "")
-		return errors.Join(err, wrap(base, "the suite fails on the base"))
+		return base, green, errors.Join(err, wrap(base.err, "the suite fails on the base"))
 	case "tests":
 		if p := first(changed, slices.Concat(c.TestPatterns, c.DocsPatterns), false); p != "" {
-			return fmt.Errorf("a tests task changed the source %s", p)
+			return red, green, fmt.Errorf("a tests task changed the source %s", p)
 		}
 		line, err := testLine(c.TestFile, test)
 		if err != nil {
-			return err
+			return red, green, err
 		}
 		base, after, err := trial(clone, tree, aside, line, line)
-		return errors.Join(err, wrap(base, test+" fails on the base"), wrap(after, test+" fails after the change"))
+		return base, after, errors.Join(err, wrap(base.err, test+" fails on the base"),
+			wrap(after.err, test+" fails after the change"))
 	case "docs":
 		if p := first(changed, c.DocsPatterns, false); p != "" {
-			return fmt.Errorf("a docs task changed %s, which is not docs", p)
+			return red, green, fmt.Errorf("a docs task changed %s, which is not docs", p)
 		}
 	}
-	return nil
+	return red, green, nil
 }
 
 // changes is every path the staged work in clone changes and what the base run sets aside: all but the test;
@@ -166,19 +172,19 @@ func shrunk(clone string, changed, tests []string) error {
 
 // redGreen sets aside, in clone, the paths aside, runs test alone with tmpl, which must fail, brings the
 // agent's work, tree, back and runs test again, which must pass.
-func redGreen(clone, tree string, aside []string, test, tmpl string) error {
+func redGreen(clone, tree string, aside []string, test, tmpl string) (red, green try, err error) {
 	line, err := testLine(tmpl, test)
 	if err != nil {
-		return err
+		return red, green, err
 	}
-	red, green, err := trial(clone, tree, aside, line, line)
+	red, green, err = trial(clone, tree, aside, line, line)
 	switch {
 	case err != nil:
-		return err
-	case red == nil:
-		return fmt.Errorf("%s passes without the fix", test)
+		return red, green, err
+	case red.err == nil:
+		return red, green, fmt.Errorf("%s passes without the fix", test)
 	}
-	return wrap(green, test+" fails with the fix")
+	return red, green, wrap(green.err, test+" fails with the fix")
 }
 
 // onBase runs test, after a fix's red and green, twice more with the files the fix adds kept and each old file
@@ -226,7 +232,7 @@ func onBase(clone, tree string, aside []string, test, tmpl string) error {
 				return err
 			}
 		}
-		if red, _, err := trial(clone, tree, nil, line, ""); err != nil || red != nil {
+		if red, _, err := trial(clone, tree, nil, line, ""); err != nil || red.err != nil {
 			return err
 		}
 	}
@@ -235,10 +241,10 @@ func onBase(clone, tree string, aside []string, test, tmpl string) error {
 }
 
 // trial runs base with the paths aside as they are at HEAD, brings the agent's work, tree, back and runs
-// after, "" for nothing, and returns how each ended. A hang in either, a clone that is no longer tree, or a
-// file keep recorded, ignored or not, changed by either, is err: the verdict is void. After each run, the files
-// git ignores are back as keep left them.
-func trial(clone, tree string, aside []string, base, after string) (red, green, err error) {
+// after, "" for nothing, and returns how each ended, zero when not run. A hang in either, a clone that is no
+// longer tree, or a file keep recorded, ignored or not, changed by either, is err: the verdict is void. After each
+// run, the files git ignores are back as keep left them.
+func trial(clone, tree string, aside []string, base, after string) (red, green try, err error) {
 	defer func() {
 		if e := reset(clone); !errors.Is(err, e) { // void once
 			err = errors.Join(err, e)
@@ -248,22 +254,22 @@ func trial(clone, tree string, aside []string, base, after string) (red, green, 
 		args := append([]string{"--literal-pathspecs", "restore", "--source=HEAD", "--staged", "--worktree", "--"},
 			aside...)
 		if _, err := git(clone, args...); err != nil {
-			return nil, nil, err
+			return red, green, err
 		}
 	}
-	_, red = sh(clone, base)
+	red = attempt(clone, base)
 	if _, err := git(clone, "restore", "--source="+tree, "--staged", "--worktree", "--", "."); err != nil {
-		return red, nil, err
+		return red, green, err
 	}
 	if err := reset(clone); err != nil {
-		return red, nil, err
+		return red, green, err
 	}
-	if errors.Is(red, errTimeout) {
-		return red, nil, red
+	if errors.Is(red.err, errTimeout) {
+		return red, green, red.err
 	}
 	if after != "" {
-		if _, green = sh(clone, after); errors.Is(green, errTimeout) {
-			return red, green, green
+		if green = attempt(clone, after); errors.Is(green.err, errTimeout) {
+			return red, green, green.err
 		}
 	}
 	if _, err := git(clone, "add", "-A"); err != nil {
@@ -273,6 +279,27 @@ func trial(clone, tree string, aside []string, base, after string) (red, green, 
 		return red, green, errors.Join(err, errVoid)
 	}
 	return red, green, nil
+}
+
+// try is how a trial's command line ended: its exit code, -1 when it did not exit, and its last 60 lines of output.
+type try struct {
+	Command string `json:"command"`
+	Exit    int    `json:"exit_code"`
+	Tail    string `json:"tail"`
+	err     error
+}
+
+// attempt runs line in clone, as sh does.
+func attempt(clone, line string) try {
+	tail, err := sh(clone, line)
+	t := try{line, 0, tail, err}
+	var exit *exec.ExitError
+	if errors.As(err, &exit) {
+		t.Exit = exit.ExitCode()
+	} else if err != nil {
+		t.Exit = -1
+	}
+	return t
 }
 
 // every runs git in clone on .git/atm-files, a repository of its own that keeps every file of the working tree,

@@ -68,8 +68,9 @@ func Run(label string, args []string, out, summary io.Writer) (err error) {
 	var dir, sha string
 	defer func() { err = errors.Join(err, release(dir, repo)) }()
 	r.step("clone", func() (ev map[string]any, err error) {
-		dir, sha, err = clone(root, *base, c.Install, repo)
-		return map[string]any{"clone": dir, "sha": sha}, err
+		var install []cmdResult
+		dir, sha, install, err = clone(root, *base, c.Install, repo)
+		return map[string]any{"clone": dir, "sha": sha, "commands": install}, err
 	})
 	var text string
 	r.step("contract", func() (ev map[string]any, err error) {
@@ -82,7 +83,11 @@ func Run(label string, args []string, out, summary io.Writer) (err error) {
 	if err := saveFollowUps(a.dir, pending); err != nil {
 		return err
 	}
-	r.step("ponytail", func() (map[string]any, error) { return a.ponytail(root, dir, sha, proofs, unit, c) })
+	r.step("ponytail", func() (map[string]any, error) {
+		ev, err := a.ponytail(root, dir, sha, proofs, unit, c)
+		r.Reproofs, _ = ev["reproofs"].([]unitResult)
+		return ev, err
+	})
 	deliver(r, root, dir, sha, *base, c.Delivery, i, summary)
 	return r.err
 }
@@ -114,7 +119,7 @@ type proof struct{ base, test, typ, testContent string }
 // units runs the units of the run in clone dir, from base commit sha, for issue i under config c: the first on
 // brief text, each next one, up to maxUnits, on the first follow-up on the issue the one before proved. It
 // returns each unit's proof, the issue as the last unit is proven, a chained one by its red test, and the
-// accepted follow-ups it did not chain.
+// accepted follow-ups it did not chain. Each unit goes to the report.
 func (a agent) units(r *verdict, root, dir, sha, text string, i Issue, c config.Config) (proofs []proof,
 	unit Issue, pending []followUp) {
 	unit, head := i, sha
@@ -138,16 +143,21 @@ func (a agent) units(r *verdict, root, dir, sha, text string, i Issue, c config.
 			return ev, err
 		})
 		var in []followUp
+		u := unitResult{Unit: n}
 		r.step("checks", func() (map[string]any, error) {
 			var err error
 			var p proof
 			var out []followUp
 			var ev map[string]any
 			p, in, out, ev, err = checkUnit(dir, head, test, unit.Type, f, n, report, i.Body, c)
+			u.Red, _ = ev["red"].(try)
+			u.Green, _ = ev["green"].(try)
 			proofs = append(proofs, p)
 			pending = append(pending, out...)
 			return ev, err
 		})
+		u.Base, u.TestFile, u.Type, u.Result = head, test, unit.Type, outcome(r.err)
+		r.Units = append(r.Units, u)
 		if r.err != nil || len(in) == 0 {
 			return proofs, unit, pending
 		}
