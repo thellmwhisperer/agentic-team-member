@@ -62,8 +62,8 @@ func commitBase(t *testing.T, root, name, text string) {
 
 // proofCases are the task types' proofs at work: why, when not "", names the run's failure.
 var proofCases = []struct {
-	name, typ, work, atm, why, lib, ignore string
-	hang, binary                           bool // binary: $ATM_TEST_BINARY is executedBinary
+	name, typ, work, atm, why, lib, ignore, hooks string // hooks: hooks_test.sh on the base
+	hang, binary                                  bool   // binary: $ATM_TEST_BINARY is executedBinary
 }{
 	{name: "fix whose test only calls a function it adds to an old file", typ: "fix", lib: lib,
 		work: "echo '" + helper + "' >> lib.sh" + testThrough("helper"), why: "depends on nothing the base had"},
@@ -127,6 +127,9 @@ var proofCases = []struct {
 		why: shrunkTest},
 	{name: "fix that adds a line to a test", typ: "fix",
 		work: "echo fixed > a.txt; echo '! grep -q broken a.txt' >> a_test.sh"},
+	{name: "chore that moves a test", typ: "chore", hooks: hooks, work: moveHooks("")},
+	{name: "chore that moves a test and drops a function", typ: "chore", hooks: hooks, work: moveHooks("/two/d"),
+		why: "the base's test hooks_test.sh is gone or shorter"},
 }
 
 // executedBinary is a program that runs but whose code signature, like slopslint's, does not match a page it
@@ -169,6 +172,15 @@ func executedBinary(t *testing.T) string {
 // shrunkTest names the failure of work that deletes or shortens a_test.sh, a test on the base.
 const shrunkTest = "the base's test a_test.sh is gone or shorter"
 
+// hooks is a test on the base, as a Go test file would be: a package line, then its functions.
+const hooks = "# package cli\none() { true; }\ntwo() { true; }\nthree() { true; }\n"
+
+// moveHooks moves hooks_test.sh to sub/, changing its package line and, with edit, more.
+func moveHooks(edit string) string {
+	return "mkdir sub; sed -e 's/package cli/package sub/' -e '" + edit + "' hooks_test.sh > sub/hooks_test.sh; " +
+		"rm hooks_test.sh"
+}
+
 // suite runs every *_test.sh.
 const suite = "for f in *_test.sh; do sh $f || exit 1; done"
 
@@ -191,6 +203,7 @@ func TestRunChecksTheProofOfEachTaskType(t *testing.T) {
 			root := repo(t, "https://example.com/owner/repo.git", cmp.Or(c.atm, atmYAML))
 			commitBase(t, root, "lib.sh", c.lib)
 			commitBase(t, root, ".gitignore", c.ignore)
+			commitBase(t, root, "hooks_test.sh", c.hooks)
 			if c.work != "" {
 				t.Setenv("FAKE_AGENT_WORK", c.work)
 			}

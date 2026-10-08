@@ -2,6 +2,7 @@ package run
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -151,8 +152,16 @@ func changes(clone, typ, test string) (changed, aside []string, err error) {
 }
 
 // shrunk is an error naming the first of changed that matches one of tests, is in the base and is not staged in
-// clone with as many bytes.
+// clone with as many bytes, at the path git's rename detection moves it to.
 func shrunk(clone string, changed, tests []string) error {
+	out, err := git(clone, "diff", "--cached", "--name-status", "-M", "--diff-filter=R", "-z", "HEAD")
+	if err != nil {
+		return err
+	}
+	to := map[string]string{}
+	for f := strings.Split(out, "\x00"); len(f) > 2; f = f[3:] {
+		to[f[1]] = f[2]
+	}
 	for _, p := range changed {
 		if first([]string{p}, tests, true) == "" {
 			continue
@@ -161,7 +170,7 @@ func shrunk(clone string, changed, tests []string) error {
 		if err != nil {
 			continue // new
 		}
-		is, err := git(clone, "cat-file", "-s", ":"+p) // staged: an error when deleted
+		is, err := git(clone, "cat-file", "-s", ":"+cmp.Or(to[p], p)) // staged: an error when deleted
 		n, _ := strconv.Atoi(is)
 		if m, _ := strconv.Atoi(was); err != nil || n < m {
 			return fmt.Errorf("the base's test %s is gone or shorter", p)
