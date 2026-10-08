@@ -1,31 +1,24 @@
 # ATM maintains itself
 
-A fix to this repository goes through the same pipeline as a fix to any
-target: an issue, an ATM run, a delivery gate, a merge that needs no hand.
-This page is that loop and what holds it.
+This page is for whoever maintains ATM itself. A fix to this repository goes
+through the same pipeline as a fix to any target: an issue, an ATM run, a
+delivery gate, a merge that needs no hand. Here is that loop and what holds
+it.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/self-maintenance-dark.svg">
+  <img alt="The loop. An issue with a red test goes to an ATM run. FAIL goes back to the issue. PASS goes to the no-mistakes gate; its findings go to whoever launched the run, who answers them, then the gate opens a PR. A Low or Medium risk PR gets auto-merge; a High risk one waits for the risk-reviewed label. Merged on main, the issue closes." src="assets/self-maintenance-light.svg" width="900">
+</picture>
 
 ## The loop
-
-```mermaid
-flowchart LR
-    I[Issue with a red test] --> R[ATM run]
-    R -->|PASS| G[no-mistakes gate]
-    R -->|FAIL| I
-    G -->|findings| H[whoever launched the run answers]
-    H --> G
-    G --> P[PR]
-    P -->|Low or Medium risk| M[auto-merge]
-    P -->|High risk| L[risk-reviewed label] --> M
-    M --> C[merged on main, issue closed]
-```
 
 1. **An issue with a contract.** Title, a `Type: fix` line, evidence,
    acceptance criteria a test can check, and a `## Red test` section naming
    the test that fails today.
    The agent gets exactly this text; a vague issue gives a vague run.
-2. **An ATM run.** Run `atm init` and fill the repository's `.atm.yaml` with
-   its install, test, typecheck, lint and delivery commands and its test and
-   doc file patterns.
+2. **An ATM run.** `atm run <number>` from the repository, its `.atm.yaml`
+   filled once with its commands, file patterns and the no-mistakes delivery
+   line; see [Configuration](configuration.md).
 3. **The verdict.** `report.json`, or the summary at the end of the run. A FAIL
    ends here: the report says which check failed and why, and the issue gets a
    better contract or the code a better check.
@@ -46,7 +39,7 @@ flowchart LR
 | `auto-merge.yml` + `scripts/arm-auto-merge.sh` | GitHub Actions | Arms auto-merge with `AUTO_MERGE_TOKEN`, a fine-grained token for this repository only. The workflow token is never used: merges made with it start no workflow and close no issue |
 | `scripts/test.sh`, `scripts/lint.sh` | local and the gate | Contribution checks; see [Contributing](../CONTRIBUTING.md) |
 | `.githooks/pre-commit` | local, after `git config core.hooksPath .githooks` | The same slopslint check |
-| `.no-mistakes.yaml` | no-mistakes | Runs the contribution checks, sets review instructions, and allows one re-run of a CI check GitHub cancelled without a verdict |
+| `.no-mistakes.yaml` | no-mistakes | Runs the contribution checks, tells the reviewer that only a defect against the issue's criteria or the checks is a finding, and allows one re-run of a CI check GitHub cancelled without a verdict |
 | `.slop/config.yml`, `.slop/ceilings.yml` | slopslint | Two duplication scopes, production and tests, under ceilings that may go down and never up |
 | `.slop/tombstones/` | slopslint | One record per slop incident, with its family and evidence |
 
@@ -54,20 +47,12 @@ flowchart LR
 `.tmp/slopslint/`, checks its SHA256 and runs it. The first run needs the
 network.
 
-## The review instructions
-
-`.no-mistakes.yaml` tells the review model what this repository has already
-decided. Each line exists because a model got it wrong once:
-
-- `**`: general review criteria and test invocation; see
-  [`.no-mistakes.yaml`](../.no-mistakes.yaml).
-
 ## The tombstones
 
 `.slop/tombstones/` holds one YAML record per incident: the pattern, what went
 wrong, the root cause, the rule it set, and the evidence as a slopslint family
 with an example and the file. Records named `T-PONYTAIL-*` are written by the
-ponytail pass, one per cut it kept. A tombstone is the shape the gate looks for
+slop detector, one per cut it kept. A tombstone is the shape the gate looks for
 next time.
 
 ## Before a PR merges
@@ -82,6 +67,3 @@ Auto-merge is armed, so this is the last look, and it is short:
    reverted on the branch, a tombstone, and another gate run.
 3. The run's `report.json`: every check green, follow-ups with their reasons.
 
-## Cleaning up
-
-See [Configuration](configuration.md) for clone cleanup and retained run files.
