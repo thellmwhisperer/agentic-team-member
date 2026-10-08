@@ -1,6 +1,6 @@
 # Configuration
 
-`atm run <issue.md | number>` runs from inside the repository it works on. Its
+`atm run [flags] <issue.md | number>` runs from inside the repository it works on. Flags may also follow the issue. A second issue argument is invalid. Its
 configuration is YAML in layers, each overriding the one before: built-in
 defaults (`harness: claude`), `~/.config/atm/config.yaml` (`harness`, `model`,
 `effort` only), `.atm.yaml` at the repository root, then `--harness`, `--model`
