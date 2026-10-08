@@ -226,6 +226,33 @@ func checkEnv(t *testing.T, got, top, issue, ponytail string) {
 	}
 }
 
+func TestRunDeliveryGetsTheIssueText(t *testing.T) {
+	body := "Type: fix\n\n## Acceptance criteria\n\n1. Retry once on a timeout."
+	for name, gh := range map[string]bool{"file issue": false, "GitHub issue": true} {
+		t.Run(name, func(t *testing.T) {
+			repo(t, "git@github.com:owner/repo.git",
+				atmSet(atmYAML, "delivery", `printenv ATM_ISSUE_TEXT > "$ATM_TEST_OUT/text"; true`))
+			got := t.TempDir()
+			t.Setenv("ATM_TEST_OUT", got)
+			arg := issueFile(t, "# Retry on timeout\n"+body+"\n")
+			if gh {
+				arg = "7"
+				fakeGH(t, `{"title":"Retry on timeout","body":"Type: fix\n\n## Acceptance criteria\n\n`+
+					`1. Retry once on a timeout."}`, false)
+			}
+			if err := Run("t", []string{arg}, &bytes.Buffer{}, &bytes.Buffer{}); err != nil {
+				t.Fatal(err)
+			}
+			text := reader(t, got)("text")
+			for _, want := range []string{"Retry on timeout", body} {
+				if !strings.Contains(text, want) {
+					t.Errorf("ATM_ISSUE_TEXT = %q, want it to hold %q", text, want)
+				}
+			}
+		})
+	}
+}
+
 func TestRunDeliveryNeedsAnOrigin(t *testing.T) {
 	root := repo(t, "https://example.com/owner/repo.git", atmSet(atmYAML, "delivery", deliveryLine))
 	gitT(t, root, "remote", "remove", "origin")

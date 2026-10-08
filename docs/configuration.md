@@ -222,7 +222,8 @@ Unix, ATM marks the command's environment with `ATM_RUN_MARK` and also kills
 every process of the user that bears the mark, so a descendant already orphaned
 to init dies too, unless it cleared its environment. Its environment contains
 `ATM_TITLE`, `ATM_ISSUE` (the issue
-number, empty for a file), `ATM_BRANCH`,
+number, empty for a file), `ATM_ISSUE_TEXT` (the whole issue, title and body;
+for a file, its content), `ATM_BRANCH`,
 `ATM_CLONE`, `ATM_REPORT` and `ATM_PONYTAIL` (the kept cut's findings, one a
 line, or empty). Its output goes to the run's screen and to
 `delivery-output.txt` in the run's directory. ATM never pushes or opens a pull request: that is
@@ -232,7 +233,7 @@ skipped and the run ends there.
 The documented example hands the branch to no-mistakes:
 
 ```yaml
-delivery: 'no-mistakes axi run --intent "$ATM_TITLE"'
+delivery: 'no-mistakes axi run --intent "$ATM_ISSUE_TEXT"'
 ```
 
 Without `--yes`, no-mistakes only reports: whoever launched the run answers

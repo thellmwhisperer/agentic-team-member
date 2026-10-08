@@ -20,6 +20,7 @@ type Issue struct {
 	Title  string
 	Body   string
 	Type   string // one of taskTypes' values
+	Text   string // the whole issue, title and body: a file's content
 }
 
 // taskTypes maps what an issue may declare in a "Type: <type>" line to its task type.
@@ -40,7 +41,7 @@ func readIssue(arg, repo string) (Issue, error) {
 		return Issue{}, fmt.Errorf("issue: %w", err)
 	}
 	title, body, _ := strings.Cut(string(b), "\n")
-	return parse(Issue{Title: strings.TrimLeft(strings.TrimSpace(title), "#"), Body: body})
+	return parse(Issue{Title: strings.TrimLeft(strings.TrimSpace(title), "#"), Body: body, Text: string(b)})
 }
 
 func fromGitHub(n int, repo string) (Issue, error) {
@@ -60,7 +61,7 @@ func fromGitHub(n int, repo string) (Issue, error) {
 	if err := json.Unmarshal(out, &data); err != nil {
 		return Issue{}, fmt.Errorf("gh issue view %d returned no JSON: %w", n, err)
 	}
-	return parse(Issue{Number: n, Title: data.Title, Body: data.Body})
+	return parse(Issue{Number: n, Title: data.Title, Body: data.Body, Text: "# " + data.Title + "\n\n" + data.Body})
 }
 
 // parse trims the issue and sets its task type, or says why it is not one ATM can run.
