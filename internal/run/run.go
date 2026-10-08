@@ -265,7 +265,9 @@ func deliver(r *verdict, root, clone, sha, base, line string, i Issue, screen io
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
 		var tail string
-		took, err := row(r.live, "delivery", func() error {
+		// Delivery owns the attached terminal. Its node event is the screen row; emitting
+		// a nested check event here would arrive after the terminal output and duplicate it.
+		took, err := row(func(map[string]any) {}, "delivery", func() error {
 			tail, err = tee(ctx, t, io.MultiWriter(f, screen), clone, line, "ATM_TITLE="+i.Title, "ATM_ISSUE="+issue,
 				"ATM_ISSUE_TEXT="+i.Text, "ATM_BRANCH="+branch, "ATM_CLONE="+clone, "ATM_REPORT="+r.path, "ATM_PONYTAIL="+cuts)
 			return err
