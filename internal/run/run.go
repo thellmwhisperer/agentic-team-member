@@ -246,7 +246,7 @@ func deliver(r *verdict, root, clone, sha, base, line string, i Issue, screen io
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
 		tail, err := tee(ctx, t, io.MultiWriter(f, screen), clone, line, "ATM_TITLE="+i.Title, "ATM_ISSUE="+issue,
-			"ATM_BRANCH="+branch, "ATM_CLONE="+clone, "ATM_REPORT="+r.path, "ATM_PONYTAIL="+cuts)
+			"ATM_ISSUE_TEXT="+i.Text, "ATM_BRANCH="+branch, "ATM_CLONE="+clone, "ATM_REPORT="+r.path, "ATM_PONYTAIL="+cuts)
 		ev["commands"] = []cmdResult{{"delivery", line, outcome(err), tail}}
 		// Once it ended: one whose background process died never did, and its clone goes.
 		return ev, errors.Join(wrap(err, "delivery"), os.WriteFile(clone+".delivered", []byte(branch+" "+base+"\n"),
