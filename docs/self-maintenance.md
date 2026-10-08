@@ -66,4 +66,3 @@ Auto-merge is armed, so this is the last look, and it is short:
    a new loop, a deleted or mock-heavy test, a reformat to another width gets
    reverted on the branch, a tombstone, and another gate run.
 3. The run's `report.json`: every check green, follow-ups with their reasons.
-
