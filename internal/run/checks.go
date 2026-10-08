@@ -26,7 +26,7 @@ import (
 func checks(clone, sha, typ, test string, c config.Config) (map[string]any, error) {
 	live := liveIn(clone)
 	var red, green try
-	err := row(live, proofs[typ], func() error {
+	_, err := row(live, proofs[typ], func() error {
 		err := moved(clone, sha, "the agent")
 		if err == nil {
 			red, green, err = prove(clone, typ, filepath.ToSlash(test), c)
@@ -44,11 +44,11 @@ func checks(clone, sha, typ, test string, c config.Config) (map[string]any, erro
 			continue
 		}
 		var tail string
-		err := row(live, cmd[0], func() (err error) {
+		s, err := row(live, cmd[0], func() (err error) {
 			tail, err = sh(clone, cmd[1])
 			return err
 		})
-		if ran = append(ran, cmdResult{cmd[0], cmd[1], outcome(err), tail}); err != nil {
+		if ran = append(ran, cmdResult{cmd[0], cmd[1], outcome(err), tail, s}); err != nil {
 			result["commands"] = ran
 			return result, fmt.Errorf("%s: %w", cmd[0], err)
 		}
@@ -70,16 +70,16 @@ func moved(clone, want, who string) error {
 var proofs = map[string]string{"fix": "red/green", "feature": "red/green", "greenfield": "red/green",
 	"refactor": "suite on the base", "tests": "test on the base", "docs": "docs only"}
 
-// row runs fn as the screen's row name, under the node that runs, when name is not "".
-func row(live func(map[string]any), name string, fn func() error) error {
+// row runs fn as the screen's row name, under the node that runs, when name is not "", and returns its span, the one
+// the screen shows.
+func row(live func(map[string]any), name string, fn func() error) (s span, err error) {
 	if name == "" {
-		return fn()
+		return s, fn()
 	}
 	live(map[string]any{"check": name, "state": "started"})
-	start := time.Now()
-	err := fn()
-	live(map[string]any{"check": name, "state": outcome(err), "duration_ms": time.Since(start).Milliseconds()})
-	return err
+	s = timed(func() { err = fn() })
+	live(map[string]any{"check": name, "state": outcome(err), "duration_ms": s.DurationMS})
+	return s, err
 }
 
 // prove runs the proof of task type typ on the agent's work in clone, all of it staged meanwhile, and returns its
@@ -281,18 +281,22 @@ func trial(clone, tree string, aside []string, base, after string) (red, green t
 	return red, green, nil
 }
 
-// try is how a trial's command line ended: its exit code, -1 when it did not exit, and its last 60 lines of output.
+// try is how a trial's command line ended: its exit code, -1 when it did not exit, its last 60 lines of output
+// and its span.
 type try struct {
 	Command string `json:"command"`
 	Exit    int    `json:"exit_code"`
 	Tail    string `json:"tail"`
-	err     error
+	span
+	err error
 }
 
 // attempt runs line in clone, as sh does.
 func attempt(clone, line string) try {
-	tail, err := sh(clone, line)
-	t := try{line, 0, tail, err}
+	var tail string
+	var err error
+	s := timed(func() { tail, err = sh(clone, line) })
+	t := try{line, 0, tail, s, err}
 	var exit *exec.ExitError
 	if errors.As(err, &exit) {
 		t.Exit = exit.ExitCode()
