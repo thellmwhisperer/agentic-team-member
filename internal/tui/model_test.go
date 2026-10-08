@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 	"testing"
@@ -138,6 +139,30 @@ func TestScreenGivesAFailedNodeAndTheSlopCutsAFindingsBox(t *testing.T) {
 	if s := view(m); !order(s, "✓ passed", "✓ Slop detector", "1 cuts · passed", "– Delivery", "skipped",
 		"╭─ Findings - W 1", "W a.go · speculative_feature", "dropped two lines") {
 		t.Fatalf("slop cuts:\n%s", s)
+	}
+}
+
+func TestScreenCutsARowsNoteBeforeItsName(t *testing.T) {
+	evs := []string{`{"step":"agent","state":"started"}`}
+	for i := range 30 {
+		evs = append(evs, fmt.Sprintf(`{"step":"agent","id":"t%d","tool":"Bash","result":"passed"}`, i))
+	}
+	evs = append(evs, `{"step":"agent","state":"passed","unit":1,"duration_ms":676000}`,
+		`{"step":"ponytail","state":"started"}`,
+		`{"step":"ponytail","state":"passed","kept":true,"duration_ms":695000,"report":{"findings":[`+
+			`{"file":"a.go","family":"speculative_feature","finding":"dropped two lines"}]}}`,
+		`{"step":"delivery","state":"started"}`,
+		`{"step":"delivery","state":"passed","duration_ms":1379000,`+
+			`"branch":"atm/go-port-report-json-keeps-every-units-proofs-and-the-install"}`)
+	// Run 218-32's screen: 138 columns, a 46-column ATM box beside the Findings box.
+	m := screen(138, 40, evs...)
+	m.end(run.Outcome{Outcome: "passed"}, nil)
+	s := view(m)
+	for _, want := range []string{`✓ Agent · unit 1  11 min 16 s .* passed │`, `✓ Slop detector  11 min 35 s .*passed │`,
+		`✓ Delivery  22 min 59 s .*passed │`} {
+		if !regexp.MustCompile(want).MatchString(s) {
+			t.Fatalf("want %q whole on its row:\n%s", want, s)
+		}
 	}
 }
 
