@@ -82,7 +82,7 @@ type reply struct {
 }
 
 // maxRuns is the target history size; running runs are exempt. ponytail: fixed; a key in .atm.yaml is the upgrade.
-const maxRuns = 200
+var maxRuns = 200
 
 // idle is how long the background process waits without a run before it ends; tick is how often it checks.
 var idle, tick = 10 * time.Minute, 5 * time.Second

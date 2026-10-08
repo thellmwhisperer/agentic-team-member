@@ -353,22 +353,33 @@ func TestBackgroundKeepsTheLastRunsAndEveryRunning(t *testing.T) {
 	}
 }
 
-// Ending a run prunes the oldest ended runs past maxRuns.
+// A run's end prunes the history too: maxRuns+1 runs that end with no start after them leave maxRuns.
 func TestBackgroundPrunesTheHistoryWhenRunsEnd(t *testing.T) {
-	top := atmRepo(t)
-	s := &server{root: top}
-	now := time.Now()
-	for _, outcome := range numberedOutcomes("issue", maxRuns, "passed", now.Add(-time.Hour), now) {
-		s.runs = append(s.runs, &bgRun{Outcome: outcome})
+	defer func(n int) { maxRuns = n }(maxRuns)
+	maxRuns = 3 // keeps the runs few, so they all start at once on every OS
+	top := backgroundRepo(t)
+	wait, release := holdFakeAgents(t, maxRuns+1)
+	path := issueFile(t, issue)
+	var started []Outcome
+	for range maxRuns + 1 {
+		o, err := Start(top, []string{path})
+		if err != nil {
+			t.Fatal(err)
+		}
+		started = append(started, o)
 	}
-	ended := &bgRun{Outcome: Outcome{Run: fmt.Sprintf("issue-%d", maxRuns+1), Outcome: "running",
-		Started: now}}
-	s.runs = append(s.runs, ended)
-	ended.Outcome.Outcome, ended.Ended = "passed", now
-	s.save()
-	if saved, err := history(top); err != nil || len(saved) != maxRuns || saved[0].Run != "issue-2" ||
-		saved[len(saved)-1].Run != fmt.Sprintf("issue-%d", maxRuns+1) {
-		t.Fatalf("runs.jsonl holds %d runs, %v; want issue-2 through issue-%d", len(saved), err, maxRuns+1)
+	wait()
+	release()
+	for _, o := range started {
+		if _, err := Attach(top, o.Run, &bytes.Buffer{}); err != nil && !strings.HasPrefix(err.Error(), "no run ") {
+			t.Fatal(err)
+		}
+	}
+	if runs, err := Runs(top); err != nil || len(runs) != maxRuns {
+		t.Fatalf("Runs = %d runs, %v; want %d", len(runs), err, maxRuns)
+	}
+	if saved, err := history(top); err != nil || len(saved) != maxRuns {
+		t.Fatalf("runs.jsonl holds %d runs, %v; want %d", len(saved), err, maxRuns)
 	}
 }
 
