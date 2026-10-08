@@ -360,8 +360,9 @@ func commitFiles(t *testing.T, root, atm string, files map[string]string) {
 	gitT(t, root, "commit", "-qm", "base")
 }
 
-// failedNode is the failed node of the run at root, after checking every node passed when none failed.
-func failedNode(t *testing.T, root string) string {
+// runResult is the failed node and delivered HEAD of the run at root, after checking every node passed when
+// none failed.
+func runResult(t *testing.T, root string) (string, string) {
 	t.Helper()
 	b, _ := os.ReadFile(filepath.Join(root, ".atm", "runs", "t", "report.json"))
 	var r verdict
@@ -373,7 +374,7 @@ func failedNode(t *testing.T, root string) string {
 			t.Errorf("want every node passed, %s %s", n.Name, n.Result)
 		}
 	}
-	return r.FailedNode
+	return r.FailedNode, r.HeadSHA
 }
 
 func TestRunGivesTheAuditsAdversarialAgentsNoPass(t *testing.T) {
@@ -391,7 +392,8 @@ func TestRunGivesTheAuditsAdversarialAgentsNoPass(t *testing.T) {
 			got := filepath.Join(t.TempDir(), "delivered")
 			t.Setenv("ATM_TEST_OUT", got)
 			root := repo(t, "https://example.com/owner/repo.git", atmSet(cmp.Or(c.atm, atmYAML), "delivery",
-				`{ git log --format="%s|%an <%ae>|%cn <%ce>"; git ls-files -co -x .tmp; cat *.txt; } `+
+				`{ git rev-parse HEAD; git log --format="%s|%an <%ae>|%cn <%ce>"; `+
+					`git ls-files -co -x .tmp; cat *.txt; } `+
 					`> "$ATM_TEST_OUT"`))
 			commitFiles(t, root, atm, c.base)
 			t.Setenv("FAKE_AGENT", c.mode)
@@ -400,7 +402,8 @@ func TestRunGivesTheAuditsAdversarialAgentsNoPass(t *testing.T) {
 			t.Setenv("FAKE_PONYTAIL_REPORT", c.report)
 			var out bytes.Buffer
 			err := Run("t", []string{issueFile(t, followUpIssue)}, &out, io.Discard)
-			switch node := failedNode(t, root); {
+			node, head := runResult(t, root)
+			switch {
 			case node != c.node:
 				t.Fatalf("want the failed node %q, got %q: %v", c.node, node, err)
 			case c.node != "" && (err == nil || !strings.Contains(err.Error(), c.why)):
@@ -412,8 +415,12 @@ func TestRunGivesTheAuditsAdversarialAgentsNoPass(t *testing.T) {
 				(p[0]["kept"] != false || !strings.Contains(fmt.Sprint(p[0]["reason"]), c.why)) {
 				t.Fatalf("want the cut rejected for %q, got %v", c.why, p)
 			}
-			if d, _ := os.ReadFile(got); string(d) != c.delivered {
-				t.Fatalf("delivery got\n%s\nwant\n%s", d, c.delivered)
+			want := c.delivered
+			if c.node == "" {
+				want = head + "\n" + want
+			}
+			if d, _ := os.ReadFile(got); string(d) != want {
+				t.Fatalf("delivery got\n%s\nwant\n%s", d, want)
 			}
 		})
 	}
