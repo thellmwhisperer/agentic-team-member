@@ -130,7 +130,7 @@ func unitDone(t *testing.T, work string) (root, dir, sha string, c config.Config
 	gitT(t, root, "commit", "-q", "-m", "b")
 	c, err := config.Load(root, os.Getenv("HOME"), config.Agent{})
 	if err == nil {
-		dir, sha, _, err = clone(root, "main", "", "")
+		dir, sha, _, err = clone(root, "main", "", "", nil)
 	}
 	if err == nil {
 		_, err = sh(dir, "printf 'fixed\\nextra\\nmore\\n' > a.txt"+fixTest)

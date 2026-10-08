@@ -69,7 +69,7 @@ func Run(label string, args []string, out, summary io.Writer) (err error) {
 	defer func() { err = errors.Join(err, release(dir, repo)) }()
 	r.step("clone", func() (ev map[string]any, err error) {
 		var install []cmdResult
-		dir, sha, install, err = clone(root, *base, c.Install, repo)
+		dir, sha, install, err = clone(root, *base, c.Install, repo, r.live)
 		return map[string]any{"clone": dir, "sha": sha, "commands": install}, err
 	})
 	var text string
@@ -265,9 +265,10 @@ func deliver(r *verdict, root, clone, sha, base, line string, i Issue, screen io
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
 		var tail string
-		took := timed(func() {
+		took, err := row(r.live, "delivery", func() error {
 			tail, err = tee(ctx, t, io.MultiWriter(f, screen), clone, line, "ATM_TITLE="+i.Title, "ATM_ISSUE="+issue,
 				"ATM_ISSUE_TEXT="+i.Text, "ATM_BRANCH="+branch, "ATM_CLONE="+clone, "ATM_REPORT="+r.path, "ATM_PONYTAIL="+cuts)
+			return err
 		})
 		ev["commands"] = []cmdResult{{"delivery", line, outcome(err), tail, took}}
 		// Once it ended: one whose background process died never did, and its clone goes.

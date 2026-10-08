@@ -120,6 +120,22 @@ func TestReportKeepsWhenEveryNodeTrialAndCommandStartedAndTook(t *testing.T) {
 			}
 		}
 	}
+	var commandRows []obj
+	for _, ev := range events {
+		if _, ok := ev["duration_ms"]; ok && ev["check"] != nil && ev["check"] != "red/green" {
+			commandRows = append(commandRows, ev)
+		}
+	}
+	commands := rep["commands"].([]any)
+	if len(commandRows) != len(commands) {
+		t.Fatalf("want one completed screen row for every reported command, got %d rows for %d commands", len(commandRows), len(commands))
+	}
+	for i, c := range commands {
+		command, row := c.(obj), commandRows[i]
+		if command["name"] != row["check"] || command["duration_ms"] != row["duration_ms"] {
+			t.Fatalf("command report differs from its screen row: %v vs %v", command, row)
+		}
+	}
 }
 
 func TestReportKeepsEveryUnitTheReproofsAndTheInstall(t *testing.T) {
