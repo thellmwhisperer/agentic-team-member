@@ -88,10 +88,13 @@ descendants that start a session or process group of their own. On Unix, ATM
 marks the agent's environment with `ATM_RUN_MARK` and also kills every process
 of the user that bears the mark, so a descendant already orphaned to init dies
 too, unless it cleared its environment.
-If the agent exits but a descendant keeps its output open past the one-second
-wait delay, ATM kills the process tree before deciding the agent's result. A
-zero exit still passes when the agent wrote a valid report; the output reader
-is closed after the tree is killed.
+The same containment applies when the agent exits but a descendant keeps its
+output open past the one-second wait delay: ATM kills the process tree before
+deciding the result. On Windows, the agent runs suspended until assigned to a
+job object that kills its processes when closed. On Unix, ATM kills the agent's
+process group and any descendants marked in its environment. A zero exit still
+passes when the agent wrote a valid report; a non-zero exit still fails. A
+zero exit with closed output keeps a detached descendant alive, as before.
 Every line it writes goes to `worker.jsonl` in the run's directory:
 JSON lines as they are, any other line as a JSON string. The
 report is the last JSON object of its final message (`codex`: its `-o` file,
