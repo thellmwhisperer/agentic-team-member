@@ -1,0 +1,18 @@
+schema: 1
+id: T-PONYTAIL-20261008-112143-1
+status: accepted
+category: alien_code
+title: "In units, removed the `unitResult` that was built in three places (`Unit` before the checks step, `Red`/`Green` set inside the step, the other fields after it). `ev` now lives outside the step, red and green are read from it afterwards, and one `unitResult{...}` literal is appended. The diff is 2 lines shorter."
+created_at: 2026-10-08
+incident:
+  pattern: "In units, removed the `unitResult` that was built in three places (`Unit` before the checks step, `Red`/`Green` set inside the step, the other fields after it). `ev` now lives outside the step, red and green are read from it afterwards, and one `unitResult{...}` literal is appended. The diff is 2 lines shorter."
+  what_went_wrong: "An ATM run wrote it and ATM's ponytail pass cut it before delivery."
+  root_cause: "The coding agent wrote more than the issue needed."
+  rule_established: "Cut by the ponytail pass; it does not come back."
+  evidence:
+    - family: speculative_hardening
+      example: "In units, removed the `unitResult` that was built in three places (`Unit` before the checks step, `Red`/`Green` set inside the step, the other fields after it). `ev` now lives outside the step, red and green are read from it afterwards, and one `unitResult{...}` literal is appended. The diff is 2 lines shorter."
+      artifact: "internal/run/run.go"
+match:
+  family: speculative_hardening
+  artifact: "internal/run/run.go"
