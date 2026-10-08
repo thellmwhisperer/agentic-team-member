@@ -139,7 +139,11 @@ func TestClaimSuffixesRunsInTheSameSecond(t *testing.T) {
 		if err != nil || dir != filepath.Join(root, want) {
 			t.Fatalf("claim = %q, %v; want %s", dir, err, want)
 		}
-		t.Cleanup(func() { closeCloneLease(dir) })
+		t.Cleanup(func() {
+			if err := release(dir, ""); err != nil {
+				t.Error(err)
+			}
+		})
 	}
 }
 
@@ -217,7 +221,6 @@ func TestRunSweepsClonesNoRunNeeds(t *testing.T) {
 				}
 			}
 			if c.live {
-				closeCloneLease(old)
 				if err := release(old, ""); err != nil {
 					t.Fatal(err)
 				}

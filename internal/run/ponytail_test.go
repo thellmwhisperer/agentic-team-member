@@ -138,7 +138,11 @@ func unitDone(t *testing.T, work string) (root, dir, sha string, c config.Config
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { closeCloneLease(dir) })
+	t.Cleanup(func() {
+		if err := release(dir, ""); err != nil {
+			t.Error(err)
+		}
+	})
 	t.Setenv("FAKE_PONYTAIL_WORK", work)
 	return root, dir, sha, c
 }
