@@ -150,7 +150,8 @@ func (m *Model) row(r *row, width int) string {
 	word := r.state
 	status := bold(states[word][1], word)
 	if r.note != "" {
-		room := width - lipgloss.Width(prefix) - lipgloss.Width(suffix) - lipgloss.Width(status) - 3
+		// The note gives way before the label: it gets only what the label, the duration and the state leave.
+		room := width - lipgloss.Width(prefix) - lipgloss.Width(r.label) - lipgloss.Width(suffix) - lipgloss.Width(status) - 4
 		if room > 0 {
 			status = paint(dim, ansi.Truncate(r.note, room, "…")+" · ") + status
 		}
