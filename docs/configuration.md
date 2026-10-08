@@ -243,10 +243,15 @@ Every step's end line carries `duration_ms`. `report.json` in the run's
 directory is rewritten at every step's start and end, so it is on disk
 before delivery: `failed_node` and `reason` first, then `nodes` (each step's
 `result`: `passed`, `failed`, `running`, `skipped` or `not run`, and
-`duration_ms`, the last unit's for `agent` and `checks`), the task `type`, and `commands`: the configured `install`, `test`,
-`typecheck`, `lint` and `delivery` commands that ran during checks or delivery,
-each with its result and last 60 lines. After a delivery got its branch, `head_sha`
-is that branch's final SHA. The summary goes to
+`duration_ms`), the task `type`, `units`, `reproofs` and `commands`. Each entry
+in `units` records the unit number, base commit, test file, task type, result,
+and its red and green proof trials. A trial records its command, exit code and
+last 60 output lines; absent trials were not run. `reproofs` records the same
+proof details for each unit the slop detector re-ran after a kept cut.
+`commands` contains the configured `install`, `test`, `typecheck`, `lint` and
+`delivery` commands that ran, including the clone's initial install when set,
+each with its result and last 60 lines. After a delivery got its branch,
+`head_sha` is that branch's final SHA. The summary goes to
 the run's screen: each step, how it ended and its duration (`0.9 s`, `4 min 28 s`,
 `1 h 02 min`, the one format ATM prints a time in), then the result and the
 report's path. A run ends with exit code 0 when every executed step passed, 1 when `agent` or
