@@ -265,7 +265,7 @@ func realToolsWork() string {
 		tools = "sh scripts/lint.sh && " + tools
 	case "windows":
 		binary += ".exe"
-		tools = "mkdir -p .tmp && go build -o " + binary + " . && " + binary
+		tools = "mkdir .tmp && go build -o " + binary + " . && " + binary
 	default:
 		tools = "mkdir -p .tmp && " + tools
 	}
