@@ -67,7 +67,9 @@ func fakeAgent(name string) int {
 		return exit
 	}
 	fakeAgentSkill(name, args, skill, mode)
-	_ = exec.Command("sh", "-c", todo).Run()
+	if err := exec.Command("sh", "-c", todo).Run(); err != nil {
+		return 1
+	}
 	text = cmp.Or(map[string]string{"no-report": "Done, nothing to report.", "no-test-file": `{"summary": "s"}`}[mode],
 		workReport(call), text)
 	if name == "codex" {

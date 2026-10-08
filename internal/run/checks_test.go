@@ -257,7 +257,8 @@ const chainedSource = `if [ -f second_test.sh ]; then echo second >> source.txt;
 // realTools is a worker that, before its fix, does what a real one does inside the clone: runs the
 // repository's own lint, which downloads slopslint under the ignored .tmp/ and runs it, then builds and runs
 // the repository's Go program there.
-const realTools = "sh scripts/lint.sh; go build -o .tmp/m . && .tmp/m; " + fixWork
+const realTools = "sh scripts/lint.sh && go build -o .tmp/m . && .tmp/m && echo fixed > a.txt && " +
+	"echo 'grep -q fixed a.txt && ! grep -q broken a.txt' > a_test.sh"
 
 // auditCases are the adversarial agents of the audit of 7 Oct 2026, and one that behaves. base is the files
 // committed on main, the ATM repository's file when the value is "atm"; why, when not "", names the failure
@@ -297,9 +298,27 @@ var auditCases = []struct {
 		ponytail: "printf 'broken\\nsecond\\n' > source.txt", why: "regression_test.sh"},
 	{name: "failed skill load", mode: "skill-error", why: "no proof it used the ponytail skill", node: "agent"},
 	{name: "runs real tools in the clone", work: realTools, delivered: unit1 + based + placed +
-		".atm.yaml\n.gitignore\na.txt\na_test.sh\ngo.mod\nmain.go\nscripts/lint.sh\nscripts/slopslint.sh\nfixed\n",
-		base: map[string]string{".gitignore": ".tmp/\n", "go.mod": "module example.com/m\n\ngo 1.21\n",
-			"main.go": "package main\n\nfunc main() {}\n", "scripts/lint.sh": "atm", "scripts/slopslint.sh": "atm"}},
+		".atm.yaml\n.gitignore\n.slop/ceilings.yml\n.slop/config.yml\n.slop/tombstones/README.md\n" +
+		"a.txt\na_test.sh\ngo.mod\ninternal/probe1/probe.go\ninternal/probe2/probe.go\nmain.go\nscripts/lint.sh\n" +
+		"scripts/slopslint.sh\nfixed\n",
+		base: map[string]string{".gitignore": ".tmp/\n", ".slop/config.yml": "schema: 1\ndetector:\n  name: jscpd\n" +
+			"  version: \"4.2.5\"\ndefaults:\n  format: go\n  mode: mild\n  min_lines: 1\n  min_tokens: 1\n" +
+			"global_ignore:\n  - \"**/.git/**\"\n  - \"**/.tmp/**\"\nscopes:\n  go_production:\n" +
+			"    scan_path: .\n    pattern: \"**/*.go\"\n    ignore:\n      - \"**/*_test.go\"\n",
+			".slop/ceilings.yml":         "schema: 1\nscopes:\n  go_production:\n    active_clones_ceiling: 10\n",
+			".slop/tombstones/README.md": "atm", "go.mod": "module example.com/m\n\ngo 1.21\n",
+			"internal/probe1/probe.go": "package probe\n\nfunc Probe(a, b, c, d, e int) int {\n" +
+				"return a + b + c + d + e + a*b + b*c + c*d + d*e + e*a +\n" +
+				"a - b + c - d + e - a + b - c + d - e + a + b + c + d + e +\n" +
+				"a*b + b*c + c*d + d*e + e*a + a-b + b-c + c-d + d-e + e-a +\n" +
+				"a + b*c - d + e*a - b + c*d - e + a*b - c + d*e - a\n}\n",
+			"internal/probe2/probe.go": "package probe\n\nfunc Probe(a, b, c, d, e int) int {\n" +
+				"return a + b + c + d + e + a*b + b*c + c*d + d*e + e*a +\n" +
+				"a - b + c - d + e - a + b - c + d - e + a + b + c + d + e +\n" +
+				"a*b + b*c + c*d + d*e + e*a + a-b + b-c + c-d + d-e + e-a +\n" +
+				"a + b*c - d + e*a - b + c*d - e + a*b - c + d*e - a\n}\n",
+			"main.go":         "package main\n\nfunc main() {}\n",
+			"scripts/lint.sh": "atm", "scripts/slopslint.sh": "atm"}},
 }
 
 // atmID is repo's git identity as author and committer; unit1, initial and based are commits delivery gets,
