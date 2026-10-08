@@ -182,3 +182,20 @@ func TestScreenStatesHaveAnIconAWordAndANSIColours(t *testing.T) {
 		t.Fatalf("a colour outside ANSI 1 to 8:\n%q", s)
 	}
 }
+
+func TestScreenShowsWhatTheAgentSaysBetweenItsDimmerToolCalls(t *testing.T) {
+	m := screen(120, 40, append(unit[:7:7], `{"step":"agent","says":"I'll run the tests.\nThen fix."}`,
+		`{"step":"agent","id":"t1","tool":"Bash","detail":"go test ./...","result":"running"}`,
+		`{"step":"agent","id":"t1","result":"passed"}`, `{"step":"agent","says":"Green; done."}`)...)
+	if s := view(m); !order(s, "╭─ Agent", "✎ I'll run the tests.", "✓ passed Bash go test ./...", "✎ Green; done.") {
+		t.Fatalf("agent box:\n%s", s)
+	}
+	if s := m.View(); !strings.Contains(s, paint(dim, "Bash go test ./...")) ||
+		strings.Contains(s, paint(dim, "✎ I'll run the tests.")) {
+		t.Fatalf("want the tool calls dim and the prose not:\n%q", s)
+	}
+	m.apply(run.Frame{Event: []byte(`{"step":"agent","state":"passed","duration_ms":1000}`)})
+	if s := view(m); !strings.Contains(s, "1 tools · passed") {
+		t.Fatalf("want only the tool calls counted:\n%s", s)
+	}
+}

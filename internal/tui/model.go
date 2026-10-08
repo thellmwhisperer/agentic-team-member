@@ -23,9 +23,9 @@ type row struct {
 	took                     time.Duration
 }
 
-// activity is a line of the Agent box: a tool call, by its id, and its result, or the agent's thinking.
+// activity is a line of the Agent box: a tool call, by its id, and its result, or what the agent says or thinks.
 type activity struct {
-	id, tool, detail, result, thinking string
+	id, tool, detail, result, thinking, says string
 }
 
 // finding is a row of the Findings box, as no-mistakes has them: a severity, error or warning, a reference and
@@ -102,7 +102,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // event is every field of a node's or a live event the screen reads.
 type event struct {
 	Step, State, Error, TS, Title, Type, SHA, Branch string
-	Check, ID, Tool, Detail, Result, Thinking        string
+	Check, ID, Tool, Detail, Result, Thinking, Says  string
 	Output                                           *string
 	Number                                           int
 	DurationMS                                       int64 `json:"duration_ms"`
@@ -128,8 +128,8 @@ func (m *Model) apply(f run.Frame) {
 		}
 	case e.ID != "" || e.Tool != "":
 		m.tool(e)
-	case e.Thinking != "":
-		m.agent = append(m.agent, &activity{thinking: e.Thinking})
+	case e.Thinking != "" || e.Says != "":
+		m.agent = append(m.agent, &activity{thinking: e.Thinking, says: e.Says})
 	case e.Output != nil:
 		m.output = append(m.output[max(0, len(m.output)-199):], ansi.Strip(*e.Output))
 	case e.State == "started":
