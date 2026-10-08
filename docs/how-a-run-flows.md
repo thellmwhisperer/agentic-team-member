@@ -7,7 +7,7 @@ the slop detector cuts it. What you set before a run is in
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/red-green-dark.svg">
-  <img alt="Red/green proof. ATM sets the agent's fix aside and keeps only the new test: the test must fail. ATM brings the fix back: the same test must pass. A test that passes without the fix, or fails with it, fails the run. The agent's own claim is not asked." src="assets/red-green-light.svg" width="900">
+  <img alt="Red/green proof for fix and hotfix tasks. ATM sets aside changes to files already in the base, while keeping the test and newly added files: the test must fail. ATM brings the changes back: the same test must pass. A test that passes without the fix, or fails with it, fails the run. The agent's own claim is not asked." src="assets/red-green-light.svg" width="900">
 </picture>
 
 ## The steps
