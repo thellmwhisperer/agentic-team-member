@@ -23,6 +23,14 @@ func (c *capturedRun) watch(b []byte) {
 	}
 }
 
+func (c *capturedRun) Write(p []byte) (int, error) {
+	var ev obj
+	if json.Unmarshal(bytes.TrimSpace(p), &ev) == nil {
+		c.events = append(c.events, ev)
+	}
+	return c.Buffer.Write(p)
+}
+
 // checkProof checks rep's proof of unit n, on base, with test and type typ: red, then green, then passed.
 func checkProof(t *testing.T, what string, got any, n int, base, test, typ string) {
 	t.Helper()
@@ -59,7 +67,7 @@ func chainedCut(t *testing.T, atm string) (string, obj, []obj) {
 }
 
 func TestReportKeepsWhenEveryNodeTrialAndCommandStartedAndTook(t *testing.T) {
-	_, rep, events := chainedCut(t, atmSet(atmInstall("true"), "delivery", "true"))
+	_, rep, events := chainedCut(t, atmSet(atmSet(atmInstall("true"), "typecheck", "true"), "delivery", "true"))
 	var timed []obj // in the order they ran
 	for _, n := range rep["nodes"].([]any) {
 		timed = append(timed, n.(obj))
@@ -77,7 +85,7 @@ func TestReportKeepsWhenEveryNodeTrialAndCommandStartedAndTook(t *testing.T) {
 			groups[len(groups)-1] = append(groups[len(groups)-1], c)
 		}
 	}
-	if len(groups) != 4 || len(groups[3]) != 3 || groups[3][2]["name"] != "delivery" {
+	if len(groups) != 4 || len(groups[3]) != 4 || groups[3][3]["name"] != "delivery" {
 		t.Fatalf("want the clone's install, each unit's checks, the re-run checks and the delivery, got %v", groups)
 	}
 	timed = append(timed, groups[0]...)
@@ -122,19 +130,36 @@ func TestReportKeepsWhenEveryNodeTrialAndCommandStartedAndTook(t *testing.T) {
 	}
 	var commandRows []obj
 	for _, ev := range events {
-		if _, ok := ev["duration_ms"]; ok && ev["check"] != nil && ev["check"] != "red/green" {
+		if ev["check"] != nil && ev["check"] != "red/green" && ev["state"] != "started" && ev["step"] != "clone" && ev["step"] != "delivery" {
 			commandRows = append(commandRows, ev)
 		}
 	}
-	commands := rep["commands"].([]any)
-	if len(commandRows) != len(commands) {
-		t.Fatalf("want one completed screen row for every reported command, got %d rows for %d commands", len(commandRows), len(commands))
+	var cloneInstall obj
+	for _, ev := range events {
+		if ev["step"] == "clone" && ev["check"] == "install" && ev["duration_ms"] != nil && ev["state"] != "started" {
+			cloneInstall = ev
+		}
 	}
-	for i, c := range commands {
-		command, row := c.(obj), commandRows[i]
+	commands := rep["commands"].([]any)
+	rows := append([]obj{cloneInstall}, commandRows...)
+	if len(rows)+1 != len(commands) {
+		t.Fatalf("want screen rows for all non-delivery commands, got %d rows for %d commands", len(rows), len(commands))
+	}
+	for i, c := range commands[:len(commands)-1] {
+		command, row := c.(obj), rows[i]
 		if command["name"] != row["check"] || command["duration_ms"] != row["duration_ms"] {
 			t.Fatalf("command report differs from its screen row: %v vs %v", command, row)
 		}
+	}
+	var deliveryEvent obj
+	for _, ev := range events {
+		if ev["step"] == "delivery" && ev["state"] != "started" && ev["duration_ms"] != nil {
+			deliveryEvent = ev
+		}
+	}
+	if last := commands[len(commands)-1].(obj); last["name"] != "delivery" ||
+		last["duration_ms"] != deliveryEvent["commands"].([]any)[0].(obj)["duration_ms"] {
+		t.Fatalf("delivery report differs from its screen row: %v vs %v", last, deliveryEvent)
 	}
 }
 
