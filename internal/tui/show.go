@@ -13,6 +13,8 @@ import (
 	"github.com/thellmwhisperer/agentic-team-member/internal/run"
 )
 
+var follow = run.Follow // tests follow a run of their own
+
 // Show shows the screen of run label, of the repository at root, on the terminal in and out until the run
 // ends, and returns how it ended; detached when the user left it going. While the delivery command runs on
 // the terminal, the terminal is the command's: no-mistakes, attached by it, shows its own screen there.
@@ -27,7 +29,7 @@ func Show(root, label string, in, out *os.File) (o run.Outcome, detached bool, e
 	p := tea.NewProgram(m, tea.WithInput(in), tea.WithOutput(out), tea.WithAltScreen())
 	d := &delivery{p: p, in: in, out: out, keys: keys}
 	go func() {
-		o, err := run.Follow(root, label, &[2]int{w, h}, keys, d.frame)
+		o, err := follow(root, label, &[2]int{w, h}, keys, d.frame)
 		d.giveBack()
 		p.Send(ended{o, err})
 	}()
@@ -49,15 +51,20 @@ type delivery struct {
 	state *term.State
 	keyed cancelreader.CancelReader
 	read  chan struct{} // closed once keys are no longer read
+	pty   bool          // the delivery command's terminal started and has written nothing yet
 }
 
 // frame takes frame f: the delivery command's output goes to the terminal, everything else to the screen.
 func (d *delivery) frame(f run.Frame) {
 	if f.PTY {
-		d.take()
+		d.pty = true
 		return
 	}
 	if f.Raw != nil {
+		if d.pty {
+			d.pty = false
+			d.take()
+		}
 		_, _ = d.out.Write(f.Raw)
 		return
 	}
