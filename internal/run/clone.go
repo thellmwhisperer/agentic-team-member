@@ -41,8 +41,9 @@ func clone(root, base, install, repo string) (dir, sha string, ran []cmdResult, 
 	if err = exclude(dir, "/.atm/"); err != nil || install == "" { // ATM's scratch
 		return dir, sha, nil, err
 	}
-	tail, err := sh(dir, install)
-	return dir, sha, []cmdResult{{"install", install, outcome(err), tail}}, wrap(err, "install")
+	var tail string
+	s := timed(func() { tail, err = sh(dir, install) })
+	return dir, sha, []cmdResult{{"install", install, outcome(err), tail, s}}, wrap(err, "install")
 }
 
 // claim makes a fresh atm-run-<now> directory under root: mkdir either succeeds or the name is taken, so two

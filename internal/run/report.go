@@ -24,7 +24,7 @@ type verdict struct {
 	Units      []unitResult `json:"units"`
 	Reproofs   []unitResult `json:"reproofs"`
 	Commands   []cmdResult  `json:"commands"`
-	HeadSHA    string      `json:"head_sha,omitempty"` // the delivered branch's
+	HeadSHA    string       `json:"head_sha,omitempty"` // the delivered branch's
 	path       string
 	out        io.Writer // the log: each node's start and end, one JSON object a line
 	err        error     // the failed node's
@@ -32,9 +32,23 @@ type verdict struct {
 }
 
 type node struct {
-	Name       string `json:"name"`
-	Result     string `json:"result"` // passed, failed, running, skipped or not run
+	Name   string `json:"name"`
+	Result string `json:"result"` // passed, failed, running, skipped or not run
+	span
+}
+
+// span is when a node, trial or command started, in UTC to the millisecond, and how long it took: "" and 0 when
+// it never ran.
+type span struct {
+	StartedAt  string `json:"started_at"`
 	DurationMS int64  `json:"duration_ms"`
+}
+
+// timed runs fn and returns its span.
+func timed(fn func()) span {
+	start := time.Now()
+	fn()
+	return span{start.UTC().Format("2006-01-02T15:04:05.000Z07:00"), time.Since(start).Milliseconds()}
 }
 
 // unitResult is a unit's proof: the unit, its base commit, test and task type, its trials and how it ended.
@@ -53,6 +67,7 @@ type cmdResult struct {
 	Command string `json:"command"`
 	Result  string `json:"result"`
 	Tail    string `json:"tail"` // the last 60 lines of its output
+	span
 }
 
 // newVerdict is the report of a run in its directory dir, every node not run yet.
@@ -82,12 +97,12 @@ func (r *verdict) step(name string, fn func() (map[string]any, error)) {
 	n := r.node(name)
 	n.Result, r.at = "running", name
 	r.emit(name, map[string]any{"state": "started"})
-	start := time.Now()
-	ev, err := fn()
+	var ev map[string]any
+	var err error
+	n.span = timed(func() { ev, err = fn() })
 	if ev == nil {
 		ev = map[string]any{}
 	}
-	n.DurationMS = time.Since(start).Milliseconds()
 	cmds, _ := ev["commands"].([]cmdResult)
 	r.Commands = append(r.Commands, cmds...)
 	n.Result = outcome(err)
