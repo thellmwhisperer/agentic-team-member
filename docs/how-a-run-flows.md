@@ -74,12 +74,13 @@ command's last 60 lines. A command that commits fails the checks too.
 | `chore` | Nothing beyond the commands |
 
 Red/green runs the report's `test_file` alone through `test_file` in
-`.atm.yaml`, once with the fix set aside and once with it back. Before each
-trial ATM restores the clone to its state before the first, so a trial cannot
-leave anything for the next; a test that changes or deletes existing files
-voids the verdict, and a test that hangs fails it. Known limit of the `fix`
-proof: where added lines cannot run alone, as in a compiled language that
-needs the base's declarations, that trial fails and the test passes it.
+`.atm.yaml`, once with the fix set aside and once with it back. After each
+trial ATM restores ignored files to their state before the first, including
+files the trial changed or deleted, so the green cannot pass on the red's
+changes. A changed tracked file voids the verdict, and a test that hangs fails
+it. Known limit of the `fix` proof: where added lines cannot run alone, as in
+a compiled language that needs the base's declarations, that trial fails and
+the test passes it.
 
 Every type then fails, naming the old path, when a test file the base has is
 deleted or shorter. If Git detects a rename, ATM checks the staged file at its
