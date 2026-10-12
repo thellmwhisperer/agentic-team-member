@@ -208,15 +208,21 @@ func TestAgentBoxFoldsToolCallsBetweenWhatTheAgentSaysIntoOneDimLine(t *testing.
 		`{"step":"agent","id":"t3","tool":"Bash","detail":"go vet ./...","result":"passed"}`,
 		`{"step":"agent","says":"Red on behaviour. Now the fix."}`,
 		`{"step":"agent","id":"t4","tool":"Bash","detail":"go build ./...","result":"failed"}`,
-		`{"step":"agent","id":"t5","tool":"Read","detail":"view.go","result":"running"}`)...)
+		`{"step":"agent","id":"t5","tool":"Read","detail":"view.go\nmodel.go","result":"running"}`)...)
 	s := view(m)
 	if !order(s, "∴ Plan the fix.", "✎ Writing the red tests first.", "  · 3 tools: Edit, Bash ×2",
-		"✎ Red on behaviour. Now the fix.", "✗ failed Bash go build ./...", "1 tool: Read · view.go") ||
-		strings.Contains(s, "✓ passed Bash") {
+		"✎ Red on behaviour. Now the fix.", "✗ failed Bash go build ./...", "⠋ 1 tool: Read · view.go") ||
+		strings.Contains(s, "✓ passed Bash") || strings.Contains(s, "model.go") {
 		t.Fatalf("agent box:\n%s", s)
 	}
 	if s := m.View(); !strings.Contains(s, paint(dim, "· 3 tools: Edit, Bash ×2")) ||
 		strings.Contains(s, paint(dim, "∴ Plan the fix.")) {
 		t.Fatalf("want the tool batch dim and the thinking not:\n%q", s)
+	}
+
+	s = view(screen(120, 40, append(unit[:7:7], `{"step":"agent","says":"Working."}`,
+		`{"step":"agent","id":"t1","tool":"skill","detail":"","result":"running"}`)...))
+	if !strings.Contains(s, "⠋ 1 tool: skill") || strings.Contains(s, "⠋ 1 tool: skill ·") {
+		t.Fatalf("want an empty-detail running tool to keep its spinner without a detail suffix:\n%s", s)
 	}
 }
