@@ -213,7 +213,8 @@ func (m *Model) agentRuns() bool {
 // under them, a failed one on its own row, in at most lines lines.
 func (m *Model) agentBox(width, lines int) string {
 	var out, names []string
-	counts, running := map[string]int{}, ""
+	counts, running := map[string]int{}, false
+	runningDetail := ""
 	flush := func() {
 		if len(names) == 0 {
 			return
@@ -226,12 +227,15 @@ func (m *Model) agentBox(width, lines int) string {
 			}
 		}
 		line := fmt.Sprintf("%d tool%s: %s", n, map[bool]string{true: "s"}[n > 1], strings.Join(parts, ", "))
-		if running != "" {
-			out = append(out, "  "+m.icon("running")+" "+paint(dim, line+" · "+running))
+		if running {
+			if runningDetail != "" {
+				line += " · " + runningDetail
+			}
+			out = append(out, "  "+m.icon("running")+" "+paint(dim, line))
 		} else {
 			out = append(out, "  "+paint(dim, "· "+line))
 		}
-		names, counts, running = nil, map[string]int{}, ""
+		names, counts, running, runningDetail = nil, map[string]int{}, false, ""
 	}
 	for _, a := range m.agent {
 		switch {
@@ -247,7 +251,8 @@ func (m *Model) agentBox(width, lines int) string {
 				names = append(names, a.tool)
 			}
 			if a.result == "" || a.result == "running" {
-				running = a.detail
+				running = true
+				runningDetail, _, _ = strings.Cut(a.detail, "\n")
 			}
 		}
 	}
