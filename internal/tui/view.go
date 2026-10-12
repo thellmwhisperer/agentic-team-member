@@ -209,19 +209,49 @@ func (m *Model) agentRuns() bool {
 	return false
 }
 
-// agentBox is the agent's last tool calls, each with its result and dimmer than what it says, and its
-// thinking, in at most lines lines.
+// agentBox is what the agent says and thinks, the tool calls between two of those folded into one dim line
+// under them, a failed one on its own row, in at most lines lines.
 func (m *Model) agentBox(width, lines int) string {
-	var out []string
-	for _, a := range m.agent {
-		if text := cmp.Or(a.says, a.thinking); text != "" {
-			first, _, _ := strings.Cut(strings.TrimSpace(text), "\n")
-			out = append(out, map[bool]string{true: "✎ " + first, false: paint(dim, "∴ "+first)}[a.says != ""])
-			continue
+	var out, names []string
+	counts, running := map[string]int{}, ""
+	flush := func() {
+		if len(names) == 0 {
+			return
 		}
-		state := cmp.Or(a.result, "running")
-		out = append(out, m.icon(state)+" "+paint(states[state][1], state)+" "+paint(dim, a.tool+" "+a.detail))
+		n, parts := 0, make([]string, len(names))
+		for i, t := range names {
+			n, parts[i] = n+counts[t], t
+			if counts[t] > 1 {
+				parts[i] += fmt.Sprintf(" ×%d", counts[t])
+			}
+		}
+		line := fmt.Sprintf("%d tool%s: %s", n, map[bool]string{true: "s"}[n > 1], strings.Join(parts, ", "))
+		if running != "" {
+			out = append(out, "  "+m.icon("running")+" "+paint(dim, line+" · "+running))
+		} else {
+			out = append(out, "  "+paint(dim, "· "+line))
+		}
+		names, counts, running = nil, map[string]int{}, ""
 	}
+	for _, a := range m.agent {
+		switch {
+		case a.says != "" || a.thinking != "":
+			flush()
+			first, _, _ := strings.Cut(strings.TrimSpace(cmp.Or(a.says, a.thinking)), "\n")
+			out = append(out, map[bool]string{true: "✎ ", false: "∴ "}[a.says != ""]+first)
+		case a.result == "failed":
+			flush()
+			out = append(out, m.icon("failed")+" "+paint(red, "failed")+" "+paint(dim, a.tool+" "+a.detail))
+		default:
+			if counts[a.tool]++; counts[a.tool] == 1 {
+				names = append(names, a.tool)
+			}
+			if a.result == "" || a.result == "running" {
+				running = a.detail
+			}
+		}
+	}
+	flush()
 	if len(out) == 0 {
 		out = []string{paint(dim, "starting")}
 	}
