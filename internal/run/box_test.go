@@ -66,8 +66,10 @@ func TestClaudeAndPiTellTheSameStory(t *testing.T) {
 		`{"type":"toolCall","id":"call-0","name":"Edit","arguments":{"path":"internal/run/checks_test.go"}}]}}
 {"type":"tool_execution_start","toolCallId":"call-0","toolName":"Edit","args":{"path":"internal/run/checks_test.go"}}
 {"type":"tool_execution_end","toolCallId":"call-0","toolName":"Edit","result":{},"isError":false}`
-	c, p := boxLines("claude", claude), boxLines("pi", pi)
-	if len(c) != 3 || !reflect.DeepEqual(c, p) {
-		t.Fatalf("claude box lines:\n%q\npi box lines:\n%q", c, p)
+	want := []string{"∴ " + thought, "✎ Writing the red tests first, then the fix in `reset`.", "Edit internal/run/checks_test.go"}
+	for harness, lines := range map[string][]string{"claude": boxLines("claude", claude), "pi": boxLines("pi", pi)} {
+		if !reflect.DeepEqual(lines, want) {
+			t.Errorf("%s box lines:\n%q\nwant\n%q", harness, lines, want)
+		}
 	}
 }

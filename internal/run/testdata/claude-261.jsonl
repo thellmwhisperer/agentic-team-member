@@ -1,0 +1,4 @@
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"","signature":"CAQSuhcKEAgSGAI4"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Writing the red tests first, then the fix in `reset`."}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_01","name":"Edit","input":{"file_path":"internal/run/checks_test.go"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_01","is_error":false,"content":"ok"}]}}

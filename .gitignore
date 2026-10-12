@@ -9,6 +9,7 @@ dist/
 build/
 cdk.out/
 *.jsonl
+!internal/run/testdata/*.jsonl
 .atm/
 .tmp/
 .workspace/
