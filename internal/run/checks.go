@@ -250,15 +250,11 @@ func onBase(clone, tree string, aside []string, test, tmpl string) error {
 }
 
 // trial runs base with the paths aside as they are at HEAD, brings the agent's work, tree, back and runs
-// after, "" for nothing, and returns how each ended, zero when not run. A hang in either, a clone that is no
-// longer tree, or a file keep recorded, ignored or not, changed by either, is err: the verdict is void. After each
-// run, the files git ignores are back as keep left them.
+// after, "" for nothing, and returns how each ended, zero when not run. A hang in either, or a clone that is no
+// longer tree, is err: the verdict is void. After each run, every file git ignores is back as keep left them,
+// changed or deleted ones too, so the green cannot pass on what the red left there.
 func trial(clone, tree string, aside []string, base, after string) (red, green try, err error) {
-	defer func() {
-		if e := reset(clone); !errors.Is(err, e) { // void once
-			err = errors.Join(err, e)
-		}
-	}()
+	defer func() { err = errors.Join(err, reset(clone)) }()
 	if len(aside) > 0 {
 		args := append([]string{"--literal-pathspecs", "restore", "--source=HEAD", "--staged", "--worktree", "--"},
 			aside...)
@@ -354,37 +350,12 @@ func whole(clone string) (string, error) {
 }
 
 // reset brings clone's working tree back to what keep recorded, byte for byte, new files gone, the ignored ones
-// too. A file keep recorded that was changed or deleted, and that clone's index lacks, is errVoid: a file of
-// the index is the clone's own git's to check, which may rewrite its line endings. diff hashes files above the
-// configured threshold in chunks.
+// too. An ignored file a run changed or deleted, a runner's cache say, is put back, not void: the next run cannot
+// see it. A file of the index is the clone's own git's to check, which may rewrite its line endings.
 func reset(clone string) error {
-	_, err := every(clone, "update-index", "-q", "--refresh")
-	if err != nil {
-		return err
-	}
-	changed, err := every(clone, "diff", "--name-only", "-z")
-	if err != nil {
-		return err
-	}
-	var void []string
-	if changed != "" {
-		index, err := git(clone, "ls-files", "-z")
-		if err != nil {
-			return err
-		}
-		index = "\x00" + index + "\x00"
-		for _, p := range strings.Split(changed, "\x00") {
-			if p != "" && !strings.Contains(index, "\x00"+p+"\x00") {
-				void = append(void, p)
-			}
-		}
-	}
-	_, err = every(clone, "clean", "-fdqx")
+	_, err := every(clone, "clean", "-fdqx")
 	if err == nil {
 		_, err = every(clone, "checkout", "--", ".")
-	}
-	if err == nil && len(void) > 0 {
-		err = fmt.Errorf("%w: %s", errVoid, strings.Join(void, " "))
 	}
 	return err
 }
