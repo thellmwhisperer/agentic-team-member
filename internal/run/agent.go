@@ -75,7 +75,8 @@ func (a agent) argv(clone, skill, final, brief string) (argv []string, stdin str
 	switch a.Harness {
 	case "claude":
 		argv = []string{"claude", "-p", "--output-format", "stream-json", "--verbose", "--setting-sources", "project",
-			"--strict-mcp-config", "--permission-mode", "acceptEdits", "--tools", tools, "--allowedTools", tools}
+			"--strict-mcp-config", "--permission-mode", "acceptEdits", "--tools", tools, "--allowedTools", tools,
+			"--thinking-display", "summarized"} // else claude's thinking blocks come empty
 		argv = with(with(argv, a.Model, "--model", a.Model), a.Effort, "--effort", a.Effort)
 		return append(argv, a.args...), brief
 	case "codex":
@@ -284,9 +285,9 @@ type event struct {
 
 type block struct {
 	Type, Name, Text, Thinking, ID string
-	ToolUseID                      string `json:"tool_use_id"`
-	IsError                        bool   `json:"is_error"`
-	Input                          json.RawMessage
+	ToolUseID                      string          `json:"tool_use_id"`
+	IsError                        bool            `json:"is_error"`
+	Input, Arguments               json.RawMessage // claude's and pi's
 }
 
 // see reads one JSON line of harness's stream.
@@ -472,9 +473,13 @@ func (e event) blocks() (evs []map[string]any) {
 				evs = append(evs, says(b.Text)...)
 			}
 		case "thinking":
-			evs = append(evs, map[string]any{"thinking": b.Thinking})
+			if strings.TrimSpace(b.Thinking) != "" { // claude's, without its summary, is only a signature
+				evs = append(evs, map[string]any{"thinking": b.Thinking})
+			}
 		case "tool_use":
 			evs = append(evs, toolCall(b.ID, b.Name, detail(b.Input), "running"))
+		case "toolCall": // pi's, which its tool_execution_start may never follow
+			evs = append(evs, toolCall(b.ID, b.Name, detail(b.Arguments), "running"))
 		case "tool_result":
 			evs = append(evs, toolCall(b.ToolUseID, "", "", result(b.IsError)))
 		}

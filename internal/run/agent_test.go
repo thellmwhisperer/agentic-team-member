@@ -241,7 +241,7 @@ func TestRunDrivesTheAgent(t *testing.T) {
 	cases := map[string]string{
 		"claude": "-p --output-format stream-json --verbose --setting-sources project --strict-mcp-config " +
 			"--permission-mode acceptEdits --tools Read,Edit,Write,Bash,Glob,Grep,Skill " +
-			"--allowedTools Read,Edit,Write,Bash,Glob,Grep,Skill --model m --effort e --x y",
+			"--allowedTools Read,Edit,Write,Bash,Glob,Grep,Skill --thinking-display summarized --model m --effort e --x y",
 		"codex": `exec --json -C <clone> --sandbox workspace-write -o <log>.final.md -c model="m" ` +
 			`-c model_reasoning_effort="e" --x y <brief>`,
 		"opencode": "run --pure --format json --dir <clone> -m m --variant e --x y <brief>",
