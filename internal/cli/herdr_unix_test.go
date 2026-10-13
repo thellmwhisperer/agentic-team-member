@@ -148,14 +148,15 @@ func checkAttachSelection(t *testing.T, got struct {
 }
 
 func TestEveryRunOnTheScreenShowsInHerdr(t *testing.T) {
-	resumeRepo(t, "", "")
+	dir, _ := resumeRepo(t, "", "")
+	watcher(t, dir, "w", 0)
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
 	t.Setenv("HERDR_PANE_ID", "wX:p1")
 
 	t.Setenv("HERDR_ENV", "")
 	calls := fakeHerdr(t, "0")
-	if _, code := onTerminal(t, "run", "chore.md"); code != 0 {
+	if _, code := onTerminal(t, "run", "--watcher", "w", "chore.md"); code != 0 {
 		t.Fatalf("exit %d", code)
 	}
 	if got := herdrCalls(t, calls); len(got) != 0 {
@@ -163,7 +164,7 @@ func TestEveryRunOnTheScreenShowsInHerdr(t *testing.T) {
 	}
 
 	t.Setenv("HERDR_ENV", "1")
-	if _, code := onTerminal(t, "run", "chore.md"); code != 0 {
+	if _, code := onTerminal(t, "run", "--watcher", "w", "chore.md"); code != 0 {
 		t.Fatalf("exit %d", code)
 	}
 	checkHerdrCalls(t, calls, wantRunSteps("chore-2", "startup"))
@@ -180,7 +181,7 @@ func TestEveryRunOnTheScreenShowsInHerdr(t *testing.T) {
 		t.Setenv("NO_COLOR", env.noColor)
 		t.Setenv("TERM", env.term)
 		calls = fakeHerdr(t, "0")
-		if _, code := onTerminal(t, "run", "chore.md"); code != 0 {
+		if _, code := onTerminal(t, "run", "--watcher", "w", "chore.md"); code != 0 {
 			t.Fatalf("plain run exit %d", code)
 		}
 		checkHerdrCalls(t, calls, wantRunSteps(label, "startup"))
@@ -194,7 +195,7 @@ func TestEveryRunOnTheScreenShowsInHerdr(t *testing.T) {
 	}
 
 	calls = fakeHerdr(t, "1")
-	if shown, code := onTerminal(t, "run", "chore.md"); code != 0 || !strings.Contains(shown, "passed") {
+	if shown, code := onTerminal(t, "run", "--watcher", "w", "chore.md"); code != 0 || !strings.Contains(shown, "passed") {
 		t.Fatalf("a failing herdr changed the run: exit %d, the terminal showed %q", code, shown)
 	}
 	if got := herdrCalls(t, calls); len(got) != 10 {
@@ -220,12 +221,13 @@ func TestAttachWithoutRunsDoesNotReportHerdr(t *testing.T) {
 
 func TestDefaultAttachKeepsSelectedRunWhenAnotherStarts(t *testing.T) {
 	repoDir, _ := resumeRepo(t, "", "")
+	watcher(t, repoDir, "w", 0)
 	writeIssue(t, repoDir, "second.md", "# Second\nType: chore\nDo it.\n")
 	agentsReady, agentRelease := setupBarrierAgent(t)
 	startRun := func(task string) string {
 		t.Helper()
 		c := root()
-		c.SetArgs([]string{"run", task})
+		c.SetArgs([]string{"run", "--watcher", "w", task})
 		var out strings.Builder
 		c.SetOut(&out)
 		if err := c.Execute(); err != nil {
@@ -285,6 +287,7 @@ func waitForAgents(t *testing.T, ready string, count int) {
 
 func TestRunReportsWorkingBeforeIssueLoadingFails(t *testing.T) {
 	dir := repo(t, "https://example.com/o/r.git")
+	watcher(t, dir, "w", 0)
 	cleanBackgroundServer(t, dir)
 	writeIssue(t, dir, "retry.md", "# Retry\nType: fix\nRetry.\n")
 	t.Setenv("NO_COLOR", "")
@@ -292,7 +295,7 @@ func TestRunReportsWorkingBeforeIssueLoadingFails(t *testing.T) {
 	t.Setenv("HERDR_ENV", "1")
 	t.Setenv("HERDR_PANE_ID", "wX:p1")
 	calls := fakeHerdr(t, "0")
-	if _, code := onTerminal(t, "run", "retry.md"); code != 2 {
+	if _, code := onTerminal(t, "run", "--watcher", "w", "retry.md"); code != 2 {
 		t.Fatalf("exit %d, want config failure", code)
 	}
 	got := herdrCalls(t, calls)

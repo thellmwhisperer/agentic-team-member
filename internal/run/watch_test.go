@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"os"
 	"os/exec"
@@ -96,7 +97,7 @@ func TestWatchPrintsEachStepAndKeepsWatchingAfterTheRun(t *testing.T) {
 // A killed watcher leaves WATCHER GONE on the screen of each run bound to it, once; another adopts the run.
 func TestAKilledWatcherLeavesItsRunsUnwatchedUntilAnotherAdoptsThem(t *testing.T) {
 	defer func(b, k time.Duration) { beat, tick = b, k }(beat, tick)
-	beat, tick = 10*time.Millisecond, 10*time.Millisecond
+	beat, tick = 10*time.Millisecond, time.Hour
 	top := backgroundRepo(t)
 	wait, release := holdFakeAgents(t, 1)
 	id, kill := watcherProcess(t, top)
@@ -114,11 +115,11 @@ func TestAKilledWatcherLeavesItsRunsUnwatchedUntilAnotherAdoptsThem(t *testing.T
 			}
 		})
 	}()
+	newID, lines, _ := watching(t, top, o.Run)
 	if l := nextLine(t, gone); !regexp.MustCompile(`^WATCHER GONE at \d\d:\d\d:\d\d: no one is watching this run$`).
 		MatchString(l) {
 		t.Fatalf("screen line %q", l)
 	}
-	newID, lines, _ := watching(t, top, o.Run)
 	if l := watchEvent(t, nextLine(t, lines), o.Run); l != "adopted: running at agent" {
 		t.Fatalf("adopting watcher printed %q first", l)
 	}
@@ -139,6 +140,33 @@ func TestAKilledWatcherLeavesItsRunsUnwatchedUntilAnotherAdoptsThem(t *testing.T
 	}
 	if runs, err := Runs(top); err != nil || runs[0].Watcher != newID {
 		t.Fatalf("Runs = %+v, %v; want the run bound to %s", runs, err, newID)
+	}
+	var report verdict
+	b, err := os.ReadFile(filepath.Join(runDir(top, o.Run), "report.json"))
+	if err != nil || json.Unmarshal(b, &report) != nil || report.Watcher != newID {
+		t.Fatalf("report watcher = %q, %v; want %s", report.Watcher, err, newID)
+	}
+}
+
+func TestWatcherDeathIsLoggedWhenRunEndsBeforeServerTick(t *testing.T) {
+	defer func(k time.Duration) { tick = k }(tick)
+	tick = time.Hour
+	top := backgroundRepo(t)
+	wait, release := holdFakeAgents(t, 1)
+	id, kill := watcherProcess(t, top)
+	o, err := startWithWatcher(t, top, []string{issueFile(t, issue), "--watcher", id})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wait()
+	kill()
+	release()
+	var screen bytes.Buffer
+	if _, err := Attach(top, o.Run, &screen); err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(screen.String(), "WATCHER GONE"); n != 1 {
+		t.Fatalf("WATCHER GONE %d times on the screen:\n%s", n, &screen)
 	}
 }
 
@@ -169,46 +197,85 @@ func TestWatchLiveness(t *testing.T) {
 	}
 }
 
-// The gate's lines come from no-mistakes axi status, polled: each once, a wait again every remind while it waits.
-func TestGateLinesAndAWaitPrintedAgainEveryInterval(t *testing.T) {
+func TestWatchPrintsGateEventsFromAxiStatusAndSurvivesTransientError(t *testing.T) {
+	defer func(b, r time.Duration) { beat, remind = b, r }(beat, remind)
+	beat, remind = 2*time.Millisecond, 15*time.Millisecond
+	top := gitT(t, repo(t, "https://example.com/owner/repo.git", atmSet(atmYAML, "delivery", "true")),
+		"rev-parse", "--show-toplevel")
+	background(t, top)
+	bin := t.TempDir()
+	waiting, merged, counter, release := filepath.Join(bin, "waiting"), filepath.Join(bin, "merged"),
+		filepath.Join(bin, "count"), filepath.Join(bin, "release")
+	const liveStatus = `run:
+  id: "01M4T2F20FPSNC61KDJ6FYHBN8"
+  branch: atm/go-port-no-watcher-no-run-atm-watch-neve-20261013-075250
+  status: running
+  head: aefb7d33
+  head_sha: aefb7d3322800a162036bb5f5bfa36b4e27c1009
+  verification_plan: none
+  findings: "3 awaiting, 4 auto-fix"
+  steps[9]{step,status,findings,duration_ms}:
+    intent,completed,0,149
+    rebase,completed,0,44095
+    review,fixing,7,277544
+    test,pending,0,0
+    document,pending,0,0
+    lint,pending,0,0
+    push,pending,0,0
+    pr,pending,0,0
+    ci,pending,0,0
+  active_steps[1]{step,status,active_for,round_active_for,last_activity,agent_pid,round}:
+    review,fixing,9m29s,4m36s,"2s ago: codex producing output","90314",fix 1
+`
 	steps := func(rows ...string) string {
-		return "current_branch: atm/x\nstatus: running\n  steps[3]{step,status,findings,duration_ms}:\n    " +
-			strings.Join(rows, "\n    ") + "\noutcome: running\n"
+		return "steps[3]{step,status,findings,duration_ms}:\n    " + strings.Join(rows, "\n    ") + "\n"
 	}
-	at := time.Date(2026, 10, 13, 9, 0, 0, 0, time.UTC)
-	var g gate
-	for _, c := range []struct {
-		after  time.Duration
-		status string
-		want   []string
-		done   bool
-	}{
-		{0, steps("review,running,0,0", "pr,pending,0,0", "ci,pending,0,0"), nil, false},
-		{time.Minute, steps("review,awaiting_approval,2,10", "pr,pending,0,0", "ci,pending,0,0"),
-			[]string{"gate waiting: review"}, false},
-		{2 * time.Minute, steps("review,awaiting_approval,2,10", "pr,pending,0,0", "ci,pending,0,0"), nil, false},
-		{11 * time.Minute, steps("review,awaiting_approval,2,10", "pr,pending,0,0", "ci,pending,0,0"),
-			[]string{"still waiting 10m: review"}, false},
-		{15 * time.Minute, steps("review,awaiting_approval,2,10", "pr,pending,0,0", "ci,pending,0,0"), nil, false},
-		{21 * time.Minute, steps("review,awaiting_approval,2,10", "pr,pending,0,0", "ci,pending,0,0"),
-			[]string{"still waiting 20m: review"}, false},
-		{22 * time.Minute, `pr: "https://github.com/o/r/pull/7"` + "\n" +
-			steps("review,completed,0,10", "pr,completed,0,10", "ci,fixing,1,0"),
-			[]string{"pr https://github.com/o/r/pull/7", "gate fixing CI"}, false},
-		{23 * time.Minute, `pr: "https://github.com/o/r/pull/7"` + "\n" +
-			steps("review,completed,0,10", "pr,completed,0,10", "ci,completed,0,10"), []string{"ci green"}, false},
-		{24 * time.Minute, `pr: "https://github.com/o/r/pull/7"` + "\npr_state: merged\n" +
-			steps("review,completed,0,10", "pr,completed,0,10", "ci,completed,0,10"), []string{"merged"}, true},
-	} {
-		got, done := g.events(c.status, at.Add(c.after))
-		if !reflect.DeepEqual(got, c.want) || done != c.done {
-			t.Fatalf("at +%s: %q, done %v; want %q, done %v", c.after, got, done, c.want, c.done)
+	if err := os.WriteFile(waiting, []byte(steps("review,awaiting_approval,1,1", "pr,pending,0,0", "ci,pending,0,0")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(merged, []byte("pr: \"https://github.com/o/r/pull/7\"\npr_state: merged\n"+
+		steps("review,completed,0,1", "pr,completed,0,1", "ci,completed,0,1")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := "#!/bin/sh\nn=0\ntest ! -f \"$ATM_STATUS_COUNT\" || n=$(cat \"$ATM_STATUS_COUNT\")\nn=$((n + 1))\nprintf '%s' \"$n\" > \"$ATM_STATUS_COUNT\"\ncase $n in\n1) cat \"$ATM_STATUS_LIVE\" ;;\n2) exit 1 ;;\n*) if test -f \"$ATM_STATUS_RELEASE\"; then cat \"$ATM_STATUS_MERGED\"; else cat \"$ATM_STATUS_WAITING\"; fi ;;\nesac\n"
+	if err := os.WriteFile(filepath.Join(bin, "no-mistakes"), []byte(cmd), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bin, "live"), []byte(liveStatus), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ATM_STATUS_COUNT", counter)
+	t.Setenv("ATM_STATUS_LIVE", filepath.Join(bin, "live"))
+	t.Setenv("ATM_STATUS_WAITING", waiting)
+	t.Setenv("ATM_STATUS_MERGED", merged)
+	t.Setenv("ATM_STATUS_RELEASE", release)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	id, lines, _ := watching(t, top, "")
+	if _, err := startWithWatcher(t, top, []string{"--watcher", id, issueFile(t, issue)}); err != nil {
+		t.Fatal(err)
+	}
+	readGateEvent := func() string {
+		for {
+			event := watchEvent(t, nextLine(t, lines), "issue-1")
+			if strings.HasPrefix(event, "lost:") {
+				t.Fatalf("transient status error became a watcher event: %q", event)
+			}
+			if strings.HasPrefix(event, "gate ") || strings.HasPrefix(event, "still waiting") || event == "merged" {
+				return event
+			}
 		}
 	}
-	var failed gate
-	if got, done := failed.events(steps("review,completed,0,1", "lint,failed,1,1", "ci,pending,0,0"), at); !done ||
-		!reflect.DeepEqual(got, []string{"gate failed: lint"}) {
-		t.Fatalf("failed gate: %q, done %v", got, done)
+	if got := readGateEvent(); got != "gate waiting: review" {
+		t.Fatalf("first gate event %q", got)
+	}
+	if got := readGateEvent(); got != "still waiting 0m: review" {
+		t.Fatalf("reminder event %q", got)
+	}
+	if err := os.WriteFile(release, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := readGateEvent(); got != "merged" {
+		t.Fatalf("merged gate event %q", got)
 	}
 }
 

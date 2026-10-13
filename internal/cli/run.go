@@ -23,9 +23,6 @@ func runCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := run.Watched(root, args); err != nil {
-				return err
-			}
 			o, err := run.Start(root, args)
 			if err != nil {
 				return err

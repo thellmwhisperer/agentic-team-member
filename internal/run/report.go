@@ -199,6 +199,23 @@ func (r *verdict) write() error {
 	return err
 }
 
+func setReportWatcher(path, id string) error {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	var r verdict
+	if err = json.Unmarshal(b, &r); err != nil {
+		return err
+	}
+	r.Watcher = id
+	b, err = json.MarshalIndent(r, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(b, '\n'), 0o644)
+}
+
 // finish writes report.json a last time and the summary to summary, and gives err, the run's, its exit code.
 func (r *verdict) finish(err error, summary io.Writer) error {
 	err = errors.Join(err, r.write())

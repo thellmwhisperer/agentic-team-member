@@ -316,6 +316,7 @@ func (s *server) handle(c net.Conn) {
 			return
 		}
 		s.Lock()
+		s.unwatched()
 		r.Watcher, r.gone = req.Watcher, false
 		s.save()
 		o := r.Outcome
@@ -386,6 +387,12 @@ func (s *server) run(r *bgRun, args []string) {
 	s.Lock()
 	defer s.Unlock()
 	o := &r.Outcome
+	s.unwatched()
+	if o.Report != "" && o.Step != "" {
+		if err := setReportWatcher(o.Report, r.Watcher); err != nil {
+			fmt.Fprintln(os.Stderr, "atm serve:", err)
+		}
+	}
 	o.Outcome, o.Ended, s.last = outcome(err), time.Now(), time.Now()
 	if err != nil {
 		o.Reason, _, _ = strings.Cut(err.Error(), "\n")
@@ -626,11 +633,14 @@ func (s *server) save() {
 // Start checks args, atm run's command line, and has the background process of the repository at root run it.
 // It returns the run, just started. A run that resumes another takes that one's issue.
 func Start(root string, args []string) (Outcome, error) {
-	args, _, resume, _, err := parseArgs(args)
+	args, _, resume, a, err := parseArgs(args)
+	if err == nil && !Watching(root, a.watcher) {
+		err = errNoWatcher
+	}
 	if err == nil && *resume != "" {
 		var p resumePoint
 		if p, err = resumeFrom(root, *resume); err == nil {
-			args, _, _, _, err = parseArgs(append(args, p.Issue)) // and no other
+			args, _, _, a, err = parseArgs(append(args, p.Issue)) // and no other
 		}
 	}
 	if err != nil {

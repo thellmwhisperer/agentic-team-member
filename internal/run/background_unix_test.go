@@ -30,7 +30,7 @@ func TestKilledBackgroundKeepsCloneForStartedAgent(t *testing.T) {
 	t.Cleanup(func() { _ = os.Remove(socket(top)) })
 	done := make(chan error, 1)
 	go func() {
-		_, err := Start(top, []string{issueFile(t, issue)})
+		_, err := startWithWatcher(t, top, []string{issueFile(t, issue)})
 		done <- err
 	}()
 	until(t, "agent start", func() bool {
@@ -111,7 +111,7 @@ func recordedPID(t *testing.T, path string) int {
 
 func startBackgroundRun(t *testing.T, top string) Outcome {
 	t.Helper()
-	o, err := Start(top, []string{issueFile(t, issue)})
+	o, err := startWithWatcher(t, top, []string{issueFile(t, issue)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +222,7 @@ func theClone(t *testing.T, root string) string {
 // nextRun runs a run in the background, through to its end at its agent.
 func nextRun(t *testing.T, root string) {
 	t.Helper()
-	o, err := Start(root, []string{issueFile(t, issue)})
+	o, err := startWithWatcher(t, root, []string{issueFile(t, issue)})
 	if err == nil {
 		o, err = Attach(root, o.Run, &bytes.Buffer{})
 	}

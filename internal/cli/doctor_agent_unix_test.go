@@ -50,6 +50,10 @@ func helloRepoWith(t *testing.T, harness, mode, fake string) (dir, call string) 
 	if err := os.WriteFile(filepath.Join(dir, ".atm.yaml"), []byte(config), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(dir, ".git", "info", "exclude"), []byte(".atm/\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	watcher(t, dir, "w", 0)
 	return dir, call
 }
 

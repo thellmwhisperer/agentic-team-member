@@ -35,6 +35,7 @@ func TestRunWithoutALiveWatcherDoesNotStart(t *testing.T) {
 		{"run", "retry.md"},
 		{"run", "--watcher", "nobody", "retry.md"},
 		{"run", "retry.md", "--watcher", "stale"},
+		{"axi", "run", "retry.md"},
 	} {
 		_, err := atm(t, args...)
 		if run.ExitCode(err) != 2 || err == nil || err.Error() !=

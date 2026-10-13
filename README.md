@@ -89,10 +89,19 @@ and `gh` for GitHub issues.
 ```bash
 cd /path/to/your/repo
 atm init     # writes .atm.yaml: fill in its commands and file patterns
-atm watch &  # until killed: one line per event of the runs bound to it
-atm doctor   # checks git, the agent CLI, gh, .atm.yaml and a live watcher
-atm run --watcher <id> 300  # <id> from atm watch's first line; or a file: plans/retry.md
 ```
+
+In the CoS session, start `atm watch` under its streaming monitor, which wakes
+the session for each output line. Keep it running there. After it prints
+`watching as w7k2`, start a separate command in that session:
+
+```bash
+atm doctor
+atm run --watcher w7k2 280
+```
+
+Use the ID printed by `atm watch` in place of `w7k2`; a run can also take an
+issue file, such as `plans/retry.md`.
 
 `.atm.yaml` declares the repository's `install`, `test`, `typecheck` and
 `lint` commands, how to run one test, which files are tests and docs, and the
