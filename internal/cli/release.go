@@ -100,13 +100,18 @@ func (r published) binary() ([]byte, error) {
 // swap puts bin at target by rename, the previous atm kept next to it until bin answers --version as tag from
 // there within 20 seconds; else the previous one comes back.
 func swap(target string, bin []byte, tag string) error {
+	previous := target + ".previous"
+	if _, err := os.Lstat(previous); err == nil {
+		return fmt.Errorf("refusing update: %s already exists", previous)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
 	f, err := os.CreateTemp(filepath.Dir(target), ".atm-update-*")
 	if err != nil {
 		return err
 	}
 	_, err = f.Write(bin)
 	err = errors.Join(err, f.Chmod(0o755), f.Close())
-	previous := target + ".previous"
 	if err == nil {
 		err = os.Rename(target, previous)
 	}

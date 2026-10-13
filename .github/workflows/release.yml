@@ -153,5 +153,8 @@ jobs:
           TAG: ${{ needs.release-please.outputs.tag_name }}
           ATM_PREFIX: ${{ runner.temp }}/bin
         run: |
+          set -euo pipefail
           sh install.sh --version "$TAG"
-          "$ATM_PREFIX/atm" --version | grep "^atm $TAG "
+          version="$("$ATM_PREFIX/atm" --version)"
+          set -- $version
+          [ "$1" = atm ] && [ "$2" = "$TAG" ]

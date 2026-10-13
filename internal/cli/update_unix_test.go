@@ -79,10 +79,16 @@ func installed(t *testing.T, tag string) string {
 	return target
 }
 
-func version(t *testing.T, bin string) string {
+func assertVersion(t *testing.T, bin, tag string) {
 	t.Helper()
-	out, _ := exec.Command(bin, "--version").Output()
-	return string(out)
+	out, err := exec.Command(bin, "--version").Output()
+	if err != nil {
+		t.Fatalf("%s --version exited with error: %v", bin, err)
+	}
+	fields := strings.Fields(string(out))
+	if len(fields) < 2 || fields[0] != "atm" || fields[1] != tag {
+		t.Fatalf("%s --version should report literal tag %q, got %q", bin, tag, out)
+	}
 }
 
 func TestUpdateReplacesTheBinaryWithTheLatestRelease(t *testing.T) {
@@ -92,9 +98,7 @@ func TestUpdateReplacesTheBinaryWithTheLatestRelease(t *testing.T) {
 	if err := update(&out, "v0.1.0", target); err != nil {
 		t.Fatalf("update: %v\n%s", err, out.String())
 	}
-	if v := version(t, target); !strings.HasPrefix(v, "atm v0.2.0 ") {
-		t.Fatalf("atm --version after update: %q", v)
-	}
+	assertVersion(t, target, "v0.2.0")
 	if entries, _ := os.ReadDir(filepath.Dir(target)); len(entries) != 1 {
 		t.Fatalf("update left %v next to atm", entries)
 	}
@@ -118,6 +122,24 @@ func TestUpdateRollsBackANewBinaryThatDoesNotAnswer(t *testing.T) {
 		t.Fatalf("update to a binary that does not answer: %v", err)
 	}
 	assertUntouched(t, target, "v0.1.0")
+}
+
+func TestUpdateRefusesToOverwriteAPreviousBinary(t *testing.T) {
+	target := installed(t, "v0.1.0")
+	previous := target + ".previous"
+	knownGood := "known-good previous atm"
+	if err := os.WriteFile(previous, []byte(knownGood), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := swap(target, []byte(fakeAtm("v0.2.0")), "v0.2.0"); err == nil || !strings.Contains(err.Error(), previous) {
+		t.Fatalf("update with existing backup: %v", err)
+	}
+	if b, err := os.ReadFile(target); err != nil || string(b) != fakeAtm("v0.1.0") {
+		t.Fatalf("current atm changed: %q, %v", b, err)
+	}
+	if b, err := os.ReadFile(previous); err != nil || string(b) != knownGood {
+		t.Fatalf("previous atm changed: %q, %v", b, err)
+	}
 }
 
 func TestUpdateWhenAlreadyLatestChangesNothing(t *testing.T) {
@@ -187,9 +209,7 @@ func TestInstallShInstallsTheLatestRelease(t *testing.T) {
 	if out, err := installSh(t, prefix); err != nil {
 		t.Fatalf("install.sh: %v\n%s", err, out)
 	}
-	if v := version(t, filepath.Join(prefix, "atm")); !strings.HasPrefix(v, "atm v0.2.0 ") {
-		t.Fatalf("installed atm --version: %q", v)
-	}
+	assertVersion(t, filepath.Join(prefix, "atm"), "v0.2.0")
 }
 
 func TestInstallShRefusesAWrongChecksumWritingNothing(t *testing.T) {
@@ -237,7 +257,5 @@ func TestPublishedReleaseAnswersItsVersion(t *testing.T) {
 	if err := os.WriteFile(atm, bin, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if v := version(t, atm); !strings.HasPrefix(v, "atm "+tag+" ") {
-		t.Fatalf("atm %s --version: %q", tag, v)
-	}
+	assertVersion(t, atm, tag)
 }
