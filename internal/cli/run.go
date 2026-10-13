@@ -47,8 +47,8 @@ func screen(w io.Writer) (*os.File, bool) {
 	return f, ok && terminal(f) && os.Getenv("NO_COLOR") == "" && os.Getenv("TERM") != "dumb"
 }
 
-// attach shows run label's screen on w until the user closes it and returns how it ended. Leaving leaves it going. herdr
-// sees the screen start from start, startup or resume.
+// attach shows run label's screen on w until the user closes it and returns how it ended.
+// Leaving leaves it going. herdr sees the screen start from start, startup or resume.
 func attach(root, label, start string, w io.Writer) error {
 	f, ok := screen(w)
 	if !ok {
@@ -70,8 +70,11 @@ func attach(root, label, start string, w io.Writer) error {
 }
 
 func attachCmd() *cobra.Command {
-	return &cobra.Command{Use: "attach [run]", Short: "Show a run's screen; completed screens stay until q or Ctrl+C",
-		Long: "The last running run is selected by default. Leaving a live screen leaves the run going.", Args: cobra.MaximumNArgs(1),
+	return &cobra.Command{
+		Use:   "attach [run]",
+		Short: "Show a run's screen; completed screens stay until q or Ctrl+C",
+		Long:  "The last running run is selected by default. Leaving a live screen leaves the run going.",
+		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			root, err := toplevel()
 			if err != nil {
