@@ -82,7 +82,6 @@ func TestRunTellsAWatchingScreenWhatItsAgentAndChecksDo(t *testing.T) {
 	}
 	for harness, stream := range streams {
 		t.Run(harness, func(t *testing.T) {
-<<<<<<< HEAD
 			yml := atmSet(atmInstall("true"), "test", "echo suite-ok; sh a_test.sh")
 			w := watch(t, harness, stream, yml)
 			for _, want := range []obj{

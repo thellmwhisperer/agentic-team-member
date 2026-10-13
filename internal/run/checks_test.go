@@ -45,7 +45,7 @@ func TestChecksStashSurvivesCloneSweep(t *testing.T) {
 	c := checksStashConfig(t, root)
 	done := make(chan error, 1)
 	go func() {
-		_, err := checks(dir, runDir, sha, "chore", "", nil, c)
+		_, err := checks(dir, runDir, sha, "chore", "", c)
 		done <- err
 	}()
 	defer func() {
