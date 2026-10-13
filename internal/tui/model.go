@@ -294,6 +294,7 @@ func (m *Model) started(step string, at time.Time) {
 		r = m.rows[i]
 	}
 	if step == "agent" || step == "ponytail" {
+		m.pipelineFocus = false
 		m.agent, m.history = nil, pane{}
 	}
 	r.state, r.start = "running", at
