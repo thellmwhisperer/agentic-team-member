@@ -19,7 +19,7 @@ A failed step stops the run; the steps after it are not run.
 | Issue | Reads the issue file or GitHub issue and its `Type:` | The issue cannot be read, or has no valid type |
 | Clone | Resolves `--base-ref` to a commit, clones the repository there into `.atm/clones/`, runs `install` | The ref, the clone or `install` fails |
 | Contract | Writes `brief.md`, the agent's contract | The brief cannot be written |
-| Agent | Runs the coding agent in the clone on the brief | It exits non-zero, times out, does not load the `ponytail` skill, or leaves no readable report |
+| Agent | Runs the coding agent in the clone on the brief | It exits non-zero, times out, reaches outside its clone, does not load the `ponytail` skill, or leaves no readable report |
 | Checks | Removes the ignored files the agent made, runs `install`, proves the task type, then runs `test`, `typecheck` and `lint` | A proof or a command fails, or anything committed |
 | Slop detector | Lets a model cut the diff; keeps the cut only if every check still passes | Its agent fails, reports badly, or anything commits |
 | Delivery | Commits the work on a branch and runs the `delivery` command | The branch or the command fails. Skipped when `delivery` is empty |
@@ -35,7 +35,9 @@ and gets its `install` run once. The contract, `brief.md` in the run's
 directory, tells the agent to read `AGENTS.md` if there is one, then gives the
 issue, the acceptance criteria of its task type, the commands from
 `.atm.yaml`, the style, what is forbidden and the JSON report it must end
-with.
+with. It limits reading, searching and running to the clone, forbids network
+access except package-manager dependency installation, and forbids access to
+the surrounding repository, `.atm/runs/` and other clones.
 
 ## Agent
 
@@ -52,8 +54,12 @@ ATM writes the bundled `ponytail` skill into the clone, outside git, and the
 agent's log must show it loaded under that exact name and succeeded. Every
 line the agent writes goes to `worker.jsonl`. Its report is the last JSON
 object of its final message and must name `test_file`: ATM never guesses
-which test proves the fix. A zero exit without a valid report fails; so does
-any non-zero exit.
+which test proves the fix. ATM checks each logged tool call, using the full
+arguments for all four harnesses. A call fails the step if it names an
+absolute path under the repository root but outside the clone, or if its
+shell command runs `curl` or `wget` or contains an HTTP(S) URL whose host is
+not `localhost`, `127.0.0.1` or `::1`. The error names the first offending
+call. A zero exit without a valid report fails; so does any non-zero exit.
 
 ## Checks
 
