@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/thellmwhisperer/agentic-team-member/internal/config"
@@ -33,10 +35,13 @@ func Hello(c config.Agent, limit time.Duration) (time.Duration, error) {
 	}
 	final := filepath.Join(dir, "final.md")
 	argv, stdin := agent{Agent: c}.argv(dir, skill, final, helloBrief)
-	ctx, cancel := context.WithTimeout(context.Background(), limit)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	ctx, cancel := context.WithTimeout(ctx, limit)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir, cmd.Stdin, cmd.WaitDelay = dir, strings.NewReader(stdin), time.Second
+	detach(cmd)
 	cmd.Env = agentEnv(nil)
 	var log bytes.Buffer
 	s := stream{live: func(map[string]any) {}}
@@ -49,8 +54,10 @@ func Hello(c config.Agent, limit time.Duration) (time.Duration, error) {
 	}
 	var exit *exec.ExitError
 	switch {
-	case ctx.Err() != nil:
+	case errors.Is(ctx.Err(), context.DeadlineExceeded):
 		err = fmt.Errorf("timed out after %s", Human(limit))
+	case ctx.Err() != nil:
+		err = errors.New("interrupted")
 	case errors.As(err, &exit) && exit.ExitCode() >= 0:
 		err = fmt.Errorf("exit code %d", exit.ExitCode())
 	case errors.As(err, &exit):
