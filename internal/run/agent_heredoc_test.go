@@ -22,11 +22,20 @@ func TestReachAcceptsQuotedHeredocTestData(t *testing.T) {
 	}
 	gitT(t, root, "add", target)
 	gitT(t, root, "commit", "-q", "-m", "add existing test file")
-	if fetchesAt(command, root) {
-		t.Error("literal fixture heredoc classified as a network fetch")
-	}
-	if got := outside([]use{{"Bash", command, command}}, root, root); got != "" {
-		t.Fatalf("literal fixture heredoc reached outside clone: %s", got)
+	for _, input := range []struct {
+		name, command string
+	}{
+		{"LF", command},
+		{"CRLF", string(bytes.ReplaceAll([]byte(command), []byte("\n"), []byte("\r\n")))},
+	} {
+		t.Run(input.name, func(t *testing.T) {
+			if fetchesAt(input.command, root) {
+				t.Error("literal fixture heredoc classified as a network fetch")
+			}
+			if got := outside([]use{{"Bash", input.command, input.command}}, root, root); got != "" {
+				t.Fatalf("literal fixture heredoc reached outside clone: %s", got)
+			}
+		})
 	}
 	t.Setenv("FAKE_AGENT_STREAM", bashEvent("claude", command, ""))
 	var out bytes.Buffer
