@@ -18,6 +18,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fakeAtm is a script that answers --version as atm at tag would, or an exit 1 when tag is empty.
@@ -168,7 +169,7 @@ func TestUpdateRefusesADevBuild(t *testing.T) {
 
 func TestUpdateRefusesWhileARunGoes(t *testing.T) {
 	setupConcurrentRunRepo(t)
-	_, _ = setupBarrierAgent(t)
+	_, release := setupBarrierAgent(t)
 	if out := atmIn(t, 0, "run", "retry.md"); out != "retry-1\n" {
 		t.Fatalf("atm run: %q", out)
 	}
@@ -182,6 +183,19 @@ func TestUpdateRefusesWhileARunGoes(t *testing.T) {
 		t.Fatalf("update while retry-1 runs: %v", err)
 	}
 	assertUntouched(t, target, "v0.1.0")
+	if err := os.WriteFile(release, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		var runs struct{ Runs []map[string]string }
+		if err := json.Unmarshal([]byte(atmIn(t, 0, "axi", "runs", "--json")), &runs); err != nil {
+			t.Fatal(err)
+		}
+		if len(runs.Runs) == 1 && runs.Runs[0]["outcome"] == "failed" {
+			return
+		}
+	}
+	t.Fatal("retry-1 did not finish after releasing the agent")
 }
 
 func assertUntouched(t *testing.T, target, tag string) {
