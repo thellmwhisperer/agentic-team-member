@@ -240,14 +240,17 @@ func deliveryRun(t *testing.T, s *shown, keys io.Writer, silent bool) func(strin
 			!order(s.since(mark), exitAltScreen, "delivery-says-hi") {
 			t.Errorf("delivery's output did not get the terminal: %q", s.since(mark))
 		}
-		_, _ = keys.Write([]byte("k"))
-		for got := false; !got; {
+		// Navigation input belongs to delivery while it owns the terminal. These are the
+		// bytes a terminal sends for focus, scrolling and an SGR wheel event.
+		navigation := []byte("\t\x1b[A\x1b[5~\x1b[<64;10;10M")
+		_, _ = keys.Write(navigation)
+		var received []byte
+		for !bytes.Contains(received, navigation) {
 			select {
 			case i := <-in:
-				got = string(i.Keys) == "k"
+				received = append(received, i.Keys...)
 			case <-time.After(5 * time.Second):
-				t.Error("delivery's keys did not reach it")
-				got = true
+				t.Fatalf("delivery did not receive navigation bytes %q; received %q", navigation, received)
 			}
 		}
 		fn(run.Frame{Event: []byte(`{"step":"delivery","state":"passed","branch":"fix/7","duration_ms":9}`)})
