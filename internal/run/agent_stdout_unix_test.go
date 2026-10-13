@@ -28,7 +28,7 @@ func TestRunKillsAChildHoldingTheAgentsStdout(t *testing.T) {
 		// The agent's group is empty once it exits: killing it finds nothing, which is no failure.
 		{name: "in its own session", env: "FAKE_AGENT_SETSID=1 "},
 		// What it left is killed whatever its exit, and its exit still fails the node.
-		{name: "agent exits non-zero", mode: "fail", why: "exit status 3"},
+		{name: "agent exits non-zero", mode: "fail", why: "exit code 3"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			defer func(d time.Duration) { agentTimeout = d }(agentTimeout)

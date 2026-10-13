@@ -19,8 +19,9 @@ A failed step stops the run; the steps after it are not run.
 | Issue | Reads the issue file or GitHub issue and its `Type:` | The issue cannot be read, or has no valid type |
 | Clone | Resolves `--base-ref` to a commit, clones the repository there into `.atm/clones/`, runs `install` | The ref, the clone or `install` fails |
 | Contract | Writes `brief.md`, the agent's contract | The brief cannot be written |
-| Agent | Runs the coding agent in the clone on the brief | It exits non-zero, times out, reaches outside its clone, does not load the `ponytail` skill, or leaves no readable report |
+| Agent | Runs the coding agent in the clone on the brief | It exits non-zero, times out, says nothing for 10 min, reaches outside its clone, does not load the `ponytail` skill, or leaves no readable report |
 | Checks | Removes the ignored files the agent made, runs `install`, proves the task type, then runs `test`, `typecheck` and `lint` | A proof or a command fails, or anything committed |
+
 | Slop detector | Lets a model cut the diff; keeps the cut only if every check still passes | Its agent fails, reports badly, or anything commits |
 | Delivery | Commits the work on a branch and runs the `delivery` command | The branch or the command fails. Skipped when `delivery` is empty |
 
@@ -52,7 +53,8 @@ The agent runs in the clone in its most minimal mode:
 
 ATM writes the bundled `ponytail` skill into the clone, outside git, and the
 agent's log must show it loaded under that exact name and succeeded. Every
-line the agent writes goes to `worker.jsonl`. Its report is the last JSON
+line the agent writes goes to `worker.jsonl`, and its stderr to
+`worker.stderr.txt` too, as it is written. Its report is the last JSON
 object of its final message and must name `test_file`: ATM never guesses
 which test proves the fix. ATM checks each logged tool call, using the full
 arguments for all four harnesses. A call fails the step if it names an
@@ -60,6 +62,11 @@ absolute path under the repository root but outside the clone, or if its
 shell command runs `curl` or `wget` or contains an HTTP(S) URL whose host is
 not `localhost`, `127.0.0.1` or `::1`. The error names the first offending
 call. A zero exit without a valid report fails; so does any non-zero exit.
+When an agent dies without a report, its node in
+`report.json` keeps its cause, `exit` (`exit code N`, `signal NAME`,
+`timed out after ...`, `silent for ...` or `interrupted`), and `tail`, the last
+20 lines it wrote, stdout and stderr in the order ATM read them. The step's
+error starts with that cause, then the log path.
 
 ## Checks
 
@@ -171,6 +178,7 @@ or opens a pull request: that is the command's business.
 | Reading a GitHub issue | 60 s |
 | Each command (`install`, `test`, `typecheck`, `lint`, a proof) | 10 min |
 | Each agent call, the slop detector's included | 30 min |
+| An agent that writes nothing on stdout or stderr | 10 min |
 | The delivery command | none |
 
 Past its limit, or when ATM gets Ctrl-C or SIGTERM, a process is killed with
@@ -185,7 +193,7 @@ it is on disk before delivery reads it.
 | Field | Holds |
 |-------|-------|
 | `failed_node`, `reason` | The step that failed and why |
-| `nodes` | Each step's `result` (`passed`, `failed`, `running`, `skipped` or `not run`), `started_at` (UTC, RFC 3339 with milliseconds) when it starts, and `duration_ms` when it ends |
+| `nodes` | Each step's `result` (`passed`, `failed`, `running`, `skipped` or `not run`), `started_at` (UTC, RFC 3339 with milliseconds) when it starts, and `duration_ms` when it ends; an agent's, once it died without a report, its `exit` and `tail` |
 | `type` | The task type |
 | `units` | Each unit's number, base commit, test file, type, result, red/green proof row span, and red and green trials: command, exit code, last 60 lines, `started_at` and `duration_ms` |
 | `reproofs` | The same proof rows and spans, run again after a kept cut |

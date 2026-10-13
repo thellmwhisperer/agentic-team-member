@@ -38,7 +38,8 @@ var work = map[string]string{"fix": fixWork, "feature": fixWork, "greenfield": f
 // $FAKE_AGENT_CALL. The default plays a run that, when the ponytail skill is where name finds it and outside
 // git, uses it, does $FAKE_AGENT_WORK or else the work of the brief's task type, and reports what that work
 // left in .atm/fake-report.json, or else fakeReport; fail
-// exits 3; no-report, no-test-file, no-skill, skill-error and wrong-skill each break the run one way; hang
+// writes boom to stderr and exits 3; silent writes its pid to $FAKE_AGENT_PID and says nothing more; killed
+// SIGKILLs itself; no-report, no-test-file, no-skill, skill-error and wrong-skill each break the run one way; hang
 // starts a grandchild, whose pid goes to $FAKE_AGENT_PID, and never ends; hang-session does the same with the
 // grandchild in its own session; hang-orphan starts it in its own session through a child that exits at once,
 // so init adopts it. The ponytail pass plays the same with the ponytail-review skill,
@@ -119,7 +120,17 @@ func fakeAgentSetup(mode string) bool {
 func fakeAgentMode(mode string) (int, bool) {
 	switch mode {
 	case "fail":
+		fmt.Fprintln(os.Stderr, "boom")
 		return 3, true
+	case "silent":
+		_ = os.WriteFile(os.Getenv("FAKE_AGENT_PID"), []byte(strconv.Itoa(os.Getpid())), 0o600)
+		time.Sleep(time.Hour)
+		return 0, true
+	case "killed":
+		self, _ := os.FindProcess(os.Getpid())
+		_ = self.Kill()
+		time.Sleep(time.Hour)
+		return 0, true
 	case "hang", "hang-session":
 		grandchild := exec.Command(os.Args[0])
 		grandchild.Env, grandchild.Stdout = append(os.Environ(), "FAKE_AGENT=grandchild"), os.Stdout
@@ -287,9 +298,11 @@ func TestRunDrivesTheAgent(t *testing.T) {
 			}) {
 				t.Fatalf("env: want ATM_FAKE and no CLAUDE_CODE_CHILD_SESSION, got %v", got.Env)
 			}
+			// stdout and stderr are two pipes: the first stdout line and the stderr one come in either order.
 			lines := logLines(t, log)
+			first := []string{`"fake stderr"`, `{"type": "system", "subtype": "init"}`}
 			if want := map[bool]int{true: 5, false: 4}[harness == "claude" || harness == "pi"]; len(lines) != want ||
-				lines[1] != `"fake stderr"` {
+				!slices.Equal(slices.Sorted(slices.Values(lines[:2])), first) {
 				t.Fatalf("want every line of the agent in the log, got %q", lines)
 			}
 			if left := clones(t, root); len(left) != 0 {
@@ -540,7 +553,7 @@ func TestRunDiesWhenTheAgentFails(t *testing.T) {
 		harness, mode, why string
 		args               []string
 	}{
-		{harness: "claude", mode: "fail", why: "exit status 3"},
+		{harness: "claude", mode: "fail", why: "exit code 3"},
 		{harness: "pi", mode: "no-report", why: "no report"},
 		{harness: "codex", mode: "no-report", why: "no report"},
 		{harness: "opencode", mode: "no-test-file", why: "test_file"},
