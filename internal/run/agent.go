@@ -125,7 +125,6 @@ func (a agent) run(clone, name, skill, brief string, check func(map[string]any) 
 	if err != nil {
 		return ev, err
 	}
-<<<<<<< HEAD
 	s := stream{skill: skill, live: relative(clone, liveIn(clone)), root: a.root, clone: clone}
 	err = s.read(cmd, f, a.Harness)
 	if a.Harness == "codex" {
@@ -206,7 +205,6 @@ func clonePathRune(r rune) bool {
 	return unicode.IsLetter(r) || unicode.IsNumber(r) || strings.ContainsRune("_-.\\/", r)
 }
 
-<<<<<<< HEAD
 // command runs argv in clone on stdin, in the run's environment without the marker that turns the agent's
 // transcripts off, holding the clone's lease.
 func (a agent) command(ctx context.Context, clone string, argv []string, stdin string) (*exec.Cmd, error) {
@@ -608,18 +606,7 @@ type use struct{ tool, args, command string }
 func (e event) calls(harness string) (cs []use) {
 	switch {
 	case harness == "codex":
-		switch e.Item.Type {
-		case "command_execution":
-			return []use{{"shell", e.Item.Command, e.Item.Command}}
-		case "mcp_tool_call":
-			return []use{{e.Item.Tool, strs(e.Item.Arguments), ""}}
-		case "file_change":
-			paths := make([]string, 0, len(e.Item.Changes))
-			for _, change := range e.Item.Changes {
-				paths = append(paths, change.Path)
-			}
-			return []use{{"file_change", strings.Join(paths, " "), ""}}
-		}
+		return codexCalls(e.Item)
 	case harness == "opencode" && e.Type == "tool_use":
 		args := strs(e.Part.State.Input)
 		return []use{{e.Part.Tool, args, shellCommand(e.Part.Tool, e.Part.State.Input)}}
@@ -640,6 +627,28 @@ func (e event) calls(harness string) (cs []use) {
 		}
 	}
 	return cs
+}
+
+func codexCalls(item struct {
+	ID, Type, Command, Text, Status, Tool string
+	Arguments                             json.RawMessage         `json:"arguments"`
+	Changes                               []struct{ Path string } `json:"changes"`
+	ExitCode                              *int                    `json:"exit_code"`
+}) []use {
+	switch item.Type {
+	case "command_execution":
+		return []use{{"shell", item.Command, item.Command}}
+	case "mcp_tool_call":
+		return []use{{item.Tool, strs(item.Arguments), ""}}
+	case "file_change":
+		paths := make([]string, 0, len(item.Changes))
+		for _, change := range item.Changes {
+			paths = append(paths, change.Path)
+		}
+		return []use{{"file_change", strings.Join(paths, " "), ""}}
+	default:
+		return nil
+	}
 }
 
 func shellCommand(tool string, input json.RawMessage) string {

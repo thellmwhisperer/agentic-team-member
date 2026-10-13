@@ -362,20 +362,16 @@ func bashEvent(harness, command, description string) string {
 }
 
 func TestRunDiesWhenTheAgentReachesOutsideItsClone(t *testing.T) {
-	runReachCases(t, reachCases())
+	for _, cases := range [][]reachCase{piReachCases(), shellReachCases(), codexReachCases(), otherReachCases()} {
+		runReachCases(t, cases)
+	}
 }
 
-func reachCases() []reachCase {
-	q := func(s string) string { b, _ := json.Marshal(s); return string(b) }
-	claude := func(tool, input string) string {
-		return `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"c1","name":` +
-			q(tool) + `,"input":` + input + `}]}}` + "\n"
-	}
+func piReachCases() []reachCase {
 	curl := `curl -sL -m 30 https://www.example.com/assets/index.js -o "$TMPDIR/x.js"`
 	const why = "the agent reached outside its clone: "
-	cases := []reachCase{
-		{"pi curl", "pi", `{"type":"tool_execution_start","toolCallId":"c1","toolName":"bash","args":{"command":` +
-			q(curl) + `}}` + "\n", why + "bash " + curl},
+	return []reachCase{
+		{"pi curl", "pi", bashEvent("pi", curl, ""), why + "bash " + curl},
 		{"pi wrapped curl", "pi", bashEvent("pi", `env curl ""`, ""),
 			why + `bash env curl ""`},
 		{"pi command with description", "pi", bashEvent("pi", `echo ready; curl "$URL"`, "Check what's happening"),
@@ -388,6 +384,20 @@ func reachCases() []reachCase {
 		{"userinfo cannot hide remote host", "claude",
 			bashEvent("claude", "git ls-remote https://localhost:80@www.example.com/repo.git", ""),
 			why + "Bash git ls-remote https://localhost:80@www.example.com/repo.git"},
+	}
+}
+
+func claudeEvent(tool, input string) string {
+	q := func(s string) string { b, _ := json.Marshal(s); return string(b) }
+	return `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"c1","name":` +
+		q(tool) + `,"input":` + input + `}]}}` + "\n"
+}
+
+func shellReachCases() []reachCase {
+	claude := claudeEvent
+	q := func(s string) string { b, _ := json.Marshal(s); return string(b) }
+	const why = "the agent reached outside its clone: "
+	return []reachCase{
 		{"claude relative reach", "claude", claude("Bash", `{"command":"rg pattern . ../.."}`),
 			why + "Bash rg pattern . ../.."},
 		{"claude relative prefix reach", "claude", claude("Bash", `{"command":"rg pattern src/../../"}`),
@@ -425,21 +435,40 @@ func reachCases() []reachCase {
 			why + `Bash sh -c "curl https://example.com/$ASSET"`},
 		{"claude reads another run", "claude", claude("Read", `{"file_path":"{root}/.atm/runs/6-2/worker.jsonl"}`),
 			why + "Read {root}/.atm/runs/6-2/worker.jsonl"},
-		{"codex MCP reads another run", "codex", `{"type":"item.started","item":{"id":"c1",` +
-			`"type":"mcp_tool_call","server":"filesystem","tool":"read_file","arguments":{"path":"{root}/.atm/runs/6-2/worker.jsonl"}}}` + "\n",
+		{"codex MCP reads another run", "codex", codexEvent(codexReadArguments()),
 			why + "read_file {root}/.atm/runs/6-2/worker.jsonl"},
-		{"codex file change inside clone", "codex", `{"type":"item.completed","item":{"id":"c1",` +
-			`"type":"file_change","changes":[{"path":"<clone>/a.txt","kind":"update"}],"status":"completed"}}` + "\n", ""},
-		{"codex file change outside clone", "codex", `{"type":"item.completed","item":{"id":"c1",` +
-			`"type":"file_change","changes":[{"path":"{root}/.atm/runs/6-2/report.json","kind":"update"}],"status":"completed"}}` + "\n",
+		{"codex file change inside clone", "codex", codexEvent(
+			`"type":"file_change","changes":[{"path":"<clone>/a.txt","kind":"update"}],"status":"completed"`), ""},
+		{"codex file change outside clone", "codex", codexEvent(
+			`"type":"file_change","changes":[{"path":"{root}/.atm/runs/6-2/report.json","kind":"update"}],"status":"completed"`),
 			why + "file_change {root}/.atm/runs/6-2/report.json"},
+	}
+}
+
+func codexReachCases() []reachCase {
+	const why = "the agent reached outside its clone: "
+	return []reachCase{
 		{"codex lists another clone", "codex", `{"type":"item.started","item":{"id":"c1","type":"command_execution",` +
 			`"command":"ls {root}/.atm/clones/other"}}` + "\n", why + "shell ls {root}/.atm/clones/other"},
-		{"opencode fetches", "opencode", `{"type":"tool_use","part":{"callID":"c1","tool":"bash","state":` +
-			`{"status":"completed","input":{"command":"node -e \"fetch('https://example.com')\""}}}}` + "\n",
-			why + `bash node -e "fetch('https://example.com')"`},
 	}
-	return append(cases, moreReachCases(claude, why)...)
+}
+
+func otherReachCases() []reachCase {
+	const why = "the agent reached outside its clone: "
+	return append(moreReachCases(claudeEvent, why), []reachCase{{
+		"opencode fetches", "opencode", `{"type":"tool_use","part":{"callID":"c1","tool":"bash","state":` +
+			`{"status":"completed","input":{"command":"node -e \"fetch('https://example.com')\""}}}}` + "\n",
+		why + `bash node -e "fetch('https://example.com')"`},
+	}...)
+}
+
+func codexEvent(item string) string {
+	return `{"type":"item.completed","item":{"id":"c1",` + item + `}}` + "\n"
+}
+
+func codexReadArguments() string {
+	return `"type":"mcp_tool_call","server":"filesystem","tool":"read_file",` +
+		`"arguments":{"path":"{root}/.atm/runs/6-2/worker.jsonl"}`
 }
 
 func moreReachCases(claude func(string, string) string, why string) []reachCase {
