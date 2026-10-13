@@ -49,7 +49,7 @@ a deliberate "none", a missing key fails with `config incomplete`. `harness`,
 | `test` | Runs the whole test suite |
 | `typecheck` | Typechecks |
 | `lint` | Lints |
-| `test_file` | Runs one test: `{file}` is its path, `{dir}` its directory as `./dir`. When not empty, it must contain one of them. `{tests}` is `^(TestA|TestB)$`, the Go tests the file defines, for `go test -run` |
+| `test_file` | Runs one test: `{file}` is its path, `{dir}` its directory as `./dir`. When not empty, it must contain `{file}` or `{dir}`. For Go, `{tests}` expands to `^(TestA|TestB)$` for the Go tests defined in the reported file, for `go test -run`. A file with no Go tests fails; if the command reports `no tests to run`, the proof fails and names the reported file. |
 | `test_patterns` | Globs of the test files |
 | `docs_patterns` | Globs of the documentation files |
 | `delivery` | Shell line that takes the run's branch from its clone, for example to a PR. Empty skips delivery |

@@ -24,7 +24,8 @@ test: ""
 typecheck: ""
 # Lints, e.g. npx eslint .
 lint: ""
-# Runs one test: {file} is its path, {dir} its directory, e.g. npx vitest run {file}
+# Runs one test: {file} is its path, {dir} its directory, {tests} selects Go tests in that file
+# e.g. npx vitest run {file} or go test -run {tests} {dir}
 test_file: ""
 # Globs of the test files, e.g. ["**/*.test.ts"]
 test_patterns: []
