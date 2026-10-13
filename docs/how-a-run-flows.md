@@ -203,7 +203,8 @@ output appears as lines.
 In a herdr pane (`HERDR_ENV=1` and
 `HERDR_PANE_ID` set), the screen also shows the run in herdr's Agents section
 as `atm`, with the run's label as its session: `working` with the issue, then
-with each step it reaches (`#7 Agent · unit 2`, `#7 Checks · red/green`), and
+with each step it reaches (`#7 Agent · unit 2`, `#7 Checks · red/green`). Until
+the issue title is available, `working` uses the run label. On completion, it reports
 `idle` with `#7 passed` or `#7 failed at <step>` when the run ends. An issue
 file goes by the run's label instead of `#7`. Leaving the screen, by the run's
 end or by `q`, takes `atm` out of the section. ATM runs `$HERDR_BIN_PATH` or
