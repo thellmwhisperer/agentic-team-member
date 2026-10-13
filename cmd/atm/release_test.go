@@ -210,7 +210,9 @@ func TestReleaseWorkflowPublishesPrereleaseOnlyAfterAssetsComplete(t *testing.T)
 	if !reflect.DeepEqual(needsList(job.Needs), []string{"release-please", "build-and-upload", "checksums"}) {
 		t.Fatalf("finalize needs = %v", job.Needs)
 	}
-	wantCondition := "!cancelled() && needs.release-please.result == 'success' && needs.build-and-upload.result == 'success' && needs.checksums.result == 'success' && needs.release-please.outputs.release_created == 'true'"
+	wantCondition := "!cancelled() && needs.release-please.result == 'success' && " +
+		"needs.build-and-upload.result == 'success' && needs.checksums.result == 'success' && " +
+		"needs.release-please.outputs.release_created == 'true'"
 	if strings.Join(strings.Fields(job.If), " ") != wantCondition {
 		t.Fatalf("finalize condition = %q, want %q", job.If, wantCondition)
 	}
