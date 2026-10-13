@@ -96,6 +96,10 @@ func TestWatchPrintsEachStepAndKeepsWatchingAfterTheRun(t *testing.T) {
 
 // A killed watcher leaves WATCHER GONE on the screen of each run bound to it, once; another adopts the run.
 func TestAKilledWatcherLeavesItsRunsUnwatchedUntilAnotherAdoptsThem(t *testing.T) {
+	t.Run("watcher death and adoption", testKilledWatcherAdoption)
+}
+
+func testKilledWatcherAdoption(t *testing.T) {
 	defer func(b, k time.Duration) { beat, tick = b, k }(beat, tick)
 	beat, tick = 10*time.Millisecond, time.Hour
 	top := backgroundRepo(t)
@@ -116,10 +120,7 @@ func TestAKilledWatcherLeavesItsRunsUnwatchedUntilAnotherAdoptsThem(t *testing.T
 		})
 	}()
 	newID, lines, _ := watching(t, top, o.Run)
-	if l := nextLine(t, gone); !regexp.MustCompile(`^WATCHER GONE at \d\d:\d\d:\d\d: no one is watching this run$`).
-		MatchString(l) {
-		t.Fatalf("screen line %q", l)
-	}
+	assertWatcherGoneLine(t, nextLine(t, gone))
 	if l := watchEvent(t, nextLine(t, lines), o.Run); l != "adopted: running at agent" {
 		t.Fatalf("adopting watcher printed %q first", l)
 	}
@@ -131,20 +132,32 @@ func TestAKilledWatcherLeavesItsRunsUnwatchedUntilAnotherAdoptsThem(t *testing.T
 	if want := []string{"checks", "ponytail", "finished: passed"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("adopting watcher printed %q, want %q", got, want)
 	}
+	assertAdoptedWatcherRecorded(t, top, o.Run, newID)
+}
+
+func assertWatcherGoneLine(t *testing.T, line string) {
+	t.Helper()
+	if !regexp.MustCompile(`^WATCHER GONE at \d\d:\d\d:\d\d: no one is watching this run$`).MatchString(line) {
+		t.Fatalf("screen line %q", line)
+	}
+}
+
+func assertAdoptedWatcherRecorded(t *testing.T, top, run, watcher string) {
+	t.Helper()
 	var screen bytes.Buffer
-	if _, err := Attach(top, o.Run, &screen); err != nil {
+	if _, err := Attach(top, run, &screen); err != nil {
 		t.Fatal(err)
 	}
 	if n := strings.Count(screen.String(), "WATCHER GONE"); n != 1 {
 		t.Fatalf("WATCHER GONE %d times on the screen:\n%s", n, &screen)
 	}
-	if runs, err := Runs(top); err != nil || runs[0].Watcher != newID {
-		t.Fatalf("Runs = %+v, %v; want the run bound to %s", runs, err, newID)
+	if runs, err := Runs(top); err != nil || runs[0].Watcher != watcher {
+		t.Fatalf("Runs = %+v, %v; want the run bound to %s", runs, err, watcher)
 	}
 	var report verdict
-	b, err := os.ReadFile(filepath.Join(runDir(top, o.Run), "report.json"))
-	if err != nil || json.Unmarshal(b, &report) != nil || report.Watcher != newID {
-		t.Fatalf("report watcher = %q, %v; want %s", report.Watcher, err, newID)
+	b, err := os.ReadFile(filepath.Join(runDir(top, run), "report.json"))
+	if err != nil || json.Unmarshal(b, &report) != nil || report.Watcher != watcher {
+		t.Fatalf("report watcher = %q, %v; want %s", report.Watcher, err, watcher)
 	}
 }
 
@@ -248,6 +261,10 @@ func TestWatchGateReadsPRStateAfterCloneRelease(t *testing.T) {
 }
 
 func TestWatchPrintsGateEventsFromAxiStatusAndSurvivesTransientError(t *testing.T) {
+	t.Run("captured status drives watcher events", testGateStatusWatcherEvents)
+}
+
+func testGateStatusWatcherEvents(t *testing.T) {
 	defer func(b, r time.Duration) { beat, remind = b, r }(beat, remind)
 	beat, remind = 2*time.Millisecond, 15*time.Millisecond
 	top := gitT(t, repo(t, "https://example.com/owner/repo.git", atmSet(atmYAML, "delivery", "true")),
@@ -255,7 +272,18 @@ func TestWatchPrintsGateEventsFromAxiStatusAndSurvivesTransientError(t *testing.
 	stop := background(t, top)
 	t.Cleanup(stop)
 	bin := t.TempDir()
-	waiting, merged, counter, release := filepath.Join(bin, "waiting"), filepath.Join(bin, "merged"),
+	waiting, merged, counter, release := gateStatusFixtures(t, bin)
+	configureGateStatus(t, bin, waiting, merged, counter, release)
+	id, lines, _ := watching(t, top, "")
+	if _, err := startWithWatcher(t, top, []string{"--watcher", id, issueFile(t, issue)}); err != nil {
+		t.Fatal(err)
+	}
+	assertGateEventSequence(t, lines, release, top)
+}
+
+func gateStatusFixtures(t *testing.T, bin string) (waiting, merged, counter, release string) {
+	t.Helper()
+	waiting, merged, counter, release = filepath.Join(bin, "waiting"), filepath.Join(bin, "merged"),
 		filepath.Join(bin, "count"), filepath.Join(bin, "release")
 	const liveStatus = `run:
   id: "01M4T2F20FPSNC61KDJ6FYHBN8"
@@ -281,30 +309,45 @@ func TestWatchPrintsGateEventsFromAxiStatusAndSurvivesTransientError(t *testing.
 	steps := func(rows ...string) string {
 		return "steps[3]{step,status,findings,duration_ms}:\n    " + strings.Join(rows, "\n    ") + "\n"
 	}
-	if err := os.WriteFile(waiting, []byte(steps("review,awaiting_approval,1,1", "pr,pending,0,0", "ci,pending,0,0")), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(merged, []byte("pr: \"https://github.com/o/r/pull/7\"\npr_state: merged\n"+
-		steps("review,completed,0,1", "pr,completed,0,1", "ci,completed,0,1")), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	cmd := "#!/bin/sh\nn=0\ntest ! -f \"$ATM_STATUS_COUNT\" || n=$(cat \"$ATM_STATUS_COUNT\")\nn=$((n + 1))\nprintf '%s' \"$n\" > \"$ATM_STATUS_COUNT\"\ncase $n in\n1) cat \"$ATM_STATUS_LIVE\" ;;\n2) exit 1 ;;\n*) if test -f \"$ATM_STATUS_RELEASE\"; then cat \"$ATM_STATUS_MERGED\"; else cat \"$ATM_STATUS_WAITING\"; fi ;;\nesac\n"
-	if err := os.WriteFile(filepath.Join(bin, "no-mistakes"), []byte(cmd), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(bin, "live"), []byte(liveStatus), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	waitingStatus := steps(
+		"review,awaiting_approval,1,1",
+		"pr,pending,0,0",
+		"ci,pending,0,0",
+	)
+	writeFixture(t, waiting, waitingStatus)
+	mergedStatus := "pr: \"https://github.com/o/r/pull/7\"\npr_state: merged\n" +
+		steps("review,completed,0,1", "pr,completed,0,1", "ci,completed,0,1")
+	writeFixture(t, merged, mergedStatus)
+	cmd := `#!/bin/sh
+n=0
+test ! -f "$ATM_STATUS_COUNT" || n=$(cat "$ATM_STATUS_COUNT")
+n=$((n + 1))
+printf '%s' "$n" > "$ATM_STATUS_COUNT"
+case $n in
+1) cat "$ATM_STATUS_LIVE" ;;
+2) exit 1 ;;
+*) if test -f "$ATM_STATUS_RELEASE"; then cat "$ATM_STATUS_MERGED"; else cat "$ATM_STATUS_WAITING"; fi ;;
+esac
+`
+	writeFixture(t, filepath.Join(bin, "no-mistakes"), cmd, 0o755)
+	writeFixture(t, filepath.Join(bin, "live"), liveStatus)
+	return waiting, merged, counter, release
+}
+
+func configureGateStatus(t *testing.T, bin, waiting, merged, counter, release string) {
+	t.Helper()
 	t.Setenv("ATM_STATUS_COUNT", counter)
 	t.Setenv("ATM_STATUS_LIVE", filepath.Join(bin, "live"))
 	t.Setenv("ATM_STATUS_WAITING", waiting)
 	t.Setenv("ATM_STATUS_MERGED", merged)
 	t.Setenv("ATM_STATUS_RELEASE", release)
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	id, lines, _ := watching(t, top, "")
-	if _, err := startWithWatcher(t, top, []string{"--watcher", id, issueFile(t, issue)}); err != nil {
-		t.Fatal(err)
-	}
+	_ = waiting
+	_ = merged
+}
+
+func assertGateEventSequence(t *testing.T, lines <-chan string, release, top string) {
+	t.Helper()
 	delivered := false
 	readGateEvent := func() string {
 		for {
@@ -329,13 +372,22 @@ func TestWatchPrintsGateEventsFromAxiStatusAndSurvivesTransientError(t *testing.
 	if got := readGateEvent(); got != "still waiting 0m: review" {
 		t.Fatalf("reminder event %q", got)
 	}
-	if err := os.WriteFile(release, nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	writeFixture(t, release, "")
 	if got := readGateEvent(); got != "merged" {
 		t.Fatalf("merged gate event %q", got)
 	}
 	if err := call(top, request{Cmd: "attach", Run: "issue-1"}, nil, func(reply) {}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeFixture(t *testing.T, path, content string, modes ...os.FileMode) {
+	t.Helper()
+	mode := os.FileMode(0o600)
+	if len(modes) > 0 {
+		mode = modes[0]
+	}
+	if err := os.WriteFile(path, []byte(content), mode); err != nil {
 		t.Fatal(err)
 	}
 }

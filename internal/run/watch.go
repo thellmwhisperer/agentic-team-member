@@ -185,7 +185,14 @@ func gateStatus(clone string) (string, error) {
 
 // watchGate hands say the lines of the gate of run label in clone, every beat, until it merged or failed, or the
 // run ended without one.
-func watchGate(ctx context.Context, root, clone string, branch <-chan string, label string, ended <-chan struct{}, say func(label, event string)) {
+func watchGate(
+	ctx context.Context,
+	root, clone string,
+	branch <-chan string,
+	label string,
+	ended <-chan struct{},
+	say func(label, event string),
+) {
 	var g gate
 	var deliveredBranch string
 	t := time.NewTicker(beat)
