@@ -21,6 +21,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 	"unicode"
@@ -100,9 +101,14 @@ func (a agent) argv(clone, skill, final, brief string) (argv []string, stdin str
 	return append(append(argv, a.args...), brief), ""
 }
 
-// run runs the agent on brief in clone with skill, in its own process group, and returns its report, which
-// check accepts. Every line it writes goes to <name>.jsonl in the run's directory, which outlives the clone.
-// The timeout, SIGINT and SIGTERM kill the group.
+// errSilent cancels an agent that said nothing for agentSilence.
+var errSilent = errors.New("silent")
+
+// agentSilence is how long the agent may write nothing, on stdout or stderr, before ATM stops it.
+var agentSilence = 10 * time.Minute
+
+// run runs the agent on brief in clone with skill and returns its report, which check accepts. Once it ran, a
+// failure puts in ev how it ended, its exit, and the last lines it wrote, its tail.
 func (a agent) run(clone, name, skill, brief string, check func(map[string]any) error) (map[string]any, error) {
 	path := filepath.Join(a.dir, name+".jsonl")
 	ev := map[string]any{"log": path}
@@ -110,43 +116,36 @@ func (a agent) run(clone, name, skill, brief string, check func(map[string]any) 
 	if err != nil {
 		return ev, err
 	}
-	f, err := os.Create(path)
-	if err != nil {
-		return ev, err
-	}
-	defer func() { _ = f.Close() }()
 	final := strings.TrimSuffix(path, ".jsonl") + ".final.md"
 	argv, stdin := a.argv(clone, dir, final, brief)
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	ctx, cancel := context.WithTimeout(ctx, agentTimeout)
-	defer cancel()
-	cmd, err := a.command(ctx, clone, argv, stdin)
-	if err != nil {
+	s, exit, cause, err := a.exec(clone, skill, path, argv, stdin)
+	if s == nil {
 		return ev, err
 	}
-	s := stream{skill: skill, live: relative(clone, liveIn(clone)), root: a.root, clone: clone}
-	err = s.read(cmd, f, a.Harness)
 	if a.Harness == "codex" {
 		b, _ := os.ReadFile(final) // none is no report
 		s.final = string(b)
 	}
 	s.finish()
+	fail := func(err error) (map[string]any, error) {
+		if exit != "" {
+			ev["exit"], ev["tail"] = exit, strings.Join(s.tail, "\n")
+		}
+		return ev, err
+	}
 	switch {
+	case cause != "":
+		return fail(fmt.Errorf("%s; log: %s", cause, path))
 	case s.reach != "":
-		return ev, fmt.Errorf("the agent reached outside its clone: %s; log: %s", s.reach, path)
-	case errors.Is(ctx.Err(), context.DeadlineExceeded):
-		return ev, fmt.Errorf("agent timed out after %s; log: %s", Human(agentTimeout), path)
-	case ctx.Err() != nil:
-		return ev, fmt.Errorf("agent interrupted; log: %s", path)
+		return fail(fmt.Errorf("the agent reached outside its clone: %s; log: %s", s.reach, path))
 	case err != nil:
-		return ev, fmt.Errorf("agent: %w; log: %s", err, path)
+		return fail(fmt.Errorf("agent: %w; log: %s", err, path))
 	case !s.used:
-		return ev, fmt.Errorf("agent left no proof it used the %s skill; log: %s", skill, path)
+		return fail(fmt.Errorf("agent left no proof it used the %s skill; log: %s", skill, path))
 	}
 	ev["report"], err = report(s.final, check)
 	if err != nil {
-		return ev, fmt.Errorf("%w; log: %s", err, path)
+		return fail(fmt.Errorf("%w; log: %s", err, path))
 	}
 	return ev, nil
 }
@@ -205,16 +204,66 @@ func clonePathRune(r rune) bool {
 	return unicode.IsLetter(r) || unicode.IsNumber(r) || strings.ContainsRune("_-.\\/", r)
 }
 
-// command runs argv in clone on stdin, in the run's environment without the marker that turns the agent's
-// transcripts off, holding the clone's lease.
-func (a agent) command(ctx context.Context, clone string, argv []string, stdin string) (*exec.Cmd, error) {
+// exec runs argv in clone, stdin on its stdin, in its own process group, and returns what its lines said, and
+// how it ended, as ended says; a nil stream when it never got to run. Every line it writes goes to the log at
+// path, in the run's directory, which outlives the clone, and its stderr to <name>.stderr.txt next to it as
+// well. The timeout, agentSilence without a line, SIGINT and SIGTERM kill the group.
+func (a agent) exec(clone, skill, path string, argv []string, stdin string) (*stream, string, string, error) {
+	f, err := os.Create(path)
+	if err != nil {
+		return nil, "", "", err
+	}
+	defer func() { _ = f.Close() }()
+	stderr, err := os.Create(strings.TrimSuffix(path, ".jsonl") + ".stderr.txt")
+	if err != nil {
+		return nil, "", "", err
+	}
+	defer func() { _ = stderr.Close() }()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	ctx, cancel := context.WithTimeout(ctx, agentTimeout)
+	defer cancel()
+	ctx, hush := context.WithCancelCause(ctx)
+	defer hush(nil)
+	quiet := time.AfterFunc(agentSilence, func() { hush(errSilent) })
+	defer quiet.Stop()
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir, cmd.Stdin, cmd.WaitDelay = clone, strings.NewReader(stdin), time.Second
 	cmd.Env = append(slices.DeleteFunc(os.Environ(), func(kv string) bool {
 		return strings.HasPrefix(kv, "CLAUDE_CODE_CHILD_SESSION=") // set, the agent's transcripts are off
 	}), a.env...)
-	return cmd, inheritCloneLease(cmd, clone)
+	if err := inheritCloneLease(cmd, clone); err != nil {
+		return nil, "", "", err
+	}
+	s := &stream{skill: skill, live: relative(clone, liveIn(clone)), root: a.root, clone: clone,
+		heard: func() { quiet.Reset(agentSilence) }}
+	err = s.read(cmd, f, stderr, a.Harness)
+	quiet.Stop()
+	exit, cause := ended(ctx, cmd.ProcessState)
+	return s, exit, cause, err
+}
 
+// ended is how the agent run under ctx ended, its exit, "" when it never ran, and the cause its step fails
+// with, "" when it exited 0.
+func ended(ctx context.Context, p *os.ProcessState) (exit, cause string) {
+	switch {
+	case errors.Is(context.Cause(ctx), errSilent):
+		return "silent for " + Human(agentSilence), "the agent said nothing for " + Human(agentSilence) +
+			"; ATM stopped it"
+	case errors.Is(ctx.Err(), context.DeadlineExceeded):
+		exit = "timed out after " + Human(agentTimeout)
+	case ctx.Err() != nil:
+		exit = "interrupted"
+	case p == nil:
+		return "", ""
+	case p.Success():
+		return "exit code 0", ""
+	case p.ExitCode() >= 0:
+		exit = "exit code " + strconv.Itoa(p.ExitCode())
+	default:
+		exit = "signal " + strings.TrimPrefix(p.String(), "signal: ")
+	}
+	return exit, exit
 }
 
 // report is the agent's report, the last JSON object of its final message, which check accepts.
@@ -279,39 +328,49 @@ type stream struct {
 	used         bool
 	live         func(map[string]any)
 	pending      string
+	tail         []string // the last 20 lines the agent wrote
+	heard        func()   // each line calls it
 }
 
 // read runs cmd and writes each line of its stdout and stderr to log, as it is when JSON, else as a JSON
-// string, reading the stream of harness from it.
-func (s *stream) read(cmd *exec.Cmd, log io.Writer, harness string) error {
+// string, reading the stream of harness from it. Its stderr goes to stderr too, as it comes.
+func (s *stream) read(cmd *exec.Cmd, log, stderr io.Writer, harness string) error {
 	attach, closeGroup, err := ownGroup(cmd)
 	if err != nil {
 		return err
 	}
 	defer closeGroup()
-	pr, pw := io.Pipe()
-	cmd.Stdout, cmd.Stderr = pw, pw
-	done := make(chan error, 1)
-	go func() {
-		var werr error
-		for r := bufio.NewReader(pr); ; {
-			line, err := r.ReadBytes('\n')
-			if line = bytes.TrimSpace(line); len(line) > 0 {
-				if !json.Valid(line) {
-					line, _ = json.Marshal(string(line))
-				} else {
-					s.see(harness, line)
+	outR, outW := io.Pipe()
+	errR, errW := io.Pipe()
+	cmd.Stdout, cmd.Stderr = outW, io.MultiWriter(stderr, errW)
+	var mu sync.Mutex
+	var werr error
+	var wg sync.WaitGroup
+	for _, pr := range []*io.PipeReader{outR, errR} {
+		wg.Go(func() {
+			for r := bufio.NewReader(pr); ; {
+				line, err := r.ReadBytes('\n')
+				if line = bytes.TrimSpace(line); len(line) > 0 {
+					mu.Lock()
+					s.heard()
+					s.tail = append(s.tail, string(line))
+					s.tail = s.tail[max(0, len(s.tail)-20):]
+					if !json.Valid(line) {
+						line, _ = json.Marshal(string(line))
+					} else {
+						s.see(harness, line)
+					}
+					if _, e := log.Write(append(line, '\n')); werr == nil {
+						werr = e
+					}
+					mu.Unlock()
 				}
-				if _, e := log.Write(append(line, '\n')); werr == nil {
-					werr = e
+				if err != nil {
+					return
 				}
 			}
-			if err != nil {
-				done <- werr
-				return
-			}
-		}
-	}()
+		})
+	}
 	err = cmd.Start()
 	if err == nil {
 		if err = attach(); err != nil {
@@ -328,8 +387,9 @@ func (s *stream) read(cmd *exec.Cmd, log io.Writer, harness string) error {
 	if errors.Is(err, exec.ErrWaitDelay) { // exited 0, and only left something holding its output
 		err = nil
 	}
-	_ = pw.Close()
-	return errors.Join(err, <-done)
+	_, _ = outW.Close(), errW.Close()
+	wg.Wait()
+	return errors.Join(err, werr)
 }
 
 // event is the fields of every harness's events that say what its final message is and that it used its

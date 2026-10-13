@@ -83,7 +83,7 @@ func TestRunDiesWhenThePonytailAgentFails(t *testing.T) {
 		name, mode, work, report, why string
 		hang                          bool
 	}{
-		{name: "exit", mode: "fail", why: "exit status 3"},
+		{name: "exit", mode: "fail", why: "exit code 3"},
 		{name: "hang", mode: "hang", why: "timed out", hang: true},
 		{name: "no skill", mode: "no-skill", why: "ponytail-review"},
 		{name: "skill load failed", mode: "skill-error", why: "ponytail-review"},
