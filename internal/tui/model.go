@@ -49,6 +49,38 @@ type Model struct {
 	done, detached      bool
 	outcome             run.Outcome
 	err                 error
+	pipeline, history   pane   // the ATM box's and the Agent box's reading positions
+	pipelineFocus       bool   // keys scroll the ATM box, not the Agent box
+	edge                [2]int // the column and row the ATM box ends at, as last drawn
+}
+
+// pane is a box's reading position: its top line, held while the user reads above its bottom, else its
+// bottom, following new lines.
+type pane struct {
+	top, last, h int // last is the top of the bottom, h the lines it shows, as last drawn
+	held         bool
+}
+
+// show is lines' h lines from the pane's position; at the bottom, it follows again.
+func (p *pane) show(lines []string, h int) []string {
+	p.h, p.last = h, max(0, len(lines)-h)
+	if !p.held || p.top >= p.last {
+		p.top, p.held = p.last, false
+	}
+	return lines[p.top:min(len(lines), p.top+h)]
+}
+
+func (p *pane) scroll(n int) {
+	p.top = min(max(0, p.top+n), p.last)
+	p.held = p.top < p.last
+}
+
+// focused is the pane keys scroll: the Agent box's while it shows, unless the user moved to the ATM box.
+func (m *Model) focused() *pane {
+	if m.pipelineFocus || !m.agentRuns() {
+		return &m.pipeline
+	}
+	return &m.history
 }
 
 // New is the screen of run label before its first frame, every node pending.
@@ -88,6 +120,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.detached = !m.done
 			return m, tea.Quit
 		}
+		m.key(msg.String())
+	case tea.MouseMsg:
+		m.wheel(msg)
 	case tick:
 		m.now, m.spin = time.Time(msg), m.spin+1
 		if !m.done {
@@ -102,6 +137,43 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+// key scrolls the focused box, or, on tab, focuses the other.
+func (m *Model) key(k string) {
+	p := m.focused()
+	switch k {
+	case "tab", "shift+tab":
+		m.pipelineFocus = !m.pipelineFocus
+	case "up", "k":
+		p.scroll(-1)
+	case "down", "j":
+		p.scroll(1)
+	case "pgup":
+		p.scroll(-max(1, p.h-1))
+	case "pgdown":
+		p.scroll(max(1, p.h-1))
+	case "home":
+		p.scroll(-p.top)
+	case "end":
+		p.scroll(p.last)
+	}
+}
+
+// wheel scrolls the box under the pointer: the ATM box, or the Agent box while it shows.
+func (m *Model) wheel(msg tea.MouseMsg) {
+	p := &m.history
+	if msg.X < m.edge[0] && msg.Y < m.edge[1] {
+		p = &m.pipeline
+	} else if !m.agentRuns() {
+		return
+	}
+	switch msg.Button {
+	case tea.MouseButtonWheelUp:
+		p.scroll(-3)
+	case tea.MouseButtonWheelDown:
+		p.scroll(3)
+	}
 }
 
 // event is every field of a node's or a live event the screen reads.
@@ -168,7 +240,7 @@ func (m *Model) started(step string, at time.Time) {
 		r = m.rows[i]
 	}
 	if step == "agent" || step == "ponytail" {
-		m.agent = nil
+		m.agent, m.history = nil, pane{}
 	}
 	r.state, r.start = "running", at
 }

@@ -86,6 +86,9 @@ var deliveryRuns = regexp.MustCompile(`Delivery  \d+\.\d s +running`)
 
 const exitAltScreen = "\x1b[?1049l"
 
+// mouseOn and mouseOff turn the terminal's mouse reports on and off.
+const mouseOn, mouseOff = "\x1b[?1002h", "\x1b[?1002l"
+
 func writeHerdrLog(t *testing.T, bin string) {
 	t.Helper()
 	script := "#!/bin/sh\nprintf '%s|' \"$@\" >> \"$HERDR_LOG\"; echo >> \"$HERDR_LOG\"\n"
@@ -196,6 +199,11 @@ func TestDeliveryGetsTheTerminalFromItsFirstOutput(t *testing.T) {
 			}
 			v := s.since(0)
 			last := ansi.Strip(v[strings.LastIndex(v, exitAltScreen):])
+			// The mouse is the screen's, not the delivery command's while it has the terminal.
+			if !order(v, mouseOn, mouseOff, "delivery-says-hi", mouseOn) ||
+				strings.Contains(v[strings.Index(v, mouseOff):strings.Index(v, "delivery-says-hi")], mouseOn) {
+				t.Fatalf("want the mouse off while delivery has the terminal, the terminal showed %q", v)
+			}
 			if !order(v, "delivery-says-hi", "\x1b[?1049h") || !order(last, "✓ Delivery", "fix/7 · passed") {
 				t.Fatalf("ATM's screen did not come back after delivery, the terminal showed %q", v)
 			}

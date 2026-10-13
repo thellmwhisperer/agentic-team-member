@@ -60,14 +60,20 @@ const (
 func (m *Model) View() string {
 	width := max(m.width, 40)
 	if width < twoColumns || !m.sidebar() {
-		body := m.atm(width)
+		height := m.height - 2
+		if m.sidebar() { // stacked, the ATM box leaves a third to the boxes under it
+			height = height * 2 / 3
+		}
+		body := m.atm(width, height)
+		m.edge = [2]int{width, lipgloss.Height(body)}
 		if more := m.right(width, m.height-2-lipgloss.Height(body)-1); more != "" {
 			body += "\n\n" + more
 		}
 		return body + m.footer()
 	}
 	left := min(max(width/3, leftMin), leftMax)
-	return columns(m.atm(left), m.right(width-left-gap, m.height-2), left) + m.footer()
+	m.edge = [2]int{left, m.height}
+	return columns(m.atm(left, m.height-2), m.right(width-left-gap, m.height-2), left) + m.footer()
 }
 
 func (m *Model) footer() string {
@@ -95,16 +101,22 @@ func columns(left, right string, width int) string {
 	return strings.Join(lines, "\n")
 }
 
-// box is content in a rounded box of width with title in its top border.
-func box(title, content string, width int) string {
+// box is content in a rounded box of width with title in its top border, its border in colour border.
+func box(title, content string, width int, border string) string {
 	inner := width - 4
 	fill := strings.Repeat("─", max(1, width-5-lipgloss.Width(title)))
-	lines := []string{paint(dim, "╭─ ") + title + " " + paint(dim, fill+"╮")}
+	lines := []string{paint(border, "╭─ ") + title + " " + paint(border, fill+"╮")}
 	for _, l := range strings.Split(content, "\n") {
 		l = ansi.Truncate(l, inner, "…")
-		lines = append(lines, paint(dim, "│")+" "+l+strings.Repeat(" ", max(0, inner-lipgloss.Width(l)))+" "+paint(dim, "│"))
+		side := paint(border, "│")
+		lines = append(lines, side+" "+l+strings.Repeat(" ", max(0, inner-lipgloss.Width(l)))+" "+side)
 	}
-	return strings.Join(append(lines, paint(dim, "╰"+strings.Repeat("─", width-2)+"╯")), "\n")
+	return strings.Join(append(lines, paint(border, "╰"+strings.Repeat("─", width-2)+"╯")), "\n")
+}
+
+// border is the colour of the border of the box of pane p: lit when keys scroll it.
+func (m *Model) border(p *pane) string {
+	return map[bool]string{true: cyan, false: dim}[m.focused() == p]
 }
 
 // spread is left and, right-aligned in width, right, which gives way first when both do not fit.
@@ -116,9 +128,10 @@ func spread(left, right string, width int) string {
 	return left + strings.Repeat(" ", max(1, room+1-lipgloss.Width(right))) + right
 }
 
-// atm is the ATM box: the issue and the run's state, then a row for each node and for each proof and command
-// of the checks, a connector between nodes when the terminal is tall enough.
-func (m *Model) atm(width int) string {
+// atm is the ATM box, height rows at most: the issue and the run's state, then a row for each node and for
+// each proof and command of the checks, a connector between nodes when the terminal is tall enough, the rows
+// from its reading position.
+func (m *Model) atm(width, height int) string {
 	inner := width - 4
 	issue := m.label
 	if m.title != "" {
@@ -128,14 +141,16 @@ func (m *Model) atm(width int) string {
 		}
 	}
 	state := m.icon(m.state) + " " + bold(states[m.state][1], m.state)
-	lines := []string{spread(paint(dim, ansi.Truncate(issue, inner-lipgloss.Width(state)-1, "…")), state, inner), ""}
+	var rows []string
 	for i, r := range m.rows {
 		if i > 0 && !r.check && m.height >= connectors {
-			lines = append(lines, paint(dim, "│"))
+			rows = append(rows, paint(dim, "│"))
 		}
-		lines = append(lines, m.row(r, inner))
+		rows = append(rows, m.row(r, inner))
 	}
-	return box(bold(cyan, "ATM"), strings.Join(lines, "\n"), width)
+	head := spread(paint(dim, ansi.Truncate(issue, inner-lipgloss.Width(state)-1, "…")), state, inner)
+	lines := append([]string{head, ""}, m.pipeline.show(rows, max(1, height-4))...)
+	return box(bold(cyan, "ATM"), strings.Join(lines, "\n"), width, m.border(&m.pipeline))
 }
 
 // row is r's line: its icon, its label and how long it took, then, right-aligned, its note and its state.
@@ -465,8 +480,9 @@ func (m *Model) agentBox(width, lines int) string {
 	if len(out) == 0 {
 		out = []string{paint(dim, "starting")}
 	}
-	out = append(make([]string, max(0, lines-len(out))), out[max(0, len(out)-lines):]...)
-	return box(bold(cyan, "Agent"), strings.Join(out, "\n"), width)
+	out = m.history.show(out, lines)
+	out = append(make([]string, max(0, lines-len(out))), out...)
+	return box(bold(cyan, "Agent"), strings.Join(out, "\n"), width, m.border(&m.history))
 }
 
 // findingsBox is the findings as no-mistakes has them: a severity icon, a reference, the description below.
@@ -490,7 +506,7 @@ func (m *Model) findingsBox(width int) string {
 			title += " " + paint(severities[sev][1], fmt.Sprintf("%s %d", severities[sev][0], counts[sev]))
 		}
 	}
-	return box(title, strings.Join(out, "\n"), width)
+	return box(title, strings.Join(out, "\n"), width, dim)
 }
 
 // logBox is the last lines of the running node's output, dim.
@@ -500,5 +516,5 @@ func (m *Model) logBox(width, lines int) string {
 	for i, l := range out {
 		styled[i] = paint(dim, l)
 	}
-	return box(bold(cyan, "Log"), strings.Join(styled, "\n"), width)
+	return box(bold(cyan, "Log"), strings.Join(styled, "\n"), width, dim)
 }
