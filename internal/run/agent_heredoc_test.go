@@ -22,11 +22,13 @@ func TestReachAcceptsQuotedHeredocTestData(t *testing.T) {
 	}
 	gitT(t, root, "add", target)
 	gitT(t, root, "commit", "-q", "-m", "add existing test file")
+	crlf := bytes.ReplaceAll([]byte(command), []byte("\r\n"), []byte("\n"))
+	crlf = bytes.ReplaceAll(crlf, []byte("\n"), []byte("\r\n"))
 	for _, input := range []struct {
 		name, command string
 	}{
 		{"LF", command},
-		{"CRLF", string(bytes.ReplaceAll([]byte(command), []byte("\n"), []byte("\r\n")))},
+		{"CRLF", string(crlf)},
 	} {
 		t.Run(input.name, func(t *testing.T) {
 			if fetchesAt(input.command, root) {
