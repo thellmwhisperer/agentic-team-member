@@ -8,8 +8,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode"
 
 	"github.com/thellmwhisperer/agentic-team-member/internal/config"
+	"github.com/yuin/goldmark/v2/ast"
+	"github.com/yuin/goldmark/v2/parser"
 )
 
 type contractCriterion struct {
@@ -170,77 +173,125 @@ func contractGaps(r contractReview, missing []string) []string {
 }
 
 func missingIssueGates(body string) []string {
-	fields := []struct{ name, key string }{
-		{"Non-goals", "non_goals"}, {"Invariants", "invariants"},
-		{"Acceptance criteria", "executable_acceptance"}, {"Split triggers", "split_triggers"},
-	}
-	seen := make(map[string]bool, len(fields))
+	source := []byte(body)
+	doc := parser.New().Parse(source)
+	seen := map[string]bool{}
 	section := ""
-	fence, fenceSize := byte(0), 0
-	for _, raw := range strings.Split(body, "\n") {
-		line := strings.TrimSpace(raw)
-		if marker, size, ok := issueFence(line); ok {
-			if fence == 0 {
-				fence, fenceSize = marker, size
-			} else if marker == fence && size >= fenceSize && strings.TrimSpace(line[size:]) == "" {
-				fence, fenceSize = 0, 0
+	var visit func(ast.Node)
+	visit = func(node ast.Node) {
+		switch n := node.(type) {
+		case *ast.Heading:
+			line := issueText(n, source, false)
+			section = issueGateName(line)
+			if section == "" {
+				if field, value, ok := issueField(line); ok {
+					section = issueGateName(field)
+					if section != "" && substantiveIssueText(value) {
+						seen[section] = true
+					}
+				}
 			}
-			continue
-		}
-		if fence != 0 {
-			if section == "Acceptance criteria" && substantiveIssueLine(line) {
+			return
+		case *ast.Paragraph:
+			fieldLines, contentLines := issueLines(n, source, false), issueLines(n, source, true)
+			for i, content := range contentLines {
+				fieldLine := content
+				if i < len(fieldLines) {
+					fieldLine = fieldLines[i]
+				}
+				if field, value, ok := issueField(fieldLine); ok {
+					section = issueGateName(field)
+					if !substantiveIssueText(value) {
+						if _, codeValue, codeOK := issueField(content); codeOK {
+							value = codeValue
+						}
+					}
+					if section != "" && substantiveIssueText(value) {
+						seen[section] = true
+					}
+					continue
+				}
+				if section != "" && substantiveIssueText(content) {
+					seen[section] = true
+				}
+			}
+			return
+		case *ast.CodeBlock:
+			if section == "Acceptance criteria" && n.CodeBlockKind == ast.CodeBlockKindFenced &&
+				substantiveMarkdown([]byte(n.Value.Str(source))) {
 				seen[section] = true
 			}
-			continue
+			return
+		case *ast.HTMLBlock, *ast.ThematicBreak:
+			return
 		}
-		if name, value, ok := issueGateField(line); ok {
-			section = name
-			if substantiveIssueLine(value) {
-				seen[name] = true
-			}
-			continue
-		}
-		if issueSectionBoundary(line) {
-			section = ""
-			continue
-		}
-		if section != "" && substantiveIssueLine(line) {
-			seen[section] = true
+		for child := node.FirstChild(); child != nil; child = child.NextSibling() {
+			visit(child)
 		}
 	}
+	for child := doc.FirstChild(); child != nil; child = child.NextSibling() {
+		visit(child)
+	}
 	var missing []string
-	for _, field := range fields {
-		if !seen[field.name] {
-			missing = append(missing, field.key)
+	for _, gate := range []struct{ name, key string }{
+		{"Non-goals", "non_goals"}, {"Invariants", "invariants"},
+		{"Acceptance criteria", "executable_acceptance"}, {"Split triggers", "split_triggers"},
+	} {
+		if !seen[gate.name] {
+			missing = append(missing, gate.key)
 		}
 	}
 	return missing
 }
 
-func issueFence(line string) (byte, int, bool) {
-	if len(line) == 0 || line[0] != '`' && line[0] != '~' {
-		return 0, 0, false
-	}
-	i := 1
-	for i < len(line) && line[i] == line[0] {
-		i++
-	}
-	return line[0], i, i >= 3
+func issueText(node ast.Node, source []byte, code bool) string {
+	return strings.Join(issueLines(node, source, code), " ")
 }
 
-func substantiveIssueLine(line string) bool {
+func issueLines(node ast.Node, source []byte, code bool) []string {
+	var line strings.Builder
+	var lines []string
+	flush := func() {
+		lines = append(lines, line.String())
+		line.Reset()
+	}
+	var visit func(ast.Node)
+	visit = func(node ast.Node) {
+		switch n := node.(type) {
+		case *ast.RawHTML:
+			return
+		case *ast.CodeSpan:
+			if !code {
+				return
+			}
+		case *ast.Text:
+			line.WriteString(n.Value.Str(source))
+			if n.SoftLineBreak() || n.HardLineBreak() {
+				flush()
+			}
+			return
+		}
+		for child := node.FirstChild(); child != nil; child = child.NextSibling() {
+			visit(child)
+		}
+	}
+	visit(node)
+	if line.Len() > 0 || len(lines) == 0 {
+		flush()
+	}
+	return lines
+}
+
+func substantiveIssueText(line string) bool {
 	for _, r := range line {
-		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' {
+		if unicode.IsLetter(r) || unicode.IsNumber(r) {
 			return true
 		}
 	}
 	return false
 }
 
-func issueSectionBoundary(line string) bool {
-	if strings.HasPrefix(line, "#") {
-		return true
-	}
+func issueField(line string) (title, value string, ok bool) {
 	line = strings.TrimSpace(line)
 	digits := 0
 	for digits < len(line) && line[digits] >= '0' && line[digits] <= '9' {
@@ -249,72 +300,36 @@ func issueSectionBoundary(line string) bool {
 	if digits > 0 && strings.HasPrefix(line[digits:], ". ") {
 		line = strings.TrimSpace(line[digits+2:])
 	}
-	var label string
-	if strings.HasPrefix(line, "**") {
-		end := strings.Index(line[2:], "**")
-		if end < 0 {
-			return false
-		}
-		label = strings.TrimSpace(line[2 : end+2])
-	} else if before, _, hasValue := strings.Cut(line, ":"); hasValue {
-		label = strings.TrimSpace(before)
-	} else {
-		label = line
+	label, value, found := strings.Cut(line, ":")
+	if !found {
+		return "", "", false
 	}
-	label = strings.TrimSuffix(label, ":")
+	label, value = strings.TrimSpace(label), strings.TrimSpace(value)
+	return label, value, issueFieldName(label)
+}
+
+func issueFieldName(label string) bool {
 	switch strings.ToLower(strings.TrimSpace(label)) {
-	case "kind", "goal", "non-goals", "invariants", "behavioral contract / states",
-		"scope surface", "acceptance", "acceptance criteria", "split triggers", "dependencies / parent", "evidence":
+	case "kind", "goal", "non-goals", "invariants", "behavioral contract / states", "scope surface",
+		"acceptance", "acceptance criteria", "split triggers", "dependencies / parent", "evidence":
 		return true
 	default:
 		return false
 	}
 }
 
-func issueGateField(line string) (title, value string, ok bool) {
-	line = strings.TrimSpace(line)
-	if strings.HasPrefix(line, "#") {
-		line = strings.TrimSpace(strings.TrimLeft(line, "#"))
-	} else {
-		digits := 0
-		for digits < len(line) && line[digits] >= '0' && line[digits] <= '9' {
-			digits++
-		}
-		if digits > 0 && strings.HasPrefix(line[digits:], ". ") {
-			line = strings.TrimSpace(line[digits+2:])
-		}
-	}
-	var label string
-	if strings.HasPrefix(line, "**") {
-		end := strings.Index(line[2:], "**")
-		if end < 0 {
-			return "", "", false
-		}
-		label = strings.TrimSpace(line[2 : end+2])
-		value = strings.TrimSpace(line[end+4:])
-		label = strings.TrimSuffix(label, ":")
-		value = strings.TrimPrefix(value, ":")
-		value = strings.TrimSpace(value)
-	} else {
-		var found bool
-		label, value, found = strings.Cut(line, ":")
-		if !found {
-			label = line
-			value = ""
-		}
-		label, value = strings.TrimSpace(label), strings.TrimSpace(value)
-	}
-	switch {
-	case strings.EqualFold(label, "Non-goals"):
-		return "Non-goals", value, true
-	case strings.EqualFold(label, "Invariants"):
-		return "Invariants", value, true
-	case strings.EqualFold(label, "Acceptance") || strings.EqualFold(label, "Acceptance criteria"):
-		return "Acceptance criteria", value, true
-	case strings.EqualFold(label, "Split triggers"):
-		return "Split triggers", value, true
+func issueGateName(label string) string {
+	switch strings.ToLower(strings.TrimSpace(label)) {
+	case "non-goals":
+		return "Non-goals"
+	case "invariants":
+		return "Invariants"
+	case "acceptance", "acceptance criteria":
+		return "Acceptance criteria"
+	case "split triggers":
+		return "Split triggers"
 	default:
-		return "", "", false
+		return ""
 	}
 }
 
@@ -325,6 +340,31 @@ func contains(values []string, value string) bool {
 		}
 	}
 	return false
+}
+
+func substantiveMarkdown(source []byte) bool {
+	doc := parser.New().Parse(source)
+	var substantive bool
+	var visit func(ast.Node)
+	visit = func(node ast.Node) {
+		if substantive {
+			return
+		}
+		switch n := node.(type) {
+		case *ast.Heading, *ast.HTMLBlock, *ast.ThematicBreak, *ast.CodeBlock:
+			return
+		case *ast.Paragraph:
+			substantive = substantiveIssueText(issueText(n, source, true))
+			return
+		}
+		for child := node.FirstChild(); child != nil; child = child.NextSibling() {
+			visit(child)
+		}
+	}
+	for child := doc.FirstChild(); child != nil; child = child.NextSibling() {
+		visit(child)
+	}
+	return substantive
 }
 
 // inspectContract keeps judgment in the reviewer, and freshness, correction limits and proofs in ATM.

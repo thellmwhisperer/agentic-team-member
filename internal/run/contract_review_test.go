@@ -146,6 +146,20 @@ func TestRunContractReviewRepair(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root, out := contractReviewRepo(t)
+			if tc.name == "repair rechecks" {
+				original, err := os.ReadFile(filepath.Join(root, ".atm.yaml"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				atm := atmSet(string(original), "install", `if grep -q repaired a.txt; then printf install >> "$ATM_TEST_OUT/install.marker"; fi`)
+				atm = atmSet(atm, "test", `if grep -q repaired a.txt; then printf test >> "$ATM_TEST_OUT/test.marker"; fi; sh a_test.sh`)
+				atm = atmSet(atm, "typecheck", `if grep -q repaired a.txt; then printf typecheck >> "$ATM_TEST_OUT/typecheck.marker"; fi`)
+				atm = atmSet(atm, "lint", `if grep -q repaired a.txt; then printf lint >> "$ATM_TEST_OUT/lint.marker"; fi`)
+				atm = atmSet(atm, "test_file", `sh {file}; status=$?; if grep -q repaired a.txt; then printf proof >> "$ATM_TEST_OUT/proof.marker"; fi; exit "$status"`)
+				if err := os.WriteFile(filepath.Join(root, ".atm.yaml"), []byte(atm), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
 			t.Setenv("FAKE_CONTRACT_REPORT", repairContract)
 			t.Setenv("FAKE_CONTRACT_REPAIR", tc.work)
 			t.Setenv("FAKE_CONTRACT_AFTER_REPAIR_REPORT", tc.after)
@@ -173,7 +187,7 @@ func TestRunContractReviewRepair(t *testing.T) {
 				t.Fatalf("no split: %s", b)
 			}
 			if tc.name == "repair rechecks" {
-				checkContractRechecks(t, dir, rounds)
+				checkContractRechecks(t, dir, out, rounds)
 			}
 			_, e = os.Stat(filepath.Join(out, "delivered"))
 			if (e == nil) != (tc.want == "") {
@@ -183,11 +197,36 @@ func TestRunContractReviewRepair(t *testing.T) {
 	}
 }
 
-func checkContractRechecks(t *testing.T, dir string, rounds []contractReview) {
+func checkContractRechecks(t *testing.T, dir, out string, rounds []contractReview) {
 	t.Helper()
 	b, e := os.ReadFile(filepath.Join(dir, "contract-rechecks-0.json"))
-	if e != nil || !strings.Contains(string(b), `"reproofs"`) || !strings.Contains(string(b), `"passed"`) {
-		t.Fatalf("rechecks missing: %s %v", b, e)
+	var rechecks struct {
+		Reproofs []unitResult `json:"reproofs"`
+		Commands []cmdResult  `json:"commands"`
+	}
+	if e != nil || json.Unmarshal(b, &rechecks) != nil || len(rechecks.Reproofs) != 1 {
+		t.Fatalf("rechecks missing a unit proof: %s %v", b, e)
+	}
+	proof := rechecks.Reproofs[0]
+	if proof.Type != "fix" || proof.TestFile != "a_test.sh" || proof.Result != "passed" ||
+		proof.Red.Exit == 0 || proof.Green.Exit != 0 {
+		t.Fatalf("repair did not rerun the required red/green proof: %+v", proof)
+	}
+	wantCommands := []string{"install", "test", "typecheck", "lint"}
+	if len(rechecks.Commands) != len(wantCommands) {
+		t.Fatalf("repair checks missing configured commands: %+v", rechecks.Commands)
+	}
+	for i, want := range wantCommands {
+		if rechecks.Commands[i].Name != want || rechecks.Commands[i].Result != "passed" {
+			t.Fatalf("repair command %q not passed: %+v", want, rechecks.Commands[i])
+		}
+		marker := filepath.Join(out, want+".marker")
+		if b, err := os.ReadFile(marker); err != nil || len(b) == 0 {
+			t.Fatalf("configured command %q left no repair marker: %q %v", want, b, err)
+		}
+	}
+	if b, err := os.ReadFile(filepath.Join(out, "proof.marker")); err != nil || len(b) == 0 {
+		t.Fatalf("repair proof left no marker: %q %v", b, err)
 	}
 	rep := readReport(t, filepath.Join(dir, "report.json"))
 	if rep["head_sha"] != rounds[1].Head || rounds[0].Head == rounds[1].Head {
@@ -267,6 +306,28 @@ Type: fix
 			t.Fatal("delivery did not run:", err)
 		}
 	})
+	t.Run("unmarked labels", func(t *testing.T) {
+		_, out := contractReviewRepo(t)
+		body := `# Retry on timeout
+Type: fix
+Non-goals
+Change retry policy outside this case.
+Invariants
+Retry occurs once.
+Acceptance
+Retry once.
+Split triggers
+Split if the diff adds an independent outcome.
+`
+		t.Setenv("FAKE_CONTRACT_REPORT", passedContract)
+		err := Run("t", []string{issueFile(t, body)}, &bytes.Buffer{}, &bytes.Buffer{})
+		if err == nil || !strings.Contains(err.Error(), "issue missing task-slicing") {
+			t.Fatalf("unmarked labels accepted as gates: %v", err)
+		}
+		if _, err := os.Stat(filepath.Join(out, "delivered")); !os.IsNotExist(err) {
+			t.Fatal("delivery ran")
+		}
+	})
 	t.Run("numbered and bold section content", func(t *testing.T) {
 		gates := []struct{ section, original string }{
 			{"Non-goals", "Change retry policy outside this case."},
@@ -292,6 +353,76 @@ Type: fix
 					}
 				})
 			}
+		}
+	})
+}
+
+func TestRunContractReviewIgnoresHTMLCommentsInGates(t *testing.T) {
+	gates := []struct{ section, original, field, target string }{
+		{"Non-goals", "Change retry policy outside this case.", "Non-goals", "non_goals"},
+		{"Invariants", "Retry occurs once.", "Invariants", "invariants"},
+		{"Acceptance criteria", "Retry once.", "Acceptance", "executable_acceptance"},
+		{"Split triggers", "Split if the diff adds an independent outcome.", "Split triggers", "split_triggers"},
+	}
+	for _, form := range []struct{ name, content string }{
+		{"inline field", ""},
+		{"section comment", "<!-- TODO -->"},
+		{"multiline comment", "<!-- TODO\nstill TODO\n-->"},
+		{"fenced comment", "```html\n<!-- TODO -->\n```"},
+	} {
+		for _, gate := range gates {
+			t.Run(form.name+"/"+gate.section, func(t *testing.T) {
+				_, out := contractReviewRepo(t)
+				old := "## " + gate.section + "\n" + gate.original + "\n"
+				newField := form.content
+				if form.name == "inline field" {
+					newField = gate.field + ": <!-- TODO -->"
+				} else {
+					newField = "## " + gate.section + "\n" + form.content
+				}
+				body := strings.Replace(reviewReadyIssue, old, newField+"\n", 1)
+				if !strings.Contains(body, newField) {
+					t.Fatal("comment-only gate fixture was not built")
+				}
+				t.Setenv("FAKE_CONTRACT_REPORT", passedContract)
+				err := Run("t", []string{issueFile(t, body)}, &bytes.Buffer{}, &bytes.Buffer{})
+				if err == nil || !strings.Contains(err.Error(), "issue missing task-slicing") {
+					t.Fatalf("comment-only %s gate accepted: %v", gate.section, err)
+				}
+				if _, err := os.Stat(filepath.Join(out, "delivered")); !os.IsNotExist(err) {
+					t.Fatal("delivery ran")
+				}
+			})
+		}
+	}
+	t.Run("split retains blockers for every commented gate", func(t *testing.T) {
+		root, out := contractReviewRepo(t)
+		body := reviewReadyIssue
+		for _, gate := range gates {
+			body = strings.Replace(body, gate.original, "<!-- TODO -->", 1)
+		}
+		var children []contractChild
+		for _, gate := range gates {
+			children = append(children, contractChild{Cause: "empty " + gate.section, Contract: "Return the issue to planning",
+				Dependency: "blocks_parent", Target: "gate:" + gate.target, Evidence: "the original field contains only a comment"})
+		}
+		report, err := json.Marshal(contractReview{Dispatch: dispatchGates{true, true, true, true, true},
+			Status: "split", Acceptance: []contractCriterion{}, Children: children})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("FAKE_CONTRACT_REPORT", string(report))
+		err = Run("t", []string{issueFile(t, body)}, &bytes.Buffer{}, &bytes.Buffer{})
+		if err == nil || !strings.Contains(err.Error(), "requires split") {
+			t.Fatalf("want retained split, got %v", err)
+		}
+		if _, err := os.Stat(filepath.Join(out, "delivered")); !os.IsNotExist(err) {
+			t.Fatal("delivery ran")
+		}
+		var rounds []contractReview
+		b, err := os.ReadFile(filepath.Join(root, ".atm/runs/t/contract-review.json"))
+		if err != nil || json.Unmarshal(b, &rounds) != nil || len(rounds) != 1 || len(rounds[0].Children) != len(gates) {
+			t.Fatalf("comment-gate blockers were not persisted: %s %v", b, err)
 		}
 	})
 }
