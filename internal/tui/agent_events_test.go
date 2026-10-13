@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -109,6 +110,29 @@ func TestAgentBoxRendersUnderscoreAndVariableBacktickMarkdown(t *testing.T) {
 	}
 }
 
+func TestAgentBoxRendersNestedAndTripleEmphasis(t *testing.T) {
+	for _, text := range []string{"**bold _italic_**", "- ***bold italic***"} {
+		raw, lines := agentBoxSays(t, 60, text)
+		want := "✎ bold italic"
+		if strings.HasPrefix(text, "-") {
+			want = "✎ • bold italic"
+		}
+		if !reflect.DeepEqual(lines, []string{want}) {
+			t.Fatalf("Agent box lines for %q:\n%q\nwant:\n%q", text, lines, []string{want})
+		}
+		bold, italic := false, false
+		for _, sgr := range regexp.MustCompile("\\x1b\\[([0-9;]*)m").FindAllStringSubmatch(raw, -1) {
+			for _, code := range strings.Split(sgr[1], ";") {
+				bold = bold || code == "1"
+				italic = italic || code == "3"
+			}
+		}
+		if !bold || !italic {
+			t.Fatalf("nested emphasis styles are missing for %q:\n%q", text, raw)
+		}
+	}
+}
+
 func TestAgentBoxPreservesInlineCodeWhitespaceWhenWrapping(t *testing.T) {
 	for _, text := range []string{
 		"`abcdefghijklmnopqrst  abcdefghijklmnop`",
@@ -190,5 +214,15 @@ func TestAgentBoxDoesNotPassTerminalControlsThrough(t *testing.T) {
 		if strings.Contains(raw, c) {
 			t.Fatalf("Agent box passes %q through:\n%q", c, raw)
 		}
+	}
+}
+
+func TestAgentBoxDoesNotDecodeMarkdownEntitiesIntoTerminalControls(t *testing.T) {
+	raw, lines := agentBoxSays(t, 60, "safe&#x1b;[2Jtext")
+	if want := []string{"✎ safe[2Jtext"}; !reflect.DeepEqual(lines, want) {
+		t.Fatalf("Agent box lines:\n%q\nwant:\n%q", lines, want)
+	}
+	if strings.Contains(raw, "\x1b[2J") {
+		t.Fatalf("Agent box emitted an entity-decoded terminal control:\n%q", raw)
 	}
 }
