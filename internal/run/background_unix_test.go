@@ -3,9 +3,11 @@
 package run
 
 import (
+	"bufio"
 	"bytes"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -232,5 +234,59 @@ func until(t *testing.T, what string, cond func() bool) {
 		if time.Now().After(deadline) {
 			t.Fatalf("not within 5 s: %s", what)
 		}
+	}
+}
+
+// An idle background process whose file atm update replaced ends at the next atm run, which one started from
+// the new file serves.
+func TestARunGoesToABackgroundProcessOfTheNewFile(t *testing.T) {
+	top := atmRepo(t)
+	wait, release := holdFakeAgents(t, 1)
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(exe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	atm := filepath.Join(t.TempDir(), "atm")
+	if err := os.WriteFile(atm, b, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	old := exec.Command(atm, "serve")
+	old.Dir = top
+	stderr, err := old.StderrPipe()
+	if err == nil {
+		err = old.Start()
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = old.Process.Kill() })
+	if line, err := bufio.NewReader(stderr).ReadString('\n'); !strings.HasPrefix(line, "atm serve pid:") {
+		t.Fatalf("atm serve = %q, %v", line, err)
+	}
+	exited := make(chan error, 1)
+	go func() { exited <- old.Wait() }()
+	if err := os.WriteFile(atm+".new", b, 0o755); err != nil { // as atm update replaces it
+		t.Fatal(err)
+	}
+	if err := os.Rename(atm+".new", atm); err != nil {
+		t.Fatal(err)
+	}
+	o, err := Start(top, []string{issueFile(t, issue)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wait()
+	select {
+	case <-exited:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the background process of the old file still serves")
+	}
+	release()
+	if end, err := Attach(top, o.Run, &bytes.Buffer{}); err != nil || end.Outcome != "passed" {
+		t.Fatalf("Attach = %+v, %v", end, err)
 	}
 }

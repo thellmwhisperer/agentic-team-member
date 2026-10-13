@@ -104,7 +104,8 @@ func short(path string) string {
 }
 
 // Serve is the background process of the repository at root, its working directory. It ends when it has had
-// no run for idle, when its socket is removed while no run goes, or at once when another one serves root. Only
+// no run for idle, when its socket is removed or its file changed while no run goes, or at once when another one
+// serves root. Only
 // the one that holds .atm/atm.lock serves: another waits for it to answer, then ends, so the atm command that
 // started it connects to that one.
 func Serve(root string) error {
@@ -172,24 +173,44 @@ func serve(l *net.UnixListener, root, sock string) error {
 		return err
 	}
 	s := &server{root: root, runs: runs, last: time.Now()}
+	moved := changed()
 	for {
 		_ = l.SetDeadline(time.Now().Add(tick))
 		c, err := l.Accept()
-		if !errors.Is(err, os.ErrDeadlineExceeded) {
-			if err != nil {
-				return err
-			}
-			go s.handle(c)
-			continue
+		if err != nil && !errors.Is(err, os.ErrDeadlineExceeded) {
+			return err
 		}
 		_, gone := os.Stat(sock)
-		if s.Lock(); s.busy() == 0 && (gone != nil || time.Since(s.last) > idle) {
-			s.Unlock()
-			return nil
-		} else if s.busy() > 0 {
+		s.Lock()
+		end := s.busy() == 0 && (moved() || c == nil && (gone != nil || time.Since(s.last) > idle))
+		if c == nil && s.busy() > 0 {
 			s.save() // runs.jsonl's time is when its runs last ran, should this process die before they end
 		}
 		s.Unlock()
+		if end {
+			_ = l.Close() // and its socket, before c closes unanswered, so c's client starts the next one
+			if c != nil {
+				_ = c.Close()
+			}
+			return nil
+		}
+		if c != nil {
+			go s.handle(c)
+		}
+	}
+}
+
+// changed tells whether the file this process runs from has changed since it started, as atm update or
+// install.sh replace it: one of the old file ends once it has no run, so atm run gets one of the new.
+func changed() func() bool {
+	exe, err := os.Executable()
+	if err != nil {
+		return func() bool { return false }
+	}
+	was, err := os.Stat(exe)
+	return func() bool {
+		now, e := os.Stat(exe)
+		return err == nil && (e != nil || !os.SameFile(was, now) || !now.ModTime().Equal(was.ModTime()))
 	}
 }
 
@@ -583,16 +604,26 @@ func Runs(root string) ([]Outcome, error) {
 }
 
 // call sends req to the background process of the repository at root, started if need be, then what comes
-// from in, and hands each reply to fn.
+// from in, and hands each reply to fn. One that ends before it replies, as one whose file changed does, gets
+// req again from the next one.
 func call(root string, req request, in <-chan Input, fn func(reply)) error {
+	again, err := send(root, req, in, fn)
+	if again {
+		_, err = send(root, req, in, fn)
+	}
+	return err
+}
+
+// send is a try of call: again when the background process it reached ended before it replied.
+func send(root string, req request, in <-chan Input, fn func(reply)) (again bool, err error) {
 	c, err := connect(root)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer func() { _ = c.Close() }()
 	enc := json.NewEncoder(c)
 	if err := enc.Encode(req); err != nil {
-		return err
+		return true, err
 	}
 	done := make(chan struct{})
 	defer close(done)
@@ -613,19 +644,19 @@ func call(root string, req request, in <-chan Input, fn func(reply)) error {
 		}
 	}()
 	dec := json.NewDecoder(c)
-	for {
+	for replied := false; ; replied = true {
 		var r reply
 		if err := dec.Decode(&r); errors.Is(err, io.EOF) {
-			return nil
+			return !replied, nil
 		} else if err != nil {
-			return err
+			return !replied, err
 		}
 		if r.Error != "" {
-			return errors.New(r.Error)
+			return false, errors.New(r.Error)
 		}
 		fn(r)
 		if req.Cmd != "attach" {
-			return nil // run and runs each have one reply
+			return false, nil // run and runs each have one reply
 		}
 	}
 }
