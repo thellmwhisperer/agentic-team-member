@@ -24,6 +24,27 @@ const helloBrief = "Reply with the single word OK and nothing else."
 // temporary directory it removes, with pipes and no terminal, and returns how long it took to answer OK. Its
 // error is the cause, then the agent's last 5 lines.
 func Hello(c config.Agent, limit time.Duration) (time.Duration, error) {
+	readAnswer := func(dir, skill string) (time.Duration, error) {
+		final := filepath.Join(dir, "final.md")
+		argv, stdin := agent{Agent: c}.argv(dir, skill, final, helloBrief)
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		ctx, cancel := context.WithTimeout(ctx, limit)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+		cmd.Dir, cmd.Stdin, cmd.WaitDelay = dir, strings.NewReader(stdin), time.Second
+		cmd.Env = agentEnv(nil)
+		var log bytes.Buffer
+		s := stream{live: func(map[string]any) {}}
+		start := time.Now()
+		err := s.read(cmd, &log, c.Harness)
+		took := time.Since(start)
+		if c.Harness == "codex" {
+			b, _ := os.ReadFile(final)
+			s.final = string(b)
+		}
+		return helloResult(ctx, err, &log, s.final, took, limit)
+	}
 	dir, err := os.MkdirTemp("", "atm-hello-")
 	if err != nil {
 		return 0, err
@@ -36,24 +57,12 @@ func Hello(c config.Agent, limit time.Duration) (time.Duration, error) {
 	if err != nil {
 		return 0, err
 	}
-	final := filepath.Join(dir, "final.md")
-	argv, stdin := agent{Agent: c}.argv(dir, skill, final, helloBrief)
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	ctx, cancel := context.WithTimeout(ctx, limit)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
-	cmd.Dir, cmd.Stdin, cmd.WaitDelay = dir, strings.NewReader(stdin), time.Second
-	cmd.Env = agentEnv(nil)
-	var log bytes.Buffer
-	s := stream{live: func(map[string]any) {}}
-	start := time.Now()
-	err = s.read(cmd, &log, c.Harness)
-	took := time.Since(start)
-	if c.Harness == "codex" {
-		b, _ := os.ReadFile(final)
-		s.final = string(b)
-	}
+	return readAnswer(dir, skill)
+}
+
+func helloResult(
+	ctx context.Context, err error, log *bytes.Buffer, final string, took, limit time.Duration,
+) (time.Duration, error) {
 	var exit *exec.ExitError
 	switch {
 	case errors.Is(ctx.Err(), context.DeadlineExceeded):
@@ -67,7 +76,7 @@ func Hello(c config.Agent, limit time.Duration) (time.Duration, error) {
 	case err != nil:
 	case log.Len() == 0:
 		err = errors.New("silent")
-	case !strings.Contains(s.final, "OK"):
+	case !strings.Contains(final, "OK"):
 		err = errors.New("no OK in its final message")
 	default:
 		return took, nil
