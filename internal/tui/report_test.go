@@ -148,6 +148,17 @@ func TestCompletedScreenRestoresFailureAndUnrunNodes(t *testing.T) {
 	}
 }
 
+func TestCompletedScreenRejectsContradictoryFailedNodeResults(t *testing.T) {
+	for _, result := range []string{"passed", "not run"} {
+		m := New("stale-failure-"+result, 80, 40)
+		m.end(run.Outcome{Outcome: "failed", FailedNode: "checks", Report: savedReport(t,
+			`{"nodes":[{"name":"checks","result":"`+result+`","duration_ms":500}]}`)}, nil)
+		if r := m.current("checks"); r.state != "unknown" || r.hasDuration {
+			t.Errorf("named failed node with result %q was presented as evidence: %+v", result, r)
+		}
+	}
+}
+
 func TestCompletedScreenRestoresPriorUnitChecksAfterLaterAgentFailure(t *testing.T) {
 	m := New("multi-unit-1", 80, 40)
 	m.end(run.Outcome{Outcome: "failed", FailedNode: "agent", Report: savedReport(t, `{"nodes":[

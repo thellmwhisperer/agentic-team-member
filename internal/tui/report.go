@@ -58,13 +58,13 @@ func (m *Model) restoreReport(path string, outcome run.Outcome) {
 		default: // a stale running report is not evidence that the ended run is still working
 			continue
 		}
-		if n.Name == "agent" {
-			r.note = "saved node"
-		}
 	}
 }
 
 func consistentResult(name, result string, outcome run.Outcome) bool {
+	if outcome.Outcome == "failed" && outcome.FailedNode == name {
+		return result == "failed"
+	}
 	switch result {
 	case "passed":
 		return outcome.Outcome == "passed" || outcome.Outcome == "failed"
