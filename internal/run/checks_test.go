@@ -28,57 +28,32 @@ func atmSet(atm, key, value string) string {
 
 func TestChecksStashSurvivesCloneSweep(t *testing.T) {
 	root := repo(t, "https://example.com/owner/repo.git", atmYAML)
-	runDir := filepath.Join(root, ".atm", "runs", "t")
-	if err := os.MkdirAll(runDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	dir, sha, _, err := clone(root, "main", "", "", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	runDir := checksStashRunDir(t, root)
+	dir, sha := checksStashClone(t, root)
 	t.Cleanup(func() {
 		if err := release(dir, ""); err != nil {
 			t.Error(err)
 		}
 	})
-	artifact := filepath.Join(dir, ".atm", "follow-ups", "1", "artifact.txt")
-	if err := os.MkdirAll(filepath.Dir(artifact), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(artifact, []byte("follow-up\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := before(dir); err != nil {
-		t.Fatal(err)
-	}
+	artifact := checksStashArtifact(t, dir)
 	ready := filepath.Join(runDir, "continue-checks")
 	t.Setenv("ATM_TEST_READY", ready)
 	if err := os.WriteFile(filepath.Join(root, ".atm.yaml"), []byte(atmSet(atmYAML,
 		"test", `while [ ! -f "$ATM_TEST_READY" ]; do sleep 0.01; done; test ! -e .atm`)), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	c, err := config.Load(root, os.Getenv("HOME"), config.Agent{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	c := checksStashConfig(t, root)
 	done := make(chan error, 1)
 	go func() {
 		_, err := checks(dir, runDir, sha, "chore", "", nil, c)
 		done <- err
 	}()
-	defer os.WriteFile(ready, nil, 0o600)
-	deadline := time.Now().Add(5 * time.Second)
-	hidden := false
-	for {
-		if _, err := os.Stat(filepath.Join(dir, ".atm")); errors.Is(err, os.ErrNotExist) {
-			hidden = true
-			break
+	defer func() {
+		if err := os.WriteFile(ready, nil, 0o600); err != nil {
+			t.Error(err)
 		}
-		if time.Now().After(deadline) {
-			break
-		}
-		time.Sleep(time.Millisecond)
-	}
+	}()
+	hidden := waitForChecksStashHidden(t, dir)
 	sweep(filepath.Join(root, ".atm", "clones"), "")
 	_, stashErr := os.Stat(filepath.Join(runDir, "checks-atm"))
 	if err := os.WriteFile(ready, nil, 0o600); err != nil {
@@ -96,6 +71,62 @@ func TestChecksStashSurvivesCloneSweep(t *testing.T) {
 	}
 	if b, err := os.ReadFile(artifact); err != nil || string(b) != "follow-up\n" {
 		t.Fatalf("follow-up was not restored: %q, %v", b, err)
+	}
+}
+
+func checksStashRunDir(t *testing.T, root string) string {
+	t.Helper()
+	runDir := filepath.Join(root, ".atm", "runs", "t")
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return runDir
+}
+
+func checksStashClone(t *testing.T, root string) (string, string) {
+	t.Helper()
+	dir, sha, _, err := clone(root, "main", "", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dir, sha
+}
+
+func checksStashArtifact(t *testing.T, dir string) string {
+	t.Helper()
+	artifact := filepath.Join(dir, ".atm", "follow-ups", "1", "artifact.txt")
+	if err := os.MkdirAll(filepath.Dir(artifact), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(artifact, []byte("follow-up\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := before(dir); err != nil {
+		t.Fatal(err)
+	}
+	return artifact
+}
+
+func checksStashConfig(t *testing.T, root string) config.Config {
+	t.Helper()
+	c, err := config.Load(root, os.Getenv("HOME"), config.Agent{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+func waitForChecksStashHidden(t *testing.T, dir string) bool {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := os.Stat(filepath.Join(dir, ".atm")); errors.Is(err, os.ErrNotExist) {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 
