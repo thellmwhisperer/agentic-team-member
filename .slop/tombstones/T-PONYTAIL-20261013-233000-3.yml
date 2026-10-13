@@ -1,0 +1,18 @@
+schema: 1
+id: T-PONYTAIL-20261013-233000-3
+status: accepted
+category: alien_code
+title: "Remove the repeated current-head check immediately after inspectContract, which already performs that check."
+created_at: 2026-10-13
+incident:
+  pattern: "Remove the repeated current-head check immediately after inspectContract, which already performs that check."
+  what_went_wrong: "An ATM run wrote it and ATM's ponytail pass cut it before delivery."
+  root_cause: "The coding agent wrote more than the issue needed."
+  rule_established: "Cut by the ponytail pass; it does not come back."
+  evidence:
+    - family: speculative_hardening
+      example: "Remove the repeated current-head check immediately after inspectContract, which already performs that check."
+      artifact: "internal/run/run.go"
+match:
+  family: speculative_hardening
+  artifact: "internal/run/run.go"

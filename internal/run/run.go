@@ -278,9 +278,6 @@ func (a agent) deliver(r *verdict, clone, sha, base string, i Issue, screen io.W
 			ev["contract_review"] = reviewed
 		}
 		if err == nil {
-			err = reviewed.current(clone)
-		}
-		if err == nil {
 			r.HeadSHA, err = git(clone, "rev-parse", "HEAD")
 		}
 		if err == nil {

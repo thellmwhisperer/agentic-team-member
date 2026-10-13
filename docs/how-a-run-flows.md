@@ -201,27 +201,17 @@ When `delivery` is set, the clone goes on a new branch
 the next unit commit, and the clone's `origin` becomes the repository's. Every
 commit after the base must carry the repository's git identity.
 
-Before launching the command, ATM loads the bundled `task-slicing` skill through
-the same verified skill loader. A read-only review receives the original issue
-and actual base-to-head diff. Non-goals, invariants, executable acceptance and
-split triggers must be explicit; multiple independently correctable contracts
-or missing dispatch gates return to planning. The reviewer records literal
-issue criteria with evidence, not a line-count verdict. Unmet mandatory
-follow-ups also block delivery.
-
-Original-contract repairs use the sole worker with `ponytail`, without changing
-tests or requirements, then rerun every proof and configured check. ATM reviews
-the new head again. At most two corrections total are allowed, so no root cause
-can receive a third. Unresolved work becomes concrete child drafts with cause,
-contract, dependency and diff evidence; CoS creates and dispatches issues.
-Adjacent improvements are separate children, never repair instructions.
-The existing slop detector remains cut-only and its net-line rule is unchanged.
-
-`contract-review.json` records each review and its exact head/base, with briefs
-and harness logs alongside it. `contract-rechecks-<round>.json` records repair
-checks. Missing, stale, malformed or non-passing evidence, a dirty tree or a
-reviewer mutation blocks the command. Semantic completeness is the reviewer's
-judgment, not a new acceptance heuristic. An empty `delivery` skips this phase.
+Before the command runs, a read-only model with the bundled `task-slicing`
+skill reviews the actual base-to-head diff against the original issue. The
+issue must state Non-goals, Invariants, Acceptance and Split triggers, and hold
+one contract; otherwise it goes back to planning. A `repair` verdict sends the
+blocking findings to the worker with `ponytail`, which may not touch tests;
+every proof and check then reruns and the new head is reviewed again, at most
+two corrections in all. A split, an unmet criterion or mandatory follow-up, a
+malformed or stale review, a dirty tree or a reviewer that changes the work
+blocks the command. Each round, with its head and base, is in
+`contract-review.json`, and each repair's checks in
+`contract-rechecks-<round>.json`.
 
 Then the command runs with `sh -c` in the clone, without a time limit, with these
 variables:

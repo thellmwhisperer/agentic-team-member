@@ -2,6 +2,7 @@ package run
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -28,94 +29,57 @@ func TestRunDeliversTheBranch(t *testing.T) {
 		kept                               bool
 	}{
 		{name: "file issue, cut discarded", origin: bare,
-			log: expectedDeliveryLog(dev, false)},
+			log: "fix: Retry on timeout|" + dev + "\ninit|atm <atm@example.com>|atm <atm@example.com>"},
 		{name: "GitHub issue, cut kept", origin: "git@github.com:owner/repo.git", issue: "7", kept: true,
 			ponytail: "- a.txt: dropped two lines (speculative_feature)",
-			log:      expectedDeliveryLog(dev, true)},
+			log:      "ponytail: 1 cuts|" + dev + "\nfix: Retry on timeout|" + dev},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			root, got, arg := setupDeliveryCase(t, c, bare)
-			out, summary := runDeliveryCase(t, arg)
-			checkDeliveryCase(t, c, bare, root, got, &out, &summary)
+			root := repo(t, c.origin, atmSet(atmYAML, "delivery", deliveryLine))
+			noIdentity(t)
+			gitT(t, root, "config", "user.name", "Repo Dev")
+			gitT(t, root, "config", "user.email", "dev@example.com")
+			got := t.TempDir()
+			t.Setenv("ATM_TEST_OUT", got)
+			arg := c.issue
+			if arg == "" {
+				arg = issueFile(t, issue)
+			} else {
+				body, _ := json.Marshal(strings.TrimPrefix(issue, "# Retry on timeout\n"))
+				fakeGH(t, `{"title":"Retry on timeout","body":`+string(body)+`}`, false)
+			}
+			if c.kept {
+				t.Setenv("FAKE_AGENT_WORK", "printf 'fixed\\nextra\\nmore\\n' > a.txt"+fixTest)
+				t.Setenv("FAKE_PONYTAIL_WORK", "echo fixed > a.txt")
+				t.Setenv("FAKE_PONYTAIL_REPORT", cut)
+			}
+			var out, summary bytes.Buffer
+			if err := Run("t", []string{arg}, &out, &summary); err != nil {
+				t.Fatalf("%v\n%s", err, summary.String())
+			}
+			read := reader(t, got)
+			top := gitT(t, root, "rev-parse", "--show-toplevel")
+			checkBranch(t, read, c.log, c.origin)
+			if c.origin == bare {
+				checkDeliveredMarker(t, read)
+				if refs := gitT(t, bare, "for-each-ref"); refs != "" {
+					t.Fatalf("ATM pushed: %s", refs)
+				}
+			}
+			checkEnv(t, got, top, c.issue, c.ponytail)
+			printed, _ := os.ReadFile(filepath.Join(top, ".atm", "runs", "t", "delivery-output.txt"))
+			for _, line := range []string{"out-line", "err-line"} {
+				if !strings.Contains(summary.String(), line) || !strings.Contains(string(printed), line) {
+					t.Fatalf("want %q on the screen and in delivery-output.txt, got %q and %q", line, summary.String(),
+						printed)
+				}
+			}
+			if end := events(t, &out); end[len(end)-1]["step"] != "delivery" || end[len(end)-1]["state"] != "passed" {
+				t.Fatalf("want delivery passed last, got %v", end[len(end)-1])
+			}
 		})
 	}
-}
-
-func setupDeliveryCase(t *testing.T, c struct {
-	name, origin, issue, ponytail, log string
-	kept                               bool
-}, bare string) (root, got, arg string) {
-	t.Helper()
-	root = repo(t, c.origin, atmSet(atmYAML, "delivery", deliveryLine))
-	noIdentity(t)
-	gitT(t, root, "config", "user.name", "Repo Dev")
-	gitT(t, root, "config", "user.email", "dev@example.com")
-	got = t.TempDir()
-	t.Setenv("ATM_TEST_OUT", got)
-	arg = c.issue
-	if arg == "" {
-		arg = issueFile(t, issue)
-	} else {
-		fakeDeliveryIssue(t)
-	}
-	if c.kept {
-		t.Setenv("FAKE_AGENT_WORK", "printf 'fixed\\nextra\\nmore\\n' > a.txt"+fixTest)
-		t.Setenv("FAKE_PONYTAIL_WORK", "echo fixed > a.txt")
-		t.Setenv("FAKE_PONYTAIL_REPORT", cut)
-	}
-	return root, got, arg
-}
-
-func fakeDeliveryIssue(t *testing.T) {
-	t.Helper()
-	fakeGH(t, `{"title":"Retry on timeout","body":"Type: fix\n\n## Non-goals\n`+
-		`Change retry policy outside this case.\n\n## Invariants\nRetry occurs once.\n\n`+
-		`## Acceptance criteria\nRetry once.\n\n## Split triggers\n`+
-		`Split if the diff adds an independent outcome."}`, false)
-}
-
-func runDeliveryCase(t *testing.T, arg string) (bytes.Buffer, bytes.Buffer) {
-	t.Helper()
-	var out, summary bytes.Buffer
-	if err := Run("t", []string{arg}, &out, &summary); err != nil {
-		t.Fatalf("%v\n%s", err, summary.String())
-	}
-	return out, summary
-}
-
-func checkDeliveryCase(t *testing.T, c struct {
-	name, origin, issue, ponytail, log string
-	kept                               bool
-}, bare, root, got string, out, summary *bytes.Buffer) {
-	t.Helper()
-	read := reader(t, got)
-	top := gitT(t, root, "rev-parse", "--show-toplevel")
-	checkBranch(t, read, c.log, c.origin)
-	if c.origin == bare {
-		checkDeliveredMarker(t, read)
-	}
-	checkEnv(t, got, top, c.issue, c.ponytail)
-	printed, _ := os.ReadFile(filepath.Join(top, ".atm", "runs", "t", "delivery-output.txt"))
-	for _, line := range []string{"out-line", "err-line"} {
-		if !strings.Contains(summary.String(), line) || !strings.Contains(string(printed), line) {
-			t.Fatalf("want %q on the screen and in delivery-output.txt, got %q and %q", line, summary.String(), printed)
-		}
-	}
-	if end := events(t, out); end[len(end)-1]["step"] != "delivery" || end[len(end)-1]["state"] != "passed" {
-		t.Fatalf("want delivery passed last, got %v", end[len(end)-1])
-	}
-	if c.origin == bare && gitT(t, bare, "for-each-ref") != "" {
-		t.Fatal("ATM pushed a branch")
-	}
-}
-
-func expectedDeliveryLog(dev string, ponytail bool) string {
-	delivery := "fix: Retry on timeout|" + dev
-	if ponytail {
-		return "ponytail: 1 cuts|" + dev + "\n" + delivery
-	}
-	return delivery + "\ninit|atm <atm@example.com>|atm <atm@example.com>"
 }
 
 func TestRunDeliversAConventionalUnitCommit(t *testing.T) {
