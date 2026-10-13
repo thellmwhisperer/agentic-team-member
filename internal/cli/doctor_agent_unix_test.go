@@ -131,6 +131,47 @@ echo '{"type":"thread.started"}'
 	}
 }
 
+func TestDoctorAgentOtherHarnessesUseTemporaryGitRepository(t *testing.T) {
+	fake := `#!/bin/sh
+if [ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" != true ]; then
+	echo 'not a git repository' >&2
+	exit 2
+fi
+printf '%s\n' "$PWD" > "$FAKE_HELLO_CALL"
+case "${0##*/}" in
+claude) echo '{"type":"result","result":"OK"}' ;;
+opencode) echo '{"type":"text","part":{"text":"OK"}}' ;;
+pi) echo '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"OK"}]}}' ;;
+esac
+`
+	for _, harness := range []string{"claude", "opencode", "pi"} {
+		t.Run(harness, func(t *testing.T) {
+			dir, call := helloRepo(t, "ok")
+			bin := t.TempDir()
+			if err := os.WriteFile(filepath.Join(bin, harness), []byte(fake), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+			config := "harness: " + harness + "\nmodel: m1\ninstall: ''\ntest: ''\ntypecheck: ''\nlint: ''\n" +
+				"test_file: ''\ntest_patterns: []\ndocs_patterns: []\ndelivery: ''\n"
+			if err := os.WriteFile(filepath.Join(dir, ".atm.yaml"), []byte(config), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			out, err := atm(t, "doctor", "--agent")
+			if err != nil || !strings.HasPrefix(lastLine(out), "ok agent: "+harness+" m1 answered in ") {
+				t.Fatalf("atm doctor --agent: %v\n%s", err, out)
+			}
+			b, err := os.ReadFile(call)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.Stat(strings.TrimSpace(string(b))); err == nil {
+				t.Fatalf("hello repository was not removed: %q", b)
+			}
+		})
+	}
+}
+
 func TestDoctorAgentSaysHelloTheWayARunDoes(t *testing.T) {
 	for _, c := range []struct{ mode, want string }{
 		{"ok", "ok agent: claude m1 answered in "},

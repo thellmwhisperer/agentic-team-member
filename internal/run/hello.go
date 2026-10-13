@@ -29,10 +29,8 @@ func Hello(c config.Agent, limit time.Duration) (time.Duration, error) {
 		return 0, err
 	}
 	defer func() { _ = os.RemoveAll(dir) }()
-	if c.Harness == "codex" {
-		if _, err := git(dir, "init", "-q"); err != nil {
-			return 0, err
-		}
+	if _, err := git(dir, "init", "-q"); err != nil {
+		return 0, err
 	}
 	skill, err := placeSkill(dir, c.Harness, "ponytail")
 	if err != nil {
