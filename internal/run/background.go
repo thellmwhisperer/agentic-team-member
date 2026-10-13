@@ -195,10 +195,6 @@ func serve(l *net.UnixListener, root, sock string, moved func() bool) error {
 			}
 			return nil
 		}
-		if c == nil && s.busy() > 0 {
-			s.save() // runs.jsonl's time is when its runs last ran, should this process die before they end
-			s.unwatched()
-		}
 		if c != nil {
 			go s.handleConnection(c)
 		}
@@ -214,6 +210,7 @@ func (s *server) shouldExit(c net.Conn, sock string, moved func() bool) bool {
 	}
 	if c == nil && s.busy() > 0 {
 		s.save() // runs.jsonl's time is when its runs last ran, should this process die before they end
+		s.unwatched()
 	}
 	if c == nil {
 		return s.handoff && s.busy() == 0 && s.handlers == 0
