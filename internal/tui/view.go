@@ -3,7 +3,9 @@ package tui
 import (
 	"cmp"
 	"fmt"
+	"regexp"
 	"strings"
+	"unicode"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
@@ -214,16 +216,73 @@ func (m *Model) agentRuns() bool {
 	return false
 }
 
+var (
+	fence    = regexp.MustCompile("^\\s*(```|~~~)")
+	listItem = regexp.MustCompile(`^(\s*)([-*+]|\d+[.)])\s+(.*)$`)
+	inline   = regexp.MustCompile("`([^`]+)`|\\*\\*(\\S(?:.*?\\S)?)\\*\\*|\\*(\\S(?:.*?\\S)?)\\*")
+)
+
+// words is text in style a word at a time, so that a line wrapped between two of them keeps it on both lines.
+func words(style lipgloss.Style, text string) string {
+	ws := strings.Split(text, " ")
+	for i, w := range ws {
+		if w != "" {
+			ws[i] = style.Render(w)
+		}
+	}
+	return strings.Join(ws, " ")
+}
+
+// markdown is line with its inline code, bold and emphasis styled in place of their markers.
+func markdown(line string) string {
+	return inline.ReplaceAllStringFunc(line, func(s string) string {
+		switch m := inline.FindStringSubmatch(s); {
+		case m[1] != "":
+			return words(lipgloss.NewStyle().Foreground(lipgloss.Color(yellow)), m[1])
+		case m[2] != "":
+			return words(lipgloss.NewStyle().Bold(true), m[2])
+		default:
+			return words(lipgloss.NewStyle().Italic(true), m[3])
+		}
+	})
+}
+
+// agentTextRows is the Markdown of text in rows of width, the first behind prefix, the rest indented under
+// it: fenced code kept as is, hard wrapped, lists with their continuation under their text. text loses its
+// terminal controls and tabs, which would move the cursor.
 func agentTextRows(prefix, text string, width int) []string {
+	text = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) && r != '\n' {
+			return -1
+		}
+		return r
+	}, strings.ReplaceAll(ansi.Strip(text), "\t", "    "))
+	w := max(1, width-6)
 	var rows []string
-	first := true
-	for _, logical := range strings.Split(strings.TrimSpace(text), "\n") {
-		for _, wrapped := range strings.Split(ansi.Wrap(logical, width-6, ""), "\n") {
-			if first {
-				rows = append(rows, prefix+wrapped)
-				first = false
+	code := false
+	for _, line := range strings.Split(strings.TrimSpace(text), "\n") {
+		var wrapped []string
+		switch item := listItem.FindStringSubmatch(line); {
+		case fence.MatchString(line):
+			code = !code
+			continue
+		case code:
+			wrapped = strings.Split(paint(yellow, ansi.Hardwrap(line, w, true)), "\n")
+		case item != nil:
+			lead := item[1] + cmp.Or(strings.Trim(item[2], "-*+"), "•") + " "
+			body := strings.Split(ansi.Wrap(markdown(item[3]), max(1, w-ansi.StringWidth(lead)), ""), "\n")
+			wrapped = append([]string{lead + body[0]}, body[1:]...)
+			for i := 1; i < len(wrapped); i++ {
+				wrapped[i] = strings.Repeat(" ", ansi.StringWidth(lead)) + wrapped[i]
+			}
+		default:
+			wrapped = strings.Split(ansi.Wrap(markdown(line), w, ""), "\n")
+		}
+		for _, l := range wrapped {
+			if rows == nil {
+				rows = append(rows, prefix+l)
 			} else {
-				rows = append(rows, "  "+wrapped)
+				rows = append(rows, "  "+l)
 			}
 		}
 	}

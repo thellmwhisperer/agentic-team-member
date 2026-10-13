@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"reflect"
@@ -61,7 +62,7 @@ func TestAgentBoxRendersRunParserEventGoldens(t *testing.T) {
 		"⠋ 1 tool: bash · ls packages",
 	}, 2)
 	checkAgentBox(t, eventGolden(t, "claude-261.events.jsonl"), []string{
-		"✎ Writing the red tests first, then the fix in `reset`.",
+		"✎ Writing the red tests first, then the fix in reset.",
 		"· 1 tool: Edit",
 	}, 1)
 }
@@ -69,10 +70,72 @@ func TestAgentBoxRendersRunParserEventGoldens(t *testing.T) {
 func TestAgentBoxRendersTheSameStoryForBothHarnesses(t *testing.T) {
 	want := []string{
 		"∴ Exploring the packages directory, particularly the analytics package, to understand existing patterns.",
-		"✎ Writing the red tests first, then the fix in `reset`.",
+		"✎ Writing the red tests first, then the fix in reset.",
 		"· 1 tool: Edit",
 	}
 	for _, name := range []string{"same-story-claude.events.jsonl", "same-story-pi.events.jsonl"} {
 		checkAgentBox(t, eventGolden(t, name), want, 1)
+	}
+}
+
+// agentBoxSays is the Agent box, width wide, once the agent says text.
+func agentBoxSays(t *testing.T, width int, text string) (string, []string) {
+	t.Helper()
+	b, err := json.Marshal(map[string]string{"says": text})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := modelWithEvents(width, []string{string(b)})
+	return m.agentBox(width, 40), agentLines(m, width)
+}
+
+func TestAgentBoxRendersMarkdownBold(t *testing.T) {
+	raw, lines := agentBoxSays(t, 60, "**Evaluating helper fallback**")
+	if want := []string{"✎ Evaluating helper fallback"}; !reflect.DeepEqual(lines, want) {
+		t.Fatalf("Agent box lines:\n%q\nwant:\n%q", lines, want)
+	}
+	if !strings.Contains(raw, "\x1b[1mEvaluating") {
+		t.Fatalf("bold text is not bold:\n%q", raw)
+	}
+}
+
+func TestAgentBoxRendersMarkdownWithinANarrowPanel(t *testing.T) {
+	const width = 32
+	raw, lines := agentBoxSays(t, width, "Plan for *the* fix:\n- read `view.go` and the tests around it\n"+
+		"- fix\n\n```go\nif  x {\n\treturn 1 // a long code line that has to wrap\n}\n```\nDone.")
+	want := []string{
+		"✎ Plan for the fix:",
+		"• read view.go and the",
+		"tests around it",
+		"• fix",
+		"if  x {",
+		"return 1 // a long cod",
+		"e line that has to wrap",
+		"}",
+		"Done.",
+	}
+	if !reflect.DeepEqual(lines, want) {
+		t.Fatalf("Agent box lines:\n%q\nwant:\n%q", lines, want)
+	}
+	for _, l := range strings.Split(raw, "\n") {
+		if w := ansi.StringWidth(l); w != width {
+			t.Fatalf("line %q is %d wide, want %d", ansi.Strip(l), w, width)
+		}
+	}
+	if stripped := ansi.Strip(raw); !strings.Contains(stripped, "│       return 1") ||
+		!strings.Contains(stripped, "│     tests around it") {
+		t.Fatalf("indentation not kept:\n%s", stripped)
+	}
+}
+
+func TestAgentBoxDoesNotPassTerminalControlsThrough(t *testing.T) {
+	raw, lines := agentBoxSays(t, 60, "safe\x1b]0;title\a \x1b[2Jtext\r\b")
+	if want := []string{"✎ safe text"}; !reflect.DeepEqual(lines, want) {
+		t.Fatalf("Agent box lines:\n%q\nwant:\n%q", lines, want)
+	}
+	for _, c := range []string{"\x1b]", "\x1b[2J", "\a", "\r", "\b"} {
+		if strings.Contains(raw, c) {
+			t.Fatalf("Agent box passes %q through:\n%q", c, raw)
+		}
 	}
 }
