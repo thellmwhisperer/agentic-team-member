@@ -194,12 +194,6 @@ func serve(l *net.UnixListener, root, sock string, moved func() bool) error {
 				_ = c.Close()
 			}
 			return nil
-<<<<<<< HEAD
-=======
-		} else if s.busy() > 0 {
-			s.save() // runs.jsonl's time is when its runs last ran, should this process die before they end
-			s.unwatched()
->>>>>>> aefb7d3 (atm unit 1: Go port: no watcher, no run: atm watch never exits, and atm run refuses to start without one)
 		}
 		if c == nil && s.busy() > 0 {
 			s.save() // runs.jsonl's time is when its runs last ran, should this process die before they end
