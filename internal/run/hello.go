@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -58,6 +59,13 @@ func Hello(c config.Agent, limit time.Duration) (time.Duration, error) {
 		return 0, err
 	}
 	return readAnswer(dir, skill)
+}
+
+// agentEnv is the agent's environment: atm's, but CLAUDE_CODE_CHILD_SESSION, then env.
+func agentEnv(env []string) []string {
+	return append(slices.DeleteFunc(os.Environ(), func(kv string) bool {
+		return strings.HasPrefix(kv, "CLAUDE_CODE_CHILD_SESSION=")
+	}), env...)
 }
 
 func helloResult(
