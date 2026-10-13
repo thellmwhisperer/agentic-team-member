@@ -95,6 +95,9 @@ func decodeContractReview(report map[string]any, body string) (contractReview, e
 }
 
 func (r contractReview) validate(body string) error {
+	if missing := missingIssueGate(body); missing != "" && r.Status != "split" {
+		return fmt.Errorf("issue missing task-slicing %s; return to planning with a split", missing)
+	}
 	if !r.Dispatch.ready() && r.Status != "split" {
 		return errors.New("task-slicing dispatch gates unmet or multiple contracts: return to planning with a split")
 	}
@@ -102,7 +105,7 @@ func (r contractReview) validate(body string) error {
 		if !quoted(body, c.Criterion) || c.Evidence == "" {
 			return errors.New("invalid contract review: criterion must quote the issue and carry evidence")
 		}
-		if r.Status == "passed" && !c.Satisfied {
+		if r.Status != "repair" && !c.Satisfied {
 			return errors.New("mandatory criterion unmet")
 		}
 	}
@@ -123,10 +126,51 @@ func (r contractReview) validateChildren() error {
 		}
 		blocking = blocking || c.Dependency == "blocks_parent"
 	}
-	if blocking == (r.Status == "passed") {
+	if (r.Status == "passed" && blocking) || (r.Status == "repair" && !blocking) {
 		return errors.New("invalid contract review: blocking children disagree with status")
 	}
 	return nil
+}
+
+func missingIssueGate(body string) string {
+	fields := []struct{ name, label string }{
+		{"Non-goals", "non-goals"},
+		{"Invariants", "invariants"},
+		{"Acceptance criteria", "executable acceptance"},
+		{"Split triggers", "split triggers"},
+	}
+	lines := strings.Split(body, "\n")
+	for _, field := range fields {
+		found := false
+		inSection := false
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "#") {
+				title := strings.TrimSpace(strings.TrimLeft(line, "#"))
+				title = strings.TrimSuffix(title, ":")
+				if strings.EqualFold(title, field.name) || field.name == "Acceptance criteria" && strings.EqualFold(title, "Acceptance") {
+					inSection = true
+					continue
+				}
+				inSection = false
+			}
+			if !inSection && strings.HasPrefix(strings.ToLower(line), strings.ToLower(field.name)+":") {
+				line = strings.TrimSpace(line[len(field.name)+1:])
+				if line != "" {
+					found = true
+					break
+				}
+			}
+			if inSection && line != "" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return field.label
+		}
+	}
+	return ""
 }
 
 // inspectContract keeps judgment in the reviewer, and freshness, correction limits and proofs in ATM.
