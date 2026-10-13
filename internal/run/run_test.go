@@ -21,7 +21,7 @@ var fakes string
 // TestMain doubles as fake command-line tools and agents under their executable names.
 func TestMain(m *testing.M) {
 	switch name := strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe"); name {
-	case "claude", "codex", "opencode", "pi":
+	case "claude", "codex", "opencode", "pi", "cursor-agent":
 		os.Exit(fakeAgent(name))
 	}
 	if len(os.Args) > 1 && os.Args[1] == "serve" { // the background process connect starts, as atm serve
@@ -124,7 +124,7 @@ func linkFakes() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	for _, name := range []string{"claude", "codex", "opencode", "pi"} {
+	for _, name := range []string{"claude", "codex", "opencode", "pi", "cursor-agent"} {
 		if runtime.GOOS == "windows" {
 			name += ".exe"
 		}

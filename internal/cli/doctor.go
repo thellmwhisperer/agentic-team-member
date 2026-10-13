@@ -44,8 +44,9 @@ func doctorCmd() *cobra.Command {
 				c, cfgErr = config.Load(cmp.Or(root, "."), home, config.Agent{})
 			}
 			harness := cmp.Or(c.Harness, "claude")
-			path, err := exec.LookPath(harness)
-			check(harness, path, err)
+			bin := cmp.Or(map[string]string{"cursor": "cursor-agent"}[harness], harness)
+			path, err := exec.LookPath(bin)
+			check(bin, path, err)
 			if root != "" && run.GitHubRepo() != "" {
 				path, err := exec.LookPath("gh")
 				check("gh", path, err)

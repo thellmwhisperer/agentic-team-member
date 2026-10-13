@@ -41,7 +41,7 @@ var skills embed.FS
 
 // skillDirs is where each harness finds a project skill; pi finds it where --skill points, under .atm/.
 var skillDirs = map[string]string{"claude": ".claude/skills", "codex": ".agents/skills",
-	"opencode": ".opencode/skills", "pi": ".atm/skills"}
+	"opencode": ".opencode/skills", "pi": ".atm/skills", "cursor": ".cursor/skills"}
 
 // tools is all claude needs for a unit.
 const tools = "Read,Edit,Write,Bash,Glob,Grep,Skill"
@@ -57,7 +57,7 @@ type agent struct {
 
 // flags adds the agent's flags to fs.
 func (a *agent) flags(fs *flag.FlagSet) {
-	fs.StringVar(&a.Harness, "harness", "", "agent CLI: claude, codex, opencode or pi")
+	fs.StringVar(&a.Harness, "harness", "", "agent CLI: claude, codex, opencode, pi or cursor")
 	fs.StringVar(&a.Model, "model", "", "the agent's model")
 	fs.StringVar(&a.Effort, "effort", "", "the agent's effort")
 	fs.Func("harness-arg", "an argument for the agent CLI, before the brief; repeatable", func(v string) error {
@@ -96,6 +96,9 @@ func (a agent) argv(clone, skill, final, brief string) (argv []string, stdin str
 	case "opencode":
 		argv = []string{"opencode", "run", "--pure", "--format", "json", "--dir", clone}
 		argv = with(with(argv, a.Model, "-m", a.Model), a.Effort, "--variant", a.Effort)
+	case "cursor":
+		argv = []string{"cursor-agent", "-p", "--output-format", "stream-json", "--trust", "--force", "--workspace", clone}
+		argv = with(argv, a.Model, "--model", a.Model)
 	case "pi":
 		argv = []string{"pi", "-p", "--mode", "json", "--no-extensions", "--no-skills", "--no-prompt-templates",
 			"--no-context-files", "--no-session", "--skill", skill}
@@ -134,6 +137,9 @@ func (a agent) run(clone, name, skill, brief string, check func(map[string]any) 
 		if exit != "" {
 			ev["exit"], ev["tail"] = exit, strings.Join(s.tail, "\n")
 		}
+		if s.failure != "" && s.reach == "" {
+			err = fmt.Errorf("%w; cursor: %s", err, s.failure)
+		}
 		return ev, err
 	}
 	switch {
@@ -143,6 +149,8 @@ func (a agent) run(clone, name, skill, brief string, check func(map[string]any) 
 		return fail(fmt.Errorf("%s; log: %s", cause, path))
 	case err != nil:
 		return fail(fmt.Errorf("agent: %w; log: %s", err, path))
+	case s.failure != "":
+		return fail(fmt.Errorf("%s; log: %s", exit, path))
 	case !s.used:
 		return fail(fmt.Errorf("%s; agent left no proof it used the %s skill; log: %s", exit, skill, path))
 	}
@@ -331,6 +339,8 @@ type stream struct {
 	used         bool
 	live         func(map[string]any)
 	pending      string
+	thought      string   // cursor's thinking deltas until completed
+	failure      string   // cursor's error result, even when the process exits 0
 	tail         []string // the last 20 lines the agent wrote
 	heard        func()   // each line calls it
 }
@@ -414,6 +424,25 @@ type event struct {
 			Input  json.RawMessage
 		}
 	}
+	Subtype, Text string                     // cursor
+	CallID        string                     `json:"call_id"`
+	ToolCall      map[string]json.RawMessage `json:"tool_call"`
+	ResultIsError bool                       `json:"is_error"`
+}
+
+// cursorTool ignores metadata beside the <kind>ToolCall key.
+func (e event) cursorTool() (kind string, args json.RawMessage, passed bool) {
+	for k, v := range e.ToolCall {
+		if kind, ok := strings.CutSuffix(k, "ToolCall"); ok {
+			var c struct {
+				Args   json.RawMessage
+				Result struct{ Success json.RawMessage }
+			}
+			_ = json.Unmarshal(v, &c)
+			return kind, c.Args, c.Result.Success != nil && string(c.Result.Success) != "null"
+		}
+	}
+	return "", nil, false
 }
 
 type block struct {
@@ -427,14 +456,17 @@ type block struct {
 func (s *stream) see(harness string, line []byte) {
 	var e event
 	_ = json.Unmarshal(line, &e) // a field of another type is left empty, the rest is read
+	if harness == "cursor" {
+		s.cursorState(&e)
+	}
 	final, ends := e.final(harness)
 	if ends {
 		s.final = final
 	}
 	if s.pending != "" {
-		s.flush(harness == "claude" && e.Type == "result" && ends)
+		s.flush(e.Type == "result" && (harness == "claude" && ends || harness == "cursor"))
 	}
-	s.loads = append(s.loads, e.skillLoads(harness, s.skill)...)
+	s.loads = append(s.loads, e.skillLoads(harness, s.skill, s.clone)...)
 	s.reach = cmp.Or(s.reach, outside(e.calls(harness), s.root, s.clone))
 	for _, ev := range e.activity(harness) {
 		id, _ := ev["id"].(string)
@@ -454,6 +486,23 @@ func (s *stream) see(harness string, line []byte) {
 			}
 			s.live(ev)
 		}
+	}
+}
+
+// cursorState joins a thought and keeps an error result even if the process exits successfully.
+func (s *stream) cursorState(e *event) {
+	if e.Type == "thinking" {
+		if e.Subtype == "delta" {
+			s.thought += e.Text
+		}
+		if e.Subtype == "completed" {
+			e.Text, s.thought = s.thought, ""
+		}
+	}
+	if e.Type == "result" && e.ResultIsError {
+		var text string
+		_ = json.Unmarshal(e.Result, &text)
+		s.failure = cmp.Or(s.failure, text, "error result")
 	}
 }
 
@@ -478,7 +527,7 @@ func (s *stream) flush(report bool) {
 // skillLoads is the ids of e's calls that load skill, by its exact name: a Skill tool call for claude, a read
 // of its SKILL.md for pi and codex, a skill call for opencode. A load proves the agent used skill once its
 // result is not an error.
-func (e event) skillLoads(harness, skill string) []string {
+func (e event) skillLoads(harness, skill, clone string) []string {
 	read := func(path string) bool { return strings.Contains(filepath.ToSlash(path), "/"+skill+"/SKILL.md") }
 	switch {
 	case harness == "claude":
@@ -490,8 +539,55 @@ func (e event) skillLoads(harness, skill string) []string {
 		return []string{e.Part.CallID}
 	case harness == "pi" && e.Type == "tool_execution_start" && e.ToolName == "read" && read(detail(e.Args)):
 		return []string{e.ToolCallID}
+	case harness == "cursor":
+		return e.cursorSkillLoads(skill, clone)
 	}
 	return nil
+}
+
+func (e event) cursorSkillLoads(skill, clone string) []string {
+	if e.Type != "tool_call" || e.Subtype != "started" {
+		return nil
+	}
+	kind, args, _ := e.cursorTool()
+	var input struct{ Path, Command string }
+	_ = json.Unmarshal(args, &input)
+	target := filepath.Join(clone, skillDirs["cursor"], skill, "SKILL.md")
+	exact := func(path string) bool {
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(clone, path)
+		}
+		return filepath.Clean(path) == target
+	}
+	if kind == "read" && exact(input.Path) || kind == "shell" && cursorCatReads(input.Command, exact) {
+		return []string{e.CallID}
+	}
+	return nil
+}
+
+// cursorCatReads proves only a direct literal cat of the installed skill, not arbitrary shell execution.
+func cursorCatReads(command string, exact func(string) bool) bool {
+	file, err := syntax.NewParser().Parse(strings.NewReader(command), "")
+	if err != nil || len(file.Stmts) != 1 {
+		return false
+	}
+	stmt := file.Stmts[0]
+	call, ok := stmt.Cmd.(*syntax.CallExpr)
+	if !ok || stmt.Negated || stmt.Background || len(stmt.Redirs) != 0 || len(call.Assigns) != 0 {
+		return false
+	}
+	var words []string
+	for _, arg := range call.Args {
+		word, literal := literalWord(arg)
+		if !literal {
+			return false
+		}
+		words = append(words, word)
+	}
+	if len(words) == 3 && words[1] == "--" {
+		words = append(words[:1], words[2])
+	}
+	return len(words) == 2 && (words[0] == "cat" || words[0] == "/bin/cat") && exact(words[1])
 }
 
 // skillCalls is the ids of claude's Skill tool calls in e that load skill.
@@ -520,7 +616,8 @@ func (e event) final(harness string) (string, bool) {
 		return text, true
 	case harness == "opencode" && e.Type == "text":
 		return e.Part.Text, true
-	case harness == "pi" && e.Type == "message_end" && e.Message.Role == "assistant":
+	case (harness == "pi" && e.Type == "message_end" || harness == "cursor" && e.Type == "assistant") &&
+		e.Message.Role == "assistant":
 		var texts []string
 		for _, b := range e.Message.Content {
 			if b.Type == "text" {
@@ -553,7 +650,24 @@ func lastObject(text string) (map[string]any, int) {
 // its id, with its result once known: running, passed or failed.
 func (e event) activity(harness string) []map[string]any {
 	return map[string]func(event) []map[string]any{"claude": event.blocks, "pi": event.pi, "codex": event.codex,
-		"opencode": event.opencode}[harness](e)
+		"opencode": event.opencode, "cursor": event.cursor}[harness](e)
+}
+
+func (e event) cursor() []map[string]any {
+	switch {
+	case e.Type == "thinking" && e.Subtype == "completed" && strings.TrimSpace(e.Text) != "":
+		return []map[string]any{{"thinking": e.Text}}
+	case e.Type == "assistant":
+		return e.blocks()
+	case e.Type == "tool_call" && (e.Subtype == "started" || e.Subtype == "completed"):
+		kind, args, passed := e.cursorTool()
+		if kind == "" {
+			return nil
+		}
+		r := cmp.Or(map[string]string{"started": "running"}[e.Subtype], result(!passed))
+		return []map[string]any{toolCall(e.CallID, kind, detail(args), r)}
+	}
+	return nil
 }
 
 func (e event) pi() []map[string]any {
@@ -658,6 +772,9 @@ type use struct{ tool, args, command string }
 // and opencode's tool uses.
 func (e event) calls(harness string) (cs []use) {
 	switch {
+	case harness == "cursor" && e.Type == "tool_call":
+		kind, args, _ := e.cursorTool()
+		return []use{{kind, strs(args, writesFile(kind)), shellCommand(kind, args)}}
 	case harness == "codex":
 		return codexCalls(e.Item)
 	case harness == "opencode" && e.Type == "tool_use":
