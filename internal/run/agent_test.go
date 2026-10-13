@@ -22,7 +22,8 @@ type obj = map[string]any
 
 // fakeReport is the fake agent's final message: a draft object, then the report, the last top-level object.
 const fakeReport = "Done.\n{\"draft\": true}\n" + `{"test_file": "a_test.sh", "changed_files": ["a.txt"], ` +
-	`"summary": "s", "commands_run": [], "follow_ups": [{"title": "t", "red_test": "b_test.sh"}]}`
+	`"summary": "s", "commands_run": [], "follow_ups": [{"title": "t", "red_test": "b_test.sh", ` +
+	`"criterion": "A retry runs once after a timeout."}]}`
 
 // fixTest writes a test that a.txt, which repo's base commit has broken, is fixed and broken no longer.
 const fixTest = "; echo 'grep -q fixed a.txt && ! grep -q broken a.txt' > a_test.sh"
