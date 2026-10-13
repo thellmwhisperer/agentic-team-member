@@ -3,7 +3,6 @@ package tui
 import (
 	"encoding/json"
 	"os"
-	"slices"
 	"time"
 
 	"github.com/thellmwhisperer/agentic-team-member/internal/run"
@@ -66,27 +65,16 @@ func (m *Model) restoreReport(path string, outcome run.Outcome) {
 }
 
 func consistentResult(name, result string, outcome run.Outcome) bool {
-	order := []string{"issue", "clone", "contract", "agent", "checks", "ponytail", "delivery"}
-	i := slices.Index(order, name)
-	if i < 0 {
-		return false
-	}
-	if outcome.Outcome == "passed" {
-		return result == "passed" || i == len(order)-1 && result == "skipped"
-	}
-	if outcome.Outcome != "failed" {
-		return false
-	}
-	failed := slices.Index(order, outcome.FailedNode)
-	if failed < 0 {
-		return false
-	}
-	switch {
-	case i < failed:
-		return result == "passed"
-	case i == failed:
-		return result == "failed"
+	switch result {
+	case "passed":
+		return outcome.Outcome == "passed" || outcome.Outcome == "failed"
+	case "failed":
+		return outcome.Outcome == "failed" && outcome.FailedNode == name
+	case "skipped":
+		return name == "delivery" && (outcome.Outcome == "passed" || outcome.Outcome == "failed" && outcome.FailedNode == "")
+	case "not run":
+		return outcome.Outcome == "failed"
 	default:
-		return result == "not run"
+		return false
 	}
 }
