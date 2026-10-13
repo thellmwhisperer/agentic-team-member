@@ -29,6 +29,11 @@ type verdict struct {
 	out        io.Writer // the log: each node's start and end, one JSON object a line
 	err        error     // the failed node's
 	at         string    // the node that runs
+
+	// Resumable says atm run --resume picks the run up, from ResumableUnit's checks: it failed after its agent.
+	Resumable     bool `json:"resumable"`
+	ResumableUnit int  `json:"resumable_unit,omitempty"`
+	saved         int  // the last unit whose agent's work is kept for atm run --resume, 0 for none
 }
 
 type node struct {
@@ -61,6 +66,8 @@ type unitResult struct {
 	Green    try    `json:"green,omitzero"`
 	Result   string `json:"result"`
 	span
+	// ResumedFrom is the run whose agent's work the unit picked up, instead of a new agent call.
+	ResumedFrom string `json:"resumed_from,omitempty"`
 }
 
 type cmdResult struct {
