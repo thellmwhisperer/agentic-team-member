@@ -262,22 +262,33 @@ func shrunk(clone string, changed, tests []string) error {
 	return nil
 }
 
-var notRun = regexp.MustCompile(`^(FAIL\s+\S+\s+\[(build|setup) failed\]$|ERROR collecting\b|E (SyntaxError|ImportError)\b|` +
-	`Test suite failed to run\b|error TS\d+:)`)
+var notRun = regexp.MustCompile(`^(FAIL\s+\S+\s+\[(build|setup) failed\]$|[_=*!# -]*ERROR collecting\b|` +
+	`E\s+(SyntaxError|ImportError)\b|Test suite failed to run\b|error TS\d+:|` +
+	`.+\(\d+,\d+\): error TS\d+:|.+:\d+:\d+ - error TS\d+:)`)
 
-var testResult = regexp.MustCompile(`^(--- (PASS|FAIL):|ok\s+\S+|FAIL\s+\S+\s+[0-9]|PASSED\b|FAILED\b|ERROR\s+\S+::|` +
-	`.+\s+(PASSED|FAILED|SKIPPED|XFAIL|XPASS)$|=+ .* (passed|failed|error) =+|PASS\s|FAIL\s)`)
+var testResult = regexp.MustCompile(`^(--- (PASS|FAIL):|ok\s+\S+|` +
+	`.+::.+\s+(PASSED|FAILED|SKIPPED|XFAIL|XPASS)\b|(PASSED|FAILED|SKIPPED|XFAIL|XPASS)\s+\S+::|` +
+	`[✓✔√]\s|[✕✘×]\s)`)
+
+func runnerLine(line string) string {
+	return strings.TrimLeft(line, " \t\r*●•○◉·_>")
+}
 
 func redDidNotRun(output string) bool {
+	diagnostic := false
+	testRan := false
 	for _, line := range strings.Split(output, "\n") {
+		original := strings.TrimLeft(line, " \t\r")
+		line = runnerLine(original)
 		if notRun.MatchString(line) {
-			return true
+			diagnostic = true
+			continue
 		}
-		if testResult.MatchString(line) {
-			return false
+		if testResult.MatchString(line) || strings.HasPrefix(original, "● ") {
+			testRan = true
 		}
 	}
-	return false
+	return diagnostic && !testRan
 }
 
 // redGreen sets aside, in clone, the paths aside, runs test alone with tmpl, which must fail, brings the
@@ -288,7 +299,7 @@ func redGreen(clone, tree string, aside []string, test, tmpl string) (red, green
 		return red, green, err
 	}
 	red, green, err = trial(clone, tree, aside, line, line, test, strings.Contains(tmpl, "{tests}"), func(red try) error {
-		if redDidNotRun(red.Tail) {
+		if redDidNotRun(red.output) {
 			return fmt.Errorf("red did not run: parse/compile error: %s fails before any test runs", test)
 		}
 		return nil
@@ -411,15 +422,16 @@ type try struct {
 	Exit    int    `json:"exit_code"`
 	Tail    string `json:"tail"`
 	span
-	err error
+	err    error
+	output string
 }
 
 // attempt runs line in clone, as sh does.
 func attempt(clone, line string) try {
-	var tail string
+	var tail, output string
 	var err error
-	s := timed(func() { tail, err = sh(clone, line) })
-	t := try{line, 0, tail, s, err}
+	s := timed(func() { tail, output, err = shOutput(clone, line) })
+	t := try{Command: line, Tail: tail, span: s, err: err, output: output}
 	var exit *exec.ExitError
 	if errors.As(err, &exit) {
 		t.Exit = exit.ExitCode()
@@ -564,6 +576,12 @@ func sh(dir, line string, env ...string) (tail string, err error) {
 	return tee(ctx, nil, io.Discard, dir, line, env...)
 }
 
+func shOutput(dir, line string, env ...string) (tail, output string, err error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	return teeOutput(ctx, nil, io.Discard, dir, line, env...)
+}
+
 // terminal is the run's screen when a terminal can be attached to it: run runs cmd on the attached one, if
 // one is, and says whether it did.
 type terminal interface {
@@ -573,6 +591,15 @@ type terminal interface {
 // tee is sh killed when ctx ends rather than past timeout, its output copied to w as it comes and, a line at a
 // time, to the screen of the run in dir. It runs on t's terminal when one is attached.
 func tee(ctx context.Context, t terminal, w io.Writer, dir, line string, env ...string) (tail string, err error) {
+	tail, _, err = teeRun(ctx, t, w, dir, line, false, env...)
+	return tail, err
+}
+
+func teeOutput(ctx context.Context, t terminal, w io.Writer, dir, line string, env ...string) (tail, output string, err error) {
+	return teeRun(ctx, t, w, dir, line, true, env...)
+}
+
+func teeRun(ctx context.Context, t terminal, w io.Writer, dir, line string, capture bool, env ...string) (tail, output string, err error) {
 	cmd := exec.CommandContext(ctx, "sh", "-c", line)
 	var out bytes.Buffer
 	live := liveIn(dir)
@@ -582,11 +609,11 @@ func tee(ctx context.Context, t terminal, w io.Writer, dir, line string, env ...
 	cmd.Stderr = cmd.Stdout
 	attach, closeGroup, err := ownGroup(cmd)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	defer closeGroup()
 	if err := inheritCloneLease(cmd, dir); err != nil {
-		return "", err
+		return "", "", err
 	}
 	ran := false
 	if t != nil {
@@ -613,5 +640,8 @@ func tee(ctx context.Context, t terminal, w io.Writer, dir, line string, env ...
 	if tail = strings.Join(lines[max(0, len(lines)-60):], "\n"); err != nil && tail != "" {
 		err = fmt.Errorf("%w\n%s", err, tail)
 	}
-	return tail, err
+	if capture {
+		output = out.String()
+	}
+	return tail, output, err
 }

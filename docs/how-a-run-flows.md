@@ -86,7 +86,7 @@ commits fails the checks too.
 | `docs` | Only files matching `docs_patterns` changed |
 | `chore` | Nothing beyond the commands |
 
-For `fix`, `feature` and `greenfield`, ATM checks the red output before judging green. A whole Go `FAIL <package> [build failed]` or `FAIL <package> [setup failed]` line, pytest `ERROR collecting`, `E SyntaxError` or `E ImportError`, Jest `Test suite failed to run`, or a TypeScript `error TS` line before any test result fails with "red did not run: parse/compile error". Assertion failures remain valid reds.
+For `fix`, `feature` and `greenfield`, ATM checks the complete red output before judging green. A whole Go `FAIL <package> [build failed]` or `FAIL <package> [setup failed]` line, decorated pytest `ERROR collecting` / `E SyntaxError` / `E ImportError` line, Jest `Test suite failed to run` line, or TypeScript `<file>:<line>:<column> - error TS<n>` diagnostic before any test result fails with "red did not run: parse/compile error". A Jest `FAIL <file>` header is not a test result. Assertion failures remain valid reds.
 
 Red/green runs the report's `test_file` alone through `test_file` in
 `.atm.yaml`, once with the fix set aside and once with it back. After each
