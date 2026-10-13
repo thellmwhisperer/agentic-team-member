@@ -28,12 +28,19 @@ const failingUnit2Work = `if [ -f c1_test.sh ]; then echo u2 >> a.txt; mkdir -p 
 
 const failsOnUnit2 = `if [ -f c1_test.sh ]; then false; else sh a_test.sh; fi`
 
-// wantFollowUps fails the test unless got is unit 1's pending follow-up, verified, then unit 2's, verified
-// as unit2 says.
+// wantFollowUps checks the independent identities and verification states of both pending follow-ups.
 func wantFollowUps(t *testing.T, got []obj, unit2 bool) {
 	t.Helper()
-	if len(got) != 2 || got[0]["red_test"] != "c2_test.sh" || got[0]["verified"] != true ||
-		got[1]["red_test"] != "c3_test.sh" || got[1]["verified"] != unit2 || got[1]["test"] != "grep -q u3 a.txt\n" {
+	if len(got) != 2 {
+		t.Fatalf("want both units' follow-ups, got %v", got)
+	}
+	byTest := map[string]obj{}
+	for _, followUp := range got {
+		byTest[followUp["red_test"].(string)] = followUp
+	}
+	if byTest["c2_test.sh"]["verified"] != true || byTest["c2_test.sh"]["title"] != "pending" ||
+		byTest["c3_test.sh"]["verified"] != unit2 || byTest["c3_test.sh"]["title"] != "unit 2 gap" ||
+		byTest["c3_test.sh"]["test"] != "grep -q u3 a.txt\n" {
 		t.Fatalf("want unit 1's follow-up verified and unit 2's verified %v, got %v", unit2, got)
 	}
 }
