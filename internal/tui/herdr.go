@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/thellmwhisperer/agentic-team-member/internal/run"
@@ -19,10 +18,8 @@ import (
 // herdr tells herdr, when the screen runs in one of its panes, what the run does: herdr shows it in its Agents
 // section as atm. It reads the run's frames on a screen of its own.
 type herdr struct {
-	sync.Mutex
 	pane, label, step, failedStep, last string
 	m                                   *Model
-	released                            bool
 }
 
 // openHerdr is the run label's herdr agent, reported from start, startup or resume; nil outside herdr.
@@ -44,6 +41,8 @@ func (h *herdr) frame(f run.Frame) {
 	h.m.apply(f)
 	if e.Check != "" && e.State == "failed" {
 		h.failedStep = h.m.failedAt(h.m.current(e.Step))
+	} else if e.Check == "" && (e.State == "started" || e.State == "passed") {
+		h.failedStep = ""
 	}
 	if s := h.m.step(); s != "" {
 		h.step = s
@@ -99,10 +98,7 @@ func resolve(root, label string) (string, error) {
 
 func followWithHerdr(root, label, start string, size *[2]int, in <-chan run.Input, fn func(run.Frame),
 	followFn func(string, string, *[2]int, <-chan run.Input, func(run.Frame)) (run.Outcome, error)) (run.Outcome, error) {
-	var h *herdr
-	if label != "" {
-		h = openHerdr(label, start)
-	}
+	h := openHerdr(label, start)
 	if h != nil {
 		defer h.release()
 		original := fn
@@ -136,9 +132,6 @@ func Attach(root, label, start string, w io.Writer) (run.Outcome, error) {
 // release takes atm out of herdr's Agents section; nothing is reported after.
 func (h *herdr) release() {
 	h.call("release-agent")
-	h.Lock()
-	h.released = true
-	h.Unlock()
 }
 
 // issue is the issue's number, or the run's label for an issue file.
@@ -152,11 +145,6 @@ func (h *herdr) issue() string {
 // call runs herdr pane cmd with args, a second at most; whatever happens to it changes nothing.
 // ponytail: on the screen's path, a hung herdr holds the screen a second per call.
 func (h *herdr) call(cmd string, args ...string) {
-	h.Lock()
-	defer h.Unlock()
-	if h.released {
-		return
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	args = append([]string{"pane", cmd, h.pane, "--source", "atm", "--agent", "atm"}, args...)

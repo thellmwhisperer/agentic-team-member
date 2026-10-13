@@ -40,3 +40,37 @@ func TestFailedCheckReportsItsLabelInIdleOutcome(t *testing.T) {
 		t.Fatalf("herdr did not receive the failed check outcome: %q", b)
 	}
 }
+
+func TestRecoveredSlopCheckDoesNotReplaceLaterDeliveryFailure(t *testing.T) {
+	dir := t.TempDir()
+	calls := filepath.Join(dir, "calls")
+	herdr := filepath.Join(dir, "herdr")
+	script := "#!/bin/sh\nprintf '%s|' \"$@\" >> \"$HERDR_LOG\"; echo >> \"$HERDR_LOG\"\n"
+	if err := os.WriteFile(herdr, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HERDR_ENV", "1")
+	t.Setenv("HERDR_PANE_ID", "wX:p1")
+	t.Setenv("HERDR_BIN_PATH", herdr)
+	t.Setenv("HERDR_LOG", calls)
+	h := openHerdr("issue-1", "startup")
+	for _, ev := range []string{
+		`{"step":"issue","state":"started"}`,
+		`{"step":"issue","state":"passed","title":"Retry","number":7}`,
+		`{"step":"ponytail","state":"started"}`,
+		`{"step":"ponytail","check":"package proof","state":"failed"}`,
+		`{"step":"ponytail","state":"passed"}`,
+		`{"step":"delivery","state":"started"}`,
+		`{"step":"delivery","state":"failed"}`,
+	} {
+		h.frame(run.Frame{Event: []byte(ev)})
+	}
+	h.end(run.Outcome{Outcome: "failed", Ended: time.Now()}, nil)
+	b, err := os.ReadFile(calls)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), "--state|idle|--message|#7 failed at Delivery|") {
+		t.Fatalf("herdr retained a recovered check as the failed step: %q", b)
+	}
+}
