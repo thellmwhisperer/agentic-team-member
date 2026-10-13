@@ -49,7 +49,7 @@ func TestBothBoxesScrollIndependentlyAndFollowOnlyAtTheBottom(t *testing.T) {
 	if len(atm) == 0 || len(atm) == 40 || agent[len(agent)-1] != "thought 59" || len(agent) == 60 {
 		t.Fatalf("want both boxes overflowing at their latest:\n%s", view(m))
 	}
-	if !strings.Contains(m.View(), paint(cyan, "╭─ ")+bold(cyan, "Agent")) {
+	if !strings.Contains(m.View(), paint(cyan, "╭─ ")+bold(cyan, "Agent*")) {
 		t.Fatalf("want the Agent box focused, its border lit:\n%q", m.View())
 	}
 
@@ -75,7 +75,7 @@ func TestBothBoxesScrollIndependentlyAndFollowOnlyAtTheBottom(t *testing.T) {
 func TestThePipelineScrollsWhenFocusedAndFollowsAtTheBottom(t *testing.T) {
 	m := overflowing(120, 24)
 	press(m, tea.KeyTab)
-	if !strings.Contains(m.View(), paint(cyan, "╭─ ")+bold(cyan, "ATM")) {
+	if !strings.Contains(m.View(), paint(cyan, "╭─ ")+bold(cyan, "ATM*")) {
 		t.Fatalf("want the ATM box focused, its border lit:\n%q", m.View())
 	}
 	press(m, tea.KeyHome)
@@ -111,12 +111,25 @@ func TestTheWheelScrollsTheBoxUnderThePointer(t *testing.T) {
 	if !slices.Equal(shownOf(m, thoughts), agent) {
 		t.Fatalf("the wheel back down returns to the latest:\n%s", view(m))
 	}
-	// Stacked, the ATM box is above the Agent box.
 	m = overflowing(80, 40)
 	atm, agent = shownOf(m, proofs), shownOf(m, thoughts)
 	m.Update(tea.MouseMsg{X: 70, Y: 35, Button: tea.MouseButtonWheelUp, Action: tea.MouseActionPress})
 	if !slices.Equal(shownOf(m, proofs), atm) || slices.Equal(shownOf(m, thoughts), agent) {
 		t.Fatalf("stacked, the wheel low on the screen scrolls the Agent box:\n%s", view(m))
+	}
+	before := shownOf(m, thoughts)
+	for _, point := range [][2]int{{40, 23}, {40, 39}} {
+		m.Update(tea.MouseMsg{X: point[0], Y: point[1], Button: tea.MouseButtonWheelUp, Action: tea.MouseActionPress})
+	}
+	if !slices.Equal(shownOf(m, thoughts), before) {
+		t.Fatalf("the gap and footer do not scroll either box:\n%s", view(m))
+	}
+	m = overflowing(120, 24)
+	feed(m, `{"step":"output","output":"log line"}`)
+	before = shownOf(m, thoughts)
+	m.Update(tea.MouseMsg{X: 80, Y: 19, Button: tea.MouseButtonWheelUp, Action: tea.MouseActionPress})
+	if !slices.Equal(shownOf(m, thoughts), before) {
+		t.Fatalf("the Log does not scroll Agent history:\n%s", view(m))
 	}
 }
 
@@ -143,6 +156,56 @@ func TestResizeKeepsBothBoxesInBordersAndTheirReadingPosition(t *testing.T) {
 	feed(m, `{"step":"checks","check":"c40","state":"passed"}`)
 	if got := shownOf(m, proofs); got[len(got)-1] != "c40" {
 		t.Fatalf("want the ATM box following once it showed its bottom:\n%s", view(m))
+	}
+}
+
+func TestViewportFitsActualHeightWhenBothBoxesOverflow(t *testing.T) {
+	m := overflowing(80, 40)
+	s := view(m)
+	if got := len(strings.Split(s, "\n")); got > 40 {
+		t.Fatalf("80×40 viewport used %d rows:\n%s", got, s)
+	}
+	if !strings.Contains(s, "q detach") || len(shownOf(m, proofs)) == 0 || len(shownOf(m, thoughts)) == 0 {
+		t.Fatalf("both overflowing boxes and the footer must fit:\n%s", s)
+	}
+}
+
+func TestHeldRowsStayAnchoredAcrossConnectorAndWrapReflow(t *testing.T) {
+	m := overflowing(120, 24)
+	press(m, tea.KeyTab, tea.KeyHome)
+	for range 4 {
+		press(m, tea.KeyDown)
+	}
+	before := strings.Split(view(m), "\n")
+	if len(before) < 4 || !strings.Contains(before[3], "Checks") {
+		t.Fatalf("fixture must hold the Checks row before connectors appear:\n%s", strings.Join(before, "\n"))
+	}
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	after := strings.Split(view(m), "\n")
+	if len(after) < 4 || !strings.Contains(after[3], "Checks") {
+		t.Fatalf("connector insertion moved the selected ATM row:\n%s", strings.Join(after, "\n"))
+	}
+
+	m = New("issue-1", 120, 24)
+	feed(m, `{"step":"agent","state":"started"}`)
+	for i := range 5 {
+		feed(m, fmt.Sprintf(`{"step":"agent","thinking":"preceding message %02d %s"}`, i, strings.Repeat("x", 45)))
+	}
+	feed(m, `{"step":"agent","thinking":"anchor identity marker"}`)
+	for i := range 40 {
+		feed(m, fmt.Sprintf(`{"step":"agent","thinking":"later message %02d"}`, i))
+	}
+	view(m)
+	press(m, tea.KeyHome)
+	for range 5 {
+		press(m, tea.KeyDown)
+	}
+	if got := view(m); !strings.Contains(got, "anchor identity marker") {
+		t.Fatalf("fixture must select the anchored Agent message:\n%s", got)
+	}
+	m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	if got := view(m); !strings.Contains(got, "anchor identity marker") {
+		t.Fatalf("wrapping moved the selected Agent message:\n%s", got)
 	}
 }
 
