@@ -38,9 +38,9 @@ Reports in this area are in scope:
 
 - ATM's own path handling: the reported `test_file` must be a local path;
   follow-up red tests must be new paths outside `.atm/`, and a unit fails if
-  its agent moved HEAD. Write and edit paths must stay in the clone; text those
-  tools write is not treated as a path. A way around these checks is a
-  vulnerability.
+  its agent moved HEAD. ATM checks write and edit paths that resolve outside
+  the clone but within the repository root; text those tools write is not
+  treated as a path. A way around these checks is a vulnerability.
 - Command execution: ATM runs the target repository's `install`, `test`,
   `typecheck`, `lint`, `test_file` and `delivery` lines from `.atm.yaml` with
   `sh -c`. Running an unconfigured command or allowing a crafted report to

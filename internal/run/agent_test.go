@@ -532,9 +532,15 @@ func moreReachCases(claude func(string, string) string, why string) []reachCase 
 		{"pi edit text naming the repository", "pi", `{"type":"tool_execution_start","toolCallId":"c1",` +
 			`"toolName":"edit","args":{"path":"a.ts","edits":[{"oldText":"x","newText":"// see {root}/.atm/runs"}]}}` +
 			"\n", ""},
+		{"claude read content still checks reach", "claude", claude("Read",
+			`{"file_path":"src/a.ts","content":"{root}/.atm/runs/6-2/worker.jsonl"}`),
+			why + "Read {root}/.atm/runs/6-2/worker.jsonl src/a.ts"},
 		{"claude writes outside its clone", "claude", claude("Write",
 			`{"file_path":"{root}/.atm/runs/6-2/report.json","content":"{}"}`),
 			why + "Write {root}/.atm/runs/6-2/report.json"},
+		{"claude edit destination outside its clone", "claude", claude("Edit",
+			`{"file_path":"{root}/.atm/runs/6-2/report.json","old_string":"x","new_string":"y"}`),
+			why + "Edit {root}/.atm/runs/6-2/report.json"},
 	}
 }
 
