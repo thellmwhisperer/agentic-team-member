@@ -3,6 +3,7 @@ package tui
 import (
 	"cmp"
 	"fmt"
+	"html"
 	"regexp"
 	"strings"
 	"unicode"
@@ -10,6 +11,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/muesli/termenv"
+	"github.com/russross/blackfriday/v2"
 
 	"github.com/thellmwhisperer/agentic-team-member/internal/run"
 )
@@ -220,86 +222,43 @@ var (
 	listItem = regexp.MustCompile(`^(\s*)([-*+]|\d+[.)])\s+(.*)$`)
 )
 
-// words is text in style a word at a time, so that a line wrapped between two of them keeps it on both lines.
-func words(style lipgloss.Style, text string) string {
-	ws := strings.Split(text, " ")
-	for i, w := range ws {
-		if w != "" {
-			ws[i] = style.Render(w)
-		}
-	}
-	return strings.Join(ws, " ")
-}
-
 func markdown(line string) (string, bool) {
+	root := blackfriday.New(blackfriday.WithExtensions(blackfriday.NoIntraEmphasis)).Parse([]byte(line))
 	var out strings.Builder
 	code := false
-	for i := 0; i < len(line); {
-		if line[i] != '`' && line[i] != '*' && line[i] != '_' {
-			out.WriteByte(line[i])
-			i++
-			continue
-		}
-		marker := line[i]
-		end := i + 1
-		for end < len(line) && line[end] == marker {
-			end++
-		}
-		run := end - i
-		if marker == '`' {
-			contentEnd, ok := codeSpanEnd(line, end, run)
-			if ok {
-				out.WriteString(words(lipgloss.NewStyle().Foreground(lipgloss.Color(yellow)), line[end:contentEnd]))
-				code = true
-				i = contentEnd + run
-				continue
-			}
-		} else if run <= 2 && end < len(line) && line[end] != ' ' && line[end] != '\t' {
-			if marker == '_' && i > 0 && isWordByte(line[i-1]) {
-				out.WriteString(line[i:end])
-				i = end
-				continue
-			}
-			delim := strings.Repeat(string(marker), run)
-			if close := strings.Index(line[end:], delim); close > 0 {
-				contentEnd := end + close
-				if line[contentEnd-1] != ' ' && line[contentEnd-1] != '\t' {
-					style := lipgloss.NewStyle().Italic(true)
-					if run == 2 {
-						style = lipgloss.NewStyle().Bold(true)
-					}
-					out.WriteString(words(style, line[end:contentEnd]))
-					i = contentEnd + run
-					continue
+	var render func(*blackfriday.Node, lipgloss.Style)
+	render = func(node *blackfriday.Node, style lipgloss.Style) {
+		switch node.Type {
+		case blackfriday.Emph:
+			style = style.Italic(true)
+		case blackfriday.Strong:
+			style = style.Bold(true)
+		case blackfriday.Text:
+			text := strings.Map(func(r rune) rune {
+				if unicode.IsControl(r) {
+					return -1
 				}
-			}
+				return r
+			}, html.UnescapeString(string(node.Literal)))
+			out.WriteString(style.Render(text))
+			return
+		case blackfriday.Code:
+			code = true
+			out.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(yellow)).Render(string(node.Literal)))
+			return
+		case blackfriday.Softbreak, blackfriday.Hardbreak:
+			out.WriteByte(' ')
+			return
+		case blackfriday.HTMLSpan:
+			out.Write(node.Literal)
+			return
 		}
-		out.WriteString(line[i:end])
-		i = end
+		for child := node.FirstChild; child != nil; child = child.Next {
+			render(child, style)
+		}
 	}
+	render(root, lipgloss.NewStyle())
 	return out.String(), code
-}
-
-func codeSpanEnd(line string, start, run int) (int, bool) {
-	for i := start; i < len(line); {
-		if line[i] != '`' {
-			i++
-			continue
-		}
-		end := i + 1
-		for end < len(line) && line[end] == '`' {
-			end++
-		}
-		if end-i == run {
-			return i, true
-		}
-		i = end
-	}
-	return 0, false
-}
-
-func isWordByte(b byte) bool {
-	return b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' || b >= '0' && b <= '9' || b == '_'
 }
 
 func fence(line string) (byte, int, string, bool) {
