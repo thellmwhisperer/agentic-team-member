@@ -1,0 +1,18 @@
+schema: 1
+id: T-PONYTAIL-20261013-300-2
+status: accepted
+category: alien_code
+title: "Replace duplicate fabricated status fixtures with the real captures already required by issue 300."
+created_at: 2026-10-13
+incident:
+  pattern: "The end-to-end watcher test built another set of status strings despite having real captured fixtures."
+  what_went_wrong: "gateStatusFixtures and configureGateStatus maintained duplicate fake output and redundant environment setup."
+  root_cause: "The test duplicated a boundary fixture instead of using the existing realStatus helper."
+  rule_established: "Use the captured status files through realStatus for the same watcher behavior."
+  evidence:
+    - family: mock_heavy_test
+      example: "Removed gateStatusFixtures and configureGateStatus; kept the end-to-end event assertions."
+      artifact: "internal/run/watch_test.go"
+match:
+  family: mock_heavy_test
+  artifact: "internal/run/watch_test.go"
