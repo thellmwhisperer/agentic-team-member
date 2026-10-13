@@ -209,7 +209,7 @@ blocking findings to the worker with `ponytail`, which may not touch tests;
 every proof and check then reruns and the new head is reviewed again, at most
 two corrections in all. A split, an unmet criterion or mandatory follow-up, a
 malformed or stale review, a dirty tree or a reviewer that changes the work
-blocks the command. Each round, with its head and base, is in
+blocks the command. Each valid round, with its head and base, is in
 `contract-review.json`, and each repair's checks in
 `contract-rechecks-<round>.json`.
 

@@ -14,9 +14,12 @@ it:
   and the relevant lines of `worker*.jsonl`, with the harness and model
   named. Strip paths and hostnames you do not want published.
 - **Acceptance criteria**: numbered, each one checkable by a test.
+- **Non-goals and invariants**: what the change excludes and what it must preserve.
+- **Split triggers**: when the work must return for replanning as separate contracts.
 - **Red test**: the test that fails today, or a sentence describing it.
 
-An issue without a red test gets one before any code is written.
+The issue must hold one correctable contract. An issue without a red test gets
+one before any code is written.
 
 ## Development setup
 
@@ -40,8 +43,9 @@ To run ATM on this repository you need one coding agent CLI (`claude`,
 ## Making a change
 
 The preferred path is the pipeline: open the issue, run ATM on it, let
-no-mistakes open the PR, read it before it merges. A hand-made PR is welcome
-when the pipeline cannot do the job yet; say so in the PR body.
+no-mistakes open a draft PR, and review it before making it ready or merging.
+A hand-made PR is welcome when the pipeline cannot do the job yet; say so in
+the PR body.
 
 Either way:
 
@@ -73,9 +77,11 @@ failed or were cancelled (`scripts/ci-summary.sh`). It is the required check
 on `main`; a path-filtered workflow that never starts would leave its check
 pending and block the merge.
 
-Auto-merge by rebase is armed when the PR body's `## Risk Assessment` says
-Low or Medium, and GitHub merges once CI is green. High risk, or a level it
-cannot read, waits for the `risk-reviewed` label. Before adding it, whoever
+No-mistakes opens draft PRs for this repository. The human reviews the draft
+and decides whether to make it ready or merge it. Auto-merge by rebase runs
+only for a non-draft PR: it is armed when the PR body's `## Risk Assessment`
+says Low or Medium, and GitHub merges once CI is green. High risk, or a level
+it cannot read, waits for the `risk-reviewed` label. Before adding it, whoever
 launched the run writes one comment:
 
 ```

@@ -168,7 +168,7 @@ ignores.
 
 | Path | Holds | Kept |
 |------|-------|------|
-| `.atm/runs/<label>/` | `report.json`, the briefs, the agent logs, `follow-ups.json`, `delivery-output.txt`, and `resume/` when the run is resumable | Always |
+| `.atm/runs/<label>/` | `report.json`, the briefs, agent logs, follow-ups, [contract review and recheck evidence](how-a-run-flows.md#delivery), delivery output, and `resume/` when the run is resumable | Always |
 | `.atm/clones/atm-run-<timestamp>/` | The run's isolated clone | Removed when the run ends, unless it delivered and its PR is open |
 | `.atm/runs.jsonl` | The last state of each retained run, so `atm runs` survives the background process | Every run going and the newest 200 that ended |
 | `.atm/atm.sock`, `.atm/atm.lock`, `.atm/serve.log` | The background process | While it runs; the log stays |

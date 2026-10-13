@@ -7,15 +7,16 @@
 
 Give ATM an issue, from GitHub or a text file. It hands the issue to a coding
 agent you already pay for (Claude Code, Codex, OpenCode or pi) inside an
-isolated clone, with a written contract. Then code, not the agent, decides:
+isolated clone, with a written contract. Code then decides:
 does the new test fail without the fix and pass with it, do the configured
 checks still pass, and does the task type's proof hold. A green run gets one
-more agent call, the slop detector, that may only cut. Then the delivery and
-code review gate takes the branch.
+more agent call, the slop detector, that may only cut. Before delivery, a
+read-only model reviews the committed diff against the issue; ATM blocks
+delivery without a current, passing review.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/pipeline-dark.svg">
-  <img alt="ATM pipeline: issue, isolated clone, contract, coding agent, checks. FAIL stops the run. PASS goes to the slop detector, a code quality gate where a model may only cut, then to the delivery and code review gate. The documented example of that gate is no-mistakes, a graph of its own where review and document are models, test and PR are code with a model part, and rebase, lint and CI call a model only after a fix answer. A passed unit with a proven follow-up goes back to the agent, at most three units." src="docs/assets/pipeline-light.svg" width="1000">
+  <img alt="ATM pipeline: issue, isolated clone, contract, coding agent, checks. FAIL stops the run. PASS goes to the slop detector, then a review of the committed diff against the issue before the configured delivery gate. A passed unit with a proven follow-up goes back to the agent, at most three units." src="docs/assets/pipeline-light.svg" width="1000">
 </picture>
 
 ## A real run
@@ -71,7 +72,8 @@ every check ran again before it was kept.
 | The project's configured `install`, `test`, `typecheck` and `lint` commands | code | any failure |
 | Follow-ups | code | a gap without a red test |
 | Slop detector (code quality gate, not code review) | **model**, may only cut | a cut that breaks any check or does not shrink the diff: the clone goes back |
-| Delivery and code review gate | your command | ATM branches, commits and runs it. The documented example is no-mistakes, a graph of its own: models review, judge the test evidence, update the docs and write the PR; code rebases, runs your test and lint commands, pushes and watches CI |
+| Pre-delivery contract review | **model**, checked by code | an issue or committed diff that does not satisfy its contract; see [Delivery](docs/how-a-run-flows.md#delivery) |
+| Delivery and code review gate | your command | ATM runs it only after the contract review passes; the documented example is no-mistakes |
 
 Step by step: [How a run flows](docs/how-a-run-flows.md).
 
