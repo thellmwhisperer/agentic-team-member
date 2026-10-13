@@ -425,6 +425,11 @@ func command(dir, name string, args ...string) (string, error) {
 }
 
 func commandFor(lockDir, dir, name string, args ...string) (string, error) {
+	out, err := commandForRaw(lockDir, dir, name, args...)
+	return strings.TrimSpace(out), err
+}
+
+func commandForRaw(lockDir, dir, name string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, name, args...)
@@ -440,9 +445,13 @@ func commandFor(lockDir, dir, name string, args ...string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
 	}
-	return strings.TrimSpace(string(out)), nil
+	return string(out), nil
 }
 
 func git(dir string, args ...string) (string, error) {
 	return command(dir, "git", args...)
+}
+
+func gitRaw(dir string, args ...string) (string, error) {
+	return commandForRaw(dir, dir, "git", args...)
 }

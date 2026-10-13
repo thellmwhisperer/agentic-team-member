@@ -257,7 +257,9 @@ var proofCases = []struct {
 	{name: "fix that adds a line to a test", typ: "fix",
 		work: "echo fixed > a.txt; echo '! grep -q broken a.txt' >> a_test.sh"},
 	{name: "fix that shortens a string in a test", typ: "fix", hooks: hooks,
-		work: fixWork + "; sed 's/three/3/' hooks_test.sh > h; mv h hooks_test.sh"},
+		work: fixWork + "; sed 's/\"atm unit 1: three\"/\"fix: three\"/' hooks_test.sh > h; mv h hooks_test.sh"},
+	{name: "fix that removes a trailing blank test line", typ: "fix", hooks: hooks + "\n",
+		work: fixWork + "; sed '$d' hooks_test.sh > h; mv h hooks_test.sh", why: "the base's test hooks_test.sh is gone or shorter"},
 	{name: "chore that moves a test", typ: "chore", hooks: hooks, work: moveHooks("")},
 	{name: "chore that moves a test and drops a function", typ: "chore", hooks: hooks, work: moveHooks("/two/d"),
 		why: "the base's test hooks_test.sh is gone or shorter"},
@@ -304,7 +306,7 @@ func executedBinary(t *testing.T) string {
 const shrunkTest = "the base's test a_test.sh is gone or shorter"
 
 // hooks is a test on the base, as a Go test file would be: a package line, then its functions.
-const hooks = "# package cli\none() { true; }\ntwo() { true; }\nthree() { true; }\n"
+const hooks = "# package cli\none() { true; }\ntwo() { true; }\nthree() { test \"atm unit 1: three\" = \"atm unit 1: three\"; }\n"
 
 // moveHooks moves hooks_test.sh to sub/, changing its package line and, with edit, more.
 func moveHooks(edit string) string {
