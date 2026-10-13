@@ -224,6 +224,15 @@ var proofCases = []struct {
 			"src/a.test.ts(3,7): error TS2322: Type 'number' is not assignable to type 'string'.")},
 		work: "echo fixed > a.txt; echo test > a.test.ts; " + reportJSON("a.test.ts"),
 		why:  "red did not run: parse/compile error"},
+	{name: "Vitest load failure with no tests rejected at red green boundary", typ: "feature",
+		atm: atmSet(atmYAML, "test_file", "sh runner.sh {file}"), files: map[string]string{"runner.sh": recordedRunner(
+			" RUN  v3.2.4 /workspace\n\nError: Failed to load url ../steps (resolved id: ../steps) in /workspace/a.test.js. Does the file exist?\n\n Test Files  1 failed (1)\n      Tests  no tests\n   Start at  12:03:18\n   Duration  4ms")},
+		work: "echo fixed > a.txt; echo test > a.test.js; " + reportJSON("a.test.js"),
+		why:  "red did not run: parse/compile error"},
+	{name: "Vitest assertion output with load wording remains a valid red", typ: "feature",
+		atm: atmSet(atmYAML, "test_file", "sh runner.sh {file}"), files: map[string]string{"runner.sh": recordedRunnerWhenFixed(
+			" RUN  v3.2.4 /workspace\n\n FAIL  a.test.js > loads\nError: Failed to load url ../steps was expected text\n\n Test Files  1 failed (1)\n      Tests  1 failed (1)")},
+		work: "echo fixed > a.txt; echo test > a.test.js; " + reportJSON("a.test.js")},
 	{name: "fix whose test only calls a function it adds to an old file", typ: "fix", lib: lib,
 		work: "echo '" + helper + "' >> lib.sh" + testThrough("helper"), why: "depends on nothing the base had"},
 	{name: "fix whose test only calls a function it adds next to a changed line", typ: "fix", lib: lib,
@@ -460,6 +469,14 @@ func TestRedDidNotRunMatchesRunnerOutput(t *testing.T) {
 		{"pytest recorded", pytestSyntaxError, true},
 		{"tsc", "src/a.test.ts(3,7): error TS2322: Type 'number' is not assignable to type 'string'.", true},
 		{"Jest assertion text alone", "    Test suite failed to run", false},
+		{"Vitest load diagnostic with zero-test summary", strings.Join([]string{
+			" RUN  v3.2.4 /workspace", "", "Error: Failed to load url ../steps (resolved id: ../steps) in /workspace/a.test.js.",
+			" Test Files  1 failed (1)", "      Tests  no tests",
+		}, "\n"), true},
+		{"Vitest assertion contains load wording", strings.Join([]string{
+			" RUN  v3.2.4 /workspace", "", " FAIL  a.test.js > loads",
+			"Error: Failed to load url ../steps was expected text", " Test Files  1 failed (1)", "      Tests  1 failed (1)",
+		}, "\n"), false},
 		{"node --test tap", strings.Join([]string{
 			"TAP version 13", "# /tmp/a.test.js:3", "# SyntaxError: Unexpected end of input",
 			"#     at wrapSafe (node:internal/modules/cjs/loader:1637:18)", "# Node.js v22.22.1",

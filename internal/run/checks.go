@@ -277,22 +277,36 @@ var testResult = regexp.MustCompile(`^(--- (PASS|FAIL):|ok\s+\S+|` +
 var jestTestsFailed = regexp.MustCompile(`^Tests:\s+[1-9]\d*\s+failed\b`)
 var tapFailedTest = regexp.MustCompile(`^not ok \d+ - `)
 var tapAssertionFailure = regexp.MustCompile(`^(code: 'ERR_ASSERTION'|name: 'AssertionError')$`)
+var vitestRun = regexp.MustCompile(`^RUN\s+v\d`)
+var vitestLoadError = regexp.MustCompile(`^Error: Failed to load url\s+`)
+var vitestNoTests = regexp.MustCompile(`^Tests\s+(no tests|0(?:\s|$))`)
+var vitestTestsFailed = regexp.MustCompile(`^Tests\s+[1-9]\d*\s+failed\b`)
+var vitestFilesFailed = regexp.MustCompile(`^Test Files\s+[1-9]\d*\s+failed\b`)
 
 // redDidNotRun says whether output, a red's whole, holds a runner's diagnostic that the test file did not parse
 // or compile and no test result.
 func redDidNotRun(output string) bool {
-	diagnostic, testRan, jest, tap, tapFailed := false, false, false, false, false
+	diagnostic, testRan, jest, tap, tapFailed, vitest, vitestLoad, vitestNoTestCount, vitestFailedFileCount :=
+		false, false, false, false, false, false, false, false, false
 	for _, line := range strings.Split(output, "\n") {
 		line = strings.TrimRight(line, "\r")
 		trimmed := strings.TrimSpace(line)
+		vitest = vitest || vitestRun.MatchString(trimmed)
 		switch {
 		case notRun.MatchString(line), jest && trimmed == "● Test suite failed to run":
 			diagnostic = true
+		case vitest && vitestLoadError.MatchString(trimmed):
+			vitestLoad = true
 		case tap && tapFailedTest.MatchString(trimmed):
 			tapFailed = true
 		case tap && tapFailed && tapAssertionFailure.MatchString(trimmed):
 			testRan = true
 		case testResult.MatchString(trimmed):
+			testRan = true
+		}
+		vitestNoTestCount = vitestNoTestCount || vitest && vitestNoTests.MatchString(trimmed)
+		vitestFailedFileCount = vitestFailedFileCount || vitest && vitestFilesFailed.MatchString(trimmed)
+		if vitest && vitestTestsFailed.MatchString(trimmed) {
 			testRan = true
 		}
 		jest = jest || jestFile.MatchString(line)
@@ -301,7 +315,7 @@ func redDidNotRun(output string) bool {
 			testRan = true
 		}
 	}
-	return diagnostic && !testRan
+	return diagnostic && !testRan || vitestLoad && vitestNoTestCount && vitestFailedFileCount
 }
 
 // redGreen sets aside, in clone, the paths aside, runs test alone with tmpl, which must fail, brings the
