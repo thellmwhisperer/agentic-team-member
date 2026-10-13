@@ -216,7 +216,7 @@ func (g *follower) poll(root string) (evs []followEvent) {
 			evs = append(evs, followEvent{"event": "pr_opened", "url": g.gate.pr})
 		case l == "ci green":
 			evs = append(evs, followEvent{"event": "ci_green", "url": g.gate.pr})
-		case failed && g.gate.pr == "": // with a PR, the PR says how it ends
+		case failed && !g.gate.merged && pr.State != "MERGED" && pr.State != "CLOSED":
 			evs = append(evs, followEvent{"event": "run_failed", "step": "delivery",
 				"reason": "no-mistakes failed at " + step})
 		}

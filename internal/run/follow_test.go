@@ -294,6 +294,21 @@ func TestFollowPrintsRunFailedWhenTheGateFailsBeforeAPR(t *testing.T) {
 	}
 }
 
+func TestFollowPrintsRunFailedWhenTheGateFailsWithAnOpenPR(t *testing.T) {
+	top := deliveringRepo(t)
+	fakeGate(t, "OPEN", "run:\n  pr: \"https://github.com/o/r/pull/7\"\n"+
+		gateRows("review,completed,0,1", "pr,completed,0,1", "ci,failed,1,1"))
+	lines, done := following(t, top, []string{issueFile(t, issue)})
+	evs := eventsUntil(t, lines, done, "run_failed", 1)
+	last := evs[len(evs)-1]
+	if last["step"] != "delivery" || last["reason"] != "no-mistakes failed at ci" {
+		t.Fatalf("run_failed = %v, want gate failure at ci", last)
+	}
+	if evs[len(evs)-2]["event"] != "pr_opened" {
+		t.Fatalf("events before run_failed = %v, want pr_opened", evs)
+	}
+}
+
 func TestFollowKeepsItsLeaseFreshWhileNoOneReadsIt(t *testing.T) {
 	defer func(b, s time.Duration) { beat, stale = b, s }(beat, stale)
 	beat, stale = 2*time.Millisecond, 100*time.Millisecond
