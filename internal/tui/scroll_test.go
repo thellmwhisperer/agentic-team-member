@@ -43,6 +43,21 @@ func feed(m *Model, evs ...string) {
 	}
 }
 
+func assertFitsViewport(t *testing.T, m *Model, width, height int) []string {
+	t.Helper()
+	s := m.View()
+	lines := strings.Split(s, "\n")
+	if len(lines) > height {
+		t.Fatalf("viewport used %d rows at %dx%d:\n%s", len(lines), width, height, ansi.Strip(s))
+	}
+	for _, line := range lines {
+		if ansi.StringWidth(line) > width {
+			t.Fatalf("viewport line exceeds %d columns at %dx%d: %q", width, width, height, ansi.Strip(line))
+		}
+	}
+	return strings.Split(ansi.Strip(s), "\n")
+}
+
 func topAgentLine(m *Model) string { return strings.Split(view(m), "\n")[1] }
 func topPipelineLine(m *Model) string {
 	line := []rune(strings.Split(view(m), "\n")[3])
@@ -199,20 +214,64 @@ func TestStackedAgentAndLogFitWithinTerminalHeight(t *testing.T) {
 	}
 }
 
+func TestStackedPanelsUseRenderedRowsForBoundsAndScrolling(t *testing.T) {
+	for _, height := range []int{15, 24} {
+		m := overflowing(80, height)
+		feed(m, `{"step":"output","output":"retained log line"}`)
+		lines := assertFitsViewport(t, m, 80, height)
+		agentY := m.historyBounds.y
+		logY := agentY + m.historyBounds.height
+		if agentY != m.pipelineBounds.height || !strings.Contains(lines[agentY], "Agent*") || !strings.Contains(lines[logY], "Log") {
+			t.Fatalf("panel bounds must match their rendered top rows at 80x%d:\n%s", height, strings.Join(lines, "\n"))
+		}
+		before := shownOf(m, thoughts)
+		pipeline := shownOf(m, proofs)
+		for _, y := range []int{agentY, agentY + m.historyBounds.height - 1} {
+			m.Update(tea.MouseMsg{X: 5, Y: y, Button: tea.MouseButtonWheelUp, Action: tea.MouseActionPress})
+		}
+		if slices.Equal(shownOf(m, thoughts), before) || !slices.Equal(shownOf(m, proofs), pipeline) {
+			t.Fatalf("wheel on Agent border rows must scroll Agent at 80x%d:\n%s", height, view(m))
+		}
+		held := shownOf(m, thoughts)
+		for _, y := range []int{logY, height - 1} {
+			m.Update(tea.MouseMsg{X: 5, Y: y, Button: tea.MouseButtonWheelUp, Action: tea.MouseActionPress})
+		}
+		if !slices.Equal(shownOf(m, thoughts), held) || !slices.Equal(shownOf(m, proofs), pipeline) {
+			t.Fatalf("wheel on Log or footer must not scroll Agent at 80x%d:\n%s", height, view(m))
+		}
+	}
+}
+
+func TestStackedFindingsAndLogUseDistinctRenderedRows(t *testing.T) {
+	for _, width := range []int{80, 120} {
+		for _, height := range []int{15, 24} {
+			m := screen(width, height, unit...)
+			m.findings = []finding{{severity: "error", ref: "view.go:1", text: "retained finding"}}
+			feed(m, `{"step":"agent","state":"passed"}`, `{"step":"output","output":"retained log line"}`)
+			lines := assertFitsViewport(t, m, width, height)
+			findingsY, logY := -1, -1
+			for i, line := range lines {
+				if strings.Contains(line, "Findings -") {
+					findingsY = i
+				}
+				if strings.Contains(line, "Log") {
+					logY = i
+				}
+			}
+			if findingsY < 0 || logY <= findingsY || strings.Contains(lines[findingsY], "Log") {
+				t.Fatalf("Findings and Log must occupy distinct rows at %dx%d:\n%s", width, height, strings.Join(lines, "\n"))
+			}
+		}
+	}
+}
+
 func TestTwoColumnAgentAndLogFitShortTerminal(t *testing.T) {
 	m := overflowing(120, 9)
 	feed(m, `{"step":"output","output":"retained log line"}`)
-	s := view(m)
-	if got := len(strings.Split(s, "\n")); got > 9 {
-		t.Fatalf("120×9 viewport used %d rows:\n%s", got, s)
-	}
+	lines := assertFitsViewport(t, m, 120, 9)
+	s := strings.Join(lines, "\n")
 	if !strings.Contains(s, "q detach") || !strings.Contains(s, "ATM") || !strings.Contains(s, "Agent") || !strings.Contains(s, "Log") {
 		t.Fatalf("both panels, the Log, and footer must fit:\n%s", s)
-	}
-	for _, line := range strings.Split(s, "\n") {
-		if ansi.StringWidth(line) > 120 {
-			t.Fatalf("120×9 viewport has an overwide line: %q", line)
-		}
 	}
 }
 
