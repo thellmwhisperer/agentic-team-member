@@ -153,6 +153,5 @@ jobs:
           TAG: ${{ needs.release-please.outputs.tag_name }}
           ATM_PREFIX: ${{ runner.temp }}/bin
         run: |
-          set -eu
           sh install.sh --version "$TAG"
           "$ATM_PREFIX/atm" --version | grep "^atm $TAG "
