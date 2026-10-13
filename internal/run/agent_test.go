@@ -112,6 +112,23 @@ func fakeAgentTask(name string, args []string, mode *string) ([]byte, string, st
 		skill, call, todo = "ponytail-review", ".ponytail", os.Getenv("FAKE_PONYTAIL_WORK")
 		text = cmp.Or(os.Getenv("FAKE_PONYTAIL_REPORT"), `{"findings": [], "summary": "Lean already."}`)
 	}
+	if strings.HasPrefix(brief, "# Pre-delivery contract review") {
+		*mode = os.Getenv("FAKE_CONTRACT_MODE")
+		skill, call, todo = "task-slicing", ".contract-review", os.Getenv("FAKE_CONTRACT_WORK")
+		text = passedContract
+		if strings.Contains(brief, "1. A retry runs once after a\n") {
+			text = strings.Replace(text, "Retry once.", "A retry runs once after a timeout.", 1)
+		}
+		text = cmp.Or(os.Getenv("FAKE_CONTRACT_REPORT"), text)
+		file := cmp.Or(os.Getenv("FAKE_CONTRACT_AFTER_REPAIR_FILE"), "a.txt")
+		if b, _ := os.ReadFile(file); strings.Contains(string(b), "repaired") {
+			text = cmp.Or(os.Getenv("FAKE_CONTRACT_AFTER_REPAIR_REPORT"), text)
+		}
+	}
+	if strings.HasPrefix(brief, "# Contract repair") {
+		*mode = ""
+		call, todo, text = ".contract-repair", os.Getenv("FAKE_CONTRACT_REPAIR"), `{"summary":"repaired"}`
+	}
 	recordFakeAgentCall(args, stdin, call)
 	return stdin, call, skill, todo, text
 }

@@ -245,6 +245,7 @@ func checkEnv(t *testing.T, got, top, issue, ponytail string) {
 }
 
 func TestRunDeliveryGetsTheIssueText(t *testing.T) {
+	t.Setenv("FAKE_CONTRACT_REPORT", strings.Replace(passedContract, "Retry once.", "Retry once on a timeout.", 1))
 	body := "Type: fix\n\n## Acceptance criteria\n\n1. Retry once on a timeout."
 	for name, gh := range map[string]bool{"file issue": false, "GitHub issue": true} {
 		t.Run(name, func(t *testing.T) {
