@@ -21,7 +21,6 @@ A failed step stops the run; the steps after it are not run.
 | Contract | Writes `brief.md`, the agent's contract | The brief cannot be written |
 | Agent | Runs the coding agent in the clone on the brief | It exits non-zero, times out, says nothing for 10 min, reaches outside its clone, does not load the `ponytail` skill, or leaves no readable report |
 | Checks | Removes the ignored files the agent made, runs `install`, proves the task type, then runs `test`, `typecheck` and `lint` | A proof or a command fails, or anything committed |
-
 | Slop detector | Lets a model cut the diff; keeps the cut only if every check still passes | Its agent fails, reports badly, or anything commits |
 | Delivery | Commits the work on a branch and runs the `delivery` command | The branch or the command fails. Skipped when `delivery` is empty |
 
@@ -65,8 +64,8 @@ call. A zero exit without a valid report fails; so does any non-zero exit.
 When an agent dies without a report, its node in
 `report.json` keeps its cause, `exit` (`exit code N`, `signal NAME`,
 `timed out after ...`, `silent for ...` or `interrupted`), and `tail`, the last
-20 lines it wrote, stdout and stderr in the order ATM read them. The step's
-error starts with that cause, then the log path.
+20 lines ATM read from its stdout and stderr. The step's error and the report's
+`reason` start with that cause, followed by any detail and the log path.
 
 ## Checks
 
@@ -201,7 +200,7 @@ it is on disk before delivery reads it.
 | Field | Holds |
 |-------|-------|
 | `failed_node`, `reason` | The step that failed and why |
-| `nodes` | Each step's `result` (`passed`, `failed`, `running`, `skipped` or `not run`), `started_at` (UTC, RFC 3339 with milliseconds) when it starts, and `duration_ms` when it ends; an agent's, once it died without a report, its `exit` and `tail` |
+| `nodes` | Each step's `result` (`passed`, `failed`, `running`, `skipped` or `not run`), `started_at` (UTC, RFC 3339 with milliseconds) when it starts, and `duration_ms` when it ends; the agent node also has `exit` and `tail` when the agent ran but its step failed |
 | `type` | The task type |
 | `units` | Each unit's number, base commit, test file, type, result, red/green proof row span, and red and green trials: command, exit code, last 60 lines, `started_at` and `duration_ms` |
 | `reproofs` | The same proof rows and spans, run again after a kept cut |
