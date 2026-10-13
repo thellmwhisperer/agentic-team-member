@@ -321,8 +321,8 @@ func exclude(clone, pattern string) error {
 	return errors.Join(err, f.Close())
 }
 
-// stream is what the agent's lines said: its final message, whether it used its skill, and its first tool
-// call that reached outside clone, in repository root. Live gets what each line tells the screen.
+// stream is what the agent's lines said: its final message, whether it used its skill, and its first
+// prohibited path or network call. Live gets what each line tells the screen.
 type stream struct {
 	final, skill string
 	loads        []string // the ids of the agent's calls that load its skill

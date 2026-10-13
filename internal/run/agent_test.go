@@ -580,11 +580,13 @@ func runReachCases(t *testing.T, cases []reachCase) {
 				if err != nil {
 					t.Fatalf("a run that stayed in its clone failed: %v", err)
 				}
+				t.Logf("ATM accepted %s", c.name)
 				return
 			}
 			if err == nil || !strings.Contains(err.Error(), r.Replace(c.why)) {
 				t.Fatalf("want an error naming %q, got %v", r.Replace(c.why), err)
 			}
+			t.Logf("ATM rejected tool call: %s", err)
 			if end, _, _ := agentStep(t, &out); end["state"] != "failed" || end["error"] != err.Error() {
 				t.Fatalf("end event: %v", end)
 			}
@@ -662,10 +664,18 @@ func TestRunDiesWhenTheAgentFails(t *testing.T) {
 
 // Recorded from Quote's runs of 13 Oct 2026: a relative path is the agent's cwd's, which a cd moved inside the clone.
 func TestReachAcceptsRelativePathsAfterACdInsideTheClone(t *testing.T) {
-	root := t.TempDir()
-	clone := filepath.Join(root, ".atm", "clones", "atm-run-1")
+	repo(t, "https://example.com/owner/repo.git", atmYAML)
 	command := "cd packages/journey && cat ../../README.md"
-	if got := outside([]use{{"Bash", command, command}}, root, clone); got != "" {
-		t.Fatalf("clone-local relative path reached outside its clone: %s", got)
+	t.Setenv("FAKE_AGENT_STREAM", bashEvent("claude", command, ""))
+	t.Setenv("FAKE_AGENT_WORK", "mkdir -p packages/journey && echo clone-local > README.md && ("+
+		command+") > relative-read.txt && grep -qx clone-local relative-read.txt && "+fixWork)
+	var out bytes.Buffer
+	if err := Run("t", []string{"--harness", "claude", issueFile(t, issue)}, &out, io.Discard); err != nil {
+		t.Fatal(err)
 	}
+	end, _, _ := agentStep(t, &out)
+	if end["state"] != "passed" {
+		t.Fatalf("agent step: %v", end)
+	}
+	t.Logf("ATM agent step: %s; %s read clone-local", end["state"], command)
 }
