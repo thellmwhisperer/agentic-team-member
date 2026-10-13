@@ -304,8 +304,12 @@ func redDidNotRun(output string) bool {
 		case testResult.MatchString(trimmed):
 			testRan = true
 		}
-		vitestNoTestCount = vitestNoTestCount || vitest && vitestNoTests.MatchString(trimmed)
-		vitestFailedFileCount = vitestFailedFileCount || vitest && vitestFilesFailed.MatchString(trimmed)
+		if vitest && strings.HasPrefix(trimmed, "Tests ") {
+			vitestNoTestCount = vitestNoTests.MatchString(trimmed)
+		}
+		if vitest && strings.HasPrefix(trimmed, "Test Files ") {
+			vitestFailedFileCount = vitestFilesFailed.MatchString(trimmed)
+		}
 		if vitest && vitestTestsFailed.MatchString(trimmed) {
 			testRan = true
 		}

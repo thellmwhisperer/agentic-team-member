@@ -233,6 +233,10 @@ var proofCases = []struct {
 		atm: atmSet(atmYAML, "test_file", "sh runner.sh {file}"), files: map[string]string{"runner.sh": recordedRunnerWhenFixed(
 			" RUN  v3.2.4 /workspace\n\n FAIL  a.test.js > loads\nError: Failed to load url ../steps was expected text\n\n Test Files  1 failed (1)\n      Tests  1 failed (1)")},
 		work: "echo fixed > a.txt; echo test > a.test.js; " + reportJSON("a.test.js")},
+	{name: "Vitest logged zero-test wording before a failed assertion", typ: "feature",
+		atm: atmSet(atmYAML, "test_file", "sh runner.sh {file}"), files: map[string]string{"runner.sh": recordedRunnerWhenFixed(
+			" RUN  v3.2.4 /workspace\n\n FAIL  a.test.js > loads\nError: Failed to load url ../steps\nTests no tests\n\n Test Files  1 failed (1)\n      Tests  1 failed (1)")},
+		work: "echo fixed > a.txt; echo test > a.test.js; " + reportJSON("a.test.js")},
 	{name: "fix whose test only calls a function it adds to an old file", typ: "fix", lib: lib,
 		work: "echo '" + helper + "' >> lib.sh" + testThrough("helper"), why: "depends on nothing the base had"},
 	{name: "fix whose test only calls a function it adds next to a changed line", typ: "fix", lib: lib,
@@ -476,6 +480,10 @@ func TestRedDidNotRunMatchesRunnerOutput(t *testing.T) {
 		{"Vitest assertion contains load wording", strings.Join([]string{
 			" RUN  v3.2.4 /workspace", "", " FAIL  a.test.js > loads",
 			"Error: Failed to load url ../steps was expected text", " Test Files  1 failed (1)", "      Tests  1 failed (1)",
+		}, "\n"), false},
+		{"Vitest assertion logs zero-test wording before its final summary", strings.Join([]string{
+			" RUN  v3.2.4 /workspace", "", " FAIL  a.test.js > loads", "Error: Failed to load url ../steps",
+			"Tests no tests", " Test Files  1 failed (1)", "      Tests  1 failed (1)",
 		}, "\n"), false},
 		{"node --test tap", strings.Join([]string{
 			"TAP version 13", "# /tmp/a.test.js:3", "# SyntaxError: Unexpected end of input",
