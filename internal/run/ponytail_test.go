@@ -110,12 +110,7 @@ func TestRunDiesWhenThePonytailAgentFails(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), c.why) {
 				t.Fatalf("want an error naming %q, got %v", c.why, err)
 			}
-			if end := ponytailStep(t, &out); end["state"] != "failed" || end["error"] != err.Error() {
-				t.Fatalf("end event: %v", end)
-			}
-			if left := clones(t, root); len(left) != 0 {
-				t.Fatalf("a failed run left its clone: %v", left)
-			}
+			assertFailedCleanup(t, root, ponytailStep(t, &out), err)
 		})
 	}
 }

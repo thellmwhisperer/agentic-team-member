@@ -600,6 +600,16 @@ func TestRunReportsReachBeforeAgentFailure(t *testing.T) {
 	}
 }
 
+func assertFailedCleanup(t *testing.T, root string, end map[string]any, err error) {
+	t.Helper()
+	if err == nil || end["state"] != "failed" || end["error"] != err.Error() {
+		t.Fatalf("end event: %v; error: %v", end, err)
+	}
+	if left := clones(t, root); len(left) != 0 {
+		t.Fatalf("a failed run left its clone: %v", left)
+	}
+}
+
 func TestRunDiesWhenTheAgentFails(t *testing.T) {
 	cases := []struct {
 		harness, mode, why string
@@ -635,12 +645,8 @@ func TestRunDiesWhenTheAgentFails(t *testing.T) {
 			if c.mode == "" {
 				return // a bad flag: no step ran
 			}
-			if end, _, _ := agentStep(t, &out); end["state"] != "failed" || end["error"] != err.Error() {
-				t.Fatalf("end event: %v", end)
-			}
-			if left := clones(t, root); len(left) != 0 {
-				t.Fatalf("a failed run left its clone: %v", left)
-			}
+			end, _, _ := agentStep(t, &out)
+			assertFailedCleanup(t, root, end, err)
 		})
 	}
 }

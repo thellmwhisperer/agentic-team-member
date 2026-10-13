@@ -806,17 +806,32 @@ func relativeEscape(token, root, clone string) bool {
 
 // fetches says whether a shell command runs curl or wget or names a URL off this machine.
 func fetches(command string) bool {
-	if badURL(command) {
-		return true
-	}
 	file, err := syntax.NewParser().Parse(strings.NewReader(command), "")
 	if err != nil {
+		if badURL(command) {
+			return true
+		}
 		fields := strings.Fields(command)
 		if len(fields) == 0 {
 			return false
 		}
 		word := strings.Trim(fields[0], "\"'`;|&()")
 		return word == "curl" || word == "wget"
+	}
+	// Leading plain cat writes carry quoted data, not shell source. Stop at
+	// other commands: they could redefine cat. Nested/piped input stays checked.
+	checked := []byte(command)
+	for i, stmt := range file.Stmts {
+		data, output := quotedCatData(stmt)
+		if data == nil || mayConsumeWrittenData(file.Stmts[i+1:], output) {
+			break
+		}
+		for i := data.Pos().Offset(); i < data.End().Offset(); i++ {
+			checked[i] = ' '
+		}
+	}
+	if badURL(string(checked)) {
+		return true
 	}
 	unsafe := false
 	syntax.Walk(file, func(node syntax.Node) bool {
@@ -826,6 +841,67 @@ func fetches(command string) bool {
 		return !unsafe
 	})
 	return unsafe
+}
+
+// quotedCatData recognizes only plain cat with one quoted stdin heredoc and
+// one literal relative output file. Pipes, interpreter input and other fd
+// arrangements keep their existing conservative reach checks.
+func quotedCatData(stmt *syntax.Stmt) (*syntax.Word, string) {
+	call, ok := stmt.Cmd.(*syntax.CallExpr)
+	if !ok || len(call.Args) != 1 || call.Args[0].Lit() != "cat" || len(call.Assigns) != 0 || len(stmt.Redirs) != 2 {
+		return nil, ""
+	}
+	var data *syntax.Word
+	output := ""
+	for _, r := range stmt.Redirs {
+		if r.N != nil {
+			return nil, ""
+		}
+		switch r.Op {
+		case syntax.Hdoc, syntax.DashHdoc:
+			_, literal := literalWord(r.Word)
+			if literal && r.Word.Lit() == "" {
+				data = r.Hdoc
+			}
+		case syntax.RdrOut, syntax.AppOut:
+			if literalOutputFile(r.Word) {
+				output, _ = literalWord(r.Word)
+			}
+		}
+	}
+	if output != "" {
+		return data, output
+	}
+	return nil, ""
+}
+
+// Later consumers can execute the saved text. Unresolved words and shell
+// interpreters stay conservative; this is not shell data-flow analysis.
+func mayConsumeWrittenData(stmts []*syntax.Stmt, output string) bool {
+	unsafe := false
+	for _, stmt := range stmts {
+		syntax.Walk(stmt, func(node syntax.Node) bool {
+			if word, ok := node.(*syntax.Word); ok {
+				text, literal := literalWord(word)
+				unsafe = unsafe || !literal || strings.Contains(text, path.Clean(output)) ||
+					strings.Contains(path.Clean(text), path.Clean(output))
+				switch path.Base(text) {
+				case "sh", "bash", "dash", "zsh", "ksh", "source", ".":
+					unsafe = true
+				}
+			}
+			return !unsafe
+		})
+		if unsafe {
+			return true
+		}
+	}
+	return false
+}
+
+func literalOutputFile(word *syntax.Word) bool {
+	name, literal := literalWord(word)
+	return literal && name != "" && !path.IsAbs(name) && !filepath.IsAbs(name)
 }
 
 func literalWord(word *syntax.Word) (string, bool) {
