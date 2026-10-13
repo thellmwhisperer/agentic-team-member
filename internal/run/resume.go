@@ -104,24 +104,6 @@ func (r *verdict) keep(dir, clone string, p resumePoint, n int, report map[strin
 	}
 }
 
-// keepPending adds follow-ups collected from a unit whose checks failed to its resume point.
-func keepPending(dir string, n int, pending []followUp) {
-	path := filepath.Join(dir, "resume", "resume.json")
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return
-	}
-	var p resumePoint
-	if json.Unmarshal(b, &p) != nil || p.Unit != n {
-		return
-	}
-	p.Pending = append([]followUp(nil), pending...)
-	b, err = json.MarshalIndent(p, "", "  ")
-	if err == nil {
-		_ = os.WriteFile(path, append(b, '\n'), 0o644)
-	}
-}
-
 // resumable marks the run resumable when it failed after its agent and its work is kept in resume/, in the
 // run's directory dir, which it removes otherwise.
 func (r *verdict) resumable(dir string) {
@@ -133,11 +115,12 @@ func (r *verdict) resumable(dir string) {
 }
 
 // putBack puts the work run p kept in clone, at p's base: the units' commits, then the failed unit's work,
-// uncommitted. It returns the new HEAD, the last of those commits.
+// uncommitted, byte for byte as kept, whatever core.autocrlf says. It returns the new HEAD, the last of those
+// commits.
 func putBack(root, clone string, p resumePoint) (string, error) {
 	bundle := filepath.Join(runDir(root, p.run), "resume", "work.bundle")
-	for _, args := range [][]string{{"fetch", "-q", bundle, "refs/atm/resume"}, {"reset", "-q", "--hard", "FETCH_HEAD"},
-		{"reset", "-q", "HEAD~1"}} {
+	for _, args := range [][]string{{"fetch", "-q", bundle, "refs/atm/resume"},
+		{"-c", "core.autocrlf=false", "reset", "-q", "--hard", "FETCH_HEAD"}, {"reset", "-q", "HEAD~1"}} {
 		if _, err := git(clone, args...); err != nil {
 			return "", err
 		}
