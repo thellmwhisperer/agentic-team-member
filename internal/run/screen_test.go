@@ -258,8 +258,9 @@ func TestRunTellsAWatchingScreenPathsRelativeToTheClone(t *testing.T) {
 			w := watch(t, harness, stream, atmYAML)
 			read := harness != "codex"
 			_, clone, log := agentStep(t, &w.Buffer)
+			outside := filepath.Join(filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(clone)))))), filepath.Base(filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(clone))))))+"-backup")
 			if read && !has(w.live, obj{"id": "t1", "detail": "a/b.go"}) ||
-				!has(w.live, obj{"id": "t2", "detail": "cd ./ && go test ./...; printf '" + filepath.ToSlash(clone) + "-backup'"}) {
+				!has(w.live, obj{"id": "t2", "detail": "cd ./ && go test ./...; printf '" + filepath.ToSlash(outside) + "'"}) {
 				t.Fatalf("want details relative to the clone in %v", w.live)
 			}
 			if harness == "claude" && !has(w.live, obj{"id": "t3", "detail": "."}) {
