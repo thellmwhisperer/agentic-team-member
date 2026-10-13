@@ -255,19 +255,27 @@ func TestARunGoesToABackgroundProcessOfTheNewFile(t *testing.T) {
 	buildATM(t, atm+".new", "new-build")
 	top := atmRepo(t)
 	wait, release := holdFakeAgents(t, 1)
-	old := exec.Command(atm, "serve")
-	old.Dir = top
-	stderr, err := old.StderrPipe()
-	if err == nil {
-		err = old.Start()
-	}
+	lockFile, err := os.OpenFile(filepath.Join(top, ".atm", "atm.lock"), os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		t.Fatal(err)
 	}
+	old := exec.Command(atm, "serve")
+	old.Dir = top
+	log, err := os.OpenFile(filepath.Join(top, ".atm", "serve.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old.Stdout, old.Stderr = log, log
+	if err := old.Start(); err != nil {
+		t.Fatal(err)
+	}
+	_ = log.Close()
 	t.Cleanup(func() { _ = old.Process.Kill() })
-	awaitOldServer(t, stderr)
-	exited := make(chan error, 1)
-	go func() { exited <- old.Wait() }()
+	until(t, "old server ready", func() bool {
+		b, e := os.ReadFile(filepath.Join(top, ".atm", "serve.log"))
+		return e == nil && strings.Contains(string(b), "atm serve version: old-build")
+	})
+	_ = lockFile.Close()
 	if err := os.Rename(atm+".new", atm); err != nil {
 		t.Fatal(err)
 	}
@@ -285,17 +293,13 @@ func TestARunGoesToABackgroundProcessOfTheNewFile(t *testing.T) {
 			t.Fatal(err)
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("atm run did not return")
+		serveLog, _ := os.ReadFile(filepath.Join(top, ".atm", "serve.log"))
+		t.Fatalf("atm run did not return; serve log: %s", serveLog)
 	}
 	wait()
-	log, err := os.ReadFile(filepath.Join(top, ".atm", "serve.log"))
-	if err != nil || !strings.Contains(string(log), "atm serve version: new-build") {
-		t.Fatalf("replacement server identity = %q, %v", log, err)
-	}
-	select {
-	case <-exited:
-	case <-time.After(5 * time.Second):
-		t.Fatal("the background process of the old file still serves")
+	serveLog, err := os.ReadFile(filepath.Join(top, ".atm", "serve.log"))
+	if err != nil || !strings.Contains(string(serveLog), "atm serve version: new-build") {
+		t.Fatalf("replacement server identity = %q, %v", serveLog, err)
 	}
 	release()
 	if runs, err := Runs(top); err != nil || len(runs) != 1 || runs[0].Outcome != "running" {

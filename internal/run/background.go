@@ -193,7 +193,7 @@ func serve(l *net.UnixListener, root, sock string, moved func() bool) error {
 			return nil
 		}
 		if c != nil {
-			go s.handle(c)
+			go s.handleConnection(c)
 		}
 	}
 }
@@ -216,6 +216,16 @@ func (s *server) shouldExit(c net.Conn, sock string, moved func() bool) bool {
 	}
 	s.handlers++
 	return false
+}
+
+func (s *server) handleConnection(c net.Conn) {
+	defer func() {
+		_ = c.Close()
+		s.Lock()
+		s.handlers--
+		s.Unlock()
+	}()
+	s.handle(c)
 }
 
 // changed tells whether the file this process runs from has changed since it started, as atm update or
@@ -244,12 +254,6 @@ func (s *server) busy() (n int) {
 }
 
 func (s *server) handle(c net.Conn) {
-	defer func() {
-		_ = c.Close()
-		s.Lock()
-		s.handlers--
-		s.Unlock()
-	}()
 	var req request
 	dec := json.NewDecoder(c)
 	if err := dec.Decode(&req); err != nil {
