@@ -256,3 +256,12 @@ func TestAgentBoxFillsTheColumnAndWrapsWhatTheAgentSaysToItsLatestLine(t *testin
 		t.Fatalf("want the last line on the box's last row:\n%s", strings.Join(lines, "\n"))
 	}
 }
+
+func TestAgentAndLogBoxesShareTheColumnHeight(t *testing.T) {
+	evs := append(unit[:7:7], `{"step":"checks","output":"one log line"}`)
+	lines := strings.Split(view(screen(120, 40, evs...)), "\n")
+	if len(lines) != 40 || !strings.Contains(lines[37], "╰") || lines[38] != "" ||
+		!strings.Contains(strings.Join(lines, "\n"), "one log line") || !strings.Contains(lines[39], "q detach") {
+		t.Fatalf("want Agent and Log boxes to fit above the footer:\n%s", strings.Join(lines, "\n"))
+	}
+}

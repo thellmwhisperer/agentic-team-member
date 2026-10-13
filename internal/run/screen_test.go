@@ -239,7 +239,7 @@ func TestClaudeFinalReportSplitAcrossTextBlocks(t *testing.T) {
 
 // A tool call's path or command shows relative to the clone; the log keeps what the agent sent.
 func TestRunTellsAWatchingScreenPathsRelativeToTheClone(t *testing.T) {
-	cmd := `{"command":"cd <clone> && go test ./..."}`
+	cmd := `{"command":"cd <clone>/ && go test ./...; printf '<clone>-backup'"}`
 	streams := map[string]string{
 		"claude": `{"type":"assistant","message":{"content":[` +
 			`{"type":"tool_use","id":"t1","name":"Read","input":{"file_path":"<clone>/a/b.go"}},` +
@@ -252,11 +252,11 @@ func TestRunTellsAWatchingScreenPathsRelativeToTheClone(t *testing.T) {
 		t.Run(harness, func(t *testing.T) {
 			w := watch(t, harness, stream, atmYAML)
 			read := harness != "codex"
+			_, clone, log := agentStep(t, &w.Buffer)
 			if read && !has(w.live, obj{"id": "t1", "detail": "a/b.go"}) ||
-				!has(w.live, obj{"id": "t2", "detail": "cd . && go test ./..."}) {
+				!has(w.live, obj{"id": "t2", "detail": "cd ./ && go test ./...; printf '" + filepath.ToSlash(clone) + "-backup'"}) {
 				t.Fatalf("want details relative to the clone in %v", w.live)
 			}
-			_, clone, log := agentStep(t, &w.Buffer)
 			if b, _ := os.ReadFile(log); read && !strings.Contains(string(b), filepath.ToSlash(clone)+"/a/b.go") {
 				t.Fatalf("want the log to keep the agent's path:\n%s", b)
 			}
