@@ -35,7 +35,7 @@ func Show(root, label, start string, in, out *os.File) (o run.Outcome, detached 
 	keys := make(chan run.Input, 64)
 	m := New(label, w, h)
 	m.keys = keys
-	p := tea.NewProgram(m, tea.WithInput(in), tea.WithOutput(out), tea.WithAltScreen())
+	p := tea.NewProgram(m, tea.WithInput(in), tea.WithOutput(out), tea.WithAltScreen(), tea.WithMouseCellMotion())
 	d := &delivery{p: p, in: in, out: out, keys: keys}
 	done := make(chan struct{})
 	go func() {
@@ -113,7 +113,8 @@ func (d *delivery) take() {
 	}()
 }
 
-// giveBack gives the terminal back to the screen, which redraws, once the delivery command had it.
+// giveBack gives the terminal back to the screen, which redraws and takes the mouse again, once the delivery
+// command had it.
 func (d *delivery) giveBack() {
 	if d.read == nil {
 		return
@@ -127,4 +128,5 @@ func (d *delivery) giveBack() {
 	}
 	d.read, d.keyed, d.state = nil, nil, nil
 	_ = d.p.RestoreTerminal()
+	d.p.Send(tea.EnableMouseCellMotion())
 }
