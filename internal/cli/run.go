@@ -14,10 +14,11 @@ import (
 	"github.com/thellmwhisperer/agentic-team-member/internal/tui"
 )
 
-// runCmd is atm run: the run goes to the repository's background process and, on a terminal, atm stays on its
-// screen until it ends. Closing the terminal leaves it going.
+// runCmd is atm run: the run goes to the repository's background process and, on a terminal, atm keeps its
+// completed screen open until the user closes it. Closing the terminal leaves it going.
 func runCmd() *cobra.Command {
-	return &cobra.Command{Use: "run", Short: "Fix an issue: " + run.Usage, DisableFlagParsing: true,
+	return &cobra.Command{Use: "run", Short: "Fix an issue: " + run.Usage,
+		Long: "On a terminal, the completed screen stays open until q or Ctrl+C.", DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			root, err := toplevel()
 			if err != nil {
@@ -46,7 +47,7 @@ func screen(w io.Writer) (*os.File, bool) {
 	return f, ok && terminal(f) && os.Getenv("NO_COLOR") == "" && os.Getenv("TERM") != "dumb"
 }
 
-// attach shows run label's screen on w until it ends and returns how it ended. Leaving leaves it going. herdr
+// attach shows run label's screen on w until the user closes it and returns how it ended. Leaving leaves it going. herdr
 // sees the screen start from start, startup or resume.
 func attach(root, label, start string, w io.Writer) error {
 	f, ok := screen(w)
@@ -69,8 +70,8 @@ func attach(root, label, start string, w io.Writer) error {
 }
 
 func attachCmd() *cobra.Command {
-	return &cobra.Command{Use: "attach [run]", Short: "Show a run's screen, the last running one by default; " +
-		"leaving leaves it going", Args: cobra.MaximumNArgs(1),
+	return &cobra.Command{Use: "attach [run]", Short: "Show a run's screen; completed screens stay until q or Ctrl+C",
+		Long: "The last running run is selected by default. Leaving a live screen leaves the run going.", Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			root, err := toplevel()
 			if err != nil {
