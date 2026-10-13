@@ -855,8 +855,19 @@ func maskQuotedGoTestData(checked []byte, stmts []*syntax.Stmt, clone string) {
 		return
 	}
 	body := []byte(data.Lit())
-	start, end := int(data.Pos().Offset()), int(data.Pos().Offset())+len(body)
-	if start < 0 || end < start || end > len(checked) || !bytes.Equal(checked[start:end], body) ||
+	start := int(data.Pos().Offset())
+	if start < 0 || start > len(checked) {
+		return
+	}
+	end := start + len(body)
+	for extra := 0; extra <= bytes.Count(body, []byte("\n")) && end+extra <= len(checked); extra++ {
+		end = start + len(body) + extra
+		if bytes.Equal(bytes.ReplaceAll(checked[start:end], []byte("\r\n"), []byte("\n")), body) {
+			break
+		}
+	}
+	if end < start || end > len(checked) ||
+		!bytes.Equal(bytes.ReplaceAll(checked[start:end], []byte("\r\n"), []byte("\n")), body) ||
 		!goTestSource(body, appended && existingTestingImport(clone, output)) {
 		return
 	}
