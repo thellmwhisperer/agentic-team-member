@@ -63,7 +63,7 @@ Either way:
 | Workflow | Runs on | Runs when these change | Does |
 |---|---|---|---|
 | `go.yml` | every PR to `main`, push to `main` | Paths classified by [`scripts/changed-areas.sh`](scripts/changed-areas.sh) | `make test` and `make lint` on ubuntu, macos, windows |
-| `release.yml` | push to `main` | always | release-please keeps a release PR with the changelog from the commits; when it merges, builds the darwin, linux and windows archives (amd64, arm64) and their checksums into the draft release, then publishes it as a prerelease (never latest) |
+| `release.yml` | push to `main` | always | release-please keeps a release PR with the changelog from the commits; when it merges, builds the darwin, linux and windows archives (amd64, arm64) and their checksums into the draft release, then publishes it as a prerelease; a maintainer marks the blessed release as latest for `atm update` and `install.sh` |
 | `auto-merge.yml` | every PR to `main` | always | arms auto-merge (below) |
 
 `go.yml` starts on every PR and skips its test jobs when its paths did not
