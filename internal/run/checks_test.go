@@ -166,6 +166,25 @@ func commitBase(t *testing.T, root, name, text string) {
 	gitT(t, root, "commit", "-qm", name)
 }
 
+const jestZeroTestOutput = " FAIL  ./index.test.js\n      ● Test suite failed to run\n\n" +
+	"        SyntaxError: Unexpected token\n      Tests:       0 total"
+const jestAssertionOutput = " FAIL  ./index.test.js\n  ● Test suite failed to run\n\n" +
+	"    expect(received).toBe(expected)\n    Expected: 1\n    Received: 0\n\n" +
+	"Test Suites: 1 failed, 1 total\nTests: 1 failed, 1 total"
+const nodeSyntaxOutput = "/tmp/a.test.js:3\n\nSyntaxError: Unexpected end of input\n" +
+	"    at wrapSafe (node:internal/modules/cjs/loader:1637:18)\nNode.js v22.22.1"
+const nodeAssertionOutput = "TAP version 13\n# SyntaxError: ordinary assertion output\n" +
+	"# Subtest: fails after logging\nnot ok 1 - fails after logging\n  ---\n" +
+	"  failureType: 'testCodeFailure'\n  error: |\n    Expected values to be strictly equal\n" +
+	"  code: 'ERR_ASSERTION'\n  name: 'AssertionError'\n  ...\n1..1\n# tests 1\n# pass 0\n# fail 1"
+const vitestLoadOutput = " RUN  v3.2.4 /workspace\n\n" +
+	"Error: Failed to load url ../steps (resolved id: ../steps) in /workspace/a.test.js. Does the file exist?\n\n" +
+	" Test Files  1 failed (1)\n      Tests  no tests\n   Start at 12:03:18\n   Duration 4ms"
+const vitestAssertionOutput = " RUN  v3.2.4 /workspace\n\n FAIL a.test.js > loads\n" +
+	"Error: Failed to load url ../steps was expected text\n\n Test Files 1 failed (1)\n Tests 1 failed (1)"
+const vitestLoggedNoTestsOutput = " RUN  v3.2.4 /workspace\n\n FAIL a.test.js > loads\n" +
+	"Error: Failed to load url ../steps\nTests no tests\n\n Test Files 1 failed (1)\n Tests 1 failed (1)"
+
 // fixtureWork fixes a.txt and tests it with fixture.txt, which it makes.
 const fixtureWork = "echo fixed > a.txt; echo ok > fixture.txt" +
 	"; echo 'grep -q fixed a.txt && ! grep -q broken a.txt && grep -q ok fixture.txt' > a_test.sh"
@@ -202,23 +221,23 @@ var proofCases = []struct {
 			reportJSON("test_bad.py"),
 		why: "red did not run: parse/compile error"},
 	{name: "Jest suite parse diagnostic rejected at red green boundary", typ: "fix",
-		atm: atmSet(atmYAML, "test_file", "sh runner.sh {file}"), files: map[string]string{"runner.sh": recordedRunner(
-			" FAIL  ./index.test.js\n      ● Test suite failed to run\n\n        SyntaxError: Unexpected token\n      Tests:       0 total")},
-		work: "echo fixed > a.txt; echo test > index.test.js; " + reportJSON("index.test.js"),
-		why:  "red did not run: parse/compile error"},
+		atm:   atmSet(atmYAML, "test_file", "sh runner.sh {file}"),
+		files: map[string]string{"runner.sh": recordedRunner(jestZeroTestOutput)},
+		work:  "echo fixed > a.txt; echo test > index.test.js; " + reportJSON("index.test.js"),
+		why:   "red did not run: parse/compile error"},
 	{name: "Jest assertion with suite diagnostic title remains a valid red", typ: "feature",
-		atm: atmSet(atmYAML, "test_file", "sh runner.sh {file}"), files: map[string]string{"runner.sh": recordedRunnerWhenFixed(
-			" FAIL  ./index.test.js\n  ● Test suite failed to run\n\n    expect(received).toBe(expected)\n    Expected: 1\n    Received: 0\n\nTest Suites: 1 failed, 1 total\nTests:       1 failed, 1 total")},
-		work: "echo fixed > a.txt; echo test > index.test.js; " + reportJSON("index.test.js")},
+		atm:   atmSet(atmYAML, "test_file", "sh runner.sh {file}"),
+		files: map[string]string{"runner.sh": recordedRunnerWhenFixed(jestAssertionOutput)},
+		work:  "echo fixed > a.txt; echo test > index.test.js; " + reportJSON("index.test.js")},
 	{name: "node syntax diagnostic rejected at red green boundary", typ: "fix",
-		atm: atmSet(atmYAML, "test_file", "sh runner.sh {file}"), files: map[string]string{"runner.sh": recordedRunner(
-			"/tmp/a.test.js:3\n\nSyntaxError: Unexpected end of input\n    at wrapSafe (node:internal/modules/cjs/loader:1637:18)\nNode.js v22.22.1")},
-		work: "echo fixed > a.txt; echo test > a.test.js; " + reportJSON("a.test.js"),
-		why:  "red did not run: parse/compile error"},
+		atm:   atmSet(atmYAML, "test_file", "sh runner.sh {file}"),
+		files: map[string]string{"runner.sh": recordedRunner(nodeSyntaxOutput)},
+		work:  "echo fixed > a.txt; echo test > a.test.js; " + reportJSON("a.test.js"),
+		why:   "red did not run: parse/compile error"},
 	{name: "node TAP assertion output with SyntaxError remains a valid red", typ: "feature",
-		atm: atmSet(atmYAML, "test_file", "sh runner.sh {file}"), files: map[string]string{"runner.sh": recordedRunnerWhenFixed(
-			"TAP version 13\n# SyntaxError: ordinary assertion output\n# Subtest: fails after logging\nnot ok 1 - fails after logging\n  ---\n  failureType: 'testCodeFailure'\n  error: |\n    Expected values to be strictly equal\n  code: 'ERR_ASSERTION'\n  name: 'AssertionError'\n  ...\n1..1\n# tests 1\n# pass 0\n# fail 1")},
-		work: "echo fixed > a.txt; echo test > a.test.js; " + reportJSON("a.test.js")},
+		atm:   atmSet(atmYAML, "test_file", "sh runner.sh {file}"),
+		files: map[string]string{"runner.sh": recordedRunnerWhenFixed(nodeAssertionOutput)},
+		work:  "echo fixed > a.txt; echo test > a.test.js; " + reportJSON("a.test.js")},
 	{name: "tsc diagnostic rejected at red green boundary", typ: "fix",
 		atm: atmSet(atmYAML, "test_file", "sh runner.sh {file}"), files: map[string]string{"runner.sh": recordedRunner(
 			"src/a.test.ts(3,7): error TS2322: Type 'number' is not assignable to type 'string'.")},
@@ -226,17 +245,17 @@ var proofCases = []struct {
 		why:  "red did not run: parse/compile error"},
 	{name: "Vitest load failure with no tests rejected at red green boundary", typ: "feature",
 		atm: atmSet(atmYAML, "test_file", "sh runner.sh {file}"), files: map[string]string{"runner.sh": recordedRunner(
-			" RUN  v3.2.4 /workspace\n\nError: Failed to load url ../steps (resolved id: ../steps) in /workspace/a.test.js. Does the file exist?\n\n Test Files  1 failed (1)\n      Tests  no tests\n   Start at  12:03:18\n   Duration  4ms")},
+			vitestLoadOutput)},
 		work: "echo fixed > a.txt; echo test > a.test.js; " + reportJSON("a.test.js"),
 		why:  "red did not run: parse/compile error"},
 	{name: "Vitest assertion output with load wording remains a valid red", typ: "feature",
-		atm: atmSet(atmYAML, "test_file", "sh runner.sh {file}"), files: map[string]string{"runner.sh": recordedRunnerWhenFixed(
-			" RUN  v3.2.4 /workspace\n\n FAIL  a.test.js > loads\nError: Failed to load url ../steps was expected text\n\n Test Files  1 failed (1)\n      Tests  1 failed (1)")},
-		work: "echo fixed > a.txt; echo test > a.test.js; " + reportJSON("a.test.js")},
+		atm:   atmSet(atmYAML, "test_file", "sh runner.sh {file}"),
+		files: map[string]string{"runner.sh": recordedRunnerWhenFixed(vitestAssertionOutput)},
+		work:  "echo fixed > a.txt; echo test > a.test.js; " + reportJSON("a.test.js")},
 	{name: "Vitest logged zero-test wording before a failed assertion", typ: "feature",
-		atm: atmSet(atmYAML, "test_file", "sh runner.sh {file}"), files: map[string]string{"runner.sh": recordedRunnerWhenFixed(
-			" RUN  v3.2.4 /workspace\n\n FAIL  a.test.js > loads\nError: Failed to load url ../steps\nTests no tests\n\n Test Files  1 failed (1)\n      Tests  1 failed (1)")},
-		work: "echo fixed > a.txt; echo test > a.test.js; " + reportJSON("a.test.js")},
+		atm:   atmSet(atmYAML, "test_file", "sh runner.sh {file}"),
+		files: map[string]string{"runner.sh": recordedRunnerWhenFixed(vitestLoggedNoTestsOutput)},
+		work:  "echo fixed > a.txt; echo test > a.test.js; " + reportJSON("a.test.js")},
 	{name: "fix whose test only calls a function it adds to an old file", typ: "fix", lib: lib,
 		work: "echo '" + helper + "' >> lib.sh" + testThrough("helper"), why: "depends on nothing the base had"},
 	{name: "fix whose test only calls a function it adds next to a changed line", typ: "fix", lib: lib,
@@ -445,7 +464,27 @@ func keepGoCache(t *testing.T) {
 }
 
 func TestRedDidNotRunMatchesRunnerOutput(t *testing.T) {
-	for _, c := range []struct {
+	for _, c := range redDidNotRunCases() {
+		t.Run(c.name, func(t *testing.T) {
+			if got := redDidNotRun(c.output); got != c.want {
+				t.Fatalf("redDidNotRun() = %v, want %v", got, c.want)
+			}
+		})
+	}
+}
+
+func redDidNotRunCases() []struct {
+	name, output string
+	want         bool
+} {
+	return append(redDidNotRunBaseCases(), redDidNotRunNodeCases()...)
+}
+
+func redDidNotRunBaseCases() []struct {
+	name, output string
+	want         bool
+} {
+	return []struct {
 		name, output string
 		want         bool
 	}{
@@ -485,6 +524,17 @@ func TestRedDidNotRunMatchesRunnerOutput(t *testing.T) {
 			" RUN  v3.2.4 /workspace", "", " FAIL  a.test.js > loads", "Error: Failed to load url ../steps",
 			"Tests no tests", " Test Files  1 failed (1)", "      Tests  1 failed (1)",
 		}, "\n"), false},
+	}
+}
+
+func redDidNotRunNodeCases() []struct {
+	name, output string
+	want         bool
+} {
+	return []struct {
+		name, output string
+		want         bool
+	}{
 		{"node --test tap", strings.Join([]string{
 			"TAP version 13", "# /tmp/a.test.js:3", "# SyntaxError: Unexpected end of input",
 			"#     at wrapSafe (node:internal/modules/cjs/loader:1637:18)", "# Node.js v22.22.1",
@@ -509,12 +559,6 @@ func TestRedDidNotRunMatchesRunnerOutput(t *testing.T) {
 			"  error: |-", "    want", "    error TS2322: nope", "    SyntaxError: nope", "  code: 'ERR_ASSERTION'",
 			"  name: 'AssertionError'", "  ...", "1..1", "# tests 1", "# pass 0", "# fail 1",
 		}, "\n"), false},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			if got := redDidNotRun(c.output); got != c.want {
-				t.Fatalf("redDidNotRun() = %v, want %v", got, c.want)
-			}
-		})
 	}
 }
 

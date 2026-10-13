@@ -286,40 +286,59 @@ var vitestFilesFailed = regexp.MustCompile(`^Test Files\s+[1-9]\d*\s+failed\b`)
 // redDidNotRun says whether output, a red's whole, holds a runner's diagnostic that the test file did not parse
 // or compile and no test result.
 func redDidNotRun(output string) bool {
-	diagnostic, testRan, jest, tap, tapFailed, vitest, vitestLoad, vitestNoTestCount, vitestFailedFileCount :=
-		false, false, false, false, false, false, false, false, false
-	for _, line := range strings.Split(output, "\n") {
-		line = strings.TrimRight(line, "\r")
-		trimmed := strings.TrimSpace(line)
-		vitest = vitest || vitestRun.MatchString(trimmed)
-		switch {
-		case notRun.MatchString(line), jest && trimmed == "● Test suite failed to run":
-			diagnostic = true
-		case vitest && vitestLoadError.MatchString(trimmed):
-			vitestLoad = true
-		case tap && tapFailedTest.MatchString(trimmed):
-			tapFailed = true
-		case tap && tapFailed && tapAssertionFailure.MatchString(trimmed):
-			testRan = true
-		case testResult.MatchString(trimmed):
-			testRan = true
+	lines := strings.Split(output, "\n")
+	return hasRunnerDiagnostic(lines) && !hasTestResult(lines) || vitestLoadFailure(lines)
+}
+
+func hasRunnerDiagnostic(lines []string) bool {
+	jest := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(strings.TrimRight(line, "\r"))
+		if jest && trimmed == "● Test suite failed to run" || notRun.MatchString(line) {
+			return true
 		}
-		if vitest && strings.HasPrefix(trimmed, "Tests ") {
-			vitestNoTestCount = vitestNoTests.MatchString(trimmed)
-		}
-		if vitest && strings.HasPrefix(trimmed, "Test Files ") {
-			vitestFailedFileCount = vitestFilesFailed.MatchString(trimmed)
-		}
-		if vitest && vitestTestsFailed.MatchString(trimmed) {
-			testRan = true
+		jest = jest || jestFile.MatchString(line)
+	}
+	return false
+}
+
+func hasTestResult(lines []string) bool {
+	jest, tap, tapFailed := false, false, false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(strings.TrimRight(line, "\r"))
+		if testResult.MatchString(trimmed) || tap && tapFailed && tapAssertionFailure.MatchString(trimmed) ||
+			runnerSummaryHasFailure(trimmed, jest, vitestRun.MatchString(trimmed)) {
+			return true
 		}
 		jest = jest || jestFile.MatchString(line)
 		tap = tap || strings.HasPrefix(trimmed, "TAP version ")
-		if jest && jestTestsFailed.MatchString(trimmed) {
-			testRan = true
+		tapFailed = tapFailed || tap && tapFailedTest.MatchString(trimmed)
+	}
+	return false
+}
+
+func runnerSummaryHasFailure(line string, jest, vitest bool) bool {
+	return jest && jestTestsFailed.MatchString(line) || vitest && vitestTestsFailed.MatchString(line)
+}
+
+func vitestLoadFailure(lines []string) bool {
+	run, load := false, false
+	noTests, failedFiles := false, false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(strings.TrimRight(line, "\r"))
+		run = run || vitestRun.MatchString(trimmed)
+		if !run {
+			continue
+		}
+		load = load || vitestLoadError.MatchString(trimmed)
+		if strings.HasPrefix(trimmed, "Tests ") {
+			noTests = vitestNoTests.MatchString(trimmed)
+		}
+		if strings.HasPrefix(trimmed, "Test Files ") {
+			failedFiles = vitestFilesFailed.MatchString(trimmed)
 		}
 	}
-	return diagnostic && !testRan || vitestLoad && vitestNoTestCount && vitestFailedFileCount
+	return load && noTests && failedFiles
 }
 
 // redGreen sets aside, in clone, the paths aside, runs test alone with tmpl, which must fail, brings the
