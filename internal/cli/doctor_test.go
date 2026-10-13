@@ -86,12 +86,7 @@ func TestDoctorRunsEveryCheckAndFailsWhenAnyFails(t *testing.T) {
 		}
 	})
 	t.Run("a key missing", func(t *testing.T) {
-		dir := repo(t, "https://github.com/o/r.git")
-		watcher(t, dir, "w", 0)
-		onPath(t, "claude", "gh")
-		if err := os.WriteFile(filepath.Join(dir, ".atm.yaml"), []byte("test: go test ./...\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
+		doctorRepoWithConfig(t, "test: go test ./...\n")
 		out, err := atm(t, "doctor")
 		ls := lines(t, out)
 		if len(ls) != 5 || !strings.HasPrefix(ls[3], "fail .atm.yaml") || !strings.Contains(ls[3], "lint") {
@@ -102,12 +97,7 @@ func TestDoctorRunsEveryCheckAndFailsWhenAnyFails(t *testing.T) {
 		}
 	})
 	t.Run("duplicate keys", func(t *testing.T) {
-		dir := repo(t, "https://github.com/o/r.git")
-		watcher(t, dir, "w", 0)
-		onPath(t, "claude", "gh")
-		if err := os.WriteFile(filepath.Join(dir, ".atm.yaml"), []byte("install: ''\ninstall: ''\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
+		doctorRepoWithConfig(t, "install: ''\ninstall: ''\n")
 		out, err := atm(t, "doctor")
 		ls := lines(t, out)
 		if len(ls) != 5 || !strings.HasPrefix(ls[3], "fail .atm.yaml") {
@@ -117,4 +107,15 @@ func TestDoctorRunsEveryCheckAndFailsWhenAnyFails(t *testing.T) {
 			t.Fatal("want a non-zero exit")
 		}
 	})
+}
+
+func doctorRepoWithConfig(t *testing.T, config string) string {
+	t.Helper()
+	dir := repo(t, "https://github.com/o/r.git")
+	watcher(t, dir, "w", 0)
+	onPath(t, "claude", "gh")
+	if err := os.WriteFile(filepath.Join(dir, ".atm.yaml"), []byte(config), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return dir
 }
