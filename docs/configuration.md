@@ -64,7 +64,7 @@ lint: golangci-lint run
 test_file: go test -run {tests} {dir}
 test_patterns: ["**/*_test.go"]
 docs_patterns: ["**/*.md", "docs/**"]
-delivery: 'no-mistakes axi run --intent "$ATM_ISSUE_TEXT"'
+delivery: 'no-mistakes axi run --intent "$ATM_INTENT"'
 ```
 
 The `delivery` line hands the branch to

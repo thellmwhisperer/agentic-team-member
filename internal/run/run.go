@@ -265,7 +265,7 @@ func deliver(r *verdict, root, clone, sha, base, line string, i Issue, screen io
 		branch := "atm/" + cmp.Or(strings.Trim(s[:min(len(s), 40)], "-"), "run") + "-" +
 			strings.TrimPrefix(filepath.Base(clone), "atm-run-") // the clone's timestamp, as unique
 		ev := map[string]any{"branch": branch}
-		cuts, err := onBranch(root, clone, sha, branch, i.Title)
+		cuts, tombs, err := onBranch(root, clone, sha, branch, i.Title)
 		if err == nil {
 			err = foreign(root, clone, sha)
 		}
@@ -295,7 +295,8 @@ func deliver(r *verdict, root, clone, sha, base, line string, i Issue, screen io
 		// a nested check event here would arrive after the terminal output and duplicate it.
 		took, err := row(func(map[string]any) {}, "delivery", func() error {
 			tail, err = tee(ctx, t, io.MultiWriter(f, screen), clone, line, "ATM_TITLE="+i.Title, "ATM_ISSUE="+issue,
-				"ATM_ISSUE_TEXT="+i.Text, "ATM_BRANCH="+branch, "ATM_CLONE="+clone, "ATM_REPORT="+r.path, "ATM_PONYTAIL="+cuts)
+				"ATM_ISSUE_TEXT="+i.Text, "ATM_INTENT="+intent(i.Text, tombs), "ATM_BRANCH="+branch,
+				"ATM_CLONE="+clone, "ATM_REPORT="+r.path, "ATM_PONYTAIL="+cuts)
 			return err
 		})
 		ev["commands"] = []cmdResult{{"delivery", line, outcome(err), tail, took}}
@@ -307,15 +308,18 @@ func deliver(r *verdict, root, clone, sha, base, line string, i Issue, screen io
 
 // onBranch puts clone, at base commit sha, on a new branch name, what is left uncommitted committed as the
 // unit under the identity of the repository at root, and points clone's origin at root's. cuts are the slop
-// detector's findings, one a line, when it committed a cut.
-func onBranch(root, clone, sha, name, title string) (cuts string, err error) {
+// detector's findings, one a line, and tombs the tombstones it committed, when it committed a cut.
+func onBranch(root, clone, sha, name, title string) (cuts, tombs string, err error) {
 	origin, err := git(root, "remote", "get-url", "origin")
 	if err != nil {
-		return "", fmt.Errorf("no origin to deliver to: %w", err)
+		return "", "", fmt.Errorf("no origin to deliver to: %w", err)
 	}
 	head, err := git(clone, "rev-parse", "HEAD")
 	if err == nil && head != sha {
 		cuts, err = git(clone, "log", "-1", "--format=%b") // the ponytail commit's body: its findings
+	}
+	if err == nil && head != sha {
+		tombs, err = git(clone, "show", "--name-only", "--format=", "HEAD", "--", ".slop/tombstones/")
 	}
 	if err == nil {
 		_, err = git(clone, "checkout", "-q", "-b", name)
@@ -346,7 +350,18 @@ func onBranch(root, clone, sha, name, title string) (cuts string, err error) {
 	if err == nil {
 		_, err = git(clone, "remote", "set-url", "origin", origin)
 	}
-	return cuts, err
+	return cuts, tombs, err
+}
+
+// intent is the issue text for the delivery's reviewer, followed, when the slop detector committed tombs, one
+// path a line, by a section naming them as ATM's own record, outside the issue's scope.
+func intent(text, tombs string) string {
+	if tombs == "" {
+		return text
+	}
+	return strings.TrimRight(text, "\n") + "\n\n## Files ATM adds\n\n`" + strings.ReplaceAll(tombs, "\n", "`, `") +
+		"`: ATM's slop detector records each cut it kept here, as slopslint tombstones. They are not part of the " +
+		"issue's scope surface and never a split trigger."
 }
 
 // foreign is an error naming the first commit from base commit sha to HEAD in clone whose author or committer
