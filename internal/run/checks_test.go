@@ -60,6 +60,10 @@ func commitBase(t *testing.T, root, name, text string) {
 	gitT(t, root, "commit", "-qm", name)
 }
 
+// fixtureWork fixes a.txt and tests it with fixture.txt, which it makes.
+const fixtureWork = "echo fixed > a.txt; echo ok > fixture.txt" +
+	"; echo 'grep -q fixed a.txt && ! grep -q broken a.txt && grep -q ok fixture.txt' > a_test.sh"
+
 // proofCases are the task types' proofs at work: why, when not "", names the run's failure.
 var proofCases = []struct {
 	name, typ, work, atm, why, lib, ignore, hooks string // hooks: hooks_test.sh on the base
@@ -89,12 +93,16 @@ var proofCases = []struct {
 	{name: "fix whose test writes ignored output", typ: "fix", ignore: "build/\n",
 		work: `echo fixed > a.txt; echo 'mkdir -p build; cp a.txt build; test "$(cat build/a.txt)" = fixed' > a_test.sh; ` +
 			reportJSON("a_test.sh")},
+	{name: "fix whose test reads an ignored fixture its agent made", typ: "fix", ignore: "fixture.txt\n",
+		work: fixtureWork, why: "fails with the fix"},
+	{name: "fix whose test reads a fixture its agent made", typ: "fix", work: fixtureWork},
 	{name: "fix whose test changes an ignored file", typ: "fix", ignore: "cache.txt\n",
 		work: "echo fixed > a.txt; echo kept > cache.txt; " +
 			"echo 'grep -q fixed a.txt && ! grep -q broken a.txt && echo x >> cache.txt' > a_test.sh; " +
 			reportJSON("a_test.sh")},
 	{name: "fix whose test deletes an ignored file", typ: "fix", ignore: "cache.txt\n",
-		work: "echo fixed > a.txt; echo kept > cache.txt; " +
+		atm: atmInstall("echo kept > cache.txt"), // there before the agent
+		work: "echo fixed > a.txt; " +
 			"echo 'grep -q fixed a.txt && ! grep -q broken a.txt && rm cache.txt' > a_test.sh; " +
 			reportJSON("a_test.sh")},
 	{name: "fix whose test passes on what its red left in an ignored file", typ: "fix", ignore: "cache.txt\n",
@@ -317,6 +325,7 @@ func TestRunChecksRunTheCommandsInOrderAndDieOnTheFirstFailure(t *testing.T) {
 		atm = atmSet(atm, k, `echo `+k+` >> "$ATM_TEST_OUT"`)
 	}
 	atm = atmSet(atm, "typecheck", `echo typecheck >> "$ATM_TEST_OUT"; seq 100; exit 3`)
+	atm = atmSet(atm, "test_file", `echo proof >> "$ATM_TEST_OUT"; sh {file}`)
 	repo(t, "https://example.com/owner/repo.git", atm)
 	var out bytes.Buffer
 	err := Run("t", []string{issueFile(t, issue)}, &out, io.Discard)
@@ -331,8 +340,9 @@ func TestRunChecksRunTheCommandsInOrderAndDieOnTheFirstFailure(t *testing.T) {
 	if end := checksStep(t, &out); end["state"] != "failed" || end["error"] != err.Error() {
 		t.Fatalf("end event: %v", end)
 	}
-	// Install runs in the clone step, then again in the checks: the agent may have changed dependencies.
-	if b, _ := os.ReadFile(got); string(b) != "install\ninstall\ntest\ntypecheck\n" {
+	// Install runs in the clone step, then again in the checks before the proof: the agent may have changed
+	// dependencies.
+	if b, _ := os.ReadFile(got); !regexp.MustCompile(`^install\ninstall\n(proof\n)+test\ntypecheck\n$`).Match(b) {
 		t.Fatalf("ran %q", b)
 	}
 }

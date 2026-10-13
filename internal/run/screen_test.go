@@ -52,6 +52,10 @@ func watch(t *testing.T, harness, stream, yml string) *watched {
 	return &w
 }
 
+// checkRows are the rows a fix's checks tell the screen, in order: install first.
+var checkRows = [][2]any{{"install", "started"}, {"install", "passed"}, {"red/green", "started"},
+	{"red/green", "passed"}, {"test", "started"}, {"test", "passed"}}
+
 // The screen's rows and boxes come from what the run tells a screen that watches it: each tool call of the
 // agent with its outcome, what it says and its thinking, each proof and command of the checks, and their output.
 func TestRunTellsAWatchingScreenWhatItsAgentAndChecksDo(t *testing.T) {
@@ -78,7 +82,9 @@ func TestRunTellsAWatchingScreenWhatItsAgentAndChecksDo(t *testing.T) {
 	}
 	for harness, stream := range streams {
 		t.Run(harness, func(t *testing.T) {
-			w := watch(t, harness, stream, atmSet(atmYAML, "test", "echo suite-ok; sh a_test.sh"))
+<<<<<<< HEAD
+			yml := atmSet(atmInstall("true"), "test", "echo suite-ok; sh a_test.sh")
+			w := watch(t, harness, stream, yml)
 			for _, want := range []obj{
 				{"step": "agent", "thinking": "Read the test first."},
 				{"step": "agent", "says": "I'll run the tests."},
@@ -99,9 +105,8 @@ func TestRunTellsAWatchingScreenWhatItsAgentAndChecksDo(t *testing.T) {
 					checks = append(checks, [2]any{ev["check"], ev["state"]})
 				}
 			}
-			want := [][2]any{{"red/green", "started"}, {"red/green", "passed"}, {"test", "started"}, {"test", "passed"}}
-			if !reflect.DeepEqual(checks, want) {
-				t.Fatalf("check rows: %v, want %v", checks, want)
+			if !reflect.DeepEqual(checks, checkRows) {
+				t.Fatalf("check rows: %v, want %v", checks, checkRows)
 			}
 			for _, ev := range events(t, &w.Buffer) {
 				if ev["thinking"] != nil || ev["output"] != nil || ev["check"] != nil || ev["tool"] != nil {

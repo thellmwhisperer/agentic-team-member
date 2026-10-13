@@ -220,7 +220,8 @@ func testFile(r map[string]any) error {
 	return nil
 }
 
-// placeSkill puts skill where harness finds it in clone, outside git, and returns its directory.
+// placeSkill puts skill where harness finds it in clone, outside git, records clone as the agent finds it, with
+// before, and returns the skill's directory.
 func placeSkill(clone, harness, skill string) (string, error) {
 	rel := skillDirs[harness] + "/" + skill
 	dir := filepath.Join(clone, filepath.FromSlash(rel))
@@ -231,10 +232,13 @@ func placeSkill(clone, harness, skill string) (string, error) {
 	if err == nil {
 		err = os.WriteFile(filepath.Join(dir, "SKILL.md"), b, 0o644)
 	}
-	if err != nil {
-		return dir, err
+	if err == nil {
+		err = exclude(clone, "/"+rel+"/")
 	}
-	return dir, exclude(clone, "/"+rel+"/")
+	if err == nil {
+		err = before(clone)
+	}
+	return dir, err
 }
 
 // exclude makes git in clone ignore pattern, even when the target does not.

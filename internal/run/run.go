@@ -149,7 +149,9 @@ func (a agent) units(r *verdict, root, dir, sha, text string, i Issue, c config.
 			var ev map[string]any
 			if from != nil {
 				resumed, ev = from.run, map[string]any{"report": from.Report, "resumed_from": from.run}
-				head, err = putBack(root, dir, *from)
+				if err = before(dir); err == nil { // the work it puts back leaves the ignored files out
+					head, err = putBack(root, dir, *from)
+				}
 				from = nil
 			} else {
 				head, unit, text, ev, err = a.runUnit(root, dir, head, text, unit, f, n, i, c)
