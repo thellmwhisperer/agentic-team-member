@@ -145,7 +145,7 @@ func (m *Model) row(r *row, width int) string {
 		took = m.now.Sub(r.start)
 	}
 	suffix := ""
-	if took > 0 || r.state == "running" || r.state == "passed" || r.state == "failed" {
+	if r.hasDuration || r.state == "running" {
 		suffix = "  " + paint(dim, run.Human(took))
 	}
 	word := r.state

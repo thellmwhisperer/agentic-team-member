@@ -21,6 +21,7 @@ type row struct {
 	check                    bool
 	start                    time.Time
 	took                     time.Duration
+	hasDuration              bool
 }
 
 // activity is a line of the Agent box: a tool call, by its id, and its result, or what the agent says or thinks.
@@ -127,7 +128,7 @@ func (m *Model) apply(f run.Frame) {
 	switch {
 	case e.Check != "":
 		r := m.checkRow(e.Step, e.Check)
-		r.state, r.took, r.start = e.State, time.Duration(e.DurationMS)*time.Millisecond, at
+		r.state, r.took, r.start, r.hasDuration = e.State, time.Duration(e.DurationMS)*time.Millisecond, at, true
 		if e.State == "started" {
 			r.state = "running"
 		}
@@ -191,7 +192,7 @@ func (m *Model) tools() (n int) {
 
 func (m *Model) ended(e event) {
 	r := m.current(e.Step)
-	r.state, r.took = e.State, time.Duration(e.DurationMS)*time.Millisecond
+	r.state, r.took, r.hasDuration = e.State, time.Duration(e.DurationMS)*time.Millisecond, true
 	switch e.Step {
 	case "issue":
 		m.title, m.number, r.note = e.Title, e.Number, e.Type
@@ -262,7 +263,7 @@ func (m *Model) tool(e event) {
 // end keeps how the run ended on screen until the user closes it.
 func (m *Model) end(o run.Outcome, err error) {
 	if o.Report != "" && !slices.ContainsFunc(m.rows, func(r *row) bool { return r.state != "pending" }) {
-		m.restoreReport(o.Report)
+		m.restoreReport(o.Report, o)
 	}
 	m.done, m.outcome, m.err = true, o, err
 	m.state = map[bool]string{true: "failed", false: o.Outcome}[err != nil || o.Outcome != "passed"]
