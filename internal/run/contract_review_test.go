@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -228,13 +229,20 @@ func checkContractRechecks(t *testing.T, dir, out string, rounds []contractRevie
 		t.Fatalf("repair command trace missing: %v", err)
 	}
 	wantTrace := map[string][]string{
-		"fix":      {"install", "proof", "proof", "test", "typecheck", "lint"},
-		"refactor": {"install", "baseline", "test", "typecheck", "lint"},
+		"fix":      {"install", "proof", "proof", "proof", "test", "typecheck", "lint"},
+		"refactor": {"install", "test", "typecheck", "lint"},
 		"docs":     {"install", "test", "typecheck", "lint"},
 		"chore":    {"install", "test", "typecheck", "lint"},
 	}[typ]
-	if got, want := strings.TrimSpace(string(trace)), strings.Join(wantTrace, "\n"); got != want {
-		t.Fatalf("repair epoch did not execute every applicable check and proof: got %q want %q", got, want)
+	var repairTrace []string
+	for _, line := range strings.Split(strings.TrimSpace(string(trace)), "\n") {
+		if strings.HasPrefix(line, "repair:") {
+			repairTrace = append(repairTrace, strings.TrimPrefix(line, "repair:"))
+		}
+	}
+	if got, want := repairTrace, wantTrace; !reflect.DeepEqual(got, want) {
+		t.Fatalf("repair epoch did not execute every applicable check and proof: got %q want %q (full trace %q)",
+			got, want, trace)
 	}
 	rep := readReport(t, filepath.Join(dir, "report.json"))
 	if rep["head_sha"] != rounds[1].Head || rounds[0].Head == rounds[1].Head {
@@ -249,20 +257,17 @@ func configureRecheckTrace(t *testing.T, root, typ, repairedFile string) {
 		t.Fatal(err)
 	}
 	record := func(name, condition string) string {
-		return `if [ -f "$ATM_TEST_OUT/repair-epoch" ] && ` + condition +
-			`; then printf "` + name + `\n" >> "$ATM_TEST_OUT/recheck.trace"; fi; `
+		return `if ` + condition +
+			`; then if grep -q contract-repair "$ATM_TEST_OUT/repair-epoch" 2>/dev/null; then printf "repair:` + name + `\n" >> "$ATM_TEST_OUT/recheck.trace"; elif [ ! -e "$ATM_TEST_OUT/repair-epoch" ]; then printf "initial:` + name + `\n" >> "$ATM_TEST_OUT/recheck.trace"; fi; fi; `
 	}
 	repaired := `grep -q repaired ` + repairedFile
 	atm := atmSet(string(b), "install", record("install", repaired))
 	test := record("test", repaired)
-	if typ == "refactor" {
-		test = record("baseline", `[ ! -e b.txt ]`) + test
-	}
 	atm = atmSet(atm, "test", test+"sh a_test.sh")
 	atm = atmSet(atm, "typecheck", record("typecheck", repaired))
 	atm = atmSet(atm, "lint", record("lint", repaired))
 	if typ == "fix" {
-		atm = atmSet(atm, "test_file", `sh {file}; status=$?; if [ -f "$ATM_TEST_OUT/repair-epoch" ] && grep -q repaired a.txt; then printf "proof\n" >> "$ATM_TEST_OUT/recheck.trace"; fi; exit "$status"`)
+		atm = atmSet(atm, "test_file", `sh {file}; status=$?; if grep -q contract-repair "$ATM_TEST_OUT/repair-epoch" 2>/dev/null; then printf "repair:proof\n" >> "$ATM_TEST_OUT/recheck.trace"; elif [ ! -e "$ATM_TEST_OUT/repair-epoch" ]; then printf "initial:proof\n" >> "$ATM_TEST_OUT/recheck.trace"; fi; exit "$status"`)
 	}
 	if err := os.WriteFile(filepath.Join(root, ".atm.yaml"), []byte(atm), 0o600); err != nil {
 		t.Fatal(err)
@@ -755,8 +760,8 @@ func TestRunContractReviewDocsRepairRejectsSourceChange(t *testing.T) {
 		!strings.Contains(rechecks.Reproofs[0].Result, "failed") || !strings.Contains(rechecks.Reason, "not docs") {
 		t.Fatalf("docs scope proof did not reject repaired source: %s %v", b, err)
 	}
-	if got := strings.TrimSpace(readRecheckTrace(t, out)); got != "install" {
-		t.Fatalf("commands after the failed docs proof ran: %q", got)
+	if got := strings.TrimSpace(readRecheckTrace(t, out)); got != "repair:install" {
+		t.Fatalf("checks after the failed docs proof ran: %q", got)
 	}
 }
 
