@@ -215,6 +215,16 @@ func TestFollowPrintsRunFailedAtChecksAndExits1(t *testing.T) {
 	}
 }
 
+func TestFollowFailsWhenRunEndsWithoutAPR(t *testing.T) {
+	top := backgroundRepo(t) // delivery is empty, so a successful run cannot open a PR
+	lines, done := following(t, top, []string{issueFile(t, issue)})
+	evs := eventsUntil(t, lines, done, "run_failed", 1)
+	if last := evs[len(evs)-1]; last["step"] != "ponytail" ||
+		!strings.Contains(last["reason"].(string), "without delivery") {
+		t.Fatalf("run_failed = %v, want a reason that no PR can arrive", last)
+	}
+}
+
 func TestFollowPrintsStalledWhileNothingChanges(t *testing.T) {
 	defer func(b, s time.Duration) { beat, stall = b, s }(beat, stall)
 	beat, stall = 2*time.Millisecond, 30*time.Millisecond
@@ -237,10 +247,9 @@ func TestFollowPrintsStalledWhileNothingChanges(t *testing.T) {
 		}
 	}
 	release()
-	for range lines { // the run passes without a delivery: nothing more to follow
-	}
-	if err := <-done; err != nil {
-		t.Fatalf("follow ended with %v after the run passed", err)
+	if evs := eventsUntil(t, lines, done, "run_failed", 1); evs[len(evs)-1]["reason"] !=
+		"run completed without delivery or PR" {
+		t.Fatalf("follow ended without explaining the missing PR: %v", evs)
 	}
 }
 

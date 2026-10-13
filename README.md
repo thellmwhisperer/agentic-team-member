@@ -91,17 +91,17 @@ cd /path/to/your/repo
 atm init     # writes .atm.yaml: fill in its commands and file patterns
 ```
 
-In the CoS session, start `atm watch` under its streaming monitor, which wakes
-the session for each output line. Keep it running there. After it prints
-`watching as w7k2`, start a separate command in that session:
+In the CoS session, launch `atm run --follow` under its streaming monitor,
+which wakes the session for each JSON line:
 
 ```bash
-atm doctor
-atm run --watcher w7k2 280
+atm run 280 --follow
 ```
 
-Use the ID printed by `atm watch` in place of `w7k2`; a run can also take an
-issue file, such as `plans/retry.md`.
+Act on each line while the command follows the run through its PR merge or
+failure. A run can also take an issue file, such as `plans/retry.md`. The
+separate `atm watch` and `--watcher` commands remain available for watching
+multiple runs; see [The watcher](docs/how-a-run-flows.md#the-watcher).
 
 `.atm.yaml` declares the repository's `install`, `test`, `typecheck` and
 `lint` commands, how to run one test, which files are tests and docs, and the
@@ -114,6 +114,7 @@ effort. Both are in [Configuration](docs/configuration.md).
 | `atm doctor` | Checks that a run can start, a live watcher included |
 | `atm watch [--adopt <run>]` | Watches the runs bound to it until killed, one line per event; see [The watcher](docs/how-a-run-flows.md#the-watcher) |
 | `atm run --watcher <id> [flags] <issue>` | Runs an issue: a GitHub number or a file with a `Type:` line. Without a live watcher it does not start |
+| `atm run [flags] <issue> --follow` | Launches and watches one run, printing JSON events until its PR merges or closes, or the run fails; see [Launch and follow](docs/how-a-run-flows.md#launch-and-follow-atm-run---follow) |
 | `atm run --resume <run>` | Runs a failed run's issue again from its agent's work, at its checks |
 | `atm status` | The runs going |
 | `atm attach [run]` | A run's screen; completed screens stay until q or Ctrl+C |
@@ -129,6 +130,9 @@ does not stop it.
 | `1` | A unit failed; nothing is delivered |
 | `2` | No live watcher, or configuration, issue, clone or contract failed |
 | `4` | Every unit passed, but the delivery command exited non-zero |
+
+With `--follow`, exit `0` means the PR merged; exit `1` means it closed
+unmerged or the run failed.
 
 ## Read more
 

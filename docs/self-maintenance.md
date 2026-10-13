@@ -2,12 +2,12 @@
 
 This page is for whoever maintains ATM itself. A fix to this repository goes
 through the same pipeline as a fix to any target: an issue, an ATM run, a
-delivery gate, a merge that needs no hand. Here is that loop and what holds
-it.
+delivery gate and a draft PR for human review. Here is that loop and what
+holds it.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/self-maintenance-dark.svg">
-  <img alt="The loop. An issue with a red test goes to an ATM run. FAIL goes back to the issue. PASS goes to the no-mistakes gate; its findings go to whoever launched the run, who answers them, then the gate opens a PR. A Low or Medium risk PR gets auto-merge; a High risk one waits for the risk-reviewed label. Merged on main, the issue closes." src="assets/self-maintenance-light.svg" width="900">
+  <img alt="The loop. An issue with a red test goes to an ATM run. FAIL goes back to the issue. PASS goes to the no-mistakes gate; its findings go to whoever launched the run, who answers them, then the gate opens a draft PR. A human marks it ready; a High risk PR also waits for the risk-reviewed label. Auto-merge can then arm. Merged on main, the issue closes." src="assets/self-maintenance-light.svg" width="900">
 </picture>
 
 ## The loop
@@ -16,10 +16,11 @@ it.
    acceptance criteria a test can check, and a `## Red test` section naming
    the test that fails today.
    The agent gets exactly this text; a vague issue gives a vague run.
-2. **An ATM run.** Start `atm watch` in the launching session and pass its ID
-   with `atm run --watcher <id> <number>`. Fill `.atm.yaml` once with the
-   repository commands, file patterns and the no-mistakes delivery line; see
-   [the watcher](how-a-run-flows.md#the-watcher) and [Configuration](configuration.md).
+2. **An ATM run.** Launch `atm run <number> --follow` in the session's
+   streaming monitor and act on its JSON events. Fill `.atm.yaml` once with
+   the repository commands, file patterns and the no-mistakes delivery line;
+   see [launch and follow](how-a-run-flows.md#launch-and-follow-atm-run---follow)
+   and [Configuration](configuration.md).
 3. **The verdict.** `report.json`, or the summary at the end of the run. A FAIL
    ends here: the report says which check failed and why, and the issue gets a
    better contract or the code a better check.
@@ -27,8 +28,9 @@ it.
    Review, test, lint and document run as fenced model steps. The reviewer
    only reports (`auto_fix.review: 0`); whoever launched the run answers each
    finding, fixing real defects and dismissing guesses.
-5. **The merge.** `auto-merge.yml` arms `gh pr merge --auto --rebase` when the
-   PR's `## Risk Assessment` says Low or Medium. High risk waits for a
+5. **The merge.** No-mistakes opens a draft PR. A human reviews it and marks
+   it ready before `auto-merge.yml` can arm `gh pr merge --auto --rebase`.
+   Low or Medium risk can arm then; High risk also waits for a
    `Risk reviewed:` comment and the `risk-reviewed` label. GitHub merges once
    the PR checks pass, closes the issue and deletes the branch.
 
@@ -37,7 +39,7 @@ it.
 | Mechanism | Where | What it does |
 |-----------|-------|--------------|
 | `go.yml` | GitHub Actions | Change-filtered checks; see [CI](../CONTRIBUTING.md#ci) |
-| `auto-merge.yml` + `scripts/arm-auto-merge.sh` | GitHub Actions | Arms auto-merge with `AUTO_MERGE_TOKEN`, a fine-grained token for this repository only. The workflow token is never used: merges made with it start no workflow and close no issue |
+| `auto-merge.yml` + `scripts/arm-auto-merge.sh` | GitHub Actions | Ignores draft PRs; once ready, arms auto-merge with `AUTO_MERGE_TOKEN`, a fine-grained token for this repository only. The workflow token is never used: merges made with it start no workflow and close no issue |
 | `scripts/test.sh`, `scripts/lint.sh` | local and the gate | Contribution checks; see [Contributing](../CONTRIBUTING.md) |
 | `.githooks/pre-commit` | local, after `git config core.hooksPath .githooks` | The same slopslint check |
 | `.no-mistakes.yaml` | no-mistakes | Runs the contribution checks, tells the reviewer that only a defect against the issue's criteria or the checks is a finding, and allows one re-run of a CI check GitHub cancelled without a verdict |
@@ -58,7 +60,7 @@ next time.
 
 ## Before a PR merges
 
-Auto-merge is armed, so this is the last look, and it is short:
+Before a human marks the draft PR ready, review:
 
 1. `git log --oneline origin/main..<branch>`: the unit commit,
    `fix: <title>` or `feat: <title>` with `atm unit <n>` in its body, a

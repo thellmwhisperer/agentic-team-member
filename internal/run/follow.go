@@ -65,7 +65,8 @@ func FollowRun(ctx context.Context, root string, args []string, w io.Writer) err
 			evs = g.frame(f)
 		case end := <-ended:
 			if evs, ended = g.end(end), nil; evs == nil && g.step != "delivery" {
-				return nil // nothing delivered, no PR to follow
+				evs = []followEvent{{"event": "run_failed", "step": g.step,
+					"reason": "run completed without delivery or PR"}}
 			}
 		case <-t.C:
 			evs = g.tick(root)

@@ -18,7 +18,7 @@ Each layer overrides the one before. A key no layer knows fails the run.
 | Built-in defaults | the binary | `harness: claude` |
 | Your machine | `~/.config/atm/config.yaml` | `harness`, `model`, `effort` only |
 | The repository | `.atm.yaml` at its root | every key below |
-| One run | `atm run` flags | `--watcher`, `--base-ref`, `--harness`, `--model`, `--effort`, `--harness-arg`, `--env`, `--resume` |
+| One run | `atm run` flags | `--watcher` or `--follow`, `--base-ref`, `--harness`, `--model`, `--effort`, `--harness-arg`, `--env`, `--resume` |
 
 ## `~/.config/atm/config.yaml`
 
@@ -81,6 +81,7 @@ Run every command from inside the repository it works on.
 | `atm doctor [--agent]` | Checks git, the configured agent CLI on `PATH`, `gh` when `origin` is on GitHub, `.atm.yaml`, and whether an `atm watch` lease is alive. One `ok` or `fail` line each; every check runs, and any failure exits non-zero. Its last line says `run atm doctor --agent to say hello to <harness>`: it makes no model call. With `--agent` it says hello instead, see [saying hello to the agent](#saying-hello-to-the-agent) |
 | `atm watch [--adopt <run>]` | Watches runs bound to it until killed; see [the watcher](how-a-run-flows.md#the-watcher) |
 | `atm run --watcher <id> [flags] <issue>` | Starts a run bound to a live watcher. On a terminal it keeps the completed screen open until q or Ctrl+C, then exits with the run's code; off one it prints the run's label and returns. See [the watcher](how-a-run-flows.md#the-watcher) and [resuming a failed run](#resuming-a-failed-run) |
+| `atm run [flags] <issue> --follow` | Starts and watches one run, printing JSON events until its PR merges or closes, or the run fails; see [launch and follow](how-a-run-flows.md#launch-and-follow-atm-run---follow) |
 | `atm status` | Each run going: label, step, duration, issue; or `nothing runs` |
 | `atm attach [run]` | The run's screen, the last one going by default; completed screens stay until q or Ctrl+C |
 | `atm runs` | Retained runs: label, `running`, `passed` or `failed at <step>`, duration, watcher, issue and report |
@@ -113,6 +114,8 @@ Flags go before or after the issue. A second issue is an error.
 
 | Flag | Default | Meaning |
 |------|---------|---------|
+| `--watcher <id>` | none | Bind the run to a live `atm watch` watcher instead of following it here |
+| `--follow` | off | Make this command the run's watcher and stream its JSON events through the PR outcome |
 | `--base-ref <ref>` | `main` | The ref the run starts from, resolved in the repository |
 | `--harness <cli>` | from the layers | `claude`, `codex`, `opencode` or `pi` |
 | `--model <model>` | from the layers | The agent's model |

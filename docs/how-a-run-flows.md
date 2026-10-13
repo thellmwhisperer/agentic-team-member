@@ -12,14 +12,15 @@ the slop detector cuts it. What you set before a run is in
 
 ## The watcher
 
-No watcher, no run. The session that launches a run starts `atm watch` first,
-under its harness's streaming monitor (any tool that wakes the session on each
-output line), and passes the id from its first line, `watching as <id>`, to
-`atm run --watcher <id>`. It replaces the CoS skill's `vigia.sh`: it never
-exits on an event, so there is nothing to re-arm.
+No watcher, no run. A session can launch and watch one run with
+[`atm run --follow`](#launch-and-follow-atm-run---follow). To watch multiple
+runs, start `atm watch` under the session's streaming monitor (any tool that
+wakes the session on each output line) and pass the id from its first line,
+`watching as <id>`, to `atm run --watcher <id>`. It replaces the CoS skill's
+`vigia.sh`: it never exits on an event, so there is nothing to re-arm.
 
-`atm run` without `--watcher`, or naming a watcher that is not alive, fails
-before cloning with exit code 2:
+`atm run` without `--watcher` or `--follow`, or naming a watcher that is not
+alive, fails before cloning with exit code 2:
 `no watcher: start atm watch in the session that launches this run and pass --watcher <id>`.
 A watcher is alive while its lease, `.atm/watch/<id>.json`, names a process
 that runs and a heartbeat it rewrites every 10 s is under 30 s old.
@@ -46,9 +47,9 @@ fails.
 
 `atm run <issue> --follow` launches the run and is its watcher: it holds a
 lease of its own and binds the run to it, so it needs no `atm watch`. It
-prints one JSON object per line on stdout, flushed at once, and never exits
-on an event, only when the run is over. The CoS launches it in the
-background and acts on each line; it waits on this one process per run.
+prints one JSON object per line on stdout, flushed at once. While left
+running, it exits on merge, PR closure or run failure. The CoS launches it in
+the background and acts on each line; it waits on this one process per run.
 
 Each line has `time`, `run`, `issue` and `event`, and the event's fields:
 
@@ -71,7 +72,7 @@ the gate lives, through every `no-mistakes axi respond` made there, and,
 once there is a PR, its state and commits with `gh pr view`, each read cut
 off after 5 s. If delivery removes the clone first, it finds the PR by the
 delivered branch. No model is called. A run that passes without a delivery
-ends it with exit 0 and no last line.
+ends with `run_failed` and exit 1 because no PR can arrive.
 Killing it leaves the run going, which then shows `WATCHER GONE`; `atm watch
 --adopt <run>` takes it over.
 
