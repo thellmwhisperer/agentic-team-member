@@ -25,8 +25,8 @@ type followUp struct {
 	Verified  bool   `json:"verified"`
 }
 
-// reported is the follow-ups the agent's report r declares, neither tested nor verified.
-func reported(r map[string]any) ([]followUp, error) {
+// declared is the follow-ups the agent's report r declares, neither tested nor verified.
+func declared(r map[string]any) ([]followUp, error) {
 	b, _ := json.Marshal(r["follow_ups"])
 	var all []followUp
 	if err := json.Unmarshal(b, &all); err != nil {
@@ -41,7 +41,7 @@ func reported(r map[string]any) ([]followUp, error) {
 // unverified is every follow-up of the agent's report r on a unit that failed its checks, with its red test
 // as the agent left it in clone, if any, and verdicts saying so: none is proven on the unit's work.
 func unverified(clone string, r map[string]any) (out []followUp, verdicts []string, err error) {
-	out, err = reported(r)
+	out, err = declared(r)
 	for n, f := range out {
 		if filepath.IsLocal(f.RedTest) {
 			b, _ := os.ReadFile(filepath.Join(clone, ".atm", "follow-ups", strconv.Itoa(n+1), filepath.FromSlash(f.RedTest)))
@@ -58,7 +58,7 @@ func unverified(clone string, r map[string]any) (out []followUp, verdicts []stri
 // sentence of the issue's body, to out otherwise.
 func followUps(clone string, r map[string]any, body, tmpl string) (in, out []followUp, verdicts []string,
 	err error) {
-	all, err := reported(r)
+	all, err := declared(r)
 	if err != nil {
 		return nil, nil, nil, err
 	}
