@@ -73,6 +73,18 @@ func fakeAgent(name string) int {
 		return exit
 	}
 	fakeAgentSkill(name, args, skill, mode)
+	if mode == "tail-sequence" {
+		for i := 1; i <= 22; i++ {
+			line := fmt.Sprintf("line-%02d", i)
+			if i%2 == 0 {
+				fmt.Fprintln(os.Stderr, line)
+			} else {
+				fmt.Println(line)
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		return 3
+	}
 	if mode == "blank-lines" {
 		for range 6 {
 			fmt.Println()
