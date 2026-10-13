@@ -292,6 +292,24 @@ func TestTabDoesNotLatchFocusBeforeAgentStarts(t *testing.T) {
 	}
 }
 
+func TestNewAgentAndPonytailInvocationsRestoreAgentFocus(t *testing.T) {
+	m := overflowing(120, 24)
+	press(m, tea.KeyTab)
+	feed(m, `{"step":"agent","thinking":"same invocation"}`)
+	if !strings.Contains(m.View(), bold(cyan, "ATM*")) {
+		t.Fatalf("new Agent activity must preserve the user's focus choice:\n%s", m.View())
+	}
+	feed(m, `{"step":"agent","state":"passed"}`, `{"step":"agent","state":"started"}`)
+	if !strings.Contains(m.View(), bold(cyan, "Agent*")) || strings.Contains(m.View(), bold(cyan, "ATM*")) {
+		t.Fatalf("a successive Agent invocation must restore Agent focus:\n%s", m.View())
+	}
+	press(m, tea.KeyTab)
+	feed(m, `{"step":"agent","state":"passed"}`, `{"step":"ponytail","state":"started"}`)
+	if !strings.Contains(m.View(), bold(cyan, "Agent*")) || strings.Contains(m.View(), bold(cyan, "ATM*")) {
+		t.Fatalf("a new Ponytail invocation must restore Agent focus:\n%s", m.View())
+	}
+}
+
 func TestHeldRowsStayAnchoredAcrossConnectorAndWrapReflow(t *testing.T) {
 	m := overflowing(120, 24)
 	press(m, tea.KeyTab, tea.KeyHome)
