@@ -11,7 +11,6 @@ import (
 
 func TestHelloFailsOnCursorErrorResultAfterOK(t *testing.T) {
 	t.Setenv("PATH", fakes+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("FAKE_AGENT", "cursor-doctor-error")
 	okMessage := `{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"OK"}]}}`
 	t.Setenv("FAKE_AGENT_STREAM", okMessage+"\n"+
 		`{"type":"result","is_error":true,"result":"rate limited"}`+"\n")
