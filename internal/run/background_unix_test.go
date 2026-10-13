@@ -3,7 +3,6 @@
 package run
 
 import (
-	"bufio"
 	"bytes"
 	"fmt"
 	"io"
@@ -304,31 +303,6 @@ func TestARunGoesToABackgroundProcessOfTheNewFile(t *testing.T) {
 	release()
 	if runs, err := Runs(top); err != nil || len(runs) != 1 || runs[0].Outcome != "running" {
 		t.Fatalf("new server run = %+v, %v", runs, err)
-	}
-}
-
-func awaitOldServer(t *testing.T, stderr io.Reader) {
-	t.Helper()
-	ready := make(chan error, 1)
-	go func() {
-		reader := bufio.NewReader(stderr)
-		lines := make([]string, 2)
-		for i := range lines {
-			line, err := reader.ReadString('\n')
-			if err != nil {
-				ready <- err
-				return
-			}
-			lines[i] = line
-		}
-		if !strings.HasPrefix(lines[0], "atm serve pid:") || !strings.Contains(lines[1], "old-build") {
-			ready <- fmt.Errorf("atm serve identity = %q", lines)
-			return
-		}
-		ready <- nil
-	}()
-	if err := <-ready; err != nil {
-		t.Fatal(err)
 	}
 }
 
