@@ -122,15 +122,7 @@ func assertHerdrReleased(t *testing.T, calls string) {
 }
 
 func TestShowReleasesHerdrBeforeReturningFromQ(t *testing.T) {
-	master, tty, err := pty.Open()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = master.Close() }()
-	defer func() { _ = tty.Close() }()
-	if err := pty.Setsize(tty, &pty.Winsize{Cols: 120, Rows: 40}); err != nil {
-		t.Fatal(err)
-	}
+	master, tty := testTerminal(t, 120, 40)
 	dir := t.TempDir()
 	calls, bin := filepath.Join(dir, "calls"), filepath.Join(dir, "herdr")
 	writeHerdrLog(t, bin)
@@ -145,9 +137,7 @@ func TestShowReleasesHerdrBeforeReturningFromQ(t *testing.T) {
 		return run.Outcome{}, nil
 	}
 	defer func() { follow = old }()
-	s := &shown{more: make(chan struct{}, 1)}
-	read := make(chan struct{})
-	go func() { _, _ = io.Copy(s, master); close(read) }()
+	s, read := readTerminal(master)
 	done := make(chan struct{})
 	go func() {
 		_, _, _ = Show("", "issue-1", "startup", tty, tty)
@@ -178,14 +168,27 @@ func TestDeliveryGetsTheTerminalFromItsFirstOutput(t *testing.T) {
 			if err := pty.Setsize(tty, &pty.Winsize{Cols: 120, Rows: 40}); err != nil {
 				t.Fatal(err)
 			}
-			s := &shown{more: make(chan struct{}, 1)}
-			read := make(chan struct{})
-			go func() { _, _ = io.Copy(s, p); close(read) }()
+			s, read := readTerminal(p)
 			defer func(f func(string, string, *[2]int, <-chan run.Input, func(run.Frame)) (run.Outcome, error)) {
 				follow = f
 			}(follow)
-			follow = deliveryRun(t, s, p, silent)
+			delivered := make(chan struct{})
+			deliver := deliveryRun(t, s, p, silent)
+			follow = func(root, label string, size *[2]int, in <-chan run.Input, fn func(run.Frame)) (run.Outcome, error) {
+				defer close(delivered)
+				return deliver(root, label, size, in, fn)
+			}
+			closed := make(chan struct{})
+			go func() {
+				defer close(closed)
+				<-delivered
+				if !s.until(0, func(v string) bool { return strings.Contains(ansi.Strip(v), "q close") }) {
+					t.Error("completed delivery did not stay on the native screen")
+				}
+				_, _ = p.Write([]byte("q"))
+			}()
 			o, _, err := Show("", "issue-1", "startup", tty, tty)
+			<-closed
 			_ = tty.Close()
 			<-read
 			if err != nil || o.Outcome != "passed" {
@@ -242,4 +245,70 @@ func deliveryRun(t *testing.T, s *shown, keys io.Writer, silent bool) func(strin
 		fn(run.Frame{Event: []byte(`{"step":"delivery","state":"passed","branch":"fix/7","duration_ms":9}`)})
 		return run.Outcome{Outcome: "passed", Ended: time.Now()}, nil
 	}
+}
+
+func TestShowColdCompletedRunStaysUntilClosed(t *testing.T) {
+	t.Setenv("HERDR_ENV", "")
+	t.Setenv("TERM", "xterm-256color")
+	master, tty := testTerminal(t, 69, 39)
+	path := savedReport(t, completedReport)
+	old := follow
+	follow = func(_, _ string, _ *[2]int, _ <-chan run.Input, _ func(run.Frame)) (run.Outcome, error) {
+		return run.Outcome{Run: "297-65", Outcome: "passed", Ended: time.Now(), Report: path}, nil
+	}
+	defer func() { follow = old }()
+	s, read := readTerminal(master)
+	done := make(chan struct{})
+	var o run.Outcome
+	var detached bool
+	var showErr error
+	go func() { o, detached, showErr = Show("", "297-65", "resume", tty, tty); close(done) }()
+	assertColdCompletedScreen(t, s, done)
+	if _, err := master.Write([]byte("q")); err != nil {
+		t.Fatal(err)
+	}
+	waitShowReturn(t, done)
+	if showErr != nil || detached || o.Outcome != "passed" {
+		t.Fatalf("completed close: %+v detached=%v err=%v", o, detached, showErr)
+	}
+	_ = tty.Close()
+	_ = master.Close()
+	<-read
+}
+
+func assertColdCompletedScreen(t *testing.T, s *shown, done <-chan struct{}) {
+	t.Helper()
+	waitShowToOpen(t, s)
+	if !s.until(0, func(v string) bool { return strings.Contains(ansi.Strip(v), "q close") }) {
+		t.Fatal("cold completed pipeline was not rendered")
+	}
+	select {
+	case <-done:
+		t.Fatal("completed view returned before q")
+	case <-time.After(150 * time.Millisecond):
+	}
+	before := s.since(0)
+	if strings.Contains(before, exitAltScreen) || !strings.Contains(ansi.Strip(before), "21 min 58 s") {
+		t.Fatalf("completed view lost its native screen/results: %q", before)
+	}
+}
+
+func testTerminal(t *testing.T, cols, rows uint16) (*os.File, *os.File) {
+	t.Helper()
+	master, tty, err := pty.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = master.Close(); _ = tty.Close() })
+	if err := pty.Setsize(tty, &pty.Winsize{Cols: cols, Rows: rows}); err != nil {
+		t.Fatal(err)
+	}
+	return master, tty
+}
+
+func readTerminal(master io.Reader) (*shown, <-chan struct{}) {
+	s := &shown{more: make(chan struct{}, 1)}
+	read := make(chan struct{})
+	go func() { _, _ = io.Copy(s, master); close(read) }()
+	return s, read
 }

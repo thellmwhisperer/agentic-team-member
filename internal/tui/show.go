@@ -16,8 +16,8 @@ import (
 
 var follow = run.Follow // tests follow a run of their own
 
-// Show shows the screen of run label, of the repository at root, on the terminal in and out until the run
-// ends, and returns how it ended; detached when the user left it going. While the delivery command runs on
+// Show shows the screen of run label, of the repository at root, on the terminal in and out until the user
+// closes it, keeping completed results visible; detached when the user left it going. While delivery runs on
 // the terminal, the terminal is the command's: no-mistakes, attached by it, shows its own screen there. In a
 // herdr pane, the run shows in herdr's Agents section while the screen does, from start, startup or resume.
 func Show(root, label, start string, in, out *os.File) (o run.Outcome, detached bool, err error) {

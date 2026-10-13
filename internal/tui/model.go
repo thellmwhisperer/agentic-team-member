@@ -84,17 +84,21 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case tea.KeyMsg:
 		if s := msg.String(); s == "q" || s == "ctrl+c" {
-			m.detached = true
+			m.detached = !m.done
 			return m, tea.Quit
 		}
 	case tick:
 		m.now, m.spin = time.Time(msg), m.spin+1
-		return m, next()
+		if !m.done {
+			return m, next()
+		}
 	case run.Frame:
 		m.apply(msg)
 	case ended:
 		m.end(msg.o, msg.err)
-		return m, tea.Quit
+		if msg.o.Ended.IsZero() { // an attach error, not a completed run to keep on screen
+			return m, tea.Quit
+		}
 	}
 	return m, nil
 }
@@ -255,8 +259,11 @@ func (m *Model) tool(e event) {
 	}
 }
 
-// end closes the screen on how the run ended: the nodes it never ran are skipped when it passed.
+// end keeps how the run ended on screen until the user closes it.
 func (m *Model) end(o run.Outcome, err error) {
+	if o.Report != "" && !slices.ContainsFunc(m.rows, func(r *row) bool { return r.state != "pending" }) {
+		m.restoreReport(o.Report)
+	}
 	m.done, m.outcome, m.err = true, o, err
 	m.state = map[bool]string{true: "failed", false: o.Outcome}[err != nil || o.Outcome != "passed"]
 	for _, r := range m.rows {
