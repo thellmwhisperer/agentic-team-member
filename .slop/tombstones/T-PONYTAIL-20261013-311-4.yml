@@ -1,0 +1,18 @@
+schema: 1
+id: T-PONYTAIL-20261013-311-4
+status: accepted
+category: alien_code
+title: "Remove normalizedTestContent and restore exact test-byte assertions and the worker fixtures. CRLF was a real putBack checkout bug; core.autocrlf=false on the hard reset fixes the producer instead of normalizing away changed bytes in tests."
+created_at: 2026-10-13
+incident:
+  pattern: "Remove normalizedTestContent and restore exact test-byte assertions and the worker fixtures. CRLF was a real putBack checkout bug; core.autocrlf=false on the hard reset fixes the producer instead of normalizing away changed bytes in tests."
+  what_went_wrong: "No-mistakes expanded issue 311 beyond the worker implementation; the ponytail review removed the additions before delivery."
+  root_cause: "The coding agent wrote more than the issue needed."
+  rule_established: "Cut by the ponytail pass; it does not come back."
+  evidence:
+    - family: test_weakening
+      example: "Remove normalizedTestContent and restore exact test-byte assertions and the worker fixtures. CRLF was a real putBack checkout bug; core.autocrlf=false on the hard reset fixes the producer instead of normalizing away changed bytes in tests."
+      artifact: "internal/run/failed_followups_test.go"
+match:
+  family: test_weakening
+  artifact: "internal/run/failed_followups_test.go"

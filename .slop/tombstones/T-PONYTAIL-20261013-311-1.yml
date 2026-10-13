@@ -1,0 +1,18 @@
+schema: 1
+id: T-PONYTAIL-20261013-311-1
+status: accepted
+category: alien_code
+title: "Remove keepPending and replaceReportedFollowUps, with resumeUnits and their extra bookkeeping. The existing resume point keeps the failed unit report and its tests, then reruns checks from the previous units' pending list, so failed-unit follow-ups are collected exactly once."
+created_at: 2026-10-13
+incident:
+  pattern: "Remove keepPending and replaceReportedFollowUps, with resumeUnits and their extra bookkeeping. The existing resume point keeps the failed unit report and its tests, then reruns checks from the previous units' pending list, so failed-unit follow-ups are collected exactly once."
+  what_went_wrong: "No-mistakes expanded issue 311 beyond the worker implementation; the ponytail review removed the additions before delivery."
+  root_cause: "The coding agent wrote more than the issue needed."
+  rule_established: "Cut by the ponytail pass; it does not come back."
+  evidence:
+    - family: speculative_feature
+      example: "Remove keepPending and replaceReportedFollowUps, with resumeUnits and their extra bookkeeping. The existing resume point keeps the failed unit report and its tests, then reruns checks from the previous units' pending list, so failed-unit follow-ups are collected exactly once."
+      artifact: "internal/run/resume.go"
+match:
+  family: speculative_feature
+  artifact: "internal/run/resume.go"
