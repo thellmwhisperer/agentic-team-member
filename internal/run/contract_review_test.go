@@ -67,7 +67,12 @@ func TestRunContractReview(t *testing.T) {
 func TestContractReviewEvidence(t *testing.T) {
 	root := repo(t, t.TempDir(), "")
 	head := gitT(t, root, "rev-parse", "HEAD")
-	valid := contractReview{Head: head, Status: "passed", Dispatch: dispatchGates{true, true, true, true, true},
+	metadata, err := deliveryMetadata(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	valid := contractReview{Head: head, Status: "passed", metadata: metadata,
+		Dispatch:   dispatchGates{true, true, true, true, true},
 		Acceptance: []contractCriterion{{Criterion: "Retry once.", Evidence: "test passes", Satisfied: true}}}
 	stale := valid
 	stale.Head = "old"
@@ -244,6 +249,56 @@ func TestContractReviewReproofRequiresTestFile(t *testing.T) {
 			why, _, _, err := reprove(t.TempDir(), root, head, []proof{{base: head, typ: typ}}, config.Config{})
 			if err != nil || !strings.Contains(why, "test") {
 				t.Fatalf("missing test must block: %q %v", why, err)
+			}
+		})
+	}
+}
+
+func TestRunContractReviewRejectsProtectedTestRename(t *testing.T) {
+	root, out := contractReviewRepo(t)
+	if err := os.WriteFile(filepath.Join(root, "other_test.sh"), []byte("true\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	gitT(t, root, "add", "other_test.sh")
+	gitT(t, root, "commit", "-m", "fixture additional protected test")
+	t.Setenv("FAKE_CONTRACT_REPORT", repairContract)
+	t.Setenv("FAKE_CONTRACT_REPAIR", "printf 'fixed\\nrepaired\\n' > a.txt; mv other_test.sh other.sh")
+	t.Setenv("FAKE_CONTRACT_AFTER_REPAIR_REPORT", passedContract)
+	err := Run("t", []string{issueFile(t, issue)}, &bytes.Buffer{}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "protected test other_test.sh") {
+		t.Fatalf("protected rename accepted: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(out, "delivered")); !os.IsNotExist(err) {
+		t.Fatal("delivery executed despite protected rename")
+	}
+}
+
+func TestRunContractReviewRejectsDeliveryMetadataMutation(t *testing.T) {
+	const origin = "git remote set-url origin https://example.com/unexpected/repo.git"
+	for _, tc := range []struct {
+		name, command string
+		repair        bool
+	}{
+		{"review origin", origin, false},
+		{"review push URL", "git remote set-url --push origin https://example.com/unexpected/repo.git", false},
+		{"review branch", "git checkout -q -b unexpected-delivery-branch", false},
+		{"repair origin", origin, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, out := contractReviewRepo(t)
+			if tc.repair {
+				t.Setenv("FAKE_CONTRACT_REPORT", repairContract)
+				t.Setenv("FAKE_CONTRACT_REPAIR", "printf 'fixed\\nrepaired\\n' > a.txt; "+tc.command)
+				t.Setenv("FAKE_CONTRACT_AFTER_REPAIR_REPORT", passedContract)
+			} else {
+				t.Setenv("FAKE_CONTRACT_WORK", tc.command)
+			}
+			err := Run("t", []string{issueFile(t, issue)}, &bytes.Buffer{}, &bytes.Buffer{})
+			if err == nil || !strings.Contains(err.Error(), "delivery metadata") {
+				t.Fatalf("metadata mutation accepted: %v", err)
+			}
+			if _, err := os.Stat(filepath.Join(out, "delivered")); !os.IsNotExist(err) {
+				t.Fatal("delivery executed despite metadata mutation")
 			}
 		})
 	}
