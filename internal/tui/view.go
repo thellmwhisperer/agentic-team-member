@@ -219,24 +219,16 @@ func (m *Model) agentRuns() bool {
 }
 
 var (
-	listItem = regexp.MustCompile(`^(\s*)([-*+]|\d+[.)])\s+(.*)$`)
+	listItem = regexp.MustCompile(`^( {0,3})([-*+]|\d+[.)])[ \t]+(.*)$`)
 )
 
-func markdown(line string) (string, bool) {
+func markdown(line string) (string, bool, bool) {
 	source := []byte(line)
 	root := parser.New().Parse(source)
-	codeBlock := false
-	_ = ast.Walk(root, func(node ast.Node, entering bool) (ast.WalkStatus, error) {
-		if entering {
-			if _, ok := node.(*ast.CodeBlock); ok {
-				codeBlock = true
-				return ast.WalkSkipChildren, nil
-			}
+	for block := root.FirstChild(); block != nil; block = block.NextSibling() {
+		if _, ok := block.(*ast.CodeBlock); ok {
+			return displayText(line), true, true
 		}
-		return ast.WalkContinue, nil
-	})
-	if codeBlock {
-		return displayText(line), true
 	}
 	var out strings.Builder
 	code := false
@@ -247,6 +239,16 @@ func markdown(line string) (string, bool) {
 			style = style.Italic(true)
 		case *ast.Strong:
 			style = style.Bold(true)
+		case *ast.AutoLink:
+			out.WriteString(style.Render(displayText(n.Label.Value(source))))
+			return
+		case *ast.CodeBlock:
+			code = true
+			out.WriteString(paint(yellow, displayText(strings.TrimSuffix(n.Value.Str(source), "\n"))))
+			return
+		case *ast.HTMLBlock:
+			out.WriteString(displayText(strings.TrimSuffix(n.Value.Str(source), "\n")))
+			return
 		case *ast.Text:
 			out.WriteString(style.Render(displayText(n.Value.Value(source))))
 			return
@@ -267,7 +269,7 @@ func markdown(line string) (string, bool) {
 		}
 	}
 	render(root, lipgloss.NewStyle())
-	return out.String(), code
+	return out.String(), code, false
 }
 
 func displayText(value string) string {
@@ -360,9 +362,17 @@ func agentTextRows(prefix, text string, width int) []string {
 		} else if isFence {
 			codeMarker, codeLength = marker, length
 			continue
+		}
+		lineText, hasCode, isBlock := markdown(line)
+		if isBlock {
+			wrappedText := ansi.Wrap(lineText, w, "")
+			if hasCode {
+				wrappedText = wrapMarkdown(lineText, w)
+			}
+			wrapped = strings.Split(wrappedText, "\n")
 		} else if item := listItem.FindStringSubmatch(line); item != nil {
 			lead := item[1] + cmp.Or(strings.Trim(item[2], "-*+"), "•") + " "
-			bodyText, hasCode := markdown(item[3])
+			bodyText, hasCode, _ := markdown(item[3])
 			bodyWidth := max(1, w-ansi.StringWidth(lead))
 			wrappedText := ansi.Wrap(bodyText, bodyWidth, "")
 			if hasCode {
@@ -374,7 +384,6 @@ func agentTextRows(prefix, text string, width int) []string {
 				wrapped[i] = strings.Repeat(" ", ansi.StringWidth(lead)) + wrapped[i]
 			}
 		} else {
-			lineText, hasCode := markdown(line)
 			wrappedText := ansi.Wrap(lineText, w, "")
 			if hasCode {
 				wrappedText = wrapMarkdown(lineText, w)

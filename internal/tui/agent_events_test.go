@@ -120,8 +120,18 @@ func TestAgentBoxRendersNestedAndTripleEmphasis(t *testing.T) {
 		if !reflect.DeepEqual(lines, []string{want}) {
 			t.Fatalf("Agent box lines for %q:\n%q\nwant:\n%q", text, lines, []string{want})
 		}
+		var messageRow string
+		for _, row := range strings.Split(raw, "\n") {
+			if strings.Contains(ansi.Strip(row), "bold italic") {
+				messageRow = row
+				break
+			}
+		}
+		if messageRow == "" {
+			t.Fatalf("message row is missing for %q:\n%q", text, raw)
+		}
 		bold, italic := false, false
-		for _, sgr := range regexp.MustCompile("\\x1b\\[([0-9;]*)m").FindAllStringSubmatch(raw, -1) {
+		for _, sgr := range regexp.MustCompile("\\x1b\\[([0-9;]*)m").FindAllStringSubmatch(messageRow, -1) {
 			for _, code := range strings.Split(sgr[1], ";") {
 				bold = bold || code == "1"
 				italic = italic || code == "3"
@@ -130,6 +140,48 @@ func TestAgentBoxRendersNestedAndTripleEmphasis(t *testing.T) {
 		if !bold || !italic {
 			t.Fatalf("nested emphasis styles are missing for %q:\n%q", text, raw)
 		}
+	}
+}
+
+func TestAgentBoxRendersAutoLinksAndHTMLSourceInListsAndText(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		text string
+		want string
+	}{
+		{name: "autolink", text: "<https://example.org>", want: "https://example.org"},
+		{name: "autolink in list", text: "- <https://example.org>", want: "• https://example.org"},
+		{name: "HTML block", text: "<div>text</div>", want: "<div>text</div>"},
+		{name: "HTML in list", text: "- <div>text</div>", want: "• <div>text</div>"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw, _ := agentBoxSays(t, 60, tc.text)
+			if stripped := ansi.Strip(raw); !strings.Contains(stripped, tc.want) {
+				t.Fatalf("rendered source is missing %q: %q", tc.want, stripped)
+			}
+		})
+	}
+}
+
+func TestAgentBoxClassifiesIndentedCodeBeforeListMarkers(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		text string
+		want string
+	}{
+		{name: "four-space code", text: "    - x", want: "✎     - x"},
+		{name: "tab-indented code", text: "\t- x", want: "✎         - x"},
+		{name: "valid one-space list", text: " - x", want: "✎  • x"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw, _ := agentBoxSays(t, 60, tc.text)
+			if stripped := ansi.Strip(raw); !strings.Contains(stripped, tc.want) {
+				t.Fatalf("rendered line is missing %q: %q", tc.want, stripped)
+			}
+			if strings.Contains(raw, "\t") {
+				t.Fatalf("tab reached terminal output: %q", raw)
+			}
+		})
 	}
 }
 
