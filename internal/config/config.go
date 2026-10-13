@@ -31,7 +31,7 @@ type Config struct {
 	Test         string   `yaml:"test"`
 	Typecheck    string   `yaml:"typecheck"`
 	Lint         string   `yaml:"lint"`
-	TestFile     string   `yaml:"test_file"` // runs one test: {file} or {dir}
+	TestFile     string   `yaml:"test_file"` // runs one test: {file} or {dir}; {tests} selects Go tests in that file
 	TestPatterns []string `yaml:"test_patterns"`
 	DocsPatterns []string `yaml:"docs_patterns"`
 	Delivery     string   `yaml:"delivery"`
