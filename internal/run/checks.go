@@ -247,8 +247,8 @@ func onBase(clone, tree string, aside []string, test, tmpl string) error {
 				return err
 			}
 		}
-		if red, _, err := trial(clone, tree, nil, line, "", test, strings.Contains(tmpl, "{tests}")); err != nil || red.err != nil {
-			return errors.Join(err, red.err)
+		if red, _, err := trial(clone, tree, nil, line, "", "", false); err != nil || red.err != nil {
+			return err
 		}
 	}
 	return fmt.Errorf("%s depends on nothing the base had: it passes on the old files with the fix's added "+

@@ -70,7 +70,7 @@ var proofCases = []struct {
 	{name: "fix whose test only calls a function it adds next to a changed line", typ: "fix", lib: lib,
 		work: "printf '# lib, v2\\n" + helper + "\\nvalue() { echo broken; }\\n' > lib.sh" + testThrough("helper"),
 		why:  "depends on nothing the base had"},
-	{name: "fix that changes a line", typ: "fix", lib: lib,
+	{name: "fix whose test depends on the base", typ: "fix", lib: lib,
 		work: "printf '# lib\\nvalue() { echo fixed; }\\n' > lib.sh" + testThrough("value")},
 	{name: "fix that adds a line inside a function", typ: "fix", lib: "value() {\n  v=broken\n  echo $v\n}\n",
 		work: "printf 'value() {\\n  v=broken\\n  v=fixed\\n  echo $v\\n}\\n' > lib.sh" + testThrough("value")},
