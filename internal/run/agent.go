@@ -766,7 +766,7 @@ func outside(calls []use, root, clone string) string {
 	root, clone = filepath.ToSlash(root), filepath.ToSlash(clone)
 	paths := regexp.MustCompile(regexp.QuoteMeta(root) + "(/[^" + sep + "]*)?")
 	for _, c := range calls {
-		if reachesPath(c.args, root, clone, paths) || c.command != "" && fetches(c.command) {
+		if reachesPath(c.args, root, clone, paths) || c.command != "" && fetchesAt(c.command, clone) {
 			r := []rune(c.args)
 			return c.tool + " " + string(r[:min(len(r), 200)])
 		}
@@ -809,6 +809,10 @@ func relativeEscape(token, root, clone string) bool {
 
 // fetches says whether a shell command runs curl or wget or names a URL off this machine.
 func fetches(command string) bool {
+	return fetchesAt(command, "")
+}
+
+func fetchesAt(command, clone string) bool {
 	file, err := syntax.NewParser().Parse(strings.NewReader(command), "")
 	if err != nil {
 		if badURL(command) {
@@ -823,10 +827,11 @@ func fetches(command string) bool {
 	}
 	checked := []byte(command)
 	if len(file.Stmts) > 0 {
-		if data, ok := quotedGoTestData(file.Stmts[0]); ok && goTestContinuation(file.Stmts[1:]) {
+		if data, output, appended := quotedGoTestData(file.Stmts[0]); data != nil && goTestContinuation(file.Stmts[1:]) {
 			body := []byte(data.Lit())
 			start, end := int(data.Pos().Offset()), int(data.Pos().Offset())+len(body)
-			if start >= 0 && end >= start && end <= len(checked) && bytes.Equal(checked[start:end], body) && goTestSource(body) {
+			if start >= 0 && end >= start && end <= len(checked) && bytes.Equal(checked[start:end], body) &&
+				goTestSource(body, appended && existingTestingImport(clone, output)) {
 				clear(checked[start:end])
 			}
 		}
@@ -844,17 +849,18 @@ func fetches(command string) bool {
 	return unsafe
 }
 
-func quotedGoTestData(stmt *syntax.Stmt) (*syntax.Word, bool) {
+func quotedGoTestData(stmt *syntax.Stmt) (*syntax.Word, string, bool) {
 	call, ok := stmt.Cmd.(*syntax.CallExpr)
 	if !ok || stmt.Negated || stmt.Background || stmt.Coprocess || len(call.Args) != 1 ||
 		call.Args[0].Lit() != "cat" || len(call.Assigns) != 0 || len(stmt.Redirs) != 2 {
-		return nil, false
+		return nil, "", false
 	}
 	var data *syntax.Word
 	output := ""
+	appended := false
 	for _, r := range stmt.Redirs {
 		if r.N != nil {
-			return nil, false
+			return nil, "", false
 		}
 		switch r.Op {
 		case syntax.Hdoc:
@@ -865,13 +871,14 @@ func quotedGoTestData(stmt *syntax.Stmt) (*syntax.Word, bool) {
 		case syntax.RdrOut, syntax.AppOut:
 			if literalGoTestOutput(r.Word) {
 				output, _ = literalWord(r.Word)
+				appended = r.Op == syntax.AppOut
 			}
 		}
 	}
 	if data != nil && output != "" {
-		return data, true
+		return data, output, appended
 	}
-	return nil, false
+	return nil, "", false
 }
 
 func literalGoTestOutput(word *syntax.Word) bool {
@@ -899,13 +906,23 @@ func literalShellWord(word *syntax.Word) (string, bool) {
 	return name, true
 }
 
-func goTestSource(src []byte) bool {
+func goTestSource(src []byte, existingTestingImport bool) bool {
 	f, err := goparser.ParseFile(token.NewFileSet(), "fixture_test.go", src, goparser.ParseComments)
 	if err != nil {
 		f, err = goparser.ParseFile(token.NewFileSet(), "fixture_test.go", append([]byte("package run\n"), src...),
 			goparser.ParseComments)
 	}
 	if err != nil || f.Name == nil {
+		return false
+	}
+	testingImported := existingTestingImport
+	for _, imp := range f.Imports {
+		if testingImport(imp) {
+			testingImported = true
+			break
+		}
+	}
+	if !testingImported {
 		return false
 	}
 	test := false
@@ -915,6 +932,31 @@ func goTestSource(src []byte) bool {
 		}
 	}
 	return test
+}
+
+func existingTestingImport(clone, output string) bool {
+	if clone == "" {
+		return false
+	}
+	src, err := os.ReadFile(filepath.Join(clone, filepath.FromSlash(output)))
+	if err != nil {
+		return false
+	}
+	f, err := goparser.ParseFile(token.NewFileSet(), output, src, 0)
+	if err != nil {
+		return false
+	}
+	for _, imp := range f.Imports {
+		if testingImport(imp) {
+			return true
+		}
+	}
+	return false
+}
+
+func testingImport(imp *ast.ImportSpec) bool {
+	importPath, err := strconv.Unquote(imp.Path.Value)
+	return err == nil && imp.Name == nil && importPath == "testing"
 }
 
 func goTestFunc(fn *ast.FuncDecl) bool {
@@ -936,14 +978,12 @@ func goTestFunc(fn *ast.FuncDecl) bool {
 	if !ok {
 		return false
 	}
-	switch typ := param.X.(type) {
-	case *ast.Ident:
-		return typ.Name == "T"
-	case *ast.SelectorExpr:
-		return typ.Sel.Name == "T"
-	default:
+	typ, ok := param.X.(*ast.SelectorExpr)
+	if !ok || typ.Sel.Name != "T" {
 		return false
 	}
+	packageName, ok := typ.X.(*ast.Ident)
+	return ok && packageName.Name == "testing"
 }
 
 func goTestContinuation(stmts []*syntax.Stmt) bool {
