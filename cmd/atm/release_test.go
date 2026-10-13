@@ -37,23 +37,25 @@ type releaseWorkflowModel struct {
 	Concurrency struct {
 		Group string `yaml:"group"`
 	} `yaml:"concurrency"`
-	Jobs map[string]struct {
-		Needs    any    `yaml:"needs"`
-		If       string `yaml:"if"`
-		Strategy struct {
-			Matrix struct {
-				Include []struct {
-					GOOS   string `yaml:"goos"`
-					GOARCH string `yaml:"goarch"`
-				} `yaml:"include"`
-			} `yaml:"matrix"`
-		} `yaml:"strategy"`
-		Steps []struct {
-			Uses string         `yaml:"uses"`
-			Run  string         `yaml:"run"`
-			With map[string]any `yaml:"with"`
-		} `yaml:"steps"`
-	} `yaml:"jobs"`
+	Jobs map[string]releaseWorkflowJob `yaml:"jobs"`
+}
+
+type releaseWorkflowJob struct {
+	Needs    any    `yaml:"needs"`
+	If       string `yaml:"if"`
+	Strategy struct {
+		Matrix struct {
+			Include []struct {
+				GOOS   string `yaml:"goos"`
+				GOARCH string `yaml:"goarch"`
+			} `yaml:"include"`
+		} `yaml:"matrix"`
+	} `yaml:"strategy"`
+	Steps []struct {
+		Uses string         `yaml:"uses"`
+		Run  string         `yaml:"run"`
+		With map[string]any `yaml:"with"`
+	} `yaml:"steps"`
 }
 
 func workflowModel(t *testing.T) releaseWorkflowModel {
@@ -80,6 +82,31 @@ func needsList(needs any) []string {
 	default:
 		return nil
 	}
+}
+
+func hasRunStep(job releaseWorkflowJob, expected ...string) bool {
+	for _, step := range job.Steps {
+		var active strings.Builder
+		for _, line := range strings.Split(step.Run, "\n") {
+			line = strings.TrimSpace(line)
+			if !strings.HasPrefix(line, "#") {
+				active.WriteString(line)
+				active.WriteByte('\n')
+			}
+		}
+		run := active.String()
+		if run == "" {
+			continue
+		}
+		matched := true
+		for _, fragment := range expected {
+			matched = matched && strings.Contains(run, fragment)
+		}
+		if matched {
+			return true
+		}
+	}
+	return false
 }
 
 func TestReleaseWorkflowUsesScopedConcurrencyGroup(t *testing.T) {
@@ -139,14 +166,16 @@ func TestReleaseWorkflowBuildStartsOnlyWhenReleaseIsCreated(t *testing.T) {
 			t.Fatalf("build matrix = %v, missing %s", gotTargets, target)
 		}
 	}
-	var scripts strings.Builder
-	for _, step := range job.Steps {
-		scripts.WriteString(step.Run)
+	if !hasRunStep(job,
+		"CGO_ENABLED=0 GOOS=\"$GOOS\" GOARCH=\"$GOARCH\"",
+		"go build -ldflags",
+		"-X github.com/thellmwhisperer/agentic-team-member/internal/buildinfo.Version=${TAG}",
+		"-X github.com/thellmwhisperer/agentic-team-member/internal/buildinfo.Commit=${COMMIT}",
+		"-X github.com/thellmwhisperer/agentic-team-member/internal/buildinfo.Date=${DATE}") {
+		t.Fatal("build-and-upload must run a CGO-free build with release metadata")
 	}
-	if !strings.Contains(scripts.String(), "CGO_ENABLED=0") ||
-		!strings.Contains(scripts.String(), "-X github.com/thellmwhisperer/agentic-team-member/internal/buildinfo.Version=${TAG}") ||
-		!strings.Contains(scripts.String(), "gh release upload \"$TAG\" \"$ARCHIVE\" --clobber") {
-		t.Fatal("build-and-upload must build with release metadata and upload the archive")
+	if !hasRunStep(job, "gh release upload \"$TAG\" \"$ARCHIVE\" --clobber") {
+		t.Fatal("build-and-upload must run the release asset upload")
 	}
 	artifactUpload := false
 	for _, step := range job.Steps {
@@ -159,26 +188,20 @@ func TestReleaseWorkflowBuildStartsOnlyWhenReleaseIsCreated(t *testing.T) {
 
 func TestReleaseArchivesAreNamedAfterAtmAndTheTag(t *testing.T) {
 	workflow := workflowModel(t)
-	var archiveRun string
-	for _, step := range workflow.Jobs["build-and-upload"].Steps {
-		if step.Run != "" && strings.Contains(step.Run, "ARCHIVE=\"dist/") {
-			archiveRun = step.Run
-		}
-	}
-	if !strings.Contains(archiveRun, "atm-${TAG}-${GOOS}-${GOARCH}.zip") ||
-		!strings.Contains(archiveRun, "atm-${TAG}-${GOOS}-${GOARCH}.tar.gz") {
-		t.Fatalf("build archive command = %q, want tagged atm archives for both formats", archiveRun)
+	if !hasRunStep(workflow.Jobs["build-and-upload"],
+		"ARCHIVE=\"dist/atm-${TAG}-${GOOS}-${GOARCH}.zip\"",
+		"ARCHIVE=\"dist/atm-${TAG}-${GOOS}-${GOARCH}.tar.gz\"") {
+		t.Fatal("build-and-upload must run commands that name tagged atm archives")
 	}
 	checksums := workflow.Jobs["checksums"]
 	if !reflect.DeepEqual(needsList(checksums.Needs), []string{"release-please", "build-and-upload"}) {
 		t.Fatalf("checksums needs = %v", checksums.Needs)
 	}
-	checksumRun := ""
-	for _, step := range checksums.Steps {
-		checksumRun += step.Run
-	}
-	if !strings.Contains(checksumRun, "sha256sum atm-* > ") {
+	if !hasRunStep(checksums, "sha256sum atm-* > ../checksums.txt") {
 		t.Fatal("checksums must cover every atm-* archive")
+	}
+	if !hasRunStep(checksums, "gh release upload \"$TAG\" checksums.txt --clobber") {
+		t.Fatal("checksums job must run the release checksum upload")
 	}
 }
 
@@ -187,17 +210,15 @@ func TestReleaseWorkflowPublishesPrereleaseOnlyAfterAssetsComplete(t *testing.T)
 	if !reflect.DeepEqual(needsList(job.Needs), []string{"release-please", "build-and-upload", "checksums"}) {
 		t.Fatalf("finalize needs = %v", job.Needs)
 	}
-	for _, want := range []string{"!cancelled()", "needs.release-please.result == 'success'", "needs.build-and-upload.result == 'success'", "needs.checksums.result == 'success'", "needs.release-please.outputs.release_created == 'true'"} {
-		if !strings.Contains(job.If, want) {
-			t.Fatalf("finalize condition %q missing %q", job.If, want)
-		}
+	wantCondition := "!cancelled() && needs.release-please.result == 'success' && needs.build-and-upload.result == 'success' && needs.checksums.result == 'success' && needs.release-please.outputs.release_created == 'true'"
+	if strings.Join(strings.Fields(job.If), " ") != wantCondition {
+		t.Fatalf("finalize condition = %q, want %q", job.If, wantCondition)
 	}
-	var command string
-	for _, step := range job.Steps {
-		command += step.Run
+	if !hasRunStep(job, "gh release edit \"$TAG\" --draft=false --prerelease=true") {
+		t.Fatal("finalize must run the prerelease publication command")
 	}
-	if !strings.Contains(command, "gh release edit \"$TAG\" --draft=false --prerelease=true") || strings.Contains(command, "--latest=true") {
-		t.Fatalf("finalize command = %q, want prerelease publication without marking latest", command)
+	if hasRunStep(job, "--latest=true") {
+		t.Fatal("finalize must not mark the release latest")
 	}
 }
 
