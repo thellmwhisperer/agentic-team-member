@@ -183,40 +183,10 @@ func missingIssueGates(body string) []string {
 		case *ast.Blockquote:
 			return
 		case *ast.Heading:
-			line := issueText(n, source, false)
-			section = issueGateName(line)
-			if section == "" {
-				if field, value, ok := issueField(line); ok {
-					section = issueGateName(field)
-					if section != "" && substantiveIssueText(value) {
-						seen[section] = true
-					}
-				}
-			}
+			section = headingGate(n, source, seen)
 			return
 		case *ast.Paragraph:
-			fieldLines, contentLines := issueLines(n, source, false), issueLines(n, source, true)
-			for i, content := range contentLines {
-				fieldLine := content
-				if i < len(fieldLines) {
-					fieldLine = fieldLines[i]
-				}
-				if field, value, ok := issueField(fieldLine); ok {
-					section = issueGateName(field)
-					if !substantiveIssueText(value) {
-						if _, codeValue, codeOK := issueField(content); codeOK {
-							value = codeValue
-						}
-					}
-					if section != "" && substantiveIssueText(value) {
-						seen[section] = true
-					}
-					continue
-				}
-				if section != "" && substantiveIssueText(content) {
-					seen[section] = true
-				}
-			}
+			inspectIssueParagraph(n, source, &section, seen)
 			return
 		case *ast.CodeBlock:
 			if section == "Acceptance criteria" && n.CodeBlockKind == ast.CodeBlockKindFenced &&
@@ -227,13 +197,9 @@ func missingIssueGates(body string) []string {
 		case *ast.HTMLBlock, *ast.ThematicBreak:
 			return
 		}
-		for child := node.FirstChild(); child != nil; child = child.NextSibling() {
-			visit(child)
-		}
+		visitChildren(node, visit)
 	}
-	for child := doc.FirstChild(); child != nil; child = child.NextSibling() {
-		visit(child)
-	}
+	visitChildren(doc, visit)
 	var missing []string
 	for _, gate := range []struct{ name, key string }{
 		{"Non-goals", "non_goals"}, {"Invariants", "invariants"},
@@ -244,6 +210,51 @@ func missingIssueGates(body string) []string {
 		}
 	}
 	return missing
+}
+
+func headingGate(node ast.Node, source []byte, seen map[string]bool) string {
+	line := issueText(node, source, false)
+	section := issueGateName(line)
+	if section == "" {
+		if field, value, ok := issueField(line); ok {
+			section = issueGateName(field)
+			if section != "" && substantiveIssueText(value) {
+				seen[section] = true
+			}
+		}
+	}
+	return section
+}
+
+func inspectIssueParagraph(node ast.Node, source []byte, section *string, seen map[string]bool) {
+	fieldLines, contentLines := issueLines(node, source, false), issueLines(node, source, true)
+	for i, content := range contentLines {
+		fieldLine := content
+		if i < len(fieldLines) {
+			fieldLine = fieldLines[i]
+		}
+		if field, value, ok := issueField(fieldLine); ok {
+			*section = issueGateName(field)
+			if !substantiveIssueText(value) {
+				if _, codeValue, codeOK := issueField(content); codeOK {
+					value = codeValue
+				}
+			}
+			if *section != "" && substantiveIssueText(value) {
+				seen[*section] = true
+			}
+			continue
+		}
+		if *section != "" && substantiveIssueText(content) {
+			seen[*section] = true
+		}
+	}
+}
+
+func visitChildren(node ast.Node, visit func(ast.Node)) {
+	for child := node.FirstChild(); child != nil; child = child.NextSibling() {
+		visit(child)
+	}
 }
 
 func issueText(node ast.Node, source []byte, code bool) string {
