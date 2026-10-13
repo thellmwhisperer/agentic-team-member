@@ -190,7 +190,9 @@ func (m *Model) key(k string) {
 	p := m.focused()
 	switch k {
 	case "tab":
-		m.pipelineFocus = !m.pipelineFocus
+		if m.agentRuns() {
+			m.pipelineFocus = !m.pipelineFocus
+		}
 	case "up":
 		p.scroll(-1)
 	case "down":
