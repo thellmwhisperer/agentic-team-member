@@ -231,11 +231,12 @@ func changes(clone, typ, test string) (changed, aside []string, err error) {
 // shrunk is an error naming the first of changed that matches one of tests, is in the base and is not staged in
 // clone with as many lines, at the path git's rename detection moves it to.
 func shrunk(clone string, changed, tests []string) error {
-	lines := func(s string) int { // s comes trimmed: "" has none
-		if s == "" {
-			return 0
+	lines := func(s string) int {
+		n := strings.Count(s, "\n")
+		if s != "" && !strings.HasSuffix(s, "\n") {
+			n++
 		}
-		return strings.Count(s, "\n") + 1
+		return n
 	}
 	out, err := git(clone, "diff", "--cached", "--name-status", "-M", "--diff-filter=R", "-z", "HEAD")
 	if err != nil {
@@ -249,11 +250,11 @@ func shrunk(clone string, changed, tests []string) error {
 		if first([]string{p}, tests, true) == "" {
 			continue
 		}
-		was, err := git(clone, "cat-file", "-p", "HEAD:"+p)
+		was, err := gitRaw(clone, "cat-file", "-p", "HEAD:"+p)
 		if err != nil {
 			continue // new
 		}
-		is, err := git(clone, "cat-file", "-p", ":"+cmp.Or(to[p], p)) // staged: an error when deleted
+		is, err := gitRaw(clone, "cat-file", "-p", ":"+cmp.Or(to[p], p)) // staged: an error when deleted
 		if err != nil || lines(is) < lines(was) {
 			return fmt.Errorf("the base's test %s is gone or shorter", p)
 		}
