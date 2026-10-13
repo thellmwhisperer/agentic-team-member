@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 )
 
 // resumePoint is what a run that fails after its agent keeps in resume/, in its directory, for atm run
@@ -98,7 +97,7 @@ func putBack(root, clone string, p resumePoint) (string, error) {
 // resume: no such run, a run that is not resumable, or a base commit the repository no longer has.
 func resumeFrom(root, label string) (p resumePoint, err error) {
 	dir := runDir(root, label)
-	if _, err := os.Stat(dir); err != nil || !filepath.IsLocal(label) || strings.ContainsAny(label, `/\`) {
+	if _, err := os.Stat(dir); err != nil {
 		return p, fmt.Errorf("no run %s", label)
 	}
 	var r struct{ Resumable bool }
