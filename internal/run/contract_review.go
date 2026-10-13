@@ -105,7 +105,7 @@ func (r contractReview) validate(body string) error {
 		if !quoted(body, c.Criterion) || c.Evidence == "" {
 			return errors.New("invalid contract review: criterion must quote the issue and carry evidence")
 		}
-		if r.Status != "repair" && !c.Satisfied {
+		if r.Status == "passed" && !c.Satisfied {
 			return errors.New("mandatory criterion unmet")
 		}
 	}
@@ -126,7 +126,11 @@ func (r contractReview) validateChildren() error {
 		}
 		blocking = blocking || c.Dependency == "blocks_parent"
 	}
-	if (r.Status == "passed" && blocking) || (r.Status == "repair" && !blocking) {
+	mandatoryUnmet := false
+	for _, c := range r.Acceptance {
+		mandatoryUnmet = mandatoryUnmet || !c.Satisfied
+	}
+	if (r.Status == "passed" && blocking) || ((r.Status == "repair" || mandatoryUnmet) && !blocking) {
 		return errors.New("invalid contract review: blocking children disagree with status")
 	}
 	return nil
@@ -145,21 +149,21 @@ func missingIssueGate(body string) string {
 		inSection := false
 		for _, line := range lines {
 			line = strings.TrimSpace(line)
-			if strings.HasPrefix(line, "#") {
-				title := strings.TrimSpace(strings.TrimLeft(line, "#"))
-				title = strings.TrimSuffix(title, ":")
-				if strings.EqualFold(title, field.name) || field.name == "Acceptance criteria" && strings.EqualFold(title, "Acceptance") {
+			title, value, matched := issueGateField(line)
+			if matched {
+				if title == field.name {
+					if value != "" {
+						found = true
+						break
+					}
 					inSection = true
-					continue
+				} else {
+					inSection = false
 				}
-				inSection = false
+				continue
 			}
-			if !inSection && strings.HasPrefix(strings.ToLower(line), strings.ToLower(field.name)+":") {
-				line = strings.TrimSpace(line[len(field.name)+1:])
-				if line != "" {
-					found = true
-					break
-				}
+			if strings.HasPrefix(line, "#") {
+				inSection = false
 			}
 			if inSection && line != "" {
 				found = true
@@ -171,6 +175,53 @@ func missingIssueGate(body string) string {
 		}
 	}
 	return ""
+}
+
+func issueGateField(line string) (title, value string, ok bool) {
+	line = strings.TrimSpace(line)
+	if strings.HasPrefix(line, "#") {
+		line = strings.TrimSpace(strings.TrimLeft(line, "#"))
+	} else {
+		digits := 0
+		for digits < len(line) && line[digits] >= '0' && line[digits] <= '9' {
+			digits++
+		}
+		if digits > 0 && strings.HasPrefix(line[digits:], ". ") {
+			line = strings.TrimSpace(line[digits+2:])
+		}
+	}
+	var label string
+	if strings.HasPrefix(line, "**") {
+		end := strings.Index(line[2:], "**")
+		if end < 0 {
+			return "", "", false
+		}
+		label = strings.TrimSpace(line[2 : end+2])
+		value = strings.TrimSpace(line[end+4:])
+		label = strings.TrimSuffix(label, ":")
+		value = strings.TrimPrefix(value, ":")
+		value = strings.TrimSpace(value)
+	} else {
+		var found bool
+		label, value, found = strings.Cut(line, ":")
+		if !found {
+			label = line
+			value = ""
+		}
+		label, value = strings.TrimSpace(label), strings.TrimSpace(value)
+	}
+	switch {
+	case strings.EqualFold(label, "Non-goals"):
+		return "Non-goals", value, true
+	case strings.EqualFold(label, "Invariants"):
+		return "Invariants", value, true
+	case strings.EqualFold(label, "Acceptance") || strings.EqualFold(label, "Acceptance criteria"):
+		return "Acceptance criteria", value, true
+	case strings.EqualFold(label, "Split triggers"):
+		return "Split triggers", value, true
+	default:
+		return "", "", false
+	}
 }
 
 // inspectContract keeps judgment in the reviewer, and freshness, correction limits and proofs in ATM.

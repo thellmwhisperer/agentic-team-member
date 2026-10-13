@@ -12,8 +12,24 @@ import (
 )
 
 // followUpIssue has two acceptance criteria, the sentences a follow-up may quote; the first one wraps.
-const followUpIssue = "# Retry on timeout\nType: fix\n\n## Acceptance criteria\n\n1. A retry runs once after a\n" +
-	"timeout.\n2. The retry error is reported.\n"
+const followUpIssue = `# Retry on timeout
+Type: fix
+
+## Non-goals
+Change retry policy outside this case.
+
+## Invariants
+Retry occurs once and retry errors are reported.
+
+## Acceptance criteria
+
+1. A retry runs once after a
+timeout.
+2. The retry error is reported.
+
+## Split triggers
+Split if the diff adds an independent outcome.
+`
 
 // ends is the end event of every run of step in out, in order.
 func ends(t *testing.T, out *bytes.Buffer, step string) []obj {
