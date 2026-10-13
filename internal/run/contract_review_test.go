@@ -200,11 +200,8 @@ func TestRunContractReviewTaskSlicing(t *testing.T) {
 	for _, field := range fields {
 		t.Run(field, func(t *testing.T) {
 			root, out := contractReviewRepo(t)
-			report := strings.Replace(repairContract, `"status":"repair"`, `"status":"split"`, 1)
-			report = strings.Replace(report, `"`+field+`":true`, `"`+field+`":false`, 1)
-			report = strings.TrimSuffix(report, `}]}`) + `,{"cause":"unmet dispatch gate",` +
-				`"contract":"Replan the issue","dependency":"blocks_parent","target":"gate:` + field + `",` +
-				`"evidence":"dispatch gate is false"}]}`
+			report := strings.Replace(splitMissingGateContract, `"`+field+`":true`, `"`+field+`":false`, 1)
+			report = strings.Replace(report, `"target":"gate:non_goals"`, `"target":"gate:`+field+`"`, 1)
 			t.Setenv("FAKE_CONTRACT_REPORT", report)
 			err := Run("t", []string{issueFile(t, reviewReadyIssue)}, &bytes.Buffer{}, &bytes.Buffer{})
 			if err == nil || !strings.Contains(err.Error(), "requires split") {
@@ -268,6 +265,33 @@ Type: fix
 		}
 		if _, err := os.Stat(filepath.Join(out, "delivered")); err != nil {
 			t.Fatal("delivery did not run:", err)
+		}
+	})
+	t.Run("numbered and bold section content", func(t *testing.T) {
+		gates := []struct{ section, original string }{
+			{"Non-goals", "Change retry policy outside this case."},
+			{"Invariants", "Retry occurs once."},
+			{"Acceptance criteria", "Retry once."},
+			{"Split triggers", "Split if the diff adds an independent outcome."},
+		}
+		for _, format := range []struct{ name, content string }{
+			{"numbered scenario", "1. Given a timeout: retry exactly once."},
+			{"bold label", "**Expected:** retry exactly once."},
+		} {
+			for _, gate := range gates {
+				t.Run(format.name+"/"+gate.section, func(t *testing.T) {
+					_, out := contractReviewRepo(t)
+					body := strings.Replace(reviewReadyIssue, "Type: fix\n", "Type: fix\nRetry once.\n", 1)
+					body = strings.Replace(body, gate.original+"\n", format.content+"\n", 1)
+					t.Setenv("FAKE_CONTRACT_REPORT", passedContract)
+					if err := Run("t", []string{issueFile(t, body)}, &bytes.Buffer{}, &bytes.Buffer{}); err != nil {
+						t.Fatal(err)
+					}
+					if _, err := os.Stat(filepath.Join(out, "delivered")); err != nil {
+						t.Fatal("delivery did not run:", err)
+					}
+				})
+			}
 		}
 	})
 }

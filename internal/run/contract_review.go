@@ -248,15 +248,20 @@ func issueSectionBoundary(line string) bool {
 	}
 	if digits > 0 && strings.HasPrefix(line[digits:], ". ") {
 		line = strings.TrimSpace(line[digits+2:])
-		return strings.Contains(line, ":")
 	}
-	if strings.HasPrefix(line, "**") && strings.Contains(line[2:], "**") {
-		return true
+	var label string
+	if strings.HasPrefix(line, "**") {
+		end := strings.Index(line[2:], "**")
+		if end < 0 {
+			return false
+		}
+		label = strings.TrimSpace(line[2 : end+2])
+	} else if before, _, hasValue := strings.Cut(line, ":"); hasValue {
+		label = strings.TrimSpace(before)
+	} else {
+		label = line
 	}
-	label, _, hasValue := strings.Cut(line, ":")
-	if !hasValue {
-		return false
-	}
+	label = strings.TrimSuffix(label, ":")
 	switch strings.ToLower(strings.TrimSpace(label)) {
 	case "kind", "goal", "non-goals", "invariants", "behavioral contract / states",
 		"scope surface", "acceptance", "acceptance criteria", "split triggers", "dependencies / parent", "evidence":
