@@ -1,0 +1,41 @@
+[
+  {
+    "name": "running",
+    "cwd": "/Volumes/CrucialX9/workspace/agentic-team-member/.worktrees/pre-delivery-contract-review",
+    "command": [
+      "no-mistakes",
+      "axi",
+      "status"
+    ],
+    "exit": 0,
+    "stderr": "",
+    "sha256": "45c39bf6e2b1d642f6570fdb30b8a678c373dae84be6a4e88b7b611797f3cf4d",
+    "captured_at": "2026-10-13T18:29:51.049027+00:00"
+  },
+  {
+    "name": "parked",
+    "cwd": "/Volumes/CrucialX9/workspace/agentic-team-member/.atm/clones/atm-run-20261013-094446",
+    "command": [
+      "no-mistakes",
+      "axi",
+      "status"
+    ],
+    "exit": 0,
+    "stderr": "",
+    "sha256": "772d5ddfd5a09b30c7bbfc7c348a94d77dbfdba4ef5a32574d22be55b6c3f7d2",
+    "captured_at": "2026-10-13T18:29:51.340333+00:00"
+  },
+  {
+    "name": "completed",
+    "cwd": "/Volumes/CrucialX9/workspace/agentic-team-member/.worktrees/fix-native-completed-view",
+    "command": [
+      "no-mistakes",
+      "axi",
+      "status"
+    ],
+    "exit": 0,
+    "stderr": "",
+    "sha256": "ab51c3ca15ac7754839dbd7cac4a2d5824ccb9fdf4408c93900d7645891117f6",
+    "captured_at": "2026-10-13T18:29:51.649031+00:00"
+  }
+]
