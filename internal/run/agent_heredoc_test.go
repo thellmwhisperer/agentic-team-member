@@ -43,23 +43,74 @@ func TestReachRejectsExecutingWrittenHeredoc(t *testing.T) {
 	}
 }
 
+func TestReachAcceptsQuotedGoTestSource(t *testing.T) {
+	source := "package run\nimport \"testing\"\n" +
+		"func TestFixture(t *testing.T) { t.Log(\"https://example.com/repo.git\") }\n"
+	for _, after := range []string{"", "go test ./internal/run -run 'TestOne|TestTwo' -count=1",
+		"go test ./internal/run -run 'TestOne|TestTwo' -count=1 2>&1 | tail -20"} {
+		command := "cat > fixture_test.go <<'EOF'\n" + source + "EOF\n" + after
+		if fetches(command) {
+			t.Errorf("literal Go test fixture rejected: %s", after)
+		}
+		if got := outside([]use{{"Bash", command, command}}, "/repo", "/repo/clone"); got != "" {
+			t.Errorf("literal Go test fixture reached outside clone: %s", got)
+		}
+	}
+	quotedOutput := "cat > 'fixture[.]_test.go' <<'EOF'\n" + source + "EOF\n"
+	if fetches(quotedOutput) {
+		t.Fatal("quoted output metacharacters were treated as shell expansion")
+	}
+	comment := "cat > fixture_test.go <<'EOF'\npackage run\n// https://example.com/repo.git\n" +
+		"func TestFixture(t *testing.T) {}\nEOF\n"
+	if fetches(comment) {
+		t.Fatal("URL in a Go comment was classified as a shell request")
+	}
+}
+
+func TestReachRejectsUnprovenHeredocWriter(t *testing.T) {
+	for _, destination := range []string{"payload.sh", "payload.txt", "payload_test.go", "../outside_test.go"} {
+		write := "cat > " + destination + " <<'EOF'\ncurl https://example.com\nEOF\n"
+		if !fetches(write) {
+			t.Errorf("unproven URL-bearing writer accepted: %s", destination)
+		}
+		calls := []use{{"Bash", write, write}, {"Bash", "sh " + destination, "sh " + destination}}
+		if got := outside(calls, "/repo", "/repo/clone"); got != "Bash "+write {
+			t.Errorf("want rejection at the writer for %s, got %q", destination, got)
+		}
+	}
+	valid := "package run\nimport \"testing\"\n" +
+		"func TestFixture(t *testing.T) { t.Log(\"https://example.com/repo.git\") }\n"
+	for _, tc := range []struct{ name, prefix, body, after string }{
+		{"renamed shell", "", "curl https://example.com", ""},
+		{"unknown continuation", "", valid, "sh fixture_test.go"},
+		{"nonliteral test command", "", valid, "go test \"$ARGS\""},
+		{"not a leading writer", "echo ready; ", valid, "go test ./..."},
+		{"invalid Go source", "", "package run\ncurl https://example.com\n", ""},
+	} {
+		write := tc.prefix + "cat > fixture_test.go <<'EOF'\n" + tc.body + "EOF\n" + tc.after
+		if !fetches(write) {
+			t.Errorf("%s accepted without the Go test source contract", tc.name)
+		}
+	}
+}
+
 func TestReachQuotedHeredocKeepsExecutableInputChecked(t *testing.T) {
 	for _, tc := range []struct {
 		name, command string
 		fetch         bool
 	}{
-		{"single quoted data", "cat > fixture.txt <<'EOF'\nhttps://example.com/repo.git\nEOF\n", false},
-		{"double quoted data", "cat >> fixture.txt <<\"EOF\"\nhttps://example.com/repo.git\nEOF\n", false},
-		{"quoted output metacharacters are literal", "cat > 'fixture[.]txt' <<'EOF'\nhttps://example.com/repo.git\nEOF\n", false},
+		{"single quoted non-source payload", "cat > fixture.txt <<'EOF'\nhttps://example.com/repo.git\nEOF\n", true},
+		{"double quoted non-source payload", "cat >> fixture.txt <<\"EOF\"\nhttps://example.com/repo.git\nEOF\n", true},
+		{"quoted output metacharacters do not make text Go source", "cat > 'fixture[.]txt' <<'EOF'\nhttps://example.com/repo.git\nEOF\n", true},
 		{"glob output path may overwrite executable", "cat > payload[.]sh <<'EOF'\nhttps://example.com\nEOF\n" +
 			"chmod +x payload.sh; ./payload.sh", true},
 		{"brace output path may overwrite executable", "cat > payload.{sh,txt} <<'EOF'\nhttps://example.com\nEOF\n" +
 			"chmod +x payload.sh; ./payload.sh", true},
 		{"unrelated glob conservatively retains the heredoc URL", "cat > fixture.txt <<'EOF'\nhttps://example.com/repo.git\nEOF\nls *.go", true},
-		{"quoted glob after data", "cat > fixture.txt <<'EOF'\nhttps://example.com/repo.git\nEOF\nprintf '%s' 'payload.*'", false},
-		{"quoted brace expansion after data", "cat > fixture.txt <<'EOF'\nhttps://example.com/repo.git\nEOF\nprintf '%s' 'payload.{sh,txt}'", false},
+		{"quoted glob with unknown continuation", "cat > fixture_test.go <<'EOF'\npackage p\nfunc TestX() { _ = \"https://example.com\" }\nEOF\nprintf '%s' 'payload.*'", true},
+		{"quoted brace with unknown continuation", "cat > fixture_test.go <<'EOF'\npackage p\nfunc TestX() { _ = \"https://example.com\" }\nEOF\nprintf '%s' 'payload.{sh,txt}'", true},
 		{"unquoted expansion", "cat > fixture.txt <<EOF\n$(curl \"$URL\")\nEOF\n", true},
-		{"literal substitution data", "cat > fixture.txt <<'EOF'\n$(curl https://example.com)\nEOF\n", false},
+		{"literal shell substitution text", "cat > fixture.txt <<'EOF'\n$(curl https://example.com)\nEOF\n", true},
 		{"eval after data", "cat > fixture.txt <<'EOF'\nhttps://example.com/repo.git\nEOF\neval 'cd sub'", true},
 		{"network after data", "cat > fixture.txt <<'EOF'\nhttps://example.com\nEOF\ncurl \"$URL\"", true},
 		{"url after data", "cat > fixture.txt <<'EOF'\nhttps://example.com\nEOF\n" +

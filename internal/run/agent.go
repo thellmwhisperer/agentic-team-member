@@ -9,6 +9,10 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"go/ast"
+	goparser "go/parser"
+	goscan "go/scanner"
+	"go/token"
 	"io"
 	"maps"
 	"os"
@@ -818,16 +822,14 @@ func fetches(command string) bool {
 		word := strings.Trim(fields[0], "\"'`;|&()")
 		return word == "curl" || word == "wget"
 	}
-	// Leading plain cat writes carry quoted data, not shell source. Stop at
-	// other commands: they could redefine cat. Nested/piped input stays checked.
 	checked := []byte(command)
-	for i, stmt := range file.Stmts {
-		data, output := quotedCatData(stmt)
-		if data == nil || mayConsumeWrittenData(file.Stmts[i+1:], output) {
-			break
-		}
-		for i := data.Pos().Offset(); i < data.End().Offset(); i++ {
-			checked[i] = ' '
+	if len(file.Stmts) > 0 {
+		if data, ok := quotedGoTestData(file.Stmts[0]); ok && goTestContinuation(file.Stmts[1:]) {
+			body := []byte(data.Lit())
+			start, end := int(data.Pos().Offset()), int(data.Pos().Offset())+len(body)
+			if start >= 0 && end >= start && end <= len(checked) && bytes.Equal(checked[start:end], body) && goTestSource(body) {
+				clear(checked[start:end])
+			}
 		}
 	}
 	if badURL(string(checked)) {
@@ -843,118 +845,174 @@ func fetches(command string) bool {
 	return unsafe
 }
 
-// quotedCatData recognizes only plain cat with one quoted stdin heredoc and
-// one literal relative output file. Pipes, interpreter input and other fd
-// arrangements keep their existing conservative reach checks.
-func quotedCatData(stmt *syntax.Stmt) (*syntax.Word, string) {
+func quotedGoTestData(stmt *syntax.Stmt) (*syntax.Word, bool) {
 	call, ok := stmt.Cmd.(*syntax.CallExpr)
-	if !ok || len(call.Args) != 1 || call.Args[0].Lit() != "cat" || len(call.Assigns) != 0 || len(stmt.Redirs) != 2 {
-		return nil, ""
+	if !ok || stmt.Negated || stmt.Background || stmt.Coprocess || len(call.Args) != 1 ||
+		call.Args[0].Lit() != "cat" || len(call.Assigns) != 0 || len(stmt.Redirs) != 2 {
+		return nil, false
 	}
 	var data *syntax.Word
 	output := ""
 	for _, r := range stmt.Redirs {
 		if r.N != nil {
-			return nil, ""
+			return nil, false
 		}
 		switch r.Op {
-		case syntax.Hdoc, syntax.DashHdoc:
+		case syntax.Hdoc:
 			_, literal := literalWord(r.Word)
 			if literal && r.Word.Lit() == "" {
 				data = r.Hdoc
 			}
 		case syntax.RdrOut, syntax.AppOut:
-			if literalOutputFile(r.Word) {
+			if literalGoTestOutput(r.Word) {
 				output, _ = literalWord(r.Word)
 			}
 		}
 	}
-	if output != "" {
-		return data, output
+	if data != nil && output != "" {
+		return data, true
 	}
-	return nil, ""
+	return nil, false
 }
 
-// Later consumers can execute the saved text. Unresolved words and shell
-// interpreters stay conservative; this is not shell data-flow analysis.
-func mayConsumeWrittenData(stmts []*syntax.Stmt, output string) bool {
-	unsafe := false
-	for _, stmt := range stmts {
-		syntax.Walk(stmt, func(node syntax.Node) bool {
-			if call, ok := node.(*syntax.CallExpr); ok {
-				unsafe = unsafe || changesDirectory(call) || evaluatesShell(call)
-			}
-			if word, ok := node.(*syntax.Word); ok {
-				text, literal := literalWord(word)
-				unsafe = unsafe || !literal || shellGlob(word) || strings.Contains(text, path.Clean(output)) ||
-					strings.Contains(path.Clean(text), path.Clean(output))
-				switch path.Base(text) {
-				case "sh", "bash", "dash", "zsh", "ksh", "source", ".":
-					unsafe = true
-				}
-			}
-			return !unsafe
-		})
-		if unsafe {
-			return true
-		}
-	}
-	return false
+func literalGoTestOutput(word *syntax.Word) bool {
+	name, literal := literalShellWord(word)
+	clean := path.Clean(name)
+	return literal && name != "" && !path.IsAbs(name) && !filepath.IsAbs(name) &&
+		clean != ".." && !strings.HasPrefix(clean, "../") && strings.HasSuffix(clean, "_test.go")
 }
 
-func changesDirectory(call *syntax.CallExpr) bool {
-	for i := 0; i < len(call.Args); {
-		name, literal := literalWord(call.Args[i])
-		if !literal {
-			return false
-		}
-		switch name {
-		case "cd", "pushd", "popd":
-			return true
-		case "builtin", "command", "exec":
-			i++
-		default:
-			return false
-		}
+func literalShellWord(word *syntax.Word) (string, bool) {
+	name, literal := literalWord(word)
+	if !literal {
+		return "", false
 	}
-	return false
-}
-
-func evaluatesShell(call *syntax.CallExpr) bool {
-	for i := 0; i < len(call.Args); {
-		name, literal := literalWord(call.Args[i])
-		if !literal {
-			return false
-		}
-		switch name {
-		case "eval":
-			return true
-		case "builtin", "command", "exec":
-			i++
-		default:
-			return false
-		}
-	}
-	return false
-}
-
-func shellGlob(word *syntax.Word) bool {
 	for _, part := range word.Parts {
 		switch part := part.(type) {
 		case *syntax.Lit:
 			if strings.ContainsAny(part.Value, "*?[{}") {
-				return true
+				return "", false
 			}
 		case *syntax.BraceExp, *syntax.ExtGlob:
-			return true
+			return "", false
 		}
 	}
-	return false
+	return name, true
 }
 
-func literalOutputFile(word *syntax.Word) bool {
-	name, literal := literalWord(word)
-	return literal && !shellGlob(word) && name != "" && !path.IsAbs(name) && !filepath.IsAbs(name)
+func goTestSource(src []byte) bool {
+	f, err := goparser.ParseFile(token.NewFileSet(), "fixture_test.go", src, goparser.ParseComments)
+	if err != nil {
+		f, err = goparser.ParseFile(token.NewFileSet(), "fixture_test.go", append([]byte("package run\n"), src...),
+			goparser.ParseComments)
+	}
+	if err != nil || f.Name == nil {
+		return false
+	}
+	test := false
+	for _, decl := range f.Decls {
+		if fn, ok := decl.(*ast.FuncDecl); ok && fn.Recv == nil && strings.HasPrefix(fn.Name.Name, "Test") {
+			test = true
+		}
+	}
+	return test && goURLsAreLiteral(src)
+}
+
+func goURLsAreLiteral(src []byte) bool {
+	urls := link.FindAllIndex(src, -1)
+	if len(urls) == 0 {
+		return true
+	}
+	fset := token.NewFileSet()
+	file := fset.AddFile("", fset.Base(), len(src))
+	var scan goscan.Scanner
+	scan.Init(file, src, nil, goscan.ScanComments)
+	var spans [][2]int
+	for {
+		pos, tok, lit := scan.Scan()
+		if tok == token.EOF {
+			break
+		}
+		if tok == token.STRING || tok == token.COMMENT {
+			start := file.Offset(pos)
+			spans = append(spans, [2]int{start, start + len(lit)})
+		}
+	}
+	for _, url := range urls {
+		found := false
+		for _, span := range spans {
+			if url[0] >= span[0] && url[1] <= span[1] {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
+func goTestContinuation(stmts []*syntax.Stmt) bool {
+	if len(stmts) == 0 {
+		return true
+	}
+	if len(stmts) != 1 {
+		return false
+	}
+	stmt := stmts[0]
+	if call, ok := stmt.Cmd.(*syntax.CallExpr); ok {
+		return literalGoTestCall(stmt, call, false)
+	}
+	pipe, ok := stmt.Cmd.(*syntax.BinaryCmd)
+	return ok && pipe.Op == syntax.Pipe && !stmt.Negated && !stmt.Background && !stmt.Coprocess &&
+		len(stmt.Redirs) == 0 && literalGoTestCall(pipe.X, callOf(pipe.X), true) && literalTail(pipe.Y)
+}
+
+func callOf(stmt *syntax.Stmt) *syntax.CallExpr {
+	if stmt == nil {
+		return nil
+	}
+	call, _ := stmt.Cmd.(*syntax.CallExpr)
+	return call
+}
+
+func literalGoTestCall(stmt *syntax.Stmt, call *syntax.CallExpr, stderrToStdout bool) bool {
+	if stmt == nil || call == nil || stmt.Negated || stmt.Background || stmt.Coprocess || len(call.Assigns) != 0 || len(call.Args) < 2 {
+		return false
+	}
+	if stderrToStdout {
+		if len(stmt.Redirs) != 1 {
+			return false
+		}
+		r := stmt.Redirs[0]
+		target, targetLiteral := literalShellWord(r.Word)
+		if r.Op != syntax.DplOut || r.N == nil || r.N.Value != "2" || !targetLiteral || target != "1" {
+			return false
+		}
+	} else if len(stmt.Redirs) != 0 {
+		return false
+	}
+	for i, arg := range call.Args {
+		word, literal := literalShellWord(arg)
+		if !literal || (i == 0 && word != "go") || (i == 1 && word != "test") {
+			return false
+		}
+	}
+	return true
+}
+
+func literalTail(stmt *syntax.Stmt) bool {
+	if stmt == nil || stmt.Negated || stmt.Background || stmt.Coprocess || len(stmt.Redirs) != 0 {
+		return false
+	}
+	call := callOf(stmt)
+	if call == nil || len(call.Assigns) != 0 || len(call.Args) != 2 {
+		return false
+	}
+	name, nameLiteral := literalShellWord(call.Args[0])
+	count, countLiteral := literalShellWord(call.Args[1])
+	return nameLiteral && countLiteral && name == "tail" && count == "-20"
 }
 
 func literalWord(word *syntax.Word) (string, bool) {
