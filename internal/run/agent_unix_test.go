@@ -4,6 +4,7 @@ package run
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -79,6 +80,7 @@ func TestRunKeepsTheCauseOfTheAgentsDeath(t *testing.T) {
 		{mode: "silent", exit: "silent for 1.0 s", why: "the agent said nothing for 1.0 s; ATM stopped it",
 			tail: "fake stderr"},
 		{mode: "fail", exit: "exit code 3", why: "exit code 3", tail: "boom"},
+		{mode: "empty-fail", exit: "exit code 3", why: "exit code 3"},
 		{mode: "killed", exit: "signal killed", why: "signal killed", tail: "fake stderr"},
 	} {
 		t.Run(c.mode, func(t *testing.T) {
@@ -96,12 +98,28 @@ func TestRunKeepsTheCauseOfTheAgentsDeath(t *testing.T) {
 			rep := readReport(t, filepath.Join(root, ".atm", "runs", "t", "report.json"))
 			n := reportNode(t, rep, "agent")
 			tail, _ := n["tail"].(string)
-			if rep["reason"] != want || n["exit"] != c.exit || !strings.Contains(tail, c.tail) ||
-				!strings.Contains(tail, `{"type": "system", "subtype": "init"}`) {
+			lines := logLines(t, log)
+			var actual []string
+			for _, line := range lines {
+				var text string
+				if json.Unmarshal([]byte(line), &text) == nil {
+					line = text
+				}
+				actual = append(actual, line)
+			}
+			if len(actual) > 20 {
+				actual = actual[len(actual)-20:]
+			}
+			if rep["reason"] != want || n["exit"] != c.exit || tail != strings.Join(actual, "\n") ||
+				c.tail != "" && (!strings.Contains(tail, c.tail) ||
+					!strings.Contains(tail, `{"type": "system", "subtype": "init"}`)) {
 				t.Fatalf("want reason %q, exit %q and a tail holding %q, got %v", want, c.exit, c.tail, rep)
 			}
+			if _, ok := n["tail"]; !ok {
+				t.Fatalf("report.json omitted empty tail: %v", n)
+			}
 			stderr, _ := os.ReadFile(strings.TrimSuffix(log, ".jsonl") + ".stderr.txt")
-			if !strings.HasPrefix(string(stderr), "fake stderr\n") ||
+			if c.mode != "empty-fail" && !strings.HasPrefix(string(stderr), "fake stderr\n") ||
 				c.mode == "fail" && string(stderr) != "fake stderr\nboom\n" {
 				t.Fatalf("worker.stderr.txt: %q", stderr)
 			}
@@ -111,5 +129,22 @@ func TestRunKeepsTheCauseOfTheAgentsDeath(t *testing.T) {
 				until(t, "the silent agent is dead", func() bool { return pid > 0 && !alive(pid) })
 			}
 		})
+	}
+}
+
+func TestRunCountsBlankAgentLinesAsActivity(t *testing.T) {
+	defer func(d time.Duration) { agentSilence = d }(agentSilence)
+	agentSilence = time.Second
+	root := repo(t, "https://example.com/owner/repo.git", atmYAML)
+	t.Setenv("FAKE_AGENT", "blank-lines")
+	var out bytes.Buffer
+	err := Run("t", []string{issueFile(t, issue)}, &out, io.Discard)
+	if err == nil || !strings.HasPrefix(err.Error(), "exit code 0; agent left no report") {
+		t.Fatalf("blank lines should prevent the silence stop: %v", err)
+	}
+	rep := readReport(t, filepath.Join(root, ".atm", "runs", "t", "report.json"))
+	tail, _ := reportNode(t, rep, "agent")["tail"].(string)
+	if !strings.Contains(tail, "\n\n") || strings.Contains(tail, "silent for") {
+		t.Fatalf("blank lines are missing from the tail or were treated as silence: %q", tail)
 	}
 }

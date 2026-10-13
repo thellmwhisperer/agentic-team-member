@@ -65,12 +65,21 @@ func fakeAgent(name string) int {
 	waitForFakeAgentRelease()
 	wd, _ := os.Getwd()
 	stream := strings.ReplaceAll(os.Getenv("FAKE_AGENT_STREAM"), "<clone>", filepath.ToSlash(wd))
-	fmt.Print(`{"type": "system", "subtype": "init"}`+"\n", stream) // the test's lines too
-	fmt.Fprintln(os.Stderr, "fake stderr")
+	if mode != "empty-fail" {
+		fmt.Print(`{"type": "system", "subtype": "init"}`+"\n", stream) // the test's lines too
+		fmt.Fprintln(os.Stderr, "fake stderr")
+	}
 	if exit, done := fakeAgentMode(mode); done {
 		return exit
 	}
 	fakeAgentSkill(name, args, skill, mode)
+	if mode == "blank-lines" {
+		for range 6 {
+			fmt.Println()
+			time.Sleep(250 * time.Millisecond)
+		}
+		text = "Done, nothing to report."
+	}
 	if err := exec.Command("sh", "-c", todo).Run(); err != nil {
 		return 1
 	}
@@ -121,6 +130,8 @@ func fakeAgentMode(mode string) (int, bool) {
 	switch mode {
 	case "fail":
 		fmt.Fprintln(os.Stderr, "boom")
+		return 3, true
+	case "empty-fail":
 		return 3, true
 	case "silent":
 		_ = os.WriteFile(os.Getenv("FAKE_AGENT_PID"), []byte(strconv.Itoa(os.Getpid())), 0o600)
@@ -298,11 +309,8 @@ func TestRunDrivesTheAgent(t *testing.T) {
 			}) {
 				t.Fatalf("env: want ATM_FAKE and no CLAUDE_CODE_CHILD_SESSION, got %v", got.Env)
 			}
-			// stdout and stderr are two pipes: the first stdout line and the stderr one come in either order.
 			lines := logLines(t, log)
-			first := []string{`"fake stderr"`, `{"type": "system", "subtype": "init"}`}
-			if want := map[bool]int{true: 5, false: 4}[harness == "claude" || harness == "pi"]; len(lines) != want ||
-				!slices.Equal(slices.Sorted(slices.Values(lines[:2])), first) {
+			if want := map[bool]int{true: 5, false: 4}[harness == "claude" || harness == "pi"]; len(lines) != want {
 				t.Fatalf("want every line of the agent in the log, got %q", lines)
 			}
 			if left := clones(t, root); len(left) != 0 {
@@ -542,8 +550,7 @@ func TestRunReportsReachBeforeAgentFailure(t *testing.T) {
 	t.Setenv("FAKE_AGENT_STREAM", stream)
 	var out bytes.Buffer
 	err := Run("t", []string{"--harness", "claude", issueFile(t, issue)}, &out, io.Discard)
-	if err == nil || !strings.Contains(err.Error(), "the agent reached outside its clone: Bash rg pattern . ../..") ||
-		strings.Contains(err.Error(), "exit status 3") {
+	if err == nil || !strings.Contains(err.Error(), "exit code 3; the agent reached outside its clone: Bash rg pattern . ../..") {
 		t.Fatalf("want reach failure to take precedence, got %v", err)
 	}
 }
@@ -554,8 +561,8 @@ func TestRunDiesWhenTheAgentFails(t *testing.T) {
 		args               []string
 	}{
 		{harness: "claude", mode: "fail", why: "exit code 3"},
-		{harness: "pi", mode: "no-report", why: "no report"},
-		{harness: "codex", mode: "no-report", why: "no report"},
+		{harness: "pi", mode: "no-report", why: "exit code 0; agent left no report"},
+		{harness: "codex", mode: "no-report", why: "exit code 0; agent left no report"},
 		{harness: "opencode", mode: "no-test-file", why: "test_file"},
 		{harness: "claude", mode: "no-skill", why: "ponytail"},
 		{harness: "codex", mode: "no-skill", why: "ponytail"},

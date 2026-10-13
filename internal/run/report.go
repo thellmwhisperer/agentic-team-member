@@ -40,7 +40,7 @@ type node struct {
 	Name   string `json:"name"`
 	Result string `json:"result"`         // passed, failed, running, skipped or not run
 	Exit   string `json:"exit,omitempty"` // how its agent ended, when it failed after it ran
-	Tail   string `json:"tail,omitempty"` // the last 20 lines that agent wrote, stdout and stderr
+	Tail   string `json:"tail"`           // the last 20 lines that agent wrote, stdout and stderr
 	span
 }
 
