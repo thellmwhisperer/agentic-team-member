@@ -68,6 +68,17 @@ func TestAgentBoxRendersRunParserEventGoldens(t *testing.T) {
 	}, 1)
 }
 
+func TestAgentBoxRendersCursorToolStartOrder(t *testing.T) {
+	checkAgentBox(t, eventGolden(t, "cursor.events.jsonl"), []string{
+		"∴ I'll run the failing command, read hello.txt, and reply DONE.",
+		"✎ I'll run the failing cat, then read hello.txt.",
+		"✗ failed shell cat nope.txt",
+		"· 1 tool: read",
+		"∴ The first command failed as expected.",
+		"✎ DONE",
+	}, 2)
+}
+
 func TestAgentBoxRendersTheSameStoryForBothHarnesses(t *testing.T) {
 	want := []string{
 		"∴ Exploring the packages directory, particularly the analytics package, to understand existing patterns.",

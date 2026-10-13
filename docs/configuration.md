@@ -26,7 +26,7 @@ Optional. It says which agent you run everywhere.
 
 | Key | Meaning |
 |-----|---------|
-| `harness` | The coding agent CLI: `claude`, `codex`, `opencode` or `pi` (local models go through `pi`). Any other fails the run |
+| `harness` | The coding agent CLI: `claude`, `codex`, `opencode`, `pi` or `cursor` (local models go through `pi`). Any other fails the run |
 | `model` | Its model; empty is the CLI's default |
 | `effort` | Its effort; empty is the CLI's default |
 
@@ -35,6 +35,25 @@ harness: claude
 model: claude-opus-5-5
 effort: high
 ```
+
+### Cursor
+
+`harness: cursor` runs `cursor-agent -p --output-format stream-json --trust
+--force --workspace <clone>`, then `--model <model>` when set, any
+`--harness-arg`s, and the brief as the last argument. `atm doctor` checks
+`cursor-agent` on PATH, not the editor's `cursor` command.
+
+Cursor has no effort flag. Leave `effort` unset in every configuration layer
+and put it in a parameterized model, for example `model: 'grok[effort=high]'`.
+A configured effort fails before cloning with
+`cursor has no effort flag: put it in the model, as '<model>[effort=<effort>]'`.
+
+The skill is installed at `.cursor/skills/<skill>/SKILL.md` and excluded from
+git. A successful read or shell read proves use; a failed read does not.
+Thinking deltas join into one `∴` line when the turn completes; assistant text
+is a `✎` line. Tools stay in start order by `call_id`, with their completed
+success or failure. The report comes from the last assistant message, not
+Cursor's concatenated result. An error result fails the step with its text.
 
 ## `.atm.yaml`
 
@@ -114,7 +133,7 @@ Flags go before or after the issue. A second issue is an error.
 | Flag | Default | Meaning |
 |------|---------|---------|
 | `--base-ref <ref>` | `main` | The ref the run starts from, resolved in the repository |
-| `--harness <cli>` | from the layers | `claude`, `codex`, `opencode` or `pi` |
+| `--harness <cli>` | from the layers | `claude`, `codex`, `opencode`, `pi` or `cursor` |
 | `--model <model>` | from the layers | The agent's model |
 | `--effort <effort>` | from the layers | The agent's effort |
 | `--harness-arg <arg>` | none | One argument for the agent CLI, before the brief. Repeatable |

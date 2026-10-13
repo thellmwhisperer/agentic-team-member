@@ -96,6 +96,19 @@ func TestLoadTestFileNeedsFileOrDir(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsEffortForCursor(t *testing.T) {
+	root := t.TempDir()
+	write(t, filepath.Join(root, ".atm.yaml"), complete)
+	if _, err := Load(root, t.TempDir(), Agent{Harness: "cursor", Model: "m"}); err != nil {
+		t.Fatalf("cursor without effort: %v", err)
+	}
+	_, err := Load(root, t.TempDir(), Agent{Harness: "cursor", Effort: "high"})
+	want := "cursor has no effort flag: put it in the model, as '<model>[effort=high]'"
+	if err == nil || err.Error() != want {
+		t.Fatalf("got %v, want %s", err, want)
+	}
+}
+
 func TestLoadRejectsUnknownHarness(t *testing.T) {
 	root := t.TempDir()
 	write(t, filepath.Join(root, ".atm.yaml"), complete)

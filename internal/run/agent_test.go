@@ -91,13 +91,17 @@ func fakeAgent(name string) int {
 	if name == "codex" {
 		_ = os.WriteFile(after(args, "-o"), []byte(text), 0o600)
 	}
-	emit(map[string]obj{
-		"claude":   {"type": "result", "result": text},
-		"codex":    {"type": "item.completed", "item": obj{"type": "agent_message", "text": "not the -o file"}},
-		"opencode": {"type": "text", "part": obj{"text": text}},
-		"pi": {"type": "message_end", "message": obj{"role": "assistant",
-			"content": []obj{{"type": "text", "text": text}}}},
-	}[name])
+	for _, ev := range map[string][]obj{
+		"claude":   {{"type": "result", "result": text}},
+		"codex":    {{"type": "item.completed", "item": obj{"type": "agent_message", "text": "not the -o file"}}},
+		"opencode": {{"type": "text", "part": obj{"text": text}}},
+		"pi": {{"type": "message_end", "message": obj{"role": "assistant",
+			"content": []obj{{"type": "text", "text": text}}}}},
+		"cursor-agent": {{"type": "assistant", "message": obj{"role": "assistant",
+			"content": []obj{{"type": "text", "text": text}}}}, {"type": "result", "result": "not the report"}},
+	}[name] {
+		emit(ev)
+	}
 	return 0
 }
 
@@ -205,7 +209,8 @@ func fakeOrphanAgent() (int, bool) {
 // skill's as a prefix instead in mode wrong-skill.
 func fakeAgentSkill(name string, args []string, skill, mode string) {
 	dir := map[string]string{"claude": ".claude/skills/" + skill, "codex": ".agents/skills/" + skill,
-		"opencode": ".opencode/skills/" + skill, "pi": after(args, "--skill")}[name]
+		"opencode": ".opencode/skills/" + skill, "pi": after(args, "--skill"),
+		"cursor-agent": ".cursor/skills/" + skill}[name]
 	path := dir + "/SKILL.md"
 	b, _ := os.ReadFile(path)
 	b = bytes.ReplaceAll(b, []byte("\r\n"), []byte("\n"))
@@ -229,6 +234,11 @@ func fakeAgentSkill(name string, args []string, skill, mode string) {
 			"status": map[bool]string{true: "error", false: "completed"}[failed], "input": obj{"name": skill}}}}},
 		"pi": {{"type": "tool_execution_start", "toolCallId": "s1", "toolName": "read", "args": obj{"path": path}},
 			{"type": "tool_execution_end", "toolCallId": "s1", "toolName": "read", "isError": failed}},
+		"cursor-agent": {{"type": "tool_call", "subtype": "started", "call_id": "s1",
+			"tool_call": obj{"readToolCall": obj{"args": obj{"path": path}}}},
+			{"type": "tool_call", "subtype": "completed", "call_id": "s1", "tool_call": obj{"hookAdditionalContexts": []obj{},
+				"readToolCall": obj{"args": obj{"path": path}, "result": obj{
+					map[bool]string{true: "failure", false: "success"}[failed]: obj{}}}}}},
 	}[name] {
 		emit(ev)
 	}
@@ -299,6 +309,7 @@ func TestRunDrivesTheAgent(t *testing.T) {
 		"opencode": "run --pure --format json --dir <clone> -m m --variant e --x y <brief>",
 		"pi": "-p --mode json --no-extensions --no-skills --no-prompt-templates --no-context-files --no-session " +
 			"--skill <clone>/.atm/skills/ponytail --model m --thinking e --x y <brief>",
+		"cursor": "-p --output-format stream-json --trust --force --workspace <clone> --model m --x y <brief>",
 	}
 	for harness, want := range cases {
 		t.Run(harness, func(t *testing.T) {
@@ -307,7 +318,8 @@ func TestRunDrivesTheAgent(t *testing.T) {
 			t.Setenv("FAKE_AGENT_CALL", call)
 			t.Setenv("CLAUDE_CODE_CHILD_SESSION", "1")
 			var out bytes.Buffer
-			err := Run("t", []string{"--harness", harness, "--model", "m", "--effort", "e", "--harness-arg", "--x",
+			effort := map[bool]string{false: "e"}[harness == "cursor"] // cursor's goes in its model
+			err := Run("t", []string{"--harness", harness, "--model", "m", "--effort", effort, "--harness-arg", "--x",
 				"--harness-arg", "y", "--env", "ATM_FAKE=a=b", issueFile(t, issue)}, &out, io.Discard)
 			if err != nil {
 				t.Fatal(err)
@@ -337,7 +349,7 @@ func TestRunDrivesTheAgent(t *testing.T) {
 				t.Fatalf("env: want ATM_FAKE and no CLAUDE_CODE_CHILD_SESSION, got %v", got.Env)
 			}
 			lines := logLines(t, log)
-			if want := map[bool]int{true: 5, false: 4}[harness == "claude" || harness == "pi"]; len(lines) != want {
+			if want := map[string]int{"claude": 5, "pi": 5, "cursor": 6}[harness]; len(lines) != cmp.Or(want, 4) {
 				t.Fatalf("want every line of the agent in the log, got %q", lines)
 			}
 			if left := clones(t, root); len(left) != 0 {
@@ -643,6 +655,11 @@ func TestRunDiesWhenTheAgentFails(t *testing.T) {
 		{harness: "opencode", mode: "wrong-skill", why: "ponytail"},
 		{harness: "pi", mode: "wrong-skill", why: "ponytail"},
 		{harness: "claude", why: "KEY=VALUE", args: []string{"--env", "NOVALUE"}},
+		{harness: "cursor", mode: "no-skill", why: "agent left no proof it used the ponytail skill"},
+		{harness: "cursor", mode: "skill-error", why: "ponytail"},
+		{harness: "cursor", mode: "wrong-skill", why: "ponytail"},
+		{harness: "cursor", why: "cursor has no effort flag: put it in the model, as '<model>[effort=high]'",
+			args: []string{"--effort", "high"}},
 	}
 	for _, c := range cases {
 		t.Run(c.harness+" "+c.mode+c.why, func(t *testing.T) {

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -107,6 +108,27 @@ func TestDoctorRunsEveryCheckAndFailsWhenAnyFails(t *testing.T) {
 			t.Fatal("want a non-zero exit")
 		}
 	})
+}
+
+func TestDoctorChecksCursorAgentForCursor(t *testing.T) {
+	dir := repo(t, "https://example.com/o/r.git")
+	watcher(t, dir, "w", 0)
+	onPath(t, "claude", "cursor-agent")
+	if out, err := atm(t, "init"); err != nil {
+		t.Fatalf("atm init: %v\n%s", err, out)
+	}
+	f, err := os.OpenFile(filepath.Join(dir, ".atm.yaml"), os.O_APPEND|os.O_WRONLY, 0)
+	if err == nil {
+		_, err = f.WriteString("harness: cursor\n")
+		err = errors.Join(err, f.Close())
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := atm(t, "doctor")
+	if err != nil || len(lines(t, out)) < 2 || !strings.HasPrefix(lines(t, out)[1], "ok cursor-agent: ") {
+		t.Fatalf("want cursor-agent checked, got %v\n%s", err, out)
+	}
 }
 
 func doctorRepoWithConfig(t *testing.T, config string) string {
