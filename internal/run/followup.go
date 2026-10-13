@@ -33,6 +33,13 @@ func reported(r map[string]any) ([]followUp, error) {
 		return nil, fmt.Errorf("invalid follow_ups in the agent report: %w", err)
 	}
 	for n := range all {
+		for _, field := range []struct{ name, value string }{
+			{"title", all[n].Title}, {"red_test", all[n].RedTest}, {"criterion", all[n].Criterion},
+		} {
+			if strings.TrimSpace(field.value) == "" {
+				return nil, fmt.Errorf("invalid follow_ups in the agent report: follow_ups[%d].%s must be non-empty", n, field.name)
+			}
+		}
 		all[n].Test, all[n].Verified = "", false
 	}
 	return all, nil

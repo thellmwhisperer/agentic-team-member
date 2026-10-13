@@ -96,6 +96,43 @@ func TestInvalidFollowUpsDoNotHideAChecksFailure(t *testing.T) {
 	}
 }
 
+func TestMalformedReportedFollowUpsDoNotHideAChecksFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		list string
+	}{
+		{name: "null entry", list: `[null]`},
+		{name: "missing title", list: `[{"red_test":"r_test.sh","criterion":"A gap is documented."}]`},
+		{name: "blank title", list: `[{"title":" ","red_test":"r_test.sh","criterion":"A gap is documented."}]`},
+		{name: "missing red test", list: `[{"title":"gap","criterion":"A gap is documented."}]`},
+		{name: "blank red test", list: `[{"title":"gap","red_test":"","criterion":"A gap is documented."}]`},
+		{name: "missing criterion", list: `[{"title":"gap","red_test":"r_test.sh"}]`},
+		{name: "blank criterion", list: `[{"title":"gap","red_test":"r_test.sh","criterion":"\t"}]`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := repo(t, "https://example.com/owner/repo.git", atmYAML)
+			t.Setenv("FAKE_AGENT_WORK", fixWork+`; mkdir -p .atm; printf '%s' '{"test_file":"","follow_ups":`+
+				tc.list+`}' > .atm/fake-report.json`)
+			var out bytes.Buffer
+			if err := Run("t", []string{issueFile(t, followUpIssue)}, &out, io.Discard); err == nil {
+				t.Fatal("want checks to reject the empty test_file")
+			}
+			checks := ends(t, &out, "checks")
+			if len(checks) != 1 {
+				t.Fatalf("want one checks event, got %v", checks)
+			}
+			reason, _ := checks[0]["error"].(string)
+			first, rest, _ := strings.Cut(reason, "\n")
+			if !strings.Contains(first, "test_file") || !strings.Contains(rest, "invalid follow_ups") {
+				t.Fatalf("want the checks reason first, the malformed follow-ups problem next to it, got %q", reason)
+			}
+			if got := readFollowUps(t, root); len(got) != 0 {
+				t.Fatalf("want no malformed follow-ups, got %v", got)
+			}
+		})
+	}
+}
+
 func TestResumeKeepsAFailedUnitsFollowUpsUntilItsReportReplacesThem(t *testing.T) {
 	root := repo(t, "https://example.com/owner/repo.git", atmSet(atmYAML, "test", failsOnUnit2))
 	t.Setenv("ATM_TEST_CRITERION", "Unit two's gap is documented.")
