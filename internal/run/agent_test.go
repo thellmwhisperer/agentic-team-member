@@ -146,8 +146,7 @@ func fakeAgentSetup(mode string) bool {
 
 func fakeAgentMode(mode string) (int, bool) {
 	switch mode {
-	case "fail":
-	case "empty-fail":
+	case "fail", "empty-fail":
 		return fakeAgentFailure(mode)
 	case "silent":
 		_ = os.WriteFile(os.Getenv("FAKE_AGENT_PID"), []byte(strconv.Itoa(os.Getpid())), 0o600)
