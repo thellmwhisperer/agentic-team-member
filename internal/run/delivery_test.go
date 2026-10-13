@@ -253,6 +253,42 @@ func TestRunDeliveryGetsTheIssueText(t *testing.T) {
 	}
 }
 
+func TestRunDeliveryGetsTheIntent(t *testing.T) {
+	for _, kept := range []bool{false, true} {
+		t.Run(map[bool]string{false: "no cut", true: "cut kept"}[kept], func(t *testing.T) {
+			repo(t, "git@github.com:owner/repo.git", atmSet(atmYAML, "delivery",
+				`printenv ATM_INTENT > "$ATM_TEST_OUT/intent"; printenv ATM_ISSUE_TEXT > "$ATM_TEST_OUT/text"; `+
+					`git show --name-only --format= HEAD -- .slop/tombstones > "$ATM_TEST_OUT/tombs"`))
+			got := t.TempDir()
+			t.Setenv("ATM_TEST_OUT", got)
+			if kept {
+				t.Setenv("FAKE_AGENT_WORK", "printf 'fixed\\nextra\\nmore\\n' > a.txt"+fixTest)
+				t.Setenv("FAKE_PONYTAIL_WORK", "echo fixed > a.txt")
+				t.Setenv("FAKE_PONYTAIL_REPORT", cut)
+			}
+			if err := Run("t", []string{issueFile(t, issue)}, &bytes.Buffer{}, &bytes.Buffer{}); err != nil {
+				t.Fatal(err)
+			}
+			read := reader(t, got)
+			intent, text, tomb := read("intent"), read("text"), read("tombs")
+			if !kept {
+				if intent != text {
+					t.Fatalf("without tombstones want ATM_INTENT = ATM_ISSUE_TEXT %q, got %q", text, intent)
+				}
+				return
+			}
+			if !strings.HasPrefix(tomb, ".slop/tombstones/T-PONYTAIL-") || strings.Contains(tomb, "\n") {
+				t.Fatalf("want one tombstone in the ponytail commit, got %q", tomb)
+			}
+			want := text + "\n\n## Files ATM adds\n\n`" + tomb + "`: ATM's slop detector records each cut it kept " +
+				"here, as slopslint tombstones. They are not part of the issue's scope surface and never a split trigger."
+			if intent != want {
+				t.Fatalf("ATM_INTENT = %q, want %q", intent, want)
+			}
+		})
+	}
+}
+
 func TestRunDeliveryNeedsAnOrigin(t *testing.T) {
 	root := repo(t, "https://example.com/owner/repo.git", atmSet(atmYAML, "delivery", deliveryLine))
 	gitT(t, root, "remote", "remove", "origin")

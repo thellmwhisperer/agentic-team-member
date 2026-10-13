@@ -140,11 +140,13 @@ variables:
 | `ATM_TITLE` | The issue's title |
 | `ATM_ISSUE` | The issue number; empty for a file |
 | `ATM_ISSUE_TEXT` | The whole issue, title and body |
+| `ATM_INTENT` | `ATM_ISSUE_TEXT`, then, when the slop detector committed tombstones, a `## Files ATM adds` section naming them as ATM's own record, not the issue's scope |
 | `ATM_BRANCH` | The branch |
 | `ATM_CLONE` | The clone's path |
 | `ATM_REPORT` | The path of `report.json` |
 | `ATM_PONYTAIL` | The kept cut's findings, one a line, or empty |
 
+With no-mistakes, the line is `no-mistakes axi run --intent "$ATM_INTENT"`.
 Its output goes to the screen and to `delivery-output.txt`. ATM never pushes
 or opens a pull request: that is the command's business.
 
