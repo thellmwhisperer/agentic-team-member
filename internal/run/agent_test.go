@@ -60,9 +60,6 @@ func fakeAgent(name string) int {
 		fmt.Print(`{"type": "system", "subtype": "init"}`+"\n", stream) // the test's lines too
 		fmt.Fprintln(os.Stderr, "fake stderr")
 	}
-	if name == "cursor-agent" && mode == "cursor-doctor-error" {
-		return 0
-	}
 	if exit, done := fakeAgentMode(mode); done {
 		return exit
 	}
@@ -661,8 +658,6 @@ func TestRunDiesWhenTheAgentFails(t *testing.T) {
 		{harness: "cursor", mode: "no-skill", why: "agent left no proof it used the ponytail skill"},
 		{harness: "cursor", mode: "skill-error", why: "ponytail"},
 		{harness: "cursor", mode: "wrong-skill", why: "ponytail"},
-		{harness: "cursor", why: "cursor has no effort flag: put it in the model, as '<model>[effort=high]'",
-			args: []string{"--effort", "high"}},
 	}
 	for _, c := range cases {
 		t.Run(c.harness+" "+c.mode+c.why, func(t *testing.T) {

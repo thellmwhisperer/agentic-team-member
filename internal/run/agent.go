@@ -525,8 +525,8 @@ func (s *stream) flush(report bool) {
 }
 
 // skillLoads is the ids of e's calls that load skill, by its exact name: a Skill tool call for claude, a read
-// of its SKILL.md for pi and codex, a skill call for opencode. A load proves the agent used skill once its
-// result is not an error.
+// of its SKILL.md for pi and codex, a skill call for opencode, a read or cat of its SKILL.md for cursor. A load
+// proves the agent used skill once its result is not an error.
 func (e event) skillLoads(harness, skill, clone string) []string {
 	read := func(path string) bool { return strings.Contains(filepath.ToSlash(path), "/"+skill+"/SKILL.md") }
 	switch {
@@ -546,13 +546,10 @@ func (e event) skillLoads(harness, skill, clone string) []string {
 }
 
 func (e event) cursorSkillLoads(skill, clone string) []string {
-	if e.Type != "tool_call" || e.Subtype != "completed" {
+	if e.Type != "tool_call" || e.Subtype != "started" {
 		return nil
 	}
-	kind, args, passed := e.cursorTool()
-	if !passed {
-		return nil
-	}
+	kind, args, _ := e.cursorTool()
 	var input struct{ Path, Command string }
 	_ = json.Unmarshal(args, &input)
 	target := filepath.Join(clone, skillDirs["cursor"], skill, "SKILL.md")
@@ -562,107 +559,35 @@ func (e event) cursorSkillLoads(skill, clone string) []string {
 		}
 		return filepath.Clean(path) == target
 	}
-	if kind == "read" && exact(input.Path) || kind == "shell" && cursorShellReads(input.Command, exact) {
+	if kind == "read" && exact(input.Path) || kind == "shell" && cursorCatReads(input.Command, exact) {
 		return []string{e.CallID}
 	}
 	return nil
 }
 
-// cursorShellReads proves a direct literal read of the installed skill, not arbitrary shell execution.
-func cursorShellReads(command string, exact func(string) bool) bool {
-	words, ok := cursorShellWords(command)
-	if !ok {
-		return false
-	}
-	return cursorCatReads(words, exact) || cursorSedReads(words, exact) || cursorHeadTailReads(words, exact)
-}
-
-func cursorShellWords(command string) ([]string, bool) {
+// cursorCatReads proves only a direct literal cat of the installed skill, not arbitrary shell execution.
+func cursorCatReads(command string, exact func(string) bool) bool {
 	file, err := syntax.NewParser().Parse(strings.NewReader(command), "")
 	if err != nil || len(file.Stmts) != 1 {
-		return nil, false
+		return false
 	}
 	stmt := file.Stmts[0]
 	call, ok := stmt.Cmd.(*syntax.CallExpr)
 	if !ok || stmt.Negated || stmt.Background || len(stmt.Redirs) != 0 || len(call.Assigns) != 0 {
-		return nil, false
+		return false
 	}
-	words := make([]string, 0, len(call.Args))
+	var words []string
 	for _, arg := range call.Args {
 		word, literal := literalWord(arg)
 		if !literal {
-			return nil, false
+			return false
 		}
 		words = append(words, word)
 	}
-	return words, true
-}
-
-func cursorCatReads(words []string, exact func(string) bool) bool {
-	if len(words) == 3 && words[0] == "cat" && words[1] == "--" {
-		return exact(words[2])
+	if len(words) == 3 && words[1] == "--" {
+		words = append(words[:1], words[2])
 	}
 	return len(words) == 2 && (words[0] == "cat" || words[0] == "/bin/cat") && exact(words[1])
-}
-
-func cursorSedReads(words []string, exact func(string) bool) bool {
-	if len(words) != 4 || !oneOf(words[0], "sed", "/bin/sed", "/usr/bin/sed") ||
-		words[1] != "-n" || !sedPrintRange(words[2]) {
-		return false
-	}
-	return exact(words[3])
-}
-
-func cursorHeadTailReads(words []string, exact func(string) bool) bool {
-	if len(words) == 0 || !oneOf(words[0], "head", "tail", "/usr/bin/head", "/usr/bin/tail") {
-		return false
-	}
-	count, path := cursorHeadTailArgs(words)
-	return positiveDecimal(count) && exact(path)
-}
-
-func cursorHeadTailArgs(words []string) (string, string) {
-	if len(words) == 3 && strings.HasPrefix(words[1], "-n") && len(words[1]) > 2 {
-		return words[1][2:], words[2]
-	}
-	if len(words) == 3 && strings.HasPrefix(words[1], "-") && len(words[1]) > 1 {
-		return words[1][1:], words[2]
-	}
-	if len(words) == 4 && words[1] == "-n" {
-		return words[2], words[3]
-	}
-	return "", ""
-}
-
-func oneOf(value string, options ...string) bool {
-	for _, option := range options {
-		if value == option {
-			return true
-		}
-	}
-	return false
-}
-
-func sedPrintRange(value string) bool {
-	if !strings.HasSuffix(value, "p") {
-		return false
-	}
-	value = strings.TrimSuffix(value, "p")
-	first, last, ranged := strings.Cut(value, ",")
-	return positiveDecimal(first) && (!ranged || positiveDecimal(last))
-}
-
-func positiveDecimal(value string) bool {
-	if value == "" {
-		return false
-	}
-	for _, r := range value {
-		if r < '0' || r > '9' {
-			return false
-		}
-	}
-	n, err := strconv.Atoi(value)
-	return err == nil && n > 0
 }
 
 // skillCalls is the ids of claude's Skill tool calls in e that load skill.

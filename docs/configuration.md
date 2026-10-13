@@ -49,11 +49,8 @@ A configured effort fails before cloning with
 `cursor has no effort flag: put it in the model, as '<model>[effort=<effort>]'`.
 
 The skill is installed at `.cursor/skills/<skill>/SKILL.md` and excluded from
-git. A successful read or shell read proves use; a failed read does not.
-Thinking deltas join into one `∴` line when the turn completes; assistant text
-is a `✎` line. Tools stay in start order by `call_id`, with their completed
-success or failure. The report comes from the last assistant message, not
-Cursor's concatenated result. An error result fails the step with its text.
+git. A successful read or cat of it proves use; a failed one does not.
+An error result fails the step with its text.
 
 ## `.atm.yaml`
 
