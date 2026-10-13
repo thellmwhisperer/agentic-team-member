@@ -169,8 +169,8 @@ func follow(ctx context.Context, root, label string, since time.Time, say func(l
 		say(label, "finished: passed")
 	default:
 		failed := o.FailedNode
-		if failed != "" {
-			failed = strings.ToUpper(failed[:1]) + failed[1:] // Delivery
+		if failed == "delivery" {
+			failed = "Delivery"
 		}
 		say(label, "finished: failed"+at(failed))
 	}
