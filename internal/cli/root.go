@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/thellmwhisperer/agentic-team-member/internal/buildinfo"
 	"github.com/thellmwhisperer/agentic-team-member/internal/run"
 )
 
@@ -24,7 +25,8 @@ func Execute() {
 // root is atm with every command; it prints errors to no one, Execute does.
 func root() *cobra.Command {
 	c := &cobra.Command{Use: "atm", Short: "ATM fixes an issue in the repository it runs in",
-		SilenceErrors: true, SilenceUsage: true}
+		Version: buildinfo.String(), SilenceErrors: true, SilenceUsage: true}
+	c.SetVersionTemplate("atm {{.Version}}\n")
 	c.AddCommand(runCmd(), attachCmd(), listCmd(true), listCmd(false), axiCmd(), initCmd(), doctorCmd(), serveCmd())
 	return c
 }
