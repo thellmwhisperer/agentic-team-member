@@ -241,7 +241,8 @@ func TestRunProvesATestsIssueOnlyThroughTheReportedFilesGoTests(t *testing.T) {
 	}
 	got := filepath.Join(t.TempDir(), "ran")
 	t.Setenv("ATM_TEST_OUT", got)
-	atm := strings.Replace(atmSet(atmYAML, "test_file", `go test -vet=off -count=1 -v -run {tests} {dir} >> "$ATM_TEST_OUT"`),
+	atm := strings.Replace(
+		atmSet(atmYAML, "test_file", `go test -vet=off -count=1 -v -run {tests} {dir} >> "$ATM_TEST_OUT"`),
 		`"**/*_test.sh"`, `"**/*_test.go"`, 1)
 	root := repo(t, "https://example.com/owner/repo.git", atm)
 	t.Setenv("GOCACHE", strings.TrimSpace(string(gocache))) // repo moves HOME, and the cache with it
