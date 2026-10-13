@@ -46,7 +46,9 @@ func TestRunPonytailFollowsTheChecks(t *testing.T) {
 				t.Fatal(err)
 			}
 			brief := strings.ReplaceAll(string(b), "\r\n", "\n")
-			for _, want := range []string{"### Retry on timeout\n\nType: fix\nRetry once.", "-broken\n+fixed",
+			briefIssue := strings.Replace(strings.TrimSpace(issue), "# Retry on timeout", "### Retry on timeout", 1)
+			briefIssue = strings.Replace(briefIssue, "Type: fix\n", "Type: fix\n", 1)
+			for _, want := range []string{briefIssue, "-broken\n+fixed",
 				"`ponytail-review`", "`speculative_feature`", "no new files", "`git commit`",
 				"Never cut code that does what a sentence of the issue asks", `"issue_sentence"`,
 				"## SCOPE\n" + reachScope + "\n" + netScope} {
