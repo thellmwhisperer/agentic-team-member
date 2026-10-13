@@ -133,6 +133,54 @@ func TestMalformedReportedFollowUpsDoNotHideAChecksFailure(t *testing.T) {
 	}
 }
 
+func TestFollowUpsFieldShapesKeepEarlierFollowUpsOnChecksFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		field     string
+		wantError bool
+	}{
+		{name: "absent"},
+		{name: "null", field: `,"follow_ups":null`, wantError: true},
+		{name: "empty array", field: `,"follow_ups":[]`},
+		{name: "scalar", field: `,"follow_ups":"later"`, wantError: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := repo(t, "https://example.com/owner/repo.git", atmSet(atmYAML, "test", failsOnUnit2))
+			t.Setenv("ATM_TEST_REPORT", `{"test_file":"a_test.sh"`+tc.field+`}`)
+			t.Setenv("FAKE_AGENT_WORK", `if [ -f c1_test.sh ]; then echo u2 >> a.txt; `+
+				`mkdir -p .atm/follow-ups/1; echo 'grep -q u3 a.txt' > .atm/follow-ups/1/c3_test.sh; `+
+				`printf '%s' "$ATM_TEST_REPORT" > .atm/fake-report.json; `+
+				`else printf 'fixed\n' > a.txt; echo 'grep -q fixed a.txt && ! grep -q broken a.txt' > a_test.sh; `+
+				`mkdir -p .atm/follow-ups/1 .atm/follow-ups/2; `+
+				`echo 'grep -q u2 a.txt' > .atm/follow-ups/1/c1_test.sh; `+
+				`echo 'grep -q extra a.txt' > .atm/follow-ups/2/c2_test.sh; `+
+				`printf '{"test_file":"a_test.sh","follow_ups":[`+
+				`{"title":"chained","red_test":"c1_test.sh","criterion":"A retry runs once after a timeout."},`+
+				`{"title":"pending","red_test":"c2_test.sh","criterion":"Some other work is documented."}]}' `+
+				`> .atm/fake-report.json; fi`)
+			var out bytes.Buffer
+			if err := Run("t", []string{issueFile(t, followUpIssue)}, &out, io.Discard); err == nil {
+				t.Fatal("want unit 2's checks to fail")
+			}
+			checks := ends(t, &out, "checks")
+			if len(checks) != 2 || checks[1]["state"] != "failed" {
+				t.Fatalf("want unit 2's checks failure, got %v", checks)
+			}
+			reason, _ := checks[1]["error"].(string)
+			first, note, hasNote := strings.Cut(reason, "\n")
+			if !strings.HasPrefix(first, "test: ") || hasNote != tc.wantError ||
+				(tc.wantError && !strings.Contains(note, "invalid follow_ups")) {
+				t.Fatalf("want invalid-field diagnostic %v after the checks reason, got %q", tc.wantError, reason)
+			}
+			got := readFollowUps(t, root)
+			if len(got) != 1 || got[0]["title"] != "pending" || got[0]["verified"] != true ||
+				got[0]["test"] != "grep -q extra a.txt\n" {
+				t.Fatalf("want unit 1's valid follow-up retained without a malformed entry, got %v", got)
+			}
+		})
+	}
+}
+
 func TestResumeKeepsAFailedUnitsFollowUpsUntilItsReportReplacesThem(t *testing.T) {
 	root := repo(t, "https://example.com/owner/repo.git", atmSet(atmYAML, "test", failsOnUnit2))
 	t.Setenv("ATM_TEST_CRITERION", "Unit two's gap is documented.")
