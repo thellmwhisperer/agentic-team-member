@@ -657,10 +657,10 @@ func (e event) calls(harness string) (cs []use) {
 	case harness == "codex":
 		return codexCalls(e.Item)
 	case harness == "opencode" && e.Type == "tool_use":
-		args := strs(e.Part.State.Input)
+		args := strs(e.Part.State.Input, writesFile(e.Part.Tool))
 		return []use{{e.Part.Tool, args, shellCommand(e.Part.Tool, e.Part.State.Input)}}
 	case harness == "pi" && e.Type == "tool_execution_start":
-		args := strs(e.Args)
+		args := strs(e.Args, writesFile(e.ToolName))
 		return []use{{e.ToolName, args, shellCommand(e.ToolName, e.Args)}}
 	case e.Type != "assistant" && e.Type != "message_end": // not a pi message_update's partial arguments
 		return nil
@@ -671,7 +671,7 @@ func (e event) calls(harness string) (cs []use) {
 			if len(input) == 0 {
 				input = b.Arguments
 			}
-			args := strs(b.Input) + strs(b.Arguments)
+			args := strs(b.Input, writesFile(b.Name)) + strs(b.Arguments, writesFile(b.Name))
 			cs = append(cs, use{b.Name, args, shellCommand(b.Name, input)})
 		}
 	}
@@ -688,7 +688,7 @@ func codexCalls(item struct {
 	case "command_execution":
 		return []use{{"shell", item.Command, item.Command}}
 	case "mcp_tool_call":
-		return []use{{item.Tool, strs(item.Arguments), ""}}
+		return []use{{item.Tool, strs(item.Arguments, writesFile(item.Tool)), ""}}
 	case "file_change":
 		paths := make([]string, 0, len(item.Changes))
 		for _, change := range item.Changes {
@@ -711,13 +711,19 @@ func shellCommand(tool string, input json.RawMessage) string {
 	return command
 }
 
-// written is the keys under which a tool call carries the text it writes into a file, not a path it reaches:
-// claude's, pi's, codex's and opencode's write and edit tools. An import of '../../x' in a test is no reach.
-var written = map[string]bool{"content": true, "old_string": true, "new_string": true, "oldString": true,
-	"newString": true, "oldText": true, "newText": true}
+func writesFile(tool string) bool {
+	switch strings.ToLower(tool) {
+	case "write", "edit", "write_file", "edit_file":
+		return true
+	default:
+		return false
+	}
+}
 
-// strs is every string in a tool call's input, by key, joined by spaces, but the text it writes into a file.
-func strs(input json.RawMessage) string {
+// strs is every string in a tool call's input, by key, joined by spaces.
+func strs(input json.RawMessage, write bool) string {
+	written := map[string]bool{"content": true, "old_string": true, "new_string": true, "oldString": true,
+		"newString": true, "oldText": true, "newText": true}
 	var walk func(any) []string
 	walk = func(v any) (out []string) {
 		switch v := v.(type) {
@@ -729,7 +735,7 @@ func strs(input json.RawMessage) string {
 			}
 		case map[string]any:
 			for _, k := range slices.Sorted(maps.Keys(v)) {
-				if !written[k] {
+				if !write || !written[k] {
 					out = append(out, walk(v[k])...)
 				}
 			}
