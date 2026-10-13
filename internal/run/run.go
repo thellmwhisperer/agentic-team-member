@@ -27,20 +27,24 @@ var githubURL = regexp.MustCompile(`^(?:[a-z][a-z0-9+.-]*://)?(?:[^/@]+@)?github
 
 // Usage is atm run's command line.
 const Usage = "usage: atm run [--base-ref r] [--harness h] [--model m] [--effort e] [--harness-arg a]... " +
-	"[--env KEY=VALUE]... <issue.md | issue number>"
+	"[--env KEY=VALUE]... <issue.md | issue number | --resume run>"
 
 // Run is atm run with args, its flags and the issue: a file, or an issue number of origin's repository.
 // Its report, briefs and logs go to .atm/runs/<label>/ (runDir): each node's start and end go to out, one JSON
 // object a line, and to report.json there; the summary goes to summary. ExitCode turns its error into atm's
-// exit code.
+// exit code. With --resume, it picks up the work a failed run kept, from its failed unit's checks.
 func Run(label string, args []string, out, summary io.Writer) (err error) {
-	args, base, a, err := parseArgs(args)
+	args, base, resume, a, err := parseArgs(args)
 	if err != nil {
 		return err
 	}
 	root, err := git("", "rev-parse", "--show-toplevel")
 	if err != nil {
 		return fmt.Errorf("not in a git repository: %w", err)
+	}
+	from, start, err := resuming(root, *resume, base)
+	if err != nil {
+		return err
 	}
 	repo := GitHubRepo()
 	home, err := os.UserHomeDir()
@@ -54,7 +58,7 @@ func Run(label string, args []string, out, summary io.Writer) (err error) {
 	}
 	a.Agent, a.dir = c.Agent, runDir(root, label)
 	r := newVerdict(a.dir, out)
-	defer func() { err = r.finish(err, summary) }()
+	defer func() { r.resumable(a.dir); err = r.finish(err, summary) }()
 	var i Issue
 	r.step("issue", func() (map[string]any, error) {
 		i, err = readIssue(args[len(args)-1], repo)
@@ -69,7 +73,7 @@ func Run(label string, args []string, out, summary io.Writer) (err error) {
 	defer func() { err = errors.Join(err, release(dir, repo)) }()
 	r.step("clone", func() (ev map[string]any, err error) {
 		var install []cmdResult
-		dir, sha, install, err = clone(root, *base, c.Install, repo, r.live)
+		dir, sha, install, err = clone(root, start, c.Install, repo, r.live)
 		return map[string]any{"clone": dir, "sha": sha, "commands": install}, err
 	})
 	var text string
@@ -79,7 +83,8 @@ func Run(label string, args []string, out, summary io.Writer) (err error) {
 	})
 	byClone.Store(dir, r)
 	defer byClone.Delete(dir)
-	proofs, unit, pending := a.units(r, root, dir, sha, text, i, c)
+	proofs, unit, pending := a.units(r, root, dir, sha, text, i, c,
+		resumePoint{Issue: args[len(args)-1], BaseRef: *base, Base: sha}, from)
 	if err := saveFollowUps(a.dir, pending); err != nil {
 		return err
 	}
@@ -94,23 +99,27 @@ func Run(label string, args []string, out, summary io.Writer) (err error) {
 
 // parseArgs is atm run's command line: its flags and the issue, in any order. It returns them as flags, then the
 // issue, last.
-func parseArgs(args []string) (ordered []string, base *string, a *agent, err error) {
+func parseArgs(args []string) (ordered []string, base, resume *string, a *agent, err error) {
 	fs := flag.NewFlagSet("atm run", flag.ContinueOnError)
 	base = fs.String("base-ref", "main", "the ref the run starts from, resolved in the repository")
+	resume = fs.String("resume", "", "a run that failed after its agent: its issue again, from its agent's work")
 	a = &agent{}
 	a.flags(fs)
 	// flag stops at the first argument that is not one: the issue, after which the flags go on.
 	for err = fs.Parse(args); err == nil && fs.NArg() > 0; err = fs.Parse(fs.Args()[1:]) {
 		if ordered != nil {
-			return nil, nil, nil, errors.New(Usage)
+			return nil, nil, nil, nil, errors.New(Usage)
 		}
 		i := len(args) - fs.NArg()
 		ordered = append(append(args[:i:i], args[i+1:]...), args[i])
 	}
-	if err == nil && ordered == nil {
+	switch {
+	case err == nil && ordered == nil && *resume != "": // the issue comes from the run it resumes
+		ordered = args
+	case err == nil && ordered == nil:
 		err = errors.New(Usage)
 	}
-	return ordered, base, a, err
+	return ordered, base, resume, a, err
 }
 
 // proof is how a unit was proven: on its base commit, with its test's content and task type.
@@ -119,18 +128,32 @@ type proof struct{ base, test, typ, testContent string }
 // units runs the units of the run in clone dir, from base commit sha, for issue i under config c: the first on
 // brief text, each next one, up to maxUnits, on the first follow-up on the issue the one before proved. It
 // returns each unit's proof, the issue as the last unit is proven, a chained one by its red test, and the
-// accepted follow-ups it did not chain. Each unit goes to the report.
-func (a agent) units(r *verdict, root, dir, sha, text string, i Issue, c config.Config) (proofs []proof,
-	unit Issue, pending []followUp) {
-	unit, head := i, sha
+// accepted follow-ups it did not chain. Each unit goes to the report, and its agent's work to keep, for atm
+// run --resume. A run that resumes from puts the work it kept back in dir, in place of its unit's agent.
+func (a agent) units(r *verdict, root, dir, sha, text string, i Issue, c config.Config, keep resumePoint,
+	from *resumePoint) (proofs []proof, unit Issue, pending []followUp) {
+	unit, head, n := i, sha, 1
 	var f *followUp // the follow-up a chained unit makes pass
 	var test string
-	for n := 1; ; n++ {
+	if from != nil {
+		n, f, proofs = from.Unit, from.FollowUp, from.proofs()
+		if f != nil {
+			unit.Type = "feature"
+		}
+	}
+	for ; ; n++ {
 		var report map[string]any
+		resumed := ""
 		r.step("agent", func() (map[string]any, error) {
 			var err error
 			var ev map[string]any
-			head, unit, text, ev, err = a.runUnit(root, dir, head, text, unit, f, n, i, c)
+			if from != nil {
+				resumed, ev = from.run, map[string]any{"report": from.Report, "resumed_from": from.run}
+				head, err = putBack(root, dir, *from)
+				from = nil
+			} else {
+				head, unit, text, ev, err = a.runUnit(root, dir, head, text, unit, f, n, i, c)
+			}
 			if ev == nil {
 				return nil, err
 			}
@@ -142,6 +165,7 @@ func (a agent) units(r *verdict, root, dir, sha, text string, i Issue, c config.
 			}
 			return ev, err
 		})
+		r.keep(a.dir, dir, keep, n, report, f, proofs)
 		var in []followUp
 		var ev map[string]any
 		r.step("checks", func() (map[string]any, error) {
@@ -157,7 +181,7 @@ func (a agent) units(r *verdict, root, dir, sha, text string, i Issue, c config.
 		green, _ := ev["green"].(try)
 		proofSpan, _ := ev["proof_span"].(span)
 		r.Units = append(r.Units, unitResult{Unit: n, Base: head, TestFile: test, Type: unit.Type,
-			Red: red, Green: green, Result: outcome(r.err), span: proofSpan})
+			Red: red, Green: green, Result: outcome(r.err), ResumedFrom: resumed, span: proofSpan})
 		if r.err != nil || len(in) == 0 {
 			return proofs, unit, pending
 		}

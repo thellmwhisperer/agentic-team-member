@@ -108,6 +108,7 @@ effort. Both are in [Configuration](docs/configuration.md).
 | `atm init` | Writes a commented `.atm.yaml` and ignores `.atm/` |
 | `atm doctor` | Checks that a run can start |
 | `atm run [flags] <issue>` | Runs an issue: a GitHub number or a file with a `Type:` line |
+| `atm run --resume <run>` | Runs a failed run's issue again from its agent's work, at its checks |
 | `atm status` | The runs going |
 | `atm attach [run]` | A run's screen until it ends |
 | `atm runs` | Every retained run and its report |

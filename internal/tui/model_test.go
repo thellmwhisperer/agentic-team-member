@@ -200,6 +200,14 @@ func TestScreenShowsWhatTheAgentSaysBetweenItsDimmerToolCalls(t *testing.T) {
 	}
 }
 
+func TestAResumedUnitsAgentRowNamesTheRunItResumes(t *testing.T) {
+	m := screen(120, 40, append(unit[:7:7],
+		`{"step":"agent","state":"passed","resumed_from":"retry-1","duration_ms":4}`)...)
+	if s := view(m); !strings.Contains(s, "resumed from retry-1 · passed") || strings.Contains(s, "tools") {
+		t.Fatalf("resumed agent row:\n%s", s)
+	}
+}
+
 func TestAgentBoxFoldsToolCallsBetweenWhatTheAgentSaysIntoOneDimLine(t *testing.T) {
 	m := screen(120, 40, append(unit[:7:7], `{"step":"agent","thinking":"Plan the fix."}`,
 		`{"step":"agent","says":"Writing the red tests first."}`,

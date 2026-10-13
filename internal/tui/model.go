@@ -103,6 +103,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 type event struct {
 	Step, State, Error, TS, Title, Type, SHA, Branch string
 	Check, ID, Tool, Detail, Result, Thinking, Says  string
+	ResumedFrom                                      string `json:"resumed_from"`
 	Output                                           *string
 	Number                                           int
 	DurationMS                                       int64 `json:"duration_ms"`
@@ -194,6 +195,9 @@ func (m *Model) ended(e event) {
 		r.note = e.SHA[:min(8, len(e.SHA))]
 	case "agent":
 		r.note = fmt.Sprintf("%d tools", m.tools())
+		if e.ResumedFrom != "" { // its agent's work, picked up: no agent call
+			r.note = "resumed from " + e.ResumedFrom
+		}
 	case "ponytail":
 		r.note = map[bool]string{true: fmt.Sprintf("%d cuts", len(e.Report.Findings)), false: "no cut"}[e.Kept]
 		for _, f := range e.Report.Findings {

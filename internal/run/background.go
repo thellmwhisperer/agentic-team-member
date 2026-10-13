@@ -282,6 +282,7 @@ func (s *server) run(r *bgRun, args []string) {
 		}()
 		return Run(r.Run, args, &screen{s: s, r: r, events: true}, &screen{s: s, r: r})
 	}()
+	_, cannot := resumeFrom(s.root, r.Run)
 	s.Lock()
 	defer s.Unlock()
 	o := &r.Outcome
@@ -300,6 +301,9 @@ func (s *server) run(r *bgRun, args []string) {
 		o.NextStep = "nothing kept the work: set delivery in .atm.yaml to hand it on"
 	case o.FailedNode == "":
 		o.NextStep = "fix the reason" + again
+	case cannot == nil:
+		o.NextStep = "read why " + o.FailedNode + " failed in the report, fix it, then pick up its agent's work: " +
+			"atm run --resume " + o.Run
 	default:
 		o.NextStep = "read why " + o.FailedNode + " failed in the report, fix it" + again
 	}
@@ -432,6 +436,7 @@ func (r *bgRun) event(line string) string {
 	var ev struct {
 		Step, State, Error string
 		DurationMS         *int64 `json:"duration_ms"`
+		ResumedFrom        string `json:"resumed_from"`
 	}
 	if json.Unmarshal([]byte(line), &ev) != nil {
 		return line
@@ -443,6 +448,9 @@ func (r *bgRun) event(line string) string {
 	line = fmt.Sprintf("%-9s %s", ev.Step, ev.State)
 	if ev.DurationMS != nil {
 		line += " " + Human(time.Duration(*ev.DurationMS)*time.Millisecond)
+	}
+	if ev.ResumedFrom != "" {
+		line += ", resumed from " + ev.ResumedFrom
 	}
 	if why, _, _ := strings.Cut(ev.Error, "\n"); why != "" {
 		line += ": " + why
@@ -516,9 +524,15 @@ func (s *server) save() {
 }
 
 // Start checks args, atm run's command line, and has the background process of the repository at root run it.
-// It returns the run, just started.
+// It returns the run, just started. A run that resumes another takes that one's issue.
 func Start(root string, args []string) (Outcome, error) {
-	args, _, _, err := parseArgs(args)
+	args, _, resume, _, err := parseArgs(args)
+	if err == nil && *resume != "" {
+		var p resumePoint
+		if p, err = resumeFrom(root, *resume); err == nil {
+			args, _, _, _, err = parseArgs(append(args, p.Issue)) // and no other
+		}
+	}
 	if err != nil {
 		return Outcome{}, err
 	}

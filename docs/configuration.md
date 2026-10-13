@@ -107,6 +107,28 @@ Flags go before or after the issue. A second issue is an error.
 | `--effort <effort>` | from the layers | The agent's effort |
 | `--harness-arg <arg>` | none | One argument for the agent CLI, before the brief. Repeatable |
 | `--env KEY=VALUE` | none | One variable in the agent's environment. Repeatable |
+| `--resume <run>` | none | Runs `<run>`'s issue again from its agent's work, in place of an issue |
+
+### Resuming a failed run
+
+A run that fails at the checks, the slop detector or the delivery keeps its
+agent's work in `.atm/runs/<label>/resume/`: `resume.json` (the issue, the base
+commit, the failed unit's number, its agent report and the follow-up it
+chained) and `work.bundle` (the commits of the units before it, then the failed
+unit's uncommitted work, new and binary files included, ignored files left
+out). Its `report.json` says `"resumable": true` and names the unit in
+`resumable_unit`, and its `next_step` names `atm run --resume <label>`. A run
+that failed before or in the agent is not resumable.
+
+`atm run --resume <label>` starts a new run of the same issue under its own
+label. It reads the issue and `.atm.yaml` again, so a fixed config counts,
+clones the saved base commit and puts the work back. The failed unit's agent
+does not run again: its Agent row reads `resumed from <label>`, also as
+`resumed_from` on its unit in `report.json`, and the run goes on from that
+unit's checks as any run does. The other flags apply as usual, `--base-ref`
+aside: the resumed run keeps the base ref of the one it resumes. A run that
+does not exist, is not resumable, or whose base commit the repository no longer
+has fails before cloning, saying which.
 
 ## The issue
 
@@ -134,7 +156,7 @@ ignores.
 
 | Path | Holds | Kept |
 |------|-------|------|
-| `.atm/runs/<label>/` | `report.json`, the briefs, the agent logs, `follow-ups.json`, `delivery-output.txt` | Always |
+| `.atm/runs/<label>/` | `report.json`, the briefs, the agent logs, `follow-ups.json`, `delivery-output.txt`, and `resume/` when the run is resumable | Always |
 | `.atm/clones/atm-run-<timestamp>/` | The run's isolated clone | Removed when the run ends, unless it delivered and its PR is open |
 | `.atm/runs.jsonl` | The last state of each retained run, so `atm runs` survives the background process | Every run going and the newest 200 that ended |
 | `.atm/atm.sock`, `.atm/atm.lock`, `.atm/serve.log` | The background process | While it runs; the log stays |
