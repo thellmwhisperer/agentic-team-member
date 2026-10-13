@@ -52,16 +52,7 @@ func fakeAgent(name string) int {
 		return 0
 	}
 	args := os.Args[1:]
-	stdin, _ := io.ReadAll(os.Stdin)
-	brief := map[bool]string{true: string(stdin), false: args[len(args)-1]}[name == "claude"]
-	_, typ, _ := strings.Cut(brief, "Task type: ")
-	typ, _, _ = strings.Cut(typ, ".")
-	skill, call, todo, text := "ponytail", "", cmp.Or(os.Getenv("FAKE_AGENT_WORK"), work[typ]), fakeReport
-	if strings.Contains(brief, "`ponytail-review`") {
-		mode, skill, call, todo = os.Getenv("FAKE_PONYTAIL"), "ponytail-review", ".ponytail", os.Getenv("FAKE_PONYTAIL_WORK")
-		text = cmp.Or(os.Getenv("FAKE_PONYTAIL_REPORT"), `{"findings": [], "summary": "Lean already."}`)
-	}
-	recordFakeAgentCall(args, stdin, call)
+	_, call, skill, todo, text := fakeAgentTask(name, args, &mode)
 	waitForFakeAgentRelease()
 	wd, _ := os.Getwd()
 	stream := strings.ReplaceAll(os.Getenv("FAKE_AGENT_STREAM"), "<clone>", filepath.ToSlash(wd))
@@ -110,6 +101,21 @@ func fakeAgent(name string) int {
 	return 0
 }
 
+func fakeAgentTask(name string, args []string, mode *string) ([]byte, string, string, string, string) {
+	stdin, _ := io.ReadAll(os.Stdin)
+	brief := map[bool]string{true: string(stdin), false: args[len(args)-1]}[name == "claude"]
+	_, typ, _ := strings.Cut(brief, "Task type: ")
+	typ, _, _ = strings.Cut(typ, ".")
+	skill, call, todo, text := "ponytail", "", cmp.Or(os.Getenv("FAKE_AGENT_WORK"), work[typ]), fakeReport
+	if strings.Contains(brief, "`ponytail-review`") {
+		*mode = os.Getenv("FAKE_PONYTAIL")
+		skill, call, todo = "ponytail-review", ".ponytail", os.Getenv("FAKE_PONYTAIL_WORK")
+		text = cmp.Or(os.Getenv("FAKE_PONYTAIL_REPORT"), `{"findings": [], "summary": "Lean already."}`)
+	}
+	recordFakeAgentCall(args, stdin, call)
+	return stdin, call, skill, todo, text
+}
+
 func fakeAgentSetup(mode string) bool {
 	if mode == "grandchild" {
 		_ = os.WriteFile(os.Getenv("FAKE_AGENT_PID"), []byte(strconv.Itoa(os.Getpid())), 0o600)
@@ -141,10 +147,8 @@ func fakeAgentSetup(mode string) bool {
 func fakeAgentMode(mode string) (int, bool) {
 	switch mode {
 	case "fail":
-		fmt.Fprintln(os.Stderr, "boom")
-		return 3, true
 	case "empty-fail":
-		return 3, true
+		return fakeAgentFailure(mode)
 	case "silent":
 		_ = os.WriteFile(os.Getenv("FAKE_AGENT_PID"), []byte(strconv.Itoa(os.Getpid())), 0o600)
 		time.Sleep(time.Hour)
@@ -169,19 +173,31 @@ func fakeAgentMode(mode string) (int, bool) {
 		time.Sleep(time.Hour)
 		return 0, true
 	case "orphan":
-		grandchild := exec.Command(os.Args[0])
-		grandchild.Env = append(os.Environ(), "FAKE_AGENT=grandchild")
-		grandchild.ExtraFiles = append(grandchild.ExtraFiles, os.NewFile(3, "clone.lock"))
-		null, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
-		if err != nil {
-			return 1, true
-		}
-		grandchild.Stdout, grandchild.Stderr = null, null
-		err = grandchild.Start()
-		_ = null.Close()
-		if err != nil {
-			return 1, true
-		}
+		return fakeOrphanAgent()
+	}
+	return 0, false
+}
+
+func fakeAgentFailure(mode string) (int, bool) {
+	if mode == "fail" {
+		fmt.Fprintln(os.Stderr, "boom")
+	}
+	return 3, true
+}
+
+func fakeOrphanAgent() (int, bool) {
+	grandchild := exec.Command(os.Args[0])
+	grandchild.Env = append(os.Environ(), "FAKE_AGENT=grandchild")
+	grandchild.ExtraFiles = append(grandchild.ExtraFiles, os.NewFile(3, "clone.lock"))
+	null, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+	if err != nil {
+		return 1, true
+	}
+	grandchild.Stdout, grandchild.Stderr = null, null
+	err = grandchild.Start()
+	_ = null.Close()
+	if err != nil {
+		return 1, true
 	}
 	return 0, false
 }
@@ -562,7 +578,8 @@ func TestRunReportsReachBeforeAgentFailure(t *testing.T) {
 	t.Setenv("FAKE_AGENT_STREAM", stream)
 	var out bytes.Buffer
 	err := Run("t", []string{"--harness", "claude", issueFile(t, issue)}, &out, io.Discard)
-	if err == nil || !strings.Contains(err.Error(), "exit code 3; the agent reached outside its clone: Bash rg pattern . ../..") {
+	want := "exit code 3; the agent reached outside its clone: Bash rg pattern . ../.."
+	if err == nil || !strings.Contains(err.Error(), want) {
 		t.Fatalf("want reach failure to take precedence, got %v", err)
 	}
 }

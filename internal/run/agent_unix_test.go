@@ -83,40 +83,48 @@ func TestRunKeepsTheCauseOfTheAgentsDeath(t *testing.T) {
 		{mode: "empty-fail", exit: "exit code 3", why: "exit code 3"},
 		{mode: "killed", exit: "signal killed", why: "signal killed", tail: "fake stderr"},
 	} {
-		t.Run(c.mode, func(t *testing.T) {
-			root := repo(t, "https://example.com/owner/repo.git", atmYAML)
-			pidFile := filepath.Join(t.TempDir(), "pid")
-			t.Setenv("FAKE_AGENT", c.mode)
-			t.Setenv("FAKE_AGENT_PID", pidFile)
-			var out bytes.Buffer
-			err := Run("t", []string{issueFile(t, issue)}, &out, io.Discard)
-			end, _, log := agentStep(t, &out)
-			want := c.why + "; log: " + log
-			if err == nil || err.Error() != want || end["error"] != want {
-				t.Fatalf("want %q, got %v, end event %v", want, err, end)
-			}
-			rep := readReport(t, filepath.Join(root, ".atm", "runs", "t", "report.json"))
-			n := reportNode(t, rep, "agent")
-			tail, _ := n["tail"].(string)
-			if rep["reason"] != want || n["exit"] != c.exit ||
-				c.tail != "" && (!strings.Contains(tail, c.tail) ||
-					!strings.Contains(tail, `{"type": "system", "subtype": "init"}`)) {
-				t.Fatalf("want reason %q, exit %q and a tail holding %q, got %v", want, c.exit, c.tail, rep)
-			}
-			if _, ok := n["tail"]; !ok {
-				t.Fatalf("report.json omitted empty tail: %v", n)
-			}
-			stderr, _ := os.ReadFile(strings.TrimSuffix(log, ".jsonl") + ".stderr.txt")
-			if c.mode != "empty-fail" && !strings.HasPrefix(string(stderr), "fake stderr\n") ||
-				c.mode == "fail" && string(stderr) != "fake stderr\nboom\n" {
-				t.Fatalf("worker.stderr.txt: %q", stderr)
-			}
-			if c.mode == "silent" {
-				b, _ := os.ReadFile(pidFile)
-				pid, _ := strconv.Atoi(string(b))
-				until(t, "the silent agent is dead", func() bool { return pid > 0 && !alive(pid) })
-			}
-		})
+		t.Run(c.mode, func(t *testing.T) { assertAgentDeath(t, c) })
+	}
+}
+
+func assertAgentDeath(t *testing.T, c struct{ mode, exit, why, tail string }) {
+	t.Helper()
+	root := repo(t, "https://example.com/owner/repo.git", atmYAML)
+	pidFile := filepath.Join(t.TempDir(), "pid")
+	t.Setenv("FAKE_AGENT", c.mode)
+	t.Setenv("FAKE_AGENT_PID", pidFile)
+	var out bytes.Buffer
+	err := Run("t", []string{issueFile(t, issue)}, &out, io.Discard)
+	end, _, log := agentStep(t, &out)
+	want := c.why + "; log: " + log
+	if err == nil || err.Error() != want || end["error"] != want {
+		t.Fatalf("want %q, got %v, end event %v", want, err, end)
+	}
+	rep := readReport(t, filepath.Join(root, ".atm", "runs", "t", "report.json"))
+	n := reportNode(t, rep, "agent")
+	tail, _ := n["tail"].(string)
+	if rep["reason"] != want || n["exit"] != c.exit ||
+		c.tail != "" && (!strings.Contains(tail, c.tail) ||
+			!strings.Contains(tail, `{"type": "system", "subtype": "init"}`)) {
+		t.Fatalf("want reason %q, exit %q and a tail holding %q, got %v", want, c.exit, c.tail, rep)
+	}
+	if _, ok := n["tail"]; !ok {
+		t.Fatalf("report.json omitted empty tail: %v", n)
+	}
+	assertAgentStderr(t, c.mode, log)
+	if c.mode == "silent" {
+		b, _ := os.ReadFile(pidFile)
+		pid, _ := strconv.Atoi(string(b))
+		until(t, "the silent agent is dead", func() bool { return pid > 0 && !alive(pid) })
+	}
+}
+
+func assertAgentStderr(t *testing.T, mode, log string) {
+	t.Helper()
+	stderr, _ := os.ReadFile(strings.TrimSuffix(log, ".jsonl") + ".stderr.txt")
+	if mode != "empty-fail" && !strings.HasPrefix(string(stderr), "fake stderr\n") ||
+		mode == "fail" && string(stderr) != "fake stderr\nboom\n" {
+		t.Fatalf("worker.stderr.txt: %q", stderr)
 	}
 }
 
