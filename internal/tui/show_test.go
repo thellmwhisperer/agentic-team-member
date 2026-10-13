@@ -105,7 +105,7 @@ func TestDeliveryGetsTheTerminalFromItsFirstOutput(t *testing.T) {
 				follow = f
 			}(follow)
 			follow = deliveryRun(t, s, p, silent)
-			o, _, err := Show("", "issue-1", tty, tty)
+			o, _, err := Show("", "issue-1", "startup", tty, tty)
 			_ = tty.Close()
 			<-read
 			if err != nil || o.Outcome != "passed" {

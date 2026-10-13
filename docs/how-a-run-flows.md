@@ -207,6 +207,16 @@ back when the command ends.
 On Windows, the delivery command runs without ATM's attached terminal, so its
 output appears as lines.
 
+In a herdr pane (`HERDR_ENV=1` and
+`HERDR_PANE_ID` set), the screen also shows the run in herdr's Agents section
+as `atm`, with the run's label as its session: `working` with the issue, then
+with each step it reaches (`#7 Agent · unit 2`, `#7 Checks · red/green`), and
+`idle` with `#7 passed` or `#7 failed at <step>` when the run ends. An issue
+file goes by the run's label instead of `#7`. Leaving the screen, by the run's
+end or by `q`, takes `atm` out of the section. ATM runs `$HERDR_BIN_PATH` or
+`herdr`, a second at most per call; a failing or missing `herdr` changes
+nothing. The coding agent keeps its own herdr reporting, if it has any.
+
 Off a terminal, or with `NO_COLOR` or `TERM=dumb`, the screen is plain lines:
 one per step start and end, then the delivery's output and the summary. Every
 duration ATM prints reads like `0.9 s`, `4 min 28 s` or `1 h 02 min`.
