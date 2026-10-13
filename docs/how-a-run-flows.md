@@ -88,17 +88,21 @@ The agent runs in the clone in its most minimal mode:
 | `codex` | `codex exec`, which still loads your skills | as its last argument |
 | `opencode` | `opencode run --pure`, which still loads your skills | as its last argument |
 | `pi` | `pi -p --no-extensions --no-skills --no-prompt-templates --no-context-files --no-session` | as its last argument |
+| `cursor` | `cursor-agent -p --output-format stream-json --trust --force --workspace <clone>`, then `--model <model>` when set and any `--harness-arg`s | as its last argument |
 
 ATM writes the bundled `ponytail` skill into the clone, outside git, and the
-agent's log must show it loaded under that exact name and succeeded. Every
-line the agent writes goes to `worker.jsonl`, and its stderr to
-`worker.stderr.txt` too, as it is written. Its report is the last JSON
+agent's log must show it loaded under that exact name and succeeded. For Cursor,
+ATM installs it at `.cursor/skills/<skill>/SKILL.md` outside git; a successful
+`read` or direct `cat` of that file proves use. Every line the agent writes
+goes to `worker.jsonl`, and its stderr to `worker.stderr.txt` too, as it is
+written. Its report is the last JSON
 object of its final message and must name `test_file`: ATM never guesses
-which test proves the fix. ATM checks each logged tool call for all four
-harnesses. For write and edit tools (`write`, `edit`, `write_file` and
-`edit_file`), it ignores the content and old/new text fields, while checking
-the remaining arguments, including the destination path. It checks all
-arguments for other tools. A call fails the step if it names an absolute path
+which test proves the fix. ATM checks each logged tool call for every
+harness. For write and edit tools (`write`, `edit`, `write_file` and
+`edit_file`), it ignores written content (`content`, `fileText` and old/new
+text fields), while checking the remaining arguments, including the destination
+path. It checks all arguments for other tools. A call fails the step if it
+names an absolute path
 under the repository root but outside the clone, or if its shell command runs
 `curl` or `wget` or contains an HTTP(S) URL whose host is not `localhost`,
 `127.0.0.1` or `::1`. One narrow exception applies to a leading plain `cat`
@@ -108,6 +112,8 @@ must contain a recognized test function using the standard `testing.T` type.
 The exception covers URL text in that fixture only; URLs or fetch commands
 elsewhere in the shell command still fail. The error names the first offending
 call. A zero exit without a valid report fails; so does any non-zero exit.
+For Cursor, a stream result with `is_error: true` fails the step with its
+result text even if the process exits zero.
 
 ## Checks
 
