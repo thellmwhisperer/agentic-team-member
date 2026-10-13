@@ -170,11 +170,18 @@ func commitBase(t *testing.T, root, name, text string) {
 const fixtureWork = "echo fixed > a.txt; echo ok > fixture.txt" +
 	"; echo 'grep -q fixed a.txt && ! grep -q broken a.txt && grep -q ok fixture.txt' > a_test.sh"
 
-// proofCases are the task types' proofs at work: why, when not "", names the run's failure.
+// proofCases are the task types' proofs at work: why, when not "", names the run's failure; files are on the base.
 var proofCases = []struct {
 	name, typ, work, atm, why, lib, ignore, hooks string // hooks: hooks_test.sh on the base
 	hang, binary                                  bool   // binary: $ATM_TEST_BINARY is executedBinary
+	files                                         map[string]string
 }{
+	{name: "Go fix whose test does not compile without it", typ: "fix", atm: goAtm, files: goBase,
+		work: `printf 'package p\n\nfunc Value() string { return "broken" }\n\nfunc Fixed() string { return "fixed" }\n'` +
+			" > p/p.go; " + goTest("Fixed"),
+		why: "red did not run: parse/compile error"},
+	{name: "Go fix whose test fails on an assertion without it", typ: "fix", atm: goAtm, files: goBase,
+		work: `printf 'package p\n\nfunc Value() string { return "fixed" }\n' > p/p.go; ` + goTest("Value")},
 	{name: "fix whose test only calls a function it adds to an old file", typ: "fix", lib: lib,
 		work: "echo '" + helper + "' >> lib.sh" + testThrough("helper"), why: "depends on nothing the base had"},
 	{name: "fix whose test only calls a function it adds next to a changed line", typ: "fix", lib: lib,
@@ -303,6 +310,17 @@ func executedBinary(t *testing.T) string {
 	return bin
 }
 
+// goBase is a Go module whose p.Value is broken, goAtm runs a Go test file alone.
+var goBase, goAtm = map[string]string{"go.mod": "module example.com/m\n\ngo 1.21\n",
+	"p/p.go": "package p\n\nfunc Value() string { return \"broken\" }\n"},
+	atmSet(atmYAML, "test_file", "go test -vet=off -count=1 -run {tests} {dir}")
+
+// goTest writes p/p_test.go, which wants fn to return fixed, and reports it as the test.
+func goTest(fn string) string {
+	return `printf 'package p\n\nimport "testing"\n\nfunc TestFix(t *testing.T) {\n\tif ` + fn +
+		`() != "fixed" {\n\t\tt.Fatal()\n\t}\n}\n' > p/p_test.go; ` + reportJSON("p/p_test.go")
+}
+
 // shrunkTest names the failure of work that deletes or shortens a_test.sh, a test on the base.
 const shrunkTest = "the base's test a_test.sh is gone or shorter"
 
@@ -329,7 +347,18 @@ func reportJSON(test string) string {
 	return `mkdir -p .atm; printf '{"test_file":"` + test + `","follow_ups":[]}' > .atm/fake-report.json`
 }
 
+// keepGoCache keeps Go's build cache where it is once repo moves HOME.
+func keepGoCache(t *testing.T) {
+	t.Helper()
+	gocache, err := exec.Command("go", "env", "GOCACHE").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GOCACHE", strings.TrimSpace(string(gocache)))
+}
+
 func TestRunChecksTheProofOfEachTaskType(t *testing.T) {
+	keepGoCache(t)
 	for _, c := range proofCases {
 		t.Run(c.name, func(t *testing.T) {
 			if c.binary {
@@ -339,6 +368,7 @@ func TestRunChecksTheProofOfEachTaskType(t *testing.T) {
 			commitBase(t, root, "lib.sh", c.lib)
 			commitBase(t, root, ".gitignore", c.ignore)
 			commitBase(t, root, "hooks_test.sh", c.hooks)
+			commitFiles(t, root, "", c.files)
 			if c.work != "" {
 				t.Setenv("FAKE_AGENT_WORK", c.work)
 			}
