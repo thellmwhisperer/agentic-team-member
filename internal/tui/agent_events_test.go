@@ -93,7 +93,7 @@ func agentBoxSays(t *testing.T, width int, text string) (string, []string) {
 func activeStylesAtText(raw, text string) (bool, bool, bool) {
 	bold, italic := false, false
 	offset := 0
-	for _, sgr := range regexp.MustCompile("\\x1b\\[([0-9;]*)m").FindAllStringSubmatchIndex(raw, -1) {
+	for _, sgr := range regexp.MustCompile(`\x1b\[([0-9;]*)m`).FindAllStringSubmatchIndex(raw, -1) {
 		if strings.Contains(raw[offset:sgr[0]], text) {
 			return bold, italic, true
 		}

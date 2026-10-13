@@ -222,14 +222,7 @@ var (
 	listItem = regexp.MustCompile(`^( {0,3})([-*+]|\d+[.)])[ \t]+(.*)$`)
 )
 
-func markdown(line string) (string, bool, bool) {
-	source := []byte(line)
-	root := parser.New().Parse(source)
-	for block := root.FirstChild(); block != nil; block = block.NextSibling() {
-		if _, ok := block.(*ast.CodeBlock); ok {
-			return displayText(line), true, true
-		}
-	}
+func markdownText(source []byte, root ast.Node) (string, bool) {
 	var out strings.Builder
 	code := false
 	var render func(ast.Node, lipgloss.Style)
@@ -269,7 +262,19 @@ func markdown(line string) (string, bool, bool) {
 		}
 	}
 	render(root, lipgloss.NewStyle())
-	return out.String(), code, false
+	return out.String(), code
+}
+
+func markdown(line string) (string, bool, bool) {
+	source := []byte(line)
+	root := parser.New().Parse(source)
+	for block := root.FirstChild(); block != nil; block = block.NextSibling() {
+		if _, ok := block.(*ast.CodeBlock); ok {
+			return displayText(line), true, true
+		}
+	}
+	text, code := markdownText(source, root)
+	return text, code, false
 }
 
 func displayText(value string) string {
@@ -336,6 +341,31 @@ func wrapMarkdown(text string, width int) string {
 	return strings.Join(wrapped, "\n")
 }
 
+func plainRows(text string, width int, code bool) []string {
+	if code {
+		text = wrapMarkdown(text, width)
+	} else {
+		text = ansi.Wrap(text, width, "")
+	}
+	return strings.Split(text, "\n")
+}
+
+func listRows(line string, width int) ([]string, bool) {
+	item := listItem.FindStringSubmatch(line)
+	if item == nil {
+		return nil, false
+	}
+	lead := item[1] + cmp.Or(strings.Trim(item[2], "-*+"), "•") + " "
+	bodyText, bodyHasCode, _ := markdown(item[3])
+	bodyWidth := max(1, width-ansi.StringWidth(lead))
+	body := plainRows(bodyText, bodyWidth, bodyHasCode)
+	wrapped := append([]string{lead + body[0]}, body[1:]...)
+	for i := 1; i < len(wrapped); i++ {
+		wrapped[i] = strings.Repeat(" ", ansi.StringWidth(lead)) + wrapped[i]
+	}
+	return wrapped, true
+}
+
 // agentTextRows is the Markdown of text in rows of width, the first behind prefix, the rest indented under
 // it: fenced code kept as is, hard wrapped, lists with their continuation under their text. Terminal
 // controls are stripped and tabs are expanded before they reach the terminal.
@@ -365,30 +395,11 @@ func agentTextRows(prefix, text string, width int) []string {
 		} else {
 			lineText, hasCode, isBlock := markdown(line)
 			if isBlock {
-				wrappedText := ansi.Wrap(lineText, w, "")
-				if hasCode {
-					wrappedText = wrapMarkdown(lineText, w)
-				}
-				wrapped = strings.Split(wrappedText, "\n")
-			} else if item := listItem.FindStringSubmatch(line); item != nil {
-				lead := item[1] + cmp.Or(strings.Trim(item[2], "-*+"), "•") + " "
-				bodyText, bodyHasCode, _ := markdown(item[3])
-				bodyWidth := max(1, w-ansi.StringWidth(lead))
-				wrappedText := ansi.Wrap(bodyText, bodyWidth, "")
-				if bodyHasCode {
-					wrappedText = wrapMarkdown(bodyText, bodyWidth)
-				}
-				body := strings.Split(wrappedText, "\n")
-				wrapped = append([]string{lead + body[0]}, body[1:]...)
-				for i := 1; i < len(wrapped); i++ {
-					wrapped[i] = strings.Repeat(" ", ansi.StringWidth(lead)) + wrapped[i]
-				}
+				wrapped = plainRows(lineText, w, hasCode)
+			} else if list, ok := listRows(line, w); ok {
+				wrapped = list
 			} else {
-				wrappedText := ansi.Wrap(lineText, w, "")
-				if hasCode {
-					wrappedText = wrapMarkdown(lineText, w)
-				}
-				wrapped = strings.Split(wrappedText, "\n")
+				wrapped = plainRows(lineText, w, hasCode)
 			}
 		}
 		for _, l := range wrapped {
