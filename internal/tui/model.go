@@ -17,7 +17,7 @@ import (
 
 // row is a row of the ATM box: a node of the graph, or, when check, a proof or command of the node before.
 type row struct {
-	step, label, state, note string // state: pending, running, waiting, passed, failed, skipped or not run
+	step, label, state, note string // state: pending, running, waiting, passed, failed, skipped, not run or unknown
 	check                    bool
 	start                    time.Time
 	took                     time.Duration
@@ -55,7 +55,7 @@ type Model struct {
 func New(label string, width, height int) *Model {
 	m := &Model{label: label, state: "waiting", width: width, height: height, now: time.Now()}
 	for _, n := range [][2]string{{"issue", "Issue"}, {"clone", "Clone"}, {"contract", "Contract"},
-		{"agent", "Agent · unit 1"}, {"checks", "Checks"}, {"ponytail", "Slop detector"}, {"delivery", "Delivery"}} {
+		{"agent", "Agent"}, {"checks", "Checks"}, {"ponytail", "Slop detector"}, {"delivery", "Delivery"}} {
 		m.rows = append(m.rows, &row{step: n[0], label: n[1], state: "pending"})
 	}
 	return m
@@ -158,6 +158,9 @@ func (m *Model) current(step string) *row {
 func (m *Model) started(step string, at time.Time) {
 	m.state, m.output = "running", nil
 	r := m.current(step)
+	if step == "agent" && r.state == "pending" {
+		r.label = "Agent · unit 1"
+	}
 	if step == "agent" && r.state != "pending" { // a chained unit: its rows again, after the last unit's
 		i := slices.IndexFunc(m.rows, func(r *row) bool { return r.step == "ponytail" })
 		m.rows = slices.Insert(m.rows, i, &row{step: "agent", label: fmt.Sprintf("Agent · unit %d", m.units()+1)},
@@ -262,7 +265,8 @@ func (m *Model) tool(e event) {
 
 // end keeps how the run ended on screen until the user closes it.
 func (m *Model) end(o run.Outcome, err error) {
-	if o.Report != "" && !slices.ContainsFunc(m.rows, func(r *row) bool { return r.state != "pending" }) {
+	cold := !slices.ContainsFunc(m.rows, func(r *row) bool { return r.state != "pending" })
+	if cold {
 		m.restoreReport(o.Report, o)
 	}
 	m.done, m.outcome, m.err = true, o, err
@@ -272,8 +276,10 @@ func (m *Model) end(o run.Outcome, err error) {
 			r.state = map[bool]string{true: "skipped", false: "not run"}[o.Outcome == "passed"]
 		}
 	}
-	if why := o.Reason; o.Outcome == "failed" && o.FailedNode == "" && why != "" {
-		m.findings = append(m.findings, finding{"error", "atm run " + o.Issue, why})
+	if why := o.Reason; o.Outcome == "failed" && why != "" {
+		if cold || o.FailedNode == "" {
+			m.findings = append(m.findings, finding{"error", "atm run " + o.Issue, why})
+		}
 	}
 	if err != nil {
 		m.findings = append(m.findings, finding{"error", "atm", err.Error()})

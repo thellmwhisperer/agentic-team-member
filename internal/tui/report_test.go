@@ -40,7 +40,7 @@ func TestCompletedScreenRestoresSavedNodesWithoutFrames(t *testing.T) {
 	}
 	want := []time.Duration{395, 4274, 0, 1318621, 385916, 285402, 8135}
 	for i, r := range m.rows {
-		if r.state != "passed" || r.took != want[i]*time.Millisecond {
+		if r.state != "passed" || r.took != want[i]*time.Millisecond || !r.hasDuration {
 			t.Errorf("row %s = %s, %v", r.step, r.state, r.took)
 		}
 	}
@@ -75,6 +75,19 @@ func TestCompletedScreenDoesNotInventMissingResults(t *testing.T) {
 	}
 }
 
+func TestCompletedScreenWithoutReportKeepsRowsUnknown(t *testing.T) {
+	m := New("cold-no-report", 80, 40)
+	m.end(run.Outcome{Outcome: "passed", Ended: time.Now()}, nil)
+	for _, r := range m.rows {
+		if r.state != "unknown" {
+			t.Errorf("row %s = %s, want unknown", r.step, r.state)
+		}
+	}
+	if strings.Contains(view(m), "unit 1") {
+		t.Fatal("cold completed view invented an Agent unit")
+	}
+}
+
 func TestCompletedScreenKeepsMissingDurationUnknown(t *testing.T) {
 	m := New("cold-2", 80, 40)
 	m.end(run.Outcome{Outcome: "passed", Report: savedReport(t, `{"nodes":[{"name":"agent","result":"passed"}]}`)}, nil)
@@ -102,14 +115,39 @@ func TestCompletedScreenKeepsContradictorySavedResultUnknown(t *testing.T) {
 }
 
 func TestCompletedScreenRestoresFailureAndUnrunNodes(t *testing.T) {
-	path := savedReport(t, `{"reason":"tests failed","nodes":[
+	path := savedReport(t, `{"reason":"stale report reason","nodes":[
 	 {"name":"checks","result":"failed","duration_ms":500},
-	 {"name":"ponytail","result":"not run"},
-	 {"name":"delivery","result":"not run"}]}`)
+	 {"name":"ponytail","result":"not run","duration_ms":0},
+	 {"name":"delivery","result":"not run","duration_ms":0}]}`)
 	m := New("failed-1", 80, 40)
-	m.end(run.Outcome{Outcome: "failed", FailedNode: "checks", Report: path}, nil)
+	m.end(run.Outcome{Outcome: "failed", FailedNode: "checks", Reason: "tests failed", Report: path}, nil)
 	if s := view(m); !order(s, "✗ Checks  0.5 s", "○ Slop detector", "not run", "○ Delivery", "not run", "tests failed") {
 		t.Fatalf("saved failed run:\n%s", s)
+	}
+	for _, step := range []string{"ponytail", "delivery"} {
+		if r := m.current(step); r.hasDuration {
+			t.Errorf("unrun %s kept a duration", step)
+		}
+	}
+	if strings.Contains(view(m), "stale report reason") {
+		t.Fatal("displayed an untrusted saved failure reason")
+	}
+}
+
+func TestCompletedScreenRejectsImpossibleAndDuplicateNodes(t *testing.T) {
+	m := New("cold-4", 80, 40)
+	m.end(run.Outcome{Outcome: "passed", Report: savedReport(t, `{"nodes":[
+		{"name":"issue","result":"passed","duration_ms":10},
+		{"name":"checks","result":"skipped","duration_ms":0},
+		{"name":"clone","result":"passed","duration_ms":10},
+		{"name":"clone","result":"passed"},
+		{"name":"delivery","result":"skipped","duration_ms":0}
+	]}`)}, nil)
+	if m.current("issue").state != "passed" || m.current("checks").state != "unknown" ||
+		m.current("clone").state != "unknown" || m.current("clone").hasDuration ||
+		m.current("delivery").state != "skipped" || m.current("delivery").hasDuration {
+		t.Fatalf("unsupported report data presented as evidence: issue=%+v checks=%+v clone=%+v delivery=%+v",
+			m.current("issue"), m.current("checks"), m.current("clone"), m.current("delivery"))
 	}
 }
 
