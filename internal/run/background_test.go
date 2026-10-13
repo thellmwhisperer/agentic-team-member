@@ -404,6 +404,15 @@ func TestBackgroundKeepsLabelMonotonicWhenNewestIsPruned(t *testing.T) {
 	if err != nil || started.Run != "issue-202" || started.Report != wantReport {
 		t.Fatalf("Start = %+v, %v; want issue-202 and its unique run directory", started, err)
 	}
+	s.Lock()
+	run := s.runs[len(s.runs)-1]
+	for run.Ended.IsZero() {
+		more := run.more
+		s.Unlock()
+		<-more
+		s.Lock()
+	}
+	s.Unlock()
 	for _, label := range []string{"issue-201", "issue-202"} {
 		if info, err := os.Stat(runDir(top, label)); err != nil || !info.IsDir() {
 			t.Fatalf("run directory %s: %v; want distinct existing directories", label, err)
