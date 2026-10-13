@@ -1,0 +1,18 @@
+schema: 1
+id: T-PONYTAIL-20261013-311-3
+status: accepted
+category: alien_code
+title: "Remove invented rejection of null follow_ups and empty title/red_test/criterion fields, their extra test matrix and the fakeReport criterion added for those guards. Preserve the existing JSON type error handling and the original worker tests for invalid follow_ups beside a Checks failure."
+created_at: 2026-10-13
+incident:
+  pattern: "Remove invented rejection of null follow_ups and empty title/red_test/criterion fields, their extra test matrix and the fakeReport criterion added for those guards. Preserve the existing JSON type error handling and the original worker tests for invalid follow_ups beside a Checks failure."
+  what_went_wrong: "No-mistakes expanded issue 311 beyond the worker implementation; the ponytail review removed the additions before delivery."
+  root_cause: "The coding agent wrote more than the issue needed."
+  rule_established: "Cut by the ponytail pass; it does not come back."
+  evidence:
+    - family: speculative_hardening
+      example: "Remove invented rejection of null follow_ups and empty title/red_test/criterion fields, their extra test matrix and the fakeReport criterion added for those guards. Preserve the existing JSON type error handling and the original worker tests for invalid follow_ups beside a Checks failure."
+      artifact: "internal/run/followup.go"
+match:
+  family: speculative_hardening
+  artifact: "internal/run/followup.go"

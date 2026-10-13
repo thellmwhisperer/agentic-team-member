@@ -117,6 +117,7 @@ func TestResumeKeepsAFailedUnitsFollowUpsUntilItsReportReplacesThem(t *testing.T
 		t.Fatal("want unit 2's checks to fail")
 	}
 	wantFollowUps(t, saved("failed"), false)
+	gitT(t, root, "config", "--global", "core.autocrlf", "true")
 	if err := Run("again", []string{"--resume", "failed", issue}, io.Discard, io.Discard); err == nil {
 		t.Fatal("want unit 2's checks to fail again")
 	}
