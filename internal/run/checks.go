@@ -30,7 +30,7 @@ import (
 // install, the type's proof, test, typecheck and lint pass, the commands no-mistakes runs, and HEAD has not
 // moved still. Install runs again before the proof: the agent may have changed dependencies. Each proof and
 // command is a row of the screen. Its result holds the proof's red and green trials.
-func checks(clone, sha, typ, test string, followUps any, c config.Config) (result map[string]any, err error) {
+func checks(clone, runDir, sha, typ, test string, followUps any, c config.Config) (result map[string]any, err error) {
 	live := liveIn(clone)
 	var red, green try
 	var proofSpan span
@@ -59,7 +59,7 @@ func checks(clone, sha, typ, test string, followUps any, c config.Config) (resul
 	}
 	if err == nil {
 		var restore func() error
-		restore, err = hideATM(clone)
+		restore, err = hideATM(clone, runDir)
 		if restore != nil {
 			defer func() { err = errors.Join(err, restore()) }()
 		}
@@ -87,9 +87,9 @@ func checks(clone, sha, typ, test string, followUps any, c config.Config) (resul
 	return result, moved(clone, sha, "the commands")
 }
 
-func hideATM(clone string) (func() error, error) {
+func hideATM(clone, runDir string) (func() error, error) {
 	path := filepath.Join(clone, ".atm")
-	stash := clone + ".checks-atm"
+	stash := filepath.Join(runDir, "checks-atm")
 	if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
 		return func() error { return os.RemoveAll(path) }, nil
 	} else if err != nil {

@@ -73,7 +73,7 @@ func (a agent) ponytail(root, clone, sha string, proofs []proof, i Issue, c conf
 		}
 	}
 	if why == "" {
-		if why, ev["reproofs"], ev["commands"], err = reprove(clone, base, proofs, c); err != nil {
+		if why, ev["reproofs"], ev["commands"], err = reprove(a.dir, clone, base, proofs, c); err != nil {
 			return ev, err
 		}
 	}
@@ -92,7 +92,7 @@ func (a agent) ponytail(root, clone, sha string, proofs []proof, i Issue, c conf
 // reprove says why the work in clone, on HEAD base, the last unit's, fails a unit's proof again, each unit
 // before the last on its own base, or the last unit's checks, "" when it fails none, each proof it re-ran and
 // the commands of those checks.
-func reprove(clone, base string, history []proof, c config.Config) (string, []unitResult, []cmdResult, error) {
+func reprove(runDir, clone, base string, history []proof, c config.Config) (string, []unitResult, []cmdResult, error) {
 	for n, p := range history {
 		content, err := os.ReadFile(filepath.Join(clone, p.test))
 		if err != nil || string(content) != p.testContent {
@@ -123,7 +123,7 @@ func reprove(clone, base string, history []proof, c config.Config) (string, []un
 		}
 	}
 	last := history[len(history)-1]
-	result, err := checks(clone, base, last.typ, last.test, nil, c)
+	result, err := checks(clone, runDir, base, last.typ, last.test, nil, c)
 	red, _ := result["red"].(try)
 	green, _ := result["green"].(try)
 	proofSpan, _ := result["proof_span"].(span)
