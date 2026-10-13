@@ -236,10 +236,11 @@ func setupBarrierAgent(t *testing.T) (string, string) {
 func TestTwoRunsAtOnceShareOneBackgroundProcess(t *testing.T) {
 	dir := setupConcurrentRunRepo(t)
 	ready, release := setupBarrierAgent(t)
+	w := watcher(t, dir, "w", 0)
 	outs, errs := make([]string, 2), make([]error, 2)
 	var wg sync.WaitGroup
 	for i := range outs {
-		wg.Go(func() { outs[i], errs[i] = atm(t, "run", "retry.md") })
+		wg.Go(func() { outs[i], errs[i] = atm(t, "run", "--watcher", w, "retry.md") })
 	}
 	wg.Wait()
 	if err := errors.Join(errs...); err != nil || !reflect.DeepEqual(map[string]bool{outs[0]: true, outs[1]: true},
@@ -324,7 +325,8 @@ func TestRunGoesToTheBackgroundAndEveryCommandSeesIt(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "retry.md"), []byte("# Retry\nType: fix\nRetry.\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if out := atmIn(t, 0, "run", "retry.md"); out != "retry-1\n" {
+	w := watcher(t, dir, "w", 0)
+	if out := atmIn(t, 0, "run", "retry.md", "--watcher", w); out != "retry-1\n" {
 		t.Fatalf("atm run off a terminal prints the run's label, got %q", out)
 	}
 	atmIn(t, 2, "attach", "retry-1")
@@ -332,7 +334,7 @@ func TestRunGoesToTheBackgroundAndEveryCommandSeesIt(t *testing.T) {
 		t.Fatalf("atm status: %q", out)
 	}
 	if out := atmIn(t, 0, "runs"); !strings.HasPrefix(out, "retry-1  failed  ") ||
-		!strings.HasSuffix(out, " s  "+filepath.Join(dir, "retry.md")+"\n") {
+		!strings.HasSuffix(out, " s  w  "+filepath.Join(dir, "retry.md")+"\n") {
 		t.Fatalf("atm runs: %q", out)
 	}
 	out := atmIn(t, 2, "axi", "run", "retry.md")

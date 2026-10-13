@@ -2,6 +2,7 @@ package run
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -32,6 +33,14 @@ func TestMain(m *testing.M) {
 			os.Exit(1)
 		}
 		os.Exit(0)
+	}
+	if len(os.Args) > 1 && os.Args[1] == "watch" { // atm watch, for a test to kill
+		root, err := git("", "rev-parse", "--show-toplevel")
+		if err == nil {
+			err = Watch(context.Background(), root, "", os.Stdout)
+		}
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
 	}
 	if out, ok := os.LookupEnv("FAKE_GH_OUT"); ok {
 		_ = os.WriteFile(os.Getenv("FAKE_GH_ARGS"), []byte(strings.Join(os.Args[1:], " ")), 0o600)

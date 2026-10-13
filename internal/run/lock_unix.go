@@ -23,3 +23,9 @@ func lock(path string) (*os.File, error) {
 	}
 	return f, nil
 }
+
+// pidAlive says whether process pid runs.
+func pidAlive(pid int) bool {
+	err := syscall.Kill(pid, 0)
+	return pid > 0 && (err == nil || errors.Is(err, syscall.EPERM))
+}

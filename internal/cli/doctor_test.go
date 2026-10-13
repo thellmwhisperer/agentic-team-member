@@ -44,11 +44,11 @@ func lines(t *testing.T, out string) []string {
 
 func TestDoctorPassesWhenEveryCheckPasses(t *testing.T) {
 	for _, c := range []struct{ origin, want string }{
-		{"https://github.com/o/r.git", "ok git|ok claude|ok gh|ok .atm.yaml"},
-		{"https://example.com/o/r.git", "ok git|ok claude|ok .atm.yaml"},
+		{"https://github.com/o/r.git", "ok git|ok claude|ok gh|ok .atm.yaml|ok watcher"},
+		{"https://example.com/o/r.git", "ok git|ok claude|ok .atm.yaml|ok watcher"},
 	} {
 		t.Run(c.origin, func(t *testing.T) {
-			repo(t, c.origin)
+			watcher(t, repo(t, c.origin), "w", 0)
 			onPath(t, "claude", "gh")
 			if out, err := atm(t, "init"); err != nil {
 				t.Fatalf("atm init: %v\n%s", err, out)
@@ -93,8 +93,8 @@ func TestDoctorRunsEveryCheckAndFailsWhenAnyFails(t *testing.T) {
 		}
 		out, err := atm(t, "doctor")
 		ls := lines(t, out)
-		if len(ls) != 4 || !strings.HasPrefix(ls[3], "fail .atm.yaml") || !strings.Contains(ls[3], "lint") {
-			t.Fatalf("want 4 checks, .atm.yaml failing on lint, got\n%s", out)
+		if len(ls) != 5 || !strings.HasPrefix(ls[3], "fail .atm.yaml") || !strings.Contains(ls[3], "lint") {
+			t.Fatalf("want 5 checks, .atm.yaml failing on lint, got\n%s", out)
 		}
 		if run.ExitCode(err) == 0 {
 			t.Fatal("want a non-zero exit")
@@ -108,8 +108,8 @@ func TestDoctorRunsEveryCheckAndFailsWhenAnyFails(t *testing.T) {
 		}
 		out, err := atm(t, "doctor")
 		ls := lines(t, out)
-		if len(ls) != 4 || !strings.HasPrefix(ls[3], "fail .atm.yaml") {
-			t.Fatalf("want four one-line checks and .atm.yaml failing, got\n%s", out)
+		if len(ls) != 5 || !strings.HasPrefix(ls[3], "fail .atm.yaml") {
+			t.Fatalf("want five one-line checks and .atm.yaml failing, got\n%s", out)
 		}
 		if run.ExitCode(err) == 0 {
 			t.Fatal("want a non-zero exit")

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"cmp"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -17,8 +18,9 @@ import (
 // helloLimit bounds atm doctor --agent's hello.
 var helloLimit = 2 * time.Minute
 
-// doctorCmd is atm doctor: git, the configured agent CLI, gh when origin is on GitHub and .atm.yaml, one line
-// each, then, with --agent, the agent's answer to a hello. Every check runs; any failure fails the command.
+// doctorCmd is atm doctor: git, the configured agent CLI, gh when origin is on GitHub, .atm.yaml and a live
+// atm watch, one line each, then, with --agent, the agent's answer to a hello. Every check runs; any failure
+// fails the command.
 func doctorCmd() *cobra.Command {
 	var hello bool
 	c := &cobra.Command{Use: "doctor", Short: "Check what atm run needs", Args: cobra.NoArgs,
@@ -64,6 +66,14 @@ func doctorCmd() *cobra.Command {
 				}
 			}
 			_, _ = fmt.Fprintln(cmd.OutOrStdout(), strings.Join(strings.Fields(last), " "))
+			if root != "" {
+				err = nil
+				ids := run.Watchers(root)
+				if len(ids) == 0 {
+					err = errors.New("none alive: start atm watch in the session that launches the run")
+				}
+				check("watcher", strings.Join(ids, " "), err)
+			}
 			if failed > 0 {
 				return fmt.Errorf("doctor: %d of the checks failed", failed)
 			}

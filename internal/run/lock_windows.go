@@ -22,3 +22,14 @@ func lock(path string) (*os.File, error) {
 	}
 	return os.NewFile(uintptr(h), path), nil
 }
+
+// pidAlive says whether process pid runs: it opens and has not exited.
+func pidAlive(pid int) bool {
+	h, err := syscall.OpenProcess(syscall.PROCESS_QUERY_INFORMATION, false, uint32(pid))
+	if err != nil {
+		return false
+	}
+	defer func() { _ = syscall.CloseHandle(h) }()
+	var code uint32
+	return syscall.GetExitCodeProcess(h, &code) == nil && code == 259 // STILL_ACTIVE
+}
