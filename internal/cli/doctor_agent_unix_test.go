@@ -23,7 +23,7 @@ case "$FAKE_HELLO" in
 no-auth) echo 'no auth' >&2; exit 2 ;;
 hang) exec tail -f /dev/null ;;
 esac
-if : 2>/dev/null </dev/tty; then echo 'has a terminal'; exit 3; fi
+if (exec </dev/tty) 2>/dev/null; then echo 'has a terminal'; exit 3; fi
 grep -q 'Reply with the single word OK and nothing else.' || exit 4
 echo '{"type": "result", "result": "OK"}'
 `
