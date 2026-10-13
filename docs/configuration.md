@@ -79,7 +79,7 @@ Run every command from inside the repository it works on.
 |---------|------|
 | `atm init` | Writes a commented `.atm.yaml` with every key empty, unless there is one, and adds `/.atm/` to `.gitignore` unless it is there. Run twice, it changes nothing |
 | `atm doctor` | Checks git, the configured agent CLI on `PATH`, `gh` when `origin` is on GitHub, and that `.atm.yaml` declares every key. One `ok` or `fail` line each; every check runs, and any failure exits non-zero |
-| `atm run [flags] <issue>` | Starts a run. On a terminal it shows the run's screen until it ends and exits with the run's code; off one it prints the run's label and returns |
+| `atm run [flags] <issue>` | Starts a run. On a terminal it shows the run's screen until it ends and exits with the run's code; off one it prints the run's label and returns. See [resuming a failed run](#resuming-a-failed-run) |
 | `atm status` | Each run going: label, step, duration, issue; or `nothing runs` |
 | `atm attach [run]` | The run's screen, the last one going by default, until it ends |
 | `atm runs` | Retained runs: label, `running`, `passed` or `failed at <step>`, duration, issue and report |
