@@ -122,7 +122,7 @@ func prove(clone, typ, test string, c config.Config) (red, green try, err error)
 		if p := first(changed, c.TestPatterns, true); p != "" {
 			return red, green, fmt.Errorf("a refactor changed the test %s", p)
 		}
-		base, _, err := trial(clone, tree, changed, c.Test, "")
+		base, _, err := trial(clone, tree, changed, c.Test, "", "", false)
 		return base, green, errors.Join(err, wrap(base.err, "the suite fails on the base"))
 	case "tests":
 		if p := first(changed, slices.Concat(c.TestPatterns, c.DocsPatterns), false); p != "" {
@@ -132,7 +132,8 @@ func prove(clone, typ, test string, c config.Config) (red, green try, err error)
 		if err != nil {
 			return red, green, err
 		}
-		base, after, err := trial(clone, tree, aside, line, line)
+		base, after, err := trial(clone, tree, aside, line, line, test,
+			strings.Contains(c.TestFile, "{tests}"))
 		return base, after, errors.Join(err, wrap(base.err, test+" fails on the base"),
 			wrap(after.err, test+" fails after the change"))
 	case "docs":
@@ -191,7 +192,7 @@ func redGreen(clone, tree string, aside []string, test, tmpl string) (red, green
 	if err != nil {
 		return red, green, err
 	}
-	red, green, err = trial(clone, tree, aside, line, line)
+	red, green, err = trial(clone, tree, aside, line, line, test, strings.Contains(tmpl, "{tests}"))
 	switch {
 	case err != nil:
 		return red, green, err
@@ -246,8 +247,8 @@ func onBase(clone, tree string, aside []string, test, tmpl string) error {
 				return err
 			}
 		}
-		if red, _, err := trial(clone, tree, nil, line, ""); err != nil || red.err != nil {
-			return err
+		if red, _, err := trial(clone, tree, nil, line, "", test, strings.Contains(tmpl, "{tests}")); err != nil || red.err != nil {
+			return errors.Join(err, red.err)
 		}
 	}
 	return fmt.Errorf("%s depends on nothing the base had: it passes on the old files with the fix's added "+
@@ -258,7 +259,7 @@ func onBase(clone, tree string, aside []string, test, tmpl string) error {
 // after, "" for nothing, and returns how each ended, zero when not run. A hang in either, or a clone that is no
 // longer tree, is err: the verdict is void. After each run, every file git ignores is back as keep left them,
 // changed or deleted ones too, so the green cannot pass on what the red left there.
-func trial(clone, tree string, aside []string, base, after string) (red, green try, err error) {
+func trial(clone, tree string, aside []string, base, after, test string, usesTests bool) (red, green try, err error) {
 	defer func() { err = errors.Join(err, reset(clone)) }()
 	if len(aside) > 0 {
 		args := append([]string{"--literal-pathspecs", "restore", "--source=HEAD", "--staged", "--worktree", "--"},
@@ -268,6 +269,9 @@ func trial(clone, tree string, aside []string, base, after string) (red, green t
 		}
 	}
 	red = attempt(clone, base)
+	if usesTests && strings.Contains(red.Tail, "no tests to run") {
+		red.err = fmt.Errorf("the test line ran no test of %s: check its build tags against test_file", test)
+	}
 	if _, err := git(clone, "restore", "--source="+tree, "--staged", "--worktree", "--", "."); err != nil {
 		return red, green, err
 	}
@@ -280,6 +284,9 @@ func trial(clone, tree string, aside []string, base, after string) (red, green t
 	if after != "" {
 		if green = attempt(clone, after); errors.Is(green.err, errTimeout) {
 			return red, green, green.err
+		}
+		if usesTests && strings.Contains(green.Tail, "no tests to run") {
+			green.err = fmt.Errorf("the test line ran no test of %s: check its build tags against test_file", test)
 		}
 	}
 	if _, err := git(clone, "add", "-A"); err != nil {
@@ -399,7 +406,7 @@ func testLine(clone, tmpl, test string) (string, error) {
 
 func isGoTest(fn *ast.FuncDecl) bool {
 	name := fn.Name.Name
-	if !strings.HasPrefix(name, "Test") {
+	if name == "TestMain" || !strings.HasPrefix(name, "Test") {
 		return false
 	}
 	if suffix := strings.TrimPrefix(name, "Test"); suffix != "" {
