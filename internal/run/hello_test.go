@@ -12,7 +12,8 @@ import (
 func TestHelloFailsOnCursorErrorResultAfterOK(t *testing.T) {
 	t.Setenv("PATH", fakes+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("FAKE_AGENT", "cursor-doctor-error")
-	t.Setenv("FAKE_AGENT_STREAM", `{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"OK"}]}}`+"\n"+
+	okMessage := `{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"OK"}]}}`
+	t.Setenv("FAKE_AGENT_STREAM", okMessage+"\n"+
 		`{"type":"result","is_error":true,"result":"rate limited"}`+"\n")
 	_, err := Hello(config.Agent{Harness: "cursor", Model: "test-model"}, time.Second)
 	if err == nil || !strings.Contains(err.Error(), "rate limited") {
