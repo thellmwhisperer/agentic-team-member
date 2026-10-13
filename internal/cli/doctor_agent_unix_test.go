@@ -68,6 +68,25 @@ func TestDoctorWithoutAgentMakesNoCallAndSaysHow(t *testing.T) {
 	}
 }
 
+func TestDoctorAgentReportsUnknownHarnessWithoutStartingIt(t *testing.T) {
+	dir, call := helloRepo(t, "ok")
+	config := "harness: unknown\ninstall: ''\ntest: ''\ntypecheck: ''\nlint: ''\ntest_file: ''\n" +
+		"test_patterns: []\ndocs_patterns: []\ndelivery: ''\n"
+	if err := os.WriteFile(filepath.Join(dir, ".atm.yaml"), []byte(config), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, err := atm(t, "doctor", "--agent")
+	if err == nil {
+		t.Fatalf("want unknown harness to fail\n%s", out)
+	}
+	if got := lastLine(out); !strings.HasPrefix(got, `FAIL agent: unknown: harness "unknown" unknown`) {
+		t.Fatalf("got %q\n%s", got, out)
+	}
+	if _, err := os.Stat(call); err == nil {
+		t.Fatal("doctor started the fake agent for an unknown harness")
+	}
+}
+
 func TestDoctorAgentSaysHelloTheWayARunDoes(t *testing.T) {
 	for _, c := range []struct{ mode, want string }{
 		{"ok", "ok agent: claude m1 answered in "},
