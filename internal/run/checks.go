@@ -30,7 +30,7 @@ import (
 // install, the type's proof, test, typecheck and lint pass, the commands no-mistakes runs, and HEAD has not
 // moved still. Install runs again before the proof: the agent may have changed dependencies. Each proof and
 // command is a row of the screen. Its result holds the proof's red and green trials.
-func checks(clone, runDir, sha, typ, test string, followUps any, c config.Config) (result map[string]any, err error) {
+func checks(clone, runDir, sha, typ, test string, c config.Config) (result map[string]any, err error) {
 	live := liveIn(clone)
 	var red, green try
 	var proofSpan span
@@ -51,17 +51,13 @@ func checks(clone, runDir, sha, typ, test string, followUps any, c config.Config
 	}
 	err = moved(clone, sha, "the agent")
 	if err == nil {
-		var keep []string
-		keep, err = declaredFollowUpPaths(clone, followUps)
+		var restore func() error
+		restore, err = hideATM(clone, runDir)
+		if restore != nil {
+			defer func() { err = errors.Join(err, restore()) }()
+		}
 		if err == nil {
-			var restore func() error
-			restore, err = hideATM(clone, runDir)
-			if restore != nil {
-				defer func() { err = errors.Join(err, restore()) }()
-			}
-			if err == nil {
-				err = unmade(clone, keep)
-			}
+			err = unmade(clone)
 		}
 	}
 	if err == nil {
@@ -121,15 +117,12 @@ func before(clone string) error {
 }
 
 // unmade removes from clone every file git ignores that before did not record, except follow-up tests the run keeps.
-func unmade(clone string, keep []string) error {
+func unmade(clone string) error {
 	was, err := every(clone, "ls-tree", "-r", "--name-only", "-z", "refs/atm/before")
 	if err != nil {
 		return err
 	}
 	had := map[string]bool{}
-	for _, p := range keep {
-		had[p] = true
-	}
 	for _, p := range strings.Split(was, "\x00") {
 		had[p] = true
 	}
