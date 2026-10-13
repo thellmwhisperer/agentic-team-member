@@ -57,36 +57,54 @@ type Model struct {
 
 type bounds struct{ x, y, width, height int }
 
-type paneLine struct{ key, text string }
+type paneLine struct{ key, parent, text string }
 
 type pane struct {
 	top, last, h, part int
-	anchor             string
+	anchor, parent     string
 	held               bool
 }
 
 func (p *pane) show(lines []paneLine, h int) []string {
-	oldAnchor, oldPart := p.anchor, p.part
+	oldAnchor, oldParent, oldPart, oldTop := p.anchor, p.parent, p.part, p.top
 	p.h, p.last = h, max(0, len(lines)-h)
 	if p.held && oldAnchor != "" {
-		for i, line := range lines {
-			if line.key == oldAnchor && countKey(lines, i, oldAnchor) == oldPart {
-				p.top = i
-				break
-			}
+		p.top = keyedLine(lines, oldAnchor, oldPart)
+		if p.top < 0 && oldParent != "" {
+			p.top = keyedLine(lines, oldParent, 0)
+		}
+		if p.top < 0 {
+			p.top = min(oldTop, p.last)
 		}
 	}
 	if !p.held || p.top >= p.last {
 		p.top, p.held = p.last, false
 	}
 	if p.top < len(lines) {
-		p.anchor, p.part = lines[p.top].key, countKey(lines, p.top, lines[p.top].key)
+		p.anchor, p.parent = lines[p.top].key, lines[p.top].parent
+		p.part = countKey(lines, p.top, lines[p.top].key)
 	}
 	out := make([]string, 0, min(h, len(lines)-p.top))
 	for _, line := range lines[p.top:min(len(lines), p.top+h)] {
 		out = append(out, line.text)
 	}
 	return out
+}
+
+func keyedLine(lines []paneLine, key string, part int) int {
+	first, count := -1, 0
+	for i, line := range lines {
+		if line.key == key {
+			if first < 0 {
+				first = i
+			}
+			count++
+		}
+	}
+	if first < 0 {
+		return -1
+	}
+	return first + min(part, count-1)
 }
 
 func countKey(lines []paneLine, at int, key string) int {
@@ -100,7 +118,7 @@ func countKey(lines []paneLine, at int, key string) int {
 func (p *pane) scroll(n int) {
 	p.top = min(max(0, p.top+n), p.last)
 	p.held = p.top < p.last
-	p.anchor, p.part = "", 0
+	p.anchor, p.parent, p.part = "", "", 0
 }
 
 // focused is the pane keys scroll: the Agent box's while it shows, unless the user moved to the ATM box.
