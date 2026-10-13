@@ -199,9 +199,16 @@ func checkUnit(
 	runDir, dir, head, test, typ string, f *followUp, n int, report map[string]any, body string, c config.Config,
 ) (proof, []followUp, []followUp, map[string]any, error) {
 	ev := map[string]any{"unit": n}
+	// A unit that fails its checks still hands over its follow-ups, unverified, a problem with them noted
+	// after its checks' reason.
+	failed := func(err error) (proof, []followUp, []followUp, map[string]any, error) {
+		out, verdicts, bad := unverified(dir, report)
+		ev["follow_ups"] = verdicts
+		return proof{}, nil, out, ev, errors.Join(err, bad)
+	}
 	if f != nil {
 		if b, err := os.ReadFile(filepath.Join(dir, test)); err != nil || string(b) != f.Test {
-			return proof{}, nil, nil, ev, fmt.Errorf("unit %d edited its red test %s, which it must make pass as it is", n, test)
+			return failed(fmt.Errorf("unit %d edited its red test %s, which it must make pass as it is", n, test))
 		}
 	}
 	result, err := checks(dir, runDir, head, typ, test, c)
@@ -209,13 +216,13 @@ func checkUnit(
 		ev[key] = value
 	}
 	if err != nil {
-		return proof{}, nil, nil, ev, err
+		return failed(err)
 	}
 	var testContent []byte
 	if typ == "fix" || typ == "feature" || typ == "greenfield" || typ == "tests" {
 		testContent, err = os.ReadFile(filepath.Join(dir, test))
 		if err != nil {
-			return proof{}, nil, nil, ev, err
+			return failed(err)
 		}
 	}
 	p := proof{head, test, typ, string(testContent)}
