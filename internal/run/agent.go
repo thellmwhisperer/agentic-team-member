@@ -883,7 +883,7 @@ func mayConsumeWrittenData(stmts []*syntax.Stmt, output string) bool {
 		syntax.Walk(stmt, func(node syntax.Node) bool {
 			if word, ok := node.(*syntax.Word); ok {
 				text, literal := literalWord(word)
-				unsafe = unsafe || !literal || strings.Contains(text, path.Clean(output)) ||
+				unsafe = unsafe || !literal || shellGlobMatches(word, text, output) || strings.Contains(text, path.Clean(output)) ||
 					strings.Contains(path.Clean(text), path.Clean(output))
 				switch path.Base(text) {
 				case "sh", "bash", "dash", "zsh", "ksh", "source", ".":
@@ -897,6 +897,36 @@ func mayConsumeWrittenData(stmts []*syntax.Stmt, output string) bool {
 		}
 	}
 	return false
+}
+
+func shellGlobMatches(word *syntax.Word, text, output string) bool {
+	brace := false
+	var expands func([]syntax.WordPart) bool
+	expands = func(parts []syntax.WordPart) bool {
+		for _, part := range parts {
+			switch part := part.(type) {
+			case *syntax.Lit:
+				if strings.ContainsAny(part.Value, "*?[") {
+					return true
+				}
+				brace = brace || strings.ContainsAny(part.Value, "{}")
+			case *syntax.BraceExp:
+				brace = true
+			case *syntax.ExtGlob:
+				return true
+			}
+		}
+		return false
+	}
+	glob := expands(word.Parts)
+	if brace {
+		return true
+	}
+	if !glob {
+		return false
+	}
+	matched, err := path.Match(path.Clean(text), path.Clean(output))
+	return err != nil || matched
 }
 
 func literalOutputFile(word *syntax.Word) bool {
