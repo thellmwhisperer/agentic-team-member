@@ -86,6 +86,41 @@ var deliveryRuns = regexp.MustCompile(`Delivery  \d+\.\d s +running`)
 
 const exitAltScreen = "\x1b[?1049l"
 
+func writeHerdrLog(t *testing.T, bin string) {
+	t.Helper()
+	script := "#!/bin/sh\nprintf '%s|' \"$@\" >> \"$HERDR_LOG\"; echo >> \"$HERDR_LOG\"\n"
+	if err := os.WriteFile(bin, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func waitShowToOpen(t *testing.T, shown *shown) {
+	t.Helper()
+	if !shown.until(0, func(v string) bool { return strings.Contains(v, "\x1b[?1049h") }) {
+		t.Fatal("Show did not open its screen")
+	}
+}
+
+func waitShowReturn(t *testing.T, done <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("Show did not return after q")
+	}
+}
+
+func assertHerdrReleased(t *testing.T, calls string) {
+	t.Helper()
+	b, err := os.ReadFile(calls)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), "pane|release-agent|wX:p1|--source|atm|--agent|atm|") {
+		t.Fatalf("Show returned before releasing herdr: %q", b)
+	}
+}
+
 func TestShowReleasesHerdrBeforeReturningFromQ(t *testing.T) {
 	master, tty, err := pty.Open()
 	if err != nil {
@@ -98,9 +133,7 @@ func TestShowReleasesHerdrBeforeReturningFromQ(t *testing.T) {
 	}
 	dir := t.TempDir()
 	calls, bin := filepath.Join(dir, "calls"), filepath.Join(dir, "herdr")
-	if err := os.WriteFile(bin, []byte("#!/bin/sh\nprintf '%s|' \"$@\" >> \"$HERDR_LOG\"; echo >> \"$HERDR_LOG\"\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
+	writeHerdrLog(t, bin)
 	t.Setenv("HERDR_ENV", "1")
 	t.Setenv("HERDR_PANE_ID", "wX:p1")
 	t.Setenv("HERDR_BIN_PATH", bin)
@@ -120,27 +153,15 @@ func TestShowReleasesHerdrBeforeReturningFromQ(t *testing.T) {
 		_, _, _ = Show("", "issue-1", "startup", tty, tty)
 		close(done)
 	}()
-	if !s.until(0, func(v string) bool { return strings.Contains(v, "\x1b[?1049h") }) {
-		t.Fatal("Show did not open its screen")
-	}
+	waitShowToOpen(t, s)
 	if _, err := master.Write([]byte("q")); err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case <-done:
-	case <-time.After(3 * time.Second):
-		t.Fatal("Show did not return after q")
-	}
+	waitShowReturn(t, done)
 	_ = tty.Close()
 	_ = master.Close()
 	<-read
-	b, err := os.ReadFile(calls)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(b), "pane|release-agent|wX:p1|--source|atm|--agent|atm|") {
-		t.Fatalf("Show returned before releasing herdr: %q", b)
-	}
+	assertHerdrReleased(t, calls)
 }
 
 // A delivery that writes nothing leaves ATM's screen live on the terminal; from its first output to its end,
