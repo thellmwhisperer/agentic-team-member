@@ -252,7 +252,8 @@ func TestWatchPrintsGateEventsFromAxiStatusAndSurvivesTransientError(t *testing.
 	beat, remind = 2*time.Millisecond, 15*time.Millisecond
 	top := gitT(t, repo(t, "https://example.com/owner/repo.git", atmSet(atmYAML, "delivery", "true")),
 		"rev-parse", "--show-toplevel")
-	background(t, top)
+	stop := background(t, top)
+	t.Cleanup(stop)
 	bin := t.TempDir()
 	waiting, merged, counter, release := filepath.Join(bin, "waiting"), filepath.Join(bin, "merged"),
 		filepath.Join(bin, "count"), filepath.Join(bin, "release")
@@ -333,6 +334,9 @@ func TestWatchPrintsGateEventsFromAxiStatusAndSurvivesTransientError(t *testing.
 	}
 	if got := readGateEvent(); got != "merged" {
 		t.Fatalf("merged gate event %q", got)
+	}
+	if err := call(top, request{Cmd: "attach", Run: "issue-1"}, nil, func(reply) {}); err != nil {
+		t.Fatal(err)
 	}
 }
 
