@@ -211,8 +211,8 @@ func (s *server) shouldExit(c net.Conn, sock string, moved func() bool) bool {
 	if c == nil {
 		return s.handoff && s.busy() == 0 && s.handlers == 0
 	}
-	if s.handoff {
-		return false
+	if s.handoff && s.busy() == 0 && s.handlers == 0 {
+		return true
 	}
 	s.handlers++
 	return false
