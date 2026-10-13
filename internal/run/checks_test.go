@@ -281,6 +281,41 @@ func TestTestLineRejectsFilesWithoutGoTests(t *testing.T) {
 	}
 }
 
+func TestTestLineRejectsAFileWithOnlyTestMain(t *testing.T) {
+	clone := t.TempDir()
+	path := filepath.Join(clone, "reported_test.go")
+	source := "package p\n\nimport \"testing\"\n\nfunc TestMain(m *testing.M) {}\n"
+	if err := os.WriteFile(path, []byte(source), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := testLine(clone, "go test -run {tests} {dir}", "reported_test.go")
+	if err == nil || err.Error() != "the report's test file reported_test.go defines no Go tests" {
+		t.Fatalf("want no-tests error, got %v", err)
+	}
+}
+
+func TestRunRejectsATestsIssueWhenBuildTagsSelectNoTests(t *testing.T) {
+	gocache, err := exec.Command("go", "env", "GOCACHE").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	atm := strings.Replace(atmSet(atmYAML, "test_file", "go test -count=1 -run {tests} {dir}"),
+		`"**/*_test.sh"`, `"**/*_test.go"`, 1)
+	root := repo(t, "https://example.com/owner/repo.git", atm)
+	t.Setenv("GOCACHE", strings.TrimSpace(string(gocache)))
+	commitFiles(t, root, "", map[string]string{"go.mod": "module example.com/m\n\ngo 1.21\n",
+		"p/old_test.go": "package p\n\nimport \"testing\"\n\nfunc TestOld(t *testing.T) {}\n"})
+	t.Setenv("ATM_TEST_TAGGED", "//go:build migrate_100k\n\npackage p\n\nimport \"testing\"\n\n"+
+		"func TestTagged(t *testing.T) {}\n")
+	t.Setenv("FAKE_AGENT_WORK", `printf %s "$ATM_TEST_TAGGED" > p/new_test.go; `+reportJSON("p/new_test.go"))
+	var out bytes.Buffer
+	err = Run("t", []string{issueFile(t, "# Cover p\nType: tests\nCover p.\n")}, &out, io.Discard)
+	if err == nil || !strings.Contains(err.Error(),
+		"the test line ran no test of p/new_test.go: check its build tags against test_file") {
+		t.Fatalf("want tagged-test warning to fail the proof, got %v", err)
+	}
+}
+
 func TestRunChecksRunTheCommandsInOrderAndDieOnTheFirstFailure(t *testing.T) {
 	got := filepath.Join(t.TempDir(), "ran")
 	t.Setenv("ATM_TEST_OUT", got)
