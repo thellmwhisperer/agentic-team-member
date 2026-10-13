@@ -213,6 +213,22 @@ func (m *Model) agentRuns() bool {
 	return false
 }
 
+func agentTextRows(prefix, text string, width int) []string {
+	var rows []string
+	first := true
+	for _, logical := range strings.Split(strings.TrimSpace(text), "\n") {
+		for _, wrapped := range strings.Split(ansi.Wrap(logical, width-6, ""), "\n") {
+			if first {
+				rows = append(rows, prefix+wrapped)
+				first = false
+			} else {
+				rows = append(rows, "  "+wrapped)
+			}
+		}
+	}
+	return rows
+}
+
 // agentBox is what the agent says and thinks, the tool calls between two of those folded into one dim line
 // under them, a failed one on its own row, in lines rows ending with its latest. What it says and thinks wraps,
 // its continuation indented under its text.
@@ -247,17 +263,7 @@ func (m *Model) agentBox(width, lines int) string {
 		case a.says != "" || a.thinking != "":
 			flush()
 			prefix := map[bool]string{true: "✎ ", false: "∴ "}[a.says != ""]
-			first := true
-			for _, logical := range strings.Split(strings.TrimSpace(cmp.Or(a.says, a.thinking)), "\n") {
-				for _, wrapped := range strings.Split(ansi.Wrap(logical, width-6, ""), "\n") {
-					if first {
-						out = append(out, prefix+wrapped)
-						first = false
-					} else {
-						out = append(out, "  "+wrapped)
-					}
-				}
-			}
+			out = append(out, agentTextRows(prefix, cmp.Or(a.says, a.thinking), width)...)
 		case a.result == "failed":
 			flush()
 			out = append(out, m.icon("failed")+" "+paint(red, "failed")+" "+paint(dim, a.tool+" "+a.detail))
