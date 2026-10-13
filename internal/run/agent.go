@@ -677,34 +677,45 @@ func outside(calls []use, root, clone string) string {
 	root, clone = filepath.ToSlash(root), filepath.ToSlash(clone)
 	paths := regexp.MustCompile(regexp.QuoteMeta(root) + "(/[^" + sep + "]*)?")
 	for _, c := range calls {
-		text := filepath.ToSlash(c.args)
-		reach := false
-		for _, m := range paths.FindAllStringIndex(text, -1) {
-			if root == "" || m[0] > 0 && !strings.ContainsRune(" \t\r\n\"'`;|&()<>,=", rune(text[m[0]-1])) ||
-				m[1] < len(text) && !strings.ContainsRune(" \t\r\n\"'`;|&()<>,=/", rune(text[m[1]])) {
-				continue // a directory beside root, as root2
-			}
-			p := path.Clean(text[m[0]:m[1]])
-			reach = reach || p != clone && !strings.HasPrefix(p, clone+"/")
-		}
-		for _, token := range strings.Fields(text) {
-			token = strings.Trim(token, "\"'`,;|&()<>")
-			if !strings.Contains(token, "..") || filepath.IsAbs(token) {
-				continue
-			}
-			p := filepath.Clean(filepath.Join(clone, token))
-			relRoot, rootErr := filepath.Rel(root, p)
-			relClone, cloneErr := filepath.Rel(clone, p)
-			underRoot := rootErr == nil && relRoot != ".." && !strings.HasPrefix(relRoot, ".."+string(filepath.Separator))
-			underClone := cloneErr == nil && relClone != ".." && !strings.HasPrefix(relClone, ".."+string(filepath.Separator))
-			reach = reach || underRoot && !underClone
-		}
-		if reach || c.command != "" && fetches(c.command) {
+		if reachesPath(c.args, root, clone, paths) || c.command != "" && fetches(c.command) {
 			r := []rune(c.args)
 			return c.tool + " " + string(r[:min(len(r), 200)])
 		}
 	}
 	return ""
+}
+
+func reachesPath(args, root, clone string, paths *regexp.Regexp) bool {
+	text := filepath.ToSlash(args)
+	for _, m := range paths.FindAllStringIndex(text, -1) {
+		if root == "" || m[0] > 0 && !strings.ContainsRune(" \t\r\n\"'`;|&()<>,=", rune(text[m[0]-1])) ||
+			m[1] < len(text) && !strings.ContainsRune(" \t\r\n\"'`;|&()<>,=/", rune(text[m[1]])) {
+			continue
+		}
+		p := path.Clean(text[m[0]:m[1]])
+		if p != clone && !strings.HasPrefix(p, clone+"/") {
+			return true
+		}
+	}
+	for _, token := range strings.Fields(text) {
+		if relativeEscape(token, root, clone) {
+			return true
+		}
+	}
+	return false
+}
+
+func relativeEscape(token, root, clone string) bool {
+	token = strings.Trim(token, "\"'`,;|&()<>")
+	if !strings.Contains(token, "..") || filepath.IsAbs(token) {
+		return false
+	}
+	p := filepath.Clean(filepath.Join(clone, token))
+	relRoot, rootErr := filepath.Rel(root, p)
+	relClone, cloneErr := filepath.Rel(clone, p)
+	underRoot := rootErr == nil && relRoot != ".." && !strings.HasPrefix(relRoot, ".."+string(filepath.Separator))
+	underClone := cloneErr == nil && relClone != ".." && !strings.HasPrefix(relClone, ".."+string(filepath.Separator))
+	return underRoot && !underClone
 }
 
 // fetches says whether a shell command runs curl or wget or names a URL off this machine.

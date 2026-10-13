@@ -334,7 +334,38 @@ func logLines(t *testing.T, path string) []string {
 	return lines
 }
 
+type reachCase struct{ name, harness, stream, why string }
+
+func bashEvent(harness, command, description string) string {
+	q := func(s string) string { b, _ := json.Marshal(s); return string(b) }
+	switch harness {
+	case "pi":
+		desc := ""
+		if description != "" {
+			desc = `,"description":` + q(description)
+		}
+		return `{"type":"tool_execution_start","toolCallId":"c1","toolName":"bash","args":{"command":` +
+			q(command) + desc + `}}` + "\n"
+	case "opencode":
+		desc := ""
+		if description != "" {
+			desc = `,"description":` + q(description)
+		}
+		return `{"type":"tool_use","part":{"callID":"c1","tool":"bash","state":{"status":"completed","input":{"command":` +
+			q(command) + desc + `}}}}` + "\n"
+	default:
+		const prefix = `{"type":"assistant","message":{"role":"assistant","content":[` +
+			`{"type":"tool_use","id":"c1","name":"Bash","input":{"command":`
+		return prefix +
+			q(command) + `}}]}}` + "\n"
+	}
+}
+
 func TestRunDiesWhenTheAgentReachesOutsideItsClone(t *testing.T) {
+	runReachCases(t, reachCases())
+}
+
+func reachCases() []reachCase {
 	q := func(s string) string { b, _ := json.Marshal(s); return string(b) }
 	claude := func(tool, input string) string {
 		return `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"c1","name":` +
@@ -342,14 +373,15 @@ func TestRunDiesWhenTheAgentReachesOutsideItsClone(t *testing.T) {
 	}
 	curl := `curl -sL -m 30 https://www.example.com/assets/index.js -o "$TMPDIR/x.js"`
 	const why = "the agent reached outside its clone: "
-	cases := []struct{ name, harness, stream, why string }{
+	cases := []reachCase{
 		{"pi curl", "pi", `{"type":"tool_execution_start","toolCallId":"c1","toolName":"bash","args":{"command":` +
 			q(curl) + `}}` + "\n", why + "bash " + curl},
-		{"pi wrapped curl", "pi", `{"type":"tool_execution_start","toolCallId":"c1","toolName":"bash","args":{"command":` + q(`env curl ""`) + `}}` + "\n",
+		{"pi wrapped curl", "pi", bashEvent("pi", `env curl ""`, ""),
 			why + `bash env curl ""`},
-		{"pi command with description", "pi", `{"type":"tool_execution_start","toolCallId":"c1","toolName":"bash","args":{"command":` + q(`echo ready; curl "$URL"`) + `,"description":"Check what's happening"}}` + "\n",
+		{"pi command with description", "pi", bashEvent("pi", `echo ready; curl "$URL"`, "Check what's happening"),
 			why + `bash echo ready; curl "$URL"`},
-		{"pi description url ignored", "pi", `{"type":"tool_execution_start","toolCallId":"c1","toolName":"bash","args":{"command":"pnpm dev --url http://localhost:5173","description":"https://example.com"}}` + "\n", ""},
+		{"pi description url ignored", "pi",
+			bashEvent("pi", "pnpm dev --url http://localhost:5173", "https://example.com"), ""},
 		{"claude relative reach", "claude", claude("Bash", `{"command":"rg pattern . ../.."}`),
 			why + "Bash rg pattern . ../.."},
 		{"claude relative prefix reach", "claude", claude("Bash", `{"command":"rg pattern src/../../"}`),
@@ -360,7 +392,8 @@ func TestRunDiesWhenTheAgentReachesOutsideItsClone(t *testing.T) {
 			why + "Bash env FOO=bar sudo command exec curl -s a"},
 		{"newline curl", "claude", claude("Bash", `{"command":`+q("printf ok\ncurl \"$URL\"")+`}`),
 			why + "Bash printf ok\ncurl \"$URL\""},
-		{"command separated from description", "claude", claude("Bash", `{"command":`+q(`echo ready; curl "$URL"`)+`,"description":"Check what's happening"}`),
+		{"command separated from description", "claude",
+			bashEvent("claude", `echo ready; curl "$URL"`, "Check what's happening"),
 			why + `Bash echo ready; curl "$URL"`},
 		{"assigned curl", "claude", claude("Bash", `{"command":`+q(`FOO=bar curl "$URL"`)+`}`),
 			why + `Bash FOO=bar curl "$URL"`},
@@ -391,18 +424,33 @@ func TestRunDiesWhenTheAgentReachesOutsideItsClone(t *testing.T) {
 		{"opencode fetches", "opencode", `{"type":"tool_use","part":{"callID":"c1","tool":"bash","state":` +
 			`{"status":"completed","input":{"command":"node -e \"fetch('https://example.com')\""}}}}` + "\n",
 			why + `bash node -e "fetch('https://example.com')"`},
-		{"opencode command with description", "opencode", `{"type":"tool_use","part":{"callID":"c1","tool":"bash","state":{"status":"completed","input":{"command":` +
-			q(`echo ready; curl "$URL"`) + `,"description":"Check what's happening"}}}}` + "\n", why + `bash echo ready; curl "$URL"`},
-		{"opencode description url ignored", "opencode", `{"type":"tool_use","part":{"callID":"c1","tool":"bash","state":{"status":"completed","input":{"command":"pnpm dev --url http://localhost:5173","description":"https://example.com"}}}}` + "\n", ""},
-		{"inside", "claude", claude("Read", `{"file_path":"{clone}/AGENTS.md"}`) +
-			claude("Bash", `{"command":"rg curl ."}`) +
-			claude("Bash", `{"command":"rg wget ."}`) +
-			claude("Bash", `{"command":"pnpm dev --url http://localhost:5173","description":"https://example.com"}`) +
-			claude("Bash", `{"command":"pnpm add zod && pnpm dev --url http://localhost:5173"}`) +
-			claude("Bash", `{"command":"pnpm dev --url http://localhost:5173; echo ready"}`) +
-			claude("Read", `{"file_path":"{home}/go/pkg/mod/golang.org/x/mod@v0.20.0/go.mod"}`) +
-			claude("Read", `{"file_path":"/archive{root}/file"}`), ""},
 	}
+	return append(cases, moreReachCases(claude, why)...)
+}
+
+func moreReachCases(claude func(string, string) string, why string) []reachCase {
+	return []reachCase{
+		{"opencode command with description", "opencode",
+			bashEvent("opencode", `echo ready; curl "$URL"`, "Check what's happening"), why + `bash echo ready; curl "$URL"`},
+		{"opencode description url ignored", "opencode",
+			bashEvent("opencode", "pnpm dev --url http://localhost:5173", "https://example.com"), ""},
+		{"inside", "claude", insideStream(claude), ""},
+	}
+}
+
+func insideStream(claude func(string, string) string) string {
+	return claude("Read", `{"file_path":"{clone}/AGENTS.md"}`) +
+		claude("Bash", `{"command":"rg curl ."}`) +
+		claude("Bash", `{"command":"rg wget ."}`) +
+		claude("Bash", `{"command":"pnpm dev --url http://localhost:5173","description":"https://example.com"}`) +
+		claude("Bash", `{"command":"pnpm add zod && pnpm dev --url http://localhost:5173"}`) +
+		claude("Bash", `{"command":"pnpm dev --url http://localhost:5173; echo ready"}`) +
+		claude("Read", `{"file_path":"{home}/go/pkg/mod/golang.org/x/mod@v0.20.0/go.mod"}`) +
+		claude("Read", `{"file_path":"/archive{root}/file"}`)
+}
+
+func runReachCases(t *testing.T, cases []reachCase) {
+	t.Helper()
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			root := repo(t, "https://example.com/owner/repo.git", atmYAML)
@@ -431,8 +479,11 @@ func TestRunReportsReachBeforeAgentFailure(t *testing.T) {
 	repo(t, "https://example.com/owner/repo.git", atmYAML)
 	q := func(s string) string { b, _ := json.Marshal(s); return string(b) }
 	t.Setenv("FAKE_AGENT", "fail")
-	t.Setenv("FAKE_AGENT_STREAM", `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"c1","name":"Bash","input":{"command":`+
-		q("rg pattern . ../..")+`}}]}}`+"\n")
+	const prefix = `{"type":"assistant","message":{"role":"assistant","content":[` +
+		`{"type":"tool_use","id":"c1","name":"Bash","input":{"command":`
+	stream := prefix +
+		q("rg pattern . ../..") + `}}]}}` + "\n"
+	t.Setenv("FAKE_AGENT_STREAM", stream)
 	var out bytes.Buffer
 	err := Run("t", []string{"--harness", "claude", issueFile(t, issue)}, &out, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "the agent reached outside its clone: Bash rg pattern . ../..") ||
