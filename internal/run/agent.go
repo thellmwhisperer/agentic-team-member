@@ -772,12 +772,20 @@ func badURL(word string) bool {
 			return true
 		}
 		authority := l[scheme+3:]
+		if end := strings.IndexAny(authority, "/?#"); end >= 0 {
+			authority = authority[:end]
+		}
+		if user := strings.LastIndexByte(authority, '@'); user >= 0 {
+			authority = authority[user+1:]
+		}
 		host := authority
 		if strings.HasPrefix(host, "[") {
-			if end := strings.IndexByte(host, ']'); end >= 0 {
-				host = host[1:end]
+			end := strings.IndexByte(host, ']')
+			if end < 0 || host[end+1:] != "" && !strings.HasPrefix(host[end+1:], ":") {
+				return true
 			}
-		} else if end := strings.IndexAny(host, ":/?#"); end >= 0 {
+			host = host[1:end]
+		} else if end := strings.IndexByte(host, ':'); end >= 0 {
 			host = host[:end]
 		}
 		if !slices.Contains([]string{"localhost", "127.0.0.1", "::1"}, strings.ToLower(host)) {
