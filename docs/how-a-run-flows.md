@@ -186,12 +186,13 @@ On a terminal the screen is the ATM box, a row per step with its icon (`○`
 pending, a spinner running, `⏸` waiting, `✓` passed, `✗` failed, `–` skipped), duration and
 note, and beside it, from 100 columns, the Agent box while an agent works,
 the Findings box with a failure or the slop detector's cuts, and the Log box.
-The Agent box shows the agent's messages and thinking as main lines. Consecutive
-successful or running tool calls appear as one dim line below them, with tool
-names and repeat counts. A running batch has a spinner and its active tool's
-detail; a failed tool keeps its own row. The box keeps the last lines that fit.
-It omits user messages, skill text, tool results and the JSON report at the end
-of the agent's final message.
+The Agent box shows the agent's prose as `✎` lines and non-empty thinking as
+`∴` lines. Consecutive successful or running tool calls appear as one dim line
+below them, with tool names and repeat counts. A running batch has a spinner
+and its active tool's detail; a failed tool keeps its own row. The box keeps
+the last lines that fit. It omits empty thinking, user messages, skill text,
+tool-result text and the JSON report at the end of the agent's final message.
+Its `N tools` note counts tool calls only.
 On Unix, ATM keeps its screen live while the delivery command is silent. From
 the command's first output until it ends, ATM gives it the attached terminal
 and its keys, so no-mistakes shows its own screen there; ATM's screen comes
