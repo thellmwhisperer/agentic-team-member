@@ -288,7 +288,7 @@ func checkRepairTrace(t *testing.T, out, typ string) {
 	}
 	wantTrace := map[string][]string{
 		"fix":      {"install", "proof", "proof", "proof", "test", "typecheck", "lint"},
-		"refactor": {"install", "test", "typecheck", "lint"},
+		"refactor": {"install", "baseline", "test", "typecheck", "lint"},
 		"docs":     {"install", "test", "typecheck", "lint"},
 		"chore":    {"install", "test", "typecheck", "lint"},
 	}[typ]
@@ -322,6 +322,10 @@ func configureRecheckTrace(t *testing.T, root, typ, repairedFile string) {
 	repaired := `grep -q repaired ` + repairedFile
 	atm := atmSet(string(b), "install", record("install", repaired))
 	test := record("test", repaired)
+	if typ == "refactor" {
+		// The fixture adds this file only in WORK; BASE execution must be observed independently.
+		test += record("baseline", "[ ! -e "+repairedFile+" ]")
+	}
 	atm = atmSet(atm, "test", test+"sh a_test.sh")
 	atm = atmSet(atm, "typecheck", record("typecheck", repaired))
 	atm = atmSet(atm, "lint", record("lint", repaired))
