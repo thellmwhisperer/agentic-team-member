@@ -526,6 +526,15 @@ func moreReachCases(claude func(string, string) string, why string) []reachCase 
 		{"opencode description url ignored", "opencode",
 			bashEvent("opencode", "pnpm dev --url http://localhost:5173", "https://example.com"), ""},
 		{"inside", "claude", insideStream(claude), ""},
+		{"pi writes a follow-up test with relative imports", "pi", `{"type":"tool_execution_start","toolCallId":"c1",` +
+			`"toolName":"write","args":{"path":".atm/follow-ups/1/packages/p/src/a/web/form.test.tsx","content":` +
+			`"import { rule } from '../../card/rules';\nimport { cfg } from '../../../../w/src/config';\n"}}` + "\n", ""},
+		{"pi edit text naming the repository", "pi", `{"type":"tool_execution_start","toolCallId":"c1",` +
+			`"toolName":"edit","args":{"path":"a.ts","edits":[{"oldText":"x","newText":"// see {root}/.atm/runs"}]}}` +
+			"\n", ""},
+		{"claude writes outside its clone", "claude", claude("Write",
+			`{"file_path":"{root}/.atm/runs/6-2/report.json","content":"{}"}`),
+			why + "Write {root}/.atm/runs/6-2/report.json"},
 	}
 }
 
@@ -537,7 +546,9 @@ func insideStream(claude func(string, string) string) string {
 		claude("Bash", `{"command":"pnpm add zod && pnpm dev --url http://localhost:5173"}`) +
 		claude("Bash", `{"command":"pnpm dev --url http://localhost:5173; echo ready"}`) +
 		claude("Read", `{"file_path":"{home}/go/pkg/mod/golang.org/x/mod@v0.20.0/go.mod"}`) +
-		claude("Read", `{"file_path":"/archive{root}/file"}`)
+		claude("Read", `{"file_path":"/archive{root}/file"}`) +
+		claude("Write", `{"file_path":"src/a.test.ts","content":"import { b } from '../../b';\n"}`) +
+		claude("Edit", `{"file_path":"src/a.ts","old_string":"x","new_string":"import { c } from '../../c';"}`)
 }
 
 func runReachCases(t *testing.T, cases []reachCase) {
