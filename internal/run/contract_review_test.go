@@ -387,6 +387,17 @@ func TestRunContractReviewBlocksPendingMandatoryCriterion(t *testing.T) {
 	if len(left) != 1 || left[0]["red_test"] != "c3_test.sh" {
 		t.Fatalf("lost mandatory follow-up: %v", left)
 	}
+	dir := filepath.Join(root, ".atm/runs/t")
+	b, err := os.ReadFile(filepath.Join(dir, "contract-review.json"))
+	var rounds []contractReview
+	if err != nil || json.Unmarshal(b, &rounds) != nil || len(rounds) != 1 || rounds[0].Status != "passed" || rounds[0].Head == "" {
+		t.Fatalf("current-head review evidence missing despite pending criterion: %s %v", b, err)
+	}
+	brief, err := os.ReadFile(filepath.Join(dir, "brief-contract-review-0.md"))
+	if err != nil || !strings.Contains(string(brief), followUpIssue) ||
+		!strings.Contains(string(brief), "Head: "+rounds[0].Head) || !strings.Contains(string(brief), "diff --git") {
+		t.Fatalf("pending criterion skipped issue/diff inspection: %s %v", brief, err)
+	}
 }
 
 func contractReviewRepo(t *testing.T) (root, out string) {
@@ -449,7 +460,7 @@ func TestRunContractReviewDocsRepairRejectsSourceChange(t *testing.T) {
 	b, err := os.ReadFile(filepath.Join(root, ".atm/runs/t/contract-rechecks-0.json"))
 	if err != nil || json.Unmarshal(b, &rechecks) != nil || len(rechecks.Reproofs) != 1 ||
 		rechecks.Reproofs[0].Type != "docs" || rechecks.Reproofs[0].Result != "failed" ||
-		!strings.Contains(rechecks.Reproofs[0].Result, "failed") || !strings.Contains(rechecks.Reason, "not docs") {
+		!strings.Contains(rechecks.Reason, "not docs") {
 		t.Fatalf("docs scope proof did not reject repaired source: %s %v", b, err)
 	}
 	if got := strings.TrimSpace(readRecheckTrace(t, out)); got != "repair:install" {
@@ -510,7 +521,9 @@ func TestRunContractReviewRejectsDeliveryMetadataMutation(t *testing.T) {
 		{"review origin", origin, false},
 		{"review push URL", "git remote set-url --push origin https://example.com/unexpected/repo.git", false},
 		{"review branch", "git checkout -q -b unexpected-delivery-branch", false},
+		{"review hook", "mkdir -p .git/hooks; printf '#!/bin/sh\\nexit 1\\n' > .git/hooks/pre-push; chmod +x .git/hooks/pre-push", false},
 		{"repair origin", origin, true},
+		{"repair hook", "mkdir -p .git/hooks; printf '#!/bin/sh\\nexit 1\\n' > .git/hooks/pre-push; chmod +x .git/hooks/pre-push", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, out := contractReviewRepo(t)

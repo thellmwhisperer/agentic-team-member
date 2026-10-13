@@ -2,9 +2,11 @@ package run
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -131,15 +133,10 @@ func (a agent) inspectContract(root, clone, base string, i Issue, proofs []proof
 	if err != nil {
 		return latest, err
 	}
-	for _, f := range pending {
-		if quoted(i.Body, f.Criterion) {
-			return latest, fmt.Errorf("mandatory criterion unmet: %s; see follow-ups.json", f.Criterion)
-		}
-	}
 	var rounds []contractReview
 	for round := 0; ; round++ {
 		var err error
-		latest, err = a.contractReviewRound(clone, base, i, round)
+		latest, err = a.contractReviewRound(clone, base, i, metadata, round)
 		latest.metadata = metadata
 		if err != nil {
 			return latest, err
@@ -151,6 +148,11 @@ func (a agent) inspectContract(root, clone, base string, i Issue, proofs []proof
 		b, _ := json.MarshalIndent(rounds, "", "  ")
 		if err := os.WriteFile(filepath.Join(a.dir, "contract-review.json"), append(b, '\n'), 0600); err != nil {
 			return latest, err
+		}
+		for _, f := range pending {
+			if quoted(i.Body, f.Criterion) {
+				return latest, fmt.Errorf("mandatory criterion unmet: %s; see follow-ups.json", f.Criterion)
+			}
 		}
 		switch latest.Status {
 		case "passed":
@@ -187,6 +189,13 @@ func (a agent) repairContract(root, clone string, i Issue, history []proof, c co
 	})
 	if err != nil {
 		return err
+	}
+	metadata, err := deliveryMetadata(clone)
+	if err != nil {
+		return err
+	}
+	if metadata != r.metadata {
+		return errors.New("contract repair changed delivery metadata; delivery blocked")
 	}
 	if err := moved(clone, head, "contract repair worker"); err != nil {
 		return err
@@ -226,7 +235,7 @@ func (a agent) repairContract(root, clone string, i Issue, history []proof, c co
 	return err
 }
 
-func (a agent) contractReviewRound(clone, base string, i Issue, round int) (r contractReview, err error) {
+func (a agent) contractReviewRound(clone, base string, i Issue, metadata string, round int) (r contractReview, err error) {
 	head, err := git(clone, "rev-parse", "HEAD")
 	if err != nil {
 		return r, err
@@ -255,6 +264,13 @@ func (a agent) contractReviewRound(clone, base string, i Issue, round int) (r co
 	if err != nil {
 		return r, err
 	}
+	nowMetadata, err := deliveryMetadata(clone)
+	if err != nil {
+		return r, err
+	}
+	if nowMetadata != metadata {
+		return r, errors.New("contract reviewer changed delivery metadata; delivery blocked")
+	}
 	now, err := whole(clone)
 	if err != nil {
 		return r, err
@@ -269,15 +285,50 @@ func (a agent) contractReviewRound(clone, base string, i Issue, round int) (r co
 	return r, nil
 }
 
-// deliveryMetadata binds review/repair to the prepared branch and Git configuration,
-// including origin fetch/push URLs. These live outside the working-tree snapshot.
 func deliveryMetadata(clone string) (string, error) {
 	branch, err := git(clone, "symbolic-ref", "HEAD")
 	if err != nil {
 		return "", err
 	}
 	settings, err := git(clone, "config", "--null", "--list", "--show-origin")
-	return branch + "\x00" + settings, err
+	if err != nil {
+		return "", err
+	}
+	hooks := filepath.Join(clone, ".git", "hooks")
+	h := sha256.New()
+	err = filepath.WalkDir(hooks, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(hooks, path)
+		if err != nil {
+			return err
+		}
+		_, _ = io.WriteString(h, rel+"\x00"+info.Mode().String()+"\x00")
+		if entry.IsDir() {
+			return nil
+		}
+		var content []byte
+		if entry.Type()&os.ModeSymlink != 0 {
+			link, err := os.Readlink(path)
+			if err != nil {
+				return err
+			}
+			content = []byte(link)
+		} else {
+			content, err = os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+		}
+		_, err = h.Write(append(content, 0))
+		return err
+	})
+	return branch + "\x00" + settings + "\x00" + fmt.Sprintf("%x", h.Sum(nil)), err
 }
 
 func contractRechecks(dir, clone, head string, history []proof, c config.Config, round int) error {
