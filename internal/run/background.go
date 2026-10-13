@@ -36,7 +36,8 @@ type Outcome struct {
 	Report     string    `json:"report"` // report.json, none when the run failed before its first node
 	NextStep   string    `json:"next_step"`
 	Issue      string    `json:"issue"`
-	Step       string    `json:"step"` // the last node it started
+	Step       string    `json:"step"`              // the last node it started
+	Watcher    string    `json:"watcher,omitempty"` // the atm watch it is bound to
 	Started    time.Time `json:"started"`
 	Ended      time.Time `json:"ended"`
 }
@@ -55,10 +56,11 @@ func (o Outcome) Err() error {
 }
 
 type request struct {
-	Cmd  string   `json:"cmd"` // run, attach or runs
-	Args []string `json:"args,omitempty"`
-	Run  string   `json:"run,omitempty"`
-	Size *[2]int  `json:"size,omitempty"` // the columns and rows of the terminal that attaches, if one does
+	Cmd     string   `json:"cmd"` // run, attach, runs or adopt
+	Args    []string `json:"args,omitempty"`
+	Run     string   `json:"run,omitempty"`
+	Watcher string   `json:"watcher,omitempty"` // the one that adopts Run
+	Size    *[2]int  `json:"size,omitempty"`    // the columns and rows of the terminal that attaches, if one does
 }
 
 // Frame is a piece of a run's screen.
@@ -164,6 +166,7 @@ type bgRun struct {
 	ttys   int
 	size   [2]int
 	pty    *os.File
+	gone   bool // its watcher is, and its screen says so
 }
 
 // add puts f on r's screen. Under the server's lock.
@@ -191,6 +194,16 @@ func serve(l *net.UnixListener, root, sock string, moved func() bool) error {
 				_ = c.Close()
 			}
 			return nil
+<<<<<<< HEAD
+=======
+		} else if s.busy() > 0 {
+			s.save() // runs.jsonl's time is when its runs last ran, should this process die before they end
+			s.unwatched()
+>>>>>>> aefb7d3 (atm unit 1: Go port: no watcher, no run: atm watch never exits, and atm run refuses to start without one)
+		}
+		if c == nil && s.busy() > 0 {
+			s.save() // runs.jsonl's time is when its runs last ran, should this process die before they end
+			s.unwatched()
 		}
 		if c != nil {
 			go s.handleConnection(c)
@@ -243,6 +256,21 @@ func changed() func() bool {
 	}
 }
 
+// unwatched tells each running run whose watcher died so, on its screen and in this process's log, once. Under
+// the server's lock.
+func (s *server) unwatched() {
+	for _, r := range s.runs {
+		if r.Ended.IsZero() && r.Watcher != "" && !r.gone && !Watching(s.root, r.Watcher) {
+			r.gone = true
+			line := "WATCHER GONE at " + time.Now().Format(time.TimeOnly) + ": no one is watching this run"
+			ev, _ := json.Marshal(map[string]any{"step": r.Step, "output": line,
+				"ts": time.Now().UTC().Format(time.RFC3339Nano)}) // the Log box's line
+			r.add(Frame{Line: &line, Event: ev})
+			fmt.Fprintln(os.Stderr, r.Run+": "+line)
+		}
+	}
+}
+
 // busy is how many runs go.
 func (s *server) busy() (n int) {
 	for _, r := range s.runs {
@@ -281,6 +309,18 @@ func (s *server) handle(c net.Conn) {
 		_ = enc.Encode(reply{Runs: runs})
 	case "attach":
 		s.attach(req, dec, enc)
+	case "adopt":
+		r := s.find(req.Run)
+		if r == nil {
+			_ = enc.Encode(reply{Error: "no run " + req.Run})
+			return
+		}
+		s.Lock()
+		r.Watcher, r.gone = req.Watcher, false
+		s.save()
+		o := r.Outcome
+		s.Unlock()
+		_ = enc.Encode(reply{Run: &o})
 	default:
 		_ = enc.Encode(reply{Error: "unknown request " + strconv.Quote(req.Cmd)})
 	}
@@ -320,6 +360,9 @@ func (s *server) start(args []string) (Outcome, error) {
 	}
 	r := &bgRun{more: make(chan struct{}), Outcome: Outcome{Outcome: "running", Issue: issue, Started: time.Now(),
 		Run: cmp.Or(strings.Trim(name, "-"), "run") + "-" + strconv.Itoa(n+1)}}
+	if _, _, _, a, err := parseArgs(args); err == nil {
+		r.Watcher = a.watcher
+	}
 	r.Report = filepath.Join(runDir(s.root, r.Run), "report.json")
 	if err := os.MkdirAll(filepath.Dir(r.Report), 0o755); err != nil {
 		return Outcome{}, err

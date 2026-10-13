@@ -10,6 +10,43 @@ the slop detector cuts it. What you set before a run is in
   <img alt="For fix and hotfix tasks, ATM sets aside changes to files already in the base while keeping the test and new files: the test must fail. ATM restores the changes and runs the test again: it must pass. A test that passes without the fix or fails with it fails the run." src="assets/red-green-light.svg" width="900">
 </picture>
 
+## The watcher
+
+No watcher, no run. The session that launches a run starts `atm watch` first,
+under its harness's streaming monitor (any tool that wakes the session on each
+output line), and passes the id from its first line, `watching as <id>`, to
+`atm run --watcher <id>`. It replaces the CoS skill's `vigia.sh`: it never
+exits on an event, so there is nothing to re-arm.
+
+`atm run` without `--watcher`, or naming a watcher that is not alive, fails
+before cloning with exit code 2:
+`no watcher: start atm watch in the session that launches this run and pass --watcher <id>`.
+A watcher is alive while its lease, `.atm/watch/<id>.json`, names a process
+that runs and a heartbeat it rewrites every 10 s is under 30 s old.
+`report.json` and `atm runs` record the run's watcher, and `atm doctor` says
+whether one is alive.
+
+The watcher prints one line per event of each run bound to it, the time and
+the run first, until it is killed:
+
+| Line | When |
+|------|------|
+| `started`, then each step's name | The run, then each step, starts; `delivery` is the last |
+| `gate waiting: <step>` | The no-mistakes gate waits on a decision, once per new wait |
+| `still waiting 20m: <step>` | Every 10 minutes the same wait goes on |
+| `gate fixing CI`, `pr <url>`, `ci green`, `merged` | The gate fixes CI, opens the PR, CI passes, the PR merges |
+| `gate failed: <step>` | A gate step fails |
+| `finished: passed`, `finished: failed at <step>` | The run ends |
+
+From delivery on it reads the gate with `no-mistakes axi status` in the run's
+clone every 10 s, after the run ends too, until the PR merges or the gate
+fails.
+
+When a watcher dies, each running run bound to it shows
+`WATCHER GONE at <time>: no one is watching this run` once, on its screen and
+in `.atm/serve.log`. `atm watch --adopt <run>` binds the run to a new watcher,
+which prints its current state first, as `adopted: running at <step>`.
+
 ## The steps
 
 A failed step stops the run; the steps after it are not run.

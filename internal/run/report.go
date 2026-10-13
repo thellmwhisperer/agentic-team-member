@@ -25,6 +25,7 @@ type verdict struct {
 	Reproofs   []unitResult `json:"reproofs"`
 	Commands   []cmdResult  `json:"commands"`
 	HeadSHA    string       `json:"head_sha,omitempty"` // the delivered branch's
+	Watcher    string       `json:"watcher,omitempty"`  // the atm watch the run was bound to
 	path       string
 	out        io.Writer // the log: each node's start and end, one JSON object a line
 	err        error     // the failed node's

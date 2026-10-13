@@ -26,8 +26,8 @@ import (
 var githubURL = regexp.MustCompile(`^(?:[a-z][a-z0-9+.-]*://)?(?:[^/@]+@)?github\.com[:/]([^/]+/[^/]+?)(\.git)?/?$`)
 
 // Usage is atm run's command line.
-const Usage = "usage: atm run [--base-ref r] [--harness h] [--model m] [--effort e] [--harness-arg a]... " +
-	"[--env KEY=VALUE]... <issue.md | issue number | --resume run>"
+const Usage = "usage: atm run --watcher id [--base-ref r] [--harness h] [--model m] [--effort e] " +
+	"[--harness-arg a]... [--env KEY=VALUE]... <issue.md | issue number | --resume run>"
 
 // Run is atm run with args, its flags and the issue: a file, or an issue number of origin's repository.
 // Its report, briefs and logs go to .atm/runs/<label>/ (runDir): each node's start and end go to out, one JSON
@@ -62,7 +62,7 @@ func Run(label string, args []string, out, summary io.Writer) (err error) {
 	var i Issue
 	r.step("issue", func() (map[string]any, error) {
 		i, err = readIssue(args[len(args)-1], repo)
-		r.Type = i.Type
+		r.Type, r.Watcher = i.Type, a.watcher
 		ev := map[string]any{"title": i.Title, "type": i.Type}
 		if i.Number != 0 {
 			ev["number"] = i.Number
@@ -104,6 +104,7 @@ func parseArgs(args []string) (ordered []string, base, resume *string, a *agent,
 	base = fs.String("base-ref", "main", "the ref the run starts from, resolved in the repository")
 	resume = fs.String("resume", "", "a run that failed after its agent: its issue again, from its agent's work")
 	a = &agent{}
+	fs.StringVar(&a.watcher, "watcher", "", "the atm watch the run is bound to")
 	a.flags(fs)
 	// flag stops at the first argument that is not one: the issue, after which the flags go on.
 	for err = fs.Parse(args); err == nil && fs.NArg() > 0; err = fs.Parse(fs.Args()[1:]) {

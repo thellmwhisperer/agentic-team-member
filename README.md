@@ -89,8 +89,9 @@ and `gh` for GitHub issues.
 ```bash
 cd /path/to/your/repo
 atm init     # writes .atm.yaml: fill in its commands and file patterns
-atm doctor   # checks git, the agent CLI, gh and .atm.yaml
-atm run 300  # or: atm run plans/retry-on-timeout.md
+atm watch &  # until killed: one line per event of the runs bound to it
+atm doctor   # checks git, the agent CLI, gh, .atm.yaml and a live watcher
+atm run --watcher <id> 300  # <id> from atm watch's first line; or a file: plans/retry.md
 ```
 
 `.atm.yaml` declares the repository's `install`, `test`, `typecheck` and
@@ -101,12 +102,13 @@ effort. Both are in [Configuration](docs/configuration.md).
 | Command | Does |
 |---------|------|
 | `atm init` | Writes a commented `.atm.yaml` and ignores `.atm/` |
-| `atm doctor` | Checks that a run can start |
-| `atm run [flags] <issue>` | Runs an issue: a GitHub number or a file with a `Type:` line |
+| `atm doctor` | Checks that a run can start, a live watcher included |
+| `atm watch [--adopt <run>]` | Watches the runs bound to it until killed, one line per event; see [The watcher](docs/how-a-run-flows.md#the-watcher) |
+| `atm run --watcher <id> [flags] <issue>` | Runs an issue: a GitHub number or a file with a `Type:` line. Without a live watcher it does not start |
 | `atm run --resume <run>` | Runs a failed run's issue again from its agent's work, at its checks |
 | `atm status` | The runs going |
 | `atm attach [run]` | A run's screen until it ends |
-| `atm runs` | Every retained run and its report |
+| `atm runs` | Every retained run, its watcher and its report |
 | `atm axi run`, `atm axi status`, `atm axi runs` | The same for programs, in TOON or JSON |
 
 A run goes on in the background: leaving its screen or closing the terminal
@@ -116,7 +118,7 @@ does not stop it.
 |------|---------|
 | `0` | Every unit passed, and delivery, if configured, exited 0 |
 | `1` | A unit failed; nothing is delivered |
-| `2` | Configuration, issue, clone or contract failed |
+| `2` | No live watcher, or configuration, issue, clone or contract failed |
 | `4` | Every unit passed, but the delivery command exited non-zero |
 
 ## Read more

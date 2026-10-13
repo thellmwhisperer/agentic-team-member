@@ -23,6 +23,9 @@ func runCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if err := run.Watched(root, args); err != nil {
+				return err
+			}
 			o, err := run.Start(root, args)
 			if err != nil {
 				return err
@@ -108,11 +111,14 @@ func listCmd(going bool) *cobra.Command {
 				how += " at " + o.FailedNode
 			}
 			n++
-			report := ""
+			report, watcher := "", ""
+			if !going {
+				watcher = o.Watcher + "\t"
+			}
 			if !going && o.Report != "" {
 				report = "\t" + o.Report
 			}
-			_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s%s\n", o.Run, how, o.Duration(), o.Issue, report)
+			_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s%s\n", o.Run, how, o.Duration(), watcher+o.Issue, report)
 		}
 		if n == 0 {
 			_, _ = fmt.Fprintln(w, map[bool]string{true: "nothing runs", false: "no run yet"}[going])

@@ -51,7 +51,7 @@ func TestRunOnATerminalShowsTheScreenUnlessPlainLinesAreAsked(t *testing.T) {
 	}
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
-	shown, code := onTerminal(t, "run", "retry.md")
+	shown, code := onTerminal(t, "run", "--watcher", watcher(t, dir, "w", 0), "retry.md")
 	if s := ansi.Strip(shown); code != 2 || !strings.Contains(s, "╭─ ATM ") || !strings.Contains(s, "✗ failed") ||
 		!strings.Contains(s, "╭─ Findings - E 1") || !strings.Contains(s, "config incomplete") {
 		t.Fatalf("exit %d, the terminal showed:\n%s", code, s)
