@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -17,7 +18,7 @@ import (
 // fakes holds this test binary under each agent CLI's name, first on PATH in every repo test.
 var fakes string
 
-// TestMain doubles as a fake gh, which fakeGH puts on PATH, and as the fake agents in fakes.
+// TestMain doubles as fake command-line tools and agents under their executable names.
 func TestMain(m *testing.M) {
 	switch name := strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe"); name {
 	case "claude", "codex", "opencode", "pi":
@@ -50,6 +51,9 @@ func TestMain(m *testing.M) {
 		}
 		os.Exit(0)
 	}
+	if strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe") == "no-mistakes" {
+		fakeNoMistakes()
+	}
 	dir, err := linkFakes()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "fake agents:", err)
@@ -59,6 +63,55 @@ func TestMain(m *testing.M) {
 	code := m.Run()
 	_ = os.RemoveAll(dir)
 	os.Exit(code)
+}
+
+func fakeNoMistakes() {
+	countPath := os.Getenv("ATM_STATUS_COUNT")
+	b, _ := os.ReadFile(countPath)
+	n, _ := strconv.Atoi(string(b))
+	n++
+	_ = os.WriteFile(countPath, []byte(strconv.Itoa(n)), 0o600)
+	if live := os.Getenv("ATM_STATUS_LIVE"); live != "" {
+		switch n {
+		case 1:
+			b, _ = os.ReadFile(live)
+		case 2:
+			os.Exit(1)
+		default:
+			path := os.Getenv("ATM_STATUS_WAITING")
+			if _, err := os.Stat(os.Getenv("ATM_STATUS_RELEASE")); err == nil {
+				path = os.Getenv("ATM_STATUS_MERGED")
+			}
+			b, _ = os.ReadFile(path)
+		}
+		_, _ = os.Stdout.Write(b)
+		os.Exit(0)
+	}
+	if n == 1 {
+		os.Exit(1)
+	}
+	os.Exit(0)
+}
+
+func installFakeNoMistakes(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(exe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := "no-mistakes"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	if err := os.WriteFile(filepath.Join(dir, name), b, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
 // linkFakes links this test binary under each agent CLI's name in a new directory.

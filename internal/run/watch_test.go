@@ -213,16 +213,9 @@ func TestWatchLiveness(t *testing.T) {
 func TestWatchGateRetriesFirstStatusErrorAfterRunEnds(t *testing.T) {
 	defer func(b time.Duration) { beat = b }(beat)
 	beat = time.Millisecond
-	bin := t.TempDir()
-	count := filepath.Join(bin, "count")
-	cmd := "#!/bin/sh\nn=0\ntest ! -f \"$ATM_STATUS_COUNT\" || n=$(cat \"$ATM_STATUS_COUNT\")\n" +
-		"n=$((n + 1))\nprintf '%s' \"$n\" > \"$ATM_STATUS_COUNT\"\n" +
-		"test \"$n\" -ne 1\n"
-	if err := os.WriteFile(filepath.Join(bin, "no-mistakes"), []byte(cmd), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	installFakeNoMistakes(t)
+	count := filepath.Join(t.TempDir(), "count")
 	t.Setenv("ATM_STATUS_COUNT", count)
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	ended := make(chan struct{})
 	close(ended)
 	watchGate(context.Background(), t.TempDir(), t.TempDir(), nil, "run", ended, func(string, string) {})
@@ -236,14 +229,7 @@ func TestWatchGateReadsPRStateAfterCloneRelease(t *testing.T) {
 	defer func(b time.Duration) { beat = b }(beat)
 	beat = time.Millisecond
 	top := repo(t, "https://github.com/o/r.git", atmYAML)
-	bin := t.TempDir()
-	gh := "#!/bin/sh\nprintf '%s' \"$*\" > \"$ATM_GH_ARGS\"\nprintf MERGED\n"
-	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte(gh), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	args := filepath.Join(bin, "args")
-	t.Setenv("ATM_GH_ARGS", args)
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	args := fakeGH(t, "MERGED", false)
 	branch := make(chan string, 1)
 	branch <- "atm/fix-1"
 	ended := make(chan struct{})
@@ -318,18 +304,7 @@ func gateStatusFixtures(t *testing.T, bin string) (waiting, merged, counter, rel
 	mergedStatus := "pr: \"https://github.com/o/r/pull/7\"\npr_state: merged\n" +
 		steps("review,completed,0,1", "pr,completed,0,1", "ci,completed,0,1")
 	writeFixture(t, merged, mergedStatus)
-	cmd := `#!/bin/sh
-n=0
-test ! -f "$ATM_STATUS_COUNT" || n=$(cat "$ATM_STATUS_COUNT")
-n=$((n + 1))
-printf '%s' "$n" > "$ATM_STATUS_COUNT"
-case $n in
-1) cat "$ATM_STATUS_LIVE" ;;
-2) exit 1 ;;
-*) if test -f "$ATM_STATUS_RELEASE"; then cat "$ATM_STATUS_MERGED"; else cat "$ATM_STATUS_WAITING"; fi ;;
-esac
-`
-	writeFixture(t, filepath.Join(bin, "no-mistakes"), cmd, 0o755)
+	installFakeNoMistakes(t)
 	writeFixture(t, filepath.Join(bin, "live"), liveStatus)
 	return waiting, merged, counter, release
 }
