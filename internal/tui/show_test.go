@@ -5,6 +5,8 @@ package tui
 import (
 	"bytes"
 	"io"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -83,6 +85,63 @@ func (s *shown) until(i int, ok func(string) bool) bool {
 var deliveryRuns = regexp.MustCompile(`Delivery  \d+\.\d s +running`)
 
 const exitAltScreen = "\x1b[?1049l"
+
+func TestShowReleasesHerdrBeforeReturningFromQ(t *testing.T) {
+	master, tty, err := pty.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = master.Close() }()
+	defer func() { _ = tty.Close() }()
+	if err := pty.Setsize(tty, &pty.Winsize{Cols: 120, Rows: 40}); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	calls, bin := filepath.Join(dir, "calls"), filepath.Join(dir, "herdr")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nprintf '%s|' \"$@\" >> \"$HERDR_LOG\"; echo >> \"$HERDR_LOG\"\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HERDR_ENV", "1")
+	t.Setenv("HERDR_PANE_ID", "wX:p1")
+	t.Setenv("HERDR_BIN_PATH", bin)
+	t.Setenv("HERDR_LOG", calls)
+	old := follow
+	follow = func(_, _ string, _ *[2]int, in <-chan run.Input, _ func(run.Frame)) (run.Outcome, error) {
+		for range in {
+		}
+		return run.Outcome{}, nil
+	}
+	defer func() { follow = old }()
+	s := &shown{more: make(chan struct{}, 1)}
+	read := make(chan struct{})
+	go func() { _, _ = io.Copy(s, master); close(read) }()
+	done := make(chan struct{})
+	go func() {
+		_, _, _ = Show("", "issue-1", "startup", tty, tty)
+		close(done)
+	}()
+	if !s.until(0, func(v string) bool { return strings.Contains(v, "\x1b[?1049h") }) {
+		t.Fatal("Show did not open its screen")
+	}
+	if _, err := master.Write([]byte("q")); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("Show did not return after q")
+	}
+	_ = tty.Close()
+	_ = master.Close()
+	<-read
+	b, err := os.ReadFile(calls)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), "pane|release-agent|wX:p1|--source|atm|--agent|atm|") {
+		t.Fatalf("Show returned before releasing herdr: %q", b)
+	}
+}
 
 // A delivery that writes nothing leaves ATM's screen live on the terminal; from its first output to its end,
 // the terminal and its keys are the delivery's, and ATM's screen comes back after.

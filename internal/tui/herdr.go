@@ -102,7 +102,10 @@ func followWithHerdr(root, label, start string, size *[2]int, in <-chan run.Inpu
 	if err != nil {
 		return run.Outcome{}, err
 	}
-	h := openHerdr(label, start)
+	var h *herdr
+	if label != "" {
+		h = openHerdr(label, start)
+	}
 	if h != nil {
 		defer h.release()
 		original := fn
