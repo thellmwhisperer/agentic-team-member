@@ -28,11 +28,13 @@ func modelWithEvents(width int, events []string) *Model {
 	return m
 }
 
+// agentLines is the Agent box's rows of m, without the blank ones that fill the box above them.
 func agentLines(m *Model, width int) []string {
 	var lines []string
 	for _, line := range strings.Split(ansi.Strip(m.agentBox(width, 40)), "\n") {
-		if strings.HasPrefix(line, "│") {
-			lines = append(lines, strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(line, "│"), "│")))
+		if line = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(line, "│"), "│")); line != "" &&
+			!strings.HasPrefix(line, "╭") && !strings.HasPrefix(line, "╰") {
+			lines = append(lines, line)
 		}
 	}
 	return lines

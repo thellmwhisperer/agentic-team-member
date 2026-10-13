@@ -123,7 +123,7 @@ func (a agent) run(clone, name, skill, brief string, check func(map[string]any) 
 	cmd.Env = append(slices.DeleteFunc(os.Environ(), func(kv string) bool {
 		return strings.HasPrefix(kv, "CLAUDE_CODE_CHILD_SESSION=") // set, the agent's transcripts are off
 	}), a.env...)
-	s := stream{skill: skill, live: liveIn(clone)}
+	s := stream{skill: skill, live: relative(clone, liveIn(clone))}
 	err = s.read(cmd, f, a.Harness)
 	if a.Harness == "codex" {
 		b, _ := os.ReadFile(final) // none is no report
@@ -145,6 +145,18 @@ func (a agent) run(clone, name, skill, brief string, check func(map[string]any) 
 		return ev, fmt.Errorf("%w; log: %s", err, path)
 	}
 	return ev, nil
+}
+
+// relative is live with each tool call's detail relative to clone: a path in it without clone, clone itself ".".
+func relative(clone string, live func(map[string]any)) func(map[string]any) {
+	slash := filepath.ToSlash(clone)
+	rel := strings.NewReplacer(clone+string(filepath.Separator), "", slash+"/", "", clone, ".", slash, ".")
+	return func(ev map[string]any) {
+		if d, ok := ev["detail"].(string); ok {
+			ev["detail"] = rel.Replace(d)
+		}
+		live(ev)
+	}
 }
 
 // report is the agent's report, the last JSON object of its final message, which check accepts.

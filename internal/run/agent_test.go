@@ -43,7 +43,8 @@ var work = map[string]string{"fix": fixWork, "feature": fixWork, "greenfield": f
 // grandchild in its own session; hang-orphan starts it in its own session through a child that exits at once,
 // so init adopts it. The ponytail pass plays the same with the ponytail-review skill,
 // $FAKE_PONYTAIL as its mode, $FAKE_PONYTAIL_WORK as its work and $FAKE_PONYTAIL_REPORT, or no findings, as
-// its report; its call goes to $FAKE_AGENT_CALL.ponytail. $FAKE_AGENT_STREAM goes to its stdout after its first line.
+// its report; its call goes to $FAKE_AGENT_CALL.ponytail. $FAKE_AGENT_STREAM goes to its stdout after its first
+// line, <clone> in it its working directory.
 func fakeAgent(name string) int {
 	mode := os.Getenv("FAKE_AGENT")
 	if fakeAgentSetup(mode) {
@@ -61,7 +62,9 @@ func fakeAgent(name string) int {
 	}
 	recordFakeAgentCall(args, stdin, call)
 	waitForFakeAgentRelease()
-	fmt.Print(`{"type": "system", "subtype": "init"}`+"\n", os.Getenv("FAKE_AGENT_STREAM")) // the test's lines too
+	wd, _ := os.Getwd()
+	stream := strings.ReplaceAll(os.Getenv("FAKE_AGENT_STREAM"), "<clone>", filepath.ToSlash(wd))
+	fmt.Print(`{"type": "system", "subtype": "init"}`+"\n", stream) // the test's lines too
 	fmt.Fprintln(os.Stderr, "fake stderr")
 	if exit, done := fakeAgentMode(mode); done {
 		return exit
