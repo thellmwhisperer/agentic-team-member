@@ -524,6 +524,7 @@ func redDidNotRunBaseCases() []struct {
 			" RUN  v3.2.4 /workspace", "", " FAIL  a.test.js > loads", "Error: Failed to load url ../steps",
 			"Tests no tests", " Test Files  1 failed (1)", "      Tests  1 failed (1)",
 		}, "\n"), false},
+		{"Vitest assertion logs zero-test wording before genuine failed-test summary", vitestLoggedNoTestsOutput, false},
 	}
 }
 
