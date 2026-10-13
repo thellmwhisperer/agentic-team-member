@@ -146,9 +146,10 @@ func TestAttachWithoutRunsDoesNotReportHerdr(t *testing.T) {
 
 func TestDefaultAttachKeepsSelectedRunWhenAnotherStarts(t *testing.T) {
 	repoDir, _ := resumeRepo(t, "", "")
-	if err := os.WriteFile(filepath.Join(repoDir, "second.md"), nil, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(repoDir, "second.md"), []byte("# Second\nType: chore\nDo it.\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	agentsReady, agentRelease := setupBarrierAgent(t)
 	startRun := func(task string) string {
 		t.Helper()
 		c := root()
@@ -160,10 +161,11 @@ func TestDefaultAttachKeepsSelectedRunWhenAnotherStarts(t *testing.T) {
 		}
 		return strings.TrimSpace(out.String())
 	}
-	startRun("chore.md")
+	firstRun := startRun("chore.md")
+	waitForAgents(t, agentsReady, 1)
 
 	dir := t.TempDir()
-	ready, unblock, calls := filepath.Join(dir, "ready"), filepath.Join(dir, "unblock"), filepath.Join(dir, "calls")
+	herdrReady, herdrRelease, calls := filepath.Join(dir, "ready"), filepath.Join(dir, "unblock"), filepath.Join(dir, "calls")
 	bin := filepath.Join(dir, "herdr")
 	script := "#!/bin/sh\nif [ \"$2\" = report-agent-session ]; then : > \"$HERDR_READY\"; while [ ! -e \"$HERDR_RELEASE\" ]; do sleep 0.01; done; fi\nprintf '%s|' \"$@\" >> \"$HERDR_LOG\"; echo >> \"$HERDR_LOG\"\n"
 	if err := os.WriteFile(bin, []byte(script), 0o700); err != nil {
@@ -172,8 +174,8 @@ func TestDefaultAttachKeepsSelectedRunWhenAnotherStarts(t *testing.T) {
 	t.Setenv("HERDR_ENV", "1")
 	t.Setenv("HERDR_PANE_ID", "wX:p1")
 	t.Setenv("HERDR_BIN_PATH", bin)
-	t.Setenv("HERDR_READY", ready)
-	t.Setenv("HERDR_RELEASE", unblock)
+	t.Setenv("HERDR_READY", herdrReady)
+	t.Setenv("HERDR_RELEASE", herdrRelease)
 	t.Setenv("HERDR_LOG", calls)
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
@@ -190,7 +192,7 @@ func TestDefaultAttachKeepsSelectedRunWhenAnotherStarts(t *testing.T) {
 	}()
 	deadline := time.Now().Add(800 * time.Millisecond)
 	for {
-		if _, err := os.Stat(ready); err == nil {
+		if _, err := os.Stat(herdrReady); err == nil {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -199,28 +201,34 @@ func TestDefaultAttachKeepsSelectedRunWhenAnotherStarts(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	secondRun := startRun("second.md")
-	if err := os.WriteFile(unblock, nil, 0o600); err != nil {
+	waitForAgents(t, agentsReady, 2)
+	if err := os.WriteFile(herdrRelease, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	assertBothRunsFinish(t, agentRelease)
 	got := <-result
-	if got.code != 0 || !strings.Contains(got.shown, "chore-1") || strings.Contains(got.shown, "second-1") {
+	if got.code != 1 || !strings.Contains(got.shown, "Chore") || strings.Contains(got.shown, "Second") {
 		t.Fatalf("attach followed the wrong run: exit %d, shown %q", got.code, got.shown)
 	}
 	b, err := os.ReadFile(calls)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(b), "--agent-session-id|chore-1|") {
+	if !strings.Contains(string(b), "--agent-session-id|"+firstRun+"|") || firstRun == secondRun {
 		t.Fatalf("herdr reported a different selected run: %q", b)
 	}
-	deadline = time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		if _, err := os.Stat(filepath.Join(repoDir, ".atm", "runs", secondRun, "report.json")); err == nil {
+}
+
+func waitForAgents(t *testing.T, ready string, count int) {
+	t.Helper()
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		entries, err := os.ReadDir(ready)
+		if err == nil && len(entries) >= count {
 			return
 		}
-		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatal("the interleaved run did not finish before cleanup")
+	entries, _ := os.ReadDir(ready)
+	t.Fatalf("only %d fake agents reached the barrier, want %d", len(entries), count)
 }
 
 func TestRunReportsWorkingBeforeIssueLoadingFails(t *testing.T) {

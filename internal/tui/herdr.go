@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -98,10 +99,6 @@ func resolve(root, label string) (string, error) {
 
 func followWithHerdr(root, label, start string, size *[2]int, in <-chan run.Input, fn func(run.Frame),
 	followFn func(string, string, *[2]int, <-chan run.Input, func(run.Frame)) (run.Outcome, error)) (run.Outcome, error) {
-	label, err := resolve(root, label)
-	if err != nil {
-		return run.Outcome{}, err
-	}
 	var h *herdr
 	if label != "" {
 		h = openHerdr(label, start)
@@ -120,6 +117,14 @@ func followWithHerdr(root, label, start string, size *[2]int, in <-chan run.Inpu
 
 // Attach shows plain run lines while reporting the same run to herdr.
 func Attach(root, label, start string, w io.Writer) (run.Outcome, error) {
+	var err error
+	label, err = resolve(root, label)
+	if err != nil {
+		return run.Outcome{}, err
+	}
+	if label == "" {
+		return run.Outcome{}, errors.New("no run yet")
+	}
 	return followWithHerdr(root, label, start, nil, nil, func(f run.Frame) {
 		if f.Line != nil {
 			_, _ = fmt.Fprintln(w, *f.Line)
