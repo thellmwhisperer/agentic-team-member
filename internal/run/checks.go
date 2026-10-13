@@ -30,7 +30,7 @@ import (
 // install, the type's proof, test, typecheck and lint pass, the commands no-mistakes runs, and HEAD has not
 // moved still. Install runs again before the proof: the agent may have changed dependencies. Each proof and
 // command is a row of the screen. Its result holds the proof's red and green trials.
-func checks(clone, sha, typ, test string, c config.Config) (map[string]any, error) {
+func checks(clone, sha, typ, test string, followUps any, c config.Config) (map[string]any, error) {
 	live := liveIn(clone)
 	var red, green try
 	var proofSpan span
@@ -51,7 +51,11 @@ func checks(clone, sha, typ, test string, c config.Config) (map[string]any, erro
 	}
 	err := moved(clone, sha, "the agent")
 	if err == nil {
-		err = unmade(clone)
+		var keep []string
+		keep, err = declaredFollowUpPaths(clone, followUps)
+		if err == nil {
+			err = unmade(clone, keep)
+		}
 	}
 	if err == nil {
 		err = run("install", c.Install)
@@ -85,20 +89,22 @@ func before(clone string) error {
 	return err
 }
 
-// unmade removes from clone every file git ignores that before did not record: the agent made it, and delivery
-// leaves it out. ATM's scratch, .atm/, stays: the agent's follow-ups are there.
-func unmade(clone string) error {
+// unmade removes from clone every file git ignores that before did not record, except follow-up tests the run keeps.
+func unmade(clone string, keep []string) error {
 	was, err := every(clone, "ls-tree", "-r", "--name-only", "-z", "refs/atm/before")
 	if err != nil {
 		return err
 	}
 	had := map[string]bool{}
+	for _, p := range keep {
+		had[p] = true
+	}
 	for _, p := range strings.Split(was, "\x00") {
 		had[p] = true
 	}
 	now, err := git(clone, "ls-files", "-z", "--others", "--ignored", "--exclude-standard")
 	for _, p := range strings.Split(now, "\x00") {
-		if err == nil && p != "" && !had[p] && !strings.HasPrefix(p, ".atm/") {
+		if err == nil && p != "" && !had[p] {
 			err = os.Remove(filepath.Join(clone, filepath.FromSlash(p)))
 		}
 	}

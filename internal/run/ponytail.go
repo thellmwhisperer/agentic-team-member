@@ -123,7 +123,7 @@ func reprove(clone, base string, history []proof, c config.Config) (string, []un
 		}
 	}
 	last := history[len(history)-1]
-	result, err := checks(clone, base, last.typ, last.test, c)
+	result, err := checks(clone, base, last.typ, last.test, nil, c)
 	red, _ := result["red"].(try)
 	green, _ := result["green"].(try)
 	proofSpan, _ := result["proof_span"].(span)
