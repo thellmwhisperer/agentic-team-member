@@ -881,6 +881,9 @@ func mayConsumeWrittenData(stmts []*syntax.Stmt, output string) bool {
 	unsafe := false
 	for _, stmt := range stmts {
 		syntax.Walk(stmt, func(node syntax.Node) bool {
+			if call, ok := node.(*syntax.CallExpr); ok && changesDirectory(call) {
+				unsafe = true
+			}
 			if word, ok := node.(*syntax.Word); ok {
 				text, literal := literalWord(word)
 				unsafe = unsafe || !literal || shellGlobMatches(word, text, output) || strings.Contains(text, path.Clean(output)) ||
@@ -894,6 +897,24 @@ func mayConsumeWrittenData(stmts []*syntax.Stmt, output string) bool {
 		})
 		if unsafe {
 			return true
+		}
+	}
+	return false
+}
+
+func changesDirectory(call *syntax.CallExpr) bool {
+	for i := 0; i < len(call.Args); {
+		name, literal := literalWord(call.Args[i])
+		if !literal {
+			return false
+		}
+		switch name {
+		case "cd", "pushd", "popd":
+			return true
+		case "builtin", "command", "exec":
+			i++
+		default:
+			return false
 		}
 	}
 	return false
