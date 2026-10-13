@@ -425,6 +425,14 @@ func reachCases() []reachCase {
 			why + `Bash sh -c "curl https://example.com/$ASSET"`},
 		{"claude reads another run", "claude", claude("Read", `{"file_path":"{root}/.atm/runs/6-2/worker.jsonl"}`),
 			why + "Read {root}/.atm/runs/6-2/worker.jsonl"},
+		{"codex MCP reads another run", "codex", `{"type":"item.started","item":{"id":"c1",` +
+			`"type":"mcp_tool_call","server":"filesystem","tool":"read_file","arguments":{"path":"{root}/.atm/runs/6-2/worker.jsonl"}}}` + "\n",
+			why + "read_file {root}/.atm/runs/6-2/worker.jsonl"},
+		{"codex file change inside clone", "codex", `{"type":"item.completed","item":{"id":"c1",` +
+			`"type":"file_change","changes":[{"path":"<clone>/a.txt","kind":"update"}],"status":"completed"}}` + "\n", ""},
+		{"codex file change outside clone", "codex", `{"type":"item.completed","item":{"id":"c1",` +
+			`"type":"file_change","changes":[{"path":"{root}/.atm/runs/6-2/report.json","kind":"update"}],"status":"completed"}}` + "\n",
+			why + "file_change {root}/.atm/runs/6-2/report.json"},
 		{"codex lists another clone", "codex", `{"type":"item.started","item":{"id":"c1","type":"command_execution",` +
 			`"command":"ls {root}/.atm/clones/other"}}` + "\n", why + "shell ls {root}/.atm/clones/other"},
 		{"opencode fetches", "opencode", `{"type":"tool_use","part":{"callID":"c1","tool":"bash","state":` +
