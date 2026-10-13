@@ -640,7 +640,7 @@ func Start(root string, args []string) (Outcome, error) {
 	if err == nil && *resume != "" {
 		var p resumePoint
 		if p, err = resumeFrom(root, *resume); err == nil {
-			args, _, _, a, err = parseArgs(append(args, p.Issue)) // and no other
+			args, err = resumeArgs(args, p.Issue)
 		}
 	}
 	if err != nil {
@@ -654,6 +654,11 @@ func Start(root string, args []string) (Outcome, error) {
 	var o Outcome
 	err = call(root, request{Cmd: "run", Args: args}, nil, func(r reply) { o = *r.Run })
 	return o, err
+}
+
+func resumeArgs(args []string, issue string) ([]string, error) {
+	resumed, _, _, _, err := parseArgs(append(args, issue)) // and no other
+	return resumed, err
 }
 
 // Attach copies the plain screen of run label, the last one that runs when label is "", to w until it ends,

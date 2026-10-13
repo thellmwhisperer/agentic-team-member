@@ -329,7 +329,8 @@ func TestBackgroundRemembersRunsAcrossRestarts(t *testing.T) {
 		!reflect.DeepEqual(got, want) {
 		t.Fatalf("Runs = %+v, %v", runs, err)
 	}
-	if o, err := startWithWatcher(t, top, []string{"--harness", "pi", issueFile(t, issue)}); err != nil || o.Run != "issue-3" {
+	if o, err := startWithWatcher(t, top, []string{"--harness", "pi", issueFile(t, issue)}); err != nil ||
+		o.Run != "issue-3" {
 		t.Fatalf("Start = %+v, %v; want the next label", o, err)
 	}
 	if _, err := Attach(top, "", &bytes.Buffer{}); err != nil {
