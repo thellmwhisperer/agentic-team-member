@@ -174,7 +174,7 @@ func (a agent) units(r *verdict, root, dir, sha, text string, i Issue, c config.
 			var err error
 			var p proof
 			var out []followUp
-			p, in, out, ev, err = checkUnit(dir, head, test, unit.Type, f, n, report, i.Body, c)
+			p, in, out, ev, err = checkUnit(a.dir, dir, head, test, unit.Type, f, n, report, i.Body, c)
 			proofs = append(proofs, p)
 			pending = append(pending, out...)
 			return ev, err
@@ -195,7 +195,7 @@ func (a agent) units(r *verdict, root, dir, sha, text string, i Issue, c config.
 }
 
 func checkUnit(
-	dir, head, test, typ string, f *followUp, n int, report map[string]any, body string, c config.Config,
+	runDir, dir, head, test, typ string, f *followUp, n int, report map[string]any, body string, c config.Config,
 ) (proof, []followUp, []followUp, map[string]any, error) {
 	ev := map[string]any{"unit": n}
 	if f != nil {
@@ -203,7 +203,7 @@ func checkUnit(
 			return proof{}, nil, nil, ev, fmt.Errorf("unit %d edited its red test %s, which it must make pass as it is", n, test)
 		}
 	}
-	result, err := checks(dir, head, typ, test, report["follow_ups"], c)
+	result, err := checks(dir, runDir, head, typ, test, report["follow_ups"], c)
 	for key, value := range result {
 		ev[key] = value
 	}

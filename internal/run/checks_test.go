@@ -17,11 +17,86 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/thellmwhisperer/agentic-team-member/internal/config"
 )
 
 // atmSet is atm with key set to the shell line value.
 func atmSet(atm, key, value string) string {
 	return regexp.MustCompile(`(?m)^`+key+`:.*$`).ReplaceAllLiteralString(atm, key+": '"+value+"'")
+}
+
+func TestChecksStashSurvivesCloneSweep(t *testing.T) {
+	root := repo(t, "https://example.com/owner/repo.git", atmYAML)
+	runDir := filepath.Join(root, ".atm", "runs", "t")
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dir, sha, _, err := clone(root, "main", "", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := release(dir, ""); err != nil {
+			t.Error(err)
+		}
+	})
+	artifact := filepath.Join(dir, ".atm", "follow-ups", "1", "artifact.txt")
+	if err := os.MkdirAll(filepath.Dir(artifact), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(artifact, []byte("follow-up\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := before(dir); err != nil {
+		t.Fatal(err)
+	}
+	ready := filepath.Join(runDir, "continue-checks")
+	t.Setenv("ATM_TEST_READY", ready)
+	if err := os.WriteFile(filepath.Join(root, ".atm.yaml"), []byte(atmSet(atmYAML,
+		"test", `while [ ! -f "$ATM_TEST_READY" ]; do sleep 0.01; done; test ! -e .atm`)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := config.Load(root, os.Getenv("HOME"), config.Agent{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := checks(dir, runDir, sha, "chore", "", nil, c)
+		done <- err
+	}()
+	defer os.WriteFile(ready, nil, 0o600)
+	deadline := time.Now().Add(5 * time.Second)
+	hidden := false
+	for {
+		if _, err := os.Stat(filepath.Join(dir, ".atm")); errors.Is(err, os.ErrNotExist) {
+			hidden = true
+			break
+		}
+		if time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	sweep(filepath.Join(root, ".atm", "clones"), "")
+	_, stashErr := os.Stat(filepath.Join(runDir, "checks-atm"))
+	if err := os.WriteFile(ready, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	checksErr := <-done
+	if !hidden {
+		t.Fatal("Checks did not hide .atm")
+	}
+	if stashErr != nil {
+		t.Fatalf("sweep removed the Checks stash: %v", stashErr)
+	}
+	if checksErr != nil {
+		t.Fatal(checksErr)
+	}
+	if b, err := os.ReadFile(artifact); err != nil || string(b) != "follow-up\n" {
+		t.Fatalf("follow-up was not restored: %q, %v", b, err)
+	}
 }
 
 // checksStep is the checks step's end event, after checking the agent step passed and nothing followed a failure.
