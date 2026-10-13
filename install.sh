@@ -45,7 +45,6 @@ curl -fsSL -o "$WORK/release.json" "$API/repos/thellmwhisperer/agentic-team-memb
   die "GitHub has no release at $RELEASE"
 field() { grep -o "\"$1\": *\"[^\"]*\"" "$WORK/release.json" | sed 's/.*"\([^"]*\)"$/\1/'; }
 TAG=$(field tag_name | head -1)
-[ -n "$TAG" ] || die "GitHub has no release at $RELEASE"
 ARCHIVE="atm-$TAG-$os-$arch.tar.gz"
 
 for f in "$ARCHIVE" checksums.txt; do
@@ -69,7 +68,3 @@ cp "$WORK/atm" "$STAGED"
 chmod 755 "$STAGED"
 mv -f "$STAGED" "$TARGET"
 "$TARGET" --version
-case ":$PATH:" in
-  *":$PREFIX:"*) ;;
-  *) echo "$PREFIX is not on your PATH: export PATH=\"$PREFIX:\$PATH\"" ;;
-esac
