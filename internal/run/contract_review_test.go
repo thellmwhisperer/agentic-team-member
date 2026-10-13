@@ -147,18 +147,7 @@ func TestRunContractReviewRepair(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			root, out := contractReviewRepo(t)
 			if tc.name == "repair rechecks" {
-				original, err := os.ReadFile(filepath.Join(root, ".atm.yaml"))
-				if err != nil {
-					t.Fatal(err)
-				}
-				atm := atmSet(string(original), "install", `if grep -q repaired a.txt; then printf install >> "$ATM_TEST_OUT/install.marker"; fi`)
-				atm = atmSet(atm, "test", `if grep -q repaired a.txt; then printf test >> "$ATM_TEST_OUT/test.marker"; fi; sh a_test.sh`)
-				atm = atmSet(atm, "typecheck", `if grep -q repaired a.txt; then printf typecheck >> "$ATM_TEST_OUT/typecheck.marker"; fi`)
-				atm = atmSet(atm, "lint", `if grep -q repaired a.txt; then printf lint >> "$ATM_TEST_OUT/lint.marker"; fi`)
-				atm = atmSet(atm, "test_file", `sh {file}; status=$?; if grep -q repaired a.txt; then printf proof >> "$ATM_TEST_OUT/proof.marker"; fi; exit "$status"`)
-				if err := os.WriteFile(filepath.Join(root, ".atm.yaml"), []byte(atm), 0600); err != nil {
-					t.Fatal(err)
-				}
+				configureRecheckTrace(t, root, "fix", "a.txt")
 			}
 			t.Setenv("FAKE_CONTRACT_REPORT", repairContract)
 			t.Setenv("FAKE_CONTRACT_REPAIR", tc.work)
@@ -199,6 +188,10 @@ func TestRunContractReviewRepair(t *testing.T) {
 
 func checkContractRechecks(t *testing.T, dir, out string, rounds []contractReview, typ, testFile string) {
 	t.Helper()
+	epoch, err := os.ReadFile(filepath.Join(out, "repair-epoch"))
+	if err != nil || strings.TrimSpace(string(epoch)) != "contract-repair" {
+		t.Fatalf("repair owner did not record its epoch: %q %v", epoch, err)
+	}
 	b, e := os.ReadFile(filepath.Join(dir, "contract-rechecks-0.json"))
 	var rechecks struct {
 		Reproofs []unitResult `json:"reproofs"`
@@ -216,15 +209,9 @@ func checkContractRechecks(t *testing.T, dir, out string, rounds []contractRevie
 		if proof.Red.Exit == 0 || proof.Green.Exit != 0 {
 			t.Fatalf("repair did not rerun the required red/green proof: %+v", proof)
 		}
-		if b, err := os.ReadFile(filepath.Join(out, "proof.marker")); err != nil || len(b) == 0 {
-			t.Fatalf("repair proof left no marker: %q %v", b, err)
-		}
 	case "refactor":
 		if proof.Red.Exit != 0 {
 			t.Fatalf("repair did not rerun the passing baseline suite: %+v", proof)
-		}
-		if b, err := os.ReadFile(filepath.Join(out, "baseline.marker")); err != nil || len(b) == 0 {
-			t.Fatalf("refactor baseline suite left no marker: %q %v", b, err)
 		}
 	}
 	wantCommands := []string{"install", "test", "typecheck", "lint"}
@@ -235,14 +222,50 @@ func checkContractRechecks(t *testing.T, dir, out string, rounds []contractRevie
 		if rechecks.Commands[i].Name != want || rechecks.Commands[i].Result != "passed" {
 			t.Fatalf("repair command %q not passed: %+v", want, rechecks.Commands[i])
 		}
-		marker := filepath.Join(out, want+".marker")
-		if b, err := os.ReadFile(marker); err != nil || len(b) == 0 {
-			t.Fatalf("configured command %q left no repair marker: %q %v", want, b, err)
-		}
+	}
+	trace, err := os.ReadFile(filepath.Join(out, "recheck.trace"))
+	if err != nil {
+		t.Fatalf("repair command trace missing: %v", err)
+	}
+	wantTrace := map[string][]string{
+		"fix":      {"install", "proof", "proof", "test", "typecheck", "lint"},
+		"refactor": {"install", "baseline", "test", "typecheck", "lint"},
+		"docs":     {"install", "test", "typecheck", "lint"},
+		"chore":    {"install", "test", "typecheck", "lint"},
+	}[typ]
+	if got, want := strings.TrimSpace(string(trace)), strings.Join(wantTrace, "\n"); got != want {
+		t.Fatalf("repair epoch did not execute every applicable check and proof: got %q want %q", got, want)
 	}
 	rep := readReport(t, filepath.Join(dir, "report.json"))
 	if rep["head_sha"] != rounds[1].Head || rounds[0].Head == rounds[1].Head {
 		t.Fatal("review not bound to repaired head")
+	}
+}
+
+func configureRecheckTrace(t *testing.T, root, typ, repairedFile string) {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(root, ".atm.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := func(name, condition string) string {
+		return `if [ -f "$ATM_TEST_OUT/repair-epoch" ] && ` + condition +
+			`; then printf "` + name + `\n" >> "$ATM_TEST_OUT/recheck.trace"; fi; `
+	}
+	repaired := `grep -q repaired ` + repairedFile
+	atm := atmSet(string(b), "install", record("install", repaired))
+	test := record("test", repaired)
+	if typ == "refactor" {
+		test = record("baseline", `[ ! -e b.txt ]`) + test
+	}
+	atm = atmSet(atm, "test", test+"sh a_test.sh")
+	atm = atmSet(atm, "typecheck", record("typecheck", repaired))
+	atm = atmSet(atm, "lint", record("lint", repaired))
+	if typ == "fix" {
+		atm = atmSet(atm, "test_file", `sh {file}; status=$?; if [ -f "$ATM_TEST_OUT/repair-epoch" ] && grep -q repaired a.txt; then printf "proof\n" >> "$ATM_TEST_OUT/recheck.trace"; fi; exit "$status"`)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".atm.yaml"), []byte(atm), 0o600); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -681,24 +704,7 @@ func TestRunContractReviewRepairWithoutTestFile(t *testing.T) {
 	for typ, file := range map[string]string{"docs": "README.md", "chore": "deps.txt", "refactor": "b.txt"} {
 		t.Run(typ, func(t *testing.T) {
 			root, out := contractReviewRepo(t)
-			atm, err := os.ReadFile(filepath.Join(root, ".atm.yaml"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			mark := func(name string) string {
-				return `if grep -q repaired ` + file + `; then printf ` + name + ` >> "$ATM_TEST_OUT/` + name + `.marker"; fi; `
-			}
-			atmText := atmSet(string(atm), "install", mark("install"))
-			testCommand := mark("test")
-			if typ == "refactor" {
-				testCommand = `if [ ! -e b.txt ]; then printf baseline >> "$ATM_TEST_OUT/baseline.marker"; fi; ` + testCommand
-			}
-			atmText = atmSet(atmText, "test", testCommand+"sh a_test.sh")
-			atmText = atmSet(atmText, "typecheck", mark("typecheck"))
-			atmText = atmSet(atmText, "lint", mark("lint"))
-			if err := os.WriteFile(filepath.Join(root, ".atm.yaml"), []byte(atmText), 0600); err != nil {
-				t.Fatal(err)
-			}
+			configureRecheckTrace(t, root, typ, file)
 			t.Setenv("FAKE_AGENT_WORK", "echo original > "+file+
 				`; mkdir -p .atm; echo "{\"test_file\":\"\"}" > .atm/fake-report.json`)
 			t.Setenv("FAKE_CONTRACT_REPORT", repairContract)
@@ -720,6 +726,47 @@ func TestRunContractReviewRepairWithoutTestFile(t *testing.T) {
 			checkContractRechecks(t, filepath.Join(root, ".atm/runs/t"), out, rounds, typ, "")
 		})
 	}
+}
+
+func TestRunContractReviewDocsRepairRejectsSourceChange(t *testing.T) {
+	root, out := contractReviewRepo(t)
+	configureRecheckTrace(t, root, "docs", "README.md")
+	t.Setenv("FAKE_AGENT_WORK", "echo original > README.md; mkdir -p .atm; echo '{\"test_file\":\"\"}' > .atm/fake-report.json")
+	t.Setenv("FAKE_CONTRACT_REPORT", repairContract)
+	t.Setenv("FAKE_CONTRACT_REPAIR", "echo repaired > README.md; echo source-change > a.txt")
+	t.Setenv("FAKE_CONTRACT_AFTER_REPAIR_FILE", "README.md")
+	t.Setenv("FAKE_CONTRACT_AFTER_REPAIR_REPORT", passedContract)
+	issue := strings.Replace(reviewReadyIssue, "Type: fix", "Type: docs", 1)
+	err := Run("t", []string{issueFile(t, issue)}, &bytes.Buffer{}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "not docs") {
+		t.Fatalf("docs repair accepted a source change: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(out, "delivered")); !os.IsNotExist(err) {
+		t.Fatal("delivery ran after a source change")
+	}
+	var rechecks struct {
+		Reason   string       `json:"reason"`
+		Reproofs []unitResult `json:"reproofs"`
+		Commands []cmdResult  `json:"commands"`
+	}
+	b, err := os.ReadFile(filepath.Join(root, ".atm/runs/t/contract-rechecks-0.json"))
+	if err != nil || json.Unmarshal(b, &rechecks) != nil || len(rechecks.Reproofs) != 1 ||
+		rechecks.Reproofs[0].Type != "docs" || rechecks.Reproofs[0].Result != "failed" ||
+		!strings.Contains(rechecks.Reproofs[0].Result, "failed") || !strings.Contains(rechecks.Reason, "not docs") {
+		t.Fatalf("docs scope proof did not reject repaired source: %s %v", b, err)
+	}
+	if got := strings.TrimSpace(readRecheckTrace(t, out)); got != "install" {
+		t.Fatalf("commands after the failed docs proof ran: %q", got)
+	}
+}
+
+func readRecheckTrace(t *testing.T, out string) string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(out, "recheck.trace"))
+	if err != nil {
+		t.Fatalf("repair execution trace missing: %v", err)
+	}
+	return string(b)
 }
 
 func TestContractReviewReproofRequiresTestFile(t *testing.T) {

@@ -76,6 +76,11 @@ func fakeAgent(name string) int {
 		}
 		return 3
 	}
+	if call == ".contract-repair" {
+		if out := os.Getenv("ATM_TEST_OUT"); out != "" {
+			_ = os.WriteFile(filepath.Join(out, "repair-epoch"), []byte("contract-repair\n"), 0o600)
+		}
+	}
 	if mode == "blank-lines" {
 		for range 6 {
 			fmt.Println()
