@@ -198,7 +198,8 @@ func TestStackedAgentAndLogFitWithinTerminalHeight(t *testing.T) {
 	if got := len(strings.Split(s, "\n")); got > 24 {
 		t.Fatalf("80×24 viewport used %d rows:\n%s", got, s)
 	}
-	if !strings.Contains(s, "q detach") || !strings.Contains(s, "Agent") || !strings.Contains(s, "Log") || !strings.Contains(s, "retained log line") {
+	if !strings.Contains(s, "q detach") || !strings.Contains(s, "Agent") ||
+		!strings.Contains(s, "Log") || !strings.Contains(s, "retained log line") {
 		t.Fatalf("both boxes, the Log, and footer must fit:\n%s", s)
 	}
 	for _, line := range strings.Split(s, "\n") {
@@ -221,7 +222,8 @@ func TestStackedPanelsUseRenderedRowsForBoundsAndScrolling(t *testing.T) {
 		lines := assertFitsViewport(t, m, 80, height)
 		agentY := m.historyBounds.y
 		logY := agentY + m.historyBounds.height
-		if agentY != m.pipelineBounds.height || !strings.Contains(lines[agentY], "Agent*") || !strings.Contains(lines[logY], "Log") {
+		if agentY != m.pipelineBounds.height || !strings.Contains(lines[agentY], "Agent*") ||
+			!strings.Contains(lines[logY], "Log") {
 			t.Fatalf("panel bounds must match their rendered top rows at 80x%d:\n%s", height, strings.Join(lines, "\n"))
 		}
 		before := shownOf(m, thoughts)
@@ -270,7 +272,8 @@ func TestTwoColumnAgentAndLogFitShortTerminal(t *testing.T) {
 	feed(m, `{"step":"output","output":"retained log line"}`)
 	lines := assertFitsViewport(t, m, 120, 9)
 	s := strings.Join(lines, "\n")
-	if !strings.Contains(s, "q detach") || !strings.Contains(s, "ATM") || !strings.Contains(s, "Agent") || !strings.Contains(s, "Log") {
+	if !strings.Contains(s, "q detach") || !strings.Contains(s, "ATM") ||
+		!strings.Contains(s, "Agent") || !strings.Contains(s, "Log") {
 		t.Fatalf("both panels, the Log, and footer must fit:\n%s", s)
 	}
 }
@@ -371,7 +374,8 @@ func TestHeldTopTracksSecondToolGroupAfterNewOutput(t *testing.T) {
 
 func TestHeldWrappedPartClampsToItsMessageWhenWidened(t *testing.T) {
 	m := New("issue-1", 120, 24)
-	feed(m, `{"step":"agent","state":"started"}`, `{"step":"agent","thinking":"WRAP-ANCHOR `+strings.Repeat("word ", 18)+`"}`)
+	feed(m, `{"step":"agent","state":"started"}`,
+		`{"step":"agent","thinking":"WRAP-ANCHOR `+strings.Repeat("word ", 18)+`"}`)
 	for i := range 30 {
 		feed(m, fmt.Sprintf(`{"step":"agent","thinking":"later %02d"}`, i))
 	}

@@ -500,25 +500,7 @@ func (m *Model) agentBox(width, lines int) string {
 	counts, running := map[string]int{}, false
 	runningDetail := ""
 	flush := func() {
-		if len(names) == 0 {
-			return
-		}
-		n, parts := 0, make([]string, len(names))
-		for i, t := range names {
-			n, parts[i] = n+counts[t], t
-			if counts[t] > 1 {
-				parts[i] += fmt.Sprintf(" ×%d", counts[t])
-			}
-		}
-		line := fmt.Sprintf("%d tool%s: %s", n, map[bool]string{true: "s"}[n > 1], strings.Join(parts, ", "))
-		if running {
-			if runningDetail != "" {
-				line += " · " + runningDetail
-			}
-			out = append(out, paneLine{key: toolGroup, text: "  " + m.icon("running") + " " + paint(dim, line)})
-		} else {
-			out = append(out, paneLine{key: toolGroup, text: "  " + paint(dim, "· "+line)})
-		}
+		out = appendToolGroup(m, out, names, counts, running, runningDetail, toolGroup)
 		names, counts, running, runningDetail, toolGroup = nil, map[string]int{}, false, "", ""
 	}
 	for _, a := range m.agent {
@@ -531,7 +513,7 @@ func (m *Model) agentBox(width, lines int) string {
 			}
 		case a.result == "failed":
 			flush()
-			out = append(out, paneLine{key: fmt.Sprintf("activity:%p", a), text: m.icon("failed") + " " + paint(red, "failed") + " " + paint(dim, a.tool+" "+a.detail)})
+			out = append(out, failedAgentLine(m, a))
 		default:
 			if len(names) == 0 {
 				toolGroup = fmt.Sprintf("tools:%p", a)
@@ -558,6 +540,37 @@ func (m *Model) agentBox(width, lines int) string {
 	result := box(bold(cyan, title), strings.Join(shown, "\n"), width, m.border(&m.history))
 	m.historyHeight = lipgloss.Height(result)
 	return result
+}
+
+func appendToolGroup(
+	m *Model, out []paneLine, names []string, counts map[string]int,
+	running bool, detail, key string,
+) []paneLine {
+	if len(names) == 0 {
+		return out
+	}
+	n, parts := 0, make([]string, len(names))
+	for i, tool := range names {
+		n, parts[i] = n+counts[tool], tool
+		if counts[tool] > 1 {
+			parts[i] += fmt.Sprintf(" ×%d", counts[tool])
+		}
+	}
+	line := fmt.Sprintf("%d tool%s: %s", n, map[bool]string{true: "s"}[n > 1], strings.Join(parts, ", "))
+	if running {
+		if detail != "" {
+			line += " · " + detail
+		}
+		return append(out, paneLine{key: key, text: "  " + m.icon("running") + " " + paint(dim, line)})
+	}
+	return append(out, paneLine{key: key, text: "  " + paint(dim, "· "+line)})
+}
+
+func failedAgentLine(m *Model, a *activity) paneLine {
+	return paneLine{
+		key:  fmt.Sprintf("activity:%p", a),
+		text: m.icon("failed") + " " + paint(red, "failed") + " " + paint(dim, a.tool+" "+a.detail),
+	}
 }
 
 // findingsBox is the findings as no-mistakes has them: a severity icon, a reference, the description below.
