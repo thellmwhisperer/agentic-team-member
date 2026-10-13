@@ -11,6 +11,8 @@ Task type: {{.Type}}. The issue, verbatim:
 
 ## SCOPE
 - Edit only files inside this clone, your working directory.
+- Read, search and run only inside this clone: never the repository around it, `.atm/runs/` or another clone.
+- No network, except the project's package manager installing a dependency.
 - Test files are those matching {{code .TestPatterns}}. Docs files are those matching {{code .DocsPatterns}}.
   Every other file is source.
 

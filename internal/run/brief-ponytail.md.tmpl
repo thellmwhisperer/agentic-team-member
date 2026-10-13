@@ -23,6 +23,10 @@ Use the `ponytail-review` skill, and make its cuts yourself: this brief wins ove
   - Typecheck: {{cmd .Typecheck}}
   - Lint: {{cmd .Lint}}
 
+## SCOPE
+- Read, search and run only inside this clone: never the repository around it, `.atm/runs/` or another clone.
+- No network, except the project's package manager installing a dependency.
+
 ## FORBIDDEN
 - `git commit`, `git push`, `git rebase`, any `gh` command.
 

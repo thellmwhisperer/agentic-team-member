@@ -48,7 +48,8 @@ func TestRunPonytailFollowsTheChecks(t *testing.T) {
 			brief := strings.ReplaceAll(string(b), "\r\n", "\n")
 			for _, want := range []string{"### Retry on timeout\n\nType: fix\nRetry once.", "-broken\n+fixed",
 				"`ponytail-review`", "`speculative_feature`", "no new files", "`git commit`",
-				"Never cut code that does what a sentence of the issue asks", `"issue_sentence"`} {
+				"Never cut code that does what a sentence of the issue asks", `"issue_sentence"`,
+				"## SCOPE\n" + reachScope + "\n" + netScope} {
 				if !strings.Contains(brief, want) {
 					t.Errorf("brief-ponytail.md lacks %q:\n%s", want, b)
 				}

@@ -19,6 +19,14 @@ docs_patterns: ["**/*.md", "docs/**"]
 delivery: ""
 `
 
+// reachScope and netScope are the SCOPE lines of the worker's and the ponytail brief that keep the agent in
+// its clone.
+const (
+	reachScope = "- Read, search and run only inside this clone: never the repository around it, `.atm/runs/` " +
+		"or another clone."
+	netScope   = "- No network, except the project's package manager installing a dependency."
+)
+
 func TestRunWritesTheContractForTheTaskType(t *testing.T) {
 	for typ, proof := range map[string]string{
 		"fix":        "fails today on behaviour",
@@ -52,7 +60,7 @@ func TestRunWritesTheContractForTheTaskType(t *testing.T) {
 			for _, want := range []string{"Task type: " + typ, "### Retry\n\n" + issue + "\n", proof,
 				"`**/*_test.sh`", "`**/*.md`, `docs/**`", "- Test: `sh a_test.sh`", "- Typecheck: `sh -n a_test.sh`",
 				"- Lint: none", "`ponytail` skill", "`git commit`, `git push`, `git rebase`, any `gh` command",
-				"`sleep` in tests", `"test_file"`, `"follow_ups"`} {
+				"`sleep` in tests", `"test_file"`, `"follow_ups"`, reachScope, netScope} {
 				if !strings.Contains(got, want) {
 					t.Errorf("brief.md lacks %q:\n%s", want, got)
 				}

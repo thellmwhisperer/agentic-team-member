@@ -56,7 +56,7 @@ func Run(label string, args []string, out, summary io.Writer) (err error) {
 	if err != nil {
 		return err
 	}
-	a.Agent, a.dir = c.Agent, runDir(root, label)
+	a.Agent, a.root, a.dir = c.Agent, root, runDir(root, label)
 	r := newVerdict(a.dir, out)
 	defer func() { r.resumable(a.dir); err = r.finish(err, summary) }()
 	var i Issue
