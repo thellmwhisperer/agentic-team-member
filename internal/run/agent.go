@@ -28,6 +28,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/thellmwhisperer/agentic-team-member/internal/config"
+	"mvdan.cc/sh/v3/syntax"
 )
 
 // skills are the ponytail skills (github.com/DietrichGebert/ponytail, MIT): the implementing agent loads
@@ -690,147 +691,93 @@ func outside(calls []use, root, clone string) string {
 
 // fetches says whether a shell command runs curl or wget or names a URL off this machine.
 func fetches(command string) bool {
-	for _, l := range link.FindAllString(command, -1) {
-		if u, err := url.Parse(l); err != nil || !slices.Contains([]string{"localhost", "127.0.0.1", "::1"}, u.Hostname()) {
-			return true
+	file, err := syntax.NewParser().Parse(strings.NewReader(command), "")
+	if err != nil {
+		fields := strings.Fields(command)
+		if len(fields) == 0 {
+			return false
 		}
+		word := strings.Trim(fields[0], "\"'`;|&()")
+		return word == "curl" || word == "wget"
 	}
-	segments, nested := shellParts(command)
-	for _, command := range nested {
-		if fetches(command) {
-			return true
-		}
-	}
-	for _, words := range segments {
-		for i := 0; i < len(words); {
-			switch words[i] {
-			case "env":
-				i++
-				for i < len(words) && strings.Contains(words[i], "=") {
-					i++
-				}
-			case "sudo", "command", "exec":
-				i++
-			case "sh", "bash":
-				if i+2 < len(words) && words[i+1] == "-c" && fetches(words[i+2]) {
-					return true
-				}
-				i = len(words)
-			default:
-				if words[i] == "curl" || words[i] == "wget" {
-					return true
-				}
-				i = len(words)
+	unsafe := false
+	syntax.Walk(file, func(node syntax.Node) bool {
+		if word, ok := node.(*syntax.Word); ok {
+			if text, literal := literalWord(word); literal && badURL(text) {
+				unsafe = true
 			}
+		}
+		if call, ok := node.(*syntax.CallExpr); ok && fetchCall(call) {
+			unsafe = true
+		}
+		return !unsafe
+	})
+	return unsafe
+}
+
+func literalWord(word *syntax.Word) (string, bool) {
+	var text strings.Builder
+	var walk func([]syntax.WordPart) bool
+	walk = func(parts []syntax.WordPart) bool {
+		for _, part := range parts {
+			switch part := part.(type) {
+			case *syntax.Lit:
+				text.WriteString(part.Value)
+			case *syntax.SglQuoted:
+				text.WriteString(part.Value)
+			case *syntax.DblQuoted:
+				if !walk(part.Parts) {
+					return false
+				}
+			default:
+				return false
+			}
+		}
+		return true
+	}
+	literal := walk(word.Parts)
+	return text.String(), literal
+}
+
+func badURL(word string) bool {
+	for _, l := range link.FindAllString(word, -1) {
+		u, err := url.Parse(l)
+		if err != nil || !slices.Contains([]string{"localhost", "127.0.0.1", "::1"}, u.Hostname()) {
+			return true
 		}
 	}
 	return false
 }
 
-// shellParts splits shell words and command segments, preserving quoted arguments and nested shell commands.
-func shellParts(command string) (segments [][]string, nested []string) {
-	var words []string
-	var word strings.Builder
-	quote := byte(0)
-	started := false
-	flushWord := func() {
-		if started {
-			words = append(words, word.String())
-			word.Reset()
-			started = false
+func fetchCall(call *syntax.CallExpr) bool {
+	args := call.Args
+	for i := 0; i < len(args); {
+		word, literal := literalWord(args[i])
+		if !literal {
+			return false
 		}
-	}
-	flushSegment := func() {
-		flushWord()
-		if len(words) > 0 {
-			segments = append(segments, words)
-			words = nil
-		}
-	}
-	for i := 0; i < len(command); i++ {
-		c := command[i]
-		if c == '\\' && quote != '\'' && i+1 < len(command) {
+		switch word {
+		case "env":
 			i++
-			word.WriteByte(command[i])
-			started = true
-			continue
-		}
-		if quote != '\'' && c == '$' && i+1 < len(command) && command[i+1] == '(' {
-			inner, end := shellParen(command, i+1)
-			if end > 0 {
-				flushSegment()
-				nested = append(nested, inner)
-				i = end
-				continue
-			}
-		}
-		if quote != '\'' && c == '`' {
-			if end := strings.IndexByte(command[i+1:], '`'); end >= 0 {
-				flushSegment()
-				nested = append(nested, command[i+1:i+1+end])
-				i = i + 1 + end
-				continue
-			}
-		}
-		if c == '\'' || c == '"' {
-			if quote == 0 {
-				quote, started = c, true
-				continue
-			}
-			if quote == c {
-				quote = 0
-				continue
-			}
-		}
-		if quote == 0 {
-			if c == ';' || c == '|' || c == '&' {
-				flushSegment()
-				if c == '&' || c == '|' {
-					if i+1 < len(command) && command[i+1] == c {
-						i++
-					}
+			for i < len(args) {
+				arg, literal := literalWord(args[i])
+				if !literal || !strings.Contains(arg, "=") {
+					break
 				}
-				continue
+				i++
 			}
-			if c == ' ' || c == '\t' || c == '\n' || c == '\r' {
-				flushWord()
-				continue
-			}
-		}
-		word.WriteByte(c)
-		started = true
-	}
-	flushSegment()
-	return segments, nested
-}
-
-func shellParen(command string, open int) (string, int) {
-	depth, quote := 1, byte(0)
-	for i := open + 1; i < len(command); i++ {
-		c := command[i]
-		if c == '\\' && quote != '\'' {
+		case "sudo", "command", "exec":
 			i++
-			continue
-		}
-		if c == '\'' || c == '"' {
-			if quote == 0 {
-				quote = c
-			} else if quote == c {
-				quote = 0
+		case "sh", "bash":
+			if i+2 < len(args) {
+				flag, flagLiteral := literalWord(args[i+1])
+				command, commandLiteral := literalWord(args[i+2])
+				return flagLiteral && flag == "-c" && commandLiteral && fetches(command)
 			}
-			continue
-		}
-		if quote != 0 {
-			continue
-		}
-		if c == '(' {
-			depth++
-		} else if c == ')' {
-			depth--
-			if depth == 0 {
-				return command[open+1 : i], i
-			}
+			return false
+		default:
+			return word == "curl" || word == "wget"
 		}
 	}
-	return "", -1
+	return false
 }

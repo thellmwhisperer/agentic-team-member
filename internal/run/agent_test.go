@@ -353,6 +353,12 @@ func TestRunDiesWhenTheAgentReachesOutsideItsClone(t *testing.T) {
 			why + "Bash rg pattern src/../../"},
 		{"env curl", "claude", claude("Bash", `{"command":`+q(`env curl "$PROD_URL"`)+`}`),
 			why + `Bash env curl "$PROD_URL"`},
+		{"wrapped curl", "claude", claude("Bash", `{"command":`+q(`env FOO=bar sudo command exec curl -s a`)+`}`),
+			why + "Bash env FOO=bar sudo command exec curl -s a"},
+		{"newline curl", "claude", claude("Bash", `{"command":`+q("printf ok\ncurl \"$URL\"")+`}`),
+			why + "Bash printf ok\ncurl \"$URL\""},
+		{"assigned curl", "claude", claude("Bash", `{"command":`+q(`FOO=bar curl "$URL"`)+`}`),
+			why + `Bash FOO=bar curl "$URL"`},
 		{"chained curl", "claude", claude("Bash", `{"command":"x && curl -s a"}`),
 			why + "Bash x && curl -s a"},
 		{"semicolon curl", "claude", claude("Bash", `{"command":"x; curl -s a"}`),
@@ -363,6 +369,8 @@ func TestRunDiesWhenTheAgentReachesOutsideItsClone(t *testing.T) {
 			why + "Bash x | curl -s a"},
 		{"substitution curl", "claude", claude("Bash", `{"command":`+q(`echo $(curl -s a)`)+`}`),
 			why + `Bash echo $(curl -s a)`},
+		{"curl argument after substitution", "claude", claude("Bash", `{"command":`+q(`echo $(date) curl`)+`}`), ""},
+		{"curl argument after backticks", "claude", claude("Bash", `{"command":`+q("echo `date` curl")+`}`), ""},
 		{"backtick curl", "claude", claude("Bash", `{"command":`+q("echo `curl -s a`")+`}`),
 			why + "Bash echo `curl -s a`"},
 		{"shell wrapped wget", "claude", claude("Bash", `{"command":`+q(`sh -c "wget b"`)+`}`),
@@ -378,6 +386,7 @@ func TestRunDiesWhenTheAgentReachesOutsideItsClone(t *testing.T) {
 			claude("Bash", `{"command":"rg curl ."}`) +
 			claude("Bash", `{"command":"rg wget ."}`) +
 			claude("Bash", `{"command":"pnpm add zod && pnpm dev --url http://localhost:5173"}`) +
+			claude("Bash", `{"command":"pnpm dev --url http://localhost:5173; echo ready"}`) +
 			claude("Read", `{"file_path":"{home}/go/pkg/mod/golang.org/x/mod@v0.20.0/go.mod"}`) +
 			claude("Read", `{"file_path":"/archive{root}/file"}`), ""},
 	}

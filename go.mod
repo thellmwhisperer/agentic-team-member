@@ -1,6 +1,6 @@
 module github.com/thellmwhisperer/agentic-team-member
 
-go 1.25
+go 1.25.0
 
 require (
 	github.com/charmbracelet/bubbletea v1.3.10
@@ -13,6 +13,7 @@ require (
 	golang.org/x/sys v0.36.0
 	golang.org/x/term v0.29.0
 	gopkg.in/yaml.v3 v3.0.1
+	mvdan.cc/sh/v3 v3.11.0
 )
 
 require (
