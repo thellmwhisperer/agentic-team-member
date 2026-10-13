@@ -49,7 +49,7 @@ a deliberate "none", a missing key fails with `config incomplete`. `harness`,
 | `test` | Runs the whole test suite |
 | `typecheck` | Typechecks |
 | `lint` | Lints |
-| `test_file` | Runs one test: `{file}` is its path, `{dir}` its directory as `./dir`. When not empty, it must contain one of them |
+| `test_file` | Runs one test: `{file}` is its path, `{dir}` its directory as `./dir`. When not empty, it must contain one of them. `{tests}` is `^(TestA|TestB)$`, the Go tests the file defines, for `go test -run` |
 | `test_patterns` | Globs of the test files |
 | `docs_patterns` | Globs of the documentation files |
 | `delivery` | Shell line that takes the run's branch from its clone, for example to a PR. Empty skips delivery |
@@ -61,7 +61,7 @@ install: go mod download
 test: go test ./...
 typecheck: go vet ./...
 lint: golangci-lint run
-test_file: go test {dir}
+test_file: go test -run {tests} {dir}
 test_patterns: ["**/*_test.go"]
 docs_patterns: ["**/*.md", "docs/**"]
 delivery: 'no-mistakes axi run --intent "$ATM_ISSUE_TEXT"'

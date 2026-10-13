@@ -123,7 +123,7 @@ func prove(clone, typ, test string, c config.Config) (red, green try, err error)
 		if p := first(changed, slices.Concat(c.TestPatterns, c.DocsPatterns), false); p != "" {
 			return red, green, fmt.Errorf("a tests task changed the source %s", p)
 		}
-		line, err := testLine(c.TestFile, test)
+		line, err := testLine(clone, c.TestFile, test)
 		if err != nil {
 			return red, green, err
 		}
@@ -182,7 +182,7 @@ func shrunk(clone string, changed, tests []string) error {
 // redGreen sets aside, in clone, the paths aside, runs test alone with tmpl, which must fail, brings the
 // agent's work, tree, back and runs test again, which must pass.
 func redGreen(clone, tree string, aside []string, test, tmpl string) (red, green try, err error) {
-	line, err := testLine(tmpl, test)
+	line, err := testLine(clone, tmpl, test)
 	if err != nil {
 		return red, green, err
 	}
@@ -202,7 +202,7 @@ func redGreen(clone, tree string, aside []string, test, tmpl string) (red, green
 // base had. ponytail: added lines that cannot run alone, as in a compiled language, fail the second and let
 // such a test pass.
 func onBase(clone, tree string, aside []string, test, tmpl string) error {
-	line, err := testLine(tmpl, test)
+	line, err := testLine(clone, tmpl, test)
 	if err != nil {
 		return err
 	}
@@ -362,17 +362,33 @@ func reset(clone string) error {
 
 var errVoid = errors.New("the clone changed during verification: the verdict is void")
 
-// testLine is test_file, tmpl, for test, a path in the clone.
-func testLine(tmpl, test string) (string, error) {
+// testLine is test_file, tmpl, for test, a path in clone. {tests} is ^(TestA|TestB)$, the Go tests test defines.
+func testLine(clone, tmpl, test string) (string, error) {
 	switch {
 	case tmpl == "":
 		return "", errors.New("test_file is empty in .atm.yaml: this task type runs its test alone")
 	case test == "" || !filepath.IsLocal(test):
 		return "", fmt.Errorf("the report's test_file %q is not a path in the clone", test)
 	}
+	var tests []string
+	if strings.Contains(tmpl, "{tests}") {
+		b, err := os.ReadFile(filepath.Join(clone, filepath.FromSlash(test)))
+		if err != nil {
+			return "", err
+		}
+		for _, m := range goTest.FindAllStringSubmatch(string(b), -1) {
+			tests = append(tests, m[1])
+		}
+		if tests == nil {
+			return "", fmt.Errorf("%s defines no Go test for {tests}", test)
+		}
+	}
 	quote := func(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
-	return strings.NewReplacer("{file}", quote(test), "{dir}", quote("./"+path.Dir(test))).Replace(tmpl), nil
+	return strings.NewReplacer("{file}", quote(test), "{dir}", quote("./"+path.Dir(test)),
+		"{tests}", quote("^("+strings.Join(tests, "|")+")$")).Replace(tmpl), nil
 }
+
+var goTest = regexp.MustCompile(`(?m)^func (Test\w*)\(`)
 
 // first is the first path that matches one of globs, when want, or matches none, when not; "" when none is.
 func first(paths, globs []string, want bool) string {

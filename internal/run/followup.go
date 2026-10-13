@@ -60,10 +60,6 @@ func red(clone string, n int, f *followUp, tmpl string) (string, error) {
 	if err := newTestPath(clone, f.RedTest); err != nil {
 		return err.Error(), nil
 	}
-	line, err := testLine(tmpl, f.RedTest)
-	if err != nil {
-		return err.Error(), nil
-	}
 	rel := filepath.Join(".atm", "follow-ups", strconv.Itoa(n), filepath.FromSlash(f.RedTest))
 	b, err := os.ReadFile(filepath.Join(clone, rel))
 	if err != nil {
@@ -76,6 +72,10 @@ func red(clone string, n int, f *followUp, tmpl string) (string, error) {
 	}
 	if err := place(clone, *f); err != nil {
 		return "", errors.Join(err, restore(clone, tree))
+	}
+	line, err := testLine(clone, tmpl, f.RedTest) // {tests} reads the placed test
+	if err != nil {
+		return err.Error(), restore(clone, tree)
 	}
 	_, failed := sh(clone, line)
 	if err := restore(clone, tree); err != nil {
