@@ -644,10 +644,8 @@ func strs(input json.RawMessage) string {
 }
 
 var (
-	fetch = regexp.MustCompile(`\b(curl|wget)\b`)
-	link  = regexp.MustCompile("https?://[^\\s\"'`)]+")
-	sep   = "\\s\"'`;|&()<>,="
-	rel   = regexp.MustCompile("(?:^|[" + sep + "])((?:\\.\\.?/)*\\.\\.(?:/[^" + sep + "]*)?)")
+	link = regexp.MustCompile("https?://[^\\s\"'`)]+")
+	sep  = "\\s\"'`;|&()<>,="
 )
 
 // outside is the first of calls that reaches outside clone, as its tool and its first 200 characters: one that
@@ -670,9 +668,17 @@ func outside(calls []use, root, clone string) string {
 			p := path.Clean(text[m[0]:m[1]])
 			reach = reach || p != clone && !strings.HasPrefix(p, clone+"/")
 		}
-		for _, m := range rel.FindAllStringSubmatch(text, -1) {
-			p := path.Clean(path.Join(clone, m[1]))
-			reach = reach || (p == root || strings.HasPrefix(p, root+"/")) && p != clone && !strings.HasPrefix(p, clone+"/")
+		for _, token := range strings.Fields(text) {
+			token = strings.Trim(token, "\"'`,;|&()<>")
+			if !strings.Contains(token, "..") || filepath.IsAbs(token) {
+				continue
+			}
+			p := filepath.Clean(filepath.Join(clone, token))
+			relRoot, rootErr := filepath.Rel(root, p)
+			relClone, cloneErr := filepath.Rel(clone, p)
+			underRoot := rootErr == nil && relRoot != ".." && !strings.HasPrefix(relRoot, ".."+string(filepath.Separator))
+			underClone := cloneErr == nil && relClone != ".." && !strings.HasPrefix(relClone, ".."+string(filepath.Separator))
+			reach = reach || underRoot && !underClone
 		}
 		if reach || (strings.EqualFold(c.tool, "bash") || c.tool == "shell") && fetches(text) {
 			r := []rune(c.args)
@@ -689,5 +695,142 @@ func fetches(command string) bool {
 			return true
 		}
 	}
-	return fetch.MatchString(command)
+	segments, nested := shellParts(command)
+	for _, command := range nested {
+		if fetches(command) {
+			return true
+		}
+	}
+	for _, words := range segments {
+		for i := 0; i < len(words); {
+			switch words[i] {
+			case "env":
+				i++
+				for i < len(words) && strings.Contains(words[i], "=") {
+					i++
+				}
+			case "sudo", "command", "exec":
+				i++
+			case "sh", "bash":
+				if i+2 < len(words) && words[i+1] == "-c" && fetches(words[i+2]) {
+					return true
+				}
+				i = len(words)
+			default:
+				if words[i] == "curl" || words[i] == "wget" {
+					return true
+				}
+				i = len(words)
+			}
+		}
+	}
+	return false
+}
+
+// shellParts splits shell words and command segments, preserving quoted arguments and nested shell commands.
+func shellParts(command string) (segments [][]string, nested []string) {
+	var words []string
+	var word strings.Builder
+	quote := byte(0)
+	started := false
+	flushWord := func() {
+		if started {
+			words = append(words, word.String())
+			word.Reset()
+			started = false
+		}
+	}
+	flushSegment := func() {
+		flushWord()
+		if len(words) > 0 {
+			segments = append(segments, words)
+			words = nil
+		}
+	}
+	for i := 0; i < len(command); i++ {
+		c := command[i]
+		if c == '\\' && quote != '\'' && i+1 < len(command) {
+			i++
+			word.WriteByte(command[i])
+			started = true
+			continue
+		}
+		if quote != '\'' && c == '$' && i+1 < len(command) && command[i+1] == '(' {
+			inner, end := shellParen(command, i+1)
+			if end > 0 {
+				flushSegment()
+				nested = append(nested, inner)
+				i = end
+				continue
+			}
+		}
+		if quote != '\'' && c == '`' {
+			if end := strings.IndexByte(command[i+1:], '`'); end >= 0 {
+				flushSegment()
+				nested = append(nested, command[i+1:i+1+end])
+				i = i + 1 + end
+				continue
+			}
+		}
+		if c == '\'' || c == '"' {
+			if quote == 0 {
+				quote, started = c, true
+				continue
+			}
+			if quote == c {
+				quote = 0
+				continue
+			}
+		}
+		if quote == 0 {
+			if c == ';' || c == '|' || c == '&' {
+				flushSegment()
+				if c == '&' || c == '|' {
+					if i+1 < len(command) && command[i+1] == c {
+						i++
+					}
+				}
+				continue
+			}
+			if c == ' ' || c == '\t' || c == '\n' || c == '\r' {
+				flushWord()
+				continue
+			}
+		}
+		word.WriteByte(c)
+		started = true
+	}
+	flushSegment()
+	return segments, nested
+}
+
+func shellParen(command string, open int) (string, int) {
+	depth, quote := 1, byte(0)
+	for i := open + 1; i < len(command); i++ {
+		c := command[i]
+		if c == '\\' && quote != '\'' {
+			i++
+			continue
+		}
+		if c == '\'' || c == '"' {
+			if quote == 0 {
+				quote = c
+			} else if quote == c {
+				quote = 0
+			}
+			continue
+		}
+		if quote != 0 {
+			continue
+		}
+		if c == '(' {
+			depth++
+		} else if c == ')' {
+			depth--
+			if depth == 0 {
+				return command[open+1 : i], i
+			}
+		}
+	}
+	return "", -1
 }
