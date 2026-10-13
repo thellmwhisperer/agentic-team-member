@@ -1,7 +1,6 @@
 package run
 
 import (
-	"bufio"
 	"bytes"
 	"cmp"
 	"context"
@@ -340,38 +339,27 @@ func (s *stream) read(cmd *exec.Cmd, log, stderr io.Writer, harness string) erro
 		return err
 	}
 	defer closeGroup()
-	outR, outW := io.Pipe()
-	errR, errW := io.Pipe()
-	cmd.Stdout, cmd.Stderr = outW, io.MultiWriter(stderr, errW)
 	var mu sync.Mutex
 	var werr error
-	var wg sync.WaitGroup
-	for _, pr := range []*io.PipeReader{outR, errR} {
-		wg.Go(func() {
-			for r := bufio.NewReader(pr); ; {
-				line, err := r.ReadBytes('\n')
-				line = bytes.TrimSpace(line)
-				if len(line) > 0 || err == nil {
-					mu.Lock()
-					s.heard()
-					s.tail = append(s.tail, string(line))
-					s.tail = s.tail[max(0, len(s.tail)-20):]
-					if !json.Valid(line) {
-						line, _ = json.Marshal(string(line))
-					} else {
-						s.see(harness, line)
-					}
-					if _, e := log.Write(append(line, '\n')); werr == nil {
-						werr = e
-					}
-					mu.Unlock()
-				}
-				if err != nil {
-					return
-				}
-			}
-		})
+	emit := func(line string) {
+		line = string(bytes.TrimSpace([]byte(line)))
+		mu.Lock()
+		defer mu.Unlock()
+		s.heard()
+		s.tail = append(s.tail, line)
+		s.tail = s.tail[max(0, len(s.tail)-20):]
+		b := []byte(line)
+		if !json.Valid(b) {
+			b, _ = json.Marshal(line)
+		} else {
+			s.see(harness, b)
+		}
+		if _, err := log.Write(append(b, '\n')); werr == nil {
+			werr = err
+		}
 	}
+	out, errout := &lineWriter{fn: emit}, &lineWriter{fn: emit}
+	cmd.Stdout, cmd.Stderr = out, io.MultiWriter(stderr, errout)
 	err = cmd.Start()
 	if err == nil {
 		if err = attach(); err != nil {
@@ -388,8 +376,8 @@ func (s *stream) read(cmd *exec.Cmd, log, stderr io.Writer, harness string) erro
 	if errors.Is(err, exec.ErrWaitDelay) { // exited 0, and only left something holding its output
 		err = nil
 	}
-	_, _ = outW.Close(), errW.Close()
-	wg.Wait()
+	out.flush()
+	errout.flush()
 	return errors.Join(err, werr)
 }
 

@@ -4,7 +4,7 @@ package run
 
 import (
 	"bytes"
-	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -98,19 +98,7 @@ func TestRunKeepsTheCauseOfTheAgentsDeath(t *testing.T) {
 			rep := readReport(t, filepath.Join(root, ".atm", "runs", "t", "report.json"))
 			n := reportNode(t, rep, "agent")
 			tail, _ := n["tail"].(string)
-			lines := logLines(t, log)
-			var actual []string
-			for _, line := range lines {
-				var text string
-				if json.Unmarshal([]byte(line), &text) == nil {
-					line = text
-				}
-				actual = append(actual, line)
-			}
-			if len(actual) > 20 {
-				actual = actual[len(actual)-20:]
-			}
-			if rep["reason"] != want || n["exit"] != c.exit || tail != strings.Join(actual, "\n") ||
+			if rep["reason"] != want || n["exit"] != c.exit ||
 				c.tail != "" && (!strings.Contains(tail, c.tail) ||
 					!strings.Contains(tail, `{"type": "system", "subtype": "init"}`)) {
 				t.Fatalf("want reason %q, exit %q and a tail holding %q, got %v", want, c.exit, c.tail, rep)
@@ -129,6 +117,32 @@ func TestRunKeepsTheCauseOfTheAgentsDeath(t *testing.T) {
 				until(t, "the silent agent is dead", func() bool { return pid > 0 && !alive(pid) })
 			}
 		})
+	}
+}
+
+func TestRunKeepsTheLastTwentyLinesInCombinedOrder(t *testing.T) {
+	defer func(d time.Duration) { agentSilence = d }(agentSilence)
+	agentSilence = time.Second
+	root := repo(t, "https://example.com/owner/repo.git", atmYAML)
+	t.Setenv("FAKE_AGENT", "tail-sequence")
+	var out bytes.Buffer
+	err := Run("t", []string{issueFile(t, issue)}, &out, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "exit code 3") {
+		t.Fatalf("the sequence agent should fail with exit code 3: %v", err)
+	}
+	rep := readReport(t, filepath.Join(root, ".atm", "runs", "t", "report.json"))
+	tail, _ := reportNode(t, rep, "agent")["tail"].(string)
+	var want []string
+	for i := 3; i <= 22; i++ {
+		want = append(want, fmt.Sprintf("line-%02d", i))
+	}
+	if tail != strings.Join(want, "\n") {
+		t.Fatalf("tail = %q, want last 20 lines %q", tail, strings.Join(want, "\n"))
+	}
+	for _, name := range []string{"issue", "clone", "contract", "checks", "ponytail", "delivery"} {
+		if _, ok := reportNode(t, rep, name)["tail"]; ok {
+			t.Fatalf("non-agent node %q has a tail", name)
+		}
 	}
 }
 

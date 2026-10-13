@@ -37,10 +37,10 @@ type verdict struct {
 }
 
 type node struct {
-	Name   string `json:"name"`
-	Result string `json:"result"`         // passed, failed, running, skipped or not run
-	Exit   string `json:"exit,omitempty"` // how its agent ended, when it failed after it ran
-	Tail   string `json:"tail"`           // the last 20 lines that agent wrote, stdout and stderr
+	Name   string  `json:"name"`
+	Result string  `json:"result"`         // passed, failed, running, skipped or not run
+	Exit   string  `json:"exit,omitempty"` // how its agent ended, when it failed after it ran
+	Tail   *string `json:"tail,omitempty"` // the last 20 lines that agent wrote, stdout and stderr
 	span
 }
 
@@ -119,7 +119,9 @@ func (r *verdict) step(name string, fn func() (map[string]any, error)) {
 	cmds, _ := ev["commands"].([]cmdResult)
 	r.Commands = append(r.Commands, cmds...)
 	n.Exit, _ = ev["exit"].(string)
-	n.Tail, _ = ev["tail"].(string)
+	if tail, ok := ev["tail"].(string); ok {
+		n.Tail = &tail
+	}
 	n.Result = outcome(err)
 	ev["state"], ev["duration_ms"] = n.Result, n.DurationMS
 	if err != nil {
