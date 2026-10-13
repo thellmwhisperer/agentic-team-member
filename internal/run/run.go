@@ -129,7 +129,7 @@ type proof struct{ base, test, typ, testContent string }
 // units runs the units of the run in clone dir, from base commit sha, for issue i under config c: the first on
 // brief text, each next one, up to maxUnits, on the first follow-up on the issue the one before proved. It
 // returns each unit's proof, the issue as the last unit is proven, a chained one by its red test, and the
-// accepted follow-ups it did not chain. Each unit goes to the report, and its agent's work to keep, for atm
+// follow-ups it did not chain. Each unit goes to the report, and its agent's work to keep, for atm
 // run --resume. A run that resumes from puts the work it kept back in dir, in place of its unit's agent.
 func (a agent) units(r *verdict, root, dir, sha, text string, i Issue, c config.Config, keep resumePoint,
 	from *resumePoint) (proofs []proof, unit Issue, pending []followUp) {
