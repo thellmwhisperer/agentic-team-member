@@ -54,14 +54,14 @@ func checks(clone, runDir, sha, typ, test string, followUps any, c config.Config
 		var keep []string
 		keep, err = declaredFollowUpPaths(clone, followUps)
 		if err == nil {
-			err = unmade(clone, keep)
-		}
-	}
-	if err == nil {
-		var restore func() error
-		restore, err = hideATM(clone, runDir)
-		if restore != nil {
-			defer func() { err = errors.Join(err, restore()) }()
+			var restore func() error
+			restore, err = hideATM(clone, runDir)
+			if restore != nil {
+				defer func() { err = errors.Join(err, restore()) }()
+			}
+			if err == nil {
+				err = unmade(clone, keep)
+			}
 		}
 	}
 	if err == nil {
