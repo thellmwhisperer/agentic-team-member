@@ -203,7 +203,7 @@ func checkUnit(
 			return proof{}, nil, nil, ev, fmt.Errorf("unit %d edited its red test %s, which it must make pass as it is", n, test)
 		}
 	}
-	result, err := checks(dir, head, typ, test, c)
+	result, err := checks(dir, head, typ, test, report["follow_ups"], c)
 	for key, value := range result {
 		ev[key] = value
 	}
