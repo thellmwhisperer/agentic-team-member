@@ -254,6 +254,7 @@ func TestARunGoesToABackgroundProcessOfTheNewFile(t *testing.T) {
 	buildATM(t, atm, "old-build")
 	buildATM(t, atm+".new", "new-build")
 	top := atmRepo(t)
+	watcher, stopWatcher := watcherProcess(t, top)
 	wait, release := holdFakeAgents(t, 1)
 	lockFile, err := os.OpenFile(filepath.Join(top, ".atm", "atm.lock"), os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
@@ -271,7 +272,10 @@ func TestARunGoesToABackgroundProcessOfTheNewFile(t *testing.T) {
 	}
 	_ = log.Close()
 	var runStarted bool
-	t.Cleanup(func() { cleanupReplacementServers(t, atm, top, old, runStarted, release) })
+	t.Cleanup(func() {
+		cleanupReplacementServers(t, atm, top, old, runStarted, release)
+		stopWatcher()
+	})
 	until(t, "old server ready", func() bool {
 		b, e := os.ReadFile(filepath.Join(top, ".atm", "serve.log"))
 		return e == nil && strings.Contains(string(b), "atm serve version: old-build")
@@ -280,7 +284,7 @@ func TestARunGoesToABackgroundProcessOfTheNewFile(t *testing.T) {
 	if err := os.Rename(atm+".new", atm); err != nil {
 		t.Fatal(err)
 	}
-	runThroughReplacement(t, atm, top, issueFile(t, issue), &runStarted)
+	runThroughReplacement(t, atm, top, issueFile(t, issue), watcher, &runStarted)
 	wait()
 	serveLog, err := os.ReadFile(filepath.Join(top, ".atm", "serve.log"))
 	if err != nil || !strings.Contains(string(serveLog), "atm serve version: new-build") {
@@ -292,9 +296,9 @@ func TestARunGoesToABackgroundProcessOfTheNewFile(t *testing.T) {
 	}
 }
 
-func runThroughReplacement(t *testing.T, atm, top, issuePath string, runStarted *bool) {
+func runThroughReplacement(t *testing.T, atm, top, issuePath, watcher string, runStarted *bool) {
 	t.Helper()
-	cmd := exec.Command(atm, "run", issuePath)
+	cmd := exec.Command(atm, "run", "--watcher", watcher, issuePath)
 	cmd.Dir, cmd.Stdout = top, io.Discard
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
