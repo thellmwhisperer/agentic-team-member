@@ -38,19 +38,14 @@ effort: high
 
 ### Cursor
 
-`harness: cursor` runs `cursor-agent -p --output-format stream-json --trust
---force --workspace <clone>`, then `--model <model>` when set, any
-`--harness-arg`s, and the brief as the last argument. `atm doctor` checks
-`cursor-agent` on PATH, not the editor's `cursor` command.
+`atm doctor` checks `cursor-agent` on PATH, not the editor's `cursor`
+command. See [Agent](how-a-run-flows.md#agent) for the command ATM runs and
+how it checks skill use.
 
 Cursor has no effort flag. Leave `effort` unset in every configuration layer
 and put it in a parameterized model, for example `model: 'grok[effort=high]'`.
 A configured effort fails before cloning with
 `cursor has no effort flag: put it in the model, as '<model>[effort=<effort>]'`.
-
-The skill is installed at `.cursor/skills/<skill>/SKILL.md` and excluded from
-git. A successful read or cat of it proves use; a failed one does not.
-An error result fails the step with its text.
 
 ## `.atm.yaml`
 
