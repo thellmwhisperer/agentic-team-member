@@ -15,6 +15,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -138,6 +139,7 @@ func (a agent) units(r *verdict, root, dir, sha, text string, i Issue, c config.
 	var test string
 	if from != nil {
 		n, f, proofs, pending = from.Unit, from.FollowUp, from.proofs(), append([]followUp(nil), from.Pending...)
+		pending = replaceReportedFollowUps(pending, from.Report)
 		if f != nil {
 			unit.Type = "feature"
 		}
@@ -180,6 +182,9 @@ func (a agent) units(r *verdict, root, dir, sha, text string, i Issue, c config.
 			pending = append(pending, out...)
 			return ev, err
 		})
+		if r.FailedNode == "checks" {
+			keepPending(a.dir, n, pending)
+		}
 		red, _ := ev["red"].(try)
 		green, _ := ev["green"].(try)
 		proofSpan, _ := ev["proof_span"].(span)
@@ -193,6 +198,23 @@ func (a agent) units(r *verdict, root, dir, sha, text string, i Issue, c config.
 		}
 		f, pending = &in[0], append(pending, in[1:]...)
 	}
+}
+
+func replaceReportedFollowUps(pending []followUp, report map[string]any) []followUp {
+	previous, err := reported(report)
+	if err != nil || len(previous) == 0 {
+		return pending
+	}
+	for _, current := range previous {
+		for i := len(pending) - 1; i >= 0; i-- {
+			saved := pending[i]
+			if saved.Title == current.Title && saved.RedTest == current.RedTest && saved.Criterion == current.Criterion {
+				pending = slices.Delete(pending, i, i+1)
+				break
+			}
+		}
+	}
+	return pending
 }
 
 func checkUnit(

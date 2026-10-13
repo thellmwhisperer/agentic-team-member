@@ -104,6 +104,24 @@ func (r *verdict) keep(dir, clone string, p resumePoint, n int, report map[strin
 	}
 }
 
+// keepPending adds follow-ups collected from a unit whose checks failed to its resume point.
+func keepPending(dir string, n int, pending []followUp) {
+	path := filepath.Join(dir, "resume", "resume.json")
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	var p resumePoint
+	if json.Unmarshal(b, &p) != nil || p.Unit != n {
+		return
+	}
+	p.Pending = append([]followUp(nil), pending...)
+	b, err = json.MarshalIndent(p, "", "  ")
+	if err == nil {
+		_ = os.WriteFile(path, append(b, '\n'), 0o644)
+	}
+}
+
 // resumable marks the run resumable when it failed after its agent and its work is kept in resume/, in the
 // run's directory dir, which it removes otherwise.
 func (r *verdict) resumable(dir string) {
