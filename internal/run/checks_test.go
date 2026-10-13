@@ -364,6 +364,38 @@ func keepGoCache(t *testing.T) {
 	t.Setenv("GOCACHE", strings.TrimSpace(string(gocache)))
 }
 
+func TestRedDidNotRunMatchesRunnerOutput(t *testing.T) {
+	for _, c := range []struct {
+		name, output string
+		want         bool
+	}{
+		{"pytest collection", "_________________________ ERROR collecting test_bad.py _________________________\nE     File \"test_bad.py\", line 1\nE       def test_broken(:\nE                       ^\nE   SyntaxError: invalid syntax", true},
+		{"pytest import", "E   ImportError: cannot import name 'missing' from 'sample'", true},
+		{"pytest runtime syntax error", "E   SyntaxError: raised by test body\nFAILED tests/test_bad.py::test_parse", false},
+		{"Jest setup", " FAIL  ./index.test.js\n      ● Test suite failed to run\n\n        SecurityError: Cannot initialize local storage without a `--localstorage-file` path\n\n      Test Suites: 1 failed, 1 total\n      Tests:       0 total\n      Snapshots:   0 total\n      Time:        0.029 s\n      Ran all test suites.", true},
+		{"tsc diagnostic", "index.ts:4:14 - error TS2322: Type '{ name: string; type: string; }' is not assignable to type 'Schema'.\n  Types of property 'type' are incompatible.", true},
+		{"Go build", "FAIL example.com/m/p [build failed]", true},
+		{"Go setup", "FAIL example.com/m/p [setup failed]", true},
+		{"Go assertion", "--- FAIL: TestFix (0.00s)\n    checks_test.go:1: expected [build failed]\nFAIL example.com/m/p 0.003s", false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if got := redDidNotRun(c.output); got != c.want {
+				t.Fatalf("redDidNotRun() = %v, want %v", got, c.want)
+			}
+		})
+	}
+}
+
+func TestRedClassificationUsesOutputBeyondTheDisplayedTail(t *testing.T) {
+	var command strings.Builder
+	command.WriteString("printf '%s\\n' '_________________________ ERROR collecting test_bad.py _________________________'; ")
+	command.WriteString("i=0; while [ $i -lt 65 ]; do printf 'line %s\\n' \"$i\"; i=$((i+1)); done")
+	red := attempt(t.TempDir(), command.String())
+	if strings.Contains(red.Tail, "ERROR collecting") || !redDidNotRun(red.output) {
+		t.Fatalf("want only the full output to retain the collection error; tail: %q", red.Tail)
+	}
+}
+
 func TestRunChecksTheProofOfEachTaskType(t *testing.T) {
 	keepGoCache(t)
 	for _, c := range proofCases {
