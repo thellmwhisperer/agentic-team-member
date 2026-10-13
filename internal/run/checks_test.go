@@ -234,6 +234,37 @@ func TestRunChecksTheProofOfEachTaskType(t *testing.T) {
 	}
 }
 
+func TestRunProvesATestsIssueOnlyThroughTheReportedFilesGoTests(t *testing.T) {
+	gocache, err := exec.Command("go", "env", "GOCACHE").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := filepath.Join(t.TempDir(), "ran")
+	t.Setenv("ATM_TEST_OUT", got)
+	atm := strings.Replace(atmSet(atmYAML, "test_file", `go test -count=1 -v -run {tests} {dir} >> "$ATM_TEST_OUT"`),
+		`"**/*_test.sh"`, `"**/*_test.go"`, 1)
+	root := repo(t, "https://example.com/owner/repo.git", atm)
+	t.Setenv("GOCACHE", strings.TrimSpace(string(gocache))) // repo moves HOME, and the cache with it
+	commitFiles(t, root, "", map[string]string{"go.mod": "module example.com/m\n\ngo 1.21\n",
+		"p/old_test.go": "package p\n\nimport \"testing\"\n\nfunc TestOld(t *testing.T) { t.Fatal(\"old\") }\n"})
+	t.Setenv("ATM_TEST_NEW", "package p\n\nimport \"testing\"\n\nfunc TestNew(t *testing.T) {}\n\n"+
+		"func TestNewToo(t *testing.T) {}\n\nfunc helper() {}\n")
+	t.Setenv("FAKE_AGENT_WORK", `printf %s "$ATM_TEST_NEW" > p/new_test.go; `+reportJSON("p/new_test.go"))
+	var out bytes.Buffer
+	if err := Run("t", []string{issueFile(t, "# Cover p\nType: tests\nCover p.\n")}, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(got)
+	ran := regexp.MustCompile(`(?m)^=== RUN   (\w+)$`).FindAllStringSubmatch(string(b), -1)
+	var names []string
+	for _, m := range ran {
+		names = append(names, m[1])
+	}
+	if strings.Join(names, " ") != "TestNew TestNewToo TestNew TestNewToo" {
+		t.Fatalf("want only new_test.go's tests, on the base and after, got %q", names)
+	}
+}
+
 func TestRunChecksRunTheCommandsInOrderAndDieOnTheFirstFailure(t *testing.T) {
 	got := filepath.Join(t.TempDir(), "ran")
 	t.Setenv("ATM_TEST_OUT", got)
