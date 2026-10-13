@@ -15,18 +15,29 @@ const readyDispatch = `"dispatch":{"non_goals":true,"invariants":true,` +
 	`"executable_acceptance":true,"split_triggers":true,"single_contract":true},`
 const passedContract = `{` + readyDispatch + `"status":"passed","acceptance":[{"criterion":"Retry once.",` +
 	`"evidence":"a_test.sh passes","satisfied":true}],"children":[]}`
-const repairContract = `{` + readyDispatch + `"status":"repair","acceptance":[],"children":[{"cause":"missing retry",` +
+const repairContract = `{` + readyDispatch + `"status":"repair","acceptance":[{"criterion":"Retry once.",` +
+	`"evidence":"a.txt does not retry once","satisfied":false}],"children":[{"cause":"missing retry",` +
 	`"contract":"Repair retry implementation without editing tests","dependency":"blocks_parent",` +
-	`"evidence":"a.txt: retry criterion"}]}`
+	`"target":"criterion:Retry once.","evidence":"a.txt: retry criterion"}]}`
 const independentSplitContract = `{` + readyDispatch + `"status":"split","acceptance":[],"children":[{"cause":"independent outcome",` +
 	`"contract":"Track separate outcome as a child issue","dependency":"independent",` +
 	`"evidence":"new independent behavior in a.txt"}]}`
 const splitMandatoryGapContract = `{` + readyDispatch + `"status":"split","acceptance":[{"criterion":"Retry once.",` +
 	`"evidence":"a.txt does not retry once","satisfied":false}],"children":[{"cause":"mandatory retry gap",` +
 	`"contract":"Repair retry behavior to satisfy the original acceptance","dependency":"blocks_parent",` +
-	`"evidence":"a.txt fails Retry once."},{"cause":"independent outcome",` +
+	`"target":"criterion:Retry once.","evidence":"a.txt fails Retry once."},{"cause":"independent outcome",` +
 	`"contract":"Track separate outcome as a child issue","dependency":"independent",` +
 	`"evidence":"new independent behavior in a.txt"}]}`
+const splitMissingGateContract = `{` + readyDispatch + `"status":"split","acceptance":[],"children":[{"cause":"missing non-goals",` +
+	`"contract":"Return the issue to planning to add Non-goals","dependency":"blocks_parent",` +
+	`"target":"gate:non_goals","evidence":"the original issue has no Non-goals field"},{"cause":"independent outcome",` +
+	`"contract":"Track separate outcome as a child issue","dependency":"independent",` +
+	`"evidence":"new independent behavior in a.txt"}]}`
+const splitTwoMandatoryGapsOneChild = `{` + readyDispatch + `"status":"split","acceptance":[` +
+	`{"criterion":"Retry once.","evidence":"retry missing","satisfied":false},` +
+	`{"criterion":"Retry error is reported.","evidence":"error missing","satisfied":false}],` +
+	`"children":[{"cause":"retry gap","contract":"Implement one retry","dependency":"blocks_parent",` +
+	`"target":"criterion:Retry once.","evidence":"a.txt lacks the retry"}]}`
 const contractDelivery = `echo delivered > "$ATM_TEST_OUT/delivered"`
 const reviewReadyIssue = `# Retry on timeout
 Type: fix
@@ -191,6 +202,9 @@ func TestRunContractReviewTaskSlicing(t *testing.T) {
 			root, out := contractReviewRepo(t)
 			report := strings.Replace(repairContract, `"status":"repair"`, `"status":"split"`, 1)
 			report = strings.Replace(report, `"`+field+`":true`, `"`+field+`":false`, 1)
+			report = strings.TrimSuffix(report, `}]}`) + `,{"cause":"unmet dispatch gate",` +
+				`"contract":"Replan the issue","dependency":"blocks_parent","target":"gate:` + field + `",` +
+				`"evidence":"dispatch gate is false"}]}`
 			t.Setenv("FAKE_CONTRACT_REPORT", report)
 			err := Run("t", []string{issueFile(t, reviewReadyIssue)}, &bytes.Buffer{}, &bytes.Buffer{})
 			if err == nil || !strings.Contains(err.Error(), "requires split") {
@@ -276,6 +290,103 @@ func TestRunContractReviewPersistsSplitWithMandatoryGap(t *testing.T) {
 	if err := json.Unmarshal(b, &rounds); err != nil || len(rounds) != 1 || len(rounds[0].Children) != 2 ||
 		rounds[0].Status != "split" || rounds[0].Children[0].Dependency != "blocks_parent" {
 		t.Fatalf("split contract lost mandatory blocker: %s, %v", b, err)
+	}
+}
+
+func TestRunContractReviewRequiresOneBlockingChildPerGap(t *testing.T) {
+	for _, tc := range []struct{ name, body, report, want string }{
+		{"two mandatory gaps", reviewReadyIssue + "\n2. Retry error is reported.\n", splitTwoMandatoryGapsOneChild,
+			"every unmet gate or criterion"},
+		{"unrelated repair child", reviewReadyIssue,
+			strings.Replace(repairContract, `"target":"criterion:Retry once."`, `"target":"criterion:other"`, 1),
+			"does not target"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, out := contractReviewRepo(t)
+			t.Setenv("FAKE_CONTRACT_REPORT", tc.report)
+			err := Run("t", []string{issueFile(t, tc.body)}, &bytes.Buffer{}, &bytes.Buffer{})
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("want %q, got %v", tc.want, err)
+			}
+			if _, err := os.Stat(filepath.Join(out, "delivered")); !os.IsNotExist(err) {
+				t.Fatal("delivery ran")
+			}
+		})
+	}
+}
+
+func TestRunContractReviewMissingGateNeedsMatchingBlockingChild(t *testing.T) {
+	for _, tc := range []struct{ section, content, target string }{
+		{"Non-goals", "Change retry policy outside this case.", "non_goals"},
+		{"Invariants", "Retry occurs once.", "invariants"},
+		{"Acceptance criteria", "Retry once.", "executable_acceptance"},
+		{"Split triggers", "Split if the diff adds an independent outcome.", "split_triggers"},
+	} {
+		t.Run(tc.section, func(t *testing.T) {
+			body := strings.Replace(reviewReadyIssue, "## "+tc.section+"\n"+tc.content+"\n", "", 1)
+			report := strings.Replace(splitMissingGateContract, "gate:non_goals", "gate:"+tc.target, 1)
+			report = strings.Replace(report, "the original issue has no Non-goals field",
+				"the original issue has no "+tc.section+" field", 1)
+			root, out := contractReviewRepo(t)
+			t.Setenv("FAKE_CONTRACT_REPORT", report)
+			err := Run("t", []string{issueFile(t, body)}, &bytes.Buffer{}, &bytes.Buffer{})
+			if err == nil || !strings.Contains(err.Error(), "requires split") {
+				t.Fatalf("want concrete split, got %v", err)
+			}
+			if _, err := os.Stat(filepath.Join(out, "delivered")); !os.IsNotExist(err) {
+				t.Fatal("delivery ran")
+			}
+			b, err := os.ReadFile(filepath.Join(root, ".atm/runs/t/contract-review.json"))
+			var rounds []contractReview
+			if err != nil || json.Unmarshal(b, &rounds) != nil || len(rounds) != 1 || len(rounds[0].Children) != 2 {
+				t.Fatalf("split children were not retained: %s %v", b, err)
+			}
+		})
+	}
+	t.Run("independent child cannot cover missing gate", func(t *testing.T) {
+		body := strings.Replace(reviewReadyIssue, "## Non-goals\nChange retry policy outside this case.\n\n", "", 1)
+		_, out := contractReviewRepo(t)
+		t.Setenv("FAKE_CONTRACT_REPORT", independentSplitContract)
+		err := Run("t", []string{issueFile(t, body)}, &bytes.Buffer{}, &bytes.Buffer{})
+		if err == nil || !strings.Contains(err.Error(), "every unmet gate or criterion") {
+			t.Fatalf("want missing gate blocker error, got %v", err)
+		}
+		if _, err := os.Stat(filepath.Join(out, "delivered")); !os.IsNotExist(err) {
+			t.Fatal("delivery ran")
+		}
+	})
+}
+
+func TestRunContractReviewIgnoresFencedLabelsAndMarkupOnlyGates(t *testing.T) {
+	for _, tc := range []struct{ name, body string }{
+		{"labels inside example", "# Retry on timeout\nType: fix\n```md\n## Non-goals\ntext\n## Invariants\ntext\n## Acceptance\ntext\n## Split triggers\ntext\n```\n"},
+		{"separator-only sections", "# Retry on timeout\nType: fix\n## Non-goals\n---\n## Invariants\n***\n## Acceptance\n___\n## Split triggers\n---\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, out := contractReviewRepo(t)
+			t.Setenv("FAKE_CONTRACT_REPORT", passedContract)
+			err := Run("t", []string{issueFile(t, tc.body)}, &bytes.Buffer{}, &bytes.Buffer{})
+			if err == nil || !strings.Contains(err.Error(), "issue missing task-slicing") {
+				t.Fatalf("empty gates accepted: %v", err)
+			}
+			if _, err := os.Stat(filepath.Join(out, "delivered")); !os.IsNotExist(err) {
+				t.Fatal("delivery ran")
+			}
+		})
+	}
+}
+
+func TestRunContractReviewAcceptsExecutableAcceptanceFence(t *testing.T) {
+	body := "# Retry on timeout\nType: fix\nRetry once.\n## Non-goals\nChange retry policy outside this case.\n" +
+		"## Invariants\nRetry occurs once.\n## Acceptance\n```sh\ngo test ./internal/run\n```\n" +
+		"## Split triggers\nSplit if the diff adds an independent outcome.\n"
+	_, out := contractReviewRepo(t)
+	t.Setenv("FAKE_CONTRACT_REPORT", passedContract)
+	if err := Run("t", []string{issueFile(t, body)}, &bytes.Buffer{}, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(out, "delivered")); err != nil {
+		t.Fatal("delivery did not run:", err)
 	}
 }
 

@@ -23,11 +23,12 @@ type contractChild struct {
 	Contract   string `json:"contract"`
 	Dependency string `json:"dependency"`
 	Evidence   string `json:"evidence"`
+	Target     string `json:"target,omitempty"`
 }
 
 func (c contractChild) complete() bool {
 	return c.Cause != "" && c.Contract != "" && c.Evidence != "" &&
-		(c.Dependency == "blocks_parent" || c.Dependency == "independent")
+		(c.Dependency == "blocks_parent" && c.Target != "" || c.Dependency == "independent")
 }
 
 type dispatchGates struct {
@@ -95,8 +96,9 @@ func decodeContractReview(report map[string]any, body string) (contractReview, e
 }
 
 func (r contractReview) validate(body string) error {
-	if missing := missingIssueGate(body); missing != "" && r.Status != "split" {
-		return fmt.Errorf("issue missing task-slicing %s; return to planning with a split", missing)
+	missing := missingIssueGates(body)
+	if len(missing) != 0 && r.Status != "split" {
+		return fmt.Errorf("issue missing task-slicing %s; return to planning with a split", missing[0])
 	}
 	if !r.Dispatch.ready() && r.Status != "split" {
 		return errors.New("task-slicing dispatch gates unmet or multiple contracts: return to planning with a split")
@@ -115,66 +117,153 @@ func (r contractReview) validate(body string) error {
 	if r.Status != "passed" && len(r.Children) == 0 {
 		return errors.New("invalid contract review: blocked work needs a concrete child contract")
 	}
-	return r.validateChildren()
+	return r.validateChildren(contractGaps(r, missing))
 }
 
-func (r contractReview) validateChildren() error {
-	blocking := false
+func (r contractReview) validateChildren(gaps []string) error {
+	remaining := make(map[string]int, len(gaps))
+	for _, gap := range gaps {
+		remaining[gap]++
+	}
 	for _, c := range r.Children {
 		if !c.complete() {
-			return errors.New("invalid contract review: child needs cause, contract, dependency and diff evidence")
+			return errors.New("invalid contract review: child needs cause, contract, dependency, target and diff evidence")
 		}
-		blocking = blocking || c.Dependency == "blocks_parent"
+		if c.Dependency == "blocks_parent" {
+			if remaining[c.Target] == 0 {
+				return errors.New("invalid contract review: blocking child does not target an unmet gate or criterion")
+			}
+			remaining[c.Target]--
+		}
 	}
-	mandatoryUnmet := false
-	for _, c := range r.Acceptance {
-		mandatoryUnmet = mandatoryUnmet || !c.Satisfied
+	for _, count := range remaining {
+		if count > 0 {
+			return errors.New("invalid contract review: every unmet gate or criterion needs a blocking child")
+		}
 	}
-	if (r.Status == "passed" && blocking) || ((r.Status == "repair" || mandatoryUnmet) && !blocking) {
-		return errors.New("invalid contract review: blocking children disagree with status")
+	if r.Status == "repair" && len(gaps) == 0 {
+		return errors.New("invalid contract review: repair has no unmet criterion")
 	}
 	return nil
 }
 
-func missingIssueGate(body string) string {
-	fields := []struct{ name, label string }{
-		{"Non-goals", "non-goals"},
-		{"Invariants", "invariants"},
-		{"Acceptance criteria", "executable acceptance"},
-		{"Split triggers", "split triggers"},
+func contractGaps(r contractReview, missing []string) []string {
+	gaps := make([]string, 0, len(missing)+len(r.Acceptance))
+	for _, gate := range missing {
+		gaps = append(gaps, "gate:"+gate)
 	}
-	lines := strings.Split(body, "\n")
+	for gate, ready := range map[string]bool{
+		"non_goals": r.Dispatch.NonGoals, "invariants": r.Dispatch.Invariants,
+		"executable_acceptance": r.Dispatch.ExecutableAcceptance, "split_triggers": r.Dispatch.SplitTriggers,
+		"single_contract": r.Dispatch.SingleContract,
+	} {
+		if !ready && !contains(gaps, "gate:"+gate) {
+			gaps = append(gaps, "gate:"+gate)
+		}
+	}
+	for _, c := range r.Acceptance {
+		if !c.Satisfied {
+			gaps = append(gaps, "criterion:"+c.Criterion)
+		}
+	}
+	return gaps
+}
+
+func missingIssueGates(body string) []string {
+	fields := []struct{ name, key string }{
+		{"Non-goals", "non_goals"}, {"Invariants", "invariants"},
+		{"Acceptance criteria", "executable_acceptance"}, {"Split triggers", "split_triggers"},
+	}
+	seen := make(map[string]bool, len(fields))
+	section := ""
+	fence, fenceSize := byte(0), 0
+	for _, raw := range strings.Split(body, "\n") {
+		line := strings.TrimSpace(raw)
+		if marker, size, ok := issueFence(line); ok {
+			if fence == 0 {
+				fence, fenceSize = marker, size
+			} else if marker == fence && size >= fenceSize && strings.TrimSpace(line[size:]) == "" {
+				fence, fenceSize = 0, 0
+			}
+			continue
+		}
+		if fence != 0 {
+			if section == "Acceptance criteria" && substantiveIssueLine(line) {
+				seen[section] = true
+			}
+			continue
+		}
+		if name, value, ok := issueGateField(line); ok {
+			section = name
+			if substantiveIssueLine(value) {
+				seen[name] = true
+			}
+			continue
+		}
+		if issueSectionBoundary(line) {
+			section = ""
+			continue
+		}
+		if section != "" && substantiveIssueLine(line) {
+			seen[section] = true
+		}
+	}
+	var missing []string
 	for _, field := range fields {
-		found := false
-		inSection := false
-		for _, line := range lines {
-			line = strings.TrimSpace(line)
-			title, value, matched := issueGateField(line)
-			if matched {
-				if title == field.name {
-					if value != "" {
-						found = true
-						break
-					}
-					inSection = true
-				} else {
-					inSection = false
-				}
-				continue
-			}
-			if strings.HasPrefix(line, "#") {
-				inSection = false
-			}
-			if inSection && line != "" {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return field.label
+		if !seen[field.name] {
+			missing = append(missing, field.key)
 		}
 	}
-	return ""
+	return missing
+}
+
+func issueFence(line string) (byte, int, bool) {
+	if len(line) == 0 || line[0] != '`' && line[0] != '~' {
+		return 0, 0, false
+	}
+	i := 1
+	for i < len(line) && line[i] == line[0] {
+		i++
+	}
+	return line[0], i, i >= 3
+}
+
+func substantiveIssueLine(line string) bool {
+	for _, r := range line {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' {
+			return true
+		}
+	}
+	return false
+}
+
+func issueSectionBoundary(line string) bool {
+	if strings.HasPrefix(line, "#") {
+		return true
+	}
+	line = strings.TrimSpace(line)
+	digits := 0
+	for digits < len(line) && line[digits] >= '0' && line[digits] <= '9' {
+		digits++
+	}
+	if digits > 0 && strings.HasPrefix(line[digits:], ". ") {
+		line = strings.TrimSpace(line[digits+2:])
+		return strings.Contains(line, ":")
+	}
+	if strings.HasPrefix(line, "**") && strings.Contains(line[2:], "**") {
+		return true
+	}
+	label, _, hasValue := strings.Cut(line, ":")
+	if !hasValue {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(label)) {
+	case "kind", "goal", "non-goals", "invariants", "behavioral contract / states",
+		"scope surface", "acceptance", "acceptance criteria", "split triggers", "dependencies / parent", "evidence":
+		return true
+	default:
+		return false
+	}
 }
 
 func issueGateField(line string) (title, value string, ok bool) {
@@ -222,6 +311,15 @@ func issueGateField(line string) (title, value string, ok bool) {
 	default:
 		return "", "", false
 	}
+}
+
+func contains(values []string, value string) bool {
+	for _, v := range values {
+		if v == value {
+			return true
+		}
+	}
+	return false
 }
 
 // inspectContract keeps judgment in the reviewer, and freshness, correction limits and proofs in ATM.
@@ -420,8 +518,11 @@ Return JSON: {"status":"passed|repair|split",
 "split_triggers":true,"single_contract":true},
 "acceptance":[{"criterion":"literal issue sentence","evidence":"concrete source/test evidence","satisfied":true}],
 "children":[{"cause":"root cause","contract":"concrete corrective or separate follow-up contract",
-"dependency":"blocks_parent|independent","evidence":"file/hunk and violated issue criterion"}]}.
+"dependency":"blocks_parent|independent","target":"criterion:<literal issue sentence> or gate:<dispatch field>",
+"evidence":"file/hunk and violated issue criterion"}]}.
 Enumerate EVERY mandatory criterion/invariant. Passed means all are satisfied and tests/requirements preserved.
+Every unmet criterion and dispatch gate needs one blocking child with an exact target. Use
+criterion:<exact issue sentence> or gate:<dispatch field>; do not reuse a blocking child for a different gap.
 Repair is only for original-contract violations. Scope drift or an undecidable contract requires split.
 Out-of-goal improvements always become independent children, never repairs. No GitHub issues: CoS creates and
  dispatches children. Retain cause/contract/dependency on every unresolved finding so it is actionable if the
