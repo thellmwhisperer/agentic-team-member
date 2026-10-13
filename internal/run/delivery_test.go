@@ -45,7 +45,10 @@ func TestRunDeliversTheBranch(t *testing.T) {
 			if arg == "" {
 				arg = issueFile(t, issue)
 			} else {
-				fakeGH(t, `{"title":"Retry on timeout","body":"Type: fix\nRetry once."}`, false)
+				fakeGH(t, `{"title":"Retry on timeout","body":"Type: fix\n\n## Non-goals\n`+
+					`Change retry policy outside this case.\n\n## Invariants\nRetry occurs once.\n\n`+
+					`## Acceptance criteria\nRetry once.\n\n## Split triggers\n`+
+					`Split if the diff adds an independent outcome."}`, false)
 			}
 			if c.kept {
 				t.Setenv("FAKE_AGENT_WORK", "printf 'fixed\\nextra\\nmore\\n' > a.txt"+fixTest)
@@ -246,7 +249,9 @@ func checkEnv(t *testing.T, got, top, issue, ponytail string) {
 
 func TestRunDeliveryGetsTheIssueText(t *testing.T) {
 	t.Setenv("FAKE_CONTRACT_REPORT", strings.Replace(passedContract, "Retry once.", "Retry once on a timeout.", 1))
-	body := "Type: fix\n\n## Acceptance criteria\n\n1. Retry once on a timeout."
+	body := "Type: fix\n\n## Non-goals\nChange retry policy outside this case.\n\n" +
+		"## Invariants\nRetry occurs once.\n\n## Acceptance criteria\n\n1. Retry once on a timeout.\n\n" +
+		"## Split triggers\nSplit if the diff adds an independent outcome."
 	for name, gh := range map[string]bool{"file issue": false, "GitHub issue": true} {
 		t.Run(name, func(t *testing.T) {
 			repo(t, "git@github.com:owner/repo.git",
@@ -256,8 +261,10 @@ func TestRunDeliveryGetsTheIssueText(t *testing.T) {
 			arg := issueFile(t, "# Retry on timeout\n"+body+"\n")
 			if gh {
 				arg = "7"
-				fakeGH(t, `{"title":"Retry on timeout","body":"Type: fix\n\n## Acceptance criteria\n\n`+
-					`1. Retry once on a timeout."}`, false)
+				fakeGH(t, `{"title":"Retry on timeout","body":"Type: fix\n\n## Non-goals\n`+
+					`Change retry policy outside this case.\n\n## Invariants\nRetry occurs once.\n\n`+
+					`## Acceptance criteria\n\n1. Retry once on a timeout.\n\n## Split triggers\n`+
+					`Split if the diff adds an independent outcome."}`, false)
 			}
 			if err := Run("t", []string{arg}, &bytes.Buffer{}, &bytes.Buffer{}); err != nil {
 				t.Fatal(err)

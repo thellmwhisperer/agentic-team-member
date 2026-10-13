@@ -10,7 +10,21 @@ import (
 	"time"
 )
 
-const issue = "# Retry on timeout\nType: fix\nRetry once.\n"
+const issue = `# Retry on timeout
+Type: fix
+
+## Non-goals
+Change retry policy outside this case.
+
+## Invariants
+Retry occurs once.
+
+## Acceptance criteria
+Retry once.
+
+## Split triggers
+Split if the diff adds an independent outcome.
+`
 
 // atmInstall is atmYAML with install set to line.
 func atmInstall(line string) string {

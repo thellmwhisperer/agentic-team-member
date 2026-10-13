@@ -21,6 +21,12 @@ const repairContract = `{` + readyDispatch + `"status":"repair","acceptance":[],
 const independentSplitContract = `{` + readyDispatch + `"status":"split","acceptance":[],"children":[{"cause":"independent outcome",` +
 	`"contract":"Track separate outcome as a child issue","dependency":"independent",` +
 	`"evidence":"new independent behavior in a.txt"}]}`
+const splitMandatoryGapContract = `{` + readyDispatch + `"status":"split","acceptance":[{"criterion":"Retry once.",` +
+	`"evidence":"a.txt does not retry once","satisfied":false}],"children":[{"cause":"mandatory retry gap",` +
+	`"contract":"Repair retry behavior to satisfy the original acceptance","dependency":"blocks_parent",` +
+	`"evidence":"a.txt fails Retry once."},{"cause":"independent outcome",` +
+	`"contract":"Track separate outcome as a child issue","dependency":"independent",` +
+	`"evidence":"new independent behavior in a.txt"}]}`
 const contractDelivery = `echo delivered > "$ATM_TEST_OUT/delivered"`
 const reviewReadyIssue = `# Retry on timeout
 Type: fix
@@ -232,6 +238,44 @@ func TestRunContractReviewRequiresOriginalIssueGates(t *testing.T) {
 				t.Fatal("passed report persisted")
 			}
 		})
+	}
+	t.Run("numbered bold fields", func(t *testing.T) {
+		_, out := contractReviewRepo(t)
+		body := `# Retry on timeout
+Type: fix
+3. **Non-goals:** Change retry policy outside this case.
+4. **Invariants:** Retry occurs once.
+7. **Acceptance:** Retry once.
+8. **Split triggers:** Split if the diff adds an independent outcome.
+`
+		t.Setenv("FAKE_CONTRACT_REPORT", passedContract)
+		if err := Run("t", []string{issueFile(t, body)}, &bytes.Buffer{}, &bytes.Buffer{}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Stat(filepath.Join(out, "delivered")); err != nil {
+			t.Fatal("delivery did not run:", err)
+		}
+	})
+}
+
+func TestRunContractReviewPersistsSplitWithMandatoryGap(t *testing.T) {
+	root, out := contractReviewRepo(t)
+	t.Setenv("FAKE_CONTRACT_REPORT", splitMandatoryGapContract)
+	err := Run("t", []string{issueFile(t, reviewReadyIssue)}, &bytes.Buffer{}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "requires split") {
+		t.Fatalf("want split disposition, got %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(out, "delivered")); !os.IsNotExist(err) {
+		t.Fatal("delivery ran")
+	}
+	b, err := os.ReadFile(filepath.Join(root, ".atm/runs/t/contract-review.json"))
+	if err != nil {
+		t.Fatal("split evidence missing:", err)
+	}
+	var rounds []contractReview
+	if err := json.Unmarshal(b, &rounds); err != nil || len(rounds) != 1 || len(rounds[0].Children) != 2 ||
+		rounds[0].Status != "split" || rounds[0].Children[0].Dependency != "blocks_parent" {
+		t.Fatalf("split contract lost mandatory blocker: %s, %v", b, err)
 	}
 }
 
