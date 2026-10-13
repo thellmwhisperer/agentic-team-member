@@ -56,13 +56,14 @@ line the agent writes goes to `worker.jsonl`, and its stderr to
 `worker.stderr.txt` too, as it is written. Its report is the last JSON
 object of its final message and must name `test_file`: ATM never guesses
 which test proves the fix. ATM checks each logged tool call for all four
-harnesses. For write and edit tools, it checks the file path but ignores the
-text written into the file. Other tool arguments remain subject to the reach
-check. A call fails the step if it names an absolute path under the repository
-root but outside the clone, or if its shell command runs `curl` or `wget` or
-contains an HTTP(S) URL whose host is not `localhost`, `127.0.0.1` or `::1`.
-The error names the first offending call. A zero exit without a valid report
-fails; so does any non-zero exit.
+harnesses. For write and edit tools (`write`, `edit`, `write_file` and
+`edit_file`), it ignores the content and old/new text fields, while checking
+the remaining arguments, including the destination path. It checks all
+arguments for other tools. A call fails the step if it names an absolute path
+under the repository root but outside the clone, or if its shell command runs
+`curl` or `wget` or contains an HTTP(S) URL whose host is not `localhost`,
+`127.0.0.1` or `::1`. The error names the first offending call. A zero exit
+without a valid report fails; so does any non-zero exit.
 
 ## Checks
 
