@@ -546,10 +546,13 @@ func (e event) skillLoads(harness, skill, clone string) []string {
 }
 
 func (e event) cursorSkillLoads(skill, clone string) []string {
-	if e.Type != "tool_call" || e.Subtype != "started" {
+	if e.Type != "tool_call" || e.Subtype != "completed" {
 		return nil
 	}
-	kind, args, _ := e.cursorTool()
+	kind, args, passed := e.cursorTool()
+	if !passed {
+		return nil
+	}
 	var input struct{ Path, Command string }
 	_ = json.Unmarshal(args, &input)
 	target := filepath.Join(clone, skillDirs["cursor"], skill, "SKILL.md")
@@ -559,14 +562,14 @@ func (e event) cursorSkillLoads(skill, clone string) []string {
 		}
 		return filepath.Clean(path) == target
 	}
-	if kind == "read" && exact(input.Path) || kind == "shell" && cursorCatReads(input.Command, exact) {
+	if kind == "read" && exact(input.Path) || kind == "shell" && cursorShellReads(input.Command, exact) {
 		return []string{e.CallID}
 	}
 	return nil
 }
 
-// cursorCatReads proves only a direct literal cat of the installed skill, not arbitrary shell execution.
-func cursorCatReads(command string, exact func(string) bool) bool {
+// cursorShellReads proves a direct literal read of the installed skill, not arbitrary shell execution.
+func cursorShellReads(command string, exact func(string) bool) bool {
 	file, err := syntax.NewParser().Parse(strings.NewReader(command), "")
 	if err != nil || len(file.Stmts) != 1 {
 		return false
@@ -584,10 +587,25 @@ func cursorCatReads(command string, exact func(string) bool) bool {
 		}
 		words = append(words, word)
 	}
-	if len(words) == 3 && words[1] == "--" {
-		words = append(words[:1], words[2])
+	if len(words) == 3 && words[0] == "cat" && words[1] == "--" {
+		return exact(words[2])
 	}
-	return len(words) == 2 && (words[0] == "cat" || words[0] == "/bin/cat") && exact(words[1])
+	if len(words) == 2 && (words[0] == "cat" || words[0] == "/bin/cat") {
+		return exact(words[1])
+	}
+	if len(words) == 4 && (words[0] == "sed" || words[0] == "/bin/sed" || words[0] == "/usr/bin/sed") &&
+		words[1] == "-n" && words[2] == "1,40p" {
+		return exact(words[3])
+	}
+	if len(words) > 0 && (words[0] == "head" || words[0] == "tail" || words[0] == "/usr/bin/head" || words[0] == "/usr/bin/tail") {
+		if len(words) == 3 && (words[1] == "-40" || words[1] == "-n40") {
+			return exact(words[2])
+		}
+		if len(words) == 4 && words[1] == "-n" && words[2] == "40" {
+			return exact(words[3])
+		}
+	}
+	return false
 }
 
 // skillCalls is the ids of claude's Skill tool calls in e that load skill.
