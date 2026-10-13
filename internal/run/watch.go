@@ -138,21 +138,28 @@ func adoptRun(root, label, id string, w io.Writer) error {
 // follow hands say each step run label starts after since, then how it finished, and its gate's lines.
 func follow(ctx context.Context, root, label string, since time.Time, say func(label, event string)) {
 	var clone string
+	branch := make(chan string, 1)
 	ended := make(chan struct{})
 	o, _ := Follow(root, label, nil, nil, func(f Frame) {
-		var ev struct{ Step, State, Clone, TS string }
+		var ev struct{ Step, State, Clone, TS, Branch string }
 		if f.Line == nil || json.Unmarshal(f.Event, &ev) != nil { // a node's start or end has a line
 			return
 		}
 		clone = cmp.Or(ev.Clone, clone)
+		if ev.Branch != "" {
+			select {
+			case branch <- ev.Branch:
+			default:
+			}
+		}
 		if ev.State != "started" {
 			return
 		}
-		if ev.Step == "delivery" {
-			go watchGate(ctx, clone, label, ended, say)
-		}
 		if t, _ := time.Parse(time.RFC3339Nano, ev.TS); !t.Before(since) { // an adopted run's past is its state
 			say(label, strings.Replace(ev.Step, "issue", "started", 1))
+		}
+		if ev.Step == "delivery" {
+			go watchGate(ctx, root, clone, branch, label, ended, say)
 		}
 	})
 	close(ended)
@@ -178,19 +185,33 @@ func gateStatus(clone string) (string, error) {
 
 // watchGate hands say the lines of the gate of run label in clone, every beat, until it merged or failed, or the
 // run ended without one.
-func watchGate(ctx context.Context, clone, label string, ended <-chan struct{}, say func(label, event string)) {
+func watchGate(ctx context.Context, root, clone string, branch <-chan string, label string, ended <-chan struct{}, say func(label, event string)) {
 	var g gate
+	var deliveredBranch string
 	t := time.NewTicker(beat)
 	defer t.Stop()
 	for {
-		status, _ := gateStatus(clone)
-		lines, done := g.events(status, time.Now())
+		select {
+		case deliveredBranch = <-branch:
+		default:
+		}
+		status, err := gateStatus(clone)
+		var lines []string
+		done := false
+		if err == nil {
+			lines, done = g.events(status, time.Now())
+		} else if errors.Is(err, os.ErrNotExist) && deliveredBranch != "" {
+			state, stateErr := gatePRState(root, deliveredBranch)
+			if stateErr == nil {
+				lines, done = g.prState(state)
+			}
+		}
 		for _, l := range lines {
 			say(label, l)
 		}
 		select {
 		case <-ended:
-			done = done || !g.seen
+			done = done || err == nil && !g.seen
 		default:
 		}
 		if done {
@@ -202,6 +223,18 @@ func watchGate(ctx context.Context, clone, label string, ended <-chan struct{}, 
 		case <-t.C:
 		}
 	}
+}
+
+func gatePRState(root, branch string) (string, error) {
+	origin, err := git(root, "remote", "get-url", "origin")
+	if err != nil {
+		return "", err
+	}
+	repo := githubURL.FindStringSubmatch(origin)
+	if repo == nil {
+		return "", errors.New("repository has no GitHub origin")
+	}
+	return command(root, "gh", "pr", "view", branch, "--repo", repo[1], "--json", "state", "--jq", ".state")
 }
 
 // gate is what a watcher printed of a gate.
@@ -288,4 +321,23 @@ func (g *gate) events(status string, now time.Time) (lines []string, done bool) 
 		lines = append(lines, fmt.Sprintf("still waiting %dm: %s", int(now.Sub(g.waited).Minutes()), s.waiting))
 	}
 	return lines, g.merged || g.failed
+}
+
+func (g *gate) prState(state string) (lines []string, done bool) {
+	switch strings.TrimSpace(state) {
+	case "MERGED":
+		if !g.merged {
+			g.merged = true
+			lines = append(lines, "merged")
+		}
+		return lines, true
+	case "CLOSED":
+		if !g.failed {
+			g.failed = true
+			lines = append(lines, "gate failed: pr")
+		}
+		return lines, true
+	default:
+		return nil, false
+	}
 }

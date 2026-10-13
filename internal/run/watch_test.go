@@ -197,6 +197,56 @@ func TestWatchLiveness(t *testing.T) {
 	}
 }
 
+func TestWatchGateRetriesFirstStatusErrorAfterRunEnds(t *testing.T) {
+	defer func(b time.Duration) { beat = b }(beat)
+	beat = time.Millisecond
+	bin := t.TempDir()
+	count := filepath.Join(bin, "count")
+	cmd := "#!/bin/sh\nn=0\ntest ! -f \"$ATM_STATUS_COUNT\" || n=$(cat \"$ATM_STATUS_COUNT\")\n" +
+		"n=$((n + 1))\nprintf '%s' \"$n\" > \"$ATM_STATUS_COUNT\"\n" +
+		"test \"$n\" -ne 1\n"
+	if err := os.WriteFile(filepath.Join(bin, "no-mistakes"), []byte(cmd), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ATM_STATUS_COUNT", count)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	ended := make(chan struct{})
+	close(ended)
+	watchGate(context.Background(), t.TempDir(), t.TempDir(), nil, "run", ended, func(string, string) {})
+	b, err := os.ReadFile(count)
+	if err != nil || string(b) != "2" {
+		t.Fatalf("status calls = %q, %v; want failed call followed by successful no-gate status", b, err)
+	}
+}
+
+func TestWatchGateReadsPRStateAfterCloneRelease(t *testing.T) {
+	defer func(b time.Duration) { beat = b }(beat)
+	beat = time.Millisecond
+	top := repo(t, "https://github.com/o/r.git", atmYAML)
+	bin := t.TempDir()
+	gh := "#!/bin/sh\nprintf '%s' \"$*\" > \"$ATM_GH_ARGS\"\nprintf MERGED\n"
+	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte(gh), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	args := filepath.Join(bin, "args")
+	t.Setenv("ATM_GH_ARGS", args)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	branch := make(chan string, 1)
+	branch <- "atm/fix-1"
+	ended := make(chan struct{})
+	close(ended)
+	got := make(chan string, 1)
+	watchGate(context.Background(), top, filepath.Join(top, "gone-clone"), branch, "run", ended,
+		func(_, event string) { got <- event })
+	if event := <-got; event != "merged" {
+		t.Fatalf("event = %q; want merged", event)
+	}
+	b, err := os.ReadFile(args)
+	if err != nil || string(b) != "pr view atm/fix-1 --repo o/r --json state --jq .state" {
+		t.Fatalf("gh args = %q, %v", b, err)
+	}
+}
+
 func TestWatchPrintsGateEventsFromAxiStatusAndSurvivesTransientError(t *testing.T) {
 	defer func(b, r time.Duration) { beat, remind = b, r }(beat, remind)
 	beat, remind = 2*time.Millisecond, 15*time.Millisecond
@@ -254,13 +304,20 @@ func TestWatchPrintsGateEventsFromAxiStatusAndSurvivesTransientError(t *testing.
 	if _, err := startWithWatcher(t, top, []string{"--watcher", id, issueFile(t, issue)}); err != nil {
 		t.Fatal(err)
 	}
+	delivered := false
 	readGateEvent := func() string {
 		for {
 			event := watchEvent(t, nextLine(t, lines), "issue-1")
+			if event == "delivery" {
+				delivered = true
+			}
 			if strings.HasPrefix(event, "lost:") {
 				t.Fatalf("transient status error became a watcher event: %q", event)
 			}
 			if strings.HasPrefix(event, "gate ") || strings.HasPrefix(event, "still waiting") || event == "merged" {
+				if !delivered {
+					t.Fatalf("gate event %q preceded delivery", event)
+				}
 				return event
 			}
 		}
