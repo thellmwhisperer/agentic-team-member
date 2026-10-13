@@ -37,42 +37,70 @@ type finding struct {
 
 // Model is a run's screen: what the run's frames said so far, drawn at the terminal's size.
 type Model struct {
-	label, title, state string
-	number              int
-	rows                []*row
-	agent               []*activity
-	output              []string
-	findings            []finding
-	width, height, spin int
-	now                 time.Time
-	keys                chan<- run.Input // where the terminal's size goes, for the delivery command
-	done, detached      bool
-	outcome             run.Outcome
-	err                 error
-	pipeline, history   pane   // the ATM box's and the Agent box's reading positions
-	pipelineFocus       bool   // keys scroll the ATM box, not the Agent box
-	edge                [2]int // the column and row the ATM box ends at, as last drawn
+	label, title, state           string
+	number                        int
+	rows                          []*row
+	agent                         []*activity
+	output                        []string
+	findings                      []finding
+	width, height, spin           int
+	historyHeight                 int
+	now                           time.Time
+	keys                          chan<- run.Input // where the terminal's size goes, for the delivery command
+	done, detached                bool
+	outcome                       run.Outcome
+	err                           error
+	pipeline, history             pane
+	pipelineFocus                 bool
+	pipelineBounds, historyBounds bounds
 }
 
-// pane is a box's reading position: its top line, held while the user reads above its bottom, else its
-// bottom, following new lines.
+type bounds struct{ x, y, width, height int }
+
+type paneLine struct{ key, text string }
+
 type pane struct {
-	top, last, h int // last is the top of the bottom, h the lines it shows, as last drawn
-	held         bool
+	top, last, h, part int
+	anchor             string
+	held               bool
 }
 
-// show is lines' h lines from the pane's position; at the bottom, it follows again.
-func (p *pane) show(lines []string, h int) []string {
+func (p *pane) show(lines []paneLine, h int) []string {
+	oldAnchor, oldPart := p.anchor, p.part
 	p.h, p.last = h, max(0, len(lines)-h)
+	if p.held && oldAnchor != "" {
+		for i, line := range lines {
+			if line.key == oldAnchor && countKey(lines, i, oldAnchor) == oldPart {
+				p.top = i
+				break
+			}
+		}
+	}
 	if !p.held || p.top >= p.last {
 		p.top, p.held = p.last, false
 	}
-	return lines[p.top:min(len(lines), p.top+h)]
+	if p.top < len(lines) {
+		p.anchor, p.part = lines[p.top].key, countKey(lines, p.top, lines[p.top].key)
+	}
+	out := make([]string, 0, min(h, len(lines)-p.top))
+	for _, line := range lines[p.top:min(len(lines), p.top+h)] {
+		out = append(out, line.text)
+	}
+	return out
+}
+
+func countKey(lines []paneLine, at int, key string) int {
+	n := 0
+	for i := at - 1; i >= 0 && lines[i].key == key; i-- {
+		n++
+	}
+	return n
 }
 
 func (p *pane) scroll(n int) {
 	p.top = min(max(0, p.top+n), p.last)
 	p.held = p.top < p.last
+	p.anchor, p.part = "", 0
 }
 
 // focused is the pane keys scroll: the Agent box's while it shows, unless the user moved to the ATM box.
@@ -143,11 +171,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *Model) key(k string) {
 	p := m.focused()
 	switch k {
-	case "tab", "shift+tab":
+	case "tab":
 		m.pipelineFocus = !m.pipelineFocus
-	case "up", "k":
+	case "up":
 		p.scroll(-1)
-	case "down", "j":
+	case "down":
 		p.scroll(1)
 	case "pgup":
 		p.scroll(-max(1, p.h-1))
@@ -162,10 +190,12 @@ func (m *Model) key(k string) {
 
 // wheel scrolls the box under the pointer: the ATM box, or the Agent box while it shows.
 func (m *Model) wheel(msg tea.MouseMsg) {
-	p := &m.history
-	if msg.X < m.edge[0] && msg.Y < m.edge[1] {
+	var p *pane
+	if m.pipelineBounds.contains(msg.X, msg.Y) {
 		p = &m.pipeline
-	} else if !m.agentRuns() {
+	} else if m.historyBounds.contains(msg.X, msg.Y) {
+		p = &m.history
+	} else {
 		return
 	}
 	switch msg.Button {
@@ -174,6 +204,10 @@ func (m *Model) wheel(msg tea.MouseMsg) {
 	case tea.MouseButtonWheelDown:
 		p.scroll(3)
 	}
+}
+
+func (b bounds) contains(x, y int) bool {
+	return x >= b.x && x < b.x+b.width && y >= b.y && y < b.y+b.height
 }
 
 // event is every field of a node's or a live event the screen reads.

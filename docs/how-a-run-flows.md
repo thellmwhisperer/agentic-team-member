@@ -265,12 +265,12 @@ tool-result text and the JSON report at the end of the agent's final message.
 Its `N tools` note counts tool calls only.
 The ATM box and the Agent box each keep every line and scroll on their own.
 The mouse wheel scrolls the box under the pointer. The keys scroll the box
-with the lit border: the Agent box while it shows, the ATM box after `Tab`.
-`↑`/`k` and `↓`/`j` move by a line, `PgUp` and `PgDn` by a page, and `Home`
-and `End` go to the first and the last lines. A box scrolled above its last
-line stays where it is as new lines come; back at its last line it follows
+with the `*` marker in its title: the Agent box while it shows, the ATM box
+after `Tab`. `↑` and `↓` move by a line, `PgUp` and `PgDn` by a page, and
+`Home` and `End` go to the first and the last lines. A box scrolled above its
+last line stays where it is as new lines come; back at its last line it follows
 them again. Stacked under 100 columns, the ATM box takes at most two thirds of
-the screen.
+the space left after the footer and panel gap.
 On Unix, ATM keeps its screen live while the delivery command is silent. From
 the command's first output until it ends, ATM gives it the attached terminal
 and its keys, so no-mistakes shows its own screen there; ATM's screen comes

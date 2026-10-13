@@ -59,21 +59,34 @@ const (
 // below it under that, and the footer.
 func (m *Model) View() string {
 	width := max(m.width, 40)
+	available := max(1, m.height-3)
 	if width < twoColumns || !m.sidebar() {
-		height := m.height - 2
-		if m.sidebar() { // stacked, the ATM box leaves a third to the boxes under it
-			height = height * 2 / 3
+		height := available
+		if m.sidebar() {
+			bodyHeight := max(2, available-2)
+			height = bodyHeight * 2 / 3
 		}
 		body := m.atm(width, height)
-		m.edge = [2]int{width, lipgloss.Height(body)}
-		if more := m.right(width, m.height-2-lipgloss.Height(body)-1); more != "" {
+		m.pipelineBounds = bounds{width: width, height: lipgloss.Height(body)}
+		m.historyBounds = bounds{width: width}
+		m.historyHeight = 0
+		if more := m.right(width, max(1, available-lipgloss.Height(body)-2)); more != "" {
+			m.historyBounds.y = lipgloss.Height(body) + 2
+			m.historyBounds.height = m.historyHeight
 			body += "\n\n" + more
 		}
 		return body + m.footer()
 	}
 	left := min(max(width/3, leftMin), leftMax)
-	m.edge = [2]int{left, m.height}
-	return columns(m.atm(left, m.height-2), m.right(width-left-gap, m.height-2), left) + m.footer()
+	rightWidth := width - left - gap
+	m.historyBounds = bounds{x: left + gap, width: rightWidth}
+	m.pipelineBounds = bounds{width: left}
+	m.historyHeight = 0
+	leftBox := m.atm(left, available)
+	rightBox := m.right(rightWidth, available)
+	m.pipelineBounds.height = lipgloss.Height(leftBox)
+	m.historyBounds.height = m.historyHeight
+	return columns(leftBox, rightBox, left) + m.footer()
 }
 
 func (m *Model) footer() string {
@@ -141,16 +154,20 @@ func (m *Model) atm(width, height int) string {
 		}
 	}
 	state := m.icon(m.state) + " " + bold(states[m.state][1], m.state)
-	var rows []string
+	var rows []paneLine
 	for i, r := range m.rows {
 		if i > 0 && !r.check && m.height >= connectors {
-			rows = append(rows, paint(dim, "│"))
+			rows = append(rows, paneLine{key: fmt.Sprintf("connector:%p", r), text: paint(dim, "│")})
 		}
-		rows = append(rows, m.row(r, inner))
+		rows = append(rows, paneLine{key: fmt.Sprintf("row:%p", r), text: m.row(r, inner)})
 	}
 	head := spread(paint(dim, ansi.Truncate(issue, inner-lipgloss.Width(state)-1, "…")), state, inner)
 	lines := append([]string{head, ""}, m.pipeline.show(rows, max(1, height-4))...)
-	return box(bold(cyan, "ATM"), strings.Join(lines, "\n"), width, m.border(&m.pipeline))
+	title := "ATM"
+	if m.focused() == &m.pipeline {
+		title += "*"
+	}
+	return box(bold(cyan, title), strings.Join(lines, "\n"), width, m.border(&m.pipeline))
 }
 
 // row is r's line: its icon, its label and how long it took, then, right-aligned, its note and its state.
@@ -196,7 +213,7 @@ func (m *Model) right(width, height int) string {
 	if m.agentRuns() {
 		if log {
 			logBox := m.logBox(width, min(len(m.output), max(1, height/3-2)))
-			top = m.agentBox(width, max(1, height-lipgloss.Height(logBox)-3))
+			top = m.agentBox(width, max(1, height-lipgloss.Height(logBox)-4))
 			return strings.Join([]string{top, logBox}, "\n\n")
 		}
 		return m.agentBox(width, max(1, height-2))
@@ -209,7 +226,7 @@ func (m *Model) right(width, height int) string {
 		boxes = append(boxes, top)
 	}
 	if log {
-		boxes = append(boxes, m.logBox(width, max(3, height-lipgloss.Height(top)-3)))
+		boxes = append(boxes, m.logBox(width, max(3, height-lipgloss.Height(top)-4)))
 	}
 	return strings.Join(boxes, "\n\n")
 }
@@ -432,7 +449,8 @@ func agentTextRows(prefix, text string, width int) []string {
 // under them, a failed one on its own row, in lines rows ending with its latest. What it says and thinks wraps,
 // its continuation indented under its text.
 func (m *Model) agentBox(width, lines int) string {
-	var out, names []string
+	var out []paneLine
+	var names []string
 	counts, running := map[string]int{}, false
 	runningDetail := ""
 	flush := func() {
@@ -451,9 +469,9 @@ func (m *Model) agentBox(width, lines int) string {
 			if runningDetail != "" {
 				line += " · " + runningDetail
 			}
-			out = append(out, "  "+m.icon("running")+" "+paint(dim, line))
+			out = append(out, paneLine{key: "tools", text: "  " + m.icon("running") + " " + paint(dim, line)})
 		} else {
-			out = append(out, "  "+paint(dim, "· "+line))
+			out = append(out, paneLine{key: "tools", text: "  " + paint(dim, "· "+line)})
 		}
 		names, counts, running, runningDetail = nil, map[string]int{}, false, ""
 	}
@@ -462,10 +480,12 @@ func (m *Model) agentBox(width, lines int) string {
 		case a.says != "" || a.thinking != "":
 			flush()
 			prefix := map[bool]string{true: "✎ ", false: "∴ "}[a.says != ""]
-			out = append(out, agentTextRows(prefix, cmp.Or(a.says, a.thinking), width)...)
+			for _, text := range agentTextRows(prefix, cmp.Or(a.says, a.thinking), width) {
+				out = append(out, paneLine{key: fmt.Sprintf("activity:%p", a), text: text})
+			}
 		case a.result == "failed":
 			flush()
-			out = append(out, m.icon("failed")+" "+paint(red, "failed")+" "+paint(dim, a.tool+" "+a.detail))
+			out = append(out, paneLine{key: fmt.Sprintf("activity:%p", a), text: m.icon("failed") + " " + paint(red, "failed") + " " + paint(dim, a.tool+" "+a.detail)})
 		default:
 			if counts[a.tool]++; counts[a.tool] == 1 {
 				names = append(names, a.tool)
@@ -478,11 +498,17 @@ func (m *Model) agentBox(width, lines int) string {
 	}
 	flush()
 	if len(out) == 0 {
-		out = []string{paint(dim, "starting")}
+		out = []paneLine{{key: "starting", text: paint(dim, "starting")}}
 	}
-	out = m.history.show(out, lines)
-	out = append(make([]string, max(0, lines-len(out))), out...)
-	return box(bold(cyan, "Agent"), strings.Join(out, "\n"), width, m.border(&m.history))
+	shown := m.history.show(out, lines)
+	shown = append(make([]string, max(0, lines-len(shown))), shown...)
+	title := "Agent"
+	if m.focused() == &m.history {
+		title += "*"
+	}
+	result := box(bold(cyan, title), strings.Join(shown, "\n"), width, m.border(&m.history))
+	m.historyHeight = lipgloss.Height(result)
+	return result
 }
 
 // findingsBox is the findings as no-mistakes has them: a severity icon, a reference, the description below.
