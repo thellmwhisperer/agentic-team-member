@@ -1,18 +1,38 @@
 package run
 
-import "testing"
+import (
+	"bytes"
+	"io"
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestReachAcceptsQuotedHeredocTestData(t *testing.T) {
 	// Recorded Bash input from 311-72, 2026-10-13T11:56:28.964Z. The URL is
 	// literal Go fixture data, not a shell argument or an executed request.
 	command := fixture(t, "quoted-heredoc-311.sh")
-	if fetches(command) {
+	root := repo(t, "https://example.com/owner/repo.git", atmYAML)
+	target := filepath.Join("internal", "run", "followup_test.go")
+	if err := os.MkdirAll(filepath.Dir(filepath.Join(root, target)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, target), []byte("package run\nimport \"testing\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitT(t, root, "add", target)
+	gitT(t, root, "commit", "-q", "-m", "add existing test file")
+	if fetchesAt(command, root) {
 		t.Error("literal fixture heredoc classified as a network fetch")
 	}
-	if got := outside([]use{{"Bash", command, command}}, "/repo", "/repo/clone"); got != "" {
+	if got := outside([]use{{"Bash", command, command}}, root, root); got != "" {
 		t.Fatalf("literal fixture heredoc reached outside clone: %s", got)
 	}
-	runReachCases(t, []reachCase{{"recorded311", "claude", bashEvent("claude", command, ""), ""}})
+	t.Setenv("FAKE_AGENT_STREAM", bashEvent("claude", command, ""))
+	var out bytes.Buffer
+	if err := Run("t", []string{"--harness", "claude", issueFile(t, issue)}, &out, io.Discard); err != nil {
+		t.Fatalf("recorded fixture command failed the fake-agent boundary: %v", err)
+	}
 }
 
 func TestReachRejectsExecutingWrittenHeredoc(t *testing.T) {
@@ -68,7 +88,7 @@ func TestReachAcceptsQuotedGoTestSource(t *testing.T) {
 	if !fetches(tildeOutput) {
 		t.Fatal("unquoted tilde output was treated as a clone-relative path")
 	}
-	comment := "cat > fixture_test.go <<'EOF'\npackage run\n// https://example.com/repo.git\n" +
+	comment := "cat > fixture_test.go <<'EOF'\npackage run\nimport \"testing\"\n// https://example.com/repo.git\n" +
 		"func TestFixture(t *testing.T) {}\nEOF\n"
 	if fetches(comment) {
 		t.Fatal("URL in a Go comment was classified as a shell request")
@@ -99,6 +119,10 @@ func TestReachRejectsUnprovenHeredocWriter(t *testing.T) {
 		{"test missing testing parameter", "", "package run\nfunc TestNoParam() { _ = \"https://example.com\" }\n", ""},
 		{"test with wrong parameter type", "", "package run\nfunc TestWrong(t testing.T) { _ = \"https://example.com\" }\n", ""},
 		{"test with result", "", "package run\nimport \"testing\"\nfunc TestResult(t *testing.T) bool { _ = \"https://example.com\"; return true }\n", ""},
+		{"custom test parameter", "", "package run\nimport \"custom\"\nfunc TestCustom(t *custom.T) { _ = \"https://example.com\" }\n", ""},
+		{"bare test parameter", "", "package run\nimport \"testing\"\ntype T struct{}\nfunc TestBare(t *T) { _ = \"https://example.com\" }\n", ""},
+		{"missing testing import", "", "package run\nfunc TestMissing(t *testing.T) { _ = \"https://example.com\" }\n", ""},
+		{"aliased testing import", "", "package run\nimport test \"testing\"\nfunc TestAlias(t *test.T) { _ = \"https://example.com\" }\n", ""},
 	} {
 		write := tc.prefix + "cat > fixture_test.go <<'EOF'\n" + tc.body + "EOF\n" + tc.after
 		if !fetches(write) {
