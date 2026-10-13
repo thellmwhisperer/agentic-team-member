@@ -90,6 +90,35 @@ func agentBoxSays(t *testing.T, width int, text string) (string, []string) {
 	return m.agentBox(width, 40), agentLines(m, width)
 }
 
+func activeStylesAtText(raw, text string) (bool, bool, bool) {
+	bold, italic := false, false
+	offset := 0
+	for _, sgr := range regexp.MustCompile("\\x1b\\[([0-9;]*)m").FindAllStringSubmatchIndex(raw, -1) {
+		if strings.Contains(raw[offset:sgr[0]], text) {
+			return bold, italic, true
+		}
+		for _, code := range strings.Split(raw[sgr[2]:sgr[3]], ";") {
+			switch code {
+			case "0":
+				bold, italic = false, false
+			case "1":
+				bold = true
+			case "3":
+				italic = true
+			case "22":
+				bold = false
+			case "23":
+				italic = false
+			}
+		}
+		offset = sgr[1]
+	}
+	if strings.Contains(raw[offset:], text) {
+		return bold, italic, true
+	}
+	return false, false, false
+}
+
 func TestAgentBoxRendersMarkdownBold(t *testing.T) {
 	raw, lines := agentBoxSays(t, 60, "**Evaluating helper fallback**")
 	if want := []string{"✎ Evaluating helper fallback"}; !reflect.DeepEqual(lines, want) {
@@ -120,26 +149,33 @@ func TestAgentBoxRendersNestedAndTripleEmphasis(t *testing.T) {
 		if !reflect.DeepEqual(lines, []string{want}) {
 			t.Fatalf("Agent box lines for %q:\n%q\nwant:\n%q", text, lines, []string{want})
 		}
-		var messageRow string
-		for _, row := range strings.Split(raw, "\n") {
-			if strings.Contains(ansi.Strip(row), "bold italic") {
-				messageRow = row
-				break
+		styleWants := map[string][2]bool{"bold": {true, false}, "italic": {true, true}}
+		if strings.HasPrefix(text, "-") {
+			styleWants = map[string][2]bool{"bold": {true, true}, "italic": {true, true}}
+		}
+		for word, styles := range styleWants {
+			bold, italic, found := activeStylesAtText(raw, word)
+			if !found || bold != styles[0] || italic != styles[1] {
+				t.Fatalf("wrong active styles for %q in %q: bold=%t italic=%t found=%t\n%q", word, text, bold, italic, found, raw)
 			}
 		}
-		if messageRow == "" {
-			t.Fatalf("message row is missing for %q:\n%q", text, raw)
+	}
+}
+
+func TestAgentBoxKeepsFencedMarkdownLiteralAndWrapsAtPanelWidth(t *testing.T) {
+	const width = 32
+	raw, lines := agentBoxSays(t, width, "```\n**literal**\n- x\n\t123456789012345678901234567890123456\n```")
+	want := []string{"✎ **literal**", "- x", "123456789012345678", "901234567890123456"}
+	if !reflect.DeepEqual(lines, want) {
+		t.Fatalf("fenced code changed:\n%q\nwant:\n%q", lines, want)
+	}
+	for _, line := range strings.Split(raw, "\n") {
+		if got := ansi.StringWidth(line); got != width {
+			t.Fatalf("rendered line is %d columns, want %d: %q", got, width, ansi.Strip(line))
 		}
-		bold, italic := false, false
-		for _, sgr := range regexp.MustCompile("\\x1b\\[([0-9;]*)m").FindAllStringSubmatch(messageRow, -1) {
-			for _, code := range strings.Split(sgr[1], ";") {
-				bold = bold || code == "1"
-				italic = italic || code == "3"
-			}
-		}
-		if !bold || !italic {
-			t.Fatalf("nested emphasis styles are missing for %q:\n%q", text, raw)
-		}
+	}
+	if strings.Contains(raw, "\t") {
+		t.Fatalf("tab reached terminal output: %q", raw)
 	}
 }
 
