@@ -94,6 +94,9 @@ func (a agent) ponytail(root, clone, sha string, proofs []proof, i Issue, c conf
 // the commands of those checks.
 func reprove(runDir, clone, base string, history []proof, c config.Config) (string, []unitResult, []cmdResult, error) {
 	for n, p := range history {
+		if p.test == "" && slices.Contains([]string{"docs", "chore", "refactor"}, p.typ) {
+			continue // These proofs use file scope or the baseline suite, not a named test.
+		}
 		content, err := os.ReadFile(filepath.Join(clone, p.test))
 		if err != nil || string(content) != p.testContent {
 			return fmt.Sprintf("unit %d: test %s changed since it was proven", n+1, p.test), nil, nil, nil

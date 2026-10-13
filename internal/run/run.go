@@ -93,7 +93,7 @@ func Run(label string, args []string, out, summary io.Writer) (err error) {
 		r.Reproofs, _ = ev["reproofs"].([]unitResult)
 		return ev, err
 	})
-	deliver(r, root, dir, sha, *base, c.Delivery, i, summary)
+	a.deliver(r, dir, sha, *base, i, summary, proofs, pending, c)
 	return r.err
 }
 
@@ -254,7 +254,9 @@ var nonSlug = regexp.MustCompile(`[^a-z0-9]+`)
 // line has no ceiling: it lasts as long as what it hands the work to. SIGINT and SIGTERM cancel its
 // process group on Unix or process tree on Windows.
 // ponytail: line gets the clone after the slop detector.
-func deliver(r *verdict, root, clone, sha, base, line string, i Issue, screen io.Writer) {
+func (a agent) deliver(r *verdict, clone, sha, base string, i Issue, screen io.Writer,
+	proofs []proof, pending []followUp, c config.Config) {
+	root, line := a.root, c.Delivery
 	if line == "" {
 		if r.err == nil {
 			r.node("delivery").Result = "skipped"
@@ -269,6 +271,14 @@ func deliver(r *verdict, root, clone, sha, base, line string, i Issue, screen io
 		cuts, tombs, err := onBranch(root, clone, sha, branch, i)
 		if err == nil {
 			err = foreign(root, clone, sha)
+		}
+		var reviewed contractReview
+		if err == nil {
+			reviewed, err = a.inspectContract(root, clone, sha, i, proofs, pending, c)
+			ev["contract_review"] = reviewed
+		}
+		if err == nil {
+			err = reviewed.current(clone)
 		}
 		if err == nil {
 			r.HeadSHA, err = git(clone, "rev-parse", "HEAD")
@@ -292,6 +302,9 @@ func deliver(r *verdict, root, clone, sha, base, line string, i Issue, screen io
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
 		var tail string
+		if err := reviewed.current(clone); err != nil {
+			return ev, err
+		}
 		// Delivery owns the attached terminal. Its node event is the screen row; emitting
 		// a nested check event here would arrive after the terminal output and duplicate it.
 		took, err := row(func(map[string]any) {}, "delivery", func() error {

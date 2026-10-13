@@ -122,7 +122,10 @@ func TestRunChainsAFollowUpOnTheIssueUpToThreeUnits(t *testing.T) {
 	got := filepath.Join(t.TempDir(), "delivered")
 	t.Setenv("ATM_TEST_OUT", got)
 	t.Setenv("ATM_TEST_CRITERION", "A retry runs once after a timeout.")
-	t.Setenv("FAKE_AGENT_WORK", chainWork)
+	// The last gap is adjacent work, not an unmet mandatory criterion at delivery.
+	t.Setenv("FAKE_AGENT_WORK", chainWork+`; if [ -f c2_test.sh ]; then `+
+		`sed 's/A retry runs once after a timeout./Adjacent improvement./' .atm/fake-report.json > .atm/last.json; `+
+		`mv .atm/last.json .atm/fake-report.json; fi`)
 	t.Setenv("FAKE_PONYTAIL_WORK", "grep -v extra a.txt > cut; mv cut a.txt")
 	t.Setenv("FAKE_PONYTAIL_REPORT", cut)
 	var out bytes.Buffer

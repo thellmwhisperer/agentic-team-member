@@ -1,8 +1,8 @@
 # How a run flows
 
 This page is what `atm run` does with an issue, step by step, and what makes
-each step fail. Code decides every step but two: the agent writes the fix and
-the slop detector cuts it. What you set before a run is in
+each step fail. Models write the fix, cut slop and inspect the final diff against
+the issue. Code enforces proofs, review freshness and the correction limit. What you set before a run is in
 [Configuration](configuration.md).
 
 <picture>
@@ -59,7 +59,7 @@ A failed step stops the run; the steps after it are not run.
 | Agent | Runs the coding agent in the clone on the brief | It exits non-zero, times out, says nothing for 10 min, reaches outside its clone, does not load the `ponytail` skill, or leaves no readable report |
 | Checks | Removes the ignored files the agent made, runs `install`, proves the task type, then runs `test`, `typecheck` and `lint` | A proof or a command fails, or anything committed |
 | Slop detector | Lets a model cut the diff; keeps the cut only if every check still passes | Its agent fails, reports badly, or anything commits |
-| Delivery | Commits the work on a branch and runs the `delivery` command | The branch or the command fails. Skipped when `delivery` is empty |
+| Delivery | Commits the work, reviews its contract, then runs `delivery` | The branch, contract review or command fails. Skipped when `delivery` is empty |
 
 Agent and Checks run again for each chained follow-up, at most three units in
 one run; see [Follow-ups](#follow-ups).
@@ -199,8 +199,31 @@ an email ending in `@localhost`, fails the run.
 When `delivery` is set, the clone goes on a new branch
 `atm/<title slug>-<timestamp>`, whatever is left uncommitted is committed as
 the next unit commit, and the clone's `origin` becomes the repository's. Every
-commit after the base must carry the repository's git identity. Then the
-command runs with `sh -c` in the clone, without a time limit, with these
+commit after the base must carry the repository's git identity.
+
+Before launching the command, ATM loads the bundled `task-slicing` skill through
+the same verified skill loader. A read-only review receives the original issue
+and actual base-to-head diff. Non-goals, invariants, executable acceptance and
+split triggers must be explicit; multiple independently correctable contracts
+or missing dispatch gates return to planning. The reviewer records literal
+issue criteria with evidence, not a line-count verdict. Unmet mandatory
+follow-ups also block delivery.
+
+Original-contract repairs use the sole worker with `ponytail`, without changing
+tests or requirements, then rerun every proof and configured check. ATM reviews
+the new head again. At most two corrections total are allowed, so no root cause
+can receive a third. Unresolved work becomes concrete child drafts with cause,
+contract, dependency and diff evidence; CoS creates and dispatches issues.
+Adjacent improvements are separate children, never repair instructions.
+The existing slop detector remains cut-only and its net-line rule is unchanged.
+
+`contract-review.json` records each review and its exact head/base, with briefs
+and harness logs alongside it. `contract-rechecks-<round>.json` records repair
+checks. Missing, stale, malformed or non-passing evidence, a dirty tree or a
+reviewer mutation blocks the command. Semantic completeness is the reviewer's
+judgment, not a new acceptance heuristic. An empty `delivery` skips this phase.
+
+Then the command runs with `sh -c` in the clone, without a time limit, with these
 variables:
 
 | Variable | Value |
