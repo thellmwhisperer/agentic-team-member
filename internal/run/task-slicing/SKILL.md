@@ -65,7 +65,6 @@ Use these ranges as soft planning guidance:
 - Acceptable: often under 1,000 gross changed lines when the contract remains coherent and independently verifiable.
 - Default maximum guardrail: around 1,200 gross changed lines should trigger an explicit review-burden check and a recorded reason not to split.
 - Multi-thousand-line changes require a surface-by-surface review plan, strong automated verification, and a rollback story.
-- A hard stop is reserved for a multi-thousand-line monster that lacks an emergency, mechanical migration, or explicit human-waiver case.
 
 Never treat 500, 999, 1,000, or 1,200 lines as the definition of done.
 Do not pad a ticket up to a ceiling or cut a single behavioral contract at an arbitrary line boundary.

@@ -18,7 +18,25 @@ const passedContract = `{` + readyDispatch + `"status":"passed","acceptance":[{"
 const repairContract = `{` + readyDispatch + `"status":"repair","acceptance":[],"children":[{"cause":"missing retry",` +
 	`"contract":"Repair retry implementation without editing tests","dependency":"blocks_parent",` +
 	`"evidence":"a.txt: retry criterion"}]}`
+const independentSplitContract = `{` + readyDispatch + `"status":"split","acceptance":[],"children":[{"cause":"independent outcome",` +
+	`"contract":"Track separate outcome as a child issue","dependency":"independent",` +
+	`"evidence":"new independent behavior in a.txt"}]}`
 const contractDelivery = `echo delivered > "$ATM_TEST_OUT/delivered"`
+const reviewReadyIssue = `# Retry on timeout
+Type: fix
+
+## Non-goals
+Change retry policy outside this case.
+
+## Invariants
+Retry occurs once.
+
+## Acceptance criteria
+Retry once.
+
+## Split triggers
+Split if the diff adds an independent outcome.
+`
 
 func TestRunContractReview(t *testing.T) {
 	for _, tc := range []struct{ name, report, work, want string }{
@@ -30,14 +48,14 @@ func TestRunContractReview(t *testing.T) {
 			report: strings.Replace(passedContract, `"single_contract":true`, `"single_contract":false`, 1)},
 		{name: "mandatory unmet", want: "unmet",
 			report: strings.Replace(passedContract, `"satisfied":true`, `"satisfied":false`, 1)},
-		{name: "scope drift", report: strings.Replace(repairContract, `"repair"`, `"split"`, 1), want: "split"},
+		{name: "scope drift", report: independentSplitContract, want: "split"},
 		{name: "review mutation", work: "echo changed > a.txt", want: "changed"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root, out := contractReviewRepo(t)
 			t.Setenv("FAKE_CONTRACT_REPORT", tc.report)
 			t.Setenv("FAKE_CONTRACT_WORK", tc.work)
-			err := Run("t", []string{issueFile(t, issue)}, &bytes.Buffer{}, &bytes.Buffer{})
+			err := Run("t", []string{issueFile(t, reviewReadyIssue)}, &bytes.Buffer{}, &bytes.Buffer{})
 			if tc.want != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.want) {
 					t.Fatalf("want %s, got %v", tc.want, err)
@@ -114,7 +132,7 @@ func TestRunContractReviewRepair(t *testing.T) {
 			t.Setenv("FAKE_CONTRACT_REPORT", repairContract)
 			t.Setenv("FAKE_CONTRACT_REPAIR", tc.work)
 			t.Setenv("FAKE_CONTRACT_AFTER_REPAIR_REPORT", tc.after)
-			err := Run("t", []string{issueFile(t, issue)}, &bytes.Buffer{}, &bytes.Buffer{})
+			err := Run("t", []string{issueFile(t, reviewReadyIssue)}, &bytes.Buffer{}, &bytes.Buffer{})
 			if tc.want == "" {
 				if err != nil {
 					t.Fatal(err)
@@ -168,7 +186,7 @@ func TestRunContractReviewTaskSlicing(t *testing.T) {
 			report := strings.Replace(repairContract, `"status":"repair"`, `"status":"split"`, 1)
 			report = strings.Replace(report, `"`+field+`":true`, `"`+field+`":false`, 1)
 			t.Setenv("FAKE_CONTRACT_REPORT", report)
-			err := Run("t", []string{issueFile(t, issue)}, &bytes.Buffer{}, &bytes.Buffer{})
+			err := Run("t", []string{issueFile(t, reviewReadyIssue)}, &bytes.Buffer{}, &bytes.Buffer{})
 			if err == nil || !strings.Contains(err.Error(), "requires split") {
 				t.Fatalf("want split got %v", err)
 			}
@@ -184,11 +202,37 @@ func TestRunContractReviewTaskSlicing(t *testing.T) {
 	t.Run("skill required", func(t *testing.T) {
 		repo(t, "https://example.com/owner/repo.git", atmSet(atmYAML, "delivery", contractDelivery))
 		t.Setenv("FAKE_CONTRACT_MODE", "no-skill")
-		err := Run("t", []string{issueFile(t, issue)}, &bytes.Buffer{}, &bytes.Buffer{})
+		err := Run("t", []string{issueFile(t, reviewReadyIssue)}, &bytes.Buffer{}, &bytes.Buffer{})
 		if err == nil || !strings.Contains(err.Error(), "task-slicing") {
 			t.Fatalf("want skill proof failure got %v", err)
 		}
 	})
+}
+
+func TestRunContractReviewRequiresOriginalIssueGates(t *testing.T) {
+	for _, tc := range []struct{ section, content string }{
+		{"Non-goals", "Change retry policy outside this case."},
+		{"Invariants", "Retry occurs once."},
+		{"Acceptance criteria", "Retry once."},
+		{"Split triggers", "Split if the diff adds an independent outcome."},
+	} {
+		t.Run(tc.section, func(t *testing.T) {
+			root, out := contractReviewRepo(t)
+			body := strings.Replace(reviewReadyIssue, "## "+tc.section+"\n", "", 1)
+			body = strings.Replace(body, tc.content+"\n", "", 1)
+			t.Setenv("FAKE_CONTRACT_REPORT", passedContract)
+			err := Run("t", []string{issueFile(t, body)}, &bytes.Buffer{}, &bytes.Buffer{})
+			if err == nil || !strings.Contains(err.Error(), "issue missing task-slicing") {
+				t.Fatalf("missing %s accepted: %v", tc.section, err)
+			}
+			if _, e := os.Stat(filepath.Join(out, "delivered")); !os.IsNotExist(e) {
+				t.Fatal("delivery ran")
+			}
+			if _, e := os.Stat(filepath.Join(root, ".atm/runs/t/contract-review.json")); !os.IsNotExist(e) {
+				t.Fatal("passed report persisted")
+			}
+		})
+	}
 }
 
 func TestRunContractReviewBlocksPendingMandatoryCriterion(t *testing.T) {
@@ -226,7 +270,7 @@ func TestRunContractReviewRepairWithoutTestFile(t *testing.T) {
 			t.Setenv("FAKE_CONTRACT_REPAIR", "echo repaired > "+file)
 			t.Setenv("FAKE_CONTRACT_AFTER_REPAIR_FILE", file)
 			t.Setenv("FAKE_CONTRACT_AFTER_REPAIR_REPORT", passedContract)
-			text := strings.Replace(issue, "Type: fix", "Type: "+typ, 1)
+			text := strings.Replace(reviewReadyIssue, "Type: fix", "Type: "+typ, 1)
 			if err := Run("t", []string{issueFile(t, text)}, &bytes.Buffer{}, &bytes.Buffer{}); err != nil {
 				t.Fatal(err)
 			}
@@ -264,7 +308,7 @@ func TestRunContractReviewRejectsProtectedTestRename(t *testing.T) {
 	t.Setenv("FAKE_CONTRACT_REPORT", repairContract)
 	t.Setenv("FAKE_CONTRACT_REPAIR", "printf 'fixed\\nrepaired\\n' > a.txt; mv other_test.sh other.sh")
 	t.Setenv("FAKE_CONTRACT_AFTER_REPAIR_REPORT", passedContract)
-	err := Run("t", []string{issueFile(t, issue)}, &bytes.Buffer{}, &bytes.Buffer{})
+	err := Run("t", []string{issueFile(t, reviewReadyIssue)}, &bytes.Buffer{}, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "protected test other_test.sh") {
 		t.Fatalf("protected rename accepted: %v", err)
 	}
@@ -293,7 +337,7 @@ func TestRunContractReviewRejectsDeliveryMetadataMutation(t *testing.T) {
 			} else {
 				t.Setenv("FAKE_CONTRACT_WORK", tc.command)
 			}
-			err := Run("t", []string{issueFile(t, issue)}, &bytes.Buffer{}, &bytes.Buffer{})
+			err := Run("t", []string{issueFile(t, reviewReadyIssue)}, &bytes.Buffer{}, &bytes.Buffer{})
 			if err == nil || !strings.Contains(err.Error(), "delivery metadata") {
 				t.Fatalf("metadata mutation accepted: %v", err)
 			}
