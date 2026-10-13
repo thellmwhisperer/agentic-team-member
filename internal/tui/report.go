@@ -16,13 +16,15 @@ func (m *Model) restoreReport(path string, outcome run.Outcome) {
 		r.state = "unknown"
 	}
 	m.current("agent").label = "Agent"
+	if path == "" {
+		return
+	}
 	var report struct {
 		Nodes []struct {
 			Name       string `json:"name"`
 			Result     string `json:"result"`
 			DurationMS *int64 `json:"duration_ms"`
 		}
-		Reason string
 	}
 	b, err := os.ReadFile(path)
 	if err == nil {
@@ -32,15 +34,23 @@ func (m *Model) restoreReport(path string, outcome run.Outcome) {
 		m.findings = append(m.findings, finding{"warning", "report.json", "Node results unavailable: " + err.Error()})
 		return
 	}
+	seen := make(map[string]bool, len(report.Nodes))
 	for _, n := range report.Nodes {
 		r := m.current(n.Name)
-		if r == nil || n.DurationMS != nil && *n.DurationMS < 0 || !consistentResult(n.Name, n.Result, outcome) {
+		if r == nil || seen[n.Name] {
+			if r != nil && seen[n.Name] {
+				r.state, r.took, r.hasDuration, r.note = "unknown", 0, false, ""
+			}
+			continue
+		}
+		seen[n.Name] = true
+		if n.DurationMS != nil && *n.DurationMS < 0 || !consistentResult(n.Name, n.Result, outcome) {
 			continue
 		}
 		switch n.Result {
 		case "passed", "failed", "skipped", "not run":
 			r.state = n.Result
-			if n.DurationMS != nil {
+			if n.DurationMS != nil && (n.Result == "passed" || n.Result == "failed") {
 				r.took, r.hasDuration = time.Duration(*n.DurationMS)*time.Millisecond, true
 			}
 		default: // a stale running report is not evidence that the ended run is still working
@@ -49,31 +59,31 @@ func (m *Model) restoreReport(path string, outcome run.Outcome) {
 		if n.Name == "agent" {
 			r.note = "saved node"
 		}
-		if n.Result == "failed" && report.Reason != "" {
-			m.findings = append(m.findings, finding{"error", r.label, report.Reason})
-		}
 	}
 }
 
 func consistentResult(name, result string, outcome run.Outcome) bool {
-	if outcome.Outcome == "passed" {
-		return result != "failed" && (result != "not run" || name == "delivery")
-	}
-	if outcome.Outcome != "failed" || outcome.FailedNode == "" {
-		return result != "failed" || outcome.Outcome == "failed"
-	}
 	order := []string{"issue", "clone", "contract", "agent", "checks", "ponytail", "delivery"}
-	failed := slices.Index(order, outcome.FailedNode)
 	i := slices.Index(order, name)
-	if failed < 0 || i < 0 {
-		return result != "failed"
+	if i < 0 {
+		return false
+	}
+	if outcome.Outcome == "passed" {
+		return result == "passed" || i == len(order)-1 && result == "skipped"
+	}
+	if outcome.Outcome != "failed" {
+		return false
+	}
+	failed := slices.Index(order, outcome.FailedNode)
+	if failed < 0 {
+		return false
 	}
 	switch {
 	case i < failed:
-		return result != "failed" && result != "not run"
+		return result == "passed"
 	case i == failed:
 		return result == "failed"
 	default:
-		return result == "not run" || result == "skipped"
+		return result == "not run"
 	}
 }
