@@ -348,8 +348,12 @@ type event struct {
 	IsError    bool   `json:"isError"`
 	Args       json.RawMessage
 	Item       struct { // codex
-		ID, Type, Command, Text, Status string
-		ExitCode                        *int `json:"exit_code"`
+		ID, Type, Command, Text, Status, Tool string
+		Arguments                             json.RawMessage `json:"arguments"`
+		Changes                               []struct {
+			Path string
+		} `json:"changes"`
+		ExitCode *int `json:"exit_code"`
 	}
 	Part struct { // opencode
 		CallID     string `json:"callID"`
@@ -603,8 +607,19 @@ type use struct{ tool, args, command string }
 // and opencode's tool uses.
 func (e event) calls(harness string) (cs []use) {
 	switch {
-	case harness == "codex" && e.Item.Type == "command_execution":
-		return []use{{"shell", e.Item.Command, e.Item.Command}}
+	case harness == "codex":
+		switch e.Item.Type {
+		case "command_execution":
+			return []use{{"shell", e.Item.Command, e.Item.Command}}
+		case "mcp_tool_call":
+			return []use{{e.Item.Tool, strs(e.Item.Arguments), ""}}
+		case "file_change":
+			paths := make([]string, 0, len(e.Item.Changes))
+			for _, change := range e.Item.Changes {
+				paths = append(paths, change.Path)
+			}
+			return []use{{"file_change", strings.Join(paths, " "), ""}}
+		}
 	case harness == "opencode" && e.Type == "tool_use":
 		args := strs(e.Part.State.Input)
 		return []use{{e.Part.Tool, args, shellCommand(e.Part.Tool, e.Part.State.Input)}}
