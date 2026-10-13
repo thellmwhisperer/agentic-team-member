@@ -269,29 +269,21 @@ func TestRunProvesATestsIssueOnlyThroughTheReportedFilesGoTests(t *testing.T) {
 }
 
 func TestTestLineRejectsFilesWithoutGoTests(t *testing.T) {
-	clone := t.TempDir()
-	path := filepath.Join(clone, "reported_test.go")
-	source := "package p\n\nimport \"testing\"\n\n" +
-		"func Testhelper(t *testing.T) {}\n\n/* func TestOld(t *testing.T) {} */\n"
-	if err := os.WriteFile(path, []byte(source), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	_, err := testLine(clone, "go test -run {tests} {dir}", "reported_test.go")
-	if err == nil || err.Error() != "the report's test file reported_test.go defines no Go tests" {
-		t.Fatalf("want no-tests error, got %v", err)
-	}
-}
-
-func TestTestLineRejectsAFileWithOnlyTestMain(t *testing.T) {
-	clone := t.TempDir()
-	path := filepath.Join(clone, "reported_test.go")
-	source := "package p\n\nimport \"testing\"\n\nfunc TestMain(m *testing.M) {}\n"
-	if err := os.WriteFile(path, []byte(source), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	_, err := testLine(clone, "go test -run {tests} {dir}", "reported_test.go")
-	if err == nil || err.Error() != "the report's test file reported_test.go defines no Go tests" {
-		t.Fatalf("want no-tests error, got %v", err)
+	for _, source := range []string{
+		"func Testhelper(t *testing.T) {}\n\n/* func TestOld(t *testing.T) {} */\n",
+		"func TestMain(m *testing.M) {}\n",
+	} {
+		t.Run(source, func(t *testing.T) {
+			clone := t.TempDir()
+			path := filepath.Join(clone, "reported_test.go")
+			if err := os.WriteFile(path, []byte("package p\n\nimport \"testing\"\n\n"+source), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, err := testLine(clone, "go test -run {tests} {dir}", "reported_test.go")
+			if err == nil || err.Error() != "the report's test file reported_test.go defines no Go tests" {
+				t.Fatalf("want no-tests error, got %v", err)
+			}
+		})
 	}
 }
 
