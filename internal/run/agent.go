@@ -854,7 +854,7 @@ func maskQuotedGoTestData(checked []byte, stmts []*syntax.Stmt, clone string) {
 	if data == nil || !goTestContinuation(stmts[1:]) {
 		return
 	}
-	body := []byte(data.Lit())
+	body := bytes.ReplaceAll([]byte(data.Lit()), []byte("\r\n"), []byte("\n"))
 	start := int(data.Pos().Offset())
 	if start < 0 || start > len(checked) {
 		return
