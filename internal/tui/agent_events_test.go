@@ -166,6 +166,25 @@ func TestAgentBoxPreservesInlineCodeWhitespaceWhenWrapping(t *testing.T) {
 	}
 }
 
+func TestAgentBoxPreservesCodeSourceWhitespaceAndExpandsTabs(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		text string
+		want string
+	}{
+		{name: "indented block", text: "    x\tz", want: "✎     x   z"},
+		{name: "inline code padding", text: "` x `", want: "✎  x "},
+		{name: "inline code tab", text: "`x\tz`", want: "x       z"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw, _ := agentBoxSays(t, 60, tc.text)
+			if stripped := ansi.Strip(raw); !strings.Contains(stripped, tc.want) {
+				t.Fatalf("rendered code lost source whitespace: got %q, want %q in output", stripped, tc.want)
+			}
+		})
+	}
+}
+
 func TestAgentBoxOnlyClosesFenceWithMatchingMarkerAndLength(t *testing.T) {
 	raw, lines := agentBoxSays(t, 60, "````go\n~~~\n```\n  kept  \n````\nafter")
 	if want := []string{"✎ ~~~", "```", "kept", "after"}; !reflect.DeepEqual(lines, want) {
@@ -186,8 +205,9 @@ func TestAgentBoxRendersMarkdownWithinANarrowPanel(t *testing.T) {
 		"tests around it",
 		"• fix",
 		"if  x {",
-		"return 1 // a long cod",
-		"e line that has to wrap",
+		"return 1 // a long",
+		"code line that has to wra",
+		"p",
 		"}",
 		"Done.",
 	}
@@ -199,7 +219,7 @@ func TestAgentBoxRendersMarkdownWithinANarrowPanel(t *testing.T) {
 			t.Fatalf("line %q is %d wide, want %d", ansi.Strip(l), w, width)
 		}
 	}
-	if stripped := ansi.Strip(raw); !strings.Contains(stripped, "│       return 1") ||
+	if stripped := ansi.Strip(raw); !strings.Contains(stripped, "│           return 1") ||
 		!strings.Contains(stripped, "│      tests around it") {
 		t.Fatalf("indentation not kept:\n%s", stripped)
 	}
