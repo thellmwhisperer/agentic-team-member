@@ -408,19 +408,7 @@ func isGoTest(fn *ast.FuncDecl) bool {
 			return false
 		}
 	}
-	if fn.Type.Params == nil || len(fn.Type.Params.List) != 1 || len(fn.Type.Params.List[0].Names) > 1 {
-		return false
-	}
-	pointer, ok := fn.Type.Params.List[0].Type.(*ast.StarExpr)
-	if !ok {
-		return false
-	}
-	testing, ok := pointer.X.(*ast.SelectorExpr)
-	if !ok || testing.Sel.Name != "T" {
-		return false
-	}
-	packageName, ok := testing.X.(*ast.Ident)
-	return ok && packageName.Name == "testing"
+	return true
 }
 
 // first is the first path that matches one of globs, when want, or matches none, when not; "" when none is.
