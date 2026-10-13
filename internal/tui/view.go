@@ -246,9 +246,18 @@ func (m *Model) agentBox(width, lines int) string {
 		switch {
 		case a.says != "" || a.thinking != "":
 			flush()
-			first, _, _ := strings.Cut(strings.TrimSpace(cmp.Or(a.says, a.thinking)), "\n")
-			first = strings.ReplaceAll(ansi.Wrap(first, width-6, ""), "\n", "\n  ")
-			out = append(out, strings.Split(map[bool]string{true: "✎ ", false: "∴ "}[a.says != ""]+first, "\n")...)
+			prefix := map[bool]string{true: "✎ ", false: "∴ "}[a.says != ""]
+			first := true
+			for _, logical := range strings.Split(strings.TrimSpace(cmp.Or(a.says, a.thinking)), "\n") {
+				for _, wrapped := range strings.Split(ansi.Wrap(logical, width-6, ""), "\n") {
+					if first {
+						out = append(out, prefix+wrapped)
+						first = false
+					} else {
+						out = append(out, "  "+wrapped)
+					}
+				}
+			}
 		case a.result == "failed":
 			flush()
 			out = append(out, m.icon("failed")+" "+paint(red, "failed")+" "+paint(dim, a.tool+" "+a.detail))

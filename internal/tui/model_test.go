@@ -265,3 +265,18 @@ func TestAgentAndLogBoxesShareTheColumnHeight(t *testing.T) {
 		t.Fatalf("want Agent and Log boxes to fit above the footer:\n%s", strings.Join(lines, "\n"))
 	}
 }
+
+func TestStackedAgentBoxFitsAboveTheFooter(t *testing.T) {
+	lines := strings.Split(view(screen(80, 40, unit[:7]...)), "\n")
+	if len(lines) != 40 || !strings.Contains(lines[37], "╰") || lines[38] != "" ||
+		!strings.Contains(lines[39], "q detach") {
+		t.Fatalf("want the stacked Agent box above the footer:\n%s", strings.Join(lines, "\n"))
+	}
+}
+
+func TestAgentBoxShowsEveryLogicalLine(t *testing.T) {
+	s := view(screen(120, 40, append(unit[:7:7], `{"step":"agent","says":"first line\nsecond line"}`)...))
+	if !order(s, "✎ first line", "  second line") {
+		t.Fatalf("want every line the agent says:\n%s", s)
+	}
+}
