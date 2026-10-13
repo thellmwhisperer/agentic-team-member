@@ -104,12 +104,17 @@ func reprove(runDir, clone, base string, history []proof, c config.Config) (stri
 		if _, err := git(clone, "reset", "-q", p.base); err != nil {
 			return "", ran, nil, err
 		}
+		restoreATM, err := hideATM(clone, runDir)
+		if err != nil {
+			return "", ran, nil, err
+		}
 		var red, green try
 		var proofErr error
 		proofSpan, proofErr := row(liveIn(clone), proofs[p.typ], func() error {
 			red, green, proofErr = prove(clone, p.typ, filepath.ToSlash(p.test), c)
 			return proofErr
 		})
+		proofErr = errors.Join(proofErr, restoreATM())
 		ran = append(ran, unitResult{Unit: n + 1, Base: p.base, TestFile: p.test, Type: p.typ,
 			Red: red, Green: green, Result: outcome(proofErr), span: proofSpan})
 		if e := moved(clone, p.base, "the commands"); e != nil {
