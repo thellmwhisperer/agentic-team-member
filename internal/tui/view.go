@@ -31,7 +31,7 @@ var spinner = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "
 
 // states is each state's icon and colour; its word is its name. Running's icon is the spinner.
 var states = map[string][2]string{"pending": {"○", dim}, "running": {"", blue}, "waiting": {"⏸", yellow},
-	"passed": {"✓", green}, "failed": {"✗", red}, "skipped": {"–", dim}, "not run": {"○", dim}}
+	"passed": {"✓", green}, "failed": {"✗", red}, "skipped": {"–", dim}, "not run": {"○", dim}, "unknown": {"?", yellow}}
 
 // icon is state's icon in its colour.
 func (m *Model) icon(state string) string {
@@ -67,10 +67,11 @@ func (m *Model) View() string {
 }
 
 func (m *Model) footer() string {
+	action := "detach"
 	if m.done {
-		return ""
+		action = "close"
 	}
-	return "\n\n  " + lipgloss.NewStyle().Bold(true).Render("q") + " " + paint(dim, "detach")
+	return "\n\n  " + lipgloss.NewStyle().Bold(true).Render("q") + " " + paint(dim, action)
 }
 
 // columns is left, every line padded to width, beside right.

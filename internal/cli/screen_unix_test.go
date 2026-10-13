@@ -4,11 +4,11 @@ package cli
 
 import (
 	"bytes"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/x/ansi"
 	"github.com/creack/pty"
@@ -28,14 +28,43 @@ func onTerminal(t *testing.T, args ...string) (string, int) {
 		t.Fatal(err)
 	}
 	var shown bytes.Buffer
-	read := make(chan struct{})
-	go func() { _, _ = io.Copy(&shown, p); close(read) }()
+	read, completed := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(read)
+		closed := false
+		b := make([]byte, 4096)
+		for {
+			n, err := p.Read(b)
+			_, _ = shown.Write(b[:n])
+			if !closed && strings.Contains(ansi.Strip(shown.String()), "q close") {
+				closed = true
+				close(completed)
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
 	stdin := os.Stdin
 	os.Stdin = tty
 	c := root()
 	c.SetArgs(args)
 	c.SetOut(tty)
-	err = c.Execute()
+	done := make(chan error, 1)
+	go func() { done <- c.Execute() }()
+	select {
+	case err = <-done: // plain output or failure before opening the screen
+	case <-completed:
+		select {
+		case err = <-done:
+			t.Error("completed native pipeline exited before q")
+		case <-time.After(150 * time.Millisecond):
+			if _, writeErr := p.Write([]byte("q")); writeErr != nil {
+				t.Fatal(writeErr)
+			}
+			err = <-done
+		}
+	}
 	os.Stdin = stdin
 	_ = tty.Close()
 	<-read
