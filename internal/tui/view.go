@@ -362,33 +362,34 @@ func agentTextRows(prefix, text string, width int) []string {
 		} else if isFence {
 			codeMarker, codeLength = marker, length
 			continue
-		}
-		lineText, hasCode, isBlock := markdown(line)
-		if isBlock {
-			wrappedText := ansi.Wrap(lineText, w, "")
-			if hasCode {
-				wrappedText = wrapMarkdown(lineText, w)
-			}
-			wrapped = strings.Split(wrappedText, "\n")
-		} else if item := listItem.FindStringSubmatch(line); item != nil {
-			lead := item[1] + cmp.Or(strings.Trim(item[2], "-*+"), "•") + " "
-			bodyText, hasCode, _ := markdown(item[3])
-			bodyWidth := max(1, w-ansi.StringWidth(lead))
-			wrappedText := ansi.Wrap(bodyText, bodyWidth, "")
-			if hasCode {
-				wrappedText = wrapMarkdown(bodyText, bodyWidth)
-			}
-			body := strings.Split(wrappedText, "\n")
-			wrapped = append([]string{lead + body[0]}, body[1:]...)
-			for i := 1; i < len(wrapped); i++ {
-				wrapped[i] = strings.Repeat(" ", ansi.StringWidth(lead)) + wrapped[i]
-			}
 		} else {
-			wrappedText := ansi.Wrap(lineText, w, "")
-			if hasCode {
-				wrappedText = wrapMarkdown(lineText, w)
+			lineText, hasCode, isBlock := markdown(line)
+			if isBlock {
+				wrappedText := ansi.Wrap(lineText, w, "")
+				if hasCode {
+					wrappedText = wrapMarkdown(lineText, w)
+				}
+				wrapped = strings.Split(wrappedText, "\n")
+			} else if item := listItem.FindStringSubmatch(line); item != nil {
+				lead := item[1] + cmp.Or(strings.Trim(item[2], "-*+"), "•") + " "
+				bodyText, bodyHasCode, _ := markdown(item[3])
+				bodyWidth := max(1, w-ansi.StringWidth(lead))
+				wrappedText := ansi.Wrap(bodyText, bodyWidth, "")
+				if bodyHasCode {
+					wrappedText = wrapMarkdown(bodyText, bodyWidth)
+				}
+				body := strings.Split(wrappedText, "\n")
+				wrapped = append([]string{lead + body[0]}, body[1:]...)
+				for i := 1; i < len(wrapped); i++ {
+					wrapped[i] = strings.Repeat(" ", ansi.StringWidth(lead)) + wrapped[i]
+				}
+			} else {
+				wrappedText := ansi.Wrap(lineText, w, "")
+				if hasCode {
+					wrappedText = wrapMarkdown(lineText, w)
+				}
+				wrapped = strings.Split(wrappedText, "\n")
 			}
-			wrapped = strings.Split(wrappedText, "\n")
 		}
 		for _, l := range wrapped {
 			if rows == nil {
