@@ -265,7 +265,7 @@ func deliver(r *verdict, root, clone, sha, base, line string, i Issue, screen io
 		branch := "atm/" + cmp.Or(strings.Trim(s[:min(len(s), 40)], "-"), "run") + "-" +
 			strings.TrimPrefix(filepath.Base(clone), "atm-run-") // the clone's timestamp, as unique
 		ev := map[string]any{"branch": branch}
-		cuts, err := onBranch(root, clone, sha, branch, i)
+		cuts, tombs, err := onBranch(root, clone, sha, branch, i)
 		if err == nil {
 			err = foreign(root, clone, sha)
 		}
