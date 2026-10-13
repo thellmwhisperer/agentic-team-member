@@ -3,7 +3,6 @@ package tui
 import (
 	"cmp"
 	"fmt"
-	"html"
 	"regexp"
 	"strings"
 	"unicode"
@@ -11,7 +10,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/muesli/termenv"
-	"github.com/russross/blackfriday/v2"
+	"github.com/yuin/goldmark/v2/ast"
+	"github.com/yuin/goldmark/v2/parser"
 
 	"github.com/thellmwhisperer/agentic-team-member/internal/run"
 )
@@ -223,42 +223,67 @@ var (
 )
 
 func markdown(line string) (string, bool) {
-	root := blackfriday.New(blackfriday.WithExtensions(blackfriday.NoIntraEmphasis)).Parse([]byte(line))
+	source := []byte(line)
+	root := parser.New().Parse(source)
+	codeBlock := false
+	_ = ast.Walk(root, func(node ast.Node, entering bool) (ast.WalkStatus, error) {
+		if entering {
+			if _, ok := node.(*ast.CodeBlock); ok {
+				codeBlock = true
+				return ast.WalkSkipChildren, nil
+			}
+		}
+		return ast.WalkContinue, nil
+	})
+	if codeBlock {
+		return displayText(line), true
+	}
 	var out strings.Builder
 	code := false
-	var render func(*blackfriday.Node, lipgloss.Style)
-	render = func(node *blackfriday.Node, style lipgloss.Style) {
-		switch node.Type {
-		case blackfriday.Emph:
+	var render func(ast.Node, lipgloss.Style)
+	render = func(node ast.Node, style lipgloss.Style) {
+		switch n := node.(type) {
+		case *ast.Emphasis:
 			style = style.Italic(true)
-		case blackfriday.Strong:
+		case *ast.Strong:
 			style = style.Bold(true)
-		case blackfriday.Text:
-			text := strings.Map(func(r rune) rune {
-				if unicode.IsControl(r) {
-					return -1
-				}
-				return r
-			}, html.UnescapeString(string(node.Literal)))
-			out.WriteString(style.Render(text))
+		case *ast.Text:
+			out.WriteString(style.Render(displayText(n.Value.Value(source))))
 			return
-		case blackfriday.Code:
+		case *ast.CodeSpan:
 			code = true
-			out.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(yellow)).Render(string(node.Literal)))
+			var value strings.Builder
+			for _, index := range n.Value.Indices() {
+				value.Write(source[index.Start:index.Stop])
+			}
+			out.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(yellow)).Render(displayText(value.String())))
 			return
-		case blackfriday.Softbreak, blackfriday.Hardbreak:
-			out.WriteByte(' ')
-			return
-		case blackfriday.HTMLSpan:
-			out.Write(node.Literal)
+		case *ast.RawHTML:
+			out.WriteString(displayText(n.Value.Value(source)))
 			return
 		}
-		for child := node.FirstChild; child != nil; child = child.Next {
+		for child := node.FirstChild(); child != nil; child = child.NextSibling() {
 			render(child, style)
 		}
 	}
 	render(root, lipgloss.NewStyle())
 	return out.String(), code
+}
+
+func displayText(value string) string {
+	var out strings.Builder
+	column := 0
+	for _, r := range value {
+		if r == '\t' {
+			spaces := 8 - column%8
+			out.WriteString(strings.Repeat(" ", spaces))
+			column += spaces
+		} else if !unicode.IsControl(r) {
+			out.WriteRune(r)
+			column += ansi.StringWidth(string(r))
+		}
+	}
+	return out.String()
 }
 
 func fence(line string) (byte, int, string, bool) {
@@ -310,15 +335,15 @@ func wrapMarkdown(text string, width int) string {
 }
 
 // agentTextRows is the Markdown of text in rows of width, the first behind prefix, the rest indented under
-// it: fenced code kept as is, hard wrapped, lists with their continuation under their text. text loses its
-// terminal controls and tabs, which would move the cursor.
+// it: fenced code kept as is, hard wrapped, lists with their continuation under their text. Terminal
+// controls are stripped and tabs are expanded before they reach the terminal.
 func agentTextRows(prefix, text string, width int) []string {
 	text = strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) && r != '\n' {
+		if unicode.IsControl(r) && r != '\n' && r != '\t' {
 			return -1
 		}
 		return r
-	}, strings.ReplaceAll(ansi.Strip(text), "\t", "    "))
+	}, ansi.Strip(text))
 	w := max(1, width-6)
 	var rows []string
 	var codeMarker byte
@@ -331,7 +356,7 @@ func agentTextRows(prefix, text string, width int) []string {
 				codeMarker, codeLength = 0, 0
 				continue
 			}
-			wrapped = strings.Split(paint(yellow, ansi.Hardwrap(line, w, true)), "\n")
+			wrapped = strings.Split(paint(yellow, ansi.Hardwrap(displayText(line), w, true)), "\n")
 		} else if isFence {
 			codeMarker, codeLength = marker, length
 			continue
