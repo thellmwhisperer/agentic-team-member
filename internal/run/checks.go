@@ -262,31 +262,34 @@ func shrunk(clone string, changed, tests []string) error {
 	return nil
 }
 
-var notRun = regexp.MustCompile(`^(FAIL\s+\S+\s+\[(build|setup) failed\]$|[_=*!# -]*ERROR collecting\b|` +
-	`E\s+(SyntaxError|ImportError)\b|Test suite failed to run\b|error TS\d+:|` +
-	`.+\(\d+,\d+\): error TS\d+:|.+:\d+:\d+ - error TS\d+:)`)
+// notRun is a runner's diagnostic that the test file did not parse or compile, as the runner prints it: from
+// the line's first column, where the output of an assertion, indented under its test, never starts. Go, pytest,
+// node --test, plain or as TAP comments, and tsc, in turn.
+var notRun = regexp.MustCompile(`^(FAIL\s+\S+\s+\[(build|setup) failed\]$|_+ ERROR collecting .+ _+$|` +
+	`E\s+(SyntaxError|ImportError)\b|(# )?SyntaxError:|` +
+	`\S.*\(\d+,\d+\): error TS\d+:|\S.*:\d+:\d+ - error TS\d+:|error TS\d+:)`)
+
+// jestFile is Jest's FAIL header of a test file, under which it says the file's suite failed to run.
+var jestFile = regexp.MustCompile(`^\s*FAIL\s+\S+(\s+\(.*\))?\s*$`)
 
 var testResult = regexp.MustCompile(`^(--- (PASS|FAIL):|ok\s+\S+|` +
 	`.+::.+\s+(PASSED|FAILED|SKIPPED|XFAIL|XPASS)\b|(PASSED|FAILED|SKIPPED|XFAIL|XPASS)\s+\S+::|` +
-	`[✓✔√]\s|[✕✘×]\s)`)
+	`[✓✔√]\s|[✕✘×]\s|● )`)
 
-func runnerLine(line string) string {
-	return strings.TrimLeft(line, " \t\r*●•○◉·_>")
-}
-
+// redDidNotRun says whether output, a red's whole, holds a runner's diagnostic that the test file did not parse
+// or compile and no test result.
 func redDidNotRun(output string) bool {
-	diagnostic := false
-	testRan := false
+	diagnostic, testRan, jest := false, false, false
 	for _, line := range strings.Split(output, "\n") {
-		original := strings.TrimLeft(line, " \t\r")
-		line = runnerLine(original)
-		if notRun.MatchString(line) {
+		line = strings.TrimRight(line, "\r")
+		trimmed := strings.TrimSpace(line)
+		switch {
+		case notRun.MatchString(line), jest && trimmed == "● Test suite failed to run":
 			diagnostic = true
-			continue
-		}
-		if testResult.MatchString(line) || strings.HasPrefix(original, "● ") {
+		case testResult.MatchString(trimmed):
 			testRan = true
 		}
+		jest = jest || jestFile.MatchString(line)
 	}
 	return diagnostic && !testRan
 }
