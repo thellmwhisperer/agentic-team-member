@@ -217,9 +217,7 @@ func (m *Model) agentRuns() bool {
 }
 
 var (
-	fence    = regexp.MustCompile("^\\s*(```|~~~)")
 	listItem = regexp.MustCompile(`^(\s*)([-*+]|\d+[.)])\s+(.*)$`)
-	inline   = regexp.MustCompile("`([^`]+)`|\\*\\*(\\S(?:.*?\\S)?)\\*\\*|\\*(\\S(?:.*?\\S)?)\\*")
 )
 
 // words is text in style a word at a time, so that a line wrapped between two of them keeps it on both lines.
@@ -233,18 +231,123 @@ func words(style lipgloss.Style, text string) string {
 	return strings.Join(ws, " ")
 }
 
-// markdown is line with its inline code, bold and emphasis styled in place of their markers.
-func markdown(line string) string {
-	return inline.ReplaceAllStringFunc(line, func(s string) string {
-		switch m := inline.FindStringSubmatch(s); {
-		case m[1] != "":
-			return words(lipgloss.NewStyle().Foreground(lipgloss.Color(yellow)), m[1])
-		case m[2] != "":
-			return words(lipgloss.NewStyle().Bold(true), m[2])
-		default:
-			return words(lipgloss.NewStyle().Italic(true), m[3])
+func markdown(line string) (string, bool) {
+	var out strings.Builder
+	code := false
+	for i := 0; i < len(line); {
+		if line[i] != '`' && line[i] != '*' && line[i] != '_' {
+			out.WriteByte(line[i])
+			i++
+			continue
 		}
-	})
+		marker := line[i]
+		end := i + 1
+		for end < len(line) && line[end] == marker {
+			end++
+		}
+		run := end - i
+		if marker == '`' {
+			contentEnd, ok := codeSpanEnd(line, end, run)
+			if ok {
+				out.WriteString(words(lipgloss.NewStyle().Foreground(lipgloss.Color(yellow)), line[end:contentEnd]))
+				code = true
+				i = contentEnd + run
+				continue
+			}
+		} else if run <= 2 && end < len(line) && line[end] != ' ' && line[end] != '\t' {
+			if marker == '_' && i > 0 && isWordByte(line[i-1]) {
+				out.WriteString(line[i:end])
+				i = end
+				continue
+			}
+			delim := strings.Repeat(string(marker), run)
+			if close := strings.Index(line[end:], delim); close > 0 {
+				contentEnd := end + close
+				if line[contentEnd-1] != ' ' && line[contentEnd-1] != '\t' {
+					style := lipgloss.NewStyle().Italic(true)
+					if run == 2 {
+						style = lipgloss.NewStyle().Bold(true)
+					}
+					out.WriteString(words(style, line[end:contentEnd]))
+					i = contentEnd + run
+					continue
+				}
+			}
+		}
+		out.WriteString(line[i:end])
+		i = end
+	}
+	return out.String(), code
+}
+
+func codeSpanEnd(line string, start, run int) (int, bool) {
+	for i := start; i < len(line); {
+		if line[i] != '`' {
+			i++
+			continue
+		}
+		end := i + 1
+		for end < len(line) && line[end] == '`' {
+			end++
+		}
+		if end-i == run {
+			return i, true
+		}
+		i = end
+	}
+	return 0, false
+}
+
+func isWordByte(b byte) bool {
+	return b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' || b >= '0' && b <= '9' || b == '_'
+}
+
+func fence(line string) (byte, int, string, bool) {
+	i := 0
+	for i < len(line) && line[i] == ' ' && i < 4 {
+		i++
+	}
+	if i > 3 || i == len(line) || line[i] != '`' && line[i] != '~' {
+		return 0, 0, "", false
+	}
+	marker := line[i]
+	start := i
+	for i < len(line) && line[i] == marker {
+		i++
+	}
+	if i-start < 3 {
+		return 0, 0, "", false
+	}
+	return marker, i - start, strings.TrimSpace(line[i:]), true
+}
+
+func wrapMarkdown(text string, width int) string {
+	lines := strings.Split(ansi.Wrap(text, width, ""), "\n")
+	plain := ansi.Strip(text)
+	offset := 0
+	var wrapped []string
+	for _, line := range lines {
+		visible := ansi.Strip(line)
+		start := strings.Index(plain[offset:], visible)
+		if start < 0 {
+			return ansi.Hardwrap(text, width, true)
+		}
+		line = plain[offset:offset+start] + line
+		offset += start + len(visible)
+		if ansi.StringWidth(line) > width {
+			wrapped = append(wrapped, strings.Split(ansi.Hardwrap(line, width, true), "\n")...)
+		} else {
+			wrapped = append(wrapped, line)
+		}
+	}
+	if offset < len(plain) {
+		wrapped[len(wrapped)-1] += plain[offset:]
+		if ansi.StringWidth(wrapped[len(wrapped)-1]) > width {
+			last := strings.Split(ansi.Hardwrap(wrapped[len(wrapped)-1], width, true), "\n")
+			wrapped = append(wrapped[:len(wrapped)-1], last...)
+		}
+	}
+	return strings.Join(wrapped, "\n")
 }
 
 // agentTextRows is the Markdown of text in rows of width, the first behind prefix, the rest indented under
@@ -259,24 +362,40 @@ func agentTextRows(prefix, text string, width int) []string {
 	}, strings.ReplaceAll(ansi.Strip(text), "\t", "    "))
 	w := max(1, width-6)
 	var rows []string
-	code := false
-	for _, line := range strings.Split(strings.TrimSpace(text), "\n") {
+	var codeMarker byte
+	codeLength := 0
+	for _, line := range strings.Split(text, "\n") {
 		var wrapped []string
-		switch item := listItem.FindStringSubmatch(line); {
-		case fence.MatchString(line):
-			code = !code
-			continue
-		case code:
+		marker, length, info, isFence := fence(line)
+		if codeLength > 0 {
+			if isFence && marker == codeMarker && length >= codeLength && info == "" {
+				codeMarker, codeLength = 0, 0
+				continue
+			}
 			wrapped = strings.Split(paint(yellow, ansi.Hardwrap(line, w, true)), "\n")
-		case item != nil:
+		} else if isFence {
+			codeMarker, codeLength = marker, length
+			continue
+		} else if item := listItem.FindStringSubmatch(line); item != nil {
 			lead := item[1] + cmp.Or(strings.Trim(item[2], "-*+"), "•") + " "
-			body := strings.Split(ansi.Wrap(markdown(item[3]), max(1, w-ansi.StringWidth(lead)), ""), "\n")
+			bodyText, hasCode := markdown(item[3])
+			bodyWidth := max(1, w-ansi.StringWidth(lead))
+			wrappedText := ansi.Wrap(bodyText, bodyWidth, "")
+			if hasCode {
+				wrappedText = wrapMarkdown(bodyText, bodyWidth)
+			}
+			body := strings.Split(wrappedText, "\n")
 			wrapped = append([]string{lead + body[0]}, body[1:]...)
 			for i := 1; i < len(wrapped); i++ {
 				wrapped[i] = strings.Repeat(" ", ansi.StringWidth(lead)) + wrapped[i]
 			}
-		default:
-			wrapped = strings.Split(ansi.Wrap(markdown(line), w, ""), "\n")
+		} else {
+			lineText, hasCode := markdown(line)
+			wrappedText := ansi.Wrap(lineText, w, "")
+			if hasCode {
+				wrappedText = wrapMarkdown(lineText, w)
+			}
+			wrapped = strings.Split(wrappedText, "\n")
 		}
 		for _, l := range wrapped {
 			if rows == nil {
