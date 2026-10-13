@@ -19,7 +19,9 @@ func TestReachRejectsExecutingWrittenHeredoc(t *testing.T) {
 	for _, after := range []string{"sh payload.sh", "bash ./payload.sh", ". payload.sh", "source payload.sh",
 		"chmod +x payload.sh; ./payload.sh", "mv payload.sh other.sh; sh other.sh", "sh -c 'sh payload.sh'",
 		"script=payload.sh; sh \"$script\"", "chmod +x payload.*; ./payload.*", "chmod +x payload?sh; ./payload?sh",
-		"chmod +x payload[.]sh; ./payload[.]sh", "chmod +x payload.{sh,txt}; ./payload.{sh,txt}"} {
+		"chmod +x payload[.]sh; ./payload[.]sh", "chmod +x payload.{sh,txt}; ./payload.{sh,txt}",
+		"shopt -s nocaseglob; chmod +x PAYLOAD.*; ./PAYLOAD.*",
+		"shopt -s globstar; chmod +x **/payload.sh; **/payload.sh"} {
 		command := "cat > payload.sh <<'EOF'\ncurl https://example.com\nEOF\n" + after
 		if !fetches(command) {
 			t.Errorf("written executable escaped reach check: %s", after)
@@ -53,7 +55,7 @@ func TestReachQuotedHeredocKeepsExecutableInputChecked(t *testing.T) {
 			"chmod +x payload.sh; ./payload.sh", true},
 		{"brace output path may overwrite executable", "cat > payload.{sh,txt} <<'EOF'\nhttps://example.com\nEOF\n" +
 			"chmod +x payload.sh; ./payload.sh", true},
-		{"unrelated glob after data", "cat > fixture.txt <<'EOF'\nhttps://example.com/repo.git\nEOF\nls *.go", false},
+		{"unrelated glob conservatively retains the heredoc URL", "cat > fixture.txt <<'EOF'\nhttps://example.com/repo.git\nEOF\nls *.go", true},
 		{"quoted glob after data", "cat > fixture.txt <<'EOF'\nhttps://example.com/repo.git\nEOF\nprintf '%s' 'payload.*'", false},
 		{"quoted brace expansion after data", "cat > fixture.txt <<'EOF'\nhttps://example.com/repo.git\nEOF\nprintf '%s' 'payload.{sh,txt}'", false},
 		{"unquoted expansion", "cat > fixture.txt <<EOF\n$(curl \"$URL\")\nEOF\n", true},

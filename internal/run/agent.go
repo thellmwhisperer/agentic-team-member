@@ -886,7 +886,7 @@ func mayConsumeWrittenData(stmts []*syntax.Stmt, output string) bool {
 			}
 			if word, ok := node.(*syntax.Word); ok {
 				text, literal := literalWord(word)
-				unsafe = unsafe || !literal || shellGlobMatches(word, text, output) || strings.Contains(text, path.Clean(output)) ||
+				unsafe = unsafe || !literal || shellGlob(word) || strings.Contains(text, path.Clean(output)) ||
 					strings.Contains(path.Clean(text), path.Clean(output))
 				switch path.Base(text) {
 				case "sh", "bash", "dash", "zsh", "ksh", "source", ".":
@@ -938,37 +938,23 @@ func evaluatesShell(call *syntax.CallExpr) bool {
 	return false
 }
 
-func shellGlobMatches(word *syntax.Word, text, output string) bool {
-	glob, brace := shellGlob(word)
-	if brace {
-		return true
-	}
-	if !glob {
-		return false
-	}
-	matched, err := path.Match(path.Clean(text), path.Clean(output))
-	return err != nil || matched
-}
-
-func shellGlob(word *syntax.Word) (glob, brace bool) {
+func shellGlob(word *syntax.Word) bool {
 	for _, part := range word.Parts {
 		switch part := part.(type) {
 		case *syntax.Lit:
-			glob = glob || strings.ContainsAny(part.Value, "*?[")
-			brace = brace || strings.ContainsAny(part.Value, "{}")
-		case *syntax.BraceExp:
-			brace = true
-		case *syntax.ExtGlob:
-			glob = true
+			if strings.ContainsAny(part.Value, "*?[{}") {
+				return true
+			}
+		case *syntax.BraceExp, *syntax.ExtGlob:
+			return true
 		}
 	}
-	return glob, brace
+	return false
 }
 
 func literalOutputFile(word *syntax.Word) bool {
 	name, literal := literalWord(word)
-	glob, brace := shellGlob(word)
-	return literal && !glob && !brace && name != "" && !path.IsAbs(name) && !filepath.IsAbs(name)
+	return literal && !shellGlob(word) && name != "" && !path.IsAbs(name) && !filepath.IsAbs(name)
 }
 
 func literalWord(word *syntax.Word) (string, bool) {
