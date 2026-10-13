@@ -527,7 +527,7 @@ var auditCases = []struct {
 		base: map[string]string{".gitignore": "cache/\n"},
 		work: "printf 'fixed\\nextra\\nmore\\n' > a.txt" + fixTest, report: cut,
 		ponytail: "echo extra >> a.txt; mkdir cache; echo injected > cache/injected.txt", why: "shorten"},
-	{name: "cut that breaks an earlier chained unit", delivered: "atm unit 2: Retry on timeout|" + atmID + "\n" +
+	{name: "cut that breaks an earlier chained unit", delivered: "feat: Retry on timeout|" + atmID + "\n" +
 		unit1 + based + ".atm/fake-report.json\n" + placed + ".atm.yaml\na.txt\na_test.sh\nregression_test.sh\n" +
 		"second_test.sh\nsource.txt\nbroken\nfixed\nextra\nmore\nsecond\n",
 		base: map[string]string{"source.txt": "broken\n"},
@@ -562,7 +562,7 @@ var auditCases = []struct {
 // placed the skills ATM leaves in the clone, and uncut what delivery gets when a cut on a.txt is rejected.
 const (
 	atmID   = "atm <atm@example.com>|atm <atm@example.com>"
-	unit1   = "atm unit 1: Retry on timeout|" + atmID + "\n"
+	unit1   = "fix: Retry on timeout|" + atmID + "\n"
 	initial = "init|" + atmID + "\n"
 	based   = "base|" + atmID + "\n" + initial
 	placed  = ".claude/skills/ponytail-review/SKILL.md\n.claude/skills/ponytail/SKILL.md\n"
