@@ -60,6 +60,9 @@ func fakeAgent(name string) int {
 		fmt.Print(`{"type": "system", "subtype": "init"}`+"\n", stream) // the test's lines too
 		fmt.Fprintln(os.Stderr, "fake stderr")
 	}
+	if name == "cursor-agent" && mode == "cursor-doctor-error" {
+		return 0
+	}
 	if exit, done := fakeAgentMode(mode); done {
 		return exit
 	}
