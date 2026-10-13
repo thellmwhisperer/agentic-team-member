@@ -186,14 +186,14 @@ func prove(clone, typ, test string, c config.Config) (red, green try, err error)
 	case "fix", "feature", "greenfield":
 		red, green, err := redGreen(clone, tree, aside, test, c.TestFile)
 		if err == nil && typ == "fix" {
-			err = fixOnBase(clone, tree, aside, test, c.TestFile, red.Tail)
+			err = onBase(clone, tree, aside, test, c.TestFile)
 		}
 		return red, green, err
 	case "refactor":
 		if p := first(changed, c.TestPatterns, true); p != "" {
 			return red, green, fmt.Errorf("a refactor changed the test %s", p)
 		}
-		base, _, err := trial(clone, tree, changed, c.Test, "", "", false)
+		base, _, err := trial(clone, tree, changed, c.Test, "", "", false, nil)
 		return base, green, errors.Join(err, wrap(base.err, "the suite fails on the base"))
 	case "tests":
 		if p := first(changed, slices.Concat(c.TestPatterns, c.DocsPatterns), false); p != "" {
@@ -204,7 +204,7 @@ func prove(clone, typ, test string, c config.Config) (red, green try, err error)
 			return red, green, err
 		}
 		base, after, err := trial(clone, tree, aside, line, line, test,
-			strings.Contains(c.TestFile, "{tests}"))
+			strings.Contains(c.TestFile, "{tests}"), nil)
 		return base, after, errors.Join(err, wrap(base.err, test+" fails on the base"),
 			wrap(after.err, test+" fails after the change"))
 	case "docs":
@@ -262,11 +262,23 @@ func shrunk(clone string, changed, tests []string) error {
 	return nil
 }
 
-// notRun matches a runner's own word, in a red's output, that its tests did not run: Go's build or setup failed,
-// Python's SyntaxError or ImportError, pytest's collection error, Jest's suite that failed to run, tsc's error.
-// ponytail: naive, a test that prints such a line at a line's start is rejected; a runner's JSON report if not.
-var notRun = regexp.MustCompile(`(?m)\[(build|setup) failed\]|^(SyntaxError|ImportError|ModuleNotFoundError)\b|` +
-	`errors? during collection|Test suite failed to run|error TS\d+:`)
+var notRun = regexp.MustCompile(`^(FAIL\s+\S+\s+\[(build|setup) failed\]$|ERROR collecting\b|E (SyntaxError|ImportError)\b|` +
+	`Test suite failed to run\b|error TS\d+:)`)
+
+var testResult = regexp.MustCompile(`^(--- (PASS|FAIL):|ok\s+\S+|FAIL\s+\S+\s+[0-9]|PASSED\b|FAILED\b|ERROR\s+\S+::|` +
+	`.+\s+(PASSED|FAILED|SKIPPED|XFAIL|XPASS)$|=+ .* (passed|failed|error) =+|PASS\s|FAIL\s)`)
+
+func redDidNotRun(output string) bool {
+	for _, line := range strings.Split(output, "\n") {
+		if notRun.MatchString(line) {
+			return true
+		}
+		if testResult.MatchString(line) {
+			return false
+		}
+	}
+	return false
+}
 
 // redGreen sets aside, in clone, the paths aside, runs test alone with tmpl, which must fail, brings the
 // agent's work, tree, back and runs test again, which must pass.
@@ -275,7 +287,12 @@ func redGreen(clone, tree string, aside []string, test, tmpl string) (red, green
 	if err != nil {
 		return red, green, err
 	}
-	red, green, err = trial(clone, tree, aside, line, line, test, strings.Contains(tmpl, "{tests}"))
+	red, green, err = trial(clone, tree, aside, line, line, test, strings.Contains(tmpl, "{tests}"), func(red try) error {
+		if redDidNotRun(red.Tail) {
+			return fmt.Errorf("red did not run: parse/compile error: %s fails before any test runs", test)
+		}
+		return nil
+	})
 	switch {
 	case err != nil:
 		return red, green, err
@@ -283,14 +300,6 @@ func redGreen(clone, tree string, aside []string, test, tmpl string) (red, green
 		return red, green, fmt.Errorf("%s passes without the fix", test)
 	}
 	return red, green, wrap(green.err, test+" fails with the fix")
-}
-
-// fixOnBase rejects a fix whose red, its output, says no test ran, before onBase.
-func fixOnBase(clone, tree string, aside []string, test, tmpl, red string) error {
-	if notRun.MatchString(red) {
-		return fmt.Errorf("red did not run: parse/compile error: %s fails before any test runs", test)
-	}
-	return onBase(clone, tree, aside, test, tmpl)
 }
 
 // onBase runs test, after a fix's red and green, twice more with the files the fix adds kept and each old file
@@ -338,7 +347,7 @@ func onBase(clone, tree string, aside []string, test, tmpl string) error {
 				return err
 			}
 		}
-		if red, _, err := trial(clone, tree, nil, line, "", "", false); err != nil || red.err != nil {
+		if red, _, err := trial(clone, tree, nil, line, "", "", false, nil); err != nil || red.err != nil {
 			return err
 		}
 	}
@@ -350,7 +359,8 @@ func onBase(clone, tree string, aside []string, test, tmpl string) error {
 // after, "" for nothing, and returns how each ended, zero when not run. A hang in either, or a clone that is no
 // longer tree, is err: the verdict is void. After each run, every file git ignores is back as keep left them,
 // changed or deleted ones too, so the green cannot pass on what the red left there.
-func trial(clone, tree string, aside []string, base, after, test string, usesTests bool) (red, green try, err error) {
+func trial(clone, tree string, aside []string, base, after, test string, usesTests bool,
+	checkRed func(try) error) (red, green try, err error) {
 	defer func() { err = errors.Join(err, reset(clone)) }()
 	if len(aside) > 0 {
 		args := append([]string{"--literal-pathspecs", "restore", "--source=HEAD", "--staged", "--worktree", "--"},
@@ -362,6 +372,11 @@ func trial(clone, tree string, aside []string, base, after, test string, usesTes
 	red = attempt(clone, base)
 	if usesTests && strings.Contains(red.Tail, "no tests to run") {
 		red.err = fmt.Errorf("the test line ran no test of %s: check its build tags against test_file", test)
+	}
+	if checkRed != nil {
+		if err := checkRed(red); err != nil {
+			return red, green, err
+		}
 	}
 	if _, err := git(clone, "restore", "--source="+tree, "--staged", "--worktree", "--", "."); err != nil {
 		return red, green, err
@@ -475,9 +490,9 @@ func testLine(clone, tmpl, test string) (string, error) {
 	}
 	var tests []string
 	if strings.Contains(tmpl, "{tests}") {
-		f, err := parser.ParseFile(token.NewFileSet(), filepath.Join(clone, filepath.FromSlash(test)), nil, 0)
-		if err != nil {
-			return "", err
+		f, parseErr := parser.ParseFile(token.NewFileSet(), filepath.Join(clone, filepath.FromSlash(test)), nil, 0)
+		if f == nil {
+			return "", parseErr
 		}
 		for _, decl := range f.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
@@ -487,7 +502,10 @@ func testLine(clone, tmpl, test string) (string, error) {
 			tests = append(tests, fn.Name.Name)
 		}
 		if len(tests) == 0 {
-			return "", fmt.Errorf("the report's test file %s defines no Go tests", test)
+			if parseErr == nil {
+				return "", fmt.Errorf("the report's test file %s defines no Go tests", test)
+			}
+			tests = []string{"."}
 		}
 	}
 	quote := func(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
