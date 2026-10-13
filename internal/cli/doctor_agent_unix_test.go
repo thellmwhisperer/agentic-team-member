@@ -31,17 +31,21 @@ echo '{"type": "result", "result": "OK"}'
 // helloRepo is a repository whose agent is fakeHello, model m1, playing mode; it returns the repository and
 // where the fake writes its call.
 func helloRepo(t *testing.T, mode string) (dir, call string) {
+	return helloRepoWith(t, "claude", mode, fakeHello)
+}
+
+func helloRepoWith(t *testing.T, harness, mode, fake string) (dir, call string) {
 	t.Helper()
 	dir = repo(t, "https://example.com/o/r.git")
 	bin := t.TempDir()
-	if err := os.WriteFile(filepath.Join(bin, "claude"), []byte(fakeHello), 0o755); err != nil {
+	if err := os.WriteFile(filepath.Join(bin, harness), []byte(fake), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	call = filepath.Join(t.TempDir(), "call")
 	t.Setenv("FAKE_HELLO_CALL", call)
 	t.Setenv("FAKE_HELLO", mode)
-	config := "harness: claude\nmodel: m1\ninstall: ''\ntest: ''\ntypecheck: ''\nlint: ''\ntest_file: ''\n" +
+	config := "harness: " + harness + "\nmodel: m1\ninstall: ''\ntest: ''\ntypecheck: ''\nlint: ''\ntest_file: ''\n" +
 		"test_patterns: []\ndocs_patterns: []\ndelivery: ''\n"
 	if err := os.WriteFile(filepath.Join(dir, ".atm.yaml"), []byte(config), 0o600); err != nil {
 		t.Fatal(err)
@@ -52,6 +56,24 @@ func helloRepo(t *testing.T, mode string) (dir, call string) {
 func lastLine(out string) string {
 	ls := strings.Split(strings.TrimSpace(out), "\n")
 	return ls[len(ls)-1]
+}
+
+func assertHelloSucceeded(t *testing.T, out string, err error, harness string) {
+	t.Helper()
+	if err != nil || !strings.HasPrefix(lastLine(out), "ok agent: "+harness+" m1 answered in ") {
+		t.Fatalf("atm doctor --agent: %v\n%s", err, out)
+	}
+}
+
+func assertHelloRepoRemoved(t *testing.T, call string) {
+	t.Helper()
+	b, err := os.ReadFile(call)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(strings.TrimSpace(string(b))); err == nil {
+		t.Fatalf("hello repository was not removed: %q", b)
+	}
 }
 
 func TestDoctorWithoutAgentMakesNoCallAndSaysHow(t *testing.T) {
@@ -88,8 +110,6 @@ func TestDoctorAgentReportsUnknownHarnessWithoutStartingIt(t *testing.T) {
 }
 
 func TestDoctorAgentCodexUsesTemporaryGitRepository(t *testing.T) {
-	dir := repo(t, "https://example.com/o/r.git")
-	bin := t.TempDir()
 	codex := `#!/bin/sh
 if [ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" != true ]; then
 	 echo 'not a git repository' >&2
@@ -107,28 +127,10 @@ done
 printf 'OK\n' > "$final"
 echo '{"type":"thread.started"}'
 `
-	if err := os.WriteFile(filepath.Join(bin, "codex"), []byte(codex), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	call := filepath.Join(t.TempDir(), "call")
-	t.Setenv("FAKE_HELLO_CALL", call)
-	config := "harness: codex\nmodel: m1\ninstall: ''\ntest: ''\ntypecheck: ''\nlint: ''\ntest_file: ''\n" +
-		"test_patterns: []\ndocs_patterns: []\ndelivery: ''\n"
-	if err := os.WriteFile(filepath.Join(dir, ".atm.yaml"), []byte(config), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	_, call := helloRepoWith(t, "codex", "ok", codex)
 	out, err := atm(t, "doctor", "--agent")
-	if err != nil || !strings.HasPrefix(lastLine(out), "ok agent: codex m1 answered in ") {
-		t.Fatalf("atm doctor --agent: %v\n%s", err, out)
-	}
-	b, err := os.ReadFile(call)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(strings.TrimSpace(string(b))); err == nil {
-		t.Fatalf("hello repository was not removed: %q", b)
-	}
+	assertHelloSucceeded(t, out, err, "codex")
+	assertHelloRepoRemoved(t, call)
 }
 
 func TestDoctorAgentOtherHarnessesUseTemporaryGitRepository(t *testing.T) {
@@ -146,28 +148,10 @@ esac
 `
 	for _, harness := range []string{"claude", "opencode", "pi"} {
 		t.Run(harness, func(t *testing.T) {
-			dir, call := helloRepo(t, "ok")
-			bin := t.TempDir()
-			if err := os.WriteFile(filepath.Join(bin, harness), []byte(fake), 0o755); err != nil {
-				t.Fatal(err)
-			}
-			t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-			config := "harness: " + harness + "\nmodel: m1\ninstall: ''\ntest: ''\ntypecheck: ''\nlint: ''\n" +
-				"test_file: ''\ntest_patterns: []\ndocs_patterns: []\ndelivery: ''\n"
-			if err := os.WriteFile(filepath.Join(dir, ".atm.yaml"), []byte(config), 0o600); err != nil {
-				t.Fatal(err)
-			}
+			_, call := helloRepoWith(t, harness, "ok", fake)
 			out, err := atm(t, "doctor", "--agent")
-			if err != nil || !strings.HasPrefix(lastLine(out), "ok agent: "+harness+" m1 answered in ") {
-				t.Fatalf("atm doctor --agent: %v\n%s", err, out)
-			}
-			b, err := os.ReadFile(call)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if _, err := os.Stat(strings.TrimSpace(string(b))); err == nil {
-				t.Fatalf("hello repository was not removed: %q", b)
-			}
+			assertHelloSucceeded(t, out, err, harness)
+			assertHelloRepoRemoved(t, call)
 		})
 	}
 }
@@ -218,9 +202,7 @@ func TestDoctorAgentGetsNoTerminal(t *testing.T) {
 			_ = f.Close()
 		}
 		out, err := atm(t, "doctor", "--agent")
-		if err != nil || !strings.HasPrefix(lastLine(out), "ok agent: claude m1") {
-			t.Fatalf("atm doctor --agent: %v\n%s", err, out)
-		}
+		assertHelloSucceeded(t, out, err, "claude")
 		return
 	}
 	dir, _ := helloRepo(t, "ok")
