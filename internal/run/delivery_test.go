@@ -145,7 +145,7 @@ func TestRunFailsOnAForeignCommit(t *testing.T) {
 			if c.ponytail != "" {
 				t.Setenv("FAKE_PONYTAIL_WORK", strings.TrimPrefix(c.ponytail, "; "))
 				t.Setenv("FAKE_PONYTAIL_REPORT", `{"findings": [{"file": "suite.sh", "family": "speculative_feature", `+
-					`"finding": "dropped the padding"}], "summary": "s"}`)
+					`"finding": "dropped the padding", "issue_sentence": ""}], "summary": "s"}`)
 			}
 			err := Run("t", []string{issueFile(t, issue)}, &bytes.Buffer{}, &bytes.Buffer{})
 			rep := readReport(t, filepath.Join(root, ".atm", "runs", "t", "report.json"))

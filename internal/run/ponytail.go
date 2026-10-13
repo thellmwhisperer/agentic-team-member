@@ -20,7 +20,10 @@ var families = []string{"agent_artifact_in_repo", "documented_as_convention", "e
 	"format_churn", "inline_foreign_language", "mock_heavy_test", "runtime_dependency", "self_validating_test",
 	"speculative_feature", "speculative_hardening", "subprocess_foreign_interpreter", "test_weakening"}
 
-type finding struct{ File, Family, Finding string }
+type finding struct {
+	File, Family, Finding string
+	IssueSentence         *string `json:"issue_sentence"` // the sentence of the issue the cut touches, "" for none
+}
 
 // ponytail is the slop detector on the run's work in clone, from base commit sha, for issue i as its last unit
 // is proven, whose units were proven as proofs: an agent that may only cut it. A cut that holds, a shorter diff
@@ -156,9 +159,9 @@ func review(dir, clone, sha string, i Issue, c config.Config) (tree string, file
 }
 
 // fault says why the cut from tree before to tree after, on the run's work from sha, which changes files,
-// does not hold even before the checks, "" when it may: it must shorten the diff, report what it cut, and
-// add or delete no file, touch no test nor file outside files. lines are the net lines the run adds before
-// and after it.
+// does not hold even before the checks, "" when it may: it must shorten the diff, report what it cut, touch
+// no sentence of the issue, and add or delete no file, touch no test nor file outside files. lines are the
+// net lines the run adds before and after it.
 func fault(clone, sha, before, after string, files []string, found []finding, tests []string) (why string, lines [2]int,
 	err error) {
 	for n, tree := range []string{before, after} {
@@ -173,6 +176,14 @@ func fault(clone, sha, before, after string, files []string, found []finding, te
 			lines, err
 	case len(found) == 0:
 		return "the cut reports no finding", lines, err
+	}
+	for _, f := range found {
+		if f.IssueSentence == nil {
+			return fmt.Sprintf("the cut touches the issue: finding %q lacks issue_sentence", f.Finding), lines, err
+		}
+		if *f.IssueSentence != "" {
+			return "the cut touches the issue: " + *f.IssueSentence, lines, err
+		}
 	}
 	for f := strings.Split(changed, "\x00"); len(f) > 1; f = f[2:] {
 		if f[0] == "D" {
