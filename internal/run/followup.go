@@ -27,23 +27,12 @@ type followUp struct {
 
 // reported is the follow-ups the agent's report r declares, neither tested nor verified.
 func reported(r map[string]any) ([]followUp, error) {
-	value, present := r["follow_ups"]
-	if present && value == nil {
-		return nil, errors.New("invalid follow_ups in the agent report: follow_ups must be an array")
-	}
-	b, _ := json.Marshal(value)
+	b, _ := json.Marshal(r["follow_ups"])
 	var all []followUp
 	if err := json.Unmarshal(b, &all); err != nil {
 		return nil, fmt.Errorf("invalid follow_ups in the agent report: %w", err)
 	}
 	for n := range all {
-		for _, field := range []struct{ name, value string }{
-			{"title", all[n].Title}, {"red_test", all[n].RedTest}, {"criterion", all[n].Criterion},
-		} {
-			if strings.TrimSpace(field.value) == "" {
-				return nil, fmt.Errorf("invalid follow_ups in the agent report: follow_ups[%d].%s must be non-empty", n, field.name)
-			}
-		}
 		all[n].Test, all[n].Verified = "", false
 	}
 	return all, nil

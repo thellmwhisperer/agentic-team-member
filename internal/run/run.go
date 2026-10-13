@@ -15,7 +15,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -134,22 +133,15 @@ type proof struct{ base, test, typ, testContent string }
 // run --resume. A run that resumes from puts the work it kept back in dir, in place of its unit's agent.
 func (a agent) units(r *verdict, root, dir, sha, text string, i Issue, c config.Config, keep resumePoint,
 	from *resumePoint) (proofs []proof, unit Issue, pending []followUp) {
-	unit, n := i, 1
+	unit, head, n := i, sha, 1
 	var f *followUp // the follow-up a chained unit makes pass
+	var test string
 	if from != nil {
-		n, f, proofs, pending = resumeUnits(*from)
+		n, f, proofs, pending = from.Unit, from.FollowUp, from.proofs(), append([]followUp(nil), from.Pending...)
 		if f != nil {
 			unit.Type = "feature"
 		}
 	}
-	return a.runUnits(r, root, dir, sha, text, unit, i, c, keep, from, n, f, proofs, pending)
-}
-
-func (a agent) runUnits(r *verdict, root, dir, sha, text string, unit, i Issue, c config.Config,
-	keep resumePoint, from *resumePoint, n int, f *followUp, proofs []proof, pending []followUp,
-) ([]proof, Issue, []followUp) {
-	head := sha
-	var test string
 	for ; ; n++ {
 		var report map[string]any
 		resumed := ""
@@ -188,9 +180,6 @@ func (a agent) runUnits(r *verdict, root, dir, sha, text string, unit, i Issue, 
 			pending = append(pending, out...)
 			return ev, err
 		})
-		if r.FailedNode == "checks" {
-			keepPending(a.dir, n, pending)
-		}
 		red, _ := ev["red"].(try)
 		green, _ := ev["green"].(try)
 		proofSpan, _ := ev["proof_span"].(span)
@@ -204,28 +193,6 @@ func (a agent) runUnits(r *verdict, root, dir, sha, text string, unit, i Issue, 
 		}
 		f, pending = &in[0], append(pending, in[1:]...)
 	}
-}
-
-func resumeUnits(from resumePoint) (int, *followUp, []proof, []followUp) {
-	pending := replaceReportedFollowUps(append([]followUp(nil), from.Pending...), from.Report)
-	return from.Unit, from.FollowUp, from.proofs(), pending
-}
-
-func replaceReportedFollowUps(pending []followUp, report map[string]any) []followUp {
-	previous, err := reported(report)
-	if err != nil || len(previous) == 0 {
-		return pending
-	}
-	for _, current := range previous {
-		for i := len(pending) - 1; i >= 0; i-- {
-			saved := pending[i]
-			if saved.Title == current.Title && saved.RedTest == current.RedTest && saved.Criterion == current.Criterion {
-				pending = slices.Delete(pending, i, i+1)
-				break
-			}
-		}
-	}
-	return pending
 }
 
 func checkUnit(
