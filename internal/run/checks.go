@@ -274,7 +274,6 @@ var jestFile = regexp.MustCompile(`^\s*FAIL\s+\S+(\s+\(.*\))?\s*$`)
 var testResult = regexp.MustCompile(`^(--- (PASS|FAIL):|ok\s+\S+|` +
 	`.+::.+\s+(PASSED|FAILED|SKIPPED|XFAIL|XPASS)\b|(PASSED|FAILED|SKIPPED|XFAIL|XPASS)\s+\S+::|` +
 	`[✓✔√]\s|[✕✘×]\s|● )`)
-var jestTestsFailed = regexp.MustCompile(`^Tests:\s+[1-9]\d*\s+failed\b`)
 var jestTestsRan = regexp.MustCompile(`^Tests:\s+[1-9]\d*\s+(passed|failed|skipped|todo)\b`)
 var tapFailedTest = regexp.MustCompile(`^not ok \d+ - `)
 var tapAssertionFailure = regexp.MustCompile(`^(code: 'ERR_ASSERTION'|name: 'AssertionError')$`)
@@ -307,7 +306,7 @@ func hasTestResult(lines []string) bool {
 	jest, tap, tapFailed := false, false, false
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(strings.TrimRight(line, "\r"))
-		if testResult.MatchString(trimmed) || jest && strings.HasPrefix(trimmed, "● ") ||
+		if trimmed != "● Test suite failed to run" && testResult.MatchString(trimmed) ||
 			tap && tapFailed && tapAssertionFailure.MatchString(trimmed) ||
 			runnerSummaryHasFailure(trimmed, jest, vitestRun.MatchString(trimmed)) {
 			return true
