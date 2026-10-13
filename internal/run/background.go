@@ -17,6 +17,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/thellmwhisperer/agentic-team-member/internal/buildinfo"
 )
 
 // The background process of a repository runs its runs, each in itself, so closing the terminal that started
@@ -137,15 +139,18 @@ func Serve(root string) error {
 		return err
 	}
 	fmt.Fprintln(os.Stderr, "atm serve pid:", os.Getpid())
+	fmt.Fprintln(os.Stderr, "atm serve version:", buildinfo.String())
 	return serve(l.(*net.UnixListener), root, sock)
 }
 
 // server is the background process's state, under its lock.
 type server struct {
 	sync.Mutex
-	root string
-	runs []*bgRun
-	last time.Time // when it last had a run going
+	root     string
+	runs     []*bgRun
+	last     time.Time // when it last had a run going
+	handlers int
+	handoff  bool
 }
 
 // bgRun is a run of the background process: its outcome, its screen so far, and more, closed and replaced
@@ -182,9 +187,18 @@ func serve(l *net.UnixListener, root, sock string) error {
 		}
 		_, gone := os.Stat(sock)
 		s.Lock()
-		end := s.busy() == 0 && (moved() || c == nil && (gone != nil || time.Since(s.last) > idle))
+		if moved() {
+			s.handoff = true
+		}
+		if c == nil && s.busy() == 0 && (gone != nil || time.Since(s.last) > idle) {
+			s.handoff = true
+		}
+		end := s.handoff && s.busy() == 0 && s.handlers == 0
 		if c == nil && s.busy() > 0 {
 			s.save() // runs.jsonl's time is when its runs last ran, should this process die before they end
+		}
+		if c != nil && !end {
+			s.handlers++
 		}
 		s.Unlock()
 		if end {
@@ -194,7 +208,7 @@ func serve(l *net.UnixListener, root, sock string) error {
 			}
 			return nil
 		}
-		if c != nil {
+		if c != nil && !end {
 			go s.handle(c)
 		}
 	}
@@ -225,7 +239,12 @@ func (s *server) busy() (n int) {
 }
 
 func (s *server) handle(c net.Conn) {
-	defer func() { _ = c.Close() }()
+	defer func() {
+		_ = c.Close()
+		s.Lock()
+		s.handlers--
+		s.Unlock()
+	}()
 	var req request
 	dec := json.NewDecoder(c)
 	if err := dec.Decode(&req); err != nil {
@@ -236,6 +255,9 @@ func (s *server) handle(c net.Conn) {
 	case "run":
 		o, err := s.start(req.Args)
 		if err != nil {
+			if errors.Is(err, errHandoff) {
+				return
+			}
 			_ = enc.Encode(reply{Error: err.Error()})
 			return
 		}
@@ -255,6 +277,8 @@ func (s *server) handle(c net.Conn) {
 	}
 }
 
+var errHandoff = errors.New("background process is handing off")
+
 // start runs args, atm run's command line, in the background and returns the run, just started.
 func (s *server) start(args []string) (Outcome, error) {
 	issue := ""
@@ -265,6 +289,9 @@ func (s *server) start(args []string) (Outcome, error) {
 		filepath.Ext(issue))), "-")
 	s.Lock()
 	defer s.Unlock()
+	if s.handoff {
+		return Outcome{}, errHandoff
+	}
 	n := 0
 	max := func(label string) {
 		if number, err := strconv.Atoi(label[strings.LastIndex(label, "-")+1:]); err == nil && number > n {
@@ -607,11 +634,12 @@ func Runs(root string) ([]Outcome, error) {
 // from in, and hands each reply to fn. One that ends before it replies, as one whose file changed does, gets
 // req again from the next one.
 func call(root string, req request, in <-chan Input, fn func(reply)) error {
-	again, err := send(root, req, in, fn)
-	if again {
-		_, err = send(root, req, in, fn)
+	for {
+		again, err := send(root, req, in, fn)
+		if !again {
+			return err
+		}
 	}
-	return err
 }
 
 // send is a try of call: again when the background process it reached ended before it replied.

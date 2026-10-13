@@ -5,10 +5,12 @@ package run
 import (
 	"bufio"
 	"bytes"
+	"fmt"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -240,20 +242,23 @@ func until(t *testing.T, what string, cond func() bool) {
 // An idle background process whose file atm update replaced ends at the next atm run, which one started from
 // the new file serves.
 func TestARunGoesToABackgroundProcessOfTheNewFile(t *testing.T) {
+	atm := filepath.Join(t.TempDir(), "atm")
+	build := func(path, version string) {
+		t.Helper()
+		cmd := exec.Command("go", "build", "-ldflags", fmt.Sprintf("-X github.com/thellmwhisperer/agentic-team-member/internal/buildinfo.Version=%s", version), "-o", path, "./cmd/atm")
+		_, file, _, ok := runtime.Caller(0)
+		if !ok {
+			t.Fatal("test source path is unavailable")
+		}
+		cmd.Dir = filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("build atm %s: %v\n%s", version, err, out)
+		}
+	}
+	build(atm, "old-build")
+	build(atm+".new", "new-build")
 	top := atmRepo(t)
 	wait, release := holdFakeAgents(t, 1)
-	exe, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	b, err := os.ReadFile(exe)
-	if err != nil {
-		t.Fatal(err)
-	}
-	atm := filepath.Join(t.TempDir(), "atm")
-	if err := os.WriteFile(atm, b, 0o755); err != nil {
-		t.Fatal(err)
-	}
 	old := exec.Command(atm, "serve")
 	old.Dir = top
 	stderr, err := old.StderrPipe()
@@ -264,29 +269,51 @@ func TestARunGoesToABackgroundProcessOfTheNewFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = old.Process.Kill() })
-	if line, err := bufio.NewReader(stderr).ReadString('\n'); !strings.HasPrefix(line, "atm serve pid:") {
-		t.Fatalf("atm serve = %q, %v", line, err)
+	ready := make(chan error, 1)
+	go func() {
+		reader := bufio.NewReader(stderr)
+		lines := make([]string, 2)
+		for i := range lines {
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				ready <- err
+				return
+			}
+			lines[i] = line
+		}
+		if !strings.HasPrefix(lines[0], "atm serve pid:") || !strings.Contains(lines[1], "old-build") {
+			ready <- fmt.Errorf("atm serve identity = %q", lines)
+			return
+		}
+		ready <- nil
+	}()
+	if err := <-ready; err != nil {
+		t.Fatal(err)
 	}
 	exited := make(chan error, 1)
 	go func() { exited <- old.Wait() }()
-	if err := os.WriteFile(atm+".new", b, 0o755); err != nil { // as atm update replaces it
-		t.Fatal(err)
-	}
 	if err := os.Rename(atm+".new", atm); err != nil {
 		t.Fatal(err)
 	}
-	o, err := Start(top, []string{issueFile(t, issue)})
+	cmd := exec.Command(atm, "run", issueFile(t, issue))
+	cmd.Dir = top
+	out, err := cmd.Output()
 	if err != nil {
 		t.Fatal(err)
 	}
+	o := strings.TrimSpace(string(out))
 	wait()
+	log, err := os.ReadFile(filepath.Join(top, ".atm", "serve.log"))
+	if err != nil || !strings.Contains(string(log), "atm serve version: new-build") {
+		t.Fatalf("replacement server identity = %q, %v", log, err)
+	}
 	select {
 	case <-exited:
 	case <-time.After(5 * time.Second):
 		t.Fatal("the background process of the old file still serves")
 	}
 	release()
-	if end, err := Attach(top, o.Run, &bytes.Buffer{}); err != nil || end.Outcome != "passed" {
+	if end, err := Attach(top, o, &bytes.Buffer{}); err != nil || end.Outcome != "passed" {
 		t.Fatalf("Attach = %+v, %v", end, err)
 	}
 }
