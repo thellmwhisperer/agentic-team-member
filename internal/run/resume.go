@@ -124,6 +124,22 @@ func putBack(root, clone string, p resumePoint) (string, error) {
 			return "", err
 		}
 	}
+	if p.FollowUp != nil {
+		name := filepath.Clean(filepath.FromSlash(p.FollowUp.RedTest))
+		if !filepath.IsLocal(name) || name == "." {
+			return "", fmt.Errorf("red_test %s is not a new test path", name)
+		}
+		path := filepath.Join(clone, name)
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return "", err
+		}
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return "", err
+		}
+		if err := os.WriteFile(path, []byte(p.FollowUp.Test), 0o644); err != nil {
+			return "", err
+		}
+	}
 	return git(clone, "rev-parse", "HEAD")
 }
 
