@@ -157,8 +157,15 @@ func killDeliveryServer(t *testing.T, top string) {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSpace(string(log)), "\n")
-	server, err := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(lines[len(lines)-1], "atm serve pid:")))
-	if err != nil {
+	var server int
+	for _, line := range lines {
+		pid, ok := strings.CutPrefix(line, "atm serve pid:")
+		if !ok {
+			continue
+		}
+		server, err = strconv.Atoi(strings.TrimSpace(pid))
+	}
+	if err != nil || server <= 0 {
 		t.Fatalf("serve log %q: %v", log, err)
 	}
 	if err := syscall.Kill(server, syscall.SIGKILL); err != nil {
