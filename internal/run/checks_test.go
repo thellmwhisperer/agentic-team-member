@@ -241,14 +241,15 @@ func TestRunProvesATestsIssueOnlyThroughTheReportedFilesGoTests(t *testing.T) {
 	}
 	got := filepath.Join(t.TempDir(), "ran")
 	t.Setenv("ATM_TEST_OUT", got)
-	atm := strings.Replace(atmSet(atmYAML, "test_file", `go test -count=1 -v -run {tests} {dir} >> "$ATM_TEST_OUT"`),
+	atm := strings.Replace(atmSet(atmYAML, "test_file", `go test -vet=off -count=1 -v -run {tests} {dir} >> "$ATM_TEST_OUT"`),
 		`"**/*_test.sh"`, `"**/*_test.go"`, 1)
 	root := repo(t, "https://example.com/owner/repo.git", atm)
 	t.Setenv("GOCACHE", strings.TrimSpace(string(gocache))) // repo moves HOME, and the cache with it
 	commitFiles(t, root, "", map[string]string{"go.mod": "module example.com/m\n\ngo 1.21\n",
 		"p/old_test.go": "package p\n\nimport \"testing\"\n\nfunc TestOld(t *testing.T) { t.Fatal(\"old\") }\n"})
 	t.Setenv("ATM_TEST_NEW", "package p\n\nimport \"testing\"\n\nfunc TestNew(t *testing.T) {}\n\n"+
-		"func TestNewToo(t *testing.T) {}\n\nfunc helper() {}\n")
+		"func TestNewToo(t *testing.T) {}\n\nfunc Testhelper(t *testing.T) { t.Fatal(\"invalid test name\") }\n\n"+
+		"/*\nfunc TestOld(t *testing.T) {}\n*/\n\nfunc helper() {}\n")
 	t.Setenv("FAKE_AGENT_WORK", `printf %s "$ATM_TEST_NEW" > p/new_test.go; `+reportJSON("p/new_test.go"))
 	var out bytes.Buffer
 	if err := Run("t", []string{issueFile(t, "# Cover p\nType: tests\nCover p.\n")}, &out, io.Discard); err != nil {
@@ -262,6 +263,20 @@ func TestRunProvesATestsIssueOnlyThroughTheReportedFilesGoTests(t *testing.T) {
 	}
 	if strings.Join(names, " ") != "TestNew TestNewToo TestNew TestNewToo" {
 		t.Fatalf("want only new_test.go's tests, on the base and after, got %q", names)
+	}
+}
+
+func TestTestLineRejectsFilesWithoutGoTests(t *testing.T) {
+	clone := t.TempDir()
+	path := filepath.Join(clone, "reported_test.go")
+	source := "package p\n\nimport \"testing\"\n\n" +
+		"func Testhelper(t *testing.T) {}\n\n/* func TestOld(t *testing.T) {} */\n"
+	if err := os.WriteFile(path, []byte(source), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := testLine(clone, "go test -run {tests} {dir}", "reported_test.go")
+	if err == nil || err.Error() != "the report's test file reported_test.go defines no Go tests" {
+		t.Fatalf("want no-tests error, got %v", err)
 	}
 }
 

@@ -6,6 +6,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"io"
 	"os"
 	"os/exec"
@@ -16,6 +19,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/thellmwhisperer/agentic-team-member/internal/config"
 )
@@ -372,15 +377,19 @@ func testLine(clone, tmpl, test string) (string, error) {
 	}
 	var tests []string
 	if strings.Contains(tmpl, "{tests}") {
-		b, err := os.ReadFile(filepath.Join(clone, filepath.FromSlash(test)))
+		f, err := parser.ParseFile(token.NewFileSet(), filepath.Join(clone, filepath.FromSlash(test)), nil, 0)
 		if err != nil {
 			return "", err
 		}
-		for _, m := range goTest.FindAllStringSubmatch(string(b), -1) {
-			tests = append(tests, m[1])
+		for _, decl := range f.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Recv != nil || !isGoTest(fn) {
+				continue
+			}
+			tests = append(tests, fn.Name.Name)
 		}
-		if tests == nil {
-			return "", fmt.Errorf("%s defines no Go test for {tests}", test)
+		if len(tests) == 0 {
+			return "", fmt.Errorf("the report's test file %s defines no Go tests", test)
 		}
 	}
 	quote := func(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
@@ -388,7 +397,31 @@ func testLine(clone, tmpl, test string) (string, error) {
 		"{tests}", quote("^("+strings.Join(tests, "|")+")$")).Replace(tmpl), nil
 }
 
-var goTest = regexp.MustCompile(`(?m)^func (Test\w*)\(`)
+func isGoTest(fn *ast.FuncDecl) bool {
+	name := fn.Name.Name
+	if !strings.HasPrefix(name, "Test") {
+		return false
+	}
+	if suffix := strings.TrimPrefix(name, "Test"); suffix != "" {
+		r, _ := utf8.DecodeRuneInString(suffix)
+		if unicode.IsLower(r) {
+			return false
+		}
+	}
+	if fn.Type.Params == nil || len(fn.Type.Params.List) != 1 || len(fn.Type.Params.List[0].Names) > 1 {
+		return false
+	}
+	pointer, ok := fn.Type.Params.List[0].Type.(*ast.StarExpr)
+	if !ok {
+		return false
+	}
+	testing, ok := pointer.X.(*ast.SelectorExpr)
+	if !ok || testing.Sel.Name != "T" {
+		return false
+	}
+	packageName, ok := testing.X.(*ast.Ident)
+	return ok && packageName.Name == "testing"
+}
 
 // first is the first path that matches one of globs, when want, or matches none, when not; "" when none is.
 func first(paths, globs []string, want bool) string {
