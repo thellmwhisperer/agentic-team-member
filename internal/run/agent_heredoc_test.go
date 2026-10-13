@@ -47,7 +47,7 @@ func TestReachAcceptsQuotedGoTestSource(t *testing.T) {
 	source := "package run\nimport \"testing\"\n" +
 		"func TestFixture(t *testing.T) { t.Log(\"https://example.com/repo.git\") }\n"
 	for _, after := range []string{"", "go test ./internal/run -run 'TestOne|TestTwo' -count=1",
-		"go test ./internal/run -run 'TestOne|TestTwo' -count=1 2>&1 | tail -20"} {
+		"go test ./internal/run -run 'TestOne|TestTwo' -count=1 2>&1 | tail -20", "go test '~'"} {
 		command := "cat > fixture_test.go <<'EOF'\n" + source + "EOF\n" + after
 		if fetches(command) {
 			t.Errorf("literal Go test fixture rejected: %s", after)
@@ -59,6 +59,14 @@ func TestReachAcceptsQuotedGoTestSource(t *testing.T) {
 	quotedOutput := "cat > 'fixture[.]_test.go' <<'EOF'\n" + source + "EOF\n"
 	if fetches(quotedOutput) {
 		t.Fatal("quoted output metacharacters were treated as shell expansion")
+	}
+	quotedTildeOutput := "cat > '~/fixture_test.go' <<'EOF'\n" + source + "EOF\n"
+	if fetches(quotedTildeOutput) {
+		t.Fatal("quoted tilde output was treated as shell expansion")
+	}
+	tildeOutput := "cat > ~/fixture_test.go <<'EOF'\n" + source + "EOF\n"
+	if !fetches(tildeOutput) {
+		t.Fatal("unquoted tilde output was treated as a clone-relative path")
 	}
 	comment := "cat > fixture_test.go <<'EOF'\npackage run\n// https://example.com/repo.git\n" +
 		"func TestFixture(t *testing.T) {}\nEOF\n"
@@ -86,6 +94,11 @@ func TestReachRejectsUnprovenHeredocWriter(t *testing.T) {
 		{"nonliteral test command", "", valid, "go test \"$ARGS\""},
 		{"not a leading writer", "echo ready; ", valid, "go test ./..."},
 		{"invalid Go source", "", "package run\ncurl https://example.com\n", ""},
+		{"tilde test argument expansion", "", valid, "go test ~/..."},
+		{"ignored Testimony helper", "", "package run\nfunc Testimony() { _ = \"https://example.com\" }\n", ""},
+		{"test missing testing parameter", "", "package run\nfunc TestNoParam() { _ = \"https://example.com\" }\n", ""},
+		{"test with wrong parameter type", "", "package run\nfunc TestWrong(t testing.T) { _ = \"https://example.com\" }\n", ""},
+		{"test with result", "", "package run\nimport \"testing\"\nfunc TestResult(t *testing.T) bool { _ = \"https://example.com\"; return true }\n", ""},
 	} {
 		write := tc.prefix + "cat > fixture_test.go <<'EOF'\n" + tc.body + "EOF\n" + tc.after
 		if !fetches(write) {
