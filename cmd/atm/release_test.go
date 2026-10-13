@@ -5,9 +5,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func readFile(t *testing.T, path string) string {
@@ -24,107 +28,176 @@ func releaseWorkflow(t *testing.T) string {
 	return readFile(t, "../../.github/workflows/release.yml")
 }
 
-// jobBlock is the text of one top-level job: from its header to the next job.
-func jobBlock(t *testing.T, content, name string) string {
+type releaseWorkflowModel struct {
+	On struct {
+		Push struct {
+			Branches []string `yaml:"branches"`
+		} `yaml:"push"`
+	} `yaml:"on"`
+	Concurrency struct {
+		Group string `yaml:"group"`
+	} `yaml:"concurrency"`
+	Jobs map[string]struct {
+		Needs    any    `yaml:"needs"`
+		If       string `yaml:"if"`
+		Strategy struct {
+			Matrix struct {
+				Include []struct {
+					GOOS   string `yaml:"goos"`
+					GOARCH string `yaml:"goarch"`
+				} `yaml:"include"`
+			} `yaml:"matrix"`
+		} `yaml:"strategy"`
+		Steps []struct {
+			Uses string         `yaml:"uses"`
+			Run  string         `yaml:"run"`
+			With map[string]any `yaml:"with"`
+		} `yaml:"steps"`
+	} `yaml:"jobs"`
+}
+
+func workflowModel(t *testing.T) releaseWorkflowModel {
 	t.Helper()
-	header := "\n  " + name + ":\n"
-	start := strings.Index(content, header)
-	if start < 0 {
-		t.Fatalf("could not locate %s job in workflow", name)
+	var workflow releaseWorkflowModel
+	if err := yaml.Unmarshal([]byte(releaseWorkflow(t)), &workflow); err != nil {
+		t.Fatal(err)
 	}
-	rest := content[start+len(header):]
-	if next := regexp.MustCompile(`\n  [^ #\n]`).FindStringIndex(rest); next != nil {
-		return rest[:next[0]]
+	return workflow
+}
+
+func needsList(needs any) []string {
+	switch needs := needs.(type) {
+	case string:
+		return []string{needs}
+	case []any:
+		result := make([]string, 0, len(needs))
+		for _, need := range needs {
+			if name, ok := need.(string); ok {
+				result = append(result, name)
+			}
+		}
+		return result
+	default:
+		return nil
 	}
-	return rest
 }
 
 func TestReleaseWorkflowUsesScopedConcurrencyGroup(t *testing.T) {
-	content := releaseWorkflow(t)
-	if !strings.Contains(content, "group: release-${{ github.ref }}") {
+	workflow := workflowModel(t)
+	if workflow.Concurrency.Group != "release-${{ github.ref }}" {
 		t.Fatal("release workflow must scope concurrency by ref")
 	}
-	if !strings.Contains(content, "on:\n  push:\n    branches:\n      - main\n") {
+	if len(workflow.On.Push.Branches) != 1 || workflow.On.Push.Branches[0] != "main" {
 		t.Fatal("release workflow must run on push to main")
 	}
 }
 
 func TestReleaseWorkflowRunsReleasePleaseFromItsConfig(t *testing.T) {
-	block := jobBlock(t, releaseWorkflow(t), "release-please")
-	for _, want := range []string{
-		"googleapis/release-please-action@v4",
-		"config-file: release-please-config.json",
-		"manifest-file: .release-please-manifest.json",
-		"token: ${{ secrets.AUTO_MERGE_TOKEN }}",
-	} {
-		if !strings.Contains(block, want) {
-			t.Fatalf("release-please job must contain %q", want)
+	job := workflowModel(t).Jobs["release-please"]
+	if len(needsList(job.Needs)) != 0 {
+		t.Fatalf("release-please needs = %v, want no dependencies", job.Needs)
+	}
+	found := false
+	for _, step := range job.Steps {
+		if step.Uses != "googleapis/release-please-action@v4" {
+			continue
+		}
+		found = true
+		if step.With["config-file"] != "release-please-config.json" ||
+			step.With["manifest-file"] != ".release-please-manifest.json" ||
+			step.With["token"] != "${{ secrets.AUTO_MERGE_TOKEN }}" {
+			t.Fatalf("release-please action inputs = %v", step.With)
+		}
+		if _, ok := step.With["release-type"]; ok {
+			t.Fatal("release-please action must use release-type from its config")
 		}
 	}
-	for _, unwanted := range []string{"needs:", "release-type:"} {
-		if strings.Contains(block, unwanted) {
-			t.Fatalf("release-please job must not contain %q", unwanted)
-		}
+	if !found {
+		t.Fatal("release-please job must use googleapis/release-please-action@v4")
 	}
 }
 
 func TestReleaseWorkflowBuildStartsOnlyWhenReleaseIsCreated(t *testing.T) {
-	block := jobBlock(t, releaseWorkflow(t), "build-and-upload")
-	if !strings.Contains(block, "if: needs.release-please.outputs.release_created == 'true'") {
+	workflow := workflowModel(t)
+	job := workflow.Jobs["build-and-upload"]
+	if job.If != "needs.release-please.outputs.release_created == 'true'" {
 		t.Fatal("build-and-upload must run only when release-please created a release")
 	}
-	for _, goos := range []string{"darwin", "linux", "windows"} {
-		for _, goarch := range []string{"amd64", "arm64"} {
-			if !strings.Contains(block, "- goos: "+goos+"\n            goarch: "+goarch+"\n") {
-				t.Fatalf("build-and-upload matrix must build %s/%s", goos, goarch)
-			}
+	if !reflect.DeepEqual(needsList(job.Needs), []string{"release-please"}) {
+		t.Fatalf("build-and-upload needs = %v", job.Needs)
+	}
+	gotTargets := make(map[string]bool, len(job.Strategy.Matrix.Include))
+	for _, target := range job.Strategy.Matrix.Include {
+		gotTargets[target.GOOS+"/"+target.GOARCH] = true
+	}
+	wantTargets := []string{"darwin/amd64", "darwin/arm64", "linux/amd64", "linux/arm64", "windows/amd64", "windows/arm64"}
+	if len(gotTargets) != len(wantTargets) {
+		t.Fatalf("build matrix = %v, want %v", gotTargets, wantTargets)
+	}
+	for _, target := range wantTargets {
+		if !gotTargets[target] {
+			t.Fatalf("build matrix = %v, missing %s", gotTargets, target)
 		}
 	}
-	for _, want := range []string{
-		"CGO_ENABLED=0",
-		"-X github.com/thellmwhisperer/agentic-team-member/internal/buildinfo.Version=${TAG}",
-		"gh release upload \"$TAG\" \"$ARCHIVE\" --clobber",
-		"actions/upload-artifact@",
-	} {
-		if !strings.Contains(block, want) {
-			t.Fatalf("build-and-upload must contain %q", want)
-		}
+	var scripts strings.Builder
+	for _, step := range job.Steps {
+		scripts.WriteString(step.Run)
+	}
+	if !strings.Contains(scripts.String(), "CGO_ENABLED=0") ||
+		!strings.Contains(scripts.String(), "-X github.com/thellmwhisperer/agentic-team-member/internal/buildinfo.Version=${TAG}") ||
+		!strings.Contains(scripts.String(), "gh release upload \"$TAG\" \"$ARCHIVE\" --clobber") {
+		t.Fatal("build-and-upload must build with release metadata and upload the archive")
+	}
+	artifactUpload := false
+	for _, step := range job.Steps {
+		artifactUpload = artifactUpload || strings.HasPrefix(step.Uses, "actions/upload-artifact@")
+	}
+	if !artifactUpload {
+		t.Fatal("build-and-upload must save archives as workflow artifacts")
 	}
 }
 
 func TestReleaseArchivesAreNamedAfterAtmAndTheTag(t *testing.T) {
-	content := releaseWorkflow(t)
-	archives := regexp.MustCompile(`[\w$/{}.-]*\.(?:tar\.gz|zip)`).FindAllString(content, -1)
-	if len(archives) == 0 {
-		t.Fatal("release workflow names no archive")
-	}
-	for _, archive := range archives {
-		if !strings.HasPrefix(filepath.Base(archive), "atm-${TAG}-") {
-			t.Fatalf("archive %q must start with atm-${TAG}-", archive)
+	workflow := workflowModel(t)
+	var archiveRun string
+	for _, step := range workflow.Jobs["build-and-upload"].Steps {
+		if step.Run != "" && strings.Contains(step.Run, "ARCHIVE=\"dist/") {
+			archiveRun = step.Run
 		}
 	}
-	if !strings.Contains(jobBlock(t, content, "checksums"), "sha256sum atm-* > ") {
+	if !strings.Contains(archiveRun, "atm-${TAG}-${GOOS}-${GOARCH}.zip") ||
+		!strings.Contains(archiveRun, "atm-${TAG}-${GOOS}-${GOARCH}.tar.gz") {
+		t.Fatalf("build archive command = %q, want tagged atm archives for both formats", archiveRun)
+	}
+	checksums := workflow.Jobs["checksums"]
+	if !reflect.DeepEqual(needsList(checksums.Needs), []string{"release-please", "build-and-upload"}) {
+		t.Fatalf("checksums needs = %v", checksums.Needs)
+	}
+	checksumRun := ""
+	for _, step := range checksums.Steps {
+		checksumRun += step.Run
+	}
+	if !strings.Contains(checksumRun, "sha256sum atm-* > ") {
 		t.Fatal("checksums must cover every atm-* archive")
 	}
 }
 
 func TestReleaseWorkflowPublishesPrereleaseOnlyAfterAssetsComplete(t *testing.T) {
-	block := jobBlock(t, releaseWorkflow(t), "finalize")
-	for _, want := range []string{
-		"- release-please", "- build-and-upload", "- checksums",
-		"!cancelled()",
-		"needs.release-please.result == 'success'",
-		"needs.build-and-upload.result == 'success'",
-		"needs.checksums.result == 'success'",
-		"needs.release-please.outputs.release_created == 'true'",
-		"gh release edit \"$TAG\" --draft=false --prerelease=true",
-	} {
-		if !strings.Contains(block, want) {
-			t.Fatalf("finalize job must contain %q", want)
+	job := workflowModel(t).Jobs["finalize"]
+	if !reflect.DeepEqual(needsList(job.Needs), []string{"release-please", "build-and-upload", "checksums"}) {
+		t.Fatalf("finalize needs = %v", job.Needs)
+	}
+	for _, want := range []string{"!cancelled()", "needs.release-please.result == 'success'", "needs.build-and-upload.result == 'success'", "needs.checksums.result == 'success'", "needs.release-please.outputs.release_created == 'true'"} {
+		if !strings.Contains(job.If, want) {
+			t.Fatalf("finalize condition %q missing %q", job.If, want)
 		}
 	}
-	if strings.Contains(block, "--latest=true") {
-		t.Fatal("finalize must never mark a release latest")
+	var command string
+	for _, step := range job.Steps {
+		command += step.Run
+	}
+	if !strings.Contains(command, "gh release edit \"$TAG\" --draft=false --prerelease=true") || strings.Contains(command, "--latest=true") {
+		t.Fatalf("finalize command = %q, want prerelease publication without marking latest", command)
 	}
 }
 
@@ -154,8 +227,8 @@ func TestReleasePleaseConfigDraftsAndForcesTags(t *testing.T) {
 	if err := json.Unmarshal([]byte(readFile(t, "../../.release-please-manifest.json")), &manifest); err != nil {
 		t.Fatal(err)
 	}
-	if manifest["."] != "0.0.0" {
-		t.Fatalf("manifest = %v, want . at 0.0.0", manifest)
+	if !regexp.MustCompile(`^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$`).MatchString(manifest["."]) {
+		t.Fatalf("manifest version = %q, want semver X.Y.Z", manifest["."])
 	}
 }
 
@@ -166,7 +239,11 @@ func TestVersionFlagPrintsBuildVersion(t *testing.T) {
 		{"", "atm dev "},
 		{"-X github.com/thellmwhisperer/agentic-team-member/internal/buildinfo.Version=v1.2.3", "atm v1.2.3 "},
 	} {
-		bin := filepath.Join(t.TempDir(), "atm")
+		name := "atm"
+		if runtime.GOOS == "windows" {
+			name += ".exe"
+		}
+		bin := filepath.Join(t.TempDir(), name)
 		build := exec.Command("go", "build", "-buildvcs=false", "-ldflags", tc.ldflags, "-o", bin, ".")
 		if out, err := build.CombinedOutput(); err != nil {
 			t.Fatalf("go build: %v\n%s", err, out)
