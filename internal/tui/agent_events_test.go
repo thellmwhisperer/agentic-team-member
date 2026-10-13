@@ -90,6 +90,15 @@ func agentBoxSays(t *testing.T, width int, text string) (string, []string) {
 	return m.agentBox(width, 40), agentLines(m, width)
 }
 
+func requireAgentBoxContains(t *testing.T, width int, text, want string) string {
+	t.Helper()
+	raw, _ := agentBoxSays(t, width, text)
+	if stripped := ansi.Strip(raw); !strings.Contains(stripped, want) {
+		t.Fatalf("rendered line is missing %q: %q", want, stripped)
+	}
+	return raw
+}
+
 func activeStylesAtText(raw, text string) (bool, bool, bool) {
 	bold, italic := false, false
 	offset := 0
@@ -210,10 +219,7 @@ func TestAgentBoxClassifiesIndentedCodeBeforeListMarkers(t *testing.T) {
 		{name: "valid one-space list", text: " - x", want: "✎  • x"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			raw, _ := agentBoxSays(t, 60, tc.text)
-			if stripped := ansi.Strip(raw); !strings.Contains(stripped, tc.want) {
-				t.Fatalf("rendered line is missing %q: %q", tc.want, stripped)
-			}
+			raw := requireAgentBoxContains(t, 60, tc.text, tc.want)
 			if strings.Contains(raw, "\t") {
 				t.Fatalf("tab reached terminal output: %q", raw)
 			}
@@ -265,10 +271,7 @@ func TestAgentBoxPreservesCodeSourceWhitespaceAndExpandsTabs(t *testing.T) {
 		{name: "inline code tab", text: "`x\tz`", want: "x       z"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			raw, _ := agentBoxSays(t, 60, tc.text)
-			if stripped := ansi.Strip(raw); !strings.Contains(stripped, tc.want) {
-				t.Fatalf("rendered code lost source whitespace: got %q, want %q in output", stripped, tc.want)
-			}
+			requireAgentBoxContains(t, 60, tc.text, tc.want)
 		})
 	}
 }
