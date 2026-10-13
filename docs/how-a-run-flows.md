@@ -252,8 +252,8 @@ On a terminal the screen is the ATM box, a row per step with its icon (`○`
 pending, a spinner running, `⏸` waiting, `✓` passed, `✗` failed, `–` skipped), duration and
 note, and beside it, from 100 columns, the Agent box while an agent works,
 the Findings box with a failure or the slop detector's cuts, and the Log box.
-The Agent box shows the agent's prose as `✎` lines and non-empty thinking as
-`∴` lines. Consecutive successful or running tool calls appear as one dim line
+The Agent box renders the agent's Markdown prose within the panel width as
+`✎` lines; non-empty thinking appears as `∴` lines. Consecutive successful or running tool calls appear as one dim line
 below them, with tool names and repeat counts. A running batch has a spinner
 and its active tool's detail; a failed tool keeps its own row. The box keeps
 the last lines that fit. It omits empty thinking, user messages, skill text,
