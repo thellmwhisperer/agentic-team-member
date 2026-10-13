@@ -1,0 +1,13 @@
+{
+  "bootstrap-sha": "0c4d0224dc6e77e996c02bd508b0a8618f6d6072",
+  "packages": {
+    ".": {
+      "release-type": "go",
+      "bump-minor-pre-major": true,
+      "bump-patch-for-minor-pre-major": true,
+      "draft": true,
+      "force-tag-creation": true
+    }
+  },
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json"
+}
