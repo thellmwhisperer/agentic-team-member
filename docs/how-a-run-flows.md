@@ -90,8 +90,9 @@ a compiled language that needs the base's declarations, that trial fails and
 the test passes it.
 
 Every type then fails, naming the old path, when a test file the base has is
-deleted or shorter. If Git detects a rename, ATM checks the staged file at its
-new path, so moving an unchanged or longer test is allowed.
+deleted or has fewer lines. A shorter file with the same line count is allowed.
+If Git detects a rename, ATM checks the staged file at its new path, so moving
+an unchanged or longer test is allowed.
 
 ## Follow-ups
 
