@@ -134,18 +134,18 @@ func (a agent) run(clone, name, skill, brief string, check func(map[string]any) 
 		return ev, err
 	}
 	switch {
+	case s.reach != "":
+		return fail(fmt.Errorf("%s; the agent reached outside its clone: %s; log: %s", exit, s.reach, path))
 	case cause != "":
 		return fail(fmt.Errorf("%s; log: %s", cause, path))
-	case s.reach != "":
-		return fail(fmt.Errorf("the agent reached outside its clone: %s; log: %s", s.reach, path))
 	case err != nil:
 		return fail(fmt.Errorf("agent: %w; log: %s", err, path))
 	case !s.used:
-		return fail(fmt.Errorf("agent left no proof it used the %s skill; log: %s", skill, path))
+		return fail(fmt.Errorf("%s; agent left no proof it used the %s skill; log: %s", exit, skill, path))
 	}
 	ev["report"], err = report(s.final, check)
 	if err != nil {
-		return fail(fmt.Errorf("%w; log: %s", err, path))
+		return fail(fmt.Errorf("%s; %w; log: %s", exit, err, path))
 	}
 	return ev, nil
 }
@@ -350,7 +350,8 @@ func (s *stream) read(cmd *exec.Cmd, log, stderr io.Writer, harness string) erro
 		wg.Go(func() {
 			for r := bufio.NewReader(pr); ; {
 				line, err := r.ReadBytes('\n')
-				if line = bytes.TrimSpace(line); len(line) > 0 {
+				line = bytes.TrimSpace(line)
+				if len(line) > 0 || err == nil {
 					mu.Lock()
 					s.heard()
 					s.tail = append(s.tail, string(line))

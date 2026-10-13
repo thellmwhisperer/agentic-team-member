@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -36,9 +37,9 @@ func Hello(c config.Agent, limit time.Duration) (time.Duration, error) {
 		cmd.Dir, cmd.Stdin, cmd.WaitDelay = dir, strings.NewReader(stdin), time.Second
 		cmd.Env = agentEnv(nil)
 		var log bytes.Buffer
-		s := stream{live: func(map[string]any) {}}
+		s := stream{live: func(map[string]any) {}, heard: func() {}}
 		start := time.Now()
-		err := s.read(cmd, &log, c.Harness)
+		err := s.read(cmd, &log, io.Discard, c.Harness)
 		took := time.Since(start)
 		if c.Harness == "codex" {
 			b, _ := os.ReadFile(final)
