@@ -41,7 +41,6 @@ func Hello(c config.Agent, limit time.Duration) (time.Duration, error) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir, cmd.Stdin, cmd.WaitDelay = dir, strings.NewReader(stdin), time.Second
-	detach(cmd)
 	cmd.Env = agentEnv(nil)
 	var log bytes.Buffer
 	s := stream{live: func(map[string]any) {}}
