@@ -1,0 +1,18 @@
+schema: 1
+id: T-PONYTAIL-20261013-011309-1
+status: accepted
+category: alien_code
+title: "Cut the checksums job's 5-line `if:` (`!cancelled()`, both results `success`, `release_created`). The default `success()` already skips the job when a needed job is skipped, failed or cancelled. Its `needs` list now fits on one line."
+created_at: 2026-10-13
+incident:
+  pattern: "Cut the checksums job's 5-line `if:` (`!cancelled()`, both results `success`, `release_created`). The default `success()` already skips the job when a needed job is skipped, failed or cancelled. Its `needs` list now fits on one line."
+  what_went_wrong: "An ATM run wrote it and ATM's ponytail pass cut it before delivery."
+  root_cause: "The coding agent wrote more than the issue needed."
+  rule_established: "Cut by the ponytail pass; it does not come back."
+  evidence:
+    - family: speculative_hardening
+      example: "Cut the checksums job's 5-line `if:` (`!cancelled()`, both results `success`, `release_created`). The default `success()` already skips the job when a needed job is skipped, failed or cancelled. Its `needs` list now fits on one line."
+      artifact: ".github/workflows/release.yml"
+match:
+  family: speculative_hardening
+  artifact: ".github/workflows/release.yml"
