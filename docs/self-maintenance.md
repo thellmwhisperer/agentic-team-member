@@ -16,9 +16,10 @@ it.
    acceptance criteria a test can check, and a `## Red test` section naming
    the test that fails today.
    The agent gets exactly this text; a vague issue gives a vague run.
-2. **An ATM run.** `atm run <number>` from the repository, its `.atm.yaml`
-   filled once with its commands, file patterns and the no-mistakes delivery
-   line; see [Configuration](configuration.md).
+2. **An ATM run.** Start `atm watch` in the launching session and pass its ID
+   with `atm run --watcher <id> <number>`. Fill `.atm.yaml` once with the
+   repository commands, file patterns and the no-mistakes delivery line; see
+   [the watcher](how-a-run-flows.md#the-watcher) and [Configuration](configuration.md).
 3. **The verdict.** `report.json`, or the summary at the end of the run. A FAIL
    ends here: the report says which check failed and why, and the issue gets a
    better contract or the code a better check.
