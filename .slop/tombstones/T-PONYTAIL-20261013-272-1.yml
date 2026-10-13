@@ -1,0 +1,18 @@
+schema: 1
+id: T-PONYTAIL-20261013-272-1
+status: accepted
+category: alien_code
+title: "Remove Cursor sed/head/tail skill-read grammar and its test cases. No real Cursor log used it; the only example was invented by the reviewer in run 272-76. Keep direct read/cat proof until an observed command requires more."
+created_at: 2026-10-13
+incident:
+  pattern: "Remove Cursor sed/head/tail skill-read grammar and its test cases. No real Cursor log used it; the only example was invented by the reviewer in run 272-76. Keep direct read/cat proof until an observed command requires more."
+  what_went_wrong: "No-mistakes added code or prose beyond issue 272; the ponytail review removed it before delivery."
+  root_cause: "The coding agent wrote more than the issue needed."
+  rule_established: "Cut by the ponytail pass; it does not come back."
+  evidence:
+    - family: speculative_feature
+      example: "Remove Cursor sed/head/tail skill-read grammar and its test cases. No real Cursor log used it; the only example was invented by the reviewer in run 272-76. Keep direct read/cat proof until an observed command requires more."
+      artifact: "internal/run/agent.go"
+match:
+  family: speculative_feature
+  artifact: "internal/run/agent.go"
