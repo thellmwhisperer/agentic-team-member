@@ -42,6 +42,39 @@ From delivery on it reads the gate with `no-mistakes axi status` in the run's
 clone every 10 s, after the run ends too, until the PR merges or the gate
 fails.
 
+### Launch and follow: `atm run --follow`
+
+`atm run <issue> --follow` launches the run and is its watcher: it holds a
+lease of its own and binds the run to it, so it needs no `atm watch`. It
+prints one JSON object per line on stdout, flushed at once, and never exits
+on an event, only when the run is over. The CoS launches it in the
+background and acts on each line; it waits on this one process per run.
+
+Each line has `time`, `run`, `issue` and `event`, and the event's fields:
+
+| `event` | Fields | When |
+|---------|--------|------|
+| `step` | `step` | The run starts a step |
+| `delivery` | `clone` | Delivery starts |
+| `gate_waiting` | `step`, `clone`, `findings` | The gate waits on a decision, once per new wait; each finding's `id`, `severity`, `file` and `description` |
+| `gate_fixing_ci` | `commit` | A `no-mistakes(ci):` commit lands on the PR: its `sha` and `subject`, oldest first |
+| `pr_opened` | `url` | The gate opens the PR |
+| `ci_green` | `url` | CI passes |
+| `merged` | `url` | The PR merges: the last line, exit 0 |
+| `closed` | `url` | The PR closes unmerged: the last line, exit 1 |
+| `run_failed` | `step`, `reason` | The run fails: the last line, exit 1 |
+| `stalled` | `minutes` | 60 minutes without an event, and every 60 minutes after |
+
+Nothing else goes to stdout; diagnostics go to stderr. From delivery on it
+reads `no-mistakes axi status` in the run's clone every 10 s for as long as
+the gate lives, through every `no-mistakes axi respond` made there, and,
+once there is a PR, its state and commits with `gh pr view`, each read cut
+off after 5 s. If delivery removes the clone first, it finds the PR by the
+delivered branch. No model is called. A run that passes without a delivery
+ends it with exit 0 and no last line.
+Killing it leaves the run going, which then shows `WATCHER GONE`; `atm watch
+--adopt <run>` takes it over.
+
 When a watcher dies, each running run bound to it shows
 `WATCHER GONE at <time>: no one is watching this run` once, on its screen and
 in `.atm/serve.log`. `atm watch --adopt <run>` binds the run to a new watcher,

@@ -48,6 +48,14 @@ func (l lease) write(root, id string) error {
 	return err
 }
 
+// hold makes this process a new watcher of the repository at root: it writes its lease and returns its id.
+func hold(root string) (string, lease, error) {
+	now := time.Now()
+	id := strconv.Itoa(os.Getpid()) + "-" + strconv.FormatInt(now.Unix(), 36)
+	l := lease{os.Getpid(), now, now}
+	return id, l, l.write(root, id)
+}
+
 // Watching says whether watcher id of the repository at root lives: its process runs and its heartbeat is fresh.
 func Watching(root, id string) bool {
 	var l lease
@@ -72,12 +80,11 @@ func Watchers(root string) (ids []string) {
 // no-mistakes gate once it reaches delivery.
 // ponytail: it asks for the runs every beat, which keeps the background process from ending idle.
 func Watch(ctx context.Context, root, adopt string, w io.Writer) error {
-	since := time.Now()
-	id := strconv.Itoa(os.Getpid()) + "-" + strconv.FormatInt(since.Unix(), 36)
-	l := lease{os.Getpid(), since, since}
-	if err := l.write(root, id); err != nil {
+	id, l, err := hold(root)
+	if err != nil {
 		return err
 	}
+	since := l.Started
 	defer func() { _ = os.Remove(leasePath(root, id)) }()
 	lines := make(chan string)
 	say := func(label, event string) {
@@ -180,8 +187,15 @@ func gateStatus(clone string) (string, error) {
 	if _, err := os.Stat(clone); err != nil {
 		return "", err
 	}
-	cmd := exec.Command("no-mistakes", "axi", "status")
-	cmd.Dir = clone
+	return probe(clone, "no-mistakes", "axi", "status")
+}
+
+// probe is the stdout of name in dir, killed after 5 s: a read that hangs is a missed beat, not a stuck watcher.
+func probe(dir, name string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Dir = dir
 	out, err := cmd.Output()
 	return string(out), err
 }
@@ -255,15 +269,15 @@ type gate struct {
 	fixing, green, merged, failed bool
 }
 
-// gateState is what `no-mistakes axi status` says of a gate: its PR, the first step that waits for approval and
-// the first that failed, and whether it has steps, CI is being fixed or green, and the PR merged.
+// gateState is what `no-mistakes axi status` says of a gate: its PR, the first step that waits for approval or a
+// decision and the first that failed, and whether it has steps, CI is being fixed or green, and the PR merged.
 type gateState struct {
 	pr, waiting, failed         string
 	seen, fixing, green, merged bool
 }
 
 func parseGate(status string) (s gateState) {
-	steps := false
+	steps, parked := false, false // parked: its fix_review step waits for a decision
 	for _, l := range strings.Split(status, "\n") {
 		trimmed := strings.TrimSpace(l)
 		key, value, isKey := strings.Cut(trimmed, ": ")
@@ -280,22 +294,29 @@ func parseGate(status string) (s gateState) {
 				s.pr = value
 			case "pr_state":
 				s.merged = value == "merged"
+			case "awaiting_agent":
+				parked = strings.HasPrefix(value, "parked")
 			}
 		case steps && l != trimmed:
-			step, rest, _ := strings.Cut(trimmed, ",")
-			state, _, _ := strings.Cut(rest, ",")
-			s.seen = true
-			switch {
-			case state == "awaiting_approval":
-				s.waiting = cmp.Or(s.waiting, step)
-			case state == "failed":
-				s.failed = cmp.Or(s.failed, step)
-			case step == "ci":
-				s.fixing, s.green = state == "fixing", state == "completed"
-			}
+			s.step(trimmed, parked)
 		}
 	}
 	return s
+}
+
+// step adds to s a row of the gate's steps, `step,status,...`, of a run parked or not.
+func (s *gateState) step(row string, parked bool) {
+	step, rest, _ := strings.Cut(row, ",")
+	state, _, _ := strings.Cut(rest, ",")
+	s.seen = true
+	switch {
+	case state == "awaiting_approval" || parked && state == "fix_review":
+		s.waiting = cmp.Or(s.waiting, step)
+	case state == "failed":
+		s.failed = cmp.Or(s.failed, step)
+	case step == "ci":
+		s.fixing, s.green = state == "fixing", state == "completed"
+	}
 }
 
 // events is the lines status, the gate's `no-mistakes axi status`, adds at now to those g printed; done once the

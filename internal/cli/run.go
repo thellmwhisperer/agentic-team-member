@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"text/tabwriter"
 
@@ -15,14 +16,19 @@ import (
 )
 
 // runCmd is atm run: the run goes to the repository's background process and, on a terminal, atm keeps its
-// completed screen open until the user closes it. Closing the terminal leaves it going.
+// completed screen open until the user closes it. Closing the terminal leaves it going. With --follow, atm is the
+// run's watcher and prints one JSON line per event of it until its PR merges or closes, or it fails.
 func runCmd() *cobra.Command {
-	return &cobra.Command{Use: "run", Short: "Fix an issue: " + run.Usage,
+	return &cobra.Command{Use: "run", Short: "Fix an issue: " +
+		strings.Replace(run.Usage, "--watcher id", "(--watcher id | --follow)", 1),
 		Long: "On a terminal, the completed screen stays open until q or Ctrl+C.", DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			root, err := toplevel()
 			if err != nil {
 				return err
+			}
+			if i := followArg(args); i >= 0 {
+				return run.FollowRun(cmd.Context(), root, slices.Delete(args, i, i+1), cmd.OutOrStdout())
 			}
 			o, err := run.Start(root, args)
 			if err != nil {
@@ -34,6 +40,21 @@ func runCmd() *cobra.Command {
 			}
 			return attach(root, o.Run, "startup", cmd.OutOrStdout())
 		}}
+}
+
+// followArg finds ATM's flag, leaving values such as --harness-arg --follow with their option.
+func followArg(args []string) int {
+	for i := 0; i < len(args); i++ {
+		switch arg := args[i]; {
+		case arg == "--":
+			return -1
+		case arg == "--follow":
+			return i
+		case strings.HasPrefix(arg, "-") && !strings.Contains(arg, "="):
+			i++ // Every other run flag takes a value.
+		}
+	}
+	return -1
 }
 
 func terminal(f *os.File) bool {

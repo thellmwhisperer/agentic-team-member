@@ -43,6 +43,9 @@ func TestMain(m *testing.M) {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+	if strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe") == "no-mistakes" {
+		fakeNoMistakes()
+	}
 	if out, ok := os.LookupEnv("FAKE_GH_OUT"); ok {
 		_ = os.WriteFile(os.Getenv("FAKE_GH_ARGS"), []byte(strings.Join(os.Args[1:], " ")), 0o600)
 		fmt.Print(out)
@@ -50,9 +53,6 @@ func TestMain(m *testing.M) {
 			os.Exit(1)
 		}
 		os.Exit(0)
-	}
-	if strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe") == "no-mistakes" {
-		fakeNoMistakes()
 	}
 	dir, err := linkFakes()
 	if err != nil {
@@ -66,6 +66,17 @@ func TestMain(m *testing.M) {
 }
 
 func fakeNoMistakes() {
+	if dir := os.Getenv("FAKE_GATE"); dir != "" { // statuses 1, 2, ... in dir, one a call, the last from then on
+		b, _ := os.ReadFile(filepath.Join(dir, "count"))
+		n, _ := strconv.Atoi(string(b))
+		if _, err := os.Stat(filepath.Join(dir, strconv.Itoa(n+1))); err == nil {
+			n++
+		}
+		_ = os.WriteFile(filepath.Join(dir, "count"), []byte(strconv.Itoa(n)), 0o600)
+		b, _ = os.ReadFile(filepath.Join(dir, strconv.Itoa(n)))
+		_, _ = os.Stdout.Write(b)
+		os.Exit(0)
+	}
 	countPath := os.Getenv("ATM_STATUS_COUNT")
 	b, _ := os.ReadFile(countPath)
 	n, _ := strconv.Atoi(string(b))
