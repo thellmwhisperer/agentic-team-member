@@ -100,6 +100,12 @@ var proofCases = []struct {
 		work: `mkdir -p .atm; echo ok > .atm/fixture.txt; echo fixed > a.txt; ` +
 			`echo 'grep -q fixed a.txt && grep -q ok .atm/fixture.txt' > a_test.sh; ` + reportJSON("a_test.sh"),
 		why: "fails with the fix"},
+	{name: "fix whose test reads an ignored follow-up fixture in .atm", typ: "fix", ignore: ".atm/\n",
+		work: `mkdir -p .atm/follow-ups/1; echo ok > .atm/follow-ups/1/fixture.txt; echo fixed > a.txt; ` +
+			`echo 'grep -q fixed a.txt && grep -q ok .atm/follow-ups/1/fixture.txt' > a_test.sh; ` +
+			`printf '{"test_file":"a_test.sh","follow_ups":[{"title":"gap","red_test":"fixture.txt",` +
+			`"criterion":"A retry runs once after a timeout."}]}' > .atm/fake-report.json`,
+		why: "fails with the fix"},
 	{name: "fix whose test changes an ignored file", typ: "fix", ignore: "cache.txt\n",
 		work: "echo fixed > a.txt; echo kept > cache.txt; " +
 			"echo 'grep -q fixed a.txt && ! grep -q broken a.txt && echo x >> cache.txt' > a_test.sh; " +

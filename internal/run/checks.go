@@ -30,11 +30,11 @@ import (
 // install, the type's proof, test, typecheck and lint pass, the commands no-mistakes runs, and HEAD has not
 // moved still. Install runs again before the proof: the agent may have changed dependencies. Each proof and
 // command is a row of the screen. Its result holds the proof's red and green trials.
-func checks(clone, sha, typ, test string, followUps any, c config.Config) (map[string]any, error) {
+func checks(clone, sha, typ, test string, followUps any, c config.Config) (result map[string]any, err error) {
 	live := liveIn(clone)
 	var red, green try
 	var proofSpan span
-	result := map[string]any{"red": red, "green": green, "proof_span": proofSpan}
+	result = map[string]any{"red": red, "green": green, "proof_span": proofSpan}
 	var ran []cmdResult
 	run := func(name, line string) error {
 		if line == "" {
@@ -49,12 +49,19 @@ func checks(clone, sha, typ, test string, followUps any, c config.Config) (map[s
 		result["commands"] = ran
 		return wrap(err, name)
 	}
-	err := moved(clone, sha, "the agent")
+	err = moved(clone, sha, "the agent")
 	if err == nil {
 		var keep []string
 		keep, err = declaredFollowUpPaths(clone, followUps)
 		if err == nil {
 			err = unmade(clone, keep)
+		}
+	}
+	if err == nil {
+		var restore func() error
+		restore, err = hideATM(clone)
+		if restore != nil {
+			defer func() { err = errors.Join(err, restore()) }()
 		}
 	}
 	if err == nil {
@@ -78,6 +85,30 @@ func checks(clone, sha, typ, test string, followUps any, c config.Config) (map[s
 	}
 	result["commands"] = ran
 	return result, moved(clone, sha, "the commands")
+}
+
+func hideATM(clone string) (func() error, error) {
+	path := filepath.Join(clone, ".atm")
+	stash := clone + ".checks-atm"
+	if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
+		return func() error { return os.RemoveAll(path) }, nil
+	} else if err != nil {
+		return nil, err
+	}
+	if _, err := os.Lstat(stash); err == nil {
+		return nil, fmt.Errorf("checks artefact path already exists: %s", stash)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+	if err := os.Rename(path, stash); err != nil {
+		return nil, err
+	}
+	return func() error {
+		if err := os.RemoveAll(path); err != nil {
+			return err
+		}
+		return os.Rename(stash, path)
+	}, nil
 }
 
 // before records every file in clone, ignored or not, as the agent finds it, for unmade.
