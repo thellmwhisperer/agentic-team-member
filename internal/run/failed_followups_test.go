@@ -13,13 +13,14 @@ import (
 // failingUnit2Work is unit 1 fixing a.txt with two follow-ups, c1_test.sh on the issue, which chains, and
 // c2_test.sh outside it, then unit 2 adding u2 to a.txt and reporting c3_test.sh with criterion
 // $ATM_TEST_CRITERION. A test line that fails once c1_test.sh is in place fails unit 2's checks.
+// printf gives every red-test fixture the same LF bytes on each OS.
 const failingUnit2Work = `if [ -f c1_test.sh ]; then echo u2 >> a.txt; mkdir -p .atm/follow-ups/1; ` +
-	`echo 'grep -q u3 a.txt' > .atm/follow-ups/1/c3_test.sh; ` +
+	`printf '%s\n' 'grep -q u3 a.txt' > .atm/follow-ups/1/c3_test.sh; ` +
 	`printf '{"test_file":"a_test.sh","follow_ups":[{"title":"unit 2 gap","red_test":"c3_test.sh",` +
 	`"criterion":"%s"}]}' "$ATM_TEST_CRITERION" > .atm/fake-report.json; ` +
 	`else printf 'fixed\n' > a.txt; echo 'grep -q fixed a.txt && ! grep -q broken a.txt' > a_test.sh; ` +
-	`mkdir -p .atm/follow-ups/1 .atm/follow-ups/2; echo 'grep -q u2 a.txt' > .atm/follow-ups/1/c1_test.sh; ` +
-	`echo 'grep -q extra a.txt' > .atm/follow-ups/2/c2_test.sh; ` +
+	`mkdir -p .atm/follow-ups/1 .atm/follow-ups/2; printf '%s\n' 'grep -q u2 a.txt' > .atm/follow-ups/1/c1_test.sh; ` +
+	`printf '%s\n' 'grep -q extra a.txt' > .atm/follow-ups/2/c2_test.sh; ` +
 	`printf '{"test_file":"a_test.sh","follow_ups":[` +
 	`{"title":"chained","red_test":"c1_test.sh","criterion":"A retry runs once after a timeout."},` +
 	`{"title":"pending","red_test":"c2_test.sh","criterion":"Some other work is documented."}]}' ` +
@@ -57,7 +58,7 @@ func TestAUnitThatFailsChecksKeepsItsFollowUps(t *testing.T) {
 func TestUnit1ThatFailsChecksKeepsItsFollowUps(t *testing.T) {
 	root := repo(t, "https://example.com/owner/repo.git", atmYAML)
 	t.Setenv("FAKE_AGENT_WORK", fixWork+"; mkdir -p .atm/follow-ups/1; "+
-		"echo 'grep -q restored a.txt' > .atm/follow-ups/1/r_test.sh; "+
+		"printf '%s\\n' 'grep -q restored a.txt' > .atm/follow-ups/1/r_test.sh; "+
 		`printf '{"test_file":"","follow_ups":[{"title":"atomic restore","red_test":"r_test.sh",`+
 		`"criterion":"Restores are atomic."}]}' > .atm/fake-report.json`)
 	var out bytes.Buffer
@@ -148,12 +149,12 @@ func TestFollowUpsFieldShapesKeepEarlierFollowUpsOnChecksFailure(t *testing.T) {
 			root := repo(t, "https://example.com/owner/repo.git", atmSet(atmYAML, "test", failsOnUnit2))
 			t.Setenv("ATM_TEST_REPORT", `{"test_file":"a_test.sh"`+tc.field+`}`)
 			t.Setenv("FAKE_AGENT_WORK", `if [ -f c1_test.sh ]; then echo u2 >> a.txt; `+
-				`mkdir -p .atm/follow-ups/1; echo 'grep -q u3 a.txt' > .atm/follow-ups/1/c3_test.sh; `+
+				`mkdir -p .atm/follow-ups/1; printf '%s\n' 'grep -q u3 a.txt' > .atm/follow-ups/1/c3_test.sh; `+
 				`printf '%s' "$ATM_TEST_REPORT" > .atm/fake-report.json; `+
 				`else printf 'fixed\n' > a.txt; echo 'grep -q fixed a.txt && ! grep -q broken a.txt' > a_test.sh; `+
 				`mkdir -p .atm/follow-ups/1 .atm/follow-ups/2; `+
-				`echo 'grep -q u2 a.txt' > .atm/follow-ups/1/c1_test.sh; `+
-				`echo 'grep -q extra a.txt' > .atm/follow-ups/2/c2_test.sh; `+
+				`printf '%s\n' 'grep -q u2 a.txt' > .atm/follow-ups/1/c1_test.sh; `+
+				`printf '%s\n' 'grep -q extra a.txt' > .atm/follow-ups/2/c2_test.sh; `+
 				`printf '{"test_file":"a_test.sh","follow_ups":[`+
 				`{"title":"chained","red_test":"c1_test.sh","criterion":"A retry runs once after a timeout."},`+
 				`{"title":"pending","red_test":"c2_test.sh","criterion":"Some other work is documented."}]}' `+
