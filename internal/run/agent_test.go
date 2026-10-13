@@ -334,6 +334,52 @@ func logLines(t *testing.T, path string) []string {
 	return lines
 }
 
+func TestRunDiesWhenTheAgentReachesOutsideItsClone(t *testing.T) {
+	q := func(s string) string { b, _ := json.Marshal(s); return string(b) }
+	claude := func(tool, input string) string {
+		return `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"c1","name":` +
+			q(tool) + `,"input":` + input + `}]}}` + "\n"
+	}
+	curl := `curl -sL -m 30 https://www.example.com/assets/index.js -o "$TMPDIR/x.js"`
+	const why = "the agent reached outside its clone: "
+	cases := []struct{ name, harness, stream, why string }{
+		{"pi curl", "pi", `{"type":"tool_execution_start","toolCallId":"c1","toolName":"bash","args":{"command":` +
+			q(curl) + `}}` + "\n", why + "bash " + curl},
+		{"claude reads another run", "claude", claude("Read", `{"file_path":"{root}/.atm/runs/6-2/worker.jsonl"}`),
+			why + "Read {root}/.atm/runs/6-2/worker.jsonl"},
+		{"codex lists another clone", "codex", `{"type":"item.started","item":{"id":"c1","type":"command_execution",` +
+			`"command":"ls {root}/.atm/clones/other"}}` + "\n", why + "shell ls {root}/.atm/clones/other"},
+		{"opencode fetches", "opencode", `{"type":"tool_use","part":{"callID":"c1","tool":"bash","state":` +
+			`{"status":"completed","input":{"command":"node -e \"fetch('https://example.com')\""}}}}` + "\n",
+			why + `bash node -e "fetch('https://example.com')"`},
+		{"inside", "claude", claude("Read", `{"file_path":"{clone}/AGENTS.md"}`) +
+			claude("Bash", `{"command":"pnpm add zod && pnpm dev --url http://localhost:5173"}`) +
+			claude("Read", `{"file_path":"{home}/go/pkg/mod/golang.org/x/mod@v0.20.0/go.mod"}`), ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			root := repo(t, "https://example.com/owner/repo.git", atmYAML)
+			r := strings.NewReplacer("{root}", gitT(t, root, "rev-parse", "--show-toplevel"),
+				"{home}", filepath.ToSlash(os.Getenv("HOME")))
+			t.Setenv("FAKE_AGENT_STREAM", r.Replace(c.stream))
+			var out bytes.Buffer
+			err := Run("t", []string{"--harness", c.harness, issueFile(t, issue)}, &out, io.Discard)
+			if c.why == "" {
+				if err != nil {
+					t.Fatalf("a run that stayed in its clone failed: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), r.Replace(c.why)) {
+				t.Fatalf("want an error naming %q, got %v", r.Replace(c.why), err)
+			}
+			if end, _, _ := agentStep(t, &out); end["state"] != "failed" || end["error"] != err.Error() {
+				t.Fatalf("end event: %v", end)
+			}
+		})
+	}
+}
+
 func TestRunDiesWhenTheAgentFails(t *testing.T) {
 	cases := []struct {
 		harness, mode, why string

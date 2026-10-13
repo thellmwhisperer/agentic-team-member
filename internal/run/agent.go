@@ -11,10 +11,14 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"maps"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
+	"path"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -40,11 +44,11 @@ var skillDirs = map[string]string{"claude": ".claude/skills", "codex": ".agents/
 const tools = "Read,Edit,Write,Bash,Glob,Grep,Skill"
 
 // agent is the coding agent of the run: its harness, model and effort, the --harness-arg and --env of the run,
-// and the run's directory, where its logs go.
+// the repository it runs in and the run's directory, where its logs go.
 type agent struct {
 	config.Agent
 	args, env []string
-	dir       string
+	root, dir string
 }
 
 // flags adds the agent's flags to fs.
@@ -117,13 +121,12 @@ func (a agent) run(clone, name, skill, brief string, check func(map[string]any) 
 	defer stop()
 	ctx, cancel := context.WithTimeout(ctx, agentTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
-	cmd.Dir, cmd.Stdin, cmd.WaitDelay = clone, strings.NewReader(stdin), time.Second
-	if err := inheritCloneLease(cmd, clone); err != nil {
+	cmd, err := a.command(ctx, clone, argv, stdin)
+	if err != nil {
 		return ev, err
 	}
-	cmd.Env = agentEnv(a.env)
-	s := stream{skill: skill, live: relative(clone, liveIn(clone))}
+<<<<<<< HEAD
+	s := stream{skill: skill, live: relative(clone, liveIn(clone)), root: a.root, clone: clone}
 	err = s.read(cmd, f, a.Harness)
 	if a.Harness == "codex" {
 		b, _ := os.ReadFile(final) // none is no report
@@ -137,6 +140,8 @@ func (a agent) run(clone, name, skill, brief string, check func(map[string]any) 
 		return ev, fmt.Errorf("agent interrupted; log: %s", path)
 	case err != nil:
 		return ev, fmt.Errorf("agent: %w; log: %s", err, path)
+	case s.reach != "":
+		return ev, fmt.Errorf("the agent reached outside its clone: %s; log: %s", s.reach, path)
 	case !s.used:
 		return ev, fmt.Errorf("agent left no proof it used the %s skill; log: %s", skill, path)
 	}
@@ -201,11 +206,17 @@ func clonePathRune(r rune) bool {
 	return unicode.IsLetter(r) || unicode.IsNumber(r) || strings.ContainsRune("_-.\\/", r)
 }
 
-// agentEnv is the agent's environment: atm's, but CLAUDE_CODE_CHILD_SESSION, then env.
-func agentEnv(env []string) []string {
-	return append(slices.DeleteFunc(os.Environ(), func(kv string) bool {
+<<<<<<< HEAD
+// command runs argv in clone on stdin, in the run's environment without the marker that turns the agent's
+// transcripts off, holding the clone's lease.
+func (a agent) command(ctx context.Context, clone string, argv []string, stdin string) (*exec.Cmd, error) {
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	cmd.Dir, cmd.Stdin, cmd.WaitDelay = clone, strings.NewReader(stdin), time.Second
+	cmd.Env = append(slices.DeleteFunc(os.Environ(), func(kv string) bool {
 		return strings.HasPrefix(kv, "CLAUDE_CODE_CHILD_SESSION=") // set, the agent's transcripts are off
-	}), env...)
+	}), a.env...)
+	return cmd, inheritCloneLease(cmd, clone)
+
 }
 
 // report is the agent's report, the last JSON object of its final message, which check accepts.
@@ -260,11 +271,13 @@ func exclude(clone, pattern string) error {
 	return errors.Join(err, f.Close())
 }
 
-// stream is what the agent's lines said: its final message and whether it used its skill. Live gets what
-// each line tells the screen.
+// stream is what the agent's lines said: its final message, whether it used its skill, and its first tool
+// call that reached outside clone, in repository root. Live gets what each line tells the screen.
 type stream struct {
 	final, skill string
 	loads        []string // the ids of the agent's calls that load its skill
+	root, clone  string
+	reach        string
 	used         bool
 	live         func(map[string]any)
 	pending      string
@@ -367,6 +380,7 @@ func (s *stream) see(harness string, line []byte) {
 		s.flush(harness == "claude" && e.Type == "result" && ends)
 	}
 	s.loads = append(s.loads, e.skillLoads(harness, s.skill)...)
+	s.reach = cmp.Or(s.reach, outside(e.calls(harness), s.root, s.clone))
 	for _, ev := range e.activity(harness) {
 		id, _ := ev["id"].(string)
 		s.used = s.used || ev["result"] == "passed" && slices.Contains(s.loads, id)
@@ -580,4 +594,94 @@ func detail(input json.RawMessage) string {
 		}
 	}
 	return ""
+}
+
+// use is one of the agent's tool calls: its tool and every string of its arguments, in full.
+type use struct{ tool, args string }
+
+// calls is e's tool calls: claude's tool_use and pi's toolCall blocks, pi's tool executions, codex's commands
+// and opencode's tool uses.
+func (e event) calls(harness string) (cs []use) {
+	switch {
+	case harness == "codex" && e.Item.Type == "command_execution":
+		return []use{{"shell", e.Item.Command}}
+	case harness == "opencode" && e.Type == "tool_use":
+		return []use{{e.Part.Tool, strs(e.Part.State.Input)}}
+	case harness == "pi" && e.Type == "tool_execution_start":
+		return []use{{e.ToolName, strs(e.Args)}}
+	case e.Type != "assistant" && e.Type != "message_end": // not a pi message_update's partial arguments
+		return nil
+	}
+	for _, b := range e.Message.Content {
+		if b.Type == "tool_use" || b.Type == "toolCall" {
+			cs = append(cs, use{b.Name, strs(b.Input) + strs(b.Arguments)})
+		}
+	}
+	return cs
+}
+
+// strs is every string in a tool call's input, by key, joined by spaces.
+func strs(input json.RawMessage) string {
+	var walk func(any) []string
+	walk = func(v any) (out []string) {
+		switch v := v.(type) {
+		case string:
+			return []string{v}
+		case []any:
+			for _, x := range v {
+				out = append(out, walk(x)...)
+			}
+		case map[string]any:
+			for _, k := range slices.Sorted(maps.Keys(v)) {
+				out = append(out, walk(v[k])...)
+			}
+		}
+		return out
+	}
+	var in any
+	_ = json.Unmarshal(input, &in)
+	return strings.Join(walk(in), " ")
+}
+
+var (
+	fetch = regexp.MustCompile("(^|[;&|(`\n]|\\$\\()\\s*(curl|wget)\\b") // ponytail: curl in command position
+	link  = regexp.MustCompile("https?://[^\\s\"'`)]+")
+	sep   = "\\s\"'`;|&()<>,="
+)
+
+// outside is the first of calls that reaches outside clone, as its tool and its first 200 characters: one that
+// names a path under root not under clone, or a shell command that runs curl or wget or names a URL off this
+// machine. A path outside root, the module cache's, passes.
+func outside(calls []use, root, clone string) string {
+	if len(calls) == 0 {
+		return ""
+	}
+	root, clone = filepath.ToSlash(root), filepath.ToSlash(clone)
+	paths := regexp.MustCompile(regexp.QuoteMeta(root) + "(/[^" + sep + "]*)?")
+	for _, c := range calls {
+		text := filepath.ToSlash(c.args)
+		reach := false
+		for _, m := range paths.FindAllStringIndex(text, -1) {
+			if root == "" || m[1] < len(text) && !strings.ContainsRune(sep, rune(text[m[1]])) {
+				continue // a directory beside root, as root2
+			}
+			p := path.Clean(text[m[0]:m[1]])
+			reach = reach || p != clone && !strings.HasPrefix(p, clone+"/")
+		}
+		if reach || (strings.EqualFold(c.tool, "bash") || c.tool == "shell") && fetches(text) {
+			r := []rune(c.args)
+			return c.tool + " " + string(r[:min(len(r), 200)])
+		}
+	}
+	return ""
+}
+
+// fetches says whether a shell command runs curl or wget or names a URL off this machine.
+func fetches(command string) bool {
+	for _, l := range link.FindAllString(command, -1) {
+		if u, err := url.Parse(l); err != nil || !slices.Contains([]string{"localhost", "127.0.0.1", "::1"}, u.Hostname()) {
+			return true
+		}
+	}
+	return fetch.MatchString(command)
 }
