@@ -15,8 +15,8 @@ import (
 // .atm.yaml is the upgrade.
 const maxUnits = 3
 
-// followUp is a behaviour gap a unit's agent found and did not fix, as its report declares it, and Test, the
-// red test that proves it. Verified says its red test was proven failing on its unit's work.
+// followUp is a behaviour gap a unit's agent found and did not fix, as its report declares it. Test holds
+// the agent's red test; Verified says ATM proved it failing on the unit's work.
 type followUp struct {
 	Title     string `json:"title"`
 	RedTest   string `json:"red_test"`
@@ -191,8 +191,8 @@ func chain(root, clone string, n int, i Issue, f followUp) (string, error) {
 	return head, err
 }
 
-// saveFollowUps writes follow-ups.json in the run's directory dir: the run's accepted follow-ups it did not chain, each
-// with its red test, to become new issues.
+// saveFollowUps writes follow-ups.json in the run's directory dir: follow-ups it did not chain, including
+// unverified ones from a unit that failed Checks.
 func saveFollowUps(dir string, fs []followUp) error {
 	if fs == nil {
 		fs = []followUp{}

@@ -154,9 +154,10 @@ an unchanged or longer test is allowed.
 
 A follow-up is a behaviour gap the agent found and did not fix. Its report
 lists each as `{"title", "red_test", "criterion"}`, with the failing test
-written at `.atm/follow-ups/<n>/<red_test>`. ATM runs it at `red_test` on the
-unit's work: it must fail. One without its test, or whose test passes or
-hangs, is rejected. No model judges a follow-up.
+written at `.atm/follow-ups/<n>/<red_test>`. After a unit passes Checks, ATM
+runs each follow-up test at `red_test` on the unit's work: it must fail. One
+without its test, or whose test passes or hangs, is rejected. No model judges
+a follow-up.
 
 An accepted follow-up whose `criterion` is a sentence copied from the issue
 becomes the next unit, in the same clone: the unit before is committed as a
@@ -164,15 +165,15 @@ unit commit, the red test is put in place, and the agent gets
 `brief-unit-<n>.md` to make it pass without editing it. The checks prove that
 unit red/green as a `feature`. Any other follow-up, and any past the third
 unit, goes to `follow-ups.json` in the run's directory, with its test, to
-become a new issue. Each there has `"verified": true`.
+become a new issue. Each accepted follow-up there has `"verified": true`.
 
-A unit that fails its checks still hands over every follow-up its report
-lists: none is run or chained, and each goes to `follow-ups.json` with the test
-the agent left, if any, and `"verified": false`. The run ends at that failure,
-as always. When its `follow_ups` is invalid, the reason stays the checks' one,
-with the follow-ups problem on the line after it. `atm run --resume` checks
-that unit's report again, so its follow-ups come back once: unverified while
-its checks fail, verified and sorted as above once they pass.
+A unit that fails Checks still hands over every follow-up its report lists:
+none is run or chained, and each goes to `follow-ups.json` with the test the
+agent left, if any, and `"verified": false`. The run ends at that failure.
+When `follow_ups` is invalid, the Checks failure remains the reason, with the
+follow-ups problem on the next line. `atm run --resume` reads that unit's
+report again, so its follow-ups appear once: unverified while Checks fail,
+then verified and sorted as above if Checks pass and their red tests fail.
 
 A unit commit is a conventional commit, so release-please sees it: its
 subject is `<type>: <title>`, its body `atm unit <n>`. The type comes from the

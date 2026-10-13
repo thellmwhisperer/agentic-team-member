@@ -69,7 +69,7 @@ every check ran again before it was kept.
 | Write the fix | **model** | nothing: it decides nothing |
 | Red / green | code | a test that passes without the fix or fails with it |
 | The project's configured `install`, `test`, `typecheck` and `lint` commands | code | any failure |
-| Follow-ups | code | a gap without a red test |
+| Follow-ups | code | unproved gaps after Checks pass; see [Follow-ups](docs/how-a-run-flows.md#follow-ups) |
 | Slop detector (code quality gate, not code review) | **model**, may only cut | a cut that breaks any check or does not shrink the diff: the clone goes back |
 | Delivery and code review gate | your command | ATM branches, commits and runs it. The documented example is no-mistakes, a graph of its own: models review, judge the test evidence, update the docs and write the PR; code rebases, runs your test and lint commands, pushes and watches CI |
 
