@@ -223,13 +223,18 @@ func (g *follower) poll(root string) (evs []followEvent) {
 		}
 	}
 	evs = append(evs, g.waiting(s, status)...)
-	switch {
-	case g.gate.merged || pr.State == "MERGED":
-		evs = append(evs, followEvent{"event": "merged", "url": g.gate.pr})
-	case pr.State == "CLOSED":
-		evs = append(evs, followEvent{"event": "closed", "url": g.gate.pr})
-	}
+	evs = append(evs, g.terminalPR(pr.State)...)
 	return evs
+}
+
+func (g *follower) terminalPR(state string) []followEvent {
+	switch {
+	case g.gate.merged || state == "MERGED":
+		return []followEvent{{"event": "merged", "url": g.gate.pr}}
+	case state == "CLOSED":
+		return []followEvent{{"event": "closed", "url": g.gate.pr}}
+	}
+	return nil
 }
 
 // fix is gate_fixing_ci for commit sha, subject, on the PR: once, and only for a CI fix of the gate.
