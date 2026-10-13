@@ -87,7 +87,9 @@ func TestScreenLaysOutAsNoMistakes(t *testing.T) {
 		}
 	}
 	s := view(screen(99, 40, running...))
-	if !regexp.MustCompile(`(?m)^╭─ ATM\*? ─+╮$`).MatchString(s) || !regexp.MustCompile(`(?m)^╭─ Agent\*? ─+╮$`).MatchString(s) {
+	atmTitle := regexp.MustCompile(`(?m)^╭─ ATM\*? ─+╮$`)
+	agentTitle := regexp.MustCompile(`(?m)^╭─ Agent\*? ─+╮$`)
+	if !atmTitle.MatchString(s) || !agentTitle.MatchString(s) {
 		t.Fatalf("under 100 columns, want the boxes stacked:\n%s", s)
 	}
 	connector := regexp.MustCompile(`(?m)^│ │ +│$`)
