@@ -39,25 +39,37 @@ func (m *Model) restoreReport(path string, outcome run.Outcome) {
 	for _, n := range report.Nodes {
 		r := m.current(n.Name)
 		if r == nil || seen[n.Name] {
-			if r != nil && seen[n.Name] {
-				r.state, r.took, r.hasDuration, r.note = "unknown", 0, false, ""
-			}
+			clearDuplicate(r, seen[n.Name])
 			continue
 		}
 		seen[n.Name] = true
-		if !consistentResult(n.Name, n.Result, outcome) {
+		if !validSavedNode(n, outcome) {
 			continue
 		}
-		switch n.Result {
-		case "passed", "failed", "skipped", "not run":
-			r.state = n.Result
-			if n.DurationMS != nil && *n.DurationMS >= 0 && *n.DurationMS <= maxDurationMS &&
-				(n.Result == "passed" || n.Result == "failed") {
-				r.took, r.hasDuration = time.Duration(*n.DurationMS)*time.Millisecond, true
-			}
-		default: // a stale running report is not evidence that the ended run is still working
-			continue
+		r.state = n.Result
+		if n.DurationMS != nil && *n.DurationMS >= 0 && *n.DurationMS <= maxDurationMS &&
+			(n.Result == "passed" || n.Result == "failed") {
+			r.took, r.hasDuration = time.Duration(*n.DurationMS)*time.Millisecond, true
 		}
+	}
+}
+
+func clearDuplicate(r *row, duplicate bool) {
+	if duplicate {
+		r.state, r.took, r.hasDuration, r.note = "unknown", 0, false, ""
+	}
+}
+
+func validSavedNode(n struct {
+	Name       string `json:"name"`
+	Result     string `json:"result"`
+	DurationMS *int64 `json:"duration_ms"`
+}, outcome run.Outcome) bool {
+	switch n.Result {
+	case "passed", "failed", "skipped", "not run":
+		return consistentResult(n.Name, n.Result, outcome)
+	default: // a stale running report is not evidence that the ended run is still working
+		return false
 	}
 }
 
