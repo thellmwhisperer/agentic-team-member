@@ -19,6 +19,7 @@ type resumePoint struct {
 	Unit     int            `json:"unit"`
 	Report   map[string]any `json:"report"`
 	FollowUp *followUp      `json:"follow_up"`
+	Pending  []followUp     `json:"pending"`
 	Proofs   [][4]string    `json:"proofs"` // each unit's before: its base, test, type and test content
 	run      string         // the run that kept it
 }
@@ -57,11 +58,12 @@ func keepWork(dir, clone string, p resumePoint) error {
 // keep keeps unit n's work in the run's clone, once its agent passed, in the run's directory dir, as p with
 // the unit, its agent's report, the follow-up it chained and the proofs of the units before.
 func (r *verdict) keep(dir, clone string, p resumePoint, n int, report map[string]any, f *followUp,
-	proofs []proof) {
+	proofs []proof, pending []followUp) {
 	if r.saved = 0; r.err != nil {
 		return
 	}
 	p.Unit, p.Report, p.FollowUp = n, report, f
+	p.Pending = append([]followUp(nil), pending...)
 	for _, q := range proofs {
 		p.Proofs = append(p.Proofs, [4]string{q.base, q.test, q.typ, q.testContent})
 	}

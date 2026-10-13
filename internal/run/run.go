@@ -136,7 +136,7 @@ func (a agent) units(r *verdict, root, dir, sha, text string, i Issue, c config.
 	var f *followUp // the follow-up a chained unit makes pass
 	var test string
 	if from != nil {
-		n, f, proofs = from.Unit, from.FollowUp, from.proofs()
+		n, f, proofs, pending = from.Unit, from.FollowUp, from.proofs(), append([]followUp(nil), from.Pending...)
 		if f != nil {
 			unit.Type = "feature"
 		}
@@ -165,7 +165,7 @@ func (a agent) units(r *verdict, root, dir, sha, text string, i Issue, c config.
 			}
 			return ev, err
 		})
-		r.keep(a.dir, dir, keep, n, report, f, proofs)
+		r.keep(a.dir, dir, keep, n, report, f, proofs, pending)
 		var in []followUp
 		var ev map[string]any
 		r.step("checks", func() (map[string]any, error) {
