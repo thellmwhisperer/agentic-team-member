@@ -177,6 +177,9 @@ func at(step string) string { return strings.TrimSuffix(" at "+step, " at ") }
 
 // gateStatus is `no-mistakes axi status` in clone: the state of the gate on its branch.
 func gateStatus(clone string) (string, error) {
+	if _, err := os.Stat(clone); err != nil {
+		return "", err
+	}
 	cmd := exec.Command("no-mistakes", "axi", "status")
 	cmd.Dir = clone
 	out, err := cmd.Output()
