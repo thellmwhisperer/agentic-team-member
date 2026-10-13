@@ -43,7 +43,7 @@ The agent runs in the clone in its most minimal mode:
 
 | Harness | Command | Reads the brief |
 |---------|---------|-----------------|
-| `claude` | `claude -p --setting-sources project --strict-mcp-config`, tools `Read,Edit,Write,Bash,Glob,Grep,Skill` only | on stdin |
+| `claude` | `claude -p --setting-sources project --strict-mcp-config --thinking-display summarized`, tools `Read,Edit,Write,Bash,Glob,Grep,Skill` only; `--harness-arg`s follow this default | on stdin |
 | `codex` | `codex exec`, which still loads your skills | as its last argument |
 | `opencode` | `opencode run --pure`, which still loads your skills | as its last argument |
 | `pi` | `pi -p --no-extensions --no-skills --no-prompt-templates --no-context-files --no-session` | as its last argument |
