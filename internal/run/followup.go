@@ -16,27 +16,55 @@ import (
 const maxUnits = 3
 
 // followUp is a behaviour gap a unit's agent found and did not fix, as its report declares it, and Test, the
-// red test that proves it.
+// red test that proves it. Verified says its red test was proven failing on its unit's work.
 type followUp struct {
 	Title     string `json:"title"`
 	RedTest   string `json:"red_test"`
 	Criterion string `json:"criterion"`
 	Test      string `json:"test"`
+	Verified  bool   `json:"verified"`
+}
+
+// reported is the follow-ups the agent's report r declares, neither tested nor verified.
+func reported(r map[string]any) ([]followUp, error) {
+	b, _ := json.Marshal(r["follow_ups"])
+	var all []followUp
+	if err := json.Unmarshal(b, &all); err != nil {
+		return nil, fmt.Errorf("invalid follow_ups in the agent report: %w", err)
+	}
+	for n := range all {
+		all[n].Test, all[n].Verified = "", false
+	}
+	return all, nil
+}
+
+// unverified is every follow-up of the agent's report r on a unit that failed its checks, with its red test
+// as the agent left it in clone, if any, and verdicts saying so: none is proven on the unit's work.
+func unverified(clone string, r map[string]any) (out []followUp, verdicts []string, err error) {
+	out, err = reported(r)
+	for n, f := range out {
+		if filepath.IsLocal(f.RedTest) {
+			b, _ := os.ReadFile(filepath.Join(clone, ".atm", "follow-ups", strconv.Itoa(n+1), filepath.FromSlash(f.RedTest)))
+			out[n].Test = string(b)
+		}
+		verdicts = append(verdicts, f.RedTest+": to follow-ups.json, not verified")
+	}
+	return out, verdicts, err
 }
 
 // followUps sorts the follow-ups of the agent's report r on its unit's work in clone, with verdicts saying
 // where each went. Follow-up n's red test, .atm/follow-ups/<n>/<red_test>, runs alone at red_test with tmpl
-// and must fail, or the follow-up is rejected. An accepted one goes to in when its criterion is a sentence
-// of the issue's body, to out otherwise.
+// and must fail, or the follow-up is rejected. An accepted one, verified, goes to in when its criterion is a
+// sentence of the issue's body, to out otherwise.
 func followUps(clone string, r map[string]any, body, tmpl string) (in, out []followUp, verdicts []string,
 	err error) {
-	b, _ := json.Marshal(r["follow_ups"])
-	var all []followUp
-	if err := json.Unmarshal(b, &all); err != nil {
-		return nil, nil, nil, fmt.Errorf("invalid follow_ups in the agent report: %w", err)
+	all, err := reported(r)
+	if err != nil {
+		return nil, nil, nil, err
 	}
 	for n, f := range all {
 		why, err := red(clone, n+1, &f, tmpl)
+		f.Verified = true
 		switch {
 		case err != nil:
 			return in, out, verdicts, err
