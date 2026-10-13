@@ -570,45 +570,74 @@ func (e event) cursorSkillLoads(skill, clone string) []string {
 
 // cursorShellReads proves a direct literal read of the installed skill, not arbitrary shell execution.
 func cursorShellReads(command string, exact func(string) bool) bool {
+	words, ok := cursorShellWords(command)
+	if !ok {
+		return false
+	}
+	return cursorCatReads(words, exact) || cursorSedReads(words, exact) || cursorHeadTailReads(words, exact)
+}
+
+func cursorShellWords(command string) ([]string, bool) {
 	file, err := syntax.NewParser().Parse(strings.NewReader(command), "")
 	if err != nil || len(file.Stmts) != 1 {
-		return false
+		return nil, false
 	}
 	stmt := file.Stmts[0]
 	call, ok := stmt.Cmd.(*syntax.CallExpr)
 	if !ok || stmt.Negated || stmt.Background || len(stmt.Redirs) != 0 || len(call.Assigns) != 0 {
-		return false
+		return nil, false
 	}
-	var words []string
+	words := make([]string, 0, len(call.Args))
 	for _, arg := range call.Args {
 		word, literal := literalWord(arg)
 		if !literal {
-			return false
+			return nil, false
 		}
 		words = append(words, word)
 	}
+	return words, true
+}
+
+func cursorCatReads(words []string, exact func(string) bool) bool {
 	if len(words) == 3 && words[0] == "cat" && words[1] == "--" {
 		return exact(words[2])
 	}
-	if len(words) == 2 && (words[0] == "cat" || words[0] == "/bin/cat") {
-		return exact(words[1])
+	return len(words) == 2 && (words[0] == "cat" || words[0] == "/bin/cat") && exact(words[1])
+}
+
+func cursorSedReads(words []string, exact func(string) bool) bool {
+	if len(words) != 4 || !oneOf(words[0], "sed", "/bin/sed", "/usr/bin/sed") ||
+		words[1] != "-n" || !sedPrintRange(words[2]) {
+		return false
 	}
-	if len(words) == 4 && (words[0] == "sed" || words[0] == "/bin/sed" || words[0] == "/usr/bin/sed") &&
-		words[1] == "-n" && sedPrintRange(words[2]) {
-		return exact(words[3])
+	return exact(words[3])
+}
+
+func cursorHeadTailReads(words []string, exact func(string) bool) bool {
+	if len(words) == 0 || !oneOf(words[0], "head", "tail", "/usr/bin/head", "/usr/bin/tail") {
+		return false
 	}
-	if len(words) > 0 && (words[0] == "head" || words[0] == "tail" || words[0] == "/usr/bin/head" || words[0] == "/usr/bin/tail") {
-		var count, path string
-		switch {
-		case len(words) == 3 && strings.HasPrefix(words[1], "-n") && len(words[1]) > 2:
-			count, path = words[1][2:], words[2]
-		case len(words) == 3 && strings.HasPrefix(words[1], "-") && len(words[1]) > 1:
-			count, path = words[1][1:], words[2]
-		case len(words) == 4 && words[1] == "-n":
-			count, path = words[2], words[3]
-		}
-		if positiveDecimal(count) {
-			return exact(path)
+	count, path := cursorHeadTailArgs(words)
+	return positiveDecimal(count) && exact(path)
+}
+
+func cursorHeadTailArgs(words []string) (string, string) {
+	if len(words) == 3 && strings.HasPrefix(words[1], "-n") && len(words[1]) > 2 {
+		return words[1][2:], words[2]
+	}
+	if len(words) == 3 && strings.HasPrefix(words[1], "-") && len(words[1]) > 1 {
+		return words[1][1:], words[2]
+	}
+	if len(words) == 4 && words[1] == "-n" {
+		return words[2], words[3]
+	}
+	return "", ""
+}
+
+func oneOf(value string, options ...string) bool {
+	for _, option := range options {
+		if value == option {
+			return true
 		}
 	}
 	return false
