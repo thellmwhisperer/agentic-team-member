@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"go/ast"
 	goparser "go/parser"
-	goscan "go/scanner"
 	"go/token"
 	"io"
 	"maps"
@@ -890,7 +889,7 @@ func literalShellWord(word *syntax.Word) (string, bool) {
 	for _, part := range word.Parts {
 		switch part := part.(type) {
 		case *syntax.Lit:
-			if strings.ContainsAny(part.Value, "*?[{}") {
+			if strings.ContainsAny(part.Value, "*?[{}~") {
 				return "", false
 			}
 		case *syntax.BraceExp, *syntax.ExtGlob:
@@ -911,46 +910,40 @@ func goTestSource(src []byte) bool {
 	}
 	test := false
 	for _, decl := range f.Decls {
-		if fn, ok := decl.(*ast.FuncDecl); ok && fn.Recv == nil && strings.HasPrefix(fn.Name.Name, "Test") {
+		if fn, ok := decl.(*ast.FuncDecl); ok && goTestFunc(fn) {
 			test = true
 		}
 	}
-	return test && goURLsAreLiteral(src)
+	return test
 }
 
-func goURLsAreLiteral(src []byte) bool {
-	urls := link.FindAllIndex(src, -1)
-	if len(urls) == 0 {
-		return true
+func goTestFunc(fn *ast.FuncDecl) bool {
+	if fn.Recv != nil || fn.Type.TypeParams != nil || fn.Type.Results != nil && len(fn.Type.Results.List) != 0 ||
+		fn.Type.Params == nil || len(fn.Type.Params.List) != 1 || len(fn.Type.Params.List[0].Names) > 1 {
+		return false
 	}
-	fset := token.NewFileSet()
-	file := fset.AddFile("", fset.Base(), len(src))
-	var scan goscan.Scanner
-	scan.Init(file, src, nil, goscan.ScanComments)
-	var spans [][2]int
-	for {
-		pos, tok, lit := scan.Scan()
-		if tok == token.EOF {
-			break
-		}
-		if tok == token.STRING || tok == token.COMMENT {
-			start := file.Offset(pos)
-			spans = append(spans, [2]int{start, start + len(lit)})
-		}
+	name := fn.Name.Name
+	if !strings.HasPrefix(name, "Test") {
+		return false
 	}
-	for _, url := range urls {
-		found := false
-		for _, span := range spans {
-			if url[0] >= span[0] && url[1] <= span[1] {
-				found = true
-				break
-			}
-		}
-		if !found {
+	if len(name) > len("Test") {
+		r, _ := utf8.DecodeRuneInString(name[len("Test"):])
+		if unicode.IsLower(r) {
 			return false
 		}
 	}
-	return true
+	param, ok := fn.Type.Params.List[0].Type.(*ast.StarExpr)
+	if !ok {
+		return false
+	}
+	switch typ := param.X.(type) {
+	case *ast.Ident:
+		return typ.Name == "T"
+	case *ast.SelectorExpr:
+		return typ.Sel.Name == "T"
+	default:
+		return false
+	}
 }
 
 func goTestContinuation(stmts []*syntax.Stmt) bool {
