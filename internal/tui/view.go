@@ -61,20 +61,21 @@ func (m *Model) View() string {
 	width := max(m.width, 40)
 	available := max(0, m.height-lipgloss.Height(m.footer()))
 	if width < twoColumns || !m.sidebar() {
-		atmHeight, rightHeight, panelGap := available, 0, 0
+		atmHeight, rightHeight := available, 0
 		if m.sidebar() {
-			atmHeight, rightHeight, panelGap = stackedHeights(available, m.rightMinimum(width))
+			atmHeight, rightHeight = stackedHeights(available, m.rightMinimum(width))
 		}
-		body := m.atm(width, atmHeight)
-		m.pipelineBounds = bounds{width: width, height: lipgloss.Height(body)}
+		atmBox := m.atm(width, atmHeight)
+		m.pipelineBounds = bounds{width: width, height: lipgloss.Height(atmBox)}
 		m.historyBounds = bounds{width: width}
 		m.historyHeight = 0
-		if more := m.right(width, rightHeight); more != "" {
-			m.historyBounds.y = lipgloss.Height(body) + panelGap
+		panels := []string{atmBox}
+		if rightBox := m.right(width, rightHeight); rightBox != "" {
+			m.historyBounds.y = lipgloss.Height(atmBox)
 			m.historyBounds.height = m.historyHeight
-			body += strings.Repeat("\n", panelGap) + more
+			panels = append(panels, rightBox)
 		}
-		return body + m.footer()
+		return strings.Join(panels, "\n") + m.footer()
 	}
 	left := min(max(width/3, leftMin), leftMax)
 	rightWidth := width - left - gap
@@ -89,28 +90,26 @@ func (m *Model) View() string {
 }
 
 const (
-	panelGapRows        = 2
 	boxBorderRows       = 2
 	minimumBoxRows      = boxBorderRows + 1
 	minimumPipelineRows = minimumBoxRows + 2
 )
 
-func stackedHeights(available, rightMinimum int) (int, int, int) {
-	panelGap := min(panelGapRows, max(0, available-minimumPipelineRows-rightMinimum))
-	panelBudget := max(0, available-panelGap)
-	minimum := minimumPipelineRows + rightMinimum
-	if panelBudget < minimum {
-		return max(1, panelBudget/2), max(1, panelBudget-panelBudget/2), panelGap
+func stackedHeights(available, rightMinimum int) (int, int) {
+	right := max(rightMinimum, available/3)
+	atm := available - right
+	if atm < minimumPipelineRows {
+		atm = minimumPipelineRows
+		right = available - atm
 	}
-	atm := min(panelBudget-rightMinimum, max(minimumPipelineRows, panelBudget*2/3))
-	return atm, panelBudget - atm, panelGap
+	return max(1, atm), max(1, right)
 }
 
 func (m *Model) rightMinimum(width int) int {
 	log := m.running() && len(m.output) > 0
 	if m.agentRuns() {
 		if log {
-			return minimumBoxRows*2 + 1
+			return minimumBoxRows * 2
 		}
 		return minimumBoxRows
 	}
@@ -122,7 +121,7 @@ func (m *Model) rightMinimum(width int) int {
 		if top == 0 {
 			return minimumBoxRows
 		}
-		return top + panelGapRows + minimumBoxRows
+		return top + minimumBoxRows
 	}
 	return top
 }
@@ -255,11 +254,10 @@ func (m *Model) right(width, height int) string {
 	top := ""
 	if m.agentRuns() {
 		if log {
-			gap := min(panelGapRows, max(1, height-2*minimumBoxRows))
-			logLines := min(len(m.output), max(1, min(height/3-boxBorderRows, height-gap-2*boxBorderRows-minimumBoxRows)))
+			logLines := min(len(m.output), max(1, min(height/3-boxBorderRows, height-minimumBoxRows-boxBorderRows)))
 			logBox := m.logBox(width, logLines)
-			top = m.agentBox(width, max(1, height-gap-lipgloss.Height(logBox)-boxBorderRows))
-			return strings.Join([]string{top, logBox}, strings.Repeat("\n", gap))
+			top = m.agentBox(width, max(1, height-lipgloss.Height(logBox)-boxBorderRows))
+			return strings.Join([]string{top, logBox}, "\n")
 		}
 		return m.agentBox(width, max(1, height-boxBorderRows))
 	}
@@ -271,15 +269,11 @@ func (m *Model) right(width, height int) string {
 		boxes = append(boxes, top)
 	}
 	if log {
-		gap := 0
-		if top != "" {
-			gap = min(panelGapRows, max(0, height-lipgloss.Height(top)-minimumBoxRows))
-		}
-		logLines := min(len(m.output), max(1, height-lipgloss.Height(top)-gap-boxBorderRows))
+		logLines := min(len(m.output), max(1, height-lipgloss.Height(top)-boxBorderRows))
 		boxes = append(boxes, m.logBox(width, logLines))
-		return strings.Join(boxes, strings.Repeat("\n", gap))
+		return strings.Join(boxes, "\n")
 	}
-	return strings.Join(boxes, strings.Repeat("\n", panelGapRows))
+	return strings.Join(boxes, "\n")
 }
 
 func (m *Model) running() bool {
