@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -239,11 +240,13 @@ func watchGate(
 	}
 }
 
-// failedFirst says whether the delivery of run label failed before g saw a gate: none comes.
+// failedFirst says whether the delivery of run label failed before g saw a gate and before its command, which
+// starts the gate, ran: none comes.
 func (g *gate) failedFirst(root, label string) bool {
 	var report verdict
 	b, _ := os.ReadFile(filepath.Join(runDir(root, label), "report.json"))
-	return !g.seen && json.Unmarshal(b, &report) == nil && report.FailedNode == "delivery"
+	return !g.seen && json.Unmarshal(b, &report) == nil && report.FailedNode == "delivery" &&
+		!slices.ContainsFunc(report.Commands, func(c cmdResult) bool { return c.Name == "delivery" })
 }
 
 func gatePRState(root, branch string) (string, error) {
