@@ -99,6 +99,59 @@ func TestAgentBoxRendersMarkdownBold(t *testing.T) {
 	}
 }
 
+func TestAgentBoxRendersUnderscoreAndVariableBacktickMarkdown(t *testing.T) {
+	raw, lines := agentBoxSays(t, 100, "__Bold__ and _emphasis_ with ``a `tick` and  double spaces``.")
+	if want := []string{"✎ Bold and emphasis with a `tick` and  double spaces."}; !reflect.DeepEqual(lines, want) {
+		t.Fatalf("Agent box lines:\n%q\nwant:\n%q", lines, want)
+	}
+	if !strings.Contains(raw, "\x1b[1mBold") || !strings.Contains(raw, "\x1b[3memphasis") {
+		t.Fatalf("Markdown styles are missing:\n%q", raw)
+	}
+}
+
+func TestAgentBoxPreservesInlineCodeWhitespaceWhenWrapping(t *testing.T) {
+	for _, text := range []string{
+		"`abcdefghijklmnopqrst  abcdefghijklmnop`",
+		"- `abcdefghijklmnopqrst  abcdefghijklmnop`",
+	} {
+		raw, _ := agentBoxSays(t, 32, text)
+		var rendered []string
+		for _, line := range strings.Split(ansi.Strip(raw), "\n") {
+			if !strings.HasPrefix(line, "│ ") {
+				continue
+			}
+			line = strings.TrimRight(strings.TrimSuffix(strings.TrimPrefix(line, "│ "), " │"), " ")
+			if line == "" {
+				continue
+			}
+			if len(rendered) > 0 {
+				line = strings.TrimPrefix(line, "  ")
+				if strings.HasPrefix(text, "-") {
+					line = strings.TrimPrefix(line, "  ")
+				}
+			}
+			if len(rendered) == 0 {
+				line = strings.TrimPrefix(line, "✎ ")
+				line = strings.TrimPrefix(line, "• ")
+			}
+			rendered = append(rendered, line)
+		}
+		if got := strings.Join(rendered, ""); got != "abcdefghijklmnopqrst  abcdefghijklmnop" {
+			t.Fatalf("inline code changed while wrapping %q: %q", text, got)
+		}
+	}
+}
+
+func TestAgentBoxOnlyClosesFenceWithMatchingMarkerAndLength(t *testing.T) {
+	raw, lines := agentBoxSays(t, 60, "````go\n~~~\n```\n  kept  \n````\nafter")
+	if want := []string{"✎ ~~~", "```", "kept", "after"}; !reflect.DeepEqual(lines, want) {
+		t.Fatalf("Agent box lines:\n%q\nwant:\n%q", lines, want)
+	}
+	if !strings.Contains(ansi.Strip(raw), "  kept  ") {
+		t.Fatalf("fenced code whitespace changed:\n%s", ansi.Strip(raw))
+	}
+}
+
 func TestAgentBoxRendersMarkdownWithinANarrowPanel(t *testing.T) {
 	const width = 32
 	raw, lines := agentBoxSays(t, width, "Plan for *the* fix:\n- read `view.go` and the tests around it\n"+
@@ -123,7 +176,7 @@ func TestAgentBoxRendersMarkdownWithinANarrowPanel(t *testing.T) {
 		}
 	}
 	if stripped := ansi.Strip(raw); !strings.Contains(stripped, "│       return 1") ||
-		!strings.Contains(stripped, "│     tests around it") {
+		!strings.Contains(stripped, "│      tests around it") {
 		t.Fatalf("indentation not kept:\n%s", stripped)
 	}
 }
