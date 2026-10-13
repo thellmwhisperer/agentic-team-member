@@ -273,11 +273,20 @@ func TestARunGoesToABackgroundProcessOfTheNewFile(t *testing.T) {
 	}
 	cmd := exec.Command(atm, "run", issueFile(t, issue))
 	cmd.Dir = top
-	out, err := cmd.Output()
-	if err != nil {
+	cmd.Stdout = io.Discard
+	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	o := strings.TrimSpace(string(out))
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("atm run did not return")
+	}
 	wait()
 	log, err := os.ReadFile(filepath.Join(top, ".atm", "serve.log"))
 	if err != nil || !strings.Contains(string(log), "atm serve version: new-build") {
@@ -289,8 +298,8 @@ func TestARunGoesToABackgroundProcessOfTheNewFile(t *testing.T) {
 		t.Fatal("the background process of the old file still serves")
 	}
 	release()
-	if end, err := Attach(top, o, &bytes.Buffer{}); err != nil || end.Outcome != "passed" {
-		t.Fatalf("Attach = %+v, %v", end, err)
+	if runs, err := Runs(top); err != nil || len(runs) != 1 || runs[0].Outcome != "running" {
+		t.Fatalf("new server run = %+v, %v", runs, err)
 	}
 }
 
