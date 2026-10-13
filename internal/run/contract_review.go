@@ -190,14 +190,7 @@ func (a agent) repairContract(root, clone string, i Issue, history []proof, c co
 	if err != nil {
 		return err
 	}
-	metadata, err := deliveryMetadata(clone)
-	if err != nil {
-		return err
-	}
-	if metadata != r.metadata {
-		return errors.New("contract repair changed delivery metadata; delivery blocked")
-	}
-	if err := moved(clone, head, "contract repair worker"); err != nil {
+	if err := checkRepairState(clone, r.metadata, head); err != nil {
 		return err
 	}
 	tree, err := snapshot(clone)
@@ -235,7 +228,19 @@ func (a agent) repairContract(root, clone string, i Issue, history []proof, c co
 	return err
 }
 
-func (a agent) contractReviewRound(clone, base string, i Issue, metadata string, round int) (r contractReview, err error) {
+func checkRepairState(clone, before, head string) error {
+	metadata, err := deliveryMetadata(clone)
+	if err != nil {
+		return err
+	}
+	if metadata != before {
+		return errors.New("contract repair changed delivery metadata; delivery blocked")
+	}
+	return moved(clone, head, "contract repair worker")
+}
+
+func (a agent) contractReviewRound(clone, base string, i Issue, metadata string,
+	round int) (r contractReview, err error) {
 	head, err := git(clone, "rev-parse", "HEAD")
 	if err != nil {
 		return r, err

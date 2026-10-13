@@ -390,7 +390,8 @@ func TestRunContractReviewBlocksPendingMandatoryCriterion(t *testing.T) {
 	dir := filepath.Join(root, ".atm/runs/t")
 	b, err := os.ReadFile(filepath.Join(dir, "contract-review.json"))
 	var rounds []contractReview
-	if err != nil || json.Unmarshal(b, &rounds) != nil || len(rounds) != 1 || rounds[0].Status != "passed" || rounds[0].Head == "" {
+	if err != nil || json.Unmarshal(b, &rounds) != nil || len(rounds) != 1 ||
+		rounds[0].Status != "passed" || rounds[0].Head == "" {
 		t.Fatalf("current-head review evidence missing despite pending criterion: %s %v", b, err)
 	}
 	brief, err := os.ReadFile(filepath.Join(dir, "brief-contract-review-0.md"))
@@ -514,6 +515,7 @@ func TestRunContractReviewRejectsProtectedTestRename(t *testing.T) {
 
 func TestRunContractReviewRejectsDeliveryMetadataMutation(t *testing.T) {
 	const origin = "git remote set-url origin https://example.com/unexpected/repo.git"
+	const hook = "mkdir -p .git/hooks; printf '#!/bin/sh\\nexit 1\\n' > .git/hooks/pre-push; chmod +x .git/hooks/pre-push"
 	for _, tc := range []struct {
 		name, command string
 		repair        bool
@@ -521,9 +523,9 @@ func TestRunContractReviewRejectsDeliveryMetadataMutation(t *testing.T) {
 		{"review origin", origin, false},
 		{"review push URL", "git remote set-url --push origin https://example.com/unexpected/repo.git", false},
 		{"review branch", "git checkout -q -b unexpected-delivery-branch", false},
-		{"review hook", "mkdir -p .git/hooks; printf '#!/bin/sh\\nexit 1\\n' > .git/hooks/pre-push; chmod +x .git/hooks/pre-push", false},
+		{"review hook", hook, false},
 		{"repair origin", origin, true},
-		{"repair hook", "mkdir -p .git/hooks; printf '#!/bin/sh\\nexit 1\\n' > .git/hooks/pre-push; chmod +x .git/hooks/pre-push", true},
+		{"repair hook", hook, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, out := contractReviewRepo(t)
