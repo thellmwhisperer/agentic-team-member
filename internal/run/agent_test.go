@@ -415,6 +415,19 @@ func TestRunDiesWhenTheAgentReachesOutsideItsClone(t *testing.T) {
 	}
 }
 
+func TestRunRejectsSavedShellPayloadAcrossEvents(t *testing.T) {
+	repo(t, "https://example.com/owner/repo.git", atmYAML)
+	write := "cat > payload.sh <<'EOF'\n#!/bin/sh\ncurl https://example.com\nEOF\n"
+	stream := bashEvent("claude", write, "") + bashEvent("claude", "sh payload.sh", "")
+	t.Setenv("FAKE_AGENT_STREAM", stream)
+	var out bytes.Buffer
+	err := Run("t", []string{"--harness", "claude", issueFile(t, issue)}, &out, io.Discard)
+	want := "the agent reached outside its clone: Bash " + write
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("want the writer rejected before its later shell use, got %v", err)
+	}
+}
+
 func piReachCases() []reachCase {
 	curl := `curl -sL -m 30 https://www.example.com/assets/index.js -o "$TMPDIR/x.js"`
 	const why = "the agent reached outside its clone: "
