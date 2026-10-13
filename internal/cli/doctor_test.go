@@ -25,10 +25,15 @@ func onPath(t *testing.T, names ...string) {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
-// lines is doctor's output, one check a line, checked to start with ok or fail.
+// lines is doctor's output, one check a line, checked to start with ok or fail, without its last line, checked
+// to say how to say hello to the agent.
 func lines(t *testing.T, out string) []string {
 	t.Helper()
 	ls := strings.Split(strings.TrimSpace(out), "\n")
+	if !strings.HasPrefix(ls[len(ls)-1], "run atm doctor --agent to say hello to ") {
+		t.Fatalf("want the last line to say how to say hello to the agent, got\n%s", out)
+	}
+	ls = ls[:len(ls)-1]
 	for _, l := range ls {
 		if !strings.HasPrefix(l, "ok ") && !strings.HasPrefix(l, "fail ") {
 			t.Fatalf("want every line to start with ok or fail, got %q in\n%s", l, out)

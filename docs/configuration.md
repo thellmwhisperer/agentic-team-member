@@ -78,7 +78,7 @@ Run every command from inside the repository it works on.
 | Command | Does |
 |---------|------|
 | `atm init` | Writes a commented `.atm.yaml` with every key empty, unless there is one, and adds `/.atm/` to `.gitignore` unless it is there. Run twice, it changes nothing |
-| `atm doctor` | Checks git, the configured agent CLI on `PATH`, `gh` when `origin` is on GitHub, and that `.atm.yaml` declares every key. One `ok` or `fail` line each; every check runs, and any failure exits non-zero |
+| `atm doctor [--agent]` | Checks git, the configured agent CLI on `PATH`, `gh` when `origin` is on GitHub, and that `.atm.yaml` declares every key. One `ok` or `fail` line each; every check runs, and any failure exits non-zero. Its last line says `run atm doctor --agent to say hello to <harness>`: it makes no model call. With `--agent` it says hello instead, see [saying hello to the agent](#saying-hello-to-the-agent) |
 | `atm run [flags] <issue>` | Starts a run. On a terminal it shows the run's screen until it ends and exits with the run's code; off one it prints the run's label and returns. See [resuming a failed run](#resuming-a-failed-run) |
 | `atm status` | Each run going: label, step, duration, issue; or `nothing runs` |
 | `atm attach [run]` | The run's screen, the last one going by default, until it ends |
@@ -94,6 +94,17 @@ have `run`, `issue`, `step` and `duration` for `status`, and `run`, `issue`,
 `outcome`, `failed_node`, `duration` and `report` for `runs`.
 
 The exit codes are in the [README](../README.md#run-it).
+
+### Saying hello to the agent
+
+`atm doctor --agent` starts the configured agent (`harness`, `model`,
+`effort`) with the command line a run builds, in a temporary directory it then
+removes, with pipes and no terminal, and gives it one brief: `Reply with the
+single word OK and nothing else.` It passes when the agent's stream ends within
+2 minutes with a final message containing `OK`, read as a run reads it. Its
+last line is `ok agent: <harness> <model> answered in <duration>`, or
+`FAIL agent: <harness>: <cause>: <its last 5 lines>`, the cause an exit code,
+a signal, `silent`, `timed out after 2 min 00 s` or `no OK in its final message`.
 
 ## `atm run` flags
 

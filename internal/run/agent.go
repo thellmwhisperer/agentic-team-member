@@ -122,10 +122,8 @@ func (a agent) run(clone, name, skill, brief string, check func(map[string]any) 
 	if err := inheritCloneLease(cmd, clone); err != nil {
 		return ev, err
 	}
-	cmd.Env = append(slices.DeleteFunc(os.Environ(), func(kv string) bool {
-		return strings.HasPrefix(kv, "CLAUDE_CODE_CHILD_SESSION=") // set, the agent's transcripts are off
-	}), a.env...)
-	s := stream{skill: skill, live: relative(clone, liveIn(clone))}
+	cmd.Env = agentEnv(a.env)
+	s := stream{skill: skill, live: relative(clone, liveIn(clone))}oes)
 	err = s.read(cmd, f, a.Harness)
 	if a.Harness == "codex" {
 		b, _ := os.ReadFile(final) // none is no report
@@ -201,6 +199,14 @@ func lastRune(s string) rune {
 
 func clonePathRune(r rune) bool {
 	return unicode.IsLetter(r) || unicode.IsNumber(r) || strings.ContainsRune("_-.\\/", r)
+// agentEnv is the agent's environment: atm's, but CLAUDE_CODE_CHILD_SESSION, then env.
+func agentEnv(env []string) []string {
+	return append(slices.DeleteFunc(os.Environ(), func(kv string) bool {
+		return strings.HasPrefix(kv, "CLAUDE_CODE_CHILD_SESSION=") // set, the agent's transcripts are off
+	}), env...)
+}
+
+oes)
 }
 
 // report is the agent's report, the last JSON object of its final message, which check accepts.
