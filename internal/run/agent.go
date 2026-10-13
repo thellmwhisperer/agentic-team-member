@@ -808,20 +808,6 @@ func fetchCall(call *syntax.CallExpr) bool {
 }
 
 func literalFragments(word *syntax.Word) string {
-	var text strings.Builder
-	var walk func([]syntax.WordPart)
-	walk = func(parts []syntax.WordPart) {
-		for _, part := range parts {
-			switch part := part.(type) {
-			case *syntax.Lit:
-				text.WriteString(part.Value)
-			case *syntax.SglQuoted:
-				text.WriteString(part.Value)
-			case *syntax.DblQuoted:
-				walk(part.Parts)
-			}
-		}
-	}
-	walk(word.Parts)
-	return text.String()
+	text, _ := literalWord(word)
+	return text
 }
