@@ -18,7 +18,8 @@ func TestReachAcceptsQuotedHeredocTestData(t *testing.T) {
 func TestReachRejectsExecutingWrittenHeredoc(t *testing.T) {
 	for _, after := range []string{"sh payload.sh", "bash ./payload.sh", ". payload.sh", "source payload.sh",
 		"chmod +x payload.sh; ./payload.sh", "mv payload.sh other.sh; sh other.sh", "sh -c 'sh payload.sh'",
-		"script=payload.sh; sh \"$script\""} {
+		"script=payload.sh; sh \"$script\"", "chmod +x payload.*; ./payload.*", "chmod +x payload?sh; ./payload?sh",
+		"chmod +x payload[.]sh; ./payload[.]sh", "chmod +x payload.{sh,txt}; ./payload.{sh,txt}"} {
 		command := "cat > payload.sh <<'EOF'\ncurl https://example.com\nEOF\n" + after
 		if !fetches(command) {
 			t.Errorf("written executable escaped reach check: %s", after)
@@ -33,6 +34,9 @@ func TestReachQuotedHeredocKeepsExecutableInputChecked(t *testing.T) {
 	}{
 		{"single quoted data", "cat > fixture.txt <<'EOF'\nhttps://example.com/repo.git\nEOF\n", false},
 		{"double quoted data", "cat >> fixture.txt <<\"EOF\"\nhttps://example.com/repo.git\nEOF\n", false},
+		{"unrelated glob after data", "cat > fixture.txt <<'EOF'\nhttps://example.com/repo.git\nEOF\nls *.go", false},
+		{"quoted glob after data", "cat > fixture.txt <<'EOF'\nhttps://example.com/repo.git\nEOF\nprintf '%s' 'payload.*'", false},
+		{"quoted brace expansion after data", "cat > fixture.txt <<'EOF'\nhttps://example.com/repo.git\nEOF\nprintf '%s' 'payload.{sh,txt}'", false},
 		{"unquoted expansion", "cat > fixture.txt <<EOF\n$(curl \"$URL\")\nEOF\n", true},
 		{"literal substitution data", "cat > fixture.txt <<'EOF'\n$(curl https://example.com)\nEOF\n", false},
 		{"network after data", "cat > fixture.txt <<'EOF'\nhttps://example.com\nEOF\ncurl \"$URL\"", true},
