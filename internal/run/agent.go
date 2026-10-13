@@ -220,8 +220,8 @@ func testFile(r map[string]any) error {
 	return nil
 }
 
-// placeSkill puts skill where harness finds it in clone, outside git, records clone as the agent finds it, with
-// before, and returns the skill's directory.
+// placeSkill puts skill where the harness finds it in clone, outside git, records the clone as the agent finds it,
+// and returns the skill's directory.
 func placeSkill(clone, harness, skill string) (string, error) {
 	rel := skillDirs[harness] + "/" + skill
 	dir := filepath.Join(clone, filepath.FromSlash(rel))
