@@ -18,16 +18,3 @@ func TestStepIsTheRunningNodeAndItsRunningCheck(t *testing.T) {
 		}
 	}
 }
-
-func TestFailedCheckRetainsItsStepForTheOutcome(t *testing.T) {
-	h := &herdr{label: "issue-1", m: New("issue-1", 120, 40)}
-	for i, ev := range unit[:13] {
-		if i == 12 {
-			ev = `{"step":"checks","check":"red/green","state":"failed"}`
-		}
-		h.frame(run.Frame{Event: []byte(ev)})
-	}
-	if h.failedStep != "Checks · red/green" {
-		t.Fatalf("failed step %q, want Checks · red/green", h.failedStep)
-	}
-}

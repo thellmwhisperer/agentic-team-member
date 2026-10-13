@@ -33,13 +33,17 @@ func Show(root, label, start string, in, out *os.File) (o run.Outcome, detached 
 	m.keys = keys
 	p := tea.NewProgram(m, tea.WithInput(in), tea.WithOutput(out), tea.WithAltScreen())
 	d := &delivery{p: p, in: in, out: out, keys: keys}
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		o, err := followWithHerdr(root, label, start, &[2]int{w, h}, keys, d.frame, follow)
 		d.giveBack()
 		p.Send(ended{o, err})
 	}()
-	defer close(keys)
-	if _, err := p.Run(); err != nil {
+	_, err = p.Run()
+	close(keys)
+	<-done
+	if err != nil {
 		return o, false, err
 	}
 	_, _ = fmt.Fprintln(out, m.View()) // the alternate screen is gone: the last one stays

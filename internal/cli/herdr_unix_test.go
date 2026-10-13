@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fakeHerdr puts a herdr first on PATH that appends its arguments, one call a line, to the file it returns, and
@@ -96,9 +97,10 @@ func TestEveryRunOnTheScreenShowsInHerdr(t *testing.T) {
 		t.Fatalf("herdr got:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 
-	for i, env := range []struct{ key, value string }{{"NO_COLOR", "1"}, {"TERM", "dumb"}} {
+	for i, env := range []struct{ noColor, term string }{{"1", "xterm-256color"}, {"", "dumb"}} {
 		label := fmt.Sprintf("chore-%d", i+3)
-		t.Setenv(env.key, env.value)
+		t.Setenv("NO_COLOR", env.noColor)
+		t.Setenv("TERM", env.term)
 		calls = fakeHerdr(t, "0")
 		if _, code := onTerminal(t, "run", "chore.md"); code != 0 {
 			t.Fatalf("plain run exit %d", code)
@@ -124,6 +126,101 @@ func TestEveryRunOnTheScreenShowsInHerdr(t *testing.T) {
 	if got := herdrCalls(t, calls); len(got) != 10 {
 		t.Fatalf("herdr got %d calls, want 10: %q", len(got), got)
 	}
+}
+
+func TestAttachWithoutRunsDoesNotReportHerdr(t *testing.T) {
+	dir := repo(t, "https://example.com/o/r.git")
+	cleanBackgroundServer(t, dir)
+	t.Setenv("HERDR_ENV", "1")
+	t.Setenv("HERDR_PANE_ID", "wX:p1")
+	calls := fakeHerdr(t, "0")
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("TERM", "xterm-256color")
+	_, _ = onTerminal(t, "attach")
+	t.Setenv("NO_COLOR", "1")
+	_, _ = onTerminal(t, "attach")
+	if got := herdrCalls(t, calls); len(got) != 0 {
+		t.Fatalf("attach without a run called herdr: %q", got)
+	}
+}
+
+func TestDefaultAttachKeepsSelectedRunWhenAnotherStarts(t *testing.T) {
+	repoDir, _ := resumeRepo(t, "", "")
+	if err := os.WriteFile(filepath.Join(repoDir, "second.md"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	startRun := func(task string) string {
+		t.Helper()
+		c := root()
+		c.SetArgs([]string{"run", task})
+		var out strings.Builder
+		c.SetOut(&out)
+		if err := c.Execute(); err != nil {
+			t.Fatal(err)
+		}
+		return strings.TrimSpace(out.String())
+	}
+	startRun("chore.md")
+
+	dir := t.TempDir()
+	ready, unblock, calls := filepath.Join(dir, "ready"), filepath.Join(dir, "unblock"), filepath.Join(dir, "calls")
+	bin := filepath.Join(dir, "herdr")
+	script := "#!/bin/sh\nif [ \"$2\" = report-agent-session ]; then : > \"$HERDR_READY\"; while [ ! -e \"$HERDR_RELEASE\" ]; do sleep 0.01; done; fi\nprintf '%s|' \"$@\" >> \"$HERDR_LOG\"; echo >> \"$HERDR_LOG\"\n"
+	if err := os.WriteFile(bin, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HERDR_ENV", "1")
+	t.Setenv("HERDR_PANE_ID", "wX:p1")
+	t.Setenv("HERDR_BIN_PATH", bin)
+	t.Setenv("HERDR_READY", ready)
+	t.Setenv("HERDR_RELEASE", unblock)
+	t.Setenv("HERDR_LOG", calls)
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("TERM", "xterm-256color")
+	result := make(chan struct {
+		shown string
+		code  int
+	}, 1)
+	go func() {
+		shown, code := onTerminal(t, "attach")
+		result <- struct {
+			shown string
+			code  int
+		}{shown, code}
+	}()
+	deadline := time.Now().Add(800 * time.Millisecond)
+	for {
+		if _, err := os.Stat(ready); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("attach did not report its selected session")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	secondRun := startRun("second.md")
+	if err := os.WriteFile(unblock, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got := <-result
+	if got.code != 0 || !strings.Contains(got.shown, "chore-1") || strings.Contains(got.shown, "second-1") {
+		t.Fatalf("attach followed the wrong run: exit %d, shown %q", got.code, got.shown)
+	}
+	b, err := os.ReadFile(calls)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), "--agent-session-id|chore-1|") {
+		t.Fatalf("herdr reported a different selected run: %q", b)
+	}
+	deadline = time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(filepath.Join(repoDir, ".atm", "runs", secondRun, "report.json")); err == nil {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("the interleaved run did not finish before cleanup")
 }
 
 func TestRunReportsWorkingBeforeIssueLoadingFails(t *testing.T) {
