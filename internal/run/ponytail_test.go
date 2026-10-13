@@ -199,7 +199,7 @@ func TestPonytailKeepsAShorterGreenCut(t *testing.T) {
 	if got := gitT(t, clone, "rev-parse", "HEAD~2"); got != sha {
 		t.Fatalf("want two commits on the base %s, HEAD~2 is %s", sha, got)
 	}
-	if got := gitT(t, clone, "log", "-1", "--format=%B", "HEAD~1"); got != "atm unit 1: Retry on timeout" {
+	if got := gitT(t, clone, "log", "-1", "--format=%B", "HEAD~1"); got != "fix: Retry on timeout\n\natm unit 1" {
 		t.Fatalf("unit commit: %q", got)
 	}
 	if got := gitT(t, clone, "show", "HEAD~1:a.txt"); got != "fixed\nextra\nmore" {

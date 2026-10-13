@@ -134,8 +134,8 @@ func TestRunChainsAFollowUpOnTheIssueUpToThreeUnits(t *testing.T) {
 		t.Fatalf("want three units, got %v", agents)
 	}
 	b, _ := os.ReadFile(got)
-	want := "ponytail: 1 cuts\natm unit 3: Retry on timeout\natm unit 2: Retry on timeout\n" +
-		"atm unit 1: Retry on timeout\ninit\n"
+	want := "ponytail: 1 cuts\nfeat: Retry on timeout\nfeat: Retry on timeout\n" +
+		"fix: Retry on timeout\ninit\n"
 	if string(b) != want {
 		t.Fatalf("want each unit committed on the one before, then the cut, got\n%s\nwant\n%s", b, want)
 	}
@@ -164,9 +164,13 @@ func TestRunLabelsDeliveredChainedUnitAndChecks(t *testing.T) {
 		t.Fatal(err)
 	}
 	dev := "atm <atm@example.com>|atm <atm@example.com>"
-	want := "atm unit 2: Retry on timeout|" + dev + "\natm unit 1: Retry on timeout|" + dev
+	want := "feat: Retry on timeout|" + dev + "\nfix: Retry on timeout|" + dev
 	if b, err := os.ReadFile(filepath.Join(got, "log")); err != nil || string(b) != want+"\n" {
-		t.Fatalf("want delivered unit numbers in commit history, got %q, %v", b, err)
+		t.Fatalf("want delivered unit types in commit history, got %q, %v", b, err)
+	}
+	clone := reader(t, got)("ATM_CLONE")
+	if b := gitT(t, clone, "log", "-2", "--format=%b"); b != "atm unit 2\n\natm unit 1" {
+		t.Fatalf("want delivered unit numbers in commit bodies, got %q", b)
 	}
 	checks := ends(t, &out, "checks")
 	if len(checks) != 2 || checks[0]["unit"] != float64(1) || checks[1]["unit"] != float64(2) {

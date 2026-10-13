@@ -109,12 +109,18 @@ unit's work: it must fail. One without its test, or whose test passes or
 hangs, is rejected. No model judges a follow-up.
 
 An accepted follow-up whose `criterion` is a sentence copied from the issue
-becomes the next unit, in the same clone: the unit before is committed as
-`atm unit <n>: <title>`, the red test is put in place, and the agent gets
+becomes the next unit, in the same clone: the unit before is committed as a
+unit commit, the red test is put in place, and the agent gets
 `brief-unit-<n>.md` to make it pass without editing it. The checks prove that
 unit red/green as a `feature`. Any other follow-up, and any past the third
 unit, goes to `follow-ups.json` in the run's directory, with its test, to
 become a new issue.
+
+A unit commit is a conventional commit, so release-please sees it: its
+subject is `<type>: <title>`, its body `atm unit <n>`. The type comes from the
+issue's `Type:`: `fix` and `hotfix` give `fix`, `feature` and `greenfield`
+`feat`, `refactor` `refactor`, `tests` `test`, `docs` `docs`, `chore` `chore`.
+A chained unit, a `feature`, is a `feat`.
 
 ## Slop detector
 
@@ -136,7 +142,7 @@ the cut, if the cut:
 | fails any unit's red/green proof again, or the last unit's checks |
 
 A kept cut is its own commit, `ponytail: <n> cuts`, one line per finding,
-after `atm unit <n>: <title>`, with one slopslint tombstone per finding under
+after the unit commit, with one slopslint tombstone per finding under
 `.slop/tombstones/`. Both commits use the repository's git identity; none, or
 an email ending in `@localhost`, fails the run.
 
@@ -144,7 +150,7 @@ an email ending in `@localhost`, fails the run.
 
 When `delivery` is set, the clone goes on a new branch
 `atm/<title slug>-<timestamp>`, whatever is left uncommitted is committed as
-the next `atm unit`, and the clone's `origin` becomes the repository's. Every
+the next unit commit, and the clone's `origin` becomes the repository's. Every
 commit after the base must carry the repository's git identity. Then the
 command runs with `sh -c` in the clone, without a time limit, with these
 variables:

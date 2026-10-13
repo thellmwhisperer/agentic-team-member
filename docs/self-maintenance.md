@@ -59,7 +59,8 @@ next time.
 
 Auto-merge is armed, so this is the last look, and it is short:
 
-1. `git log --oneline origin/main..<branch>`: the `atm unit` commit, a
+1. `git log --oneline origin/main..<branch>`: the unit commit,
+   `fix: <title>` or `feat: <title>` with `atm unit <n>` in its body, a
    `ponytail:` commit if a cut was kept, then the `no-mistakes(...)` commits
    the gate added.
 2. `git show --stat` of each gate commit. Review and test are models: a uuid,

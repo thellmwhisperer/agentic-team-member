@@ -229,7 +229,7 @@ func (a agent) runUnit(
 	name := "worker"
 	if f != nil {
 		var err error
-		head, err = chain(root, dir, n-1, i.Title, *f)
+		head, err = chain(root, dir, n-1, i, *f)
 		if err != nil {
 			return head, unit, text, nil, err
 		}
@@ -265,7 +265,7 @@ func deliver(r *verdict, root, clone, sha, base, line string, i Issue, screen io
 		branch := "atm/" + cmp.Or(strings.Trim(s[:min(len(s), 40)], "-"), "run") + "-" +
 			strings.TrimPrefix(filepath.Base(clone), "atm-run-") // the clone's timestamp, as unique
 		ev := map[string]any{"branch": branch}
-		cuts, tombs, err := onBranch(root, clone, sha, branch, i.Title)
+		cuts, err := onBranch(root, clone, sha, branch, i)
 		if err == nil {
 			err = foreign(root, clone, sha)
 		}
@@ -306,10 +306,23 @@ func deliver(r *verdict, root, clone, sha, base, line string, i Issue, screen io
 	})
 }
 
+// conventional maps a task type to its conventional commit type, which release-please reads.
+var conventional = map[string]string{"fix": "fix", "feature": "feat", "greenfield": "feat", "refactor": "refactor",
+	"tests": "test", "docs": "docs", "chore": "chore"}
+
+// unitMessage is the commit message of unit n of issue i: a conventional commit, a chained unit a feature.
+func unitMessage(i Issue, n int) string {
+	typ := i.Type
+	if n > 1 {
+		typ = "feature"
+	}
+	return fmt.Sprintf("%s: %s\n\natm unit %d", conventional[typ], i.Title, n)
+}
+
 // onBranch puts clone, at base commit sha, on a new branch name, what is left uncommitted committed as the
-// unit under the identity of the repository at root, and points clone's origin at root's. cuts are the slop
-// detector's findings, one a line, and tombs the tombstones it committed, when it committed a cut.
-func onBranch(root, clone, sha, name, title string) (cuts, tombs string, err error) {
+// unit of issue i under the identity of the repository at root, and points clone's origin at root's. cuts are
+// the slop detector's findings, one a line, and tombs the tombstones it committed, when it committed a cut.
+func onBranch(root, clone, sha, name string, i Issue) (cuts, tombs string, err error) {
 	origin, err := git(root, "remote", "get-url", "origin")
 	if err != nil {
 		return "", "", fmt.Errorf("no origin to deliver to: %w", err)
@@ -344,7 +357,7 @@ func onBranch(root, clone, sha, name, title string) (cuts, tombs string, err err
 		}
 		if err == nil {
 			_, err = git(clone, append(id, "commit", "-q", "--no-verify", "--cleanup=verbatim", "-m",
-				fmt.Sprintf("atm unit %d: %s", n+1, title))...)
+				unitMessage(i, n+1))...)
 		}
 	}
 	if err == nil {

@@ -139,9 +139,9 @@ func quoted(body, criterion string) bool {
 	return ok && strings.ContainsAny(c[max(0, len(c)-1):], ".!?")
 }
 
-// chain commits the work in clone on HEAD as unit n of the issue title, under the identity of the repository
-// at root, sets aside its follow-ups and puts f's red test in place for the next unit. It returns the new HEAD.
-func chain(root, clone string, n int, title string, f followUp) (string, error) {
+// chain commits the work in clone on HEAD as unit n of issue i, under the identity of the repository at
+// root, sets aside its follow-ups and puts f's red test in place for the next unit. It returns the new HEAD.
+func chain(root, clone string, n int, i Issue, f followUp) (string, error) {
 	id, err := identity(root)
 	if err != nil {
 		return "", err
@@ -150,8 +150,7 @@ func chain(root, clone string, n int, title string, f followUp) (string, error) 
 	if err != nil {
 		return "", err
 	}
-	head, err := git(clone, append(id, "commit-tree", tree, "-p", "HEAD", "-m",
-		fmt.Sprintf("atm unit %d: %s", n, title))...)
+	head, err := git(clone, append(id, "commit-tree", tree, "-p", "HEAD", "-m", unitMessage(i, n))...)
 	if err == nil {
 		_, err = git(clone, "reset", "-q", head)
 	}

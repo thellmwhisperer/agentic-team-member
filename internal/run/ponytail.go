@@ -85,7 +85,7 @@ func (a agent) ponytail(root, clone, sha string, proofs []proof, i Issue, c conf
 		ev["reason"] = why
 		return ev, restore(clone, all)
 	}
-	ev["commits"], ev["tombstones"], err = commit(root, clone, sha, before, i.Title, found)
+	ev["commits"], ev["tombstones"], err = commit(root, clone, sha, before, i, found)
 	return ev, err
 }
 
@@ -287,7 +287,7 @@ func added(clone, sha, tree string) (int, error) {
 // commit commits in clone, on HEAD, the run's last unit from base commit sha, tree unit, then the cut, the
 // working tree with a tombstone per finding, under the git identity of the repository at root, and returns
 // both commits and the tombstones.
-func commit(root, clone, sha, unit, title string, found []finding) (commits, tombs []string, err error) {
+func commit(root, clone, sha, unit string, i Issue, found []finding) (commits, tombs []string, err error) {
 	id, err := identity(root)
 	if err != nil {
 		return nil, nil, err
@@ -309,7 +309,7 @@ func commit(root, clone, sha, unit, title string, found []finding) (commits, tom
 	for _, f := range found {
 		msg += fmt.Sprintf("\n- %s: %s (%s)", f.File, f.Finding, f.Family)
 	}
-	for _, c := range [][2]string{{unit, fmt.Sprintf("atm unit %d: %s", n+1, title)}, {cut, msg}} {
+	for _, c := range [][2]string{{unit, unitMessage(i, n+1)}, {cut, msg}} {
 		if parent, err = git(clone, append(id, "commit-tree", c[0], "-p", parent, "-m", c[1])...); err != nil {
 			return commits, tombs, err
 		}

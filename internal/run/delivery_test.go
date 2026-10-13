@@ -28,10 +28,10 @@ func TestRunDeliversTheBranch(t *testing.T) {
 		kept                               bool
 	}{
 		{name: "file issue, cut discarded", origin: bare,
-			log: "atm unit 1: Retry on timeout|" + dev + "\ninit|atm <atm@example.com>|atm <atm@example.com>"},
+			log: "fix: Retry on timeout|" + dev + "\ninit|atm <atm@example.com>|atm <atm@example.com>"},
 		{name: "GitHub issue, cut kept", origin: "git@github.com:owner/repo.git", issue: "7", kept: true,
 			ponytail: "- a.txt: dropped two lines (speculative_feature)",
-			log:      "ponytail: 1 cuts|" + dev + "\natm unit 1: Retry on timeout|" + dev},
+			log:      "ponytail: 1 cuts|" + dev + "\nfix: Retry on timeout|" + dev},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -77,6 +77,24 @@ func TestRunDeliversTheBranch(t *testing.T) {
 				if refs := gitT(t, bare, "for-each-ref"); refs != "" {
 					t.Fatalf("ATM pushed: %s", refs)
 				}
+			}
+		})
+	}
+}
+
+func TestRunDeliversAConventionalUnitCommit(t *testing.T) {
+	for typ, want := range map[string]string{"fix": "fix", "feature": "feat"} {
+		t.Run(typ, func(t *testing.T) {
+			repo(t, "https://example.com/owner/repo.git", atmSet(atmYAML, "delivery", deliveryLine))
+			got := t.TempDir()
+			t.Setenv("ATM_TEST_OUT", got)
+			arg := issueFile(t, strings.Replace(issue, "Type: fix", "Type: "+typ, 1))
+			if err := Run("t", []string{arg}, &bytes.Buffer{}, &bytes.Buffer{}); err != nil {
+				t.Fatal(err)
+			}
+			msg := gitT(t, reader(t, got)("ATM_CLONE"), "log", "-1", "--format=%B")
+			if msg != want+": Retry on timeout\n\natm unit 1" {
+				t.Fatalf("want a %s commit, its body atm unit 1, got %q", want, msg)
 			}
 		})
 	}
