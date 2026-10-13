@@ -176,6 +176,63 @@ func TestViewportFitsActualHeightWhenBothBoxesOverflow(t *testing.T) {
 	}
 }
 
+func TestStackedAgentAndLogFitWithinTerminalHeight(t *testing.T) {
+	m := overflowing(80, 24)
+	feed(m, `{"step":"output","output":"retained log line"}`)
+	s := view(m)
+	if got := len(strings.Split(s, "\n")); got > 24 {
+		t.Fatalf("80×24 viewport used %d rows:\n%s", got, s)
+	}
+	if !strings.Contains(s, "q detach") || !strings.Contains(s, "Agent") || !strings.Contains(s, "Log") || !strings.Contains(s, "retained log line") {
+		t.Fatalf("both boxes, the Log, and footer must fit:\n%s", s)
+	}
+	for _, line := range strings.Split(s, "\n") {
+		if ansi.StringWidth(line) > 80 {
+			t.Fatalf("80×24 viewport has an overwide line: %q", line)
+		}
+	}
+
+	m = overflowing(80, 16)
+	feed(m, `{"step":"output","output":"retained log line"}`)
+	if s := view(m); len(strings.Split(s, "\n")) > 16 {
+		t.Fatalf("minimum stacked viewport exceeded 16 rows:\n%s", s)
+	}
+}
+
+func TestTwoColumnAgentAndLogFitShortTerminal(t *testing.T) {
+	m := overflowing(120, 9)
+	feed(m, `{"step":"output","output":"retained log line"}`)
+	s := view(m)
+	if got := len(strings.Split(s, "\n")); got > 9 {
+		t.Fatalf("120×9 viewport used %d rows:\n%s", got, s)
+	}
+	if !strings.Contains(s, "q detach") || !strings.Contains(s, "ATM") || !strings.Contains(s, "Agent") || !strings.Contains(s, "Log") {
+		t.Fatalf("both panels, the Log, and footer must fit:\n%s", s)
+	}
+	for _, line := range strings.Split(s, "\n") {
+		if ansi.StringWidth(line) > 120 {
+			t.Fatalf("120×9 viewport has an overwide line: %q", line)
+		}
+	}
+}
+
+func TestTabDoesNotLatchFocusBeforeAgentStarts(t *testing.T) {
+	m := screen(120, 24, unit...)
+	if m.agentRuns() {
+		t.Fatal("fixture must have no running Agent history")
+	}
+	press(m, tea.KeyTab)
+	feed(m, `{"step":"agent","state":"started"}`)
+	s := m.View()
+	if !strings.Contains(s, paint(cyan, "╭─ ")+bold(cyan, "Agent*")) || strings.Contains(s, bold(cyan, "ATM*")) {
+		t.Fatalf("new Agent history must get the default focus:\n%s", s)
+	}
+	press(m, tea.KeyTab)
+	if !strings.Contains(m.View(), bold(cyan, "ATM*")) {
+		t.Fatalf("Tab must still switch focus while Agent history is available:\n%s", m.View())
+	}
+}
+
 func TestHeldRowsStayAnchoredAcrossConnectorAndWrapReflow(t *testing.T) {
 	m := overflowing(120, 24)
 	press(m, tea.KeyTab, tea.KeyHome)
