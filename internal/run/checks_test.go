@@ -194,11 +194,28 @@ var proofCases = []struct {
 		work: noPackage, why: "red did not run: parse/compile error"},
 	{name: "Go greenfield whose red test has no package clause", typ: "greenfield", atm: goAtm, files: goBase,
 		work: noPackage, why: "red did not run: parse/compile error"},
+	{name: "Go fix whose red test has no package clause", typ: "fix", atm: goAtm, files: goBase,
+		work: noPackage, why: "red did not run: parse/compile error"},
 	{name: "fix whose malformed Python test fails in red and green", typ: "fix",
 		atm: atmSet(atmYAML, "test_file", "sh pytest.sh {file}"), files: map[string]string{"pytest.sh": fakePytest},
 		work: "echo fixed > a.txt; printf 'def test_broken(:\\n    assert True\\n' > test_bad.py; " +
 			reportJSON("test_bad.py"),
 		why: "red did not run: parse/compile error"},
+	{name: "Jest suite parse diagnostic rejected at red green boundary", typ: "fix",
+		atm: atmSet(atmYAML, "test_file", "sh runner.sh {file}"), files: map[string]string{"runner.sh": recordedRunner(
+			" FAIL  ./index.test.js\n      ● Test suite failed to run\n\n        SyntaxError: Unexpected token\n      Tests:       0 total")},
+		work: "echo fixed > a.txt; echo test > index.test.js; " + reportJSON("index.test.js"),
+		why:  "red did not run: parse/compile error"},
+	{name: "node syntax diagnostic rejected at red green boundary", typ: "fix",
+		atm: atmSet(atmYAML, "test_file", "sh runner.sh {file}"), files: map[string]string{"runner.sh": recordedRunner(
+			"/tmp/a.test.js:3\n\nSyntaxError: Unexpected end of input\n    at wrapSafe (node:internal/modules/cjs/loader:1637:18)\nNode.js v22.22.1")},
+		work: "echo fixed > a.txt; echo test > a.test.js; " + reportJSON("a.test.js"),
+		why:  "red did not run: parse/compile error"},
+	{name: "tsc diagnostic rejected at red green boundary", typ: "fix",
+		atm: atmSet(atmYAML, "test_file", "sh runner.sh {file}"), files: map[string]string{"runner.sh": recordedRunner(
+			"src/a.test.ts(3,7): error TS2322: Type 'number' is not assignable to type 'string'.")},
+		work: "echo fixed > a.txt; echo test > a.test.ts; " + reportJSON("a.test.ts"),
+		why:  "red did not run: parse/compile error"},
 	{name: "fix whose test only calls a function it adds to an old file", typ: "fix", lib: lib,
 		work: "echo '" + helper + "' >> lib.sh" + testThrough("helper"), why: "depends on nothing the base had"},
 	{name: "fix whose test only calls a function it adds next to a changed line", typ: "fix", lib: lib,
@@ -361,6 +378,10 @@ var pytestSyntaxError = strings.Join([]string{
 
 // fakePytest plays pytest on a test file that does not parse, red or green.
 var fakePytest = "cat <<'EOF'\n" + pytestSyntaxError + "\nEOF\nexit 2\n"
+
+func recordedRunner(output string) string {
+	return "cat <<'EOF'\n" + output + "\nEOF\nexit 1\n"
+}
 
 // shrunkTest names the failure of work that deletes or shortens a_test.sh, a test on the base.
 const shrunkTest = "the base's test a_test.sh is gone or shorter"
