@@ -844,7 +844,7 @@ func writesFile(tool string) bool {
 // strs is every string in a tool call's input, by key, joined by spaces.
 func strs(input json.RawMessage, write bool) string {
 	written := map[string]bool{"content": true, "old_string": true, "new_string": true, "oldString": true,
-		"newString": true, "oldText": true, "newText": true}
+		"newString": true, "oldText": true, "newText": true, "fileText": true}
 	var walk func(any) []string
 	walk = func(v any) (out []string) {
 		switch v := v.(type) {
