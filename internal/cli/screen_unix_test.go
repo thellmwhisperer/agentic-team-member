@@ -5,6 +5,7 @@ package cli
 import (
 	"bytes"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -73,12 +74,17 @@ func onTerminal(t *testing.T, args ...string) (string, int) {
 
 func TestRunOnATerminalShowsTheScreenUnlessPlainLinesAreAsked(t *testing.T) {
 	dir := setupRetryRepo(t)
+	config := "harness: claude\ninstall: \"\"\ntest: \"\"\ntypecheck: \"\"\nlint: \"\"\n" +
+		"test_file: \"\"\ntest_patterns: []\ndocs_patterns: []\ndelivery: \"\"\n"
+	if err := os.WriteFile(filepath.Join(dir, ".atm.yaml"), []byte(config), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	onPath(t, "claude", "gh")
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
 	shown, code := onTerminal(t, "run", "--watcher", watcher(t, dir, "w", 0), "retry.md")
-	if s := ansi.Strip(shown); code != 2 || !strings.Contains(s, "╭─ ATM ") || !strings.Contains(s, "✗ failed") ||
-		!strings.Contains(s, "╭─ Findings - E 1") || !strings.Contains(s, "config incomplete") {
+	if s := ansi.Strip(shown); code != 2 || !strings.Contains(s, "╭─ ATM") || !strings.Contains(s, "✗ failed") ||
+		!strings.Contains(s, "╭─ Findings - E 1") || !strings.Contains(s, "base ref") {
 		t.Fatalf("exit %d, the terminal showed:\n%s", code, s)
 	}
 	for env, value := range map[string]string{"NO_COLOR": "1", "TERM": "dumb"} {
