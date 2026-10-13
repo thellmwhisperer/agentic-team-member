@@ -31,6 +31,14 @@ func savedReport(t *testing.T, body string) string {
 	return path
 }
 
+func completedFromReport(t *testing.T, id string, outcome run.Outcome, body string) *Model {
+	t.Helper()
+	outcome.Report = savedReport(t, body)
+	m := New(id, 80, 40)
+	m.end(outcome, nil)
+	return m
+}
+
 func TestCompletedScreenRestoresSavedNodesWithoutFrames(t *testing.T) {
 	path := savedReport(t, completedReport)
 	m := New("297-65", 69, 39)
@@ -65,8 +73,7 @@ func TestCompletedScreenKeepsReplayDetail(t *testing.T) {
 
 func TestCompletedScreenDoesNotInventMissingResults(t *testing.T) {
 	for _, body := range []string{"{", `{}`, `{"nodes":[{"name":"agent","result":"running"}]}`} {
-		m := New("cold-1", 80, 40)
-		m.end(run.Outcome{Outcome: "passed", Report: savedReport(t, body)}, nil)
+		m := completedFromReport(t, "cold-1", run.Outcome{Outcome: "passed"}, body)
 		for _, r := range m.rows {
 			if r.state != "unknown" {
 				t.Errorf("report %s: %s incorrectly %s", body, r.step, r.state)
@@ -89,8 +96,7 @@ func TestCompletedScreenWithoutReportKeepsRowsUnknown(t *testing.T) {
 }
 
 func TestCompletedScreenKeepsMissingDurationUnknown(t *testing.T) {
-	m := New("cold-2", 80, 40)
-	m.end(run.Outcome{Outcome: "passed", Report: savedReport(t, `{"nodes":[{"name":"agent","result":"passed"}]}`)}, nil)
+	m := completedFromReport(t, "cold-2", run.Outcome{Outcome: "passed"}, `{"nodes":[{"name":"agent","result":"passed"}]}`)
 	r := m.current("agent")
 	if r.state != "passed" || r.hasDuration {
 		t.Fatalf("missing duration became evidence: state=%s duration=%v", r.state, r.hasDuration)
@@ -101,10 +107,9 @@ func TestCompletedScreenKeepsMissingDurationUnknown(t *testing.T) {
 }
 
 func TestCompletedScreenKeepsOverflowingDurationUnknown(t *testing.T) {
-	m := New("cold-overflow", 80, 40)
-	m.end(run.Outcome{Outcome: "passed", Report: savedReport(t, `{"nodes":[
+	m := completedFromReport(t, "cold-overflow", run.Outcome{Outcome: "passed"}, `{"nodes":[
 		{"name":"agent","result":"passed","duration_ms":9223372036855}
-	]}`)}, nil)
+	]}`)
 	r := m.current("agent")
 	if r.state != "passed" || r.hasDuration {
 		t.Fatalf("overflowing duration became evidence: state=%s duration=%v", r.state, r.took)
@@ -115,11 +120,10 @@ func TestCompletedScreenKeepsOverflowingDurationUnknown(t *testing.T) {
 }
 
 func TestCompletedScreenKeepsContradictorySavedResultUnknown(t *testing.T) {
-	m := New("cold-3", 80, 40)
-	m.end(run.Outcome{Outcome: "passed", Report: savedReport(t, `{"nodes":[
+	m := completedFromReport(t, "cold-3", run.Outcome{Outcome: "passed"}, `{"nodes":[
 		{"name":"issue","result":"passed","duration_ms":12},
 		{"name":"checks","result":"failed","duration_ms":500}
-	]}`)}, nil)
+	]}`)
 	if m.current("issue").state != "passed" || m.current("checks").state != "unknown" {
 		t.Fatalf("stale report was not reconciled: issue=%s checks=%s", m.current("issue").state, m.current("checks").state)
 	}
@@ -150,9 +154,9 @@ func TestCompletedScreenRestoresFailureAndUnrunNodes(t *testing.T) {
 
 func TestCompletedScreenRejectsContradictoryFailedNodeResults(t *testing.T) {
 	for _, result := range []string{"passed", "not run"} {
-		m := New("stale-failure-"+result, 80, 40)
-		m.end(run.Outcome{Outcome: "failed", FailedNode: "checks", Report: savedReport(t,
-			`{"nodes":[{"name":"checks","result":"`+result+`","duration_ms":500}]}`)}, nil)
+		m := completedFromReport(t, "stale-failure-"+result,
+			run.Outcome{Outcome: "failed", FailedNode: "checks"},
+			`{"nodes":[{"name":"checks","result":"`+result+`","duration_ms":500}]}`)
 		if r := m.current("checks"); r.state != "unknown" || r.hasDuration {
 			t.Errorf("named failed node with result %q was presented as evidence: %+v", result, r)
 		}
@@ -160,8 +164,7 @@ func TestCompletedScreenRejectsContradictoryFailedNodeResults(t *testing.T) {
 }
 
 func TestCompletedScreenRestoresPriorUnitChecksAfterLaterAgentFailure(t *testing.T) {
-	m := New("multi-unit-1", 80, 40)
-	m.end(run.Outcome{Outcome: "failed", FailedNode: "agent", Report: savedReport(t, `{"nodes":[
+	m := completedFromReport(t, "multi-unit-1", run.Outcome{Outcome: "failed", FailedNode: "agent"}, `{"nodes":[
 		{"name":"issue","result":"passed","duration_ms":5},
 		{"name":"clone","result":"passed","duration_ms":6},
 		{"name":"contract","result":"passed","duration_ms":7},
@@ -169,7 +172,7 @@ func TestCompletedScreenRestoresPriorUnitChecksAfterLaterAgentFailure(t *testing
 		{"name":"checks","result":"passed","duration_ms":100},
 		{"name":"ponytail","result":"not run","duration_ms":0},
 		{"name":"delivery","result":"not run","duration_ms":0}
-	]}`)}, nil)
+	]}`)
 	if m.current("agent").state != "failed" || m.current("checks").state != "passed" ||
 		m.current("checks").took != 100*time.Millisecond {
 		t.Fatalf("multi-unit evidence was lost: agent=%+v checks=%+v", m.current("agent"), m.current("checks"))
@@ -177,8 +180,8 @@ func TestCompletedScreenRestoresPriorUnitChecksAfterLaterAgentFailure(t *testing
 }
 
 func TestCompletedScreenRestoresNodesWhenFailureIsOutsideNode(t *testing.T) {
-	m := New("external-failure-1", 80, 40)
-	m.end(run.Outcome{Outcome: "failed", Reason: "could not save follow-ups", Report: savedReport(t, `{"nodes":[
+	m := completedFromReport(t, "external-failure-1",
+		run.Outcome{Outcome: "failed", Reason: "could not save follow-ups"}, `{"nodes":[
 		{"name":"issue","result":"passed","duration_ms":5},
 		{"name":"clone","result":"passed","duration_ms":6},
 		{"name":"contract","result":"passed","duration_ms":7},
@@ -186,7 +189,7 @@ func TestCompletedScreenRestoresNodesWhenFailureIsOutsideNode(t *testing.T) {
 		{"name":"checks","result":"passed","duration_ms":9},
 		{"name":"ponytail","result":"not run","duration_ms":0},
 		{"name":"delivery","result":"not run","duration_ms":0}
-	]}`)}, nil)
+	]}`)
 	if m.current("checks").state != "passed" || m.current("checks").took != 9*time.Millisecond ||
 		m.current("ponytail").state != "not run" {
 		t.Fatalf("valid external-failure evidence was lost: checks=%+v ponytail=%+v",
@@ -195,25 +198,23 @@ func TestCompletedScreenRestoresNodesWhenFailureIsOutsideNode(t *testing.T) {
 }
 
 func TestCompletedScreenRejectsImpossibleAndDuplicateNodes(t *testing.T) {
-	m := New("cold-4", 80, 40)
-	m.end(run.Outcome{Outcome: "passed", Report: savedReport(t, `{"nodes":[
+	m := completedFromReport(t, "cold-4", run.Outcome{Outcome: "passed"}, `{"nodes":[
 		{"name":"issue","result":"passed","duration_ms":10},
 		{"name":"checks","result":"skipped","duration_ms":0},
 		{"name":"clone","result":"passed","duration_ms":10},
 		{"name":"clone","result":"passed"},
 		{"name":"delivery","result":"skipped","duration_ms":0}
-	]}`)}, nil)
+	]}`)
 	if m.current("issue").state != "passed" || m.current("checks").state != "unknown" ||
 		m.current("clone").state != "unknown" || m.current("clone").hasDuration ||
 		m.current("delivery").state != "skipped" || m.current("delivery").hasDuration {
 		t.Fatalf("unsupported report data presented as evidence: issue=%+v checks=%+v clone=%+v delivery=%+v",
 			m.current("issue"), m.current("checks"), m.current("clone"), m.current("delivery"))
 	}
-	failed := New("failed-skipped", 80, 40)
-	failed.end(run.Outcome{Outcome: "failed", FailedNode: "checks", Report: savedReport(t, `{"nodes":[
+	failed := completedFromReport(t, "failed-skipped", run.Outcome{Outcome: "failed", FailedNode: "checks"}, `{"nodes":[
 		{"name":"checks","result":"skipped","duration_ms":0},
 		{"name":"delivery","result":"skipped","duration_ms":0}
-	]}`)}, nil)
+	]}`)
 	if failed.current("checks").state != "unknown" || failed.current("delivery").state != "unknown" {
 		t.Fatalf("impossible skipped result was accepted after node failure: checks=%s delivery=%s",
 			failed.current("checks").state, failed.current("delivery").state)
