@@ -178,6 +178,9 @@ func relativeDetail(detail, clone string) string {
 		if beforeOK && afterOK {
 			out.WriteString(detail[start:i])
 			if i == 0 && (next == '/' || next == '\\') {
+				if end+1 == len(detail) {
+					out.WriteByte('.')
+				}
 				start = end + 1
 			} else {
 				out.WriteByte('.')

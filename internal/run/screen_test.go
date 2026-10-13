@@ -243,7 +243,8 @@ func TestRunTellsAWatchingScreenPathsRelativeToTheClone(t *testing.T) {
 	streams := map[string]string{
 		"claude": `{"type":"assistant","message":{"content":[` +
 			`{"type":"tool_use","id":"t1","name":"Read","input":{"file_path":"<clone>/a/b.go"}},` +
-			`{"type":"tool_use","id":"t2","name":"Bash","input":` + cmd + `}]}}` + "\n",
+			`{"type":"tool_use","id":"t2","name":"Bash","input":` + cmd + `},` +
+			`{"type":"tool_use","id":"t3","name":"Glob","input":{"path":"<clone>/"}}]}}` + "\n",
 		"pi": `{"type":"tool_execution_start","toolCallId":"t1","toolName":"read","args":{"path":"<clone>/a/b.go"}}` +
 			"\n" + `{"type":"tool_execution_start","toolCallId":"t2","toolName":"bash","args":` + cmd + `}` + "\n",
 		"codex": `{"type":"item.started","item":{"id":"t2","type":"command_execution",` + cmd[1:] + `}` + "\n",
@@ -256,6 +257,9 @@ func TestRunTellsAWatchingScreenPathsRelativeToTheClone(t *testing.T) {
 			if read && !has(w.live, obj{"id": "t1", "detail": "a/b.go"}) ||
 				!has(w.live, obj{"id": "t2", "detail": "cd ./ && go test ./...; printf '" + filepath.ToSlash(clone) + "-backup'"}) {
 				t.Fatalf("want details relative to the clone in %v", w.live)
+			}
+			if harness == "claude" && !has(w.live, obj{"id": "t3", "detail": "."}) {
+				t.Fatalf("want a trailing clone-root separator to show as dot in %v", w.live)
 			}
 			if b, _ := os.ReadFile(log); read && !strings.Contains(string(b), filepath.ToSlash(clone)+"/a/b.go") {
 				t.Fatalf("want the log to keep the agent's path:\n%s", b)
