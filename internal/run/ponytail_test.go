@@ -24,8 +24,8 @@ func ponytailStep(t *testing.T, out *bytes.Buffer) obj {
 }
 
 // cut is a ponytail report with one finding on a.txt.
-const cut = `{"findings": [{"file": "a.txt", "family": "speculative_feature", "finding": "dropped two lines"}], ` +
-	`"summary": "s"}`
+const cut = `{"findings": [{"file": "a.txt", "family": "speculative_feature", "finding": "dropped two lines", ` +
+	`"issue_sentence": ""}], "summary": "s"}`
 
 func TestRunPonytailFollowsTheChecks(t *testing.T) {
 	for _, harness := range []string{"claude", "codex", "opencode", "pi"} {
@@ -47,7 +47,8 @@ func TestRunPonytailFollowsTheChecks(t *testing.T) {
 			}
 			brief := strings.ReplaceAll(string(b), "\r\n", "\n")
 			for _, want := range []string{"### Retry on timeout\n\nType: fix\nRetry once.", "-broken\n+fixed",
-				"`ponytail-review`", "`speculative_feature`", "no new files", "`git commit`"} {
+				"`ponytail-review`", "`speculative_feature`", "no new files", "`git commit`",
+				"Never cut code that does what a sentence of the issue asks", `"issue_sentence"`} {
 				if !strings.Contains(brief, want) {
 					t.Errorf("brief-ponytail.md lacks %q:\n%s", want, b)
 				}
@@ -271,6 +272,11 @@ func TestPonytailDiscardsACutThatDoesNotHold(t *testing.T) {
 		{name: "touches test", work: "echo fixed > a.txt; echo bad > a_test.sh",
 			report: cut, why: "touches the test a_test.sh"},
 		{name: "deletes file", work: "rm a.txt", report: cut, why: "deletes a.txt"},
+		{name: "touches the issue", work: "echo fixed > a.txt", report: strings.Replace(cut, `"issue_sentence": ""`,
+			`"issue_sentence": "token() never returns an expired token"`, 1),
+			why: "the cut touches the issue: token() never returns an expired token"},
+		{name: "no issue_sentence", work: "echo fixed > a.txt", report: strings.Replace(cut, `, "issue_sentence": ""`, "", 1),
+			why: "lacks issue_sentence"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -298,6 +304,9 @@ func TestPonytailDiscardsACutThatDoesNotHold(t *testing.T) {
 			}
 			if b, err := os.ReadFile(filepath.Join(clone, "cache", "old.txt")); err != nil || !bytes.Equal(b, old) {
 				t.Fatalf("the ignored file the cut changed did not come back: %q, %v", b, err)
+			}
+			if _, err := os.Stat(filepath.Join(clone, ".slop")); !os.IsNotExist(err) {
+				t.Fatalf("a discarded cut wrote a tombstone: %v", err)
 			}
 		})
 	}
