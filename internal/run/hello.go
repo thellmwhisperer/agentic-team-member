@@ -45,7 +45,7 @@ func Hello(c config.Agent, limit time.Duration) (time.Duration, error) {
 			b, _ := os.ReadFile(final)
 			s.final = string(b)
 		}
-		return helloResult(ctx, err, &log, s.final, took, limit)
+		return helloResult(ctx, err, &log, s.final, s.failure, took, limit)
 	}
 	dir, err := os.MkdirTemp("", "atm-hello-")
 	if err != nil {
@@ -70,7 +70,7 @@ func agentEnv(env []string) []string {
 }
 
 func helloResult(
-	ctx context.Context, err error, log *bytes.Buffer, final string, took, limit time.Duration,
+	ctx context.Context, err error, log *bytes.Buffer, final, failure string, took, limit time.Duration,
 ) (time.Duration, error) {
 	var exit *exec.ExitError
 	switch {
@@ -83,6 +83,8 @@ func helloResult(
 	case errors.As(err, &exit):
 		err = errors.New(exit.String()) // signal: killed
 	case err != nil:
+	case failure != "":
+		err = fmt.Errorf("cursor: %s", failure)
 	case log.Len() == 0:
 		err = errors.New("silent")
 	case !strings.Contains(final, "OK"):
