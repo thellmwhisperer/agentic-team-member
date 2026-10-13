@@ -594,18 +594,46 @@ func cursorShellReads(command string, exact func(string) bool) bool {
 		return exact(words[1])
 	}
 	if len(words) == 4 && (words[0] == "sed" || words[0] == "/bin/sed" || words[0] == "/usr/bin/sed") &&
-		words[1] == "-n" && words[2] == "1,40p" {
+		words[1] == "-n" && sedPrintRange(words[2]) {
 		return exact(words[3])
 	}
 	if len(words) > 0 && (words[0] == "head" || words[0] == "tail" || words[0] == "/usr/bin/head" || words[0] == "/usr/bin/tail") {
-		if len(words) == 3 && (words[1] == "-40" || words[1] == "-n40") {
-			return exact(words[2])
+		var count, path string
+		switch {
+		case len(words) == 3 && strings.HasPrefix(words[1], "-n") && len(words[1]) > 2:
+			count, path = words[1][2:], words[2]
+		case len(words) == 3 && strings.HasPrefix(words[1], "-") && len(words[1]) > 1:
+			count, path = words[1][1:], words[2]
+		case len(words) == 4 && words[1] == "-n":
+			count, path = words[2], words[3]
 		}
-		if len(words) == 4 && words[1] == "-n" && words[2] == "40" {
-			return exact(words[3])
+		if positiveDecimal(count) {
+			return exact(path)
 		}
 	}
 	return false
+}
+
+func sedPrintRange(value string) bool {
+	if !strings.HasSuffix(value, "p") {
+		return false
+	}
+	value = strings.TrimSuffix(value, "p")
+	first, last, ranged := strings.Cut(value, ",")
+	return positiveDecimal(first) && (!ranged || positiveDecimal(last))
+}
+
+func positiveDecimal(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	n, err := strconv.Atoi(value)
+	return err == nil && n > 0
 }
 
 // skillCalls is the ids of claude's Skill tool calls in e that load skill.
