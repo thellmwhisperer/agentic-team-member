@@ -692,6 +692,9 @@ func send(root string, req request, in <-chan Input, fn func(reply)) (again bool
 			return !replied, err
 		}
 		if r.Error != "" {
+			if req.Cmd == "attach" && !replied && strings.HasPrefix(r.Error, "no run ") {
+				return true, nil
+			}
 			return false, errors.New(r.Error)
 		}
 		fn(r)
