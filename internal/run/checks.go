@@ -26,41 +26,83 @@ import (
 )
 
 // checks is the verdict on the agent's work in clone, at base commit sha, for a task of type typ whose report
-// names test: HEAD has not moved, the type's proof holds, then install, test, typecheck and lint pass, the
-// commands no-mistakes runs, and HEAD has not moved still. Install runs again: the agent may have changed
-// dependencies. Each proof and command is a row of the screen. Its result holds the proof's red and green trials.
+// names test: HEAD has not moved, the ignored files the agent made are gone, as delivery leaves them out, then
+// install, the type's proof, test, typecheck and lint pass, the commands no-mistakes runs, and HEAD has not
+// moved still. Install runs again before the proof: the agent may have changed dependencies. Each proof and
+// command is a row of the screen. Its result holds the proof's red and green trials.
 func checks(clone, sha, typ, test string, c config.Config) (map[string]any, error) {
 	live := liveIn(clone)
 	var red, green try
-	proofSpan, err := row(live, proofs[typ], func() error {
-		err := moved(clone, sha, "the agent")
-		if err == nil {
-			red, green, err = prove(clone, typ, filepath.ToSlash(test), c)
-		}
-		return err
-	})
+	var proofSpan span
 	result := map[string]any{"red": red, "green": green, "proof_span": proofSpan}
+	var ran []cmdResult
+	run := func(name, line string) error {
+		if line == "" {
+			return nil
+		}
+		var tail string
+		s, err := row(live, name, func() (err error) {
+			tail, err = sh(clone, line)
+			return err
+		})
+		ran = append(ran, cmdResult{name, line, outcome(err), tail, s})
+		result["commands"] = ran
+		return wrap(err, name)
+	}
+	err := moved(clone, sha, "the agent")
+	if err == nil {
+		err = unmade(clone)
+	}
+	if err == nil {
+		err = run("install", c.Install)
+	}
 	if err != nil {
 		return result, err
 	}
-	var ran []cmdResult
-	for _, cmd := range [][2]string{{"install", c.Install}, {"test", c.Test}, {"typecheck", c.Typecheck},
-		{"lint", c.Lint}} {
-		if cmd[1] == "" {
-			continue
-		}
-		var tail string
-		s, err := row(live, cmd[0], func() (err error) {
-			tail, err = sh(clone, cmd[1])
-			return err
-		})
-		if ran = append(ran, cmdResult{cmd[0], cmd[1], outcome(err), tail, s}); err != nil {
-			result["commands"] = ran
-			return result, fmt.Errorf("%s: %w", cmd[0], err)
+	proofSpan, err = row(live, proofs[typ], func() (err error) {
+		red, green, err = prove(clone, typ, filepath.ToSlash(test), c)
+		return err
+	})
+	result["red"], result["green"], result["proof_span"] = red, green, proofSpan
+	if err != nil {
+		return result, err
+	}
+	for _, cmd := range [][2]string{{"test", c.Test}, {"typecheck", c.Typecheck}, {"lint", c.Lint}} {
+		if err := run(cmd[0], cmd[1]); err != nil {
+			return result, err
 		}
 	}
 	result["commands"] = ran
 	return result, moved(clone, sha, "the commands")
+}
+
+// before records every file in clone, ignored or not, as the agent finds it, for unmade.
+func before(clone string) error {
+	tree, err := whole(clone)
+	if err == nil {
+		_, err = every(clone, "update-ref", "refs/atm/before", tree)
+	}
+	return err
+}
+
+// unmade removes from clone every file git ignores that before did not record: the agent made it, and delivery
+// leaves it out. ATM's scratch, .atm/, stays: the agent's follow-ups are there.
+func unmade(clone string) error {
+	was, err := every(clone, "ls-tree", "-r", "--name-only", "-z", "refs/atm/before")
+	if err != nil {
+		return err
+	}
+	had := map[string]bool{}
+	for _, p := range strings.Split(was, "\x00") {
+		had[p] = true
+	}
+	now, err := git(clone, "ls-files", "-z", "--others", "--ignored", "--exclude-standard")
+	for _, p := range strings.Split(now, "\x00") {
+		if err == nil && p != "" && !had[p] && !strings.HasPrefix(p, ".atm/") {
+			err = os.Remove(filepath.Join(clone, filepath.FromSlash(p)))
+		}
+	}
+	return err
 }
 
 // moved is an error when HEAD in clone is not want: who made commits.

@@ -94,13 +94,17 @@ func reportTimeline(t *testing.T, rep obj) []obj {
 		t.Fatalf("want the clone's install, each unit's checks, the re-run checks and the delivery, got %v", groups)
 	}
 	timed = append(timed, groups[0]...)
+	// Each checks' install runs before its proof, the rest after.
+	timed = append(timed, groups[1][0])
 	trials("units", 0)
-	timed = append(timed, groups[1]...)
+	timed = append(timed, groups[1][1:]...)
+	timed = append(timed, groups[2][0])
 	trials("units", 1)
-	timed = append(timed, groups[2]...)
+	timed = append(timed, groups[2][1:]...)
 	trials("reproofs", 0)
+	timed = append(timed, groups[3][0])
 	trials("reproofs", 1)
-	timed = append(timed, groups[3]...)
+	timed = append(timed, groups[3][1:]...)
 	return timed
 }
 

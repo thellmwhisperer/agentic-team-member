@@ -134,6 +134,9 @@ func unitDone(t *testing.T, work string) (root, dir, sha string, c config.Config
 		dir, sha, _, err = clone(root, "main", "", "", nil)
 	}
 	if err == nil {
+		err = before(dir) // as units does, before the unit's agent
+	}
+	if err == nil {
 		_, err = sh(dir, "printf 'fixed\\nextra\\nmore\\n' > a.txt"+fixTest)
 	}
 	if err != nil {

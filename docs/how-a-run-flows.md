@@ -20,7 +20,7 @@ A failed step stops the run; the steps after it are not run.
 | Clone | Resolves `--base-ref` to a commit, clones the repository there into `.atm/clones/`, runs `install` | The ref, the clone or `install` fails |
 | Contract | Writes `brief.md`, the agent's contract | The brief cannot be written |
 | Agent | Runs the coding agent in the clone on the brief | It exits non-zero, times out, does not load the `ponytail` skill, or leaves no readable report |
-| Checks | Proves the task type, then runs `install`, `test`, `typecheck` and `lint` | A proof or a command fails, or anything committed |
+| Checks | Removes the ignored files the agent made, runs `install`, proves the task type, then runs `test`, `typecheck` and `lint` | A proof or a command fails, or anything committed |
 | Slop detector | Lets a model cut the diff; keeps the cut only if every check still passes | Its agent fails, reports badly, or anything commits |
 | Delivery | Commits the work on a branch and runs the `delivery` command | The branch or the command fails. Skipped when `delivery` is empty |
 
@@ -57,9 +57,12 @@ any non-zero exit.
 
 ## Checks
 
-The agent must not have committed. The checks prove the task type, then run
-`install` again (the agent may have changed dependencies), `test`, `typecheck`
-and `lint`, empty ones skipped. The first failure stops the run with that
+The agent must not have committed. ATM records every file in the clone before
+the agent starts; the checks first remove each file git ignores that the agent
+made, as delivery leaves it out, so a test that needs one fails. Ignored files
+already there, the install's output or caches, stay, and so does `.atm/`. Then
+they run `install` again (the agent may have changed dependencies), prove the
+task type, and run `test`, `typecheck` and `lint`, empty ones skipped. The first failure stops the run with that
 command's last 60 lines. A command that commits fails the checks too.
 
 ### What each task type proves
