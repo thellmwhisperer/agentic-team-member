@@ -67,15 +67,6 @@ func Watchers(root string) (ids []string) {
 	return ids
 }
 
-// Watched is nil when args, atm run's command line, bind the run to a live watcher of the repository at root.
-func Watched(root string, args []string) error {
-	_, _, _, a, err := parseArgs(args)
-	if err == nil && !Watching(root, a.watcher) {
-		err = errNoWatcher
-	}
-	return err
-}
-
 // Watch is atm watch on the repository at root until ctx ends: `watching as <id>`, then, after adopt's state when
 // it takes run adopt over, a line per event of each run bound to it, its time and the run first, and of its
 // no-mistakes gate once it reaches delivery.
@@ -148,7 +139,7 @@ func adoptRun(root, label, id string, w io.Writer) error {
 func follow(ctx context.Context, root, label string, since time.Time, say func(label, event string)) {
 	var clone string
 	ended := make(chan struct{})
-	o, err := Follow(root, label, nil, nil, func(f Frame) {
+	o, _ := Follow(root, label, nil, nil, func(f Frame) {
 		var ev struct{ Step, State, Clone, TS string }
 		if f.Line == nil || json.Unmarshal(f.Event, &ev) != nil { // a node's start or end has a line
 			return
@@ -166,8 +157,6 @@ func follow(ctx context.Context, root, label string, since time.Time, say func(l
 	})
 	close(ended)
 	switch {
-	case err != nil:
-		say(label, "lost: "+err.Error())
 	case o.Ended.Before(since):
 	case o.Outcome == "passed":
 		say(label, "finished: passed")
@@ -194,14 +183,14 @@ func watchGate(ctx context.Context, clone, label string, ended <-chan struct{}, 
 	t := time.NewTicker(beat)
 	defer t.Stop()
 	for {
-		status, err := gateStatus(clone)
+		status, _ := gateStatus(clone)
 		lines, done := g.events(status, time.Now())
 		for _, l := range lines {
 			say(label, l)
 		}
 		select {
 		case <-ended:
-			done = done || err != nil || !g.seen
+			done = done || !g.seen
 		default:
 		}
 		if done {

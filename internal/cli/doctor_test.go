@@ -87,6 +87,7 @@ func TestDoctorRunsEveryCheckAndFailsWhenAnyFails(t *testing.T) {
 	})
 	t.Run("a key missing", func(t *testing.T) {
 		dir := repo(t, "https://github.com/o/r.git")
+		watcher(t, dir, "w", 0)
 		onPath(t, "claude", "gh")
 		if err := os.WriteFile(filepath.Join(dir, ".atm.yaml"), []byte("test: go test ./...\n"), 0o600); err != nil {
 			t.Fatal(err)
@@ -102,6 +103,7 @@ func TestDoctorRunsEveryCheckAndFailsWhenAnyFails(t *testing.T) {
 	})
 	t.Run("duplicate keys", func(t *testing.T) {
 		dir := repo(t, "https://github.com/o/r.git")
+		watcher(t, dir, "w", 0)
 		onPath(t, "claude", "gh")
 		if err := os.WriteFile(filepath.Join(dir, ".atm.yaml"), []byte("install: ''\ninstall: ''\n"), 0o600); err != nil {
 			t.Fatal(err)

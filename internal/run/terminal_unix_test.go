@@ -19,7 +19,7 @@ func TestDeliveryRunsOnTheAttachedTerminal(t *testing.T) {
 	background(t, top)
 	gitT(t, top, "config", "user.name", "Repo Dev")
 	gitT(t, top, "config", "user.email", "dev@example.com")
-	o, err := Start(top, []string{issueFile(t, issue)})
+	o, err := startWithWatcher(t, top, []string{issueFile(t, issue)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +51,7 @@ func TestDeliveryRunsOnTheAttachedTerminal(t *testing.T) {
 }
 
 func offATerminal(t *testing.T, top string) {
-	o, err := Start(top, []string{issueFile(t, issue)})
+	o, err := startWithWatcher(t, top, []string{issueFile(t, issue)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func offATerminal(t *testing.T, top string) {
 func TestFollowDisconnectsWhenItsTerminalLeaves(t *testing.T) {
 	top := gitT(t, repo(t, t.TempDir(), atmSet(atmYAML, "delivery", "sleep 3")), "rev-parse", "--show-toplevel")
 	background(t, top)
-	o, err := Start(top, []string{issueFile(t, issue)})
+	o, err := startWithWatcher(t, top, []string{issueFile(t, issue)})
 	if err != nil {
 		t.Fatal(err)
 	}

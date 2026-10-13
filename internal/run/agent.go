@@ -49,7 +49,6 @@ type agent struct {
 	config.Agent
 	args, env []string
 	root, dir string
-	dir       string
 	watcher   string // the run's atm watch, which atm run --watcher names
 }
 

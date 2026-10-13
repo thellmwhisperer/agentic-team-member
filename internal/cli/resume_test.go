@@ -81,8 +81,13 @@ func writeResumeConfig(t *testing.T, dir, install, test string) {
 // axiRun runs atm axi run --json with args, failing the test unless it exits with code, and returns its outcome.
 func axiRun(t *testing.T, code int, args ...string) map[string]string {
 	t.Helper()
+	dir, err := toplevel()
+	if err != nil {
+		t.Fatal(err)
+	}
+	watcher(t, dir, "resume-test", 0)
 	var o map[string]string
-	out := atmIn(t, code, append([]string{"axi", "run", "--json"}, args...)...)
+	out := atmIn(t, code, append([]string{"axi", "run", "--json", "--watcher", "resume-test"}, args...)...)
 	if err := json.Unmarshal([]byte(out), &o); err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +97,12 @@ func axiRun(t *testing.T, code int, args ...string) map[string]string {
 // failsToResume says whether atm axi run --resume label fails with an error that says why.
 func failsToResume(t *testing.T, label, why string) bool {
 	t.Helper()
-	_, err := atm(t, "axi", "run", "--resume", label)
+	dir, err := toplevel()
+	if err != nil {
+		t.Fatal(err)
+	}
+	watcher(t, dir, "resume-test", 0)
+	_, err = atm(t, "axi", "run", "--watcher", "resume-test", "--resume", label)
 	return err != nil && strings.Contains(err.Error(), why)
 }
 

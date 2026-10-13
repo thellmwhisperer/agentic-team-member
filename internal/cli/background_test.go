@@ -337,7 +337,8 @@ func TestRunGoesToTheBackgroundAndEveryCommandSeesIt(t *testing.T) {
 		!strings.HasSuffix(out, " s  w  "+filepath.Join(dir, "retry.md")+"\n") {
 		t.Fatalf("atm runs: %q", out)
 	}
-	out := atmIn(t, 2, "axi", "run", "retry.md")
+	watcher(t, dir, "w2", 0)
+	out := atmIn(t, 2, "axi", "run", "--watcher", "w2", "retry.md")
 	if !strings.HasPrefix(out, "outcome: failed\nrun: retry-2\nfailed_node: \"\"\nreason: \"config incomplete") ||
 		!strings.Contains(out, "\nreport: \"\"\nnext_step: ") {
 		t.Fatalf("atm axi run:\n%s", out)

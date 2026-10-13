@@ -65,7 +65,6 @@ func doctorCmd() *cobra.Command {
 					}
 				}
 			}
-			_, _ = fmt.Fprintln(cmd.OutOrStdout(), strings.Join(strings.Fields(last), " "))
 			if root != "" {
 				err = nil
 				ids := run.Watchers(root)
@@ -74,6 +73,7 @@ func doctorCmd() *cobra.Command {
 				}
 				check("watcher", strings.Join(ids, " "), err)
 			}
+			_, _ = fmt.Fprintln(cmd.OutOrStdout(), strings.Join(strings.Fields(last), " "))
 			if failed > 0 {
 				return fmt.Errorf("doctor: %d of the checks failed", failed)
 			}

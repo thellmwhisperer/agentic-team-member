@@ -42,6 +42,20 @@ func backgroundRepo(t *testing.T) string {
 	return top
 }
 
+func startWithWatcher(t *testing.T, root string, args []string) (Outcome, error) {
+	t.Helper()
+	_, _, _, a, err := parseArgs(args)
+	if err == nil && a.watcher == "" {
+		id := fmt.Sprintf("test-%d", os.Getpid())
+		now := time.Now()
+		if err := (lease{PID: os.Getpid(), Started: now, Heartbeat: now}).write(root, id); err != nil {
+			t.Fatal(err)
+		}
+		args = append(args, "--watcher", id)
+	}
+	return Start(root, args)
+}
+
 func atmRepo(t *testing.T) string {
 	t.Helper()
 	top := gitT(t, repo(t, "https://example.com/owner/repo.git", atmYAML), "rev-parse", "--show-toplevel")
@@ -93,7 +107,7 @@ func TestBackgroundRunsAndTellsHowEachEnded(t *testing.T) {
 			}
 			t.Setenv("FAKE_AGENT", c.agent)
 			path := issueFile(t, issue)
-			o, err := Start(top, []string{path})
+			o, err := startWithWatcher(t, top, []string{path})
 			if err != nil || o.Outcome != "running" || o.Run != "issue-1" || o.Issue != path ||
 				o.Report != filepath.Join(top, ".atm", "runs", o.Run, "report.json") {
 				t.Fatalf("Start = %+v, %v", o, err)
@@ -140,7 +154,7 @@ func TestBackgroundRunsAtOnceEachInItsOwnDirectory(t *testing.T) {
 	t.Setenv("FAKE_AGENT_WORK", fixWork)
 	var started []Outcome
 	for _, typ := range []string{"fix", "docs"} {
-		o, err := Start(top, []string{issueFile(t, "# Retry\nType: "+typ+"\nRetry once.\n")})
+		o, err := startWithWatcher(t, top, []string{issueFile(t, "# Retry\nType: "+typ+"\nRetry once.\n")})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -164,7 +178,7 @@ func TestBackgroundRunsAtOnceEachInItsOwnDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, e := range entries {
-		if !map[string]bool{"atm.sock": true, "runs.jsonl": true, "runs": true, "clones": true}[e.Name()] {
+		if !map[string]bool{"atm.sock": true, "runs.jsonl": true, "runs": true, "clones": true, "watch": true}[e.Name()] {
 			t.Errorf("the runs share .atm/%s", e.Name())
 		}
 	}
@@ -193,7 +207,7 @@ func TestBackgroundRunThatNeverStartedHasNoReport(t *testing.T) {
 	root := repo(t, "https://example.com/owner/repo.git", "test: go test ./...\n")
 	top := gitT(t, root, "rev-parse", "--show-toplevel")
 	background(t, top)
-	o, err := Start(top, []string{issueFile(t, issue)})
+	o, err := startWithWatcher(t, top, []string{issueFile(t, issue)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,7 +255,7 @@ func TestStartRejectsABadCommandLineBeforeTheBackground(t *testing.T) {
 func TestBackgroundSweepsTheCloneOfARunThatDied(t *testing.T) {
 	top := backgroundRepo(t)
 	old := oldClone(t, top, false, false, false)
-	o, err := Start(top, []string{issueFile(t, issue)})
+	o, err := startWithWatcher(t, top, []string{issueFile(t, issue)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -287,7 +301,7 @@ func TestSweepKeepsOnlyClonesWithLiveLeases(t *testing.T) {
 func TestBackgroundRemembersRunsAcrossRestarts(t *testing.T) {
 	top := gitT(t, repo(t, "https://example.com/owner/repo.git", atmYAML), "rev-parse", "--show-toplevel")
 	stop := background(t, top)
-	o, err := Start(top, []string{issueFile(t, issue)})
+	o, err := startWithWatcher(t, top, []string{issueFile(t, issue)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -315,7 +329,7 @@ func TestBackgroundRemembersRunsAcrossRestarts(t *testing.T) {
 		!reflect.DeepEqual(got, want) {
 		t.Fatalf("Runs = %+v, %v", runs, err)
 	}
-	if o, err := Start(top, []string{"--harness", "pi", issueFile(t, issue)}); err != nil || o.Run != "issue-3" {
+	if o, err := startWithWatcher(t, top, []string{"--harness", "pi", issueFile(t, issue)}); err != nil || o.Run != "issue-3" {
 		t.Fatalf("Start = %+v, %v; want the next label", o, err)
 	}
 	if _, err := Attach(top, "", &bytes.Buffer{}); err != nil {
@@ -329,14 +343,14 @@ func TestBackgroundKeepsTheLastRunsAndEveryRunning(t *testing.T) {
 	seedHistory(t, top)
 	background(t, top)
 	wait, release := holdFakeAgents(t, 1)
-	held, err := Start(top, []string{issueFile(t, issue)})
+	held, err := startWithWatcher(t, top, []string{issueFile(t, issue)})
 	if err != nil {
 		t.Fatal(err)
 	}
 	wait()
 	missing := filepath.Join(t.TempDir(), "missing.md") // each run fails at its issue
 	for range 2 {
-		o, err := Start(top, []string{missing})
+		o, err := startWithWatcher(t, top, []string{missing})
 		if err == nil {
 			_, err = Attach(top, o.Run, &bytes.Buffer{})
 		}
@@ -363,7 +377,7 @@ func TestBackgroundPrunesTheHistoryWhenRunsEnd(t *testing.T) {
 	path := issueFile(t, issue)
 	var started []Outcome
 	for range maxRuns + 1 {
-		o, err := Start(top, []string{path})
+		o, err := startWithWatcher(t, top, []string{path})
 		if err != nil {
 			t.Fatal(err)
 		}
