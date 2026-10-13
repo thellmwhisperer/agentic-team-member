@@ -881,8 +881,8 @@ func mayConsumeWrittenData(stmts []*syntax.Stmt, output string) bool {
 	unsafe := false
 	for _, stmt := range stmts {
 		syntax.Walk(stmt, func(node syntax.Node) bool {
-			if call, ok := node.(*syntax.CallExpr); ok && changesDirectory(call) {
-				unsafe = true
+			if call, ok := node.(*syntax.CallExpr); ok {
+				unsafe = unsafe || changesDirectory(call) || evaluatesShell(call)
 			}
 			if word, ok := node.(*syntax.Word); ok {
 				text, literal := literalWord(word)
@@ -920,26 +920,26 @@ func changesDirectory(call *syntax.CallExpr) bool {
 	return false
 }
 
-func shellGlobMatches(word *syntax.Word, text, output string) bool {
-	brace := false
-	var expands func([]syntax.WordPart) bool
-	expands = func(parts []syntax.WordPart) bool {
-		for _, part := range parts {
-			switch part := part.(type) {
-			case *syntax.Lit:
-				if strings.ContainsAny(part.Value, "*?[") {
-					return true
-				}
-				brace = brace || strings.ContainsAny(part.Value, "{}")
-			case *syntax.BraceExp:
-				brace = true
-			case *syntax.ExtGlob:
-				return true
-			}
+func evaluatesShell(call *syntax.CallExpr) bool {
+	for i := 0; i < len(call.Args); {
+		name, literal := literalWord(call.Args[i])
+		if !literal {
+			return false
 		}
-		return false
+		switch name {
+		case "eval":
+			return true
+		case "builtin", "command", "exec":
+			i++
+		default:
+			return false
+		}
 	}
-	glob := expands(word.Parts)
+	return false
+}
+
+func shellGlobMatches(word *syntax.Word, text, output string) bool {
+	glob, brace := shellGlob(word)
 	if brace {
 		return true
 	}
@@ -950,9 +950,25 @@ func shellGlobMatches(word *syntax.Word, text, output string) bool {
 	return err != nil || matched
 }
 
+func shellGlob(word *syntax.Word) (glob, brace bool) {
+	for _, part := range word.Parts {
+		switch part := part.(type) {
+		case *syntax.Lit:
+			glob = glob || strings.ContainsAny(part.Value, "*?[")
+			brace = brace || strings.ContainsAny(part.Value, "{}")
+		case *syntax.BraceExp:
+			brace = true
+		case *syntax.ExtGlob:
+			glob = true
+		}
+	}
+	return glob, brace
+}
+
 func literalOutputFile(word *syntax.Word) bool {
 	name, literal := literalWord(word)
-	return literal && name != "" && !path.IsAbs(name) && !filepath.IsAbs(name)
+	glob, brace := shellGlob(word)
+	return literal && !glob && !brace && name != "" && !path.IsAbs(name) && !filepath.IsAbs(name)
 }
 
 func literalWord(word *syntax.Word) (string, bool) {

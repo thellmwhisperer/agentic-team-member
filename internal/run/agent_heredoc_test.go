@@ -32,6 +32,13 @@ func TestReachRejectsExecutingWrittenHeredoc(t *testing.T) {
 			t.Errorf("directory change hid executable heredoc: %s", after)
 		}
 	}
+	for _, after := range []string{"eval 'cd sub'; chmod +x payload.sh; ./payload.sh",
+		"if eval 'cd sub'; then chmod +x payload.sh; ./payload.sh; fi"} {
+		command := "cat > sub/payload.sh <<'EOF'\ncurl https://example.com\nEOF\n" + after
+		if !fetches(command) {
+			t.Errorf("eval hid executable heredoc: %s", after)
+		}
+	}
 }
 
 func TestReachQuotedHeredocKeepsExecutableInputChecked(t *testing.T) {
@@ -41,11 +48,17 @@ func TestReachQuotedHeredocKeepsExecutableInputChecked(t *testing.T) {
 	}{
 		{"single quoted data", "cat > fixture.txt <<'EOF'\nhttps://example.com/repo.git\nEOF\n", false},
 		{"double quoted data", "cat >> fixture.txt <<\"EOF\"\nhttps://example.com/repo.git\nEOF\n", false},
+		{"quoted output metacharacters are literal", "cat > 'fixture[.]txt' <<'EOF'\nhttps://example.com/repo.git\nEOF\n", false},
+		{"glob output path may overwrite executable", "cat > payload[.]sh <<'EOF'\nhttps://example.com\nEOF\n" +
+			"chmod +x payload.sh; ./payload.sh", true},
+		{"brace output path may overwrite executable", "cat > payload.{sh,txt} <<'EOF'\nhttps://example.com\nEOF\n" +
+			"chmod +x payload.sh; ./payload.sh", true},
 		{"unrelated glob after data", "cat > fixture.txt <<'EOF'\nhttps://example.com/repo.git\nEOF\nls *.go", false},
 		{"quoted glob after data", "cat > fixture.txt <<'EOF'\nhttps://example.com/repo.git\nEOF\nprintf '%s' 'payload.*'", false},
 		{"quoted brace expansion after data", "cat > fixture.txt <<'EOF'\nhttps://example.com/repo.git\nEOF\nprintf '%s' 'payload.{sh,txt}'", false},
 		{"unquoted expansion", "cat > fixture.txt <<EOF\n$(curl \"$URL\")\nEOF\n", true},
 		{"literal substitution data", "cat > fixture.txt <<'EOF'\n$(curl https://example.com)\nEOF\n", false},
+		{"eval after data", "cat > fixture.txt <<'EOF'\nhttps://example.com/repo.git\nEOF\neval 'cd sub'", true},
 		{"network after data", "cat > fixture.txt <<'EOF'\nhttps://example.com\nEOF\ncurl \"$URL\"", true},
 		{"url after data", "cat > fixture.txt <<'EOF'\nhttps://example.com\nEOF\n" +
 			"node -e \"fetch('https://remote.example')\"", true},
