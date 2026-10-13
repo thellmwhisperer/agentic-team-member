@@ -10,7 +10,7 @@ import (
 	"github.com/thellmwhisperer/agentic-team-member/internal/run"
 )
 
-// onPath puts an executable file under each name first on PATH; doctor only looks them up.
+// onPath puts executable files first on PATH.
 func onPath(t *testing.T, names ...string) {
 	t.Helper()
 	dir := t.TempDir()
