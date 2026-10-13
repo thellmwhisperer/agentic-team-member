@@ -51,11 +51,16 @@ func doctorCmd() *cobra.Command {
 			check(".atm.yaml", "every key declared", cfgErr)
 			last := "run atm doctor --agent to say hello to " + harness
 			if hello {
-				took, err := run.Hello(c.Agent, helloLimit)
-				last = "ok agent: " + harness + " " + c.Model + " answered in " + run.Human(took)
-				if err != nil {
+				if cfgErr != nil {
 					failed++
-					last = "FAIL agent: " + harness + ": " + err.Error()
+					last = "FAIL agent: " + cmp.Or(c.Harness, "(none)") + ": " + cfgErr.Error()
+				} else {
+					took, err := run.Hello(c.Agent, helloLimit)
+					last = "ok agent: " + harness + " " + c.Model + " answered in " + run.Human(took)
+					if err != nil {
+						failed++
+						last = "FAIL agent: " + harness + ": " + err.Error()
+					}
 				}
 			}
 			_, _ = fmt.Fprintln(cmd.OutOrStdout(), strings.Join(strings.Fields(last), " "))
