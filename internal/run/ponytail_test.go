@@ -250,7 +250,7 @@ func TestReproveHidesATMFromAnEarlierUnit(t *testing.T) {
 	}
 	proofs := []proof{unitProof(t, clone, sha), unitProof(t, clone, sha)}
 
-	why, _, _, err := reprove(clone, sha, proofs, cfg)
+	why, _, _, err := reprove(t.TempDir(), clone, sha, proofs, cfg)
 	if err != nil || !strings.HasPrefix(why, "unit 1: ") {
 		t.Fatalf("want unit 1's re-proof to fail without .atm/, got %q, %v", why, err)
 	}
