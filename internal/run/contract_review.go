@@ -180,6 +180,8 @@ func missingIssueGates(body string) []string {
 	var visit func(ast.Node)
 	visit = func(node ast.Node) {
 		switch n := node.(type) {
+		case *ast.Blockquote:
+			return
 		case *ast.Heading:
 			line := issueText(n, source, false)
 			section = issueGateName(line)
@@ -351,7 +353,7 @@ func substantiveMarkdown(source []byte) bool {
 			return
 		}
 		switch n := node.(type) {
-		case *ast.Heading, *ast.HTMLBlock, *ast.ThematicBreak, *ast.CodeBlock:
+		case *ast.Blockquote, *ast.Heading, *ast.HTMLBlock, *ast.ThematicBreak, *ast.CodeBlock:
 			return
 		case *ast.Paragraph:
 			substantive = substantiveIssueText(issueText(n, source, true))

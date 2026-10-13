@@ -187,7 +187,7 @@ func TestRunContractReviewRepair(t *testing.T) {
 				t.Fatalf("no split: %s", b)
 			}
 			if tc.name == "repair rechecks" {
-				checkContractRechecks(t, dir, out, rounds)
+				checkContractRechecks(t, dir, out, rounds, "fix", "a_test.sh")
 			}
 			_, e = os.Stat(filepath.Join(out, "delivered"))
 			if (e == nil) != (tc.want == "") {
@@ -197,7 +197,7 @@ func TestRunContractReviewRepair(t *testing.T) {
 	}
 }
 
-func checkContractRechecks(t *testing.T, dir, out string, rounds []contractReview) {
+func checkContractRechecks(t *testing.T, dir, out string, rounds []contractReview, typ, testFile string) {
 	t.Helper()
 	b, e := os.ReadFile(filepath.Join(dir, "contract-rechecks-0.json"))
 	var rechecks struct {
@@ -205,12 +205,27 @@ func checkContractRechecks(t *testing.T, dir, out string, rounds []contractRevie
 		Commands []cmdResult  `json:"commands"`
 	}
 	if e != nil || json.Unmarshal(b, &rechecks) != nil || len(rechecks.Reproofs) != 1 {
-		t.Fatalf("rechecks missing a unit proof: %s %v", b, e)
+		t.Fatalf("rechecks missing the applicable unit proof: %s %v", b, e)
 	}
 	proof := rechecks.Reproofs[0]
-	if proof.Type != "fix" || proof.TestFile != "a_test.sh" || proof.Result != "passed" ||
-		proof.Red.Exit == 0 || proof.Green.Exit != 0 {
-		t.Fatalf("repair did not rerun the required red/green proof: %+v", proof)
+	if proof.Type != typ || proof.TestFile != testFile || proof.Result != "passed" {
+		t.Fatalf("repair did not rerun the %s proof: %+v", typ, proof)
+	}
+	switch typ {
+	case "fix":
+		if proof.Red.Exit == 0 || proof.Green.Exit != 0 {
+			t.Fatalf("repair did not rerun the required red/green proof: %+v", proof)
+		}
+		if b, err := os.ReadFile(filepath.Join(out, "proof.marker")); err != nil || len(b) == 0 {
+			t.Fatalf("repair proof left no marker: %q %v", b, err)
+		}
+	case "refactor":
+		if proof.Red.Exit != 0 {
+			t.Fatalf("repair did not rerun the passing baseline suite: %+v", proof)
+		}
+		if b, err := os.ReadFile(filepath.Join(out, "baseline.marker")); err != nil || len(b) == 0 {
+			t.Fatalf("refactor baseline suite left no marker: %q %v", b, err)
+		}
 	}
 	wantCommands := []string{"install", "test", "typecheck", "lint"}
 	if len(rechecks.Commands) != len(wantCommands) {
@@ -224,9 +239,6 @@ func checkContractRechecks(t *testing.T, dir, out string, rounds []contractRevie
 		if b, err := os.ReadFile(marker); err != nil || len(b) == 0 {
 			t.Fatalf("configured command %q left no repair marker: %q %v", want, b, err)
 		}
-	}
-	if b, err := os.ReadFile(filepath.Join(out, "proof.marker")); err != nil || len(b) == 0 {
-		t.Fatalf("repair proof left no marker: %q %v", b, err)
 	}
 	rep := readReport(t, filepath.Join(dir, "report.json"))
 	if rep["head_sha"] != rounds[1].Head || rounds[0].Head == rounds[1].Head {
@@ -427,6 +439,101 @@ func TestRunContractReviewIgnoresHTMLCommentsInGates(t *testing.T) {
 	})
 }
 
+func TestRunContractReviewIgnoresQuotedGateExamples(t *testing.T) {
+	for _, tc := range []struct{ name, gates string }{
+		{"quoted headings", `> ## Non-goals
+> Change retry policy outside this case.
+>
+> ## Invariants
+> Retry occurs once.
+>
+> ## Acceptance criteria
+> Retry once.
+>
+> ## Split triggers
+> Split if the diff adds an independent outcome.`},
+		{"quoted colon fields", `> Non-goals: Change retry policy outside this case.
+> Invariants: Retry occurs once.
+> Acceptance criteria: Retry once.
+> Split triggers: Split if the diff adds an independent outcome.`},
+		{"quoted section content", `## Non-goals
+> Change retry policy outside this case.
+
+## Invariants
+> Retry occurs once.
+
+## Acceptance criteria
+> Retry once.
+
+## Split triggers
+> Split if the diff adds an independent outcome.`},
+		{"nested quotes", `> > ## Non-goals
+> > Change retry policy outside this case.
+>
+> > ## Invariants
+> > Retry occurs once.
+>
+> > ## Acceptance criteria
+> > Retry once.
+>
+> > ## Split triggers
+> > Split if the diff adds an independent outcome.`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, out := contractReviewRepo(t)
+			body := "# Retry on timeout\nType: fix\n\n" + tc.gates + "\n"
+			t.Setenv("FAKE_CONTRACT_REPORT", passedContract)
+			err := Run("t", []string{issueFile(t, body)}, &bytes.Buffer{}, &bytes.Buffer{})
+			if err == nil || !strings.Contains(err.Error(), "issue missing task-slicing") {
+				t.Fatalf("quoted gate example accepted: %v", err)
+			}
+			if _, err := os.Stat(filepath.Join(out, "delivered")); !os.IsNotExist(err) {
+				t.Fatal("delivery ran")
+			}
+		})
+	}
+	t.Run("split retains a blocker for every quoted gate", func(t *testing.T) {
+		root, out := contractReviewRepo(t)
+		body := "# Retry on timeout\nType: fix\n\n" +
+			`> ## Non-goals
+> Change retry policy outside this case.
+>
+> ## Invariants
+> Retry occurs once.
+>
+> ## Acceptance criteria
+> Retry once.
+>
+> ## Split triggers
+> Split if the diff adds an independent outcome.
+`
+		children := []contractChild{
+			{Cause: "quoted Non-goals", Contract: "Return the issue to planning", Dependency: "blocks_parent", Target: "gate:non_goals", Evidence: "Non-goals appears only in a quoted example"},
+			{Cause: "quoted invariants", Contract: "Return the issue to planning", Dependency: "blocks_parent", Target: "gate:invariants", Evidence: "Invariants appears only in a quoted example"},
+			{Cause: "quoted Acceptance", Contract: "Return the issue to planning", Dependency: "blocks_parent", Target: "gate:executable_acceptance", Evidence: "Acceptance appears only in a quoted example"},
+			{Cause: "quoted split triggers", Contract: "Return the issue to planning", Dependency: "blocks_parent", Target: "gate:split_triggers", Evidence: "Split triggers appears only in a quoted example"},
+		}
+		report, err := json.Marshal(contractReview{Dispatch: dispatchGates{true, true, true, true, true},
+			Status: "split", Acceptance: []contractCriterion{}, Children: children})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("FAKE_CONTRACT_REPORT", string(report))
+		err = Run("t", []string{issueFile(t, body)}, &bytes.Buffer{}, &bytes.Buffer{})
+		if err == nil || !strings.Contains(err.Error(), "requires split") {
+			t.Fatalf("want persisted split, got %v", err)
+		}
+		if _, err := os.Stat(filepath.Join(out, "delivered")); !os.IsNotExist(err) {
+			t.Fatal("delivery ran")
+		}
+		var rounds []contractReview
+		b, err := os.ReadFile(filepath.Join(root, ".atm/runs/t/contract-review.json"))
+		if err != nil || json.Unmarshal(b, &rounds) != nil || len(rounds) != 1 || len(rounds[0].Children) != len(children) {
+			t.Fatalf("quoted-gate blockers were not persisted: %s %v", b, err)
+		}
+	})
+}
+
 func TestRunContractReviewPersistsSplitWithMandatoryGap(t *testing.T) {
 	root, out := contractReviewRepo(t)
 	t.Setenv("FAKE_CONTRACT_REPORT", splitMandatoryGapContract)
@@ -574,6 +681,24 @@ func TestRunContractReviewRepairWithoutTestFile(t *testing.T) {
 	for typ, file := range map[string]string{"docs": "README.md", "chore": "deps.txt", "refactor": "b.txt"} {
 		t.Run(typ, func(t *testing.T) {
 			root, out := contractReviewRepo(t)
+			atm, err := os.ReadFile(filepath.Join(root, ".atm.yaml"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			mark := func(name string) string {
+				return `if grep -q repaired ` + file + `; then printf ` + name + ` >> "$ATM_TEST_OUT/` + name + `.marker"; fi; `
+			}
+			atmText := atmSet(string(atm), "install", mark("install"))
+			testCommand := mark("test")
+			if typ == "refactor" {
+				testCommand = `if [ ! -e b.txt ]; then printf baseline >> "$ATM_TEST_OUT/baseline.marker"; fi; ` + testCommand
+			}
+			atmText = atmSet(atmText, "test", testCommand+"sh a_test.sh")
+			atmText = atmSet(atmText, "typecheck", mark("typecheck"))
+			atmText = atmSet(atmText, "lint", mark("lint"))
+			if err := os.WriteFile(filepath.Join(root, ".atm.yaml"), []byte(atmText), 0600); err != nil {
+				t.Fatal(err)
+			}
 			t.Setenv("FAKE_AGENT_WORK", "echo original > "+file+
 				`; mkdir -p .atm; echo "{\"test_file\":\"\"}" > .atm/fake-report.json`)
 			t.Setenv("FAKE_CONTRACT_REPORT", repairContract)
@@ -587,10 +712,12 @@ func TestRunContractReviewRepairWithoutTestFile(t *testing.T) {
 			if _, err := os.Stat(filepath.Join(out, "delivered")); err != nil {
 				t.Fatal(err)
 			}
-			b, err := os.ReadFile(filepath.Join(root, ".atm/runs/t/contract-rechecks-0.json"))
-			if err != nil || !strings.Contains(string(b), `"name": "test"`) || !strings.Contains(string(b), `"passed"`) {
-				t.Fatalf("repair checks missing: %s %v", b, err)
+			var rounds []contractReview
+			b, err := os.ReadFile(filepath.Join(root, ".atm/runs/t/contract-review.json"))
+			if err != nil || json.Unmarshal(b, &rounds) != nil {
+				t.Fatalf("contract review rounds missing: %s %v", b, err)
 			}
+			checkContractRechecks(t, filepath.Join(root, ".atm/runs/t"), out, rounds, typ, "")
 		})
 	}
 }
