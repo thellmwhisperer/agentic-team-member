@@ -40,7 +40,9 @@ the run first, until it is killed:
 
 From delivery on it reads the gate with `no-mistakes axi status` in the run's
 clone every 10 s, after the run ends too, until the PR merges or the gate
-fails.
+fails. If Delivery fails before its command runs and no gate was seen, it stops
+checking gate status and prints `finished: failed at Delivery`. If the command
+ran, it keeps retrying transient status errors because a gate may have started.
 
 When a watcher dies, each running run bound to it shows
 `WATCHER GONE at <time>: no one is watching this run` once, on its screen and
