@@ -185,33 +185,37 @@ func serve(l *net.UnixListener, root, sock string, moved func() bool) error {
 		if err != nil && !errors.Is(err, os.ErrDeadlineExceeded) {
 			return err
 		}
-		_, gone := os.Stat(sock)
-		s.Lock()
-		if moved() {
-			s.handoff = true
-		}
-		if c == nil && s.busy() == 0 && (gone != nil || time.Since(s.last) > idle) {
-			s.handoff = true
-		}
-		end := s.handoff && s.busy() == 0 && s.handlers == 0
-		if c == nil && s.busy() > 0 {
-			s.save() // runs.jsonl's time is when its runs last ran, should this process die before they end
-		}
-		if c != nil && !end {
-			s.handlers++
-		}
-		s.Unlock()
-		if end {
-			_ = l.Close() // and its socket, before c closes unanswered, so c's client starts the next one
-			if c != nil {
+		if s.shouldExit(c, sock, moved) {
+			_ = l.Close()
+			if c != nil { // close its unanswered request after the socket, so its client starts the next one
 				_ = c.Close()
 			}
 			return nil
 		}
-		if c != nil && !end {
+		if c != nil {
 			go s.handle(c)
 		}
 	}
+}
+
+func (s *server) shouldExit(c net.Conn, sock string, moved func() bool) bool {
+	_, gone := os.Stat(sock)
+	s.Lock()
+	defer s.Unlock()
+	if moved() || c == nil && s.busy() == 0 && (gone != nil || time.Since(s.last) > idle) {
+		s.handoff = true
+	}
+	if c == nil && s.busy() > 0 {
+		s.save() // runs.jsonl's time is when its runs last ran, should this process die before they end
+	}
+	if c == nil {
+		return s.handoff && s.busy() == 0 && s.handlers == 0
+	}
+	if s.handoff {
+		return false
+	}
+	s.handlers++
+	return false
 }
 
 // changed tells whether the file this process runs from has changed since it started, as atm update or

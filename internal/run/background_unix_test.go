@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -250,20 +251,8 @@ func until(t *testing.T, what string, cond func() bool) {
 // the new file serves.
 func TestARunGoesToABackgroundProcessOfTheNewFile(t *testing.T) {
 	atm := filepath.Join(t.TempDir(), "atm")
-	build := func(path, version string) {
-		t.Helper()
-		cmd := exec.Command("go", "build", "-ldflags", fmt.Sprintf("-X github.com/thellmwhisperer/agentic-team-member/internal/buildinfo.Version=%s", version), "-o", path, "./cmd/atm")
-		_, file, _, ok := runtime.Caller(0)
-		if !ok {
-			t.Fatal("test source path is unavailable")
-		}
-		cmd.Dir = filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("build atm %s: %v\n%s", version, err, out)
-		}
-	}
-	build(atm, "old-build")
-	build(atm+".new", "new-build")
+	buildATM(t, atm, "old-build")
+	buildATM(t, atm+".new", "new-build")
 	top := atmRepo(t)
 	wait, release := holdFakeAgents(t, 1)
 	old := exec.Command(atm, "serve")
@@ -276,27 +265,7 @@ func TestARunGoesToABackgroundProcessOfTheNewFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = old.Process.Kill() })
-	ready := make(chan error, 1)
-	go func() {
-		reader := bufio.NewReader(stderr)
-		lines := make([]string, 2)
-		for i := range lines {
-			line, err := reader.ReadString('\n')
-			if err != nil {
-				ready <- err
-				return
-			}
-			lines[i] = line
-		}
-		if !strings.HasPrefix(lines[0], "atm serve pid:") || !strings.Contains(lines[1], "old-build") {
-			ready <- fmt.Errorf("atm serve identity = %q", lines)
-			return
-		}
-		ready <- nil
-	}()
-	if err := <-ready; err != nil {
-		t.Fatal(err)
-	}
+	awaitOldServer(t, stderr)
 	exited := make(chan error, 1)
 	go func() { exited <- old.Wait() }()
 	if err := os.Rename(atm+".new", atm); err != nil {
@@ -322,5 +291,44 @@ func TestARunGoesToABackgroundProcessOfTheNewFile(t *testing.T) {
 	release()
 	if end, err := Attach(top, o, &bytes.Buffer{}); err != nil || end.Outcome != "passed" {
 		t.Fatalf("Attach = %+v, %v", end, err)
+	}
+}
+
+func awaitOldServer(t *testing.T, stderr io.Reader) {
+	t.Helper()
+	ready := make(chan error, 1)
+	go func() {
+		reader := bufio.NewReader(stderr)
+		lines := make([]string, 2)
+		for i := range lines {
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				ready <- err
+				return
+			}
+			lines[i] = line
+		}
+		if !strings.HasPrefix(lines[0], "atm serve pid:") || !strings.Contains(lines[1], "old-build") {
+			ready <- fmt.Errorf("atm serve identity = %q", lines)
+			return
+		}
+		ready <- nil
+	}()
+	if err := <-ready; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func buildATM(t *testing.T, path, version string) {
+	t.Helper()
+	ldflags := fmt.Sprintf("-X github.com/thellmwhisperer/agentic-team-member/internal/buildinfo.Version=%s", version)
+	cmd := exec.Command("go", "build", "-ldflags", ldflags, "-o", path, "./cmd/atm")
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("test source path is unavailable")
+	}
+	cmd.Dir = filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("build atm %s: %v\n%s", version, err, out)
 	}
 }
