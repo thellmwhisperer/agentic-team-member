@@ -87,6 +87,50 @@ func TestDoctorAgentReportsUnknownHarnessWithoutStartingIt(t *testing.T) {
 	}
 }
 
+func TestDoctorAgentCodexUsesTemporaryGitRepository(t *testing.T) {
+	dir := repo(t, "https://example.com/o/r.git")
+	bin := t.TempDir()
+	codex := `#!/bin/sh
+if [ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" != true ]; then
+	 echo 'not a git repository' >&2
+	 exit 2
+fi
+printf '%s\n' "$PWD" > "$FAKE_HELLO_CALL"
+final=
+while [ "$#" -gt 0 ]; do
+	if [ "$1" = "-o" ]; then
+		shift
+		final=$1
+	fi
+	shift
+done
+printf 'OK\n' > "$final"
+echo '{"type":"thread.started"}'
+`
+	if err := os.WriteFile(filepath.Join(bin, "codex"), []byte(codex), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	call := filepath.Join(t.TempDir(), "call")
+	t.Setenv("FAKE_HELLO_CALL", call)
+	config := "harness: codex\nmodel: m1\ninstall: ''\ntest: ''\ntypecheck: ''\nlint: ''\ntest_file: ''\n" +
+		"test_patterns: []\ndocs_patterns: []\ndelivery: ''\n"
+	if err := os.WriteFile(filepath.Join(dir, ".atm.yaml"), []byte(config), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, err := atm(t, "doctor", "--agent")
+	if err != nil || !strings.HasPrefix(lastLine(out), "ok agent: codex m1 answered in ") {
+		t.Fatalf("atm doctor --agent: %v\n%s", err, out)
+	}
+	b, err := os.ReadFile(call)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(strings.TrimSpace(string(b))); err == nil {
+		t.Fatalf("hello repository was not removed: %q", b)
+	}
+}
+
 func TestDoctorAgentSaysHelloTheWayARunDoes(t *testing.T) {
 	for _, c := range []struct{ mode, want string }{
 		{"ok", "ok agent: claude m1 answered in "},
