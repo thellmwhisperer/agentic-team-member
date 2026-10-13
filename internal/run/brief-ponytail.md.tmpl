@@ -18,8 +18,7 @@ Use the `ponytail-review` skill, and make its cuts yourself: this brief wins ove
   this repository.
 - Only files in the diff, no new files.
 - Every test stays: do not delete, skip or weaken one.
-- ATM runs every check again and throws the cut away if one fails, the diff does not get shorter, or a
-  finding names a sentence of the issue:
+- ATM runs every check again and throws the cut away if one fails or the diff does not get shorter:
   - Test: {{cmd .Test}}
   - Typecheck: {{cmd .Typecheck}}
   - Lint: {{cmd .Lint}}
