@@ -148,6 +148,41 @@ func TestCompletedScreenRestoresFailureAndUnrunNodes(t *testing.T) {
 	}
 }
 
+func TestCompletedScreenRestoresPriorUnitChecksAfterLaterAgentFailure(t *testing.T) {
+	m := New("multi-unit-1", 80, 40)
+	m.end(run.Outcome{Outcome: "failed", FailedNode: "agent", Report: savedReport(t, `{"nodes":[
+		{"name":"issue","result":"passed","duration_ms":5},
+		{"name":"clone","result":"passed","duration_ms":6},
+		{"name":"contract","result":"passed","duration_ms":7},
+		{"name":"agent","result":"failed","duration_ms":800},
+		{"name":"checks","result":"passed","duration_ms":100},
+		{"name":"ponytail","result":"not run","duration_ms":0},
+		{"name":"delivery","result":"not run","duration_ms":0}
+	]}`)}, nil)
+	if m.current("agent").state != "failed" || m.current("checks").state != "passed" ||
+		m.current("checks").took != 100*time.Millisecond {
+		t.Fatalf("multi-unit evidence was lost: agent=%+v checks=%+v", m.current("agent"), m.current("checks"))
+	}
+}
+
+func TestCompletedScreenRestoresNodesWhenFailureIsOutsideNode(t *testing.T) {
+	m := New("external-failure-1", 80, 40)
+	m.end(run.Outcome{Outcome: "failed", Reason: "could not save follow-ups", Report: savedReport(t, `{"nodes":[
+		{"name":"issue","result":"passed","duration_ms":5},
+		{"name":"clone","result":"passed","duration_ms":6},
+		{"name":"contract","result":"passed","duration_ms":7},
+		{"name":"agent","result":"passed","duration_ms":8},
+		{"name":"checks","result":"passed","duration_ms":9},
+		{"name":"ponytail","result":"not run","duration_ms":0},
+		{"name":"delivery","result":"not run","duration_ms":0}
+	]}`)}, nil)
+	if m.current("checks").state != "passed" || m.current("checks").took != 9*time.Millisecond ||
+		m.current("ponytail").state != "not run" {
+		t.Fatalf("valid external-failure evidence was lost: checks=%+v ponytail=%+v",
+			m.current("checks"), m.current("ponytail"))
+	}
+}
+
 func TestCompletedScreenRejectsImpossibleAndDuplicateNodes(t *testing.T) {
 	m := New("cold-4", 80, 40)
 	m.end(run.Outcome{Outcome: "passed", Report: savedReport(t, `{"nodes":[
@@ -162,6 +197,15 @@ func TestCompletedScreenRejectsImpossibleAndDuplicateNodes(t *testing.T) {
 		m.current("delivery").state != "skipped" || m.current("delivery").hasDuration {
 		t.Fatalf("unsupported report data presented as evidence: issue=%+v checks=%+v clone=%+v delivery=%+v",
 			m.current("issue"), m.current("checks"), m.current("clone"), m.current("delivery"))
+	}
+	failed := New("failed-skipped", 80, 40)
+	failed.end(run.Outcome{Outcome: "failed", FailedNode: "checks", Report: savedReport(t, `{"nodes":[
+		{"name":"checks","result":"skipped","duration_ms":0},
+		{"name":"delivery","result":"skipped","duration_ms":0}
+	]}`)}, nil)
+	if failed.current("checks").state != "unknown" || failed.current("delivery").state != "unknown" {
+		t.Fatalf("impossible skipped result was accepted after node failure: checks=%s delivery=%s",
+			failed.current("checks").state, failed.current("delivery").state)
 	}
 }
 
