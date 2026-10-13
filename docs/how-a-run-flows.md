@@ -79,12 +79,14 @@ commits fails the checks too.
 
 | Type | Proof |
 |------|-------|
-| `fix`, `hotfix` | Red/green on the files the base already has: the files the fix added stay, so the test must fail on behaviour. A red whose output carries the runner's own sign that no test ran (Go `[build failed]` or `[setup failed]`, a line starting `SyntaxError`, `ImportError` or `ModuleNotFoundError`, pytest's error during collection, Jest's `Test suite failed to run`, a `tsc` `error TS`) fails with "red did not run: parse/compile error". Then twice more, on the base with only the fix's added lines in place: a test that passes there depends on nothing the base had and is rejected |
+| `fix`, `hotfix` | Red/green on the files the base already has: the files the fix added stay, so the test must fail on behaviour. Then twice more, on the base with only the fix's added lines in place: a test that passes there depends on nothing the base had and is rejected |
 | `feature`, `greenfield` | Red/green with everything set aside, so the red may fail on a missing symbol or module |
 | `refactor` | `test` passes on the base, and no test file changed |
 | `tests` | The new test passes on the base and after; only test and doc files changed |
 | `docs` | Only files matching `docs_patterns` changed |
 | `chore` | Nothing beyond the commands |
+
+For `fix`, `feature` and `greenfield`, ATM checks the red output before judging green. A whole Go `FAIL <package> [build failed]` or `FAIL <package> [setup failed]` line, pytest `ERROR collecting`, `E SyntaxError` or `E ImportError`, Jest `Test suite failed to run`, or a TypeScript `error TS` line before any test result fails with "red did not run: parse/compile error". Assertion failures remain valid reds.
 
 Red/green runs the report's `test_file` alone through `test_file` in
 `.atm.yaml`, once with the fix set aside and once with it back. After each

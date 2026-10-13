@@ -182,6 +182,13 @@ var proofCases = []struct {
 		why: "red did not run: parse/compile error"},
 	{name: "Go fix whose test fails on an assertion without it", typ: "fix", atm: goAtm, files: goBase,
 		work: `printf 'package p\n\nfunc Value() string { return "fixed" }\n' > p/p.go; ` + goTest("Value")},
+	{name: "Go fix whose assertion mentions a build diagnostic", typ: "fix", atm: goAtm, files: goBase,
+		work: `printf 'package p\n\nfunc Value() string { return "fixed" }\n' > p/p.go; ` +
+			`printf 'package p\n\nimport "testing"\n\nfunc TestFix(t *testing.T) {\n\tif Value() != "fixed" { t.Fatal("expected [build failed]") }\n}\n' > p/p_test.go; ` +
+			reportJSON("p/p_test.go")},
+	{name: "Go feature whose red test does not compile", typ: "feature", atm: goAtm, files: goBase,
+		work: `printf 'package p\n\nfunc TestFix(t *testing.T) {\n' > p/p_test.go; ` + reportJSON("p/p_test.go"),
+		why:  "red did not run: parse/compile error"},
 	{name: "fix whose test only calls a function it adds to an old file", typ: "fix", lib: lib,
 		work: "echo '" + helper + "' >> lib.sh" + testThrough("helper"), why: "depends on nothing the base had"},
 	{name: "fix whose test only calls a function it adds next to a changed line", typ: "fix", lib: lib,
@@ -267,7 +274,7 @@ var proofCases = []struct {
 		work: fixWork + "; sed 's/\"atm unit 1: three\"/\"fix: three\"/' hooks_test.sh > h; mv h hooks_test.sh"},
 	{name: "fix that removes a trailing blank test line", typ: "fix", hooks: hooks + "\n",
 		work: fixWork + "; sed '$d' hooks_test.sh > h; mv h hooks_test.sh",
-		why: "the base's test hooks_test.sh is gone or shorter"},
+		why:  "the base's test hooks_test.sh is gone or shorter"},
 	{name: "chore that moves a test", typ: "chore", hooks: hooks, work: moveHooks("")},
 	{name: "chore that moves a test and drops a function", typ: "chore", hooks: hooks, work: moveHooks("/two/d"),
 		why: "the base's test hooks_test.sh is gone or shorter"},
