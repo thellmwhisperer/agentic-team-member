@@ -117,12 +117,17 @@ func TestReachRejectsUnprovenHeredocWriter(t *testing.T) {
 		{"tilde test argument expansion", "", valid, "go test ~/..."},
 		{"ignored Testimony helper", "", "package run\nfunc Testimony() { _ = \"https://example.com\" }\n", ""},
 		{"test missing testing parameter", "", "package run\nfunc TestNoParam() { _ = \"https://example.com\" }\n", ""},
-		{"test with wrong parameter type", "", "package run\nfunc TestWrong(t testing.T) { _ = \"https://example.com\" }\n", ""},
-		{"test with result", "", "package run\nimport \"testing\"\nfunc TestResult(t *testing.T) bool { _ = \"https://example.com\"; return true }\n", ""},
-		{"custom test parameter", "", "package run\nimport \"custom\"\nfunc TestCustom(t *custom.T) { _ = \"https://example.com\" }\n", ""},
-		{"bare test parameter", "", "package run\nimport \"testing\"\ntype T struct{}\nfunc TestBare(t *T) { _ = \"https://example.com\" }\n", ""},
+		{"test with wrong parameter type", "", "package run\n" +
+			"func TestWrong(t testing.T) { _ = \"https://example.com\" }\n", ""},
+		{"test with result", "", "package run\nimport \"testing\"\n" +
+			"func TestResult(t *testing.T) bool { _ = \"https://example.com\"; return true }\n", ""},
+		{"custom test parameter", "", "package run\nimport \"custom\"\n" +
+			"func TestCustom(t *custom.T) { _ = \"https://example.com\" }\n", ""},
+		{"bare test parameter", "", "package run\nimport \"testing\"\ntype T struct{}\n" +
+			"func TestBare(t *T) { _ = \"https://example.com\" }\n", ""},
 		{"missing testing import", "", "package run\nfunc TestMissing(t *testing.T) { _ = \"https://example.com\" }\n", ""},
-		{"aliased testing import", "", "package run\nimport test \"testing\"\nfunc TestAlias(t *test.T) { _ = \"https://example.com\" }\n", ""},
+		{"aliased testing import", "", "package run\nimport test \"testing\"\n" +
+			"func TestAlias(t *test.T) { _ = \"https://example.com\" }\n", ""},
 	} {
 		write := tc.prefix + "cat > fixture_test.go <<'EOF'\n" + tc.body + "EOF\n" + tc.after
 		if !fetches(write) {
@@ -138,14 +143,20 @@ func TestReachQuotedHeredocKeepsExecutableInputChecked(t *testing.T) {
 	}{
 		{"single quoted non-source payload", "cat > fixture.txt <<'EOF'\nhttps://example.com/repo.git\nEOF\n", true},
 		{"double quoted non-source payload", "cat >> fixture.txt <<\"EOF\"\nhttps://example.com/repo.git\nEOF\n", true},
-		{"quoted output metacharacters do not make text Go source", "cat > 'fixture[.]txt' <<'EOF'\nhttps://example.com/repo.git\nEOF\n", true},
+		{"quoted output metacharacters do not make text Go source",
+			"cat > 'fixture[.]txt' <<'EOF'\nhttps://example.com/repo.git\nEOF\n", true},
 		{"glob output path may overwrite executable", "cat > payload[.]sh <<'EOF'\nhttps://example.com\nEOF\n" +
 			"chmod +x payload.sh; ./payload.sh", true},
 		{"brace output path may overwrite executable", "cat > payload.{sh,txt} <<'EOF'\nhttps://example.com\nEOF\n" +
 			"chmod +x payload.sh; ./payload.sh", true},
-		{"unrelated glob conservatively retains the heredoc URL", "cat > fixture.txt <<'EOF'\nhttps://example.com/repo.git\nEOF\nls *.go", true},
-		{"quoted glob with unknown continuation", "cat > fixture_test.go <<'EOF'\npackage p\nfunc TestX() { _ = \"https://example.com\" }\nEOF\nprintf '%s' 'payload.*'", true},
-		{"quoted brace with unknown continuation", "cat > fixture_test.go <<'EOF'\npackage p\nfunc TestX() { _ = \"https://example.com\" }\nEOF\nprintf '%s' 'payload.{sh,txt}'", true},
+		{"unrelated glob conservatively retains the heredoc URL",
+			"cat > fixture.txt <<'EOF'\nhttps://example.com/repo.git\nEOF\nls *.go", true},
+		{"quoted glob with unknown continuation",
+			"cat > fixture_test.go <<'EOF'\npackage p\n" +
+				"func TestX() { _ = \"https://example.com\" }\nEOF\nprintf '%s' 'payload.*'", true},
+		{"quoted brace with unknown continuation",
+			"cat > fixture_test.go <<'EOF'\npackage p\n" +
+				"func TestX() { _ = \"https://example.com\" }\nEOF\nprintf '%s' 'payload.{sh,txt}'", true},
 		{"unquoted expansion", "cat > fixture.txt <<EOF\n$(curl \"$URL\")\nEOF\n", true},
 		{"literal shell substitution text", "cat > fixture.txt <<'EOF'\n$(curl https://example.com)\nEOF\n", true},
 		{"eval after data", "cat > fixture.txt <<'EOF'\nhttps://example.com/repo.git\nEOF\neval 'cd sub'", true},

@@ -827,18 +827,15 @@ func fetchesAt(command, clone string) bool {
 	}
 	checked := []byte(command)
 	if len(file.Stmts) > 0 {
-		if data, output, appended := quotedGoTestData(file.Stmts[0]); data != nil && goTestContinuation(file.Stmts[1:]) {
-			body := []byte(data.Lit())
-			start, end := int(data.Pos().Offset()), int(data.Pos().Offset())+len(body)
-			if start >= 0 && end >= start && end <= len(checked) && bytes.Equal(checked[start:end], body) &&
-				goTestSource(body, appended && existingTestingImport(clone, output)) {
-				clear(checked[start:end])
-			}
-		}
+		maskQuotedGoTestData(checked, file.Stmts, clone)
 	}
 	if badURL(string(checked)) {
 		return true
 	}
+	return containsFetchCall(file)
+}
+
+func containsFetchCall(file *syntax.File) bool {
 	unsafe := false
 	syntax.Walk(file, func(node syntax.Node) bool {
 		if call, ok := node.(*syntax.CallExpr); ok && fetchCall(call) {
@@ -849,36 +846,63 @@ func fetchesAt(command, clone string) bool {
 	return unsafe
 }
 
+func maskQuotedGoTestData(checked []byte, stmts []*syntax.Stmt, clone string) {
+	if len(stmts) == 0 {
+		return
+	}
+	data, output, appended := quotedGoTestData(stmts[0])
+	if data == nil || !goTestContinuation(stmts[1:]) {
+		return
+	}
+	body := []byte(data.Lit())
+	start, end := int(data.Pos().Offset()), int(data.Pos().Offset())+len(body)
+	if start < 0 || end < start || end > len(checked) || !bytes.Equal(checked[start:end], body) ||
+		!goTestSource(body, appended && existingTestingImport(clone, output)) {
+		return
+	}
+	clear(checked[start:end])
+}
+
 func quotedGoTestData(stmt *syntax.Stmt) (*syntax.Word, string, bool) {
+	if stmt == nil || stmt.Negated || stmt.Background || stmt.Coprocess || len(stmt.Redirs) != 2 {
+		return nil, "", false
+	}
 	call, ok := stmt.Cmd.(*syntax.CallExpr)
-	if !ok || stmt.Negated || stmt.Background || stmt.Coprocess || len(call.Args) != 1 ||
-		call.Args[0].Lit() != "cat" || len(call.Assigns) != 0 || len(stmt.Redirs) != 2 {
+	if !ok || len(call.Args) != 1 || call.Args[0].Lit() != "cat" || len(call.Assigns) != 0 {
 		return nil, "", false
 	}
 	var data *syntax.Word
 	output := ""
 	appended := false
-	for _, r := range stmt.Redirs {
-		if r.N != nil {
-			return nil, "", false
-		}
-		switch r.Op {
-		case syntax.Hdoc:
-			_, literal := literalWord(r.Word)
-			if literal && r.Word.Lit() == "" {
-				data = r.Hdoc
-			}
-		case syntax.RdrOut, syntax.AppOut:
-			if literalGoTestOutput(r.Word) {
-				output, _ = literalWord(r.Word)
-				appended = r.Op == syntax.AppOut
-			}
-		}
-	}
+	data, output, appended = classifyGoTestRedirs(stmt.Redirs)
 	if data != nil && output != "" {
 		return data, output, appended
 	}
 	return nil, "", false
+}
+
+func classifyGoTestRedirs(redirs []*syntax.Redirect) (*syntax.Word, string, bool) {
+	var data *syntax.Word
+	output := ""
+	appended := false
+	for _, redir := range redirs {
+		if redir.N != nil {
+			return nil, "", false
+		}
+		switch redir.Op {
+		case syntax.Hdoc:
+			_, literal := literalWord(redir.Word)
+			if literal && redir.Word.Lit() == "" {
+				data = redir.Hdoc
+			}
+		case syntax.RdrOut, syntax.AppOut:
+			if literalGoTestOutput(redir.Word) {
+				output, _ = literalWord(redir.Word)
+				appended = redir.Op == syntax.AppOut
+			}
+		}
+	}
+	return data, output, appended
 }
 
 func literalGoTestOutput(word *syntax.Word) bool {
@@ -1011,19 +1035,10 @@ func callOf(stmt *syntax.Stmt) *syntax.CallExpr {
 }
 
 func literalGoTestCall(stmt *syntax.Stmt, call *syntax.CallExpr, stderrToStdout bool) bool {
-	if stmt == nil || call == nil || stmt.Negated || stmt.Background || stmt.Coprocess || len(call.Assigns) != 0 || len(call.Args) < 2 {
+	if !literalGoTestCallShape(stmt, call) {
 		return false
 	}
-	if stderrToStdout {
-		if len(stmt.Redirs) != 1 {
-			return false
-		}
-		r := stmt.Redirs[0]
-		target, targetLiteral := literalShellWord(r.Word)
-		if r.Op != syntax.DplOut || r.N == nil || r.N.Value != "2" || !targetLiteral || target != "1" {
-			return false
-		}
-	} else if len(stmt.Redirs) != 0 {
+	if !goTestRedirsMatch(stmt.Redirs, stderrToStdout) {
 		return false
 	}
 	for i, arg := range call.Args {
@@ -1033,6 +1048,23 @@ func literalGoTestCall(stmt *syntax.Stmt, call *syntax.CallExpr, stderrToStdout 
 		}
 	}
 	return true
+}
+
+func goTestRedirsMatch(redirs []*syntax.Redirect, stderrToStdout bool) bool {
+	if !stderrToStdout {
+		return len(redirs) == 0
+	}
+	if len(redirs) != 1 {
+		return false
+	}
+	redir := redirs[0]
+	target, literal := literalShellWord(redir.Word)
+	return redir.Op == syntax.DplOut && redir.N != nil && redir.N.Value == "2" && literal && target == "1"
+}
+
+func literalGoTestCallShape(stmt *syntax.Stmt, call *syntax.CallExpr) bool {
+	return stmt != nil && call != nil && !stmt.Negated && !stmt.Background && !stmt.Coprocess &&
+		len(call.Assigns) == 0 && len(call.Args) >= 2
 }
 
 func literalTail(stmt *syntax.Stmt) bool {
