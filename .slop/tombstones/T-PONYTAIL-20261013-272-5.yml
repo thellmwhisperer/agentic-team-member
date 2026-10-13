@@ -1,0 +1,18 @@
+schema: 1
+id: T-PONYTAIL-20261013-272-5
+status: accepted
+category: alien_code
+title: "Remove the extra Cursor event-rendering prose from configuration documentation. Keep the invocation, effort, skill and failure behavior relevant to configuration."
+created_at: 2026-10-13
+incident:
+  pattern: "Remove the extra Cursor event-rendering prose from configuration documentation. Keep the invocation, effort, skill and failure behavior relevant to configuration."
+  what_went_wrong: "No-mistakes added code or prose beyond issue 272; the ponytail review removed it before delivery."
+  root_cause: "The coding agent wrote more than the issue needed."
+  rule_established: "Cut by the ponytail pass; it does not come back."
+  evidence:
+    - family: speculative_feature
+      example: "Remove the extra Cursor event-rendering prose from configuration documentation. Keep the invocation, effort, skill and failure behavior relevant to configuration."
+      artifact: "docs/configuration.md"
+match:
+  family: speculative_feature
+  artifact: "docs/configuration.md"

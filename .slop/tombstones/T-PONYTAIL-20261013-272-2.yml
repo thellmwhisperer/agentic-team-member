@@ -1,0 +1,18 @@
+schema: 1
+id: T-PONYTAIL-20261013-272-2
+status: accepted
+category: alien_code
+title: "Reuse the stream's existing successful-completion check for Cursor skill proof. Record the read call at started, then require its matching passed event; remove the second completion gate and duplicated failed-read case."
+created_at: 2026-10-13
+incident:
+  pattern: "Reuse the stream's existing successful-completion check for Cursor skill proof. Record the read call at started, then require its matching passed event; remove the second completion gate and duplicated failed-read case."
+  what_went_wrong: "No-mistakes added code or prose beyond issue 272; the ponytail review removed it before delivery."
+  root_cause: "The coding agent wrote more than the issue needed."
+  rule_established: "Cut by the ponytail pass; it does not come back."
+  evidence:
+    - family: speculative_hardening
+      example: "Reuse the stream's existing successful-completion check for Cursor skill proof. Record the read call at started, then require its matching passed event; remove the second completion gate and duplicated failed-read case."
+      artifact: "internal/run/agent.go"
+match:
+  family: speculative_hardening
+  artifact: "internal/run/agent.go"

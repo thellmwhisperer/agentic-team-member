@@ -1,3 +1,6 @@
+providers:
+  github:
+    draft_pull_requests: true
 commands:
   test: scripts/test.sh
   lint: scripts/lint.sh
