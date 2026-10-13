@@ -20,7 +20,8 @@ func TestResumeKeepsEarlierUnchainedFollowUps(t *testing.T) {
 		`echo 'grep -q extra a.txt' > .atm/follow-ups/2/c2_test.sh; echo cache > .atm/follow-ups/cache; `+
 		`printf '{"test_file":"a_test.sh","follow_ups":[`+
 		`{"title":"chained","red_test":"c1_test.sh","criterion":"A retry runs once after a timeout."},`+
-		`{"title":"pending","red_test":"c2_test.sh","criterion":"Some other work is documented."}]}' > .atm/fake-report.json; fi`)
+		`{"title":"pending","red_test":"c2_test.sh",`+
+		`"criterion":"Some other work is documented."}]}' > .atm/fake-report.json; fi`)
 	var first bytes.Buffer
 	err := Run("failed", []string{issueFile(t, followUpIssue)}, &first, io.Discard)
 	if err == nil {
@@ -31,7 +32,8 @@ func TestResumeKeepsEarlierUnchainedFollowUps(t *testing.T) {
 		t.Fatal(err)
 	}
 	var resumed bytes.Buffer
-	if err := Run("resumed", []string{"--resume", "failed", issueFile(t, followUpIssue)}, &resumed, io.Discard); err != nil {
+	args := []string{"--resume", "failed", issueFile(t, followUpIssue)}
+	if err := Run("resumed", args, &resumed, io.Discard); err != nil {
 		b, _ := os.ReadFile(filepath.Join(root, ".atm", "runs", "failed", "resume", "resume.json"))
 		t.Fatalf("resume: %v; saved state: %s", err, b)
 	}

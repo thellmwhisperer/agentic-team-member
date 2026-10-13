@@ -28,27 +28,9 @@ type resumePoint struct {
 // keepWork writes p and the work in clone, on HEAD, to resume/ in the run's directory dir. The work leaves the
 // files git ignores out, but for the agent's follow-ups.
 func keepWork(dir, clone string, p resumePoint) error {
-	b, err := json.Marshal(p.Report["follow_ups"])
+	paths, err := declaredFollowUpPaths(clone, p.Report["follow_ups"])
 	if err != nil {
 		return err
-	}
-	var declared []followUp
-	if err := json.Unmarshal(b, &declared); err != nil {
-		return err
-	}
-	var paths []string
-	for i, f := range declared {
-		name := filepath.Clean(filepath.FromSlash(f.RedTest))
-		if !filepath.IsLocal(name) || name == "." {
-			continue
-		}
-		path := filepath.Join(".atm", "follow-ups", strconv.Itoa(i+1), name)
-		info, err := os.Lstat(filepath.Join(clone, path))
-		if err == nil && !info.IsDir() {
-			paths = append(paths, filepath.ToSlash(path))
-		} else if err != nil && !os.IsNotExist(err) {
-			return err
-		}
 	}
 	if len(paths) > 0 {
 		args := append([]string{"--literal-pathspecs", "add", "-f", "--"}, paths...)
@@ -75,8 +57,34 @@ func keepWork(dir, clone string, p resumePoint) error {
 	if err != nil {
 		return err
 	}
-	b, _ = json.MarshalIndent(p, "", "  ")
+	b, _ := json.MarshalIndent(p, "", "  ")
 	return os.WriteFile(filepath.Join(keep, "resume.json"), append(b, '\n'), 0o644)
+}
+
+func declaredFollowUpPaths(clone string, followUps any) ([]string, error) {
+	b, err := json.Marshal(followUps)
+	if err != nil {
+		return nil, err
+	}
+	var declared []followUp
+	if err := json.Unmarshal(b, &declared); err != nil {
+		return nil, err
+	}
+	var paths []string
+	for i, f := range declared {
+		name := filepath.Clean(filepath.FromSlash(f.RedTest))
+		if !filepath.IsLocal(name) || name == "." {
+			continue
+		}
+		path := filepath.Join(".atm", "follow-ups", strconv.Itoa(i+1), name)
+		info, err := os.Lstat(filepath.Join(clone, path))
+		if err == nil && !info.IsDir() {
+			paths = append(paths, filepath.ToSlash(path))
+		} else if err != nil && !os.IsNotExist(err) {
+			return nil, err
+		}
+	}
+	return paths, nil
 }
 
 // keep keeps unit n's work in the run's clone, once its agent passed, in the run's directory dir, as p with
