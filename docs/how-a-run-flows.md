@@ -60,11 +60,14 @@ any non-zero exit.
 The agent must not have committed. ATM records every file in the clone before
 the agent starts; the checks first remove each file git ignores that the agent
 made, as delivery leaves it out, so a test that needs one fails. Ignored files
-already there, the install's output or caches, and declared follow-up test
-files stay. Then they run `install` again (the agent may have changed
-dependencies), prove the task type, and run `test`, `typecheck` and `lint`,
-empty ones skipped. The first failure stops the run with that
-command's last 60 lines. A command that commits fails the checks too.
+already there and the install's output or caches stay. ATM moves `.atm/` out
+of the clone while Checks runs, including `install`, the proof and the other
+commands, then restores it even if a check fails. This keeps follow-up tests
+for ATM to process after Checks without exposing them to a test. Checks then
+run `install` again (the agent may have changed dependencies), prove the task
+type, and run `test`, `typecheck` and `lint`, empty ones skipped. The first
+failure stops the run with that command's last 60 lines. A command that commits
+fails the checks too.
 
 ### What each task type proves
 
