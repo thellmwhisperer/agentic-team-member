@@ -1,0 +1,60 @@
+run:
+  id: "01M4T951VBVAMD48WYCJXBPZNH"
+  branch: atm/go-port-atm-run-follow-launches-a-run-an-20261013-094446
+  status: running
+  awaiting_agent: parked 4h32m
+  head: 9df398a1
+  head_sha: 9df398a19fdc2b1ac4966b0d5536d06d557f00c0
+  verification_plan: none
+  findings: "1 awaiting, 1 auto-fix"
+  steps[9]{step,status,findings,duration_ms}:
+    intent,completed,0,66
+    rebase,completed,0,38698
+    review,fix_review,2,4697267
+    test,pending,0,0
+    document,pending,0,0
+    lint,pending,0,0
+    push,pending,0,0
+    pr,pending,0,0
+    ci,pending,0,0
+branch_sync:
+  state: pipeline_owned
+  changed: false
+  local:
+    branch: atm/go-port-atm-run-follow-launches-a-run-an-20261013-094446
+    head: 51891fa02dd40930ba96208f54caeb863af2b4cb
+    clean: true
+  pipeline:
+    run: "01M4T951VBVAMD48WYCJXBPZNH"
+    status: running
+    phase: pre_push
+    submitted_head: 51891fa02dd40930ba96208f54caeb863af2b4cb
+    current_head: 9df398a19fdc2b1ac4966b0d5536d06d557f00c0
+    pushed_head: ""
+    pushed_at: 0
+    push_generation: 0
+  target:
+    kind: ""
+    remote: origin
+    url: "https://github.com/thellmwhisperer/agentic-team-member.git"
+    ref: ""
+  remote:
+    observed_head: ""
+    freshness: pipeline_push
+    observed_at: 0
+  relation: unknown
+  safety: blocked_pipeline_owned
+  pr_state: none
+  note: the pipeline head has moved but has not been successfully pushed; do not make local follow-up commits yet
+  next_action:
+    code: continue_active_run
+    command: no-mistakes axi status
+gate:
+  step: review
+  status: fix_review
+  risk: high
+  note: "Review auto-fix is disabled by default (`auto_fix.review: 0`; a repo or global `auto_fix.review > 0` override re-enables it), so blocking and ask-user review findings park for your decision rather than being silently self-fixed."
+  findings[2]{id,severity,file,action,description}:
+    doctor-duplicate-watcher,error,internal/cli/doctor.go,auto-fix,"`atm doctor` now prints and counts the watcher check twice: the existing block is at lines 68–75 and the added copy is at lines 78–85. This breaks the existing check-count contract and tests. Remove the added copy."
+    follow-ci-commit-provenance-unresolved,error,internal/run/follow.go,ask-user,"Criterion 2 requires the SHA and subject of each commit added while fixing CI. The latest fix round's `s.fixing` guard omits a CI commit when fixing completes between polls, while a review commit observed during CI fixing can still be labelled as a CI commit. The baseline is also learned from the delivery-passed frame at `internal/run/follow.go:180`, after the gate may have advanced; `internal/run/run.go:275` records that initial SHA earlier, and `internal/run/follow_test.go:156` delays the fake gate until delivery ends. Correct attribution needs authoritative commit-to-step provenance, so the remedy extends the available status contract and needs a decision."
+help[6]: Run `no-mistakes axi respond --action approve` to accept this step and continue,Run `no-mistakes axi respond --action fix --findings <ids>` to have the pipeline fix the selected findings (do not edit files yourself),Run `no-mistakes axi respond --action skip` to skip this step,Run `no-mistakes axi logs --step review --full` to read the complete step summary and log,"A long-running call is working, not stalled - background it if your harness needs to, but the run never advances past a gate on its own. Read every return; on a `gate:`, respond; loop until an `outcome:`.","Commit post-pipeline follow-up work on top of the existing branch so every pipeline fix commit remains present. Never abort-and-restart, reset, or replace the branch in a way that drops prior gate-fix commits."

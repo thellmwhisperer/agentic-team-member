@@ -1,0 +1,48 @@
+run:
+  id: "01M4TGSPFNF9Q1J3WDT2QGJS8H"
+  branch: codex/fix-native-completed-view
+  status: completed
+  head: b946fbc0
+  head_sha: b946fbc038d6e1bddb9e4735e04a86828fb64441
+  verification_plan: none
+  pr: "https://github.com/thellmwhisperer/agentic-team-member/pull/315"
+  findings: none
+  steps[9]{step,status,findings,duration_ms}:
+    intent,completed,0,12
+    rebase,completed,0,1122
+    review,completed,0,129822
+    test,completed,0,1384178
+    document,completed,0,31889
+    lint,completed,0,212998
+    push,completed,0,7226
+    pr,completed,0,16070
+    ci,completed,0,1310737
+branch_sync:
+  state: merged_remote_retained
+  changed: false
+  local:
+    branch: codex/fix-native-completed-view
+    head: abce805db90f2f7e18b616531425fada87c4b34c
+    clean: true
+  pipeline:
+    run: "01M4TGSPFNF9Q1J3WDT2QGJS8H"
+    status: completed
+    phase: ""
+    submitted_head: abce805db90f2f7e18b616531425fada87c4b34c
+    current_head: b946fbc038d6e1bddb9e4735e04a86828fb64441
+    pushed_head: b946fbc038d6e1bddb9e4735e04a86828fb64441
+    pushed_at: 1791897726
+    push_generation: 2
+  target:
+    kind: upstream
+    remote: origin
+    url: "https://github.com/thellmwhisperer/agentic-team-member.git"
+    ref: refs/heads/codex/fix-native-completed-view
+  remote:
+    observed_head: b946fbc038d6e1bddb9e4735e04a86828fb64441
+    freshness: pipeline_push
+    observed_at: 1791897726
+  relation: unknown
+  safety: blocked_merged
+  pr_state: merged
+outcome: passed

@@ -225,6 +225,122 @@ func TestWatchGateRetriesFirstStatusErrorAfterRunEnds(t *testing.T) {
 	}
 }
 
+func TestWatchStopsAtDeliveryFailedBeforeAGate(t *testing.T) {
+	defer func(b time.Duration) { beat = b }(beat)
+	beat = 10 * time.Millisecond
+	fakeStatus(t)
+	top := gitT(t, repo(t, "https://example.com/owner/repo.git", atmSet(atmYAML, "delivery", "exit 1")),
+		"rev-parse", "--show-toplevel")
+	background(t, top)
+	id, lines, _ := watching(t, top, "")
+	o, err := Start(top, []string{"--watcher", id, issueFile(t, issue)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var event string
+	for !strings.HasPrefix(event, "finished") {
+		event = watchEvent(t, nextLine(t, lines), o.Run)
+	}
+	if event != "finished: failed at Delivery" {
+		t.Fatalf("watcher printed %q", event)
+	}
+}
+
+func TestWatchGateMakesNoStatusCallAfterDeliveryFailedBeforeAGate(t *testing.T) {
+	defer func(b time.Duration) { beat = b }(beat)
+	beat = time.Millisecond
+	count := fakeStatus(t)
+	root := t.TempDir()
+	if err := os.MkdirAll(runDir(root, "run"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFixture(t, filepath.Join(runDir(root, "run"), "report.json"), `{"failed_node": "delivery"}`)
+	ended := make(chan struct{})
+	close(ended)
+	watchGate(context.Background(), root, t.TempDir(), nil, "run", ended, func(_, event string) {
+		t.Errorf("watcher printed %q", event)
+	})
+	if b, err := os.ReadFile(count); err == nil {
+		t.Fatalf("%s status calls after delivery failed before a gate; want none", b)
+	}
+}
+
+// fakeStatus installs the fake no-mistakes and returns the file counting its calls.
+func fakeStatus(t *testing.T) (count string) {
+	t.Helper()
+	installFakeNoMistakes(t)
+	count = filepath.Join(t.TempDir(), "count")
+	t.Setenv("ATM_STATUS_COUNT", count)
+	return count
+}
+
+// realStatus has the fake no-mistakes answer with the testdata captures of a real run: running, an error, then
+// parked until release exists, then completed. It returns the file counting its calls.
+func realStatus(t *testing.T, release string) (count string) {
+	t.Helper()
+	t.Setenv("ATM_STATUS_RELEASE", release)
+	for env, name := range map[string]string{"ATM_STATUS_LIVE": "running", "ATM_STATUS_WAITING": "parked",
+		"ATM_STATUS_MERGED": "completed"} {
+		path, err := filepath.Abs(filepath.Join("testdata", "atm_watch_status_"+name+".txt"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv(env, path)
+	}
+	return fakeStatus(t)
+}
+
+func TestWatchGatePrintsRealCompletedStatusAndRetriesAnErrorOnceItsGateRuns(t *testing.T) {
+	defer func(b time.Duration) { beat = b }(beat)
+	beat = time.Millisecond
+	release := filepath.Join(t.TempDir(), "release")
+	writeFixture(t, release, "")
+	count := realStatus(t, release)
+	var got []string
+	watchGate(context.Background(), t.TempDir(), t.TempDir(), nil, "run", make(chan struct{}),
+		func(_, event string) { got = append(got, event) })
+	want := []string{"pr https://github.com/thellmwhisperer/agentic-team-member/pull/315", "ci green", "merged"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("watcher printed %q, want %q", got, want)
+	}
+	if b, err := os.ReadFile(count); err != nil || string(b) != "3" {
+		t.Fatalf("status calls = %q, %v; want running, the error retried, completed", b, err)
+	}
+}
+
+// A real run parked for a decision, `awaiting_agent: parked`, is a gate waiting at its step.
+func TestWatchGatePrintsRealParkedStatusAsWaiting(t *testing.T) {
+	defer func(b time.Duration) { beat = b }(beat)
+	beat = time.Millisecond
+	release := filepath.Join(t.TempDir(), "release")
+	realStatus(t, release)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	var got []string
+	watchGate(ctx, t.TempDir(), t.TempDir(), nil, "run", make(chan struct{}), func(_, event string) {
+		got = append(got, event)
+		if event == "gate waiting: review" {
+			writeFixture(t, release, "")
+		}
+	})
+	want := []string{"gate waiting: review", "pr https://github.com/thellmwhisperer/agentic-team-member/pull/315",
+		"ci green", "merged"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("watcher printed %q, want %q", got, want)
+	}
+}
+
+// A step fixing its review findings on its own, not parked, waits for no one.
+func TestParseGateFixReviewNotParkedIsNotWaiting(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("testdata", "atm_watch_status_parked.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := parseGate(strings.Replace(string(b), "awaiting_agent: parked", "awaiting_agent: none", 1)); s.waiting != "" {
+		t.Fatalf("waiting = %q, want none", s.waiting)
+	}
+}
+
 func TestWatchGateReadsPRStateAfterCloneRelease(t *testing.T) {
 	defer func(b time.Duration) { beat = b }(beat)
 	beat = time.Millisecond

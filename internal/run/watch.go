@@ -168,7 +168,11 @@ func follow(ctx context.Context, root, label string, since time.Time, say func(l
 	case o.Outcome == "passed":
 		say(label, "finished: passed")
 	default:
-		say(label, "finished: failed"+at(o.FailedNode))
+		failed := o.FailedNode
+		if failed != "" {
+			failed = strings.ToUpper(failed[:1]) + failed[1:] // Delivery
+		}
+		say(label, "finished: failed"+at(failed))
 	}
 }
 
@@ -200,7 +204,7 @@ func watchGate(
 	var deliveredBranch string
 	t := time.NewTicker(beat)
 	defer t.Stop()
-	for {
+	for !g.failedFirst(root, label) {
 		select {
 		case deliveredBranch = <-branch:
 		default:
@@ -235,6 +239,13 @@ func watchGate(
 	}
 }
 
+// failedFirst says whether the delivery of run label failed before g saw a gate: none comes.
+func (g *gate) failedFirst(root, label string) bool {
+	var report verdict
+	b, _ := os.ReadFile(filepath.Join(runDir(root, label), "report.json"))
+	return !g.seen && json.Unmarshal(b, &report) == nil && report.FailedNode == "delivery"
+}
+
 func gatePRState(root, branch string) (string, error) {
 	origin, err := git(root, "remote", "get-url", "origin")
 	if err != nil {
@@ -255,15 +266,15 @@ type gate struct {
 	fixing, green, merged, failed bool
 }
 
-// gateState is what `no-mistakes axi status` says of a gate: its PR, the first step that waits for approval and
-// the first that failed, and whether it has steps, CI is being fixed or green, and the PR merged.
+// gateState is what `no-mistakes axi status` says of a gate: its PR, the first step that waits for approval or a
+// decision and the first that failed, and whether it has steps, CI is being fixed or green, and the PR merged.
 type gateState struct {
 	pr, waiting, failed         string
 	seen, fixing, green, merged bool
 }
 
 func parseGate(status string) (s gateState) {
-	steps := false
+	steps, parked := false, false // parked: its fix_review step waits for a decision
 	for _, l := range strings.Split(status, "\n") {
 		trimmed := strings.TrimSpace(l)
 		key, value, isKey := strings.Cut(trimmed, ": ")
@@ -280,22 +291,29 @@ func parseGate(status string) (s gateState) {
 				s.pr = value
 			case "pr_state":
 				s.merged = value == "merged"
+			case "awaiting_agent":
+				parked = strings.HasPrefix(value, "parked")
 			}
 		case steps && l != trimmed:
-			step, rest, _ := strings.Cut(trimmed, ",")
-			state, _, _ := strings.Cut(rest, ",")
-			s.seen = true
-			switch {
-			case state == "awaiting_approval":
-				s.waiting = cmp.Or(s.waiting, step)
-			case state == "failed":
-				s.failed = cmp.Or(s.failed, step)
-			case step == "ci":
-				s.fixing, s.green = state == "fixing", state == "completed"
-			}
+			s.step(trimmed, parked)
 		}
 	}
 	return s
+}
+
+// step adds to s a row of the gate's steps, `step,status,...`, of a run parked or not.
+func (s *gateState) step(row string, parked bool) {
+	step, rest, _ := strings.Cut(row, ",")
+	state, _, _ := strings.Cut(rest, ",")
+	s.seen = true
+	switch {
+	case state == "awaiting_approval" || parked && state == "fix_review":
+		s.waiting = cmp.Or(s.waiting, step)
+	case state == "failed":
+		s.failed = cmp.Or(s.failed, step)
+	case step == "ci":
+		s.fixing, s.green = state == "fixing", state == "completed"
+	}
 }
 
 // events is the lines status, the gate's `no-mistakes axi status`, adds at now to those g printed; done once the
