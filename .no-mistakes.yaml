@@ -1,9 +1,6 @@
 commands:
   test: scripts/test.sh
   lint: scripts/lint.sh
-providers:
-  github:
-    draft_pull_requests: true
 review:
   path_instructions:
     - path: "**"
