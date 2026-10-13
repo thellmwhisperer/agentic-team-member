@@ -75,6 +75,32 @@ func TestCompletedScreenDoesNotInventMissingResults(t *testing.T) {
 	}
 }
 
+func TestCompletedScreenKeepsMissingDurationUnknown(t *testing.T) {
+	m := New("cold-2", 80, 40)
+	m.end(run.Outcome{Outcome: "passed", Report: savedReport(t, `{"nodes":[{"name":"agent","result":"passed"}]}`)}, nil)
+	r := m.current("agent")
+	if r.state != "passed" || r.hasDuration {
+		t.Fatalf("missing duration became evidence: state=%s duration=%v", r.state, r.hasDuration)
+	}
+	if s := view(m); strings.Contains(s, "Agent  0.0 s") {
+		t.Fatalf("missing duration rendered as zero:\n%s", s)
+	}
+}
+
+func TestCompletedScreenKeepsContradictorySavedResultUnknown(t *testing.T) {
+	m := New("cold-3", 80, 40)
+	m.end(run.Outcome{Outcome: "passed", Report: savedReport(t, `{"nodes":[
+		{"name":"issue","result":"passed","duration_ms":12},
+		{"name":"checks","result":"failed","duration_ms":500}
+	]}`)}, nil)
+	if m.current("issue").state != "passed" || m.current("checks").state != "unknown" {
+		t.Fatalf("stale report was not reconciled: issue=%s checks=%s", m.current("issue").state, m.current("checks").state)
+	}
+	if s := view(m); strings.Contains(s, "✗ Checks") || !strings.Contains(s, "? Checks") {
+		t.Fatalf("contradictory result shown as current:\n%s", s)
+	}
+}
+
 func TestCompletedScreenRestoresFailureAndUnrunNodes(t *testing.T) {
 	path := savedReport(t, `{"reason":"tests failed","nodes":[
 	 {"name":"checks","result":"failed","duration_ms":500},
