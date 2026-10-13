@@ -28,6 +28,11 @@ const failingUnit2Work = `if [ -f c1_test.sh ]; then echo u2 >> a.txt; mkdir -p 
 
 const failsOnUnit2 = `if [ -f c1_test.sh ]; then false; else sh a_test.sh; fi`
 
+func normalizedTestContent(followUp obj) string {
+	content, _ := followUp["test"].(string)
+	return strings.ReplaceAll(content, "\r\n", "\n")
+}
+
 // wantFollowUps checks the independent identities and verification states of both pending follow-ups.
 func wantFollowUps(t *testing.T, got []obj, unit2 bool) {
 	t.Helper()
@@ -40,7 +45,7 @@ func wantFollowUps(t *testing.T, got []obj, unit2 bool) {
 	}
 	if byTest["c2_test.sh"]["verified"] != true || byTest["c2_test.sh"]["title"] != "pending" ||
 		byTest["c3_test.sh"]["verified"] != unit2 || byTest["c3_test.sh"]["title"] != "unit 2 gap" ||
-		byTest["c3_test.sh"]["test"] != "grep -q u3 a.txt\n" {
+		normalizedTestContent(byTest["c3_test.sh"]) != "grep -q u3 a.txt\n" {
 		t.Fatalf("want unit 1's follow-up verified and unit 2's verified %v, got %v", unit2, got)
 	}
 }
@@ -77,7 +82,7 @@ func TestUnit1ThatFailsChecksKeepsItsFollowUps(t *testing.T) {
 	}
 	got := readFollowUps(t, root)
 	if len(got) != 1 || got[0]["title"] != "atomic restore" || got[0]["verified"] != false ||
-		got[0]["test"] != "grep -q restored a.txt\n" {
+		normalizedTestContent(got[0]) != "grep -q restored a.txt\n" {
 		t.Fatalf("want unit 1's follow-up not verified, got %v", got)
 	}
 }
@@ -182,7 +187,7 @@ func TestFollowUpsFieldShapesKeepEarlierFollowUpsOnChecksFailure(t *testing.T) {
 			}
 			got := readFollowUps(t, root)
 			if len(got) != 1 || got[0]["title"] != "pending" || got[0]["verified"] != true ||
-				got[0]["test"] != "grep -q extra a.txt\n" {
+				normalizedTestContent(got[0]) != "grep -q extra a.txt\n" {
 				t.Fatalf("want unit 1's valid follow-up retained without a malformed entry, got %v", got)
 			}
 		})
