@@ -262,12 +262,12 @@ type gateState struct {
 func parseGate(status string) (s gateState) {
 	steps := false
 	for _, l := range strings.Split(status, "\n") {
-		l = strings.TrimSpace(l)
-		key, value, isKey := strings.Cut(l, ": ")
+		trimmed := strings.TrimSpace(l)
+		key, value, isKey := strings.Cut(trimmed, ": ")
 		switch {
-		case strings.HasPrefix(l, "steps["):
+		case strings.HasPrefix(trimmed, "steps["):
 			steps = true
-		case isKey || strings.HasSuffix(l, ":"):
+		case isKey || strings.HasSuffix(trimmed, ":"):
 			steps = false
 			if unquoted, err := strconv.Unquote(value); err == nil {
 				value = unquoted
@@ -278,8 +278,8 @@ func parseGate(status string) (s gateState) {
 			case "pr_state":
 				s.merged = value == "merged"
 			}
-		case steps:
-			step, rest, _ := strings.Cut(l, ",")
+		case steps && l != trimmed:
+			step, rest, _ := strings.Cut(trimmed, ",")
 			state, _, _ := strings.Cut(rest, ",")
 			s.seen = true
 			switch {
