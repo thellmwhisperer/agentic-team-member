@@ -248,11 +248,7 @@ func TestWatchGateMakesNoStatusCallAfterDeliveryFailedBeforeAGate(t *testing.T) 
 	defer func(b time.Duration) { beat = b }(beat)
 	beat = time.Millisecond
 	count := fakeStatus(t)
-	root := t.TempDir()
-	if err := os.MkdirAll(runDir(root, "run"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeFixture(t, filepath.Join(runDir(root, "run"), "report.json"), `{"failed_node": "delivery"}`)
+	root := reported(t, `{"failed_node": "delivery"}`)
 	ended := make(chan struct{})
 	close(ended)
 	watchGate(context.Background(), root, t.TempDir(), nil, "run", ended, func(_, event string) {
@@ -261,6 +257,31 @@ func TestWatchGateMakesNoStatusCallAfterDeliveryFailedBeforeAGate(t *testing.T) 
 	if b, err := os.ReadFile(count); err == nil {
 		t.Fatalf("%s status calls after delivery failed before a gate; want none", b)
 	}
+}
+
+// A delivery command that ran may have started a gate before it failed: its status errors are retried.
+func TestWatchGateRetriesAfterDeliveryCommandFailed(t *testing.T) {
+	defer func(b time.Duration) { beat = b }(beat)
+	beat = time.Millisecond
+	root := reported(t, `{"failed_node": "delivery", "commands": [{"name": "delivery", "result": "failed"}]}`)
+	release := filepath.Join(t.TempDir(), "release")
+	writeFixture(t, release, "")
+	count := realStatus(t, release)
+	none := filepath.Join(t.TempDir(), "none")
+	writeFixture(t, none, "")
+	t.Setenv("ATM_STATUS_LIVE", none)
+	watchesToMergedAfterARetry(t, root, count)
+}
+
+// reported is a root whose run "run" has report, its report.json.
+func reported(t *testing.T, report string) (root string) {
+	t.Helper()
+	root = t.TempDir()
+	if err := os.MkdirAll(runDir(root, "run"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFixture(t, filepath.Join(runDir(root, "run"), "report.json"), report)
+	return root
 }
 
 // fakeStatus installs the fake no-mistakes and returns the file counting its calls.
@@ -293,16 +314,23 @@ func TestWatchGatePrintsRealCompletedStatusAndRetriesAnErrorOnceItsGateRuns(t *t
 	beat = time.Millisecond
 	release := filepath.Join(t.TempDir(), "release")
 	writeFixture(t, release, "")
-	count := realStatus(t, release)
+	watchesToMergedAfterARetry(t, t.TempDir(), realStatus(t, release))
+}
+
+// watchesToMergedAfterARetry watches the gate of run "run" in root and wants the real completed capture's lines
+// after three status calls, counted in count: a first answer, an error retried, completed.
+func watchesToMergedAfterARetry(t *testing.T, root, count string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
 	var got []string
-	watchGate(context.Background(), t.TempDir(), t.TempDir(), nil, "run", make(chan struct{}),
-		func(_, event string) { got = append(got, event) })
+	watchGate(ctx, root, t.TempDir(), nil, "run", make(chan struct{}), func(_, event string) { got = append(got, event) })
 	want := []string{"pr https://github.com/thellmwhisperer/agentic-team-member/pull/315", "ci green", "merged"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("watcher printed %q, want %q", got, want)
 	}
 	if b, err := os.ReadFile(count); err != nil || string(b) != "3" {
-		t.Fatalf("status calls = %q, %v; want running, the error retried, completed", b, err)
+		t.Fatalf("status calls = %q, %v; want a first answer, the error retried, completed", b, err)
 	}
 }
 
