@@ -1,0 +1,8 @@
+{"thinking":"I'll run the failing command, read hello.txt, and reply DONE."}
+{"says":"I'll run the failing `cat`, then read `hello.txt`."}
+{"detail":"cat nope.txt","id":"call-0","result":"running","tool":"shell"}
+{"detail":"hello.txt","id":"call-1","result":"running","tool":"read"}
+{"detail":"hello.txt","id":"call-1","result":"passed","tool":"read"}
+{"detail":"cat nope.txt","id":"call-0","result":"failed","tool":"shell"}
+{"thinking":"The first command failed as expected."}
+{"says":"DONE"}

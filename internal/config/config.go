@@ -67,8 +67,11 @@ func Load(root, home string, flags Agent) (Config, error) {
 	}
 	c.Harness, c.Model, c.Effort = cmp.Or(flags.Harness, c.Harness), cmp.Or(flags.Model, c.Model),
 		cmp.Or(flags.Effort, c.Effort)
-	if !slices.Contains([]string{"claude", "codex", "opencode", "pi"}, c.Harness) {
-		return c, fmt.Errorf("harness %q unknown, want claude, codex, opencode or pi", c.Harness)
+	if !slices.Contains([]string{"claude", "codex", "opencode", "pi", "cursor"}, c.Harness) {
+		return c, fmt.Errorf("harness %q unknown, want claude, codex, opencode, pi or cursor", c.Harness)
+	}
+	if c.Harness == "cursor" && c.Effort != "" {
+		return c, fmt.Errorf("cursor has no effort flag: put it in the model, as '<model>[effort=%s]'", c.Effort)
 	}
 	return c, nil
 }

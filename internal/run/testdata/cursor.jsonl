@@ -1,0 +1,15 @@
+{"type":"system","subtype":"init","model":"Grok 4.6 High Fast","session_id":"s1"}
+{"type":"thinking","subtype":"delta","text":"I'll run the failing"}
+{"type":"thinking","subtype":"delta","text":" command, read hello.txt,"}
+{"type":"thinking","subtype":"delta","text":" and reply DONE."}
+{"type":"thinking","subtype":"completed"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"I'll run the failing `cat`, then read `hello.txt`."}]}}
+{"type":"tool_call","subtype":"started","call_id":"call-0","tool_call":{"shellToolCall":{"args":{"command":"cat nope.txt"}}}}
+{"type":"tool_call","subtype":"started","call_id":"call-1","tool_call":{"readToolCall":{"args":{"path":"hello.txt"}}}}
+{"type":"tool_call","subtype":"completed","call_id":"call-1","tool_call":{"readToolCall":{"args":{"path":"hello.txt"},"result":{"success":{}}}}}
+{"type":"tool_call","subtype":"completed","call_id":"call-0","tool_call":{"shellToolCall":{"args":{"command":"cat nope.txt"},"result":{"failure":{"exitCode":1,"stderr":"cat: nope.txt: No such file or directory\n"}}}}}
+{"type":"thinking","subtype":"delta","text":"The first command failed"}
+{"type":"thinking","subtype":"delta","text":" as expected."}
+{"type":"thinking","subtype":"completed"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"DONE"}]}}
+{"type":"result","subtype":"success","is_error":false,"result":"I'll run the failing `cat`, then read `hello.txt`.DONE"}
