@@ -4,6 +4,7 @@ package run
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -269,7 +270,8 @@ func TestARunGoesToABackgroundProcessOfTheNewFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = log.Close()
-	t.Cleanup(func() { _ = old.Process.Kill() })
+	var runStarted bool
+	t.Cleanup(func() { cleanupReplacementServers(t, atm, top, old, runStarted, release) })
 	until(t, "old server ready", func() bool {
 		b, e := os.ReadFile(filepath.Join(top, ".atm", "serve.log"))
 		return e == nil && strings.Contains(string(b), "atm serve version: old-build")
@@ -278,12 +280,26 @@ func TestARunGoesToABackgroundProcessOfTheNewFile(t *testing.T) {
 	if err := os.Rename(atm+".new", atm); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command(atm, "run", issueFile(t, issue))
-	cmd.Dir = top
-	cmd.Stdout = io.Discard
+	runThroughReplacement(t, atm, top, issueFile(t, issue), &runStarted)
+	wait()
+	serveLog, err := os.ReadFile(filepath.Join(top, ".atm", "serve.log"))
+	if err != nil || !strings.Contains(string(serveLog), "atm serve version: new-build") {
+		t.Fatalf("replacement server identity = %q, %v", serveLog, err)
+	}
+	release()
+	if runs, err := Runs(top); err != nil || len(runs) != 1 || runs[0].Outcome != "running" {
+		t.Fatalf("new server run = %+v, %v", runs, err)
+	}
+}
+
+func runThroughReplacement(t *testing.T, atm, top, issuePath string, runStarted *bool) {
+	t.Helper()
+	cmd := exec.Command(atm, "run", issuePath)
+	cmd.Dir, cmd.Stdout = top, io.Discard
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
+	*runStarted = true
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
 	select {
@@ -295,14 +311,60 @@ func TestARunGoesToABackgroundProcessOfTheNewFile(t *testing.T) {
 		serveLog, _ := os.ReadFile(filepath.Join(top, ".atm", "serve.log"))
 		t.Fatalf("atm run did not return; serve log: %s", serveLog)
 	}
-	wait()
-	serveLog, err := os.ReadFile(filepath.Join(top, ".atm", "serve.log"))
-	if err != nil || !strings.Contains(string(serveLog), "atm serve version: new-build") {
-		t.Fatalf("replacement server identity = %q, %v", serveLog, err)
-	}
+}
+
+func cleanupReplacementServers(t *testing.T, atm, top string, old *exec.Cmd, runStarted bool, release func()) {
+	t.Helper()
 	release()
-	if runs, err := Runs(top); err != nil || len(runs) != 1 || runs[0].Outcome != "running" {
-		t.Fatalf("new server run = %+v, %v", runs, err)
+	if runStarted {
+		waitForRunToFinish(t, atm, top)
+	}
+	killServeProcesses(t, top, old.Process.Pid)
+	_ = old.Wait()
+}
+
+func waitForRunToFinish(t *testing.T, atm, top string) {
+	t.Helper()
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		cmd := exec.Command(atm, "axi", "runs", "--json")
+		cmd.Dir = top
+		out, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("atm axi runs --json: %v", err)
+		}
+		var runs struct {
+			Runs []struct {
+				Outcome string `json:"outcome"`
+			}
+		}
+		if err := json.Unmarshal(out, &runs); err != nil {
+			t.Fatalf("decode atm axi runs --json: %v", err)
+		}
+		if len(runs.Runs) == 1 && runs.Runs[0].Outcome != "running" {
+			return
+		}
+	}
+	t.Fatal("the run did not finish after releasing its fake agent")
+}
+
+func killServeProcesses(t *testing.T, top string, pids ...int) {
+	t.Helper()
+	log, err := os.ReadFile(filepath.Join(top, ".atm", "serve.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(string(log), "\n") {
+		pidText, ok := strings.CutPrefix(line, "atm serve pid:")
+		if !ok {
+			continue
+		}
+		pid, err := strconv.Atoi(strings.TrimSpace(pidText))
+		if err == nil {
+			pids = append(pids, pid)
+		}
+	}
+	for _, pid := range pids {
+		_ = syscall.Kill(pid, syscall.SIGKILL)
 	}
 }
 
