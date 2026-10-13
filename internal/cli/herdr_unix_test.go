@@ -3,6 +3,7 @@
 package cli
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -68,6 +69,7 @@ func TestEveryRunOnTheScreenShowsInHerdr(t *testing.T) {
 		return []string{
 			"pane|report-agent-session|wX:p1|--source|atm|--agent|atm|--agent-session-id|" + label +
 				"|--session-start-source|" + start + "|",
+			report + "working|--message|" + label + "|",
 			report + "working|--message|" + label + " Chore|",
 			report + "working|--message|" + label + " Clone|",
 			report + "working|--message|" + label + " Contract|",
@@ -94,11 +96,55 @@ func TestEveryRunOnTheScreenShowsInHerdr(t *testing.T) {
 		t.Fatalf("herdr got:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 
+	for i, env := range []struct{ key, value string }{{"NO_COLOR", "1"}, {"TERM", "dumb"}} {
+		label := fmt.Sprintf("chore-%d", i+3)
+		t.Setenv(env.key, env.value)
+		calls = fakeHerdr(t, "0")
+		if _, code := onTerminal(t, "run", "chore.md"); code != 0 {
+			t.Fatalf("plain run exit %d", code)
+		}
+		if got, want := herdrCalls(t, calls), steps(label, "startup"); !reflect.DeepEqual(got, want) {
+			t.Fatalf("plain run herdr calls:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+		}
+		if err := os.Remove(calls); err != nil {
+			t.Fatal(err)
+		}
+		if _, code := onTerminal(t, "attach", label); code != 0 {
+			t.Fatalf("plain attach exit %d", code)
+		}
+		if got, want := herdrCalls(t, calls), steps(label, "resume"); !reflect.DeepEqual(got, want) {
+			t.Fatalf("plain attach herdr calls:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+		}
+	}
+
 	calls = fakeHerdr(t, "1")
 	if shown, code := onTerminal(t, "run", "chore.md"); code != 0 || !strings.Contains(shown, "passed") {
 		t.Fatalf("a failing herdr changed the run: exit %d, the terminal showed %q", code, shown)
 	}
-	if got := herdrCalls(t, calls); len(got) != 9 {
-		t.Fatalf("herdr got %d calls, want 9: %q", len(got), got)
+	if got := herdrCalls(t, calls); len(got) != 10 {
+		t.Fatalf("herdr got %d calls, want 10: %q", len(got), got)
+	}
+}
+
+func TestRunReportsWorkingBeforeIssueLoadingFails(t *testing.T) {
+	dir := repo(t, "https://example.com/o/r.git")
+	cleanBackgroundServer(t, dir)
+	if err := os.WriteFile(filepath.Join(dir, "retry.md"), []byte("# Retry\nType: fix\nRetry.\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("TERM", "xterm-256color")
+	t.Setenv("HERDR_ENV", "1")
+	t.Setenv("HERDR_PANE_ID", "wX:p1")
+	calls := fakeHerdr(t, "0")
+	if _, code := onTerminal(t, "run", "retry.md"); code != 2 {
+		t.Fatalf("exit %d, want config failure", code)
+	}
+	got := herdrCalls(t, calls)
+	if len(got) != 4 || !strings.Contains(got[0], "report-agent-session") ||
+		!strings.Contains(got[1], "working|--message|retry-1|") ||
+		!strings.Contains(got[2], "idle|--message|retry-1 failed at start|") ||
+		!strings.Contains(got[3], "release-agent") {
+		t.Fatalf("herdr calls before issue loading failed: %q", got)
 	}
 }

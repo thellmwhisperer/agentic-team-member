@@ -51,7 +51,7 @@ func screen(w io.Writer) (*os.File, bool) {
 func attach(root, label, start string, w io.Writer) error {
 	f, ok := screen(w)
 	if !ok {
-		o, err := run.Attach(root, label, w)
+		o, err := tui.Attach(root, label, start, w)
 		if err != nil {
 			return err
 		}

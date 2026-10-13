@@ -20,6 +20,10 @@ var follow = run.Follow // tests follow a run of their own
 // the terminal, the terminal is the command's: no-mistakes, attached by it, shows its own screen there. In a
 // herdr pane, the run shows in herdr's Agents section while the screen does, from start, startup or resume.
 func Show(root, label, start string, in, out *os.File) (o run.Outcome, detached bool, err error) {
+	label, err = resolve(root, label)
+	if err != nil {
+		return o, false, err
+	}
 	w, h, err := term.GetSize(int(out.Fd()))
 	if err != nil {
 		return o, false, err
@@ -29,17 +33,9 @@ func Show(root, label, start string, in, out *os.File) (o run.Outcome, detached 
 	m.keys = keys
 	p := tea.NewProgram(m, tea.WithInput(in), tea.WithOutput(out), tea.WithAltScreen())
 	d := &delivery{p: p, in: in, out: out, keys: keys}
-	a, frame := openHerdr(root, label, start), d.frame
-	if a != nil {
-		defer a.release()
-		frame = func(f run.Frame) { a.frame(f); d.frame(f) }
-	}
 	go func() {
-		o, err := follow(root, label, &[2]int{w, h}, keys, frame)
+		o, err := followWithHerdr(root, label, start, &[2]int{w, h}, keys, d.frame, follow)
 		d.giveBack()
-		if a != nil {
-			a.end(o, err)
-		}
 		p.Send(ended{o, err})
 	}()
 	defer close(keys)
