@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"go/ast"
 	"go/parser"
+	"go/scanner"
 	"go/token"
 	"io"
 	"os"
@@ -299,6 +300,10 @@ func redDidNotRun(output string) bool {
 func redGreen(clone, tree string, aside []string, test, tmpl string) (red, green try, err error) {
 	line, err := testLine(clone, tmpl, test)
 	if err != nil {
+		var parseErr goTestParseError
+		if errors.As(err, &parseErr) {
+			return red, green, fmt.Errorf("red did not run: parse/compile error: %s fails before any test runs", test)
+		}
 		return red, green, err
 	}
 	red, green, err = trial(clone, tree, aside, line, line, test, strings.Contains(tmpl, "{tests}"), func(red try) error {
@@ -512,6 +517,10 @@ func reset(clone string) error {
 
 var errVoid = errors.New("the clone changed during verification: the verdict is void")
 
+type goTestParseError struct{ error }
+
+func (e goTestParseError) Unwrap() error { return e.error }
+
 // testLine is test_file, tmpl, for test, a path in clone. {tests} is ^(TestA|TestB)$, the Go tests test defines.
 func testLine(clone, tmpl, test string) (string, error) {
 	switch {
@@ -524,6 +533,10 @@ func testLine(clone, tmpl, test string) (string, error) {
 	if strings.Contains(tmpl, "{tests}") {
 		f, parseErr := parser.ParseFile(token.NewFileSet(), filepath.Join(clone, filepath.FromSlash(test)), nil, 0)
 		if f == nil {
+			var syntaxErrors scanner.ErrorList
+			if errors.As(parseErr, &syntaxErrors) {
+				return "", goTestParseError{parseErr}
+			}
 			return "", parseErr
 		}
 		for _, decl := range f.Decls {
