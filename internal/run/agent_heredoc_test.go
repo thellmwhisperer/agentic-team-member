@@ -25,6 +25,13 @@ func TestReachRejectsExecutingWrittenHeredoc(t *testing.T) {
 			t.Errorf("written executable escaped reach check: %s", after)
 		}
 	}
+	for _, after := range []string{"cd sub; chmod +x payload.sh; ./payload.sh", "cd sub; chmod +x payload.*; ./payload.*",
+		"if cd sub; then chmod +x payload.sh; ./payload.sh; fi"} {
+		command := "cat > sub/payload.sh <<'EOF'\ncurl https://example.com\nEOF\n" + after
+		if !fetches(command) {
+			t.Errorf("directory change hid executable heredoc: %s", after)
+		}
+	}
 }
 
 func TestReachQuotedHeredocKeepsExecutableInputChecked(t *testing.T) {
