@@ -86,13 +86,13 @@ commits fails the checks too.
 | Type | Proof |
 |------|-------|
 | `fix`, `hotfix` | Red/green on the files the base already has: the files the fix added stay, so the test must fail on behaviour. Then twice more, on the base with only the fix's added lines in place: a test that passes there depends on nothing the base had and is rejected |
-| `feature`, `greenfield` | Red/green with everything set aside; the red must reach a test assertion, so parse and compile failures do not count |
+| `feature`, `greenfield` | Red/green with everything set aside; the red may fail on a missing symbol at runtime, but not on a parse or compile error of the test file itself |
 | `refactor` | `test` passes on the base, and no test file changed |
 | `tests` | The new test passes on the base and after; only test and doc files changed |
 | `docs` | Only files matching `docs_patterns` changed |
 | `chore` | Nothing beyond the commands |
 
-For `fix`, `feature` and `greenfield`, ATM checks the complete red output before judging green. A whole Go `FAIL <package> [build failed]` or `FAIL <package> [setup failed]` line, decorated pytest `ERROR collecting` / `E SyntaxError` / `E ImportError` line, Jest `Test suite failed to run` line, or TypeScript `<file>:<line>:<column> - error TS<n>` diagnostic before any test result fails with "red did not run: parse/compile error". A Jest `FAIL <file>` header is not a test result. Assertion failures remain valid reds.
+For `fix`, `feature` and `greenfield`, ATM classifies the red at the shared red/green boundary, on its whole output, before it judges the green. A red that fails on a parse or compile error of the test file itself fails the run with "red did not run: parse/compile error", never with "fails with the fix"; one that fails on a missing symbol at runtime, or on an assertion, is a valid red. ATM tells a runner's diagnostic from assertion output by where and how the runner prints it: from the line's first column, where indented assertion output never starts, and with no test result in the output. The diagnostics are Go's `FAIL <package> [build failed]` or `[setup failed]` line, which a test file without a valid package clause also gets; pytest's `ERROR collecting` header and `E   SyntaxError` / `E   ImportError` lines; Jest's `● Test suite failed to run` under a `FAIL <file>` header; node --test's `SyntaxError:` line, plain or as a TAP `# ` comment; and tsc's `<file>(<line>,<column>): error TS<n>` or `<file>:<line>:<column> - error TS<n>` diagnostic. So a Go assertion whose own text holds `[build failed]` remains a valid red.
 
 Red/green runs the report's `test_file` alone through `test_file` in
 `.atm.yaml`, once with the fix set aside and once with it back. After each

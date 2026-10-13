@@ -190,6 +190,15 @@ var proofCases = []struct {
 	{name: "Go feature whose red test does not compile", typ: "feature", atm: goAtm, files: goBase,
 		work: `printf 'package p\n\nfunc TestFix(t *testing.T) {\n' > p/p_test.go; ` + reportJSON("p/p_test.go"),
 		why:  "red did not run: parse/compile error"},
+	{name: "Go feature whose red test has no package clause", typ: "feature", atm: goAtm, files: goBase,
+		work: noPackage, why: "red did not run: parse/compile error"},
+	{name: "Go greenfield whose red test has no package clause", typ: "greenfield", atm: goAtm, files: goBase,
+		work: noPackage, why: "red did not run: parse/compile error"},
+	{name: "fix whose malformed Python test fails in red and green", typ: "fix",
+		atm: atmSet(atmYAML, "test_file", "sh pytest.sh {file}"), files: map[string]string{"pytest.sh": fakePytest},
+		work: "echo fixed > a.txt; printf 'def test_broken(:\\n    assert True\\n' > test_bad.py; " +
+			reportJSON("test_bad.py"),
+		why: "red did not run: parse/compile error"},
 	{name: "fix whose test only calls a function it adds to an old file", typ: "fix", lib: lib,
 		work: "echo '" + helper + "' >> lib.sh" + testThrough("helper"), why: "depends on nothing the base had"},
 	{name: "fix whose test only calls a function it adds next to a changed line", typ: "fix", lib: lib,
@@ -329,6 +338,30 @@ func goTest(fn string) string {
 		`() != "fixed" {\n\t\tt.Fatal()\n\t}\n}\n' > p/p_test.go; ` + reportJSON("p/p_test.go")
 }
 
+// noPackage writes p/p_test.go without its package clause and reports it as the test.
+const noPackage = `printf 'import "testing"\n\nfunc TestFix(t *testing.T) {}\n' > p/p_test.go; ` + "mkdir -p .atm; " +
+	`printf '{"test_file":"p/p_test.go","follow_ups":[]}' > .atm/fake-report.json`
+
+// pytestSyntaxError is pytest 9.0.2's output, recorded, on a test file that does not parse.
+var pytestSyntaxError = strings.Join([]string{
+	"============================= test session starts ==============================",
+	"platform darwin -- Python 3.14.7, pytest-9.0.2, pluggy-1.6.0",
+	"collected 0 items / 1 error", "",
+	"==================================== ERRORS ====================================",
+	"_________________________ ERROR collecting test_bad.py _________________________",
+	"/opt/homebrew/Cellar/python@3.14/3.14.7/lib/python3.14/ast.py:46: in parse",
+	"    return compile(source, filename, mode, flags,",
+	`E     File "/tmp/test_bad.py", line 1`, "E       def test_broken(:", "E                       ^",
+	"E   SyntaxError: invalid syntax",
+	"=========================== short test summary info ============================",
+	"ERROR test_bad.py",
+	"!!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!",
+	"=============================== 1 error in 0.17s ===============================",
+}, "\n")
+
+// fakePytest plays pytest on a test file that does not parse, red or green.
+var fakePytest = "cat <<'EOF'\n" + pytestSyntaxError + "\nEOF\nexit 2\n"
+
 // shrunkTest names the failure of work that deletes or shortens a_test.sh, a test on the base.
 const shrunkTest = "the base's test a_test.sh is gone or shorter"
 
@@ -389,6 +422,35 @@ func TestRedDidNotRunMatchesRunnerOutput(t *testing.T) {
 		{"Go setup", "FAIL example.com/m/p [setup failed]", true},
 		{"Go assertion", "--- FAIL: TestFix (0.00s)\nchecks_test.go:1: expected [build failed]\n" +
 			"FAIL example.com/m/p 0.003s", false},
+		{"Go no package clause", "# example.com/m/p\np/p_test.go:1:1: expected 'package', found 'import'\n" +
+			"FAIL\texample.com/m/p [setup failed]\nFAIL", true},
+		{"pytest recorded", pytestSyntaxError, true},
+		{"tsc", "src/a.test.ts(3,7): error TS2322: Type 'number' is not assignable to type 'string'.", true},
+		{"Jest assertion text alone", "    Test suite failed to run", false},
+		{"node --test tap", strings.Join([]string{
+			"TAP version 13", "# /tmp/a.test.js:3", "# SyntaxError: Unexpected end of input",
+			"#     at wrapSafe (node:internal/modules/cjs/loader:1637:18)", "# Node.js v22.22.1",
+			"# Subtest: a.test.js", "not ok 1 - a.test.js", "  ---", "  failureType: 'testCodeFailure'",
+			"  exitCode: 1", "  error: 'test failed'", "  code: 'ERR_TEST_FAILURE'", "  ...", "1..1",
+			"# tests 1", "# pass 0", "# fail 1",
+		}, "\n"), true},
+		{"node --test spec", strings.Join([]string{
+			"/tmp/a.test.js:3", "", "", "", "SyntaxError: Unexpected end of input",
+			"    at wrapSafe (node:internal/modules/cjs/loader:1637:18)", "", "Node.js v22.22.1",
+			"✖ a.test.js (20.180916ms)", "ℹ tests 1", "ℹ pass 0", "ℹ fail 1", "", "✖ failing tests:", "",
+			"test at a.test.js:1:1", "✖ a.test.js (20.180916ms)", "  'test failed'",
+		}, "\n"), true},
+		{"node --test runtime SyntaxError", strings.Join([]string{
+			"✖ x (0.370709ms)", "ℹ tests 1", "ℹ pass 0", "ℹ fail 1", "", "✖ failing tests:", "",
+			"test at b.test.js:2:1", "✖ x (0.370709ms)",
+			"  SyntaxError: Expected property name or '}' in JSON at position 1 (line 1 column 2)",
+			"      at JSON.parse (<anonymous>)",
+		}, "\n"), false},
+		{"node --test assertion text", strings.Join([]string{
+			"TAP version 13", "# Subtest: x", "not ok 1 - x", "  ---", "  failureType: 'testCodeFailure'",
+			"  error: |-", "    want", "    error TS2322: nope", "    SyntaxError: nope", "  code: 'ERR_ASSERTION'",
+			"  name: 'AssertionError'", "  ...", "1..1", "# tests 1", "# pass 0", "# fail 1",
+		}, "\n"), false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			if got := redDidNotRun(c.output); got != c.want {
