@@ -100,6 +100,20 @@ func TestCompletedScreenKeepsMissingDurationUnknown(t *testing.T) {
 	}
 }
 
+func TestCompletedScreenKeepsOverflowingDurationUnknown(t *testing.T) {
+	m := New("cold-overflow", 80, 40)
+	m.end(run.Outcome{Outcome: "passed", Report: savedReport(t, `{"nodes":[
+		{"name":"agent","result":"passed","duration_ms":9223372036855}
+	]}`)}, nil)
+	r := m.current("agent")
+	if r.state != "passed" || r.hasDuration {
+		t.Fatalf("overflowing duration became evidence: state=%s duration=%v", r.state, r.took)
+	}
+	if s := view(m); strings.Contains(s, "292471") || strings.Contains(s, "0.0 s") {
+		t.Fatalf("overflowing duration rendered in completed view:\n%s", s)
+	}
+}
+
 func TestCompletedScreenKeepsContradictorySavedResultUnknown(t *testing.T) {
 	m := New("cold-3", 80, 40)
 	m.end(run.Outcome{Outcome: "passed", Report: savedReport(t, `{"nodes":[

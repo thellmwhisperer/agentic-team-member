@@ -9,6 +9,8 @@ import (
 	"github.com/thellmwhisperer/agentic-team-member/internal/run"
 )
 
+const maxDurationMS = int64(^uint64(0)>>1) / int64(time.Millisecond)
+
 // restoreReport recovers node results after the daemon lost its in-memory frames. The report has only
 // the last Agent/Checks timings, not every unit's events, so it must not invent per-unit rows or tool counts.
 func (m *Model) restoreReport(path string, outcome run.Outcome) {
@@ -44,13 +46,14 @@ func (m *Model) restoreReport(path string, outcome run.Outcome) {
 			continue
 		}
 		seen[n.Name] = true
-		if n.DurationMS != nil && *n.DurationMS < 0 || !consistentResult(n.Name, n.Result, outcome) {
+		if !consistentResult(n.Name, n.Result, outcome) {
 			continue
 		}
 		switch n.Result {
 		case "passed", "failed", "skipped", "not run":
 			r.state = n.Result
-			if n.DurationMS != nil && (n.Result == "passed" || n.Result == "failed") {
+			if n.DurationMS != nil && *n.DurationMS >= 0 && *n.DurationMS <= maxDurationMS &&
+				(n.Result == "passed" || n.Result == "failed") {
 				r.took, r.hasDuration = time.Duration(*n.DurationMS)*time.Millisecond, true
 			}
 		default: // a stale running report is not evidence that the ended run is still working

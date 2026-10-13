@@ -116,7 +116,7 @@ effort. Both are in [Configuration](docs/configuration.md).
 | `atm run --watcher <id> [flags] <issue>` | Runs an issue: a GitHub number or a file with a `Type:` line. Without a live watcher it does not start |
 | `atm run --resume <run>` | Runs a failed run's issue again from its agent's work, at its checks |
 | `atm status` | The runs going |
-| `atm attach [run]` | A run's screen until it ends |
+| `atm attach [run]` | A run's screen; completed screens stay until q or Ctrl+C |
 | `atm runs` | Every retained run, its watcher and its report |
 | `atm axi run`, `atm axi status`, `atm axi runs` | The same for programs, in TOON or JSON |
 
