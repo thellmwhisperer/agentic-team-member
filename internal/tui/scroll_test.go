@@ -43,6 +43,12 @@ func feed(m *Model, evs ...string) {
 	}
 }
 
+func topAgentLine(m *Model) string { return strings.Split(view(m), "\n")[1] }
+func topPipelineLine(m *Model) string {
+	line := []rune(strings.Split(view(m), "\n")[3])
+	return string(line[:min(len(line), m.pipelineBounds.width)])
+}
+
 func TestBothBoxesScrollIndependentlyAndFollowOnlyAtTheBottom(t *testing.T) {
 	m := overflowing(120, 24)
 	atm, agent := shownOf(m, proofs), shownOf(m, thoughts)
@@ -206,6 +212,63 @@ func TestHeldRowsStayAnchoredAcrossConnectorAndWrapReflow(t *testing.T) {
 	m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
 	if got := view(m); !strings.Contains(got, "anchor identity marker") {
 		t.Fatalf("wrapping moved the selected Agent message:\n%s", got)
+	}
+}
+
+func TestHeldTopTracksSecondToolGroupAfterNewOutput(t *testing.T) {
+	m := New("issue-1", 120, 24)
+	feed(m, `{"step":"agent","state":"started"}`,
+		`{"step":"agent","id":"t1","tool":"first-tool","result":"passed"}`,
+		`{"step":"agent","thinking":"group separator"}`,
+		`{"step":"agent","id":"t2","tool":"second-tool","result":"passed"}`)
+	for i := range 40 {
+		feed(m, fmt.Sprintf(`{"step":"agent","thinking":"later %02d"}`, i))
+	}
+	view(m)
+	press(m, tea.KeyHome, tea.KeyDown, tea.KeyDown)
+	if line := topAgentLine(m); !strings.Contains(line, "second-tool") {
+		t.Fatalf("the selected top row must be the second tool group: %q", line)
+	}
+	feed(m, `{"step":"agent","thinking":"new output"}`)
+	if line := topAgentLine(m); !strings.Contains(line, "second-tool") || strings.Contains(line, "first-tool") {
+		t.Fatalf("new output moved the selected second tool group: %q", line)
+	}
+}
+
+func TestHeldWrappedPartClampsToItsMessageWhenWidened(t *testing.T) {
+	m := New("issue-1", 120, 24)
+	feed(m, `{"step":"agent","state":"started"}`, `{"step":"agent","thinking":"WRAP-ANCHOR `+strings.Repeat("word ", 18)+`"}`)
+	for i := range 30 {
+		feed(m, fmt.Sprintf(`{"step":"agent","thinking":"later %02d"}`, i))
+	}
+	view(m)
+	press(m, tea.KeyHome, tea.KeyDown)
+	if line := topAgentLine(m); strings.Contains(line, "WRAP-ANCHOR") {
+		t.Fatalf("the fixture must select a continuation row: %q", line)
+	}
+	m.Update(tea.WindowSizeMsg{Width: 200, Height: 24})
+	if line := topAgentLine(m); !strings.Contains(line, "WRAP-ANCHOR") {
+		t.Fatalf("widening must keep the same message at the top: %q", line)
+	}
+}
+
+func TestHeldConnectorMapsToItsRowWhenConnectorsDisappear(t *testing.T) {
+	m := overflowing(120, 30)
+	view(m)
+	press(m, tea.KeyTab, tea.KeyHome)
+	for range 7 {
+		press(m, tea.KeyDown)
+	}
+	if line := topPipelineLine(m); strings.Trim(line, "│ ") != "" {
+		t.Fatalf("the fixture must select the Checks connector: %q", line)
+	}
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 29})
+	if line := topPipelineLine(m); !strings.Contains(line, "Checks") {
+		t.Fatalf("when its connector disappears, the Checks row must stay at the top: %q", line)
+	}
+	feed(m, `{"step":"checks","check":"new check","state":"passed"}`)
+	if line := topPipelineLine(m); !strings.Contains(line, "Checks") {
+		t.Fatalf("new rows moved the surviving Checks row: %q", line)
 	}
 }
 

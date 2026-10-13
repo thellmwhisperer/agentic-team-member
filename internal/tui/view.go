@@ -157,7 +157,8 @@ func (m *Model) atm(width, height int) string {
 	var rows []paneLine
 	for i, r := range m.rows {
 		if i > 0 && !r.check && m.height >= connectors {
-			rows = append(rows, paneLine{key: fmt.Sprintf("connector:%p", r), text: paint(dim, "│")})
+			key := fmt.Sprintf("row:%p", r)
+			rows = append(rows, paneLine{key: "connector:" + key, parent: key, text: paint(dim, "│")})
 		}
 		rows = append(rows, paneLine{key: fmt.Sprintf("row:%p", r), text: m.row(r, inner)})
 	}
@@ -451,6 +452,7 @@ func agentTextRows(prefix, text string, width int) []string {
 func (m *Model) agentBox(width, lines int) string {
 	var out []paneLine
 	var names []string
+	toolGroup := ""
 	counts, running := map[string]int{}, false
 	runningDetail := ""
 	flush := func() {
@@ -469,11 +471,11 @@ func (m *Model) agentBox(width, lines int) string {
 			if runningDetail != "" {
 				line += " · " + runningDetail
 			}
-			out = append(out, paneLine{key: "tools", text: "  " + m.icon("running") + " " + paint(dim, line)})
+			out = append(out, paneLine{key: toolGroup, text: "  " + m.icon("running") + " " + paint(dim, line)})
 		} else {
-			out = append(out, paneLine{key: "tools", text: "  " + paint(dim, "· "+line)})
+			out = append(out, paneLine{key: toolGroup, text: "  " + paint(dim, "· "+line)})
 		}
-		names, counts, running, runningDetail = nil, map[string]int{}, false, ""
+		names, counts, running, runningDetail, toolGroup = nil, map[string]int{}, false, "", ""
 	}
 	for _, a := range m.agent {
 		switch {
@@ -487,6 +489,9 @@ func (m *Model) agentBox(width, lines int) string {
 			flush()
 			out = append(out, paneLine{key: fmt.Sprintf("activity:%p", a), text: m.icon("failed") + " " + paint(red, "failed") + " " + paint(dim, a.tool+" "+a.detail)})
 		default:
+			if len(names) == 0 {
+				toolGroup = fmt.Sprintf("tools:%p", a)
+			}
 			if counts[a.tool]++; counts[a.tool] == 1 {
 				names = append(names, a.tool)
 			}
