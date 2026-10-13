@@ -347,6 +347,9 @@ func TestRunDiesWhenTheAgentReachesOutsideItsClone(t *testing.T) {
 			q(curl) + `}}` + "\n", why + "bash " + curl},
 		{"pi wrapped curl", "pi", `{"type":"tool_execution_start","toolCallId":"c1","toolName":"bash","args":{"command":` + q(`env curl ""`) + `}}` + "\n",
 			why + `bash env curl ""`},
+		{"pi command with description", "pi", `{"type":"tool_execution_start","toolCallId":"c1","toolName":"bash","args":{"command":` + q(`echo ready; curl "$URL"`) + `,"description":"Check what's happening"}}` + "\n",
+			why + `bash echo ready; curl "$URL"`},
+		{"pi description url ignored", "pi", `{"type":"tool_execution_start","toolCallId":"c1","toolName":"bash","args":{"command":"pnpm dev --url http://localhost:5173","description":"https://example.com"}}` + "\n", ""},
 		{"claude relative reach", "claude", claude("Bash", `{"command":"rg pattern . ../.."}`),
 			why + "Bash rg pattern . ../.."},
 		{"claude relative prefix reach", "claude", claude("Bash", `{"command":"rg pattern src/../../"}`),
@@ -357,6 +360,8 @@ func TestRunDiesWhenTheAgentReachesOutsideItsClone(t *testing.T) {
 			why + "Bash env FOO=bar sudo command exec curl -s a"},
 		{"newline curl", "claude", claude("Bash", `{"command":`+q("printf ok\ncurl \"$URL\"")+`}`),
 			why + "Bash printf ok\ncurl \"$URL\""},
+		{"command separated from description", "claude", claude("Bash", `{"command":`+q(`echo ready; curl "$URL"`)+`,"description":"Check what's happening"}`),
+			why + `Bash echo ready; curl "$URL"`},
 		{"assigned curl", "claude", claude("Bash", `{"command":`+q(`FOO=bar curl "$URL"`)+`}`),
 			why + `Bash FOO=bar curl "$URL"`},
 		{"chained curl", "claude", claude("Bash", `{"command":"x && curl -s a"}`),
@@ -375,6 +380,10 @@ func TestRunDiesWhenTheAgentReachesOutsideItsClone(t *testing.T) {
 			why + "Bash echo `curl -s a`"},
 		{"shell wrapped wget", "claude", claude("Bash", `{"command":`+q(`sh -c "wget b"`)+`}`),
 			why + `Bash sh -c "wget b"`},
+		{"expanded url", "claude", claude("Bash", `{"command":`+q(`node -e "fetch('https://example.com/$ASSET')"`)+`}`),
+			why + `Bash node -e "fetch('https://example.com/$ASSET')"`},
+		{"expanded nested curl", "claude", claude("Bash", `{"command":`+q(`sh -c "curl https://example.com/$ASSET"`)+`}`),
+			why + `Bash sh -c "curl https://example.com/$ASSET"`},
 		{"claude reads another run", "claude", claude("Read", `{"file_path":"{root}/.atm/runs/6-2/worker.jsonl"}`),
 			why + "Read {root}/.atm/runs/6-2/worker.jsonl"},
 		{"codex lists another clone", "codex", `{"type":"item.started","item":{"id":"c1","type":"command_execution",` +
@@ -382,9 +391,13 @@ func TestRunDiesWhenTheAgentReachesOutsideItsClone(t *testing.T) {
 		{"opencode fetches", "opencode", `{"type":"tool_use","part":{"callID":"c1","tool":"bash","state":` +
 			`{"status":"completed","input":{"command":"node -e \"fetch('https://example.com')\""}}}}` + "\n",
 			why + `bash node -e "fetch('https://example.com')"`},
+		{"opencode command with description", "opencode", `{"type":"tool_use","part":{"callID":"c1","tool":"bash","state":{"status":"completed","input":{"command":` +
+			q(`echo ready; curl "$URL"`) + `,"description":"Check what's happening"}}}}` + "\n", why + `bash echo ready; curl "$URL"`},
+		{"opencode description url ignored", "opencode", `{"type":"tool_use","part":{"callID":"c1","tool":"bash","state":{"status":"completed","input":{"command":"pnpm dev --url http://localhost:5173","description":"https://example.com"}}}}` + "\n", ""},
 		{"inside", "claude", claude("Read", `{"file_path":"{clone}/AGENTS.md"}`) +
 			claude("Bash", `{"command":"rg curl ."}`) +
 			claude("Bash", `{"command":"rg wget ."}`) +
+			claude("Bash", `{"command":"pnpm dev --url http://localhost:5173","description":"https://example.com"}`) +
 			claude("Bash", `{"command":"pnpm add zod && pnpm dev --url http://localhost:5173"}`) +
 			claude("Bash", `{"command":"pnpm dev --url http://localhost:5173; echo ready"}`) +
 			claude("Read", `{"file_path":"{home}/go/pkg/mod/golang.org/x/mod@v0.20.0/go.mod"}`) +

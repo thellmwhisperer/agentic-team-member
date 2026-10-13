@@ -597,28 +597,46 @@ func detail(input json.RawMessage) string {
 	return ""
 }
 
-// use is one of the agent's tool calls: its tool and every string of its arguments, in full.
-type use struct{ tool, args string }
+// use is one of the agent's tool calls: its tool, every string of its arguments, and its shell command.
+type use struct{ tool, args, command string }
 
 // calls is e's tool calls: claude's tool_use and pi's toolCall blocks, pi's tool executions, codex's commands
 // and opencode's tool uses.
 func (e event) calls(harness string) (cs []use) {
 	switch {
 	case harness == "codex" && e.Item.Type == "command_execution":
-		return []use{{"shell", e.Item.Command}}
+		return []use{{"shell", e.Item.Command, e.Item.Command}}
 	case harness == "opencode" && e.Type == "tool_use":
-		return []use{{e.Part.Tool, strs(e.Part.State.Input)}}
+		args := strs(e.Part.State.Input)
+		return []use{{e.Part.Tool, args, shellCommand(e.Part.Tool, e.Part.State.Input)}}
 	case harness == "pi" && e.Type == "tool_execution_start":
-		return []use{{e.ToolName, strs(e.Args)}}
+		args := strs(e.Args)
+		return []use{{e.ToolName, args, shellCommand(e.ToolName, e.Args)}}
 	case e.Type != "assistant" && e.Type != "message_end": // not a pi message_update's partial arguments
 		return nil
 	}
 	for _, b := range e.Message.Content {
 		if b.Type == "tool_use" || b.Type == "toolCall" {
-			cs = append(cs, use{b.Name, strs(b.Input) + strs(b.Arguments)})
+			input := b.Input
+			if len(input) == 0 {
+				input = b.Arguments
+			}
+			args := strs(b.Input) + strs(b.Arguments)
+			cs = append(cs, use{b.Name, args, shellCommand(b.Name, input)})
 		}
 	}
 	return cs
+}
+
+func shellCommand(tool string, input json.RawMessage) string {
+	if !strings.EqualFold(tool, "bash") && !strings.EqualFold(tool, "shell") {
+		return ""
+	}
+	var fields map[string]json.RawMessage
+	_ = json.Unmarshal(input, &fields)
+	var command string
+	_ = json.Unmarshal(fields["command"], &command)
+	return command
 }
 
 // strs is every string in a tool call's input, by key, joined by spaces.
@@ -645,7 +663,7 @@ func strs(input json.RawMessage) string {
 }
 
 var (
-	link = regexp.MustCompile("https?://[^\\s\"'`)]+")
+	link = regexp.MustCompile("https?://[^\\s\"'`;|&)]+")
 	sep  = "\\s\"'`;|&()<>,="
 )
 
@@ -681,7 +699,7 @@ func outside(calls []use, root, clone string) string {
 			underClone := cloneErr == nil && relClone != ".." && !strings.HasPrefix(relClone, ".."+string(filepath.Separator))
 			reach = reach || underRoot && !underClone
 		}
-		if reach || (strings.EqualFold(c.tool, "bash") || c.tool == "shell") && fetches(text) {
+		if reach || c.command != "" && fetches(c.command) {
 			r := []rune(c.args)
 			return c.tool + " " + string(r[:min(len(r), 200)])
 		}
@@ -691,6 +709,9 @@ func outside(calls []use, root, clone string) string {
 
 // fetches says whether a shell command runs curl or wget or names a URL off this machine.
 func fetches(command string) bool {
+	if badURL(command) {
+		return true
+	}
 	file, err := syntax.NewParser().Parse(strings.NewReader(command), "")
 	if err != nil {
 		fields := strings.Fields(command)
@@ -702,11 +723,6 @@ func fetches(command string) bool {
 	}
 	unsafe := false
 	syntax.Walk(file, func(node syntax.Node) bool {
-		if word, ok := node.(*syntax.Word); ok {
-			if text, literal := literalWord(word); literal && badURL(text) {
-				unsafe = true
-			}
-		}
 		if call, ok := node.(*syntax.CallExpr); ok && fetchCall(call) {
 			unsafe = true
 		}
@@ -760,8 +776,7 @@ func fetchCall(call *syntax.CallExpr) bool {
 		case "env":
 			i++
 			for i < len(args) {
-				arg, literal := literalWord(args[i])
-				if !literal || !strings.Contains(arg, "=") {
+				if !strings.Contains(literalFragments(args[i]), "=") {
 					break
 				}
 				i++
@@ -771,8 +786,7 @@ func fetchCall(call *syntax.CallExpr) bool {
 		case "sh", "bash":
 			if i+2 < len(args) {
 				flag, flagLiteral := literalWord(args[i+1])
-				command, commandLiteral := literalWord(args[i+2])
-				return flagLiteral && flag == "-c" && commandLiteral && fetches(command)
+				return flagLiteral && flag == "-c" && fetches(literalFragments(args[i+2]))
 			}
 			return false
 		default:
@@ -780,4 +794,23 @@ func fetchCall(call *syntax.CallExpr) bool {
 		}
 	}
 	return false
+}
+
+func literalFragments(word *syntax.Word) string {
+	var text strings.Builder
+	var walk func([]syntax.WordPart)
+	walk = func(parts []syntax.WordPart) {
+		for _, part := range parts {
+			switch part := part.(type) {
+			case *syntax.Lit:
+				text.WriteString(part.Value)
+			case *syntax.SglQuoted:
+				text.WriteString(part.Value)
+			case *syntax.DblQuoted:
+				walk(part.Parts)
+			}
+		}
+	}
+	walk(word.Parts)
+	return text.String()
 }
