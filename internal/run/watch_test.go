@@ -213,9 +213,7 @@ func TestWatchLiveness(t *testing.T) {
 func TestWatchGateRetriesFirstStatusErrorAfterRunEnds(t *testing.T) {
 	defer func(b time.Duration) { beat = b }(beat)
 	beat = time.Millisecond
-	installFakeNoMistakes(t)
-	count := filepath.Join(t.TempDir(), "count")
-	t.Setenv("ATM_STATUS_COUNT", count)
+	count := fakeStatus(t)
 	ended := make(chan struct{})
 	close(ended)
 	watchGate(context.Background(), t.TempDir(), t.TempDir(), nil, "run", ended, func(string, string) {})
@@ -369,72 +367,17 @@ func TestWatchPrintsGateEventsFromAxiStatusAndSurvivesTransientError(t *testing.
 func testGateStatusWatcherEvents(t *testing.T) {
 	defer func(b, r time.Duration) { beat, remind = b, r }(beat, remind)
 	beat, remind = 2*time.Millisecond, 15*time.Millisecond
+	release := filepath.Join(t.TempDir(), "release")
+	realStatus(t, release) // before repo, which leaves the package directory
 	top := gitT(t, repo(t, "https://example.com/owner/repo.git", atmSet(atmYAML, "delivery", "true")),
 		"rev-parse", "--show-toplevel")
 	stop := background(t, top)
 	t.Cleanup(stop)
-	bin := t.TempDir()
-	waiting, merged, counter, release := gateStatusFixtures(t, bin)
-	configureGateStatus(t, bin, waiting, merged, counter, release)
 	id, lines, _ := watching(t, top, "")
 	if _, err := startWithWatcher(t, top, []string{"--watcher", id, issueFile(t, issue)}); err != nil {
 		t.Fatal(err)
 	}
 	assertGateEventSequence(t, lines, release, top)
-}
-
-func gateStatusFixtures(t *testing.T, bin string) (waiting, merged, counter, release string) {
-	t.Helper()
-	waiting, merged, counter, release = filepath.Join(bin, "waiting"), filepath.Join(bin, "merged"),
-		filepath.Join(bin, "count"), filepath.Join(bin, "release")
-	const liveStatus = `run:
-  id: "01M4T2F20FPSNC61KDJ6FYHBN8"
-  branch: atm/go-port-no-watcher-no-run-atm-watch-neve-20261013-075250
-  status: running
-  head: aefb7d33
-  head_sha: aefb7d3322800a162036bb5f5bfa36b4e27c1009
-  verification_plan: none
-  findings: "3 awaiting, 4 auto-fix"
-  steps[9]{step,status,findings,duration_ms}:
-    intent,completed,0,149
-    rebase,completed,0,44095
-    review,fixing,7,277544
-    test,pending,0,0
-    document,pending,0,0
-    lint,pending,0,0
-    push,pending,0,0
-    pr,pending,0,0
-    ci,pending,0,0
-  active_steps[1]{step,status,active_for,round_active_for,last_activity,agent_pid,round}:
-    review,fixing,9m29s,4m36s,"2s ago: codex producing output","90314",fix 1
-`
-	steps := func(rows ...string) string {
-		return "steps[3]{step,status,findings,duration_ms}:\n    " + strings.Join(rows, "\n    ") + "\n"
-	}
-	waitingStatus := steps(
-		"review,awaiting_approval,1,1",
-		"pr,pending,0,0",
-		"ci,pending,0,0",
-	)
-	writeFixture(t, waiting, waitingStatus)
-	mergedStatus := "pr: \"https://github.com/o/r/pull/7\"\npr_state: merged\n" +
-		steps("review,completed,0,1", "pr,completed,0,1", "ci,completed,0,1")
-	writeFixture(t, merged, mergedStatus)
-	installFakeNoMistakes(t)
-	writeFixture(t, filepath.Join(bin, "live"), liveStatus)
-	return waiting, merged, counter, release
-}
-
-func configureGateStatus(t *testing.T, bin, waiting, merged, counter, release string) {
-	t.Helper()
-	t.Setenv("ATM_STATUS_COUNT", counter)
-	t.Setenv("ATM_STATUS_LIVE", filepath.Join(bin, "live"))
-	t.Setenv("ATM_STATUS_WAITING", waiting)
-	t.Setenv("ATM_STATUS_MERGED", merged)
-	t.Setenv("ATM_STATUS_RELEASE", release)
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	_ = waiting
-	_ = merged
 }
 
 func assertGateEventSequence(t *testing.T, lines <-chan string, release, top string) {
