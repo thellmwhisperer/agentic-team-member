@@ -247,8 +247,9 @@ func TestRunProvesATestsIssueOnlyThroughTheReportedFilesGoTests(t *testing.T) {
 	t.Setenv("GOCACHE", strings.TrimSpace(string(gocache))) // repo moves HOME, and the cache with it
 	commitFiles(t, root, "", map[string]string{"go.mod": "module example.com/m\n\ngo 1.21\n",
 		"p/old_test.go": "package p\n\nimport \"testing\"\n\nfunc TestOld(t *testing.T) { t.Fatal(\"old\") }\n"})
-	t.Setenv("ATM_TEST_NEW", "package p\n\nimport \"testing\"\n\nfunc TestNew(t *testing.T) {}\n\n"+
-		"func TestNewToo(t *testing.T) {}\n\nfunc Testhelper(t *testing.T) { t.Fatal(\"invalid test name\") }\n\n"+
+	t.Setenv("ATM_TEST_NEW", "package p\n\nimport \"testing\"\n\ntype T = testing.T\n\n"+
+		"func TestNew(t *testing.T) {}\n\nfunc TestNewToo(t *testing.T) {}\n\nfunc TestAlias(t *T) {}\n\n"+
+		"func Testhelper(t *testing.T) { t.Fatal(\"invalid test name\") }\n\n"+
 		"/*\nfunc TestOld(t *testing.T) {}\n*/\n\nfunc helper() {}\n")
 	t.Setenv("FAKE_AGENT_WORK", `printf %s "$ATM_TEST_NEW" > p/new_test.go; `+reportJSON("p/new_test.go"))
 	var out bytes.Buffer
@@ -261,7 +262,7 @@ func TestRunProvesATestsIssueOnlyThroughTheReportedFilesGoTests(t *testing.T) {
 	for _, m := range ran {
 		names = append(names, m[1])
 	}
-	if strings.Join(names, " ") != "TestNew TestNewToo TestNew TestNewToo" {
+	if strings.Join(names, " ") != "TestNew TestNewToo TestAlias TestNew TestNewToo TestAlias" {
 		t.Fatalf("want only new_test.go's tests, on the base and after, got %q", names)
 	}
 }
