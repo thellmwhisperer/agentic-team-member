@@ -173,14 +173,15 @@ func (m *Model) sidebar() bool {
 func (m *Model) right(width, height int) string {
 	log := m.running() && len(m.output) > 0
 	top := ""
-	switch {
-	case m.agentRuns():
-		rows := height
+	if m.agentRuns() {
 		if log {
-			rows -= min(len(m.output)+2, height/3) + 1
+			logBox := m.logBox(width, min(len(m.output), max(1, height/3-2)))
+			top = m.agentBox(width, max(1, height-lipgloss.Height(logBox)-3))
+			return strings.Join([]string{top, logBox}, "\n\n")
 		}
-		top = m.agentBox(width, max(3, rows-2))
-	case len(m.findings) > 0:
+		return m.agentBox(width, max(1, height-2))
+	}
+	if len(m.findings) > 0 {
 		top = m.findingsBox(width)
 	}
 	var boxes []string

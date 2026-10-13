@@ -20,6 +20,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/thellmwhisperer/agentic-team-member/internal/config"
 )
@@ -149,14 +151,53 @@ func (a agent) run(clone, name, skill, brief string, check func(map[string]any) 
 
 // relative is live with each tool call's detail relative to clone: a path in it without clone, clone itself ".".
 func relative(clone string, live func(map[string]any)) func(map[string]any) {
-	slash := filepath.ToSlash(clone)
-	rel := strings.NewReplacer(clone+string(filepath.Separator), "", slash+"/", "", clone, ".", slash, ".")
 	return func(ev map[string]any) {
 		if d, ok := ev["detail"].(string); ok {
-			ev["detail"] = rel.Replace(d)
+			ev["detail"] = relativeDetail(d, clone)
 		}
 		live(ev)
 	}
+}
+
+func relativeDetail(detail, clone string) string {
+	var out strings.Builder
+	for start := 0; start < len(detail); {
+		i := strings.Index(detail[start:], clone)
+		if i < 0 {
+			out.WriteString(detail[start:])
+			break
+		}
+		i += start
+		end := i + len(clone)
+		beforeOK := i == 0 || !clonePathRune(lastRune(detail[:i]))
+		next := rune(0)
+		if end < len(detail) {
+			next, _ = utf8.DecodeRuneInString(detail[end:])
+		}
+		afterOK := end == len(detail) || next == '/' || next == '\\' || !clonePathRune(next)
+		if beforeOK && afterOK {
+			out.WriteString(detail[start:i])
+			if i == 0 && (next == '/' || next == '\\') {
+				start = end + 1
+			} else {
+				out.WriteByte('.')
+				start = end
+			}
+		} else {
+			out.WriteString(detail[start:end])
+			start = end
+		}
+	}
+	return out.String()
+}
+
+func lastRune(s string) rune {
+	r, _ := utf8.DecodeLastRuneInString(s)
+	return r
+}
+
+func clonePathRune(r rune) bool {
+	return unicode.IsLetter(r) || unicode.IsNumber(r) || strings.ContainsRune("_-.\\/", r)
 }
 
 // report is the agent's report, the last JSON object of its final message, which check accepts.
