@@ -186,7 +186,7 @@ func prove(clone, typ, test string, c config.Config) (red, green try, err error)
 	case "fix", "feature", "greenfield":
 		red, green, err := redGreen(clone, tree, aside, test, c.TestFile)
 		if err == nil && typ == "fix" {
-			err = onBase(clone, tree, aside, test, c.TestFile)
+			err = fixOnBase(clone, tree, aside, test, c.TestFile, red.Tail)
 		}
 		return red, green, err
 	case "refactor":
@@ -262,6 +262,12 @@ func shrunk(clone string, changed, tests []string) error {
 	return nil
 }
 
+// notRun matches a runner's own word, in a red's output, that its tests did not run: Go's build or setup failed,
+// Python's SyntaxError or ImportError, pytest's collection error, Jest's suite that failed to run, tsc's error.
+// ponytail: naive, a test that prints such a line at a line's start is rejected; a runner's JSON report if not.
+var notRun = regexp.MustCompile(`(?m)\[(build|setup) failed\]|^(SyntaxError|ImportError|ModuleNotFoundError)\b|` +
+	`errors? during collection|Test suite failed to run|error TS\d+:`)
+
 // redGreen sets aside, in clone, the paths aside, runs test alone with tmpl, which must fail, brings the
 // agent's work, tree, back and runs test again, which must pass.
 func redGreen(clone, tree string, aside []string, test, tmpl string) (red, green try, err error) {
@@ -277,6 +283,14 @@ func redGreen(clone, tree string, aside []string, test, tmpl string) (red, green
 		return red, green, fmt.Errorf("%s passes without the fix", test)
 	}
 	return red, green, wrap(green.err, test+" fails with the fix")
+}
+
+// fixOnBase rejects a fix whose red, its output, says no test ran, before onBase.
+func fixOnBase(clone, tree string, aside []string, test, tmpl, red string) error {
+	if notRun.MatchString(red) {
+		return fmt.Errorf("red did not run: parse/compile error: %s fails before any test runs", test)
+	}
+	return onBase(clone, tree, aside, test, tmpl)
 }
 
 // onBase runs test, after a fix's red and green, twice more with the files the fix adds kept and each old file

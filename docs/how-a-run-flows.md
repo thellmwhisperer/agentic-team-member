@@ -79,7 +79,7 @@ commits fails the checks too.
 
 | Type | Proof |
 |------|-------|
-| `fix`, `hotfix` | Red/green on the files the base already has: the files the fix added stay, so the test must fail on behaviour. Then twice more, on the base with only the fix's added lines in place: a test that passes there depends on nothing the base had and is rejected |
+| `fix`, `hotfix` | Red/green on the files the base already has: the files the fix added stay, so the test must fail on behaviour. A red whose output carries the runner's own sign that no test ran (Go `[build failed]` or `[setup failed]`, a line starting `SyntaxError`, `ImportError` or `ModuleNotFoundError`, pytest's error during collection, Jest's `Test suite failed to run`, a `tsc` `error TS`) fails with "red did not run: parse/compile error". Then twice more, on the base with only the fix's added lines in place: a test that passes there depends on nothing the base had and is rejected |
 | `feature`, `greenfield` | Red/green with everything set aside, so the red may fail on a missing symbol or module |
 | `refactor` | `test` passes on the base, and no test file changed |
 | `tests` | The new test passes on the base and after; only test and doc files changed |
