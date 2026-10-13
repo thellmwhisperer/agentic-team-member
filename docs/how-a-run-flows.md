@@ -265,6 +265,8 @@ and its keys, so no-mistakes shows its own screen there; ATM's screen comes
 back when the command ends.
 On Windows, the delivery command runs without ATM's attached terminal, so its
 output appears as lines.
+After a terminal run completes, the ATM screen stays open until `q` or
+Ctrl+C; off-terminal output still returns when the run ends.
 
 In a herdr pane (`HERDR_ENV=1` and
 `HERDR_PANE_ID` set), the screen also shows the run in herdr's Agents section
