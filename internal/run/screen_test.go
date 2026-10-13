@@ -263,3 +263,26 @@ func TestRunTellsAWatchingScreenPathsRelativeToTheClone(t *testing.T) {
 		})
 	}
 }
+
+func TestRunRelativizesNativeAndSlashClonePaths(t *testing.T) {
+	clone := filepath.Join("repo", ".atm", "clones", "run")
+	for _, path := range []struct {
+		root, separator string
+	}{
+		{clone, string(filepath.Separator)},
+		{filepath.ToSlash(clone), "/"},
+	} {
+		var got string
+		live := relative(clone, func(ev map[string]any) { got, _ = ev["detail"].(string) })
+		live(obj{"detail": path.root + path.separator + "a" + path.separator + "b.go"})
+		want := "a" + path.separator + "b.go"
+		if got != want {
+			t.Errorf("relative detail = %q, want %q", got, want)
+		}
+		outside := path.root + "-backup"
+		live(obj{"detail": outside})
+		if got != outside {
+			t.Errorf("outside path = %q, want %q", got, outside)
+		}
+	}
+}
