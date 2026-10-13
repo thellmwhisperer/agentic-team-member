@@ -17,7 +17,7 @@ func TestResumeKeepsEarlierUnchainedFollowUps(t *testing.T) {
 		`printf '{"test_file":"a_test.sh","follow_ups":[]}' > .atm/fake-report.json; `+
 		`else printf 'fixed\n' > a.txt; echo 'grep -q fixed a.txt && ! grep -q broken a.txt' > a_test.sh; `+
 		`mkdir -p .atm/follow-ups/1 .atm/follow-ups/2; echo 'grep -q u2 a.txt' > .atm/follow-ups/1/c1_test.sh; `+
-		`echo 'grep -q extra a.txt' > .atm/follow-ups/2/c2_test.sh; `+
+		`echo 'grep -q extra a.txt' > .atm/follow-ups/2/c2_test.sh; echo cache > .atm/follow-ups/cache; `+
 		`printf '{"test_file":"a_test.sh","follow_ups":[`+
 		`{"title":"chained","red_test":"c1_test.sh","criterion":"A retry runs once after a timeout."},`+
 		`{"title":"pending","red_test":"c2_test.sh","criterion":"Some other work is documented."}]}' > .atm/fake-report.json; fi`)
@@ -26,7 +26,8 @@ func TestResumeKeepsEarlierUnchainedFollowUps(t *testing.T) {
 	if err == nil {
 		t.Fatal("want unit 2 checks to fail")
 	}
-	if err := os.WriteFile(filepath.Join(root, ".atm.yaml"), []byte(atmYAML), 0o600); err != nil {
+	fixedConfig := atmSet(atmYAML, "test", "test ! -e .atm/follow-ups/cache && sh a_test.sh")
+	if err := os.WriteFile(filepath.Join(root, ".atm.yaml"), []byte(fixedConfig), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	var resumed bytes.Buffer
