@@ -711,7 +711,12 @@ func shellCommand(tool string, input json.RawMessage) string {
 	return command
 }
 
-// strs is every string in a tool call's input, by key, joined by spaces.
+// written is the keys under which a tool call carries the text it writes into a file, not a path it reaches:
+// claude's, pi's, codex's and opencode's write and edit tools. An import of '../../x' in a test is no reach.
+var written = map[string]bool{"content": true, "old_string": true, "new_string": true, "oldString": true,
+	"newString": true, "oldText": true, "newText": true}
+
+// strs is every string in a tool call's input, by key, joined by spaces, but the text it writes into a file.
 func strs(input json.RawMessage) string {
 	var walk func(any) []string
 	walk = func(v any) (out []string) {
@@ -724,7 +729,9 @@ func strs(input json.RawMessage) string {
 			}
 		case map[string]any:
 			for _, k := range slices.Sorted(maps.Keys(v)) {
-				out = append(out, walk(v[k])...)
+				if !written[k] {
+					out = append(out, walk(v[k])...)
+				}
 			}
 		}
 		return out
