@@ -134,3 +134,25 @@ jobs:
           GH_REPO: ${{ github.repository }}
           TAG: ${{ needs.release-please.outputs.tag_name }}
         run: gh release edit "$TAG" --draft=false --prerelease=true
+
+  # The real artefact: the release just published, installed by install.sh, must answer its own tag.
+  answers:
+    needs: [release-please, finalize]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
+
+      - name: Install the release and ask its version
+        env:
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+          ATM_PREFIX: ${{ runner.temp }}/bin
+        run: |
+          set -eu
+          sh install.sh --version "$TAG"
+          "$ATM_PREFIX/atm" --version | grep "^atm $TAG "

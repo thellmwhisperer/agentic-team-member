@@ -77,13 +77,8 @@ Step by step: [How a run flows](docs/how-a-run-flows.md).
 
 ## Install
 
-Download the archive for your platform from
-[Releases](https://github.com/thellmwhisperer/agentic-team-member/releases)
-(macOS and Linux on amd64 and arm64, Windows on amd64) and put `atm` on your
-`PATH`, or build it with the Go version in [go.mod](go.mod):
-
 ```bash
-go install github.com/thellmwhisperer/agentic-team-member/cmd/atm@latest
+curl -fsSL https://raw.githubusercontent.com/thellmwhisperer/agentic-team-member/main/install.sh | sh
 ```
 
 You also need one coding agent CLI (`claude`, `codex`, `opencode` or `pi`),
