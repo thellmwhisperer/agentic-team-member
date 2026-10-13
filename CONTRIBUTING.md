@@ -34,7 +34,7 @@ The pre-commit hook runs slopslint; its first run downloads the pinned binary
 into `.tmp/slopslint/` and needs the network.
 
 To run ATM on this repository you need one coding agent CLI (`claude`,
-`codex`, `opencode` or `pi`) and, for delivery, `no-mistakes`. See
+`codex`, `opencode`, `pi` or `cursor-agent`) and, for delivery, `no-mistakes`. See
 [docs/self-maintenance.md](docs/self-maintenance.md).
 
 ## Making a change
