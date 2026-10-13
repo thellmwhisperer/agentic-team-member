@@ -2,6 +2,7 @@ package tui
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -23,6 +24,9 @@ func Show(root, label, start string, in, out *os.File) (o run.Outcome, detached 
 	label, err = resolve(root, label)
 	if err != nil {
 		return o, false, err
+	}
+	if label == "" {
+		return o, false, errors.New("no run yet")
 	}
 	w, h, err := term.GetSize(int(out.Fd()))
 	if err != nil {
