@@ -345,6 +345,10 @@ func TestRunDiesWhenTheAgentReachesOutsideItsClone(t *testing.T) {
 	cases := []struct{ name, harness, stream, why string }{
 		{"pi curl", "pi", `{"type":"tool_execution_start","toolCallId":"c1","toolName":"bash","args":{"command":` +
 			q(curl) + `}}` + "\n", why + "bash " + curl},
+		{"pi wrapped curl", "pi", `{"type":"tool_execution_start","toolCallId":"c1","toolName":"bash","args":{"command":` + q(`env curl ""`) + `}}` + "\n",
+			why + `bash env curl ""`},
+		{"claude relative reach", "claude", claude("Bash", `{"command":"rg pattern . ../.."}`),
+			why + "Bash rg pattern . ../.."},
 		{"claude reads another run", "claude", claude("Read", `{"file_path":"{root}/.atm/runs/6-2/worker.jsonl"}`),
 			why + "Read {root}/.atm/runs/6-2/worker.jsonl"},
 		{"codex lists another clone", "codex", `{"type":"item.started","item":{"id":"c1","type":"command_execution",` +
@@ -354,7 +358,8 @@ func TestRunDiesWhenTheAgentReachesOutsideItsClone(t *testing.T) {
 			why + `bash node -e "fetch('https://example.com')"`},
 		{"inside", "claude", claude("Read", `{"file_path":"{clone}/AGENTS.md"}`) +
 			claude("Bash", `{"command":"pnpm add zod && pnpm dev --url http://localhost:5173"}`) +
-			claude("Read", `{"file_path":"{home}/go/pkg/mod/golang.org/x/mod@v0.20.0/go.mod"}`), ""},
+			claude("Read", `{"file_path":"{home}/go/pkg/mod/golang.org/x/mod@v0.20.0/go.mod"}`) +
+			claude("Read", `{"file_path":"/archive{root}/file"}`), ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -377,6 +382,20 @@ func TestRunDiesWhenTheAgentReachesOutsideItsClone(t *testing.T) {
 				t.Fatalf("end event: %v", end)
 			}
 		})
+	}
+}
+
+func TestRunReportsReachBeforeAgentFailure(t *testing.T) {
+	repo(t, "https://example.com/owner/repo.git", atmYAML)
+	q := func(s string) string { b, _ := json.Marshal(s); return string(b) }
+	t.Setenv("FAKE_AGENT", "fail")
+	t.Setenv("FAKE_AGENT_STREAM", `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"c1","name":"Bash","input":{"command":`+
+		q("rg pattern . ../..")+`}}]}}`+"\n")
+	var out bytes.Buffer
+	err := Run("t", []string{"--harness", "claude", issueFile(t, issue)}, &out, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "the agent reached outside its clone: Bash rg pattern . ../..") ||
+		strings.Contains(err.Error(), "exit status 3") {
+		t.Fatalf("want reach failure to take precedence, got %v", err)
 	}
 }
 

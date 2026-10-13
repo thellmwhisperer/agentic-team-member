@@ -134,14 +134,14 @@ func (a agent) run(clone, name, skill, brief string, check func(map[string]any) 
 	}
 	s.finish()
 	switch {
+	case s.reach != "":
+		return ev, fmt.Errorf("the agent reached outside its clone: %s; log: %s", s.reach, path)
 	case errors.Is(ctx.Err(), context.DeadlineExceeded):
 		return ev, fmt.Errorf("agent timed out after %s; log: %s", Human(agentTimeout), path)
 	case ctx.Err() != nil:
 		return ev, fmt.Errorf("agent interrupted; log: %s", path)
 	case err != nil:
 		return ev, fmt.Errorf("agent: %w; log: %s", err, path)
-	case s.reach != "":
-		return ev, fmt.Errorf("the agent reached outside its clone: %s; log: %s", s.reach, path)
 	case !s.used:
 		return ev, fmt.Errorf("agent left no proof it used the %s skill; log: %s", skill, path)
 	}
@@ -644,9 +644,10 @@ func strs(input json.RawMessage) string {
 }
 
 var (
-	fetch = regexp.MustCompile("(^|[;&|(`\n]|\\$\\()\\s*(curl|wget)\\b") // ponytail: curl in command position
+	fetch = regexp.MustCompile(`\b(curl|wget)\b`)
 	link  = regexp.MustCompile("https?://[^\\s\"'`)]+")
 	sep   = "\\s\"'`;|&()<>,="
+	rel   = regexp.MustCompile("(?:^|[" + sep + "])((?:\\.\\.?/)*\\.\\.(?:/[^" + sep + "]*)?)")
 )
 
 // outside is the first of calls that reaches outside clone, as its tool and its first 200 characters: one that
@@ -662,11 +663,16 @@ func outside(calls []use, root, clone string) string {
 		text := filepath.ToSlash(c.args)
 		reach := false
 		for _, m := range paths.FindAllStringIndex(text, -1) {
-			if root == "" || m[1] < len(text) && !strings.ContainsRune(sep, rune(text[m[1]])) {
+			if root == "" || m[0] > 0 && !strings.ContainsRune(" \t\r\n\"'`;|&()<>,=", rune(text[m[0]-1])) ||
+				m[1] < len(text) && !strings.ContainsRune(" \t\r\n\"'`;|&()<>,=/", rune(text[m[1]])) {
 				continue // a directory beside root, as root2
 			}
 			p := path.Clean(text[m[0]:m[1]])
 			reach = reach || p != clone && !strings.HasPrefix(p, clone+"/")
+		}
+		for _, m := range rel.FindAllStringSubmatch(text, -1) {
+			p := path.Clean(path.Join(clone, m[1]))
+			reach = reach || (p == root || strings.HasPrefix(p, root+"/")) && p != clone && !strings.HasPrefix(p, clone+"/")
 		}
 		if reach || (strings.EqualFold(c.tool, "bash") || c.tool == "shell") && fetches(text) {
 			r := []rune(c.args)
