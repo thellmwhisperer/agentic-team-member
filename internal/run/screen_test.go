@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"os"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -37,6 +40,18 @@ func index(evs []obj, want obj) int {
 	return -1
 }
 
+// watch is what a screen watching a run of harness, whose agent writes stream, in a repo with yml, sees.
+func watch(t *testing.T, harness, stream, yml string) *watched {
+	t.Helper()
+	repo(t, "https://example.com/owner/repo.git", yml)
+	t.Setenv("FAKE_AGENT_STREAM", stream)
+	var w watched
+	if err := Run("t", []string{"--harness", harness, issueFile(t, issue)}, &w, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	return &w
+}
+
 // The screen's rows and boxes come from what the run tells a screen that watches it: each tool call of the
 // agent with its outcome, what it says and its thinking, each proof and command of the checks, and their output.
 func TestRunTellsAWatchingScreenWhatItsAgentAndChecksDo(t *testing.T) {
@@ -63,12 +78,7 @@ func TestRunTellsAWatchingScreenWhatItsAgentAndChecksDo(t *testing.T) {
 	}
 	for harness, stream := range streams {
 		t.Run(harness, func(t *testing.T) {
-			repo(t, "https://example.com/owner/repo.git", atmSet(atmYAML, "test", "echo suite-ok; sh a_test.sh"))
-			t.Setenv("FAKE_AGENT_STREAM", stream)
-			var w watched
-			if err := Run("t", []string{"--harness", harness, issueFile(t, issue)}, &w, io.Discard); err != nil {
-				t.Fatal(err)
-			}
+			w := watch(t, harness, stream, atmSet(atmYAML, "test", "echo suite-ok; sh a_test.sh"))
 			for _, want := range []obj{
 				{"step": "agent", "thinking": "Read the test first."},
 				{"step": "agent", "says": "I'll run the tests."},
@@ -224,5 +234,32 @@ func TestClaudeFinalReportSplitAcrossTextBlocks(t *testing.T) {
 	s.finish()
 	if !reflect.DeepEqual(got, []any{"All green."}) {
 		t.Fatalf("final Claude text %q, want only the prose", got)
+	}
+}
+
+// A tool call's path or command shows relative to the clone; the log keeps what the agent sent.
+func TestRunTellsAWatchingScreenPathsRelativeToTheClone(t *testing.T) {
+	cmd := `{"command":"cd <clone> && go test ./..."}`
+	streams := map[string]string{
+		"claude": `{"type":"assistant","message":{"content":[` +
+			`{"type":"tool_use","id":"t1","name":"Read","input":{"file_path":"<clone>/a/b.go"}},` +
+			`{"type":"tool_use","id":"t2","name":"Bash","input":` + cmd + `}]}}` + "\n",
+		"pi": `{"type":"tool_execution_start","toolCallId":"t1","toolName":"read","args":{"path":"<clone>/a/b.go"}}` +
+			"\n" + `{"type":"tool_execution_start","toolCallId":"t2","toolName":"bash","args":` + cmd + `}` + "\n",
+		"codex": `{"type":"item.started","item":{"id":"t2","type":"command_execution",` + cmd[1:] + `}` + "\n",
+	}
+	for harness, stream := range streams {
+		t.Run(harness, func(t *testing.T) {
+			w := watch(t, harness, stream, atmYAML)
+			read := harness != "codex"
+			if read && !has(w.live, obj{"id": "t1", "detail": "a/b.go"}) ||
+				!has(w.live, obj{"id": "t2", "detail": "cd . && go test ./..."}) {
+				t.Fatalf("want details relative to the clone in %v", w.live)
+			}
+			_, clone, log := agentStep(t, &w.Buffer)
+			if b, _ := os.ReadFile(log); read && !strings.Contains(string(b), filepath.ToSlash(clone)+"/a/b.go") {
+				t.Fatalf("want the log to keep the agent's path:\n%s", b)
+			}
+		})
 	}
 }

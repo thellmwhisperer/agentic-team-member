@@ -234,3 +234,25 @@ func TestAgentBoxFoldsToolCallsBetweenWhatTheAgentSaysIntoOneDimLine(t *testing.
 		t.Fatalf("want an empty-detail running tool to keep its spinner without a detail suffix:\n%s", s)
 	}
 }
+
+func TestAgentBoxFillsTheColumnAndWrapsWhatTheAgentSaysToItsLatestLine(t *testing.T) {
+	lines := strings.Split(view(screen(120, 40, unit[:7]...)), "\n")
+	if len(lines) != 40 || !strings.Contains(lines[37], "╰") || lines[38] != "" ||
+		!strings.Contains(lines[39], "q detach") {
+		t.Fatalf("want the Agent box down to the footer:\n%s", strings.Join(lines, "\n"))
+	}
+	words := strings.Repeat("lorem ipsum ", 16) + "omega" // three rows of the 74 columns inside the box
+	s := view(screen(120, 40, append(unit[:7:7], `{"step":"agent","says":"`+words+`"}`)...))
+	rows := regexp.MustCompile(`(?m)│ ✎ lorem.*│\n.*│   lorem.*│\n.*│   .*omega +│$`)
+	if strings.Contains(s, "…") || !rows.MatchString(s) {
+		t.Fatalf("want the long line whole over three rows:\n%s", s)
+	}
+	evs := unit[:7:7]
+	for i := range 60 {
+		evs = append(evs, fmt.Sprintf(`{"step":"agent","thinking":"thought %d"}`, i))
+	}
+	lines = strings.Split(view(screen(120, 40, evs...)), "\n")
+	if !strings.Contains(lines[36], "∴ thought 59 ") || !strings.Contains(lines[37], "╰") {
+		t.Fatalf("want the last line on the box's last row:\n%s", strings.Join(lines, "\n"))
+	}
+}

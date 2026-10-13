@@ -168,15 +168,18 @@ func (m *Model) sidebar() bool {
 }
 
 // right is, at width in height rows, the Agent box while an agent runs, else the Findings box when there are
-// findings, then the Log box while a node has output; "" for none.
+// findings, then the Log box while a node has output; "" for none. The Agent box takes every row the Log box,
+// at most a third of them, leaves.
 func (m *Model) right(width, height int) string {
-	agent := m.agentRuns()
-	// ponytail: the Agent or Findings box gets half the rows and the Log box the rest; fitting each to its
-	// content is the upgrade.
-	top, half := "", max(3, height/2-2)
+	log := m.running() && len(m.output) > 0
+	top := ""
 	switch {
-	case agent:
-		top = m.agentBox(width, half)
+	case m.agentRuns():
+		rows := height
+		if log {
+			rows -= min(len(m.output)+2, height/3) + 1
+		}
+		top = m.agentBox(width, max(3, rows-2))
 	case len(m.findings) > 0:
 		top = m.findingsBox(width)
 	}
@@ -184,7 +187,7 @@ func (m *Model) right(width, height int) string {
 	if top != "" {
 		boxes = append(boxes, top)
 	}
-	if m.running() && len(m.output) > 0 {
+	if log {
 		boxes = append(boxes, m.logBox(width, max(3, height-lipgloss.Height(top)-3)))
 	}
 	return strings.Join(boxes, "\n\n")
@@ -210,7 +213,8 @@ func (m *Model) agentRuns() bool {
 }
 
 // agentBox is what the agent says and thinks, the tool calls between two of those folded into one dim line
-// under them, a failed one on its own row, in at most lines lines.
+// under them, a failed one on its own row, in lines rows ending with its latest. What it says and thinks wraps,
+// its continuation indented under its text.
 func (m *Model) agentBox(width, lines int) string {
 	var out, names []string
 	counts, running := map[string]int{}, false
@@ -242,7 +246,8 @@ func (m *Model) agentBox(width, lines int) string {
 		case a.says != "" || a.thinking != "":
 			flush()
 			first, _, _ := strings.Cut(strings.TrimSpace(cmp.Or(a.says, a.thinking)), "\n")
-			out = append(out, map[bool]string{true: "✎ ", false: "∴ "}[a.says != ""]+first)
+			first = strings.ReplaceAll(ansi.Wrap(first, width-6, ""), "\n", "\n  ")
+			out = append(out, strings.Split(map[bool]string{true: "✎ ", false: "∴ "}[a.says != ""]+first, "\n")...)
 		case a.result == "failed":
 			flush()
 			out = append(out, m.icon("failed")+" "+paint(red, "failed")+" "+paint(dim, a.tool+" "+a.detail))
@@ -260,7 +265,8 @@ func (m *Model) agentBox(width, lines int) string {
 	if len(out) == 0 {
 		out = []string{paint(dim, "starting")}
 	}
-	return box(bold(cyan, "Agent"), strings.Join(out[max(0, len(out)-lines):], "\n"), width)
+	out = append(make([]string, max(0, lines-len(out))), out[max(0, len(out)-lines):]...)
+	return box(bold(cyan, "Agent"), strings.Join(out, "\n"), width)
 }
 
 // findingsBox is the findings as no-mistakes has them: a severity icon, a reference, the description below.
