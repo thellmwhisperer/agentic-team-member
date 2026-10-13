@@ -31,7 +31,7 @@ func runCmd() *cobra.Command {
 				_, err = fmt.Fprintln(cmd.OutOrStdout(), o.Run)
 				return err
 			}
-			return attach(root, o.Run, cmd.OutOrStdout())
+			return attach(root, o.Run, "startup", cmd.OutOrStdout())
 		}}
 }
 
@@ -46,8 +46,9 @@ func screen(w io.Writer) (*os.File, bool) {
 	return f, ok && terminal(f) && os.Getenv("NO_COLOR") == "" && os.Getenv("TERM") != "dumb"
 }
 
-// attach shows run label's screen on w until it ends and returns how it ended. Leaving leaves it going.
-func attach(root, label string, w io.Writer) error {
+// attach shows run label's screen on w until it ends and returns how it ended. Leaving leaves it going. herdr
+// sees the screen start from start, startup or resume.
+func attach(root, label, start string, w io.Writer) error {
 	f, ok := screen(w)
 	if !ok {
 		o, err := run.Attach(root, label, w)
@@ -56,7 +57,7 @@ func attach(root, label string, w io.Writer) error {
 		}
 		return o.Err()
 	}
-	o, detached, err := tui.Show(root, label, os.Stdin, f)
+	o, detached, err := tui.Show(root, label, start, os.Stdin, f)
 	switch {
 	case err != nil:
 		return err
@@ -75,7 +76,7 @@ func attachCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return attach(root, append(args, "")[0], cmd.OutOrStdout())
+			return attach(root, append(args, "")[0], "resume", cmd.OutOrStdout())
 		}}
 }
 
