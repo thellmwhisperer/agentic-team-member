@@ -459,10 +459,6 @@ func shellReachCases() []reachCase {
 	q := func(s string) string { b, _ := json.Marshal(s); return string(b) }
 	const why = "the agent reached outside its clone: "
 	return []reachCase{
-		{"claude relative reach", "claude", claude("Bash", `{"command":"rg pattern . ../.."}`),
-			why + "Bash rg pattern . ../.."},
-		{"claude relative prefix reach", "claude", claude("Bash", `{"command":"rg pattern src/../../"}`),
-			why + "Bash rg pattern src/../../"},
 		{"env curl", "claude", claude("Bash", `{"command":`+q(`env curl "$PROD_URL"`)+`}`),
 			why + `Bash env curl "$PROD_URL"`},
 		{"wrapped curl", "claude", claude("Bash", `{"command":`+q(`env FOO=bar sudo command exec curl -s a`)+`}`),
@@ -603,11 +599,11 @@ func TestRunReportsReachBeforeAgentFailure(t *testing.T) {
 	const prefix = `{"type":"assistant","message":{"role":"assistant","content":[` +
 		`{"type":"tool_use","id":"c1","name":"Bash","input":{"command":`
 	stream := prefix +
-		q("rg pattern . ../..") + `}}]}}` + "\n"
+		q("curl https://example.com") + `}}]}}` + "\n"
 	t.Setenv("FAKE_AGENT_STREAM", stream)
 	var out bytes.Buffer
 	err := Run("t", []string{"--harness", "claude", issueFile(t, issue)}, &out, io.Discard)
-	want := "exit code 3; the agent reached outside its clone: Bash rg pattern . ../.."
+	want := "exit code 3; the agent reached outside its clone: Bash curl https://example.com"
 	if err == nil || !strings.Contains(err.Error(), want) {
 		t.Fatalf("want reach failure to take precedence, got %v", err)
 	}
@@ -661,5 +657,15 @@ func TestRunDiesWhenTheAgentFails(t *testing.T) {
 			end, _, _ := agentStep(t, &out)
 			assertFailedCleanup(t, root, end, err)
 		})
+	}
+}
+
+// Recorded from Quote's runs of 13 Oct 2026: a relative path is the agent's cwd's, which a cd moved inside the clone.
+func TestReachAcceptsRelativePathsAfterACdInsideTheClone(t *testing.T) {
+	root := t.TempDir()
+	clone := filepath.Join(root, ".atm", "clones", "atm-run-1")
+	command := "cd packages/journey && cat ../../README.md"
+	if got := outside([]use{{"Bash", command, command}}, root, clone); got != "" {
+		t.Fatalf("clone-local relative path reached outside its clone: %s", got)
 	}
 }

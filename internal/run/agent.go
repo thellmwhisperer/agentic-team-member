@@ -786,25 +786,7 @@ func reachesPath(args, root, clone string, paths *regexp.Regexp) bool {
 			return true
 		}
 	}
-	for _, token := range strings.Fields(text) {
-		if relativeEscape(token, root, clone) {
-			return true
-		}
-	}
 	return false
-}
-
-func relativeEscape(token, root, clone string) bool {
-	token = strings.Trim(token, "\"'`,;|&()<>")
-	if !strings.Contains(token, "..") || filepath.IsAbs(token) {
-		return false
-	}
-	p := filepath.Clean(filepath.Join(clone, token))
-	relRoot, rootErr := filepath.Rel(root, p)
-	relClone, cloneErr := filepath.Rel(clone, p)
-	underRoot := rootErr == nil && relRoot != ".." && !strings.HasPrefix(relRoot, ".."+string(filepath.Separator))
-	underClone := cloneErr == nil && relClone != ".." && !strings.HasPrefix(relClone, ".."+string(filepath.Separator))
-	return underRoot && !underClone
 }
 
 // fetches says whether a shell command runs curl or wget or names a URL off this machine.

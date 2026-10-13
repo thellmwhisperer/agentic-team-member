@@ -1,0 +1,18 @@
+schema: 1
+id: T-PONYTAIL-20261013-222500-1
+status: accepted
+category: alien_code
+title: "Deleted relativeEscape, which resolved every ../ token from the clone root and failed clone-local cd plus relative reads. Nothing replaces it."
+created_at: 2026-10-13
+incident:
+  pattern: "Deleted relativeEscape, which resolved every ../ token from the clone root and failed clone-local cd plus relative reads. Nothing replaces it."
+  what_went_wrong: "A no-mistakes fix round of PR 292 added it; issue 266 only asks for absolute paths outside the clone and network reach. It failed good Quote runs on 13 Oct 2026 (cd packages/journey && cat ../../README.md)."
+  root_cause: "The fixer hardened a case the issue does not name."
+  rule_established: "Cut by the ponytail pass; it does not come back."
+  evidence:
+    - family: speculative_hardening
+      example: "Deleted relativeEscape, which resolved every ../ token from the clone root and failed clone-local cd plus relative reads. Nothing replaces it."
+      artifact: "internal/run/agent.go"
+match:
+  family: speculative_hardening
+  artifact: "internal/run/agent.go"
