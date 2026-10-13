@@ -241,6 +241,23 @@ func TestReproveFailsWhenAPriorUnitTestCommits(t *testing.T) {
 	}
 }
 
+func TestReproveHidesATMFromAnEarlierUnit(t *testing.T) {
+	_, clone, sha, cfg := unitDone(t, "")
+	if _, err := sh(clone, "mkdir -p .atm/follow-ups/1; echo f > .atm/follow-ups/1/fixture.txt; "+
+		"echo 'grep -q fixed a.txt && ! grep -q broken a.txt && cat .atm/follow-ups/1/fixture.txt' > a_test.sh"); err != nil {
+		t.Fatal(err)
+	}
+	proofs := []proof{unitProof(t, clone, sha), unitProof(t, clone, sha)}
+
+	why, _, _, err := reprove(clone, sha, proofs, cfg)
+	if err != nil || !strings.HasPrefix(why, "unit 1: ") {
+		t.Fatalf("want unit 1's re-proof to fail without .atm/, got %q, %v", why, err)
+	}
+	if b, err := os.ReadFile(filepath.Join(clone, ".atm", "follow-ups", "1", "fixture.txt")); string(b) != "f\n" {
+		t.Fatalf("the follow-ups artefact did not come back: %q, %v", b, err)
+	}
+}
+
 func TestPonytailDiscardsCutWhenAChainedUnitChangesEarlierTest(t *testing.T) {
 	root, clone, sha, cfg := unitDone(t, "echo fixed > a.txt")
 	earlier := unitProof(t, clone, sha)

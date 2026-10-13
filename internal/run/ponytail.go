@@ -111,8 +111,10 @@ func reprove(runDir, clone, base string, history []proof, c config.Config) (stri
 		var red, green try
 		var proofErr error
 		proofSpan, proofErr := row(liveIn(clone), proofs[p.typ], func() error {
-			red, green, proofErr = prove(clone, p.typ, filepath.ToSlash(p.test), c)
-			return proofErr
+			return hidden(clone, func() (err error) {
+				red, green, err = prove(clone, p.typ, filepath.ToSlash(p.test), c)
+				return err
+			})
 		})
 		proofErr = errors.Join(proofErr, restoreATM())
 		ran = append(ran, unitResult{Unit: n + 1, Base: p.base, TestFile: p.test, Type: p.typ,
@@ -139,6 +141,19 @@ func reprove(runDir, clone, base string, history []proof, c config.Config) (stri
 		return err.Error(), ran, cmds, nil
 	}
 	return "", ran, cmds, nil
+}
+
+// hidden runs fn with clone's .atm/, ATM's artefacts, which delivery leaves out, out of the clone, and puts it back
+// after, pass or fail.
+func hidden(clone string, fn func() error) error {
+	atm, aside := filepath.Join(clone, ".atm"), filepath.Join(clone, ".git", "atm-hidden")
+	if err := os.Rename(atm, aside); os.IsNotExist(err) {
+		return fn()
+	} else if err != nil {
+		return err
+	}
+	err := fn()
+	return errors.Join(err, os.Rename(aside, atm))
 }
 
 // review is the run's work in clone, at base commit sha, as a tree, the files it changes, and its
