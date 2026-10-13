@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 )
 
 // resumePoint is what a run that fails after its agent keeps in resume/, in its directory, for atm run
@@ -27,8 +28,31 @@ type resumePoint struct {
 // keepWork writes p and the work in clone, on HEAD, to resume/ in the run's directory dir. The work leaves the
 // files git ignores out, but for the agent's follow-ups.
 func keepWork(dir, clone string, p resumePoint) error {
-	if _, err := os.Stat(filepath.Join(clone, ".atm", "follow-ups")); err == nil {
-		if _, err := git(clone, "add", "-f", ".atm/follow-ups"); err != nil {
+	b, err := json.Marshal(p.Report["follow_ups"])
+	if err != nil {
+		return err
+	}
+	var declared []followUp
+	if err := json.Unmarshal(b, &declared); err != nil {
+		return err
+	}
+	var paths []string
+	for i, f := range declared {
+		name := filepath.Clean(filepath.FromSlash(f.RedTest))
+		if !filepath.IsLocal(name) || name == "." {
+			continue
+		}
+		path := filepath.Join(".atm", "follow-ups", strconv.Itoa(i+1), name)
+		info, err := os.Lstat(filepath.Join(clone, path))
+		if err == nil && !info.IsDir() {
+			paths = append(paths, filepath.ToSlash(path))
+		} else if err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	if len(paths) > 0 {
+		args := append([]string{"--literal-pathspecs", "add", "-f", "--"}, paths...)
+		if _, err := git(clone, args...); err != nil {
 			return err
 		}
 	}
@@ -51,7 +75,7 @@ func keepWork(dir, clone string, p resumePoint) error {
 	if err != nil {
 		return err
 	}
-	b, _ := json.MarshalIndent(p, "", "  ")
+	b, _ = json.MarshalIndent(p, "", "  ")
 	return os.WriteFile(filepath.Join(keep, "resume.json"), append(b, '\n'), 0o644)
 }
 
