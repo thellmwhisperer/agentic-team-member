@@ -43,6 +43,7 @@ func (g dispatchGates) ready() bool {
 }
 
 type contractReview struct {
+	metadata   string              // Host-owned; config may contain secrets, never serialize it.
 	Dispatch   dispatchGates       `json:"dispatch"`
 	Head       string              `json:"head"`
 	Base       string              `json:"base"`
@@ -62,6 +63,13 @@ func (r contractReview) current(clone string) error {
 	}
 	if r.Status != "passed" || r.Head != head || dirty != "" || len(r.Acceptance) == 0 || !r.Dispatch.ready() {
 		return errors.New("delivery blocked: missing or stale contract review for current head")
+	}
+	metadata, err := deliveryMetadata(clone)
+	if err != nil {
+		return err
+	}
+	if metadata != r.metadata {
+		return errors.New("contract review or repair changed delivery metadata; delivery blocked")
 	}
 	for _, c := range r.Acceptance {
 		if !c.Satisfied {
@@ -126,6 +134,10 @@ func (r contractReview) validateChildren() error {
 func (a agent) inspectContract(root, clone, base string, i Issue, proofs []proof, pending []followUp,
 	c config.Config) (contractReview, error) {
 	var latest contractReview
+	metadata, err := deliveryMetadata(clone)
+	if err != nil {
+		return latest, err
+	}
 	for _, f := range pending {
 		if quoted(i.Body, f.Criterion) {
 			return latest, fmt.Errorf("mandatory criterion unmet: %s; see follow-ups.json", f.Criterion)
@@ -135,6 +147,7 @@ func (a agent) inspectContract(root, clone, base string, i Issue, proofs []proof
 	for round := 0; round <= 2; round++ {
 		var err error
 		latest, err = a.contractReviewRound(clone, base, i, round)
+		latest.metadata = metadata
 		if err != nil {
 			return latest, err
 		}
@@ -190,11 +203,11 @@ func (a agent) repairContract(root, clone string, i Issue, history []proof, c co
 	if err != nil {
 		return err
 	}
-	names, err := git(clone, "diff", "--name-only", head, tree)
+	names, err := git(clone, "diff", "--name-only", "--no-renames", "-z", head, tree)
 	if err != nil {
 		return err
 	}
-	for _, name := range strings.Split(names, "\n") {
+	for _, name := range strings.Split(names, "\x00") {
 		if first([]string{name}, c.TestPatterns, true) != "" {
 			return fmt.Errorf("contract repair changed protected test %s", name)
 		}
@@ -262,6 +275,17 @@ func (a agent) contractReviewRound(clone, base string, i Issue, round int) (r co
 	}
 	r.Head, r.Base = head, base
 	return r, nil
+}
+
+// deliveryMetadata binds review/repair to the prepared branch and Git configuration,
+// including origin fetch/push URLs. These live outside the working-tree snapshot.
+func deliveryMetadata(clone string) (string, error) {
+	branch, err := git(clone, "symbolic-ref", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	settings, err := git(clone, "config", "--null", "--list", "--show-origin")
+	return branch + "\x00" + settings, err
 }
 
 func contractRechecks(dir, clone, head string, history []proof, c config.Config, round int) error {
