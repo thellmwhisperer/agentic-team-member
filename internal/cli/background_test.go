@@ -319,12 +319,18 @@ func assertBothRunsFinish(t *testing.T, release string) {
 	t.Fatalf("both runs did not finish after release: %+v", runs)
 }
 
-func TestRunGoesToTheBackgroundAndEveryCommandSeesIt(t *testing.T) {
+func setupRetryRepo(t *testing.T) string {
+	t.Helper()
 	dir := repo(t, "https://example.com/o/r.git") // no .atm.yaml: every run fails at once
 	cleanBackgroundServer(t, dir)
 	if err := os.WriteFile(filepath.Join(dir, "retry.md"), []byte("# Retry\nType: fix\nRetry.\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	return dir
+}
+
+func TestRunGoesToTheBackgroundAndEveryCommandSeesIt(t *testing.T) {
+	dir := setupRetryRepo(t)
 	w := watcher(t, dir, "w", 0)
 	if out := atmIn(t, 0, "run", "retry.md", "--watcher", w); out != "retry-1\n" {
 		t.Fatalf("atm run off a terminal prints the run's label, got %q", out)

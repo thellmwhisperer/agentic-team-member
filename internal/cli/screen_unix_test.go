@@ -5,7 +5,6 @@ package cli
 import (
 	"bytes"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -73,11 +72,8 @@ func onTerminal(t *testing.T, args ...string) (string, int) {
 }
 
 func TestRunOnATerminalShowsTheScreenUnlessPlainLinesAreAsked(t *testing.T) {
-	dir := repo(t, "https://example.com/o/r.git") // no .atm.yaml: every run fails at once
-	cleanBackgroundServer(t, dir)
-	if err := os.WriteFile(filepath.Join(dir, "retry.md"), []byte("# Retry\nType: fix\nRetry.\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	dir := setupRetryRepo(t)
+	onPath(t, "claude", "gh")
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
 	shown, code := onTerminal(t, "run", "--watcher", watcher(t, dir, "w", 0), "retry.md")
