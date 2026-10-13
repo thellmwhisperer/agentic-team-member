@@ -153,7 +153,7 @@ func (a agent) run(clone, name, skill, brief string, check func(map[string]any) 
 func relative(clone string, live func(map[string]any)) func(map[string]any) {
 	return func(ev map[string]any) {
 		if d, ok := ev["detail"].(string); ok {
-			ev["detail"] = relativeDetail(d, clone)
+			ev["detail"] = relativeDetail(relativeDetail(d, clone), filepath.ToSlash(clone))
 		}
 		live(ev)
 	}
