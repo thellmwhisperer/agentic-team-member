@@ -381,30 +381,24 @@ func trial(clone, tree string, aside []string, base, after, test string, usesTes
 		}
 	}
 	red = attempt(clone, base)
-	if usesTests && strings.Contains(red.Tail, "no tests to run") {
-		red.err = fmt.Errorf("the test line ran no test of %s: check its build tags against test_file", test)
-	}
+	classifyTestRun(&red, test, usesTests)
 	if checkRed != nil {
 		if err := checkRed(red); err != nil {
 			return red, green, err
 		}
 	}
-	if _, err := git(clone, "restore", "--source="+tree, "--staged", "--worktree", "--", "."); err != nil {
+	if err := restoreTrialTree(clone, tree); err != nil {
 		return red, green, err
 	}
-	if err := reset(clone); err != nil {
-		return red, green, err
-	}
-	if errors.Is(red.err, errTimeout) {
+	if err := trialTimeout(red, green, false); err != nil {
 		return red, green, red.err
 	}
 	if after != "" {
-		if green = attempt(clone, after); errors.Is(green.err, errTimeout) {
-			return red, green, green.err
+		green = attempt(clone, after)
+		if err := trialTimeout(red, green, true); err != nil {
+			return red, green, err
 		}
-		if usesTests && strings.Contains(green.Tail, "no tests to run") {
-			green.err = fmt.Errorf("the test line ran no test of %s: check its build tags against test_file", test)
-		}
+		classifyTestRun(&green, test, usesTests)
 	}
 	if _, err := git(clone, "add", "-A"); err != nil {
 		return red, green, err
@@ -413,6 +407,29 @@ func trial(clone, tree string, aside []string, base, after, test string, usesTes
 		return red, green, errors.Join(err, errVoid)
 	}
 	return red, green, nil
+}
+
+func classifyTestRun(result *try, test string, usesTests bool) {
+	if usesTests && strings.Contains(result.Tail, "no tests to run") {
+		result.err = fmt.Errorf("the test line ran no test of %s: check its build tags against test_file", test)
+	}
+}
+
+func trialTimeout(red, green try, checkGreen bool) error {
+	if checkGreen && errors.Is(green.err, errTimeout) {
+		return green.err
+	}
+	if !checkGreen && errors.Is(red.err, errTimeout) {
+		return red.err
+	}
+	return nil
+}
+
+func restoreTrialTree(clone, tree string) error {
+	if _, err := git(clone, "restore", "--source="+tree, "--staged", "--worktree", "--", "."); err != nil {
+		return err
+	}
+	return reset(clone)
 }
 
 // try is how a trial's command line ended: its exit code, -1 when it did not exit, its last 60 lines of output
@@ -595,11 +612,13 @@ func tee(ctx context.Context, t terminal, w io.Writer, dir, line string, env ...
 	return tail, err
 }
 
-func teeOutput(ctx context.Context, t terminal, w io.Writer, dir, line string, env ...string) (tail, output string, err error) {
+func teeOutput(ctx context.Context, t terminal, w io.Writer, dir, line string,
+	env ...string) (tail, output string, err error) {
 	return teeRun(ctx, t, w, dir, line, true, env...)
 }
 
-func teeRun(ctx context.Context, t terminal, w io.Writer, dir, line string, capture bool, env ...string) (tail, output string, err error) {
+func teeRun(ctx context.Context, t terminal, w io.Writer, dir, line string, capture bool,
+	env ...string) (tail, output string, err error) {
 	cmd := exec.CommandContext(ctx, "sh", "-c", line)
 	var out bytes.Buffer
 	live := liveIn(dir)
