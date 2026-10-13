@@ -18,6 +18,7 @@ import (
 // the test.
 func background(t *testing.T, root string) (stop func()) {
 	t.Helper()
+	moved := changed()
 	sock := socket(root)
 	if err := os.MkdirAll(filepath.Dir(sock), 0o755); err != nil {
 		t.Fatal(err)
@@ -27,7 +28,7 @@ func background(t *testing.T, root string) (stop func()) {
 		t.Fatal(err)
 	}
 	done := make(chan struct{})
-	go func() { _ = serve(l.(*net.UnixListener), root, sock); close(done) }()
+	go func() { _ = serve(l.(*net.UnixListener), root, sock, moved); close(done) }()
 	stop = func() { _ = l.Close(); <-done }
 	t.Cleanup(stop)
 	return stop

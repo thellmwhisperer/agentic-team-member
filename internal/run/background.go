@@ -111,6 +111,7 @@ func short(path string) string {
 // the one that holds .atm/atm.lock serves: another waits for it to answer, then ends, so the atm command that
 // started it connects to that one.
 func Serve(root string) error {
+	moved := changed()
 	sock := socket(root)
 	for start := time.Now(); ; time.Sleep(20 * time.Millisecond) {
 		f, err := lock(filepath.Join(root, ".atm", "atm.lock")) // connect, which starts it, made .atm
@@ -140,7 +141,7 @@ func Serve(root string) error {
 	}
 	fmt.Fprintln(os.Stderr, "atm serve pid:", os.Getpid())
 	fmt.Fprintln(os.Stderr, "atm serve version:", buildinfo.String())
-	return serve(l.(*net.UnixListener), root, sock)
+	return serve(l.(*net.UnixListener), root, sock, moved)
 }
 
 // server is the background process's state, under its lock.
@@ -172,13 +173,12 @@ func (r *bgRun) add(f Frame) {
 	r.more = make(chan struct{})
 }
 
-func serve(l *net.UnixListener, root, sock string) error {
+func serve(l *net.UnixListener, root, sock string, moved func() bool) error {
 	runs, err := history(root)
 	if err != nil {
 		return err
 	}
 	s := &server{root: root, runs: runs, last: time.Now()}
-	moved := changed()
 	for {
 		_ = l.SetDeadline(time.Now().Add(tick))
 		c, err := l.Accept()
@@ -224,7 +224,8 @@ func changed() func() bool {
 	was, err := os.Stat(exe)
 	return func() bool {
 		now, e := os.Stat(exe)
-		return err == nil && (e != nil || !os.SameFile(was, now) || !now.ModTime().Equal(was.ModTime()))
+		return err == nil && (e != nil || !os.SameFile(was, now) || now.Size() != was.Size() ||
+			!now.ModTime().Equal(was.ModTime()))
 	}
 }
 
@@ -634,11 +635,14 @@ func Runs(root string) ([]Outcome, error) {
 // from in, and hands each reply to fn. One that ends before it replies, as one whose file changed does, gets
 // req again from the next one.
 func call(root string, req request, in <-chan Input, fn func(reply)) error {
+	delay := 200 * time.Millisecond
 	for {
 		again, err := send(root, req, in, fn)
 		if !again {
 			return err
 		}
+		time.Sleep(delay)
+		delay = min(delay*2, 2*time.Second)
 	}
 }
 
