@@ -58,6 +58,33 @@ Retry once.
 Split if the diff adds an independent outcome.
 `
 
+func runContractReview(t *testing.T, body, report string) error {
+	t.Helper()
+	t.Setenv("FAKE_CONTRACT_REPORT", report)
+	return Run("t", []string{issueFile(t, body)}, &bytes.Buffer{}, &bytes.Buffer{})
+}
+
+func requireContractReviewError(t *testing.T, err error, want string) {
+	t.Helper()
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("want %q, got %v", want, err)
+	}
+}
+
+func assertDeliveryBlocked(t *testing.T, out string) {
+	t.Helper()
+	if _, err := os.Stat(filepath.Join(out, "delivered")); !os.IsNotExist(err) {
+		t.Fatalf("delivery ran: %v", err)
+	}
+}
+
+func assertDeliveryRan(t *testing.T, out string) {
+	t.Helper()
+	if _, err := os.Stat(filepath.Join(out, "delivered")); err != nil {
+		t.Fatalf("delivery did not run: %v", err)
+	}
+}
+
 func TestRunContractReview(t *testing.T) {
 	for _, tc := range []struct{ name, report, work, want string }{
 		{name: "current evidence"},
@@ -332,9 +359,7 @@ func TestRunContractReviewTaskSlicing(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), "requires split") {
 				t.Fatalf("want split got %v", err)
 			}
-			if _, e := os.Stat(filepath.Join(out, "delivered")); !os.IsNotExist(e) {
-				t.Fatal("delivery ran")
-			}
+			assertDeliveryBlocked(t, out)
 			log, e := os.ReadFile(filepath.Join(root, ".atm/runs/t/contract-review-0.jsonl"))
 			if e != nil || !strings.Contains(string(log), "task-slicing") {
 				t.Fatalf("skill not loaded: %s %v", log, e)
@@ -369,14 +394,9 @@ func testMissingOriginalGates(t *testing.T) {
 			root, out := contractReviewRepo(t)
 			body := strings.Replace(reviewReadyIssue, "## "+tc.section+"\n", "", 1)
 			body = strings.Replace(body, tc.content+"\n", "", 1)
-			t.Setenv("FAKE_CONTRACT_REPORT", passedContract)
-			err := Run("t", []string{issueFile(t, body)}, &bytes.Buffer{}, &bytes.Buffer{})
-			if err == nil || !strings.Contains(err.Error(), "issue missing task-slicing") {
-				t.Fatalf("missing %s accepted: %v", tc.section, err)
-			}
-			if _, e := os.Stat(filepath.Join(out, "delivered")); !os.IsNotExist(e) {
-				t.Fatal("delivery ran")
-			}
+			err := runContractReview(t, body, passedContract)
+			requireContractReviewError(t, err, "issue missing task-slicing")
+			assertDeliveryBlocked(t, out)
 			if _, e := os.Stat(filepath.Join(root, ".atm/runs/t/contract-review.json")); !os.IsNotExist(e) {
 				t.Fatal("passed report persisted")
 			}
@@ -393,13 +413,10 @@ Type: fix
 7. **Acceptance:** Retry once.
 8. **Split triggers:** Split if the diff adds an independent outcome.
 `
-	t.Setenv("FAKE_CONTRACT_REPORT", passedContract)
-	if err := Run("t", []string{issueFile(t, body)}, &bytes.Buffer{}, &bytes.Buffer{}); err != nil {
+	if err := runContractReview(t, body, passedContract); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(out, "delivered")); err != nil {
-		t.Fatal("delivery did not run:", err)
-	}
+	assertDeliveryRan(t, out)
 }
 
 func testUnmarkedOriginalGates(t *testing.T) {
@@ -415,14 +432,9 @@ Retry once.
 Split triggers
 Split if the diff adds an independent outcome.
 `
-	t.Setenv("FAKE_CONTRACT_REPORT", passedContract)
-	err := Run("t", []string{issueFile(t, body)}, &bytes.Buffer{}, &bytes.Buffer{})
-	if err == nil || !strings.Contains(err.Error(), "issue missing task-slicing") {
-		t.Fatalf("unmarked labels accepted as gates: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(out, "delivered")); !os.IsNotExist(err) {
-		t.Fatal("delivery ran")
-	}
+	err := runContractReview(t, body, passedContract)
+	requireContractReviewError(t, err, "issue missing task-slicing")
+	assertDeliveryBlocked(t, out)
 }
 
 func testFormattedOriginalGateContent(t *testing.T) {
@@ -441,13 +453,10 @@ func testFormattedOriginalGateContent(t *testing.T) {
 				_, out := contractReviewRepo(t)
 				body := strings.Replace(reviewReadyIssue, "Type: fix\n", "Type: fix\nRetry once.\n", 1)
 				body = strings.Replace(body, gate.original+"\n", format.content+"\n", 1)
-				t.Setenv("FAKE_CONTRACT_REPORT", passedContract)
-				if err := Run("t", []string{issueFile(t, body)}, &bytes.Buffer{}, &bytes.Buffer{}); err != nil {
+				if err := runContractReview(t, body, passedContract); err != nil {
 					t.Fatal(err)
 				}
-				if _, err := os.Stat(filepath.Join(out, "delivered")); err != nil {
-					t.Fatal("delivery did not run:", err)
-				}
+				assertDeliveryRan(t, out)
 			})
 		}
 	}
@@ -492,14 +501,11 @@ func testCommentGateForm(t *testing.T, form commentForm, gates []commentGate) {
 			if !strings.Contains(body, newField) {
 				t.Fatal("comment-only gate fixture was not built")
 			}
-			t.Setenv("FAKE_CONTRACT_REPORT", passedContract)
-			err := Run("t", []string{issueFile(t, body)}, &bytes.Buffer{}, &bytes.Buffer{})
+			err := runContractReview(t, body, passedContract)
 			if err == nil || !strings.Contains(err.Error(), "issue missing task-slicing") {
 				t.Fatalf("comment-only %s gate accepted: %v", gate.section, err)
 			}
-			if _, err := os.Stat(filepath.Join(out, "delivered")); !os.IsNotExist(err) {
-				t.Fatal("delivery ran")
-			}
+			assertDeliveryBlocked(t, out)
 		})
 	}
 }
@@ -540,9 +546,7 @@ func assertSplitBlocked(t *testing.T, root, out, body string, children []contrac
 	if err == nil || !strings.Contains(err.Error(), "requires split") {
 		t.Fatalf("want retained split, got %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(out, "delivered")); !os.IsNotExist(err) {
-		t.Fatal("delivery ran")
-	}
+	assertDeliveryBlocked(t, out)
 	var rounds []contractReview
 	b, err := os.ReadFile(filepath.Join(root, ".atm/runs/t/contract-review.json"))
 	if err != nil || json.Unmarshal(b, &rounds) != nil || len(rounds) != 1 || len(rounds[0].Children) != len(children) {
@@ -603,14 +607,9 @@ func assertQuotedGateBlocked(t *testing.T, gates string) {
 	t.Helper()
 	_, out := contractReviewRepo(t)
 	body := "# Retry on timeout\nType: fix\n\n" + gates + "\n"
-	t.Setenv("FAKE_CONTRACT_REPORT", passedContract)
-	err := Run("t", []string{issueFile(t, body)}, &bytes.Buffer{}, &bytes.Buffer{})
-	if err == nil || !strings.Contains(err.Error(), "issue missing task-slicing") {
-		t.Fatalf("quoted gate example accepted: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(out, "delivered")); !os.IsNotExist(err) {
-		t.Fatal("delivery ran")
-	}
+	err := runContractReview(t, body, passedContract)
+	requireContractReviewError(t, err, "issue missing task-slicing")
+	assertDeliveryBlocked(t, out)
 }
 
 func testQuotedGateSplitRetainsBlockers(t *testing.T) {
@@ -660,9 +659,7 @@ func TestRunContractReviewPersistsSplitWithMandatoryGap(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "requires split") {
 		t.Fatalf("want split disposition, got %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(out, "delivered")); !os.IsNotExist(err) {
-		t.Fatal("delivery ran")
-	}
+	assertDeliveryBlocked(t, out)
 	b, err := os.ReadFile(filepath.Join(root, ".atm/runs/t/contract-review.json"))
 	if err != nil {
 		t.Fatal("split evidence missing:", err)
@@ -689,9 +686,7 @@ func TestRunContractReviewRequiresOneBlockingChildPerGap(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("want %q, got %v", tc.want, err)
 			}
-			if _, err := os.Stat(filepath.Join(out, "delivered")); !os.IsNotExist(err) {
-				t.Fatal("delivery ran")
-			}
+			assertDeliveryBlocked(t, out)
 		})
 	}
 }
@@ -714,9 +709,7 @@ func TestRunContractReviewMissingGateNeedsMatchingBlockingChild(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), "requires split") {
 				t.Fatalf("want concrete split, got %v", err)
 			}
-			if _, err := os.Stat(filepath.Join(out, "delivered")); !os.IsNotExist(err) {
-				t.Fatal("delivery ran")
-			}
+			assertDeliveryBlocked(t, out)
 			b, err := os.ReadFile(filepath.Join(root, ".atm/runs/t/contract-review.json"))
 			var rounds []contractReview
 			if err != nil || json.Unmarshal(b, &rounds) != nil || len(rounds) != 1 || len(rounds[0].Children) != 2 {
@@ -732,9 +725,7 @@ func TestRunContractReviewMissingGateNeedsMatchingBlockingChild(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "every unmet gate or criterion") {
 			t.Fatalf("want missing gate blocker error, got %v", err)
 		}
-		if _, err := os.Stat(filepath.Join(out, "delivered")); !os.IsNotExist(err) {
-			t.Fatal("delivery ran")
-		}
+		assertDeliveryBlocked(t, out)
 	})
 }
 
@@ -747,12 +738,8 @@ func TestRunContractReviewIgnoresFencedLabelsAndMarkupOnlyGates(t *testing.T) {
 			_, out := contractReviewRepo(t)
 			t.Setenv("FAKE_CONTRACT_REPORT", passedContract)
 			err := Run("t", []string{issueFile(t, tc.body)}, &bytes.Buffer{}, &bytes.Buffer{})
-			if err == nil || !strings.Contains(err.Error(), "issue missing task-slicing") {
-				t.Fatalf("empty gates accepted: %v", err)
-			}
-			if _, err := os.Stat(filepath.Join(out, "delivered")); !os.IsNotExist(err) {
-				t.Fatal("delivery ran")
-			}
+			requireContractReviewError(t, err, "issue missing task-slicing")
+			assertDeliveryBlocked(t, out)
 		})
 	}
 }
@@ -762,13 +749,10 @@ func TestRunContractReviewAcceptsExecutableAcceptanceFence(t *testing.T) {
 		"## Invariants\nRetry occurs once.\n## Acceptance\n```sh\ngo test ./internal/run\n```\n" +
 		"## Split triggers\nSplit if the diff adds an independent outcome.\n"
 	_, out := contractReviewRepo(t)
-	t.Setenv("FAKE_CONTRACT_REPORT", passedContract)
-	if err := Run("t", []string{issueFile(t, body)}, &bytes.Buffer{}, &bytes.Buffer{}); err != nil {
+	if err := runContractReview(t, body, passedContract); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(out, "delivered")); err != nil {
-		t.Fatal("delivery did not run:", err)
-	}
+	assertDeliveryRan(t, out)
 }
 
 func TestRunContractReviewBlocksPendingMandatoryCriterion(t *testing.T) {
@@ -779,9 +763,7 @@ func TestRunContractReviewBlocksPendingMandatoryCriterion(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "mandatory criterion unmet") {
 		t.Fatalf("got %v", err)
 	}
-	if _, e := os.Stat(filepath.Join(out, "delivered")); !os.IsNotExist(e) {
-		t.Fatal("delivery ran")
-	}
+	assertDeliveryBlocked(t, out)
 	left := readFollowUps(t, root)
 	if len(left) != 1 || left[0]["red_test"] != "c3_test.sh" {
 		t.Fatalf("lost mandatory follow-up: %v", left)
