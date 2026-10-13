@@ -99,8 +99,13 @@ the remaining arguments, including the destination path. It checks all
 arguments for other tools. A call fails the step if it names an absolute path
 under the repository root but outside the clone, or if its shell command runs
 `curl` or `wget` or contains an HTTP(S) URL whose host is not `localhost`,
-`127.0.0.1` or `::1`. The error names the first offending call. A zero exit
-without a valid report fails; so does any non-zero exit.
+`127.0.0.1` or `::1`. One narrow exception applies to a leading plain `cat`
+that writes a quoted heredoc of valid Go test source to a literal clone-relative
+`_test.go` file, followed only by a literal `go test` invocation. The heredoc
+must contain a recognized test function using the standard `testing.T` type.
+The exception covers URL text in that fixture only; URLs or fetch commands
+elsewhere in the shell command still fail. The error names the first offending
+call. A zero exit without a valid report fails; so does any non-zero exit.
 
 ## Checks
 
