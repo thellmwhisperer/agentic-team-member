@@ -263,9 +263,7 @@ func shrunk(clone string, changed, tests []string) error {
 	return nil
 }
 
-// notRun is a runner's diagnostic that the test file did not parse or compile, as the runner prints it: from
-// the line's first column, where the output of an assertion, indented under its test, never starts. Go, pytest,
-// node --test, plain or as TAP comments, and tsc, in turn.
+// notRun matches parse or compile diagnostics printed by Go, pytest, node --test, and tsc.
 var notRun = regexp.MustCompile(`^(FAIL\s+\S+\s+\[(build|setup) failed\]$|_+ ERROR collecting .+ _+$|` +
 	`E\s+(SyntaxError|ImportError)\b|(# )?SyntaxError:|` +
 	`\S.*\(\d+,\d+\): error TS\d+:|\S.*:\d+:\d+ - error TS\d+:|error TS\d+:)`)
@@ -276,21 +274,32 @@ var jestFile = regexp.MustCompile(`^\s*FAIL\s+\S+(\s+\(.*\))?\s*$`)
 var testResult = regexp.MustCompile(`^(--- (PASS|FAIL):|ok\s+\S+|` +
 	`.+::.+\s+(PASSED|FAILED|SKIPPED|XFAIL|XPASS)\b|(PASSED|FAILED|SKIPPED|XFAIL|XPASS)\s+\S+::|` +
 	`[✓✔√]\s|[✕✘×]\s|● )`)
+var jestTestsFailed = regexp.MustCompile(`^Tests:\s+[1-9]\d*\s+failed\b`)
+var tapFailedTest = regexp.MustCompile(`^not ok \d+ - `)
+var tapAssertionFailure = regexp.MustCompile(`^(code: 'ERR_ASSERTION'|name: 'AssertionError')$`)
 
 // redDidNotRun says whether output, a red's whole, holds a runner's diagnostic that the test file did not parse
 // or compile and no test result.
 func redDidNotRun(output string) bool {
-	diagnostic, testRan, jest := false, false, false
+	diagnostic, testRan, jest, tap, tapFailed := false, false, false, false, false
 	for _, line := range strings.Split(output, "\n") {
 		line = strings.TrimRight(line, "\r")
 		trimmed := strings.TrimSpace(line)
 		switch {
 		case notRun.MatchString(line), jest && trimmed == "● Test suite failed to run":
 			diagnostic = true
+		case tap && tapFailedTest.MatchString(trimmed):
+			tapFailed = true
+		case tap && tapFailed && tapAssertionFailure.MatchString(trimmed):
+			testRan = true
 		case testResult.MatchString(trimmed):
 			testRan = true
 		}
 		jest = jest || jestFile.MatchString(line)
+		tap = tap || strings.HasPrefix(trimmed, "TAP version ")
+		if jest && jestTestsFailed.MatchString(trimmed) {
+			testRan = true
+		}
 	}
 	return diagnostic && !testRan
 }

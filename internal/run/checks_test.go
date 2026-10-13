@@ -206,11 +206,19 @@ var proofCases = []struct {
 			" FAIL  ./index.test.js\n      ● Test suite failed to run\n\n        SyntaxError: Unexpected token\n      Tests:       0 total")},
 		work: "echo fixed > a.txt; echo test > index.test.js; " + reportJSON("index.test.js"),
 		why:  "red did not run: parse/compile error"},
+	{name: "Jest assertion with suite diagnostic title remains a valid red", typ: "feature",
+		atm: atmSet(atmYAML, "test_file", "sh runner.sh {file}"), files: map[string]string{"runner.sh": recordedRunnerWhenFixed(
+			" FAIL  ./index.test.js\n  ● Test suite failed to run\n\n    expect(received).toBe(expected)\n    Expected: 1\n    Received: 0\n\nTest Suites: 1 failed, 1 total\nTests:       1 failed, 1 total")},
+		work: "echo fixed > a.txt; echo test > index.test.js; " + reportJSON("index.test.js")},
 	{name: "node syntax diagnostic rejected at red green boundary", typ: "fix",
 		atm: atmSet(atmYAML, "test_file", "sh runner.sh {file}"), files: map[string]string{"runner.sh": recordedRunner(
 			"/tmp/a.test.js:3\n\nSyntaxError: Unexpected end of input\n    at wrapSafe (node:internal/modules/cjs/loader:1637:18)\nNode.js v22.22.1")},
 		work: "echo fixed > a.txt; echo test > a.test.js; " + reportJSON("a.test.js"),
 		why:  "red did not run: parse/compile error"},
+	{name: "node TAP assertion output with SyntaxError remains a valid red", typ: "feature",
+		atm: atmSet(atmYAML, "test_file", "sh runner.sh {file}"), files: map[string]string{"runner.sh": recordedRunnerWhenFixed(
+			"TAP version 13\n# SyntaxError: ordinary assertion output\n# Subtest: fails after logging\nnot ok 1 - fails after logging\n  ---\n  failureType: 'testCodeFailure'\n  error: |\n    Expected values to be strictly equal\n  code: 'ERR_ASSERTION'\n  name: 'AssertionError'\n  ...\n1..1\n# tests 1\n# pass 0\n# fail 1")},
+		work: "echo fixed > a.txt; echo test > a.test.js; " + reportJSON("a.test.js")},
 	{name: "tsc diagnostic rejected at red green boundary", typ: "fix",
 		atm: atmSet(atmYAML, "test_file", "sh runner.sh {file}"), files: map[string]string{"runner.sh": recordedRunner(
 			"src/a.test.ts(3,7): error TS2322: Type 'number' is not assignable to type 'string'.")},
@@ -381,6 +389,10 @@ var fakePytest = "cat <<'EOF'\n" + pytestSyntaxError + "\nEOF\nexit 2\n"
 
 func recordedRunner(output string) string {
 	return "cat <<'EOF'\n" + output + "\nEOF\nexit 1\n"
+}
+
+func recordedRunnerWhenFixed(output string) string {
+	return "if grep -q fixed a.txt; then exit 0; fi\n" + recordedRunner(output)
 }
 
 // shrunkTest names the failure of work that deletes or shortens a_test.sh, a test on the base.
