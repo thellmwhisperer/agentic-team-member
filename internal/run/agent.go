@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"io"
 	"maps"
-	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -768,8 +767,20 @@ func literalWord(word *syntax.Word) (string, bool) {
 
 func badURL(word string) bool {
 	for _, l := range link.FindAllString(word, -1) {
-		u, err := url.Parse(l)
-		if err != nil || !slices.Contains([]string{"localhost", "127.0.0.1", "::1"}, u.Hostname()) {
+		scheme := strings.Index(l, "://")
+		if scheme < 0 {
+			return true
+		}
+		authority := l[scheme+3:]
+		host := authority
+		if strings.HasPrefix(host, "[") {
+			if end := strings.IndexByte(host, ']'); end >= 0 {
+				host = host[1:end]
+			}
+		} else if end := strings.IndexAny(host, ":/?#"); end >= 0 {
+			host = host[:end]
+		}
+		if !slices.Contains([]string{"localhost", "127.0.0.1", "::1"}, strings.ToLower(host)) {
 			return true
 		}
 	}

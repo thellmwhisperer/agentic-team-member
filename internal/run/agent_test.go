@@ -382,6 +382,7 @@ func reachCases() []reachCase {
 			why + `bash echo ready; curl "$URL"`},
 		{"pi description url ignored", "pi",
 			bashEvent("pi", "pnpm dev --url http://localhost:5173", "https://example.com"), ""},
+		{"local variable port", "claude", bashEvent("claude", "pnpm dev --url http://localhost:$PORT", ""), ""},
 		{"claude relative reach", "claude", claude("Bash", `{"command":"rg pattern . ../.."}`),
 			why + "Bash rg pattern . ../.."},
 		{"claude relative prefix reach", "claude", claude("Bash", `{"command":"rg pattern src/../../"}`),
