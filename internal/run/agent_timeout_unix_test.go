@@ -4,6 +4,7 @@ package run
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"os"
 	"path/filepath"
@@ -16,9 +17,15 @@ import (
 
 func TestRunStopsTheAgentAtItsConfiguredTimeout(t *testing.T) {
 	// One run after the other: each keeps its own limit.
-	for _, limit := range []time.Duration{2 * time.Second, time.Second} {
-		t.Run(limit.String(), func(t *testing.T) {
-			root := repo(t, "https://example.com/owner/repo.git", atmYAML+"agent_timeout: "+limit.String()+"\n")
+	for _, tc := range []struct {
+		limit time.Duration
+		want  string
+	}{
+		{2 * time.Second, "timed out after 2s"},
+		{time.Second, "timed out after 1s"},
+	} {
+		t.Run(tc.limit.String(), func(t *testing.T) {
+			root := repo(t, "https://example.com/owner/repo.git", atmYAML+"agent_timeout: "+tc.limit.String()+"\n")
 			fifo := filepath.Join(t.TempDir(), "pid")
 			if err := syscall.Mkfifo(fifo, 0o600); err != nil {
 				t.Fatal(err)
@@ -33,13 +40,12 @@ func TestRunStopsTheAgentAtItsConfiguredTimeout(t *testing.T) {
 			}()
 			var out bytes.Buffer
 			err := Run("t", []string{issueFile(t, issue)}, &out, io.Discard)
-			want := "timed out after " + Human(limit)
-			if err == nil || !strings.HasPrefix(err.Error(), want+";") {
-				t.Fatalf("want an error starting %q, got %v", want, err)
+			if err == nil || !strings.HasPrefix(err.Error(), tc.want+";") {
+				t.Fatalf("want an error starting %q, got %v", tc.want, err)
 			}
 			rep := readReport(t, filepath.Join(root, ".atm", "runs", "t", "report.json"))
-			if exit := reportNode(t, rep, "agent")["exit"]; exit != want {
-				t.Fatalf("agent exit = %v, want %q", exit, want)
+			if exit := reportNode(t, rep, "agent")["exit"]; exit != tc.want {
+				t.Fatalf("agent exit = %v, want %q", exit, tc.want)
 			}
 			pid := <-pids
 			t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
@@ -48,6 +54,15 @@ func TestRunStopsTheAgentAtItsConfiguredTimeout(t *testing.T) {
 				t.Fatalf("the run's clone outlived it: %v", left)
 			}
 		})
+	}
+}
+
+func TestAgentTimeoutMessageKeepsSubsecondLimit(t *testing.T) {
+	ctx, cancel := context.WithDeadline(context.Background(), time.Time{})
+	defer cancel()
+	exit, cause := ended(ctx, nil, "50ms")
+	if exit != "timed out after 50ms" || cause != "timed out after 50ms" {
+		t.Fatalf("exit = %q, cause = %q; want timed out after 50ms", exit, cause)
 	}
 }
 
