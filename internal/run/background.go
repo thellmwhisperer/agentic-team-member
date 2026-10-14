@@ -580,19 +580,39 @@ func (r *bgRun) event(line string) string {
 // history is the runs in root's .atm/runs.jsonl, how each last stood. One still running there ran in a
 // background process that ended before it did.
 func history(root string) ([]*bgRun, error) {
+	all, modified, err := recordedRuns(root)
+	var runs []*bgRun
+	for _, o := range all {
+		if o.Ended.IsZero() {
+			o.Outcome, o.FailedNode, o.Ended = "failed", o.Step, modified
+			o.Reason = "the background process ended before the run did"
+			o.NextStep = "run it again: atm run " + o.Issue
+		}
+		runs = append(runs, &bgRun{Outcome: o})
+	}
+	return runs, err
+}
+
+// RecordedRuns reads the last line of each run in runs.jsonl without changing its recorded outcome.
+func RecordedRuns(root string) ([]Outcome, error) {
+	runs, _, err := recordedRuns(root)
+	return runs, err
+}
+
+func recordedRuns(root string) ([]Outcome, time.Time, error) {
 	f, err := os.Open(filepath.Join(root, ".atm", "runs.jsonl"))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return nil, nil // no run yet
+			return nil, time.Time{}, nil // no run yet
 		}
-		return nil, err
+		return nil, time.Time{}, err
 	}
 	defer func() { _ = f.Close() }()
 	info, err := f.Stat()
 	if err != nil {
-		return nil, err
+		return nil, time.Time{}, err
 	}
-	var runs []*bgRun
+	var runs []Outcome
 	at := map[string]int{}
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 64*1024), 1024*1024)
@@ -601,20 +621,14 @@ func history(root string) ([]*bgRun, error) {
 		if json.Unmarshal(sc.Bytes(), &o) != nil {
 			continue
 		}
-		if o.Ended.IsZero() {
-			o.Outcome, o.FailedNode, o.Ended = "failed", o.Step, info.ModTime() // when it last ran
-			o.Reason = "the background process ended before the run did"
-			o.NextStep = "run it again: atm run " + o.Issue
-		}
-		r := &bgRun{Outcome: o} // ended: attach never waits on its more
 		if i, ok := at[o.Run]; ok {
-			runs[i] = r
+			runs[i] = o
 			continue
 		}
 		at[o.Run] = len(runs)
-		runs = append(runs, r)
+		runs = append(runs, o)
 	}
-	return runs, sc.Err()
+	return runs, info.ModTime(), sc.Err()
 }
 
 // save drops the oldest runs that ended past maxRuns, then writes the runs to runs.jsonl, through a file renamed
