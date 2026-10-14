@@ -9,9 +9,10 @@ Give ATM an issue, from GitHub or a text file. It hands the issue to a coding
 agent you already pay for (Claude Code, Codex, OpenCode, pi or Cursor) inside an
 isolated clone, with a written contract. Then code, not the agent, decides:
 does the new test fail without the fix and pass with it, do the configured
-checks still pass, and does the task type's proof hold. A green run gets one
-more agent call, the slop detector, that may only cut. Then the delivery and
-code review gate takes the branch.
+checks still pass, and does the task type's proof hold. A green run reaches
+the slop detector, which may only cut.
+[Delivery](docs/how-a-run-flows.md#delivery) then reviews the committed work
+against the issue before handing the branch to your configured command.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/pipeline-dark.svg">
@@ -71,7 +72,7 @@ every check ran again before it was kept.
 | The project's configured `install`, `test`, `typecheck` and `lint` commands | code | any failure |
 | Follow-ups | code | unproved gaps after Checks pass; see [Follow-ups](docs/how-a-run-flows.md#follow-ups) |
 | Slop detector (code quality gate, not code review) | **model**, may only cut | a cut that breaks any check or does not shrink the diff: the clone goes back |
-| Delivery and code review gate | your command | ATM branches, commits and runs it. The documented example is no-mistakes, a graph of its own: models review, judge the test evidence, update the docs and write the PR; code rebases, runs your test and lint commands, pushes and watches CI |
+| Delivery and code review gate | **model**, then your command | See [Delivery](docs/how-a-run-flows.md#delivery) for the review that must approve before the command runs |
 
 Step by step: [How a run flows](docs/how-a-run-flows.md).
 
@@ -131,7 +132,7 @@ For `atm run` and `atm axi run`:
 | `0` | Every unit passed, and delivery, if configured, exited 0 |
 | `1` | A unit failed; nothing is delivered |
 | `2` | No live watcher, or configuration, issue, clone or contract failed |
-| `4` | Every unit passed, but the delivery command exited non-zero |
+| `4` | Every unit passed, but Delivery failed, including its contract review |
 
 ## Read more
 

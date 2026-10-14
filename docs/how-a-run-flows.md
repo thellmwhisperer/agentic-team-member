@@ -1,9 +1,9 @@
 # How a run flows
 
 This page is what `atm run` does with an issue, step by step, and what makes
-each step fail. Code decides every step but two: the agent writes the fix and
-the slop detector cuts it. What you set before a run is in
-[Configuration](configuration.md).
+each step fail. Models write the fix, cut the diff and review the commit
+against the issue before delivery; code enforces the step results. What you
+set before a run is in [Configuration](configuration.md).
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/red-green-dark.svg">
@@ -90,9 +90,10 @@ The agent runs in the clone in its most minimal mode:
 | `pi` | `pi -p --no-extensions --no-skills --no-prompt-templates --no-context-files --no-session` | as its last argument |
 | `cursor` | `cursor-agent -p --output-format stream-json --trust --force --workspace <clone>`, then `--model <model>` when set and any `--harness-arg`s | as its last argument |
 
-For `claude`, ATM sets `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` for both the
-coding agent and the slop detector. It overrides an inherited value or one
-passed with `--env`, so their turns wait for running commands to finish.
+For `claude`, ATM sets `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` for every
+agent call, including the slop detector and contract reviewer. It overrides
+an inherited value or one passed with `--env`, so their turns wait for running
+commands to finish.
 
 ATM writes the bundled `ponytail` skill into the clone, outside git, and the
 agent's log must show it loaded under that exact name and succeeded. For Cursor,
@@ -253,12 +254,16 @@ the next unit commit, and the clone's `origin` becomes the repository's. Every
 commit after the base must carry the repository's git identity.
 
 Then the agent, with the `ponytail-review` skill, reviews read only the issue
-and the diff from the base to that HEAD, and reports `approved` or `blocked`,
-each block quoting the issue's criterion and its evidence in the diff.
+and the committed diff from the original base to that HEAD. Its final message
+must be a single JSON object reporting `approved` or `blocked`, with no
+surrounding text; approval requires no findings, and each block quotes the
+issue's criterion and its evidence in the diff.
 `contract-review.json` in the run's directory keeps the issue, base, HEAD,
 report and reason. A block, a report that is not valid or names another base
-or HEAD, a failed reviewer, or a reviewer that changes the clone or HEAD fails
-Delivery before its command runs; nothing retries it.
+or HEAD, a failed reviewer, a reviewer that changes the clone or HEAD, or
+uncommitted changes after review fails Delivery before its command runs;
+nothing retries it. With no `delivery` command, neither the review nor the
+command runs.
 
 Once approved, the command runs with `sh -c` in the clone, without a time limit, with these
 variables:

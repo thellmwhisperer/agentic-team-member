@@ -270,7 +270,7 @@ type exitError struct {
 func (e exitError) Error() string { return e.err.Error() }
 func (e exitError) Unwrap() error { return e.err }
 
-// codes is the exit code of a failed node: 1 a unit failed, 4 the delivery command failed, 2 any other.
+// codes is the exit code of a failed node: 1 a unit failed, 4 Delivery failed, 2 any other.
 var codes = map[string]int{"agent": 1, "checks": 1, "delivery": 4}
 
 // ExitCode is atm's exit code for Run's error: 0 none, the failed node's code, or 2 when the run never started.
