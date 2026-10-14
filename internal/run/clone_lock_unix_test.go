@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -169,5 +170,79 @@ func TestReleaseRemovesAMergedClone(t *testing.T) {
 	}
 	if left := clones(t, root); len(left) != 0 {
 		t.Fatalf("a merged clone outlived release: %v", left)
+	}
+}
+
+func TestReleaseKeepsCloneWhenHelperCannotStart(t *testing.T) {
+	if a := os.Getenv("ATM_TEST_HELPER_START_CLONE"); a != "" {
+		exe, err := os.Executable()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Remove(exe); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("FAKE_GH_OUT", "CLOSED")
+		if err := release(a, "owner/repo"); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	root := repo(t, "https://example.com/owner/repo.git", atmYAML)
+	a := oldClone(t, root, false, true, false)
+	fakeGH(t, "CLOSED", false)
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(exe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	child := filepath.Join(t.TempDir(), "atm-test")
+	if err := os.WriteFile(child, b, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(child, "-test.run=^TestReleaseKeepsCloneWhenHelperCannotStart$")
+	cmd.Env = append(slices.DeleteFunc(os.Environ(), func(s string) bool {
+		return strings.HasPrefix(s, "FAKE_GH_OUT=")
+	}), "ATM_TEST_HELPER_START_CLONE="+a)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("release in child: %v\n%s", err, out)
+	}
+	for _, p := range []string{a, a + ".delivered", a + ".lock"} {
+		if _, err := os.Stat(p); err != nil {
+			t.Fatalf("helper start failure removed %s: %v", p, err)
+		}
+	}
+}
+
+func TestReleaseKeepsCloneWhenBranchQueryFails(t *testing.T) {
+	root := repo(t, "https://example.com/owner/repo.git", atmYAML)
+	a := oldClone(t, root, false, true, true)
+	gitPath, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := t.TempDir()
+	write(t, filepath.Join(bin, "git"), `#!/bin/sh
+if [ "$1" = branch ]; then
+	printf '  atm/fix\n'
+	exit 9
+fi
+exec "$ATM_TEST_GIT" "$@"
+`)
+	if err := os.Chmod(filepath.Join(bin, "git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ATM_TEST_GIT", gitPath)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	if err := release(a, ""); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{a, a + ".delivered", a + ".lock"} {
+		if _, err := os.Stat(p); err != nil {
+			t.Fatalf("branch query failure removed %s: %v", p, err)
+		}
 	}
 }

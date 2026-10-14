@@ -131,7 +131,8 @@ func release(dir, repo string) error {
 func kept(dir, repo string, lock *os.File) bool {
 	delivered := func() ([]byte, error) { return os.ReadFile(dir + ".delivered") }
 	gitIn, ghDir := func(args ...string) (string, error) { return git(dir, args...) }, dir
-	if s, ok := selected(lock); ok {
+	s, selectedClone := selected(lock)
+	if selectedClone {
 		delivered = func() ([]byte, error) { return s.parent.ReadFile(s.name + ".delivered") }
 		gitIn, ghDir = func(args ...string) (string, error) { return gitAt(s.dir, args...) }, ""
 	}
@@ -141,8 +142,17 @@ func kept(dir, repo string, lock *os.File) bool {
 	}
 	branch, base, _ := strings.Cut(strings.TrimSpace(string(b)), " ")
 	if _, err := gitIn("fetch", "-q", "origin", base); err == nil {
-		if merged, _ := gitIn("branch", "--merged", "FETCH_HEAD", "--list", branch); merged != "" {
+		merged, err := gitIn("branch", "--merged", "FETCH_HEAD", "--list", branch)
+		if selectedClone && err != nil {
+			return true
+		}
+		if merged != "" {
 			return false
+		}
+	} else if selectedClone {
+		var exit *exec.ExitError
+		if !errors.As(err, &exit) {
+			return true
 		}
 	}
 	if repo == "" {
