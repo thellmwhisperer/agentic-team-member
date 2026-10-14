@@ -52,6 +52,16 @@ func (d *Timeout) UnmarshalYAML(n *yaml.Node) error {
 	return nil
 }
 
+// ACP is the agents ATM speaks ACP with, by harness: the command line it runs in the clone, and, since it takes
+// its model and effort from its own config, the error either fails the run with (rule 8).
+var ACP = map[string]struct {
+	Argv  []string
+	Unset string
+}{
+	"hermes": {[]string{"hermes", "--ignore-rules", "acp"},
+		"hermes takes model and effort from its own config; unset them in .atm.yaml"},
+}
+
 // required is every key .atm.yaml must declare; an empty value is a deliberate "none".
 var required = []string{"install", "test", "typecheck", "lint", "test_file", "test_patterns", "docs_patterns",
 	"delivery"}
@@ -85,13 +95,21 @@ func Load(root, home string, flags Agent) (Config, error) {
 	}
 	c.Harness, c.Model, c.Effort = cmp.Or(flags.Harness, c.Harness), cmp.Or(flags.Model, c.Model),
 		cmp.Or(flags.Effort, c.Effort)
-	if !slices.Contains([]string{"claude", "codex", "opencode", "pi", "cursor"}, c.Harness) {
-		return c, fmt.Errorf("harness %q unknown, want claude, codex, opencode, pi or cursor", c.Harness)
+	return c, harnessError(c.Agent)
+}
+
+// harnessError is why a's harness cannot run as a sets it, nil when it can.
+func harnessError(a Agent) error {
+	acp, isACP := ACP[a.Harness]
+	switch {
+	case !slices.Contains([]string{"claude", "codex", "opencode", "pi", "cursor"}, a.Harness) && !isACP:
+		return fmt.Errorf("harness %q unknown, want claude, codex, opencode, pi, cursor or hermes", a.Harness)
+	case isACP && (a.Model != "" || a.Effort != ""):
+		return errors.New(acp.Unset)
+	case a.Harness == "cursor" && a.Effort != "":
+		return fmt.Errorf("cursor has no effort flag: put it in the model, as '<model>[effort=%s]'", a.Effort)
 	}
-	if c.Harness == "cursor" && c.Effort != "" {
-		return c, fmt.Errorf("cursor has no effort flag: put it in the model, as '<model>[effort=%s]'", c.Effort)
-	}
-	return c, nil
+	return nil
 }
 
 // decode decodes the file at path, if any, over v and returns its top-level keys. A key v lacks is an error.

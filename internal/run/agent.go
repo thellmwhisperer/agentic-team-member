@@ -58,7 +58,7 @@ type agent struct {
 
 // flags adds the agent's flags to fs.
 func (a *agent) flags(fs *flag.FlagSet) {
-	fs.StringVar(&a.Harness, "harness", "", "agent CLI: claude, codex, opencode, pi or cursor")
+	fs.StringVar(&a.Harness, "harness", "", "agent CLI: claude, codex, opencode, pi, cursor or hermes")
 	fs.StringVar(&a.Model, "model", "", "the agent's model")
 	fs.StringVar(&a.Effort, "effort", "", "the agent's effort")
 	fs.Func("harness-arg", "an argument for the agent CLI, before the brief; repeatable", func(v string) error {
@@ -75,8 +75,12 @@ func (a *agent) flags(fs *flag.FlagSet) {
 }
 
 // argv is the agent's command line, in its most minimal mode, and what goes on its stdin: claude reads the
-// brief there, the others take it as the last argument. final is where codex writes its last message.
+// brief there, the others take it as the last argument, but an ACP agent, whose prompt it is. final is where
+// codex writes its last message.
 func (a agent) argv(clone, skill, final, brief string) (argv []string, stdin string) {
+	if acp, ok := config.ACP[a.Harness]; ok {
+		return append(slices.Clone(acp.Argv), a.args...), brief
+	}
 	with := func(argv []string, value string, args ...string) []string {
 		if value == "" {
 			return argv
@@ -122,6 +126,9 @@ func (a agent) run(clone, name, skill, brief string, check func(map[string]any) 
 	dir, err := placeSkill(clone, a.Harness, skill)
 	if err != nil {
 		return ev, err
+	}
+	if _, acp := config.ACP[a.Harness]; acp { // no skill directory: the brief has the skill, the report its proof
+		brief, check = withSkill(brief, skill), withoutSkill(check)
 	}
 	final := strings.TrimSuffix(path, ".jsonl") + ".final.md"
 	argv, stdin := a.argv(clone, dir, final, brief)
@@ -261,6 +268,9 @@ func (a agent) exec(clone, skill, path string, argv []string, stdin string) (*st
 	}
 	s := &stream{skill: skill, live: relative(clone, liveIn(clone)), root: a.root, clone: clone,
 		heard: func() { quiet.Reset(agentSilence) }}
+	if err := s.talk(cmd, f, a.Harness, stdin); err != nil {
+		return nil, "", "", err
+	}
 	err = s.read(cmd, f, stderr, a.Harness)
 	quiet.Stop()
 	limitText := Human(limit)
@@ -268,7 +278,7 @@ func (a agent) exec(clone, skill, path string, argv []string, stdin string) (*st
 		limitText = a.timeout.String()
 	}
 	exit, cause := ended(ctx, cmd.ProcessState, limitText)
-	return s, exit, cause, err
+	return s.acpEnded(exit, cause, err)
 }
 
 // ended is how the agent run under ctx, bounded by limit, ended, its exit, "" when it never ran, and the cause
@@ -314,6 +324,9 @@ func testFile(r map[string]any) error {
 // placeSkill puts skill where the harness finds it in clone, outside git, records the clone as the agent finds it,
 // and returns the skill's directory.
 func placeSkill(clone, harness, skill string) (string, error) {
+	if _, acp := config.ACP[harness]; acp { // its skill goes in its brief
+		return "", before(clone)
+	}
 	rel := skillDirs[harness] + "/" + skill
 	dir := filepath.Join(clone, filepath.FromSlash(rel))
 	b, err := skills.ReadFile(skill + "/SKILL.md")
@@ -360,6 +373,11 @@ type stream struct {
 	failure      string   // cursor's error result, even when the process exits 0
 	tail         []string // the last 20 lines the agent wrote
 	heard        func()   // each line calls it
+	// An ACP agent's: its prompt, its stdin until its prompt's reply, the reply's stopReason or the failed call,
+	// and the chunks of one thought or message so far.
+	prompt, stop   string
+	rpc            io.WriteCloser
+	chunk, chunkOf string
 }
 
 // read runs cmd and writes each line of its stdout and stderr to log, as it is when JSON, else as a JSON
@@ -372,7 +390,7 @@ func (s *stream) read(cmd *exec.Cmd, log, stderr io.Writer, harness string) erro
 	defer closeGroup()
 	var mu sync.Mutex
 	var werr error
-	emit := func(line string) {
+	emit := func(line string, stdout bool) {
 		line = string(bytes.TrimSpace([]byte(line)))
 		mu.Lock()
 		defer mu.Unlock()
@@ -388,8 +406,11 @@ func (s *stream) read(cmd *exec.Cmd, log, stderr io.Writer, harness string) erro
 		if _, err := log.Write(append(b, '\n')); werr == nil {
 			werr = err
 		}
+		if stdout && s.rpc != nil {
+			s.say(cmd, log, s.answer(b))
+		}
 	}
-	out, errout := &lineWriter{fn: emit}, &lineWriter{fn: emit}
+	out, errout := &lineWriter{fn: func(l string) { emit(l, true) }}, &lineWriter{fn: func(l string) { emit(l, false) }}
 	cmd.Stdout, cmd.Stderr = out, io.MultiWriter(stderr, errout)
 	err = cmd.Start()
 	if err == nil {
@@ -471,6 +492,10 @@ type block struct {
 
 // see reads one JSON line of harness's stream.
 func (s *stream) see(harness string, line []byte) {
+	if _, acp := config.ACP[harness]; acp {
+		s.show(s.acp(line))
+		return
+	}
 	var e event
 	_ = json.Unmarshal(line, &e) // a field of another type is left empty, the rest is read
 	if harness == "cursor" {
@@ -485,7 +510,12 @@ func (s *stream) see(harness string, line []byte) {
 	}
 	s.loads = append(s.loads, e.skillLoads(harness, s.skill, s.clone)...)
 	s.reach = cmp.Or(s.reach, outside(e.calls(harness), s.root, s.clone))
-	for _, ev := range e.activity(harness) {
+	s.show(e.activity(harness))
+}
+
+// show tells the screen evs, what the agent says once the stream knows whether it ends with a report.
+func (s *stream) show(evs []map[string]any) {
+	for _, ev := range evs {
 		id, _ := ev["id"].(string)
 		s.used = s.used || ev["result"] == "passed" && slices.Contains(s.loads, id)
 		if says, ok := ev["says"].(string); ok {
@@ -523,7 +553,14 @@ func (s *stream) cursorState(e *event) {
 	}
 }
 
-func (s *stream) finish() { s.flush(true) }
+func (s *stream) finish() {
+	s.show(s.chunkEnd())
+	s.flush(true)
+	if s.prompt != "" { // an ACP agent's report proves its skill
+		r, _ := lastObject(s.final)
+		s.used = r["skill"] == s.skill
+	}
+}
 
 func (s *stream) flush(report bool) {
 	if s.pending == "" {
@@ -892,13 +929,17 @@ var (
 
 // outside is the first of calls that reaches outside clone, as its tool and its first 200 characters: one that
 // names a path under root not under clone, or a shell command that runs curl or wget or names a URL off this
-// machine. A path outside root, the module cache's, passes.
+// machine. A path outside root, the module cache's, passes; root "/" is every absolute path.
 func outside(calls []use, root, clone string) string {
 	if len(calls) == 0 {
 		return ""
 	}
 	root, clone = filepath.ToSlash(root), filepath.ToSlash(clone)
-	paths := regexp.MustCompile(regexp.QuoteMeta(root) + "(/[^" + sep + "]*)?")
+	pattern := regexp.QuoteMeta(root) + "(/[^" + sep + "]*)?"
+	if root == "/" {
+		pattern = "/[^" + sep + "]*"
+	}
+	paths := regexp.MustCompile(pattern)
 	for _, c := range calls {
 		if reachesPath(c.args, root, clone, paths) || c.command != "" && fetchesAt(c.command, clone) {
 			r := []rune(c.args)
