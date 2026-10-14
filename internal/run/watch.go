@@ -298,6 +298,7 @@ type ciCommit struct{ sha, subject string }
 const findingsTable = "{id,severity,file,action,description}:"
 
 func parseGate(status string) (s gateState) {
+	expectedFindings := 0
 	parked := false       // its fix_review step waits for a decision
 	table, depth := "", 0 // the table whose rows, deeper than its header, follow
 	for _, l := range strings.Split(status, "\n") {
@@ -318,8 +319,12 @@ func parseGate(status string) (s gateState) {
 			table = "steps"
 		case strings.HasPrefix(trimmed, "findings["):
 			table = "findings"
-			if !strings.HasSuffix(trimmed, findingsTable) {
+			count, valid := strings.CutSuffix(strings.TrimPrefix(trimmed, "findings["), "]"+findingsTable)
+			n, err := strconv.Atoi(count)
+			if !valid || err != nil || n < 0 {
 				s.err = cmp.Or(s.err, fmt.Errorf("findings are not %s: %q", findingsTable, trimmed))
+			} else {
+				expectedFindings += n
 			}
 		case isKey:
 			if unquoted, err := strconv.Unquote(value); err == nil {
@@ -334,6 +339,9 @@ func parseGate(status string) (s gateState) {
 				parked = strings.HasPrefix(value, "parked")
 			}
 		}
+	}
+	if len(s.findings) != expectedFindings {
+		s.err = cmp.Or(s.err, fmt.Errorf("findings has %d rows, want %d", len(s.findings), expectedFindings))
 	}
 	return s
 }
