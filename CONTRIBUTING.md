@@ -86,12 +86,9 @@ Risk reviewed:
 
 The label is the switch; the comment is the record.
 
-A PR with `no-mistakes(...)` commits gets the `review-required` label and is
-not armed. The CoS has it reviewed through
-[the review circuit](skills/no-mistakes-review/SKILL.md), then adds
-`review-completed`, which arms it under the risk rules above, or
-`pr-discarded`, which never arms and disarms it. Any push removes
-`review-completed`, so the new head is reviewed again.
+For PRs with `no-mistakes(...)` commits, the CoS follows
+[the label-based review circuit](skills/no-mistakes-review/SKILL.md), which
+defines review completion, invalidation after a push, and discard.
 
 ## What is accepted
 
