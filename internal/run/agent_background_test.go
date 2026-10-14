@@ -5,6 +5,7 @@ import (
 	"io"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -21,11 +22,20 @@ func TestRunDisablesClaudeBackgroundTasks(t *testing.T) {
 			}
 			for _, pass := range []string{"", ".ponytail"} {
 				env := agentCall(t, call+pass).Env
-				claude := harness == "claude"
-				if slices.Contains(env, "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1") != claude ||
-					slices.Contains(env, "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=0") == claude {
-					t.Fatalf("%s%s env: want CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 only for claude", harness, pass)
+				var got []string
+				for _, kv := range env {
+					if strings.HasPrefix(kv, "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=") {
+						got = append(got, kv)
+					}
 				}
+				want := []string{"CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=0"}
+				if harness == "claude" {
+					want[0] = "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1"
+				}
+				if !slices.Equal(got, want) {
+					t.Fatalf("%s%s agent env: got %v, want %v", harness, pass, got, want)
+				}
+				t.Logf("%s%s agent env: %s", harness, pass, got[0])
 			}
 		})
 	}
