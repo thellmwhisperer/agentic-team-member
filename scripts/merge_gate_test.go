@@ -94,9 +94,6 @@ func fakeGH(args []string) int {
 		return 0
 	}
 	switch after(args, "--json") {
-	case "headRefOid,commits,comments":
-		fmt.Println(strings.Join(commits[:min(len(commits), 100)], "\n"))
-		fmt.Print(os.Getenv("FAKE_GH_PR"))
 	case "headRefOid,comments":
 		fmt.Print(os.Getenv("FAKE_GH_PR"))
 	case "body":
