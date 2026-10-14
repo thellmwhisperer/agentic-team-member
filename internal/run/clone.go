@@ -89,7 +89,7 @@ func claim(root string, now time.Time) (string, error) {
 	}
 }
 
-// sweep removes every clone under clones whose run is gone and that is not kept.
+// sweep tries to remove clones whose runs are gone, leaving any it cannot select or safely remove.
 func sweep(clones, repo string) {
 	entries, _ := os.ReadDir(clones) // none yet: nothing to sweep
 	for _, e := range entries {
@@ -109,7 +109,7 @@ func sweep(clones, repo string) {
 	}
 }
 
-// release ends the run's hold on its clone dir: removed, unless kept.
+// release ends the run's hold on its clone dir, removing it when eligible and safely selected.
 func release(dir, repo string) error {
 	if dir == "" {
 		return nil

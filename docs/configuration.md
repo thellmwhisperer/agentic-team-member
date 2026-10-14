@@ -191,13 +191,17 @@ ignores.
 | Path | Holds | Kept |
 |------|-------|------|
 | `.atm/runs/<label>/` | `report.json`, the briefs, the agent logs, `follow-ups.json`, `delivery-output.txt`, and `resume/` when the run is resumable | Always |
-| `.atm/clones/atm-run-<timestamp>/` | The run's isolated clone | Removed when the run ends, unless it delivered and its PR is open |
+| `.atm/clones/atm-run-<timestamp>/` | The run's isolated clone | Removed after the run when no longer needed and cleanup can verify its identity |
 | `.atm/runs.jsonl` | The last state of each retained run, so `atm runs` survives the background process | Every run going and the newest 200 that ended |
 | `.atm/atm.sock`, `.atm/atm.lock`, `.atm/serve.log` | The background process | While it runs; the log stays |
 
 A run's label is `<issue name>-<n>`, `n` counting the repository's runs; it is
 what `atm runs` shows. A run that delivered leaves `<clone>.delivered` with its
-branch and base. Each new run first removes the clones of runs that are gone,
+branch and base. Each new run first tries to remove the clones of runs that are gone,
 except a delivered one whose branch is not merged into its base and whose PR
 `gh` does not report closed or merged. A clone a live process still uses is
-left in place.
+left in place. On Unix, cleanup also keeps a clone if it cannot verify that
+the locked clone is still the one at its original directory name. Cleanup
+rejects symlinks in the clone's parent path, including an inherited `TMPDIR`
+alias; on macOS, the system `/var` to `/private/var` alias is accepted when
+its ownership and permissions can be verified.

@@ -7,8 +7,8 @@ import (
 )
 
 // cloneSelections holds, for each lock openCloneLock opened on Unix, the clone it selected with it: its parent
-// and its directory, opened once, so that the decision to keep it and its removal act on that clone, never on
-// whatever its path names later. Windows selects none and works by path.
+// and its directory, opened once, so that the retention decision and removal use the selected directory.
+// Windows selects none and works by path.
 var cloneSelections sync.Map // *os.File: cloneSelection
 
 type cloneSelection struct {
