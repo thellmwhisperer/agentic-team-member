@@ -15,7 +15,8 @@ import (
 // A background process that closes on an input it never read, after the run's final reply, resets the socket on
 // Linux: attach still returns how the run ended.
 func TestAttachIgnoresAResetAfterTheFinalReply(t *testing.T) {
-	root := t.TempDir()
+	t.Chdir(t.TempDir())
+	root := "."
 	err := os.Mkdir(filepath.Join(root, ".atm"), 0o755)
 	l, e := net.Listen("unix", short(socket(root)))
 	if err != nil || e != nil {
