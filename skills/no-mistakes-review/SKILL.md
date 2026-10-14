@@ -31,7 +31,7 @@ pass and one read-only review.
 
 1. **Look at the size.** A signal, not a gate. Generated files are marked
    `linguist-generated` in `.gitattributes` and left out:
-   `git diff --stat <first-nm>^ <head> -- . ':(attr:!linguist-generated)'`.
+   `git diff --stat <first-nm>^ <head> -- . ':(exclude,attr:linguist-generated)'`.
 2. **Trim.** Launch one agent with the issue text and only the no-mistakes
    commits (`git log --oneline origin/main..<head> --grep '^no-mistakes('`,
    then `git show` of each). It classifies every hunk against the issue's
@@ -64,5 +64,6 @@ pass and one read-only review.
    that head. Low or Medium risk merges by itself; High waits for
    `risk-reviewed` as always.
 
-A new no-mistakes commit after step 4 blocks the PR again. Clear it with a new
-comment for the new head; do not run the circuit a second time.
+A new no-mistakes commit after step 4 blocks the PR again. Return it to the
+worker and run this circuit again for the new no-mistakes commits before
+clearing the new head.

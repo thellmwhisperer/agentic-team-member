@@ -80,8 +80,19 @@ func fakeGH(args []string) int {
 	if os.Getenv("FAKE_GH_FAIL") != "" {
 		return 1
 	}
+	commits := strings.Split(strings.TrimSuffix(os.Getenv("FAKE_GH_COMMITS"), "\n"), "\n")
+	if len(args) > 0 && args[0] == "api" {
+		if !slices.Contains(args, "--paginate") {
+			commits = commits[:min(len(commits), 100)]
+		}
+		fmt.Println(strings.Join(commits, "\n"))
+		return 0
+	}
 	switch after(args, "--json") {
 	case "headRefOid,commits,comments":
+		fmt.Println(strings.Join(commits[:min(len(commits), 100)], "\n"))
+		fmt.Print(os.Getenv("FAKE_GH_PR"))
+	case "headRefOid,comments":
 		fmt.Print(os.Getenv("FAKE_GH_PR"))
 	case "body":
 		fmt.Println(os.Getenv("FAKE_GH_BODY"))
@@ -112,9 +123,6 @@ type pr struct {
 // view is the gh --jq projection no-mistakes-review.sh asks for.
 func (p pr) view() string {
 	lines := []string{"head " + p.head}
-	for _, s := range p.subjects {
-		lines = append(lines, "commit "+s)
-	}
 	for _, c := range p.comments {
 		for _, line := range strings.Split(c.body, "\n") {
 			lines = append(lines, "comment "+c.login+" "+line)
@@ -136,6 +144,11 @@ func (p pr) run(t *testing.T, command string) result {
 	t.Setenv("GH_TOKEN", "token")
 	t.Setenv("FAKE_GH_LOG", log)
 	t.Setenv("FAKE_GH_PR", p.view())
+	commits := make([]string, 0, len(p.subjects))
+	for _, subject := range p.subjects {
+		commits = append(commits, "commit "+subject)
+	}
+	t.Setenv("FAKE_GH_COMMITS", strings.Join(commits, "\n"))
 	t.Setenv("FAKE_GH_HEAD", cmp.Or(p.live, p.head))
 	t.Setenv("FAKE_GH_BODY", cmp.Or(p.body, lowRisk))
 	t.Setenv("FAKE_GH_LABELS", p.labels)
@@ -168,6 +181,19 @@ func TestReviewBlocksEachNoMistakesCategory(t *testing.T) {
 				t.Fatalf("review = %q, %v; want blocked until the head is reviewed", r.out, r.err)
 			}
 		})
+	}
+}
+
+func TestReviewBlocksNoMistakesCommitAfterFirstHundred(t *testing.T) {
+	subjects := make([]string, 101)
+	for i := range subjects {
+		subjects[i] = "feat: ordinary commit"
+	}
+	subjects[100] = "no-mistakes(ci): added by the gate"
+	r := pr{head: newHead, subjects: subjects}.run(t, review)
+	if r.err == nil || !strings.Contains(r.out, "No-mistakes reviewed: "+newHead) ||
+		!strings.Contains(r.calls, "--paginate") {
+		t.Fatalf("review = %q, %v; calls = %q; want blocked after all commits", r.out, r.err, r.calls)
 	}
 }
 
@@ -351,5 +377,25 @@ func TestGeneratedFilesAreMarked(t *testing.T) {
 	out, err := exec.Command("git", "-C", "..", "check-attr", "linguist-generated", "--", "go.sum").Output()
 	if err != nil || strings.TrimSpace(string(out)) != "go.sum: linguist-generated: set" {
 		t.Fatalf("check-attr = %q, %v; want go.sum marked linguist-generated", out, err)
+	}
+	dir := t.TempDir()
+	for name, content := range map[string]string{
+		".gitattributes": "go.sum linguist-generated\n",
+		"go.sum":         "generated\n",
+		"main.go":        "package main\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, args := range [][]string{{"init", "-q"}, {"add", "."}} {
+		if out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %s: %v", args, out, err)
+		}
+	}
+	out, err = exec.Command("git", "-C", dir, "diff", "--cached", "--stat", "--", ".",
+		":(exclude,attr:linguist-generated)").CombinedOutput()
+	if err != nil || !strings.Contains(string(out), "main.go") || strings.Contains(string(out), "go.sum") {
+		t.Fatalf("generated-file exclusion = %q, %v; want source without go.sum", out, err)
 	}
 }
