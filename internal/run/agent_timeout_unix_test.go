@@ -53,7 +53,6 @@ func TestRunStopsTheAgentAtItsConfiguredTimeout(t *testing.T) {
 			if left := clones(t, root); len(left) != 0 {
 				t.Fatalf("the run's clone outlived it: %v", left)
 			}
-			t.Logf("configured limit %s; run error %q; report agent exit %q; grandchild %d dead; clone removed", tc.limit, err, tc.want, pid)
 		})
 	}
 }
@@ -69,7 +68,6 @@ func TestRunReportsSubsecondConfiguredTimeout(t *testing.T) {
 	if exit := reportNode(t, rep, "agent")["exit"]; exit != "timed out after 250ms" {
 		t.Fatalf("agent exit = %v, want timed out after 250ms", exit)
 	}
-	t.Logf("configured limit 250ms; run error %q; report agent exit %q", err, reportNode(t, rep, "agent")["exit"])
 }
 
 func TestRunRejectsInvalidTimeoutBeforeStartingAgent(t *testing.T) {
@@ -88,7 +86,6 @@ func TestRunRejectsInvalidTimeoutBeforeStartingAgent(t *testing.T) {
 			if _, err := os.Stat(filepath.Join(root, ".atm", "runs", "t", "report.json")); !os.IsNotExist(err) {
 				t.Fatalf("run started despite invalid config: %v", err)
 			}
-			t.Logf("invalid limit %q; run error %q; agent never called; no report created", value, err)
 		})
 	}
 }
@@ -113,7 +110,6 @@ func TestRunPassesAnAgentWithinItsConfiguredTimeout(t *testing.T) {
 			if got := reportNode(t, rep, "agent")["result"]; got != "passed" {
 				t.Fatalf("agent result = %v, want passed", got)
 			}
-			t.Logf("configured limit %s; run reason %q; report agent result %q", limit, rep["reason"], reportNode(t, rep, "agent")["result"])
 		})
 	}
 }
