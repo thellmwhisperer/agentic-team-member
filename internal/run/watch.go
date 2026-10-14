@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -54,14 +53,18 @@ func (l lease) write(root, id string) error {
 // Watching says whether watcher id of the repository at root lives: its process runs and its heartbeat is fresh.
 func Watching(root, id string) bool {
 	var l lease
+	if id != filepath.Base(id) {
+		return false
+	}
 	b, err := os.ReadFile(leasePath(root, id))
-	// On Windows a read fails for a moment while the watcher renames its new lease over the file: read again.
-	// ponytail: 10 tries 10 ms apart, so a lease really gone costs 100 ms there.
-	for i := 0; err != nil && runtime.GOOS == "windows" && i < 10; i++ {
+	// On Windows a read fails, at times for over 100 ms, while the watcher renames its new lease over the file:
+	// read again.
+	// ponytail: a lease really gone costs 1 s.
+	for until := time.Now().Add(time.Second); err != nil && time.Now().Before(until); {
 		time.Sleep(10 * time.Millisecond)
 		b, err = os.ReadFile(leasePath(root, id))
 	}
-	return err == nil && id == filepath.Base(id) && json.Unmarshal(b, &l) == nil && pidAlive(l.PID) &&
+	return err == nil && json.Unmarshal(b, &l) == nil && pidAlive(l.PID) &&
 		time.Since(l.Heartbeat) < stale
 }
 

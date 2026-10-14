@@ -210,14 +210,20 @@ func TestWatchLiveness(t *testing.T) {
 	}
 }
 
-// A live watcher stays live while it rewrites its lease, as it does every beat.
-func TestWatchingHoldsWhileItsWatcherRewritesItsLease(t *testing.T) {
-	top := atmRepo(t)
+// liveLease is a repository with the fresh lease l of a live watcher, "live".
+func liveLease(t *testing.T) (top string, l lease) {
+	top = atmRepo(t)
 	now := time.Now()
-	l := lease{os.Getpid(), now, now}
+	l = lease{os.Getpid(), now, now}
 	if err := l.write(top, "live"); err != nil {
 		t.Fatal(err)
 	}
+	return top, l
+}
+
+// A live watcher stays live while it rewrites its lease, as it does every beat.
+func TestWatchingHoldsWhileItsWatcherRewritesItsLease(t *testing.T) {
+	top, l := liveLease(t)
 	stop, stopped := make(chan struct{}), make(chan struct{})
 	go func() {
 		defer close(stopped)
@@ -235,6 +241,21 @@ func TestWatchingHoldsWhileItsWatcherRewritesItsLease(t *testing.T) {
 		if !Watching(top, "live") {
 			t.Fatalf("Watching = false at check %d while its watcher rewrites its lease", i)
 		}
+	}
+}
+
+// On Windows a lease being renamed over cannot be read, at times for over 100 ms: its watcher stays live.
+func TestWatchingHoldsWhileItsLeaseCannotBeReadForAMoment(t *testing.T) {
+	top, _ := liveLease(t)
+	if err := os.Rename(leasePath(top, "live"), leasePath(top, "live")+".tmp"); err != nil {
+		t.Fatal(err)
+	}
+	back := time.AfterFunc(200*time.Millisecond, func() {
+		_ = os.Rename(leasePath(top, "live")+".tmp", leasePath(top, "live"))
+	})
+	defer back.Stop()
+	if !Watching(top, "live") {
+		t.Fatal("Watching = false while its lease could not be read for 200 ms")
 	}
 }
 
