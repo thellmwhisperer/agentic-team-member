@@ -1,8 +1,8 @@
 # Configuration
 
-This page is everything you set: the two YAML files, the flags of `atm run`,
-the issue it takes and the commands that go with it. What a run then does
-with them is in [How a run flows](how-a-run-flows.md).
+This page covers the two YAML files, the flags and issue for `atm run`, and
+the JSON plan for `atm axi plan`. What a run does with its configuration is
+in [How a run flows](how-a-run-flows.md).
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/config-layers-dark.svg">
@@ -100,9 +100,10 @@ Run every command from inside the repository it works on.
 | `atm axi plan [--json] [--follow] <plan.json>` | Which tickets of a plan can launch now; see [following a plan](#following-a-plan) |
 
 Leaving a screen with `q` or Ctrl-C, or closing the terminal, leaves the run
-going. `atm axi` is for programs: it prints TOON, or JSON with `--json`. Its
-outcome always carries `outcome`, `run`, `failed_node`, `reason`, `report`
-(empty when the run failed before its first step) and `next_step`. Its tables
+going. `atm axi` is for programs: it prints TOON, or JSON with `--json`;
+`axi plan --follow` always prints JSON lines. The `axi run` outcome carries
+`outcome`, `run`, `failed_node`, `reason`, `report` (empty when the run failed
+before its first step) and `next_step`. The `axi status` and `axi runs` tables
 have `run`, `issue`, `step` and `duration` for `status`, and `run`, `issue`,
 `outcome`, `failed_node`, `duration` and `report` for `runs`.
 

@@ -119,9 +119,12 @@ effort. Both are in [Configuration](docs/configuration.md).
 | `atm attach [run]` | A run's screen; completed screens stay until q or Ctrl+C |
 | `atm runs` | Every retained run, its watcher and its report |
 | `atm axi run`, `atm axi status`, `atm axi runs` | The same for programs, in TOON or JSON |
+| `atm axi plan <plan.json>` | Shows which plan tickets can launch; see [Following a plan](docs/configuration.md#following-a-plan) |
 
 A run goes on in the background: leaving its screen or closing the terminal
 does not stop it.
+
+For `atm run` and `atm axi run`:
 
 | Exit | Meaning |
 |------|---------|
