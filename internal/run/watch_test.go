@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -246,6 +247,9 @@ func TestWatchingHoldsWhileItsWatcherRewritesItsLease(t *testing.T) {
 
 // On Windows a lease being renamed over cannot be read, at times for over 100 ms: its watcher stays live.
 func TestWatchingHoldsWhileItsLeaseCannotBeReadForAMoment(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("lease read retries apply only on Windows")
+	}
 	top, _ := liveLease(t)
 	if err := os.Rename(leasePath(top, "live"), leasePath(top, "live")+".tmp"); err != nil {
 		t.Fatal(err)

@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -57,7 +58,7 @@ func Watching(root, id string) bool {
 	// On Windows a read fails, at times for over 100 ms, while the watcher renames its new lease over the file:
 	// read again.
 	// ponytail: a lease really gone costs 1 s.
-	for until := time.Now().Add(time.Second); err != nil && time.Now().Before(until); {
+	for until := time.Now().Add(time.Second); err != nil && runtime.GOOS == "windows" && time.Now().Before(until); {
 		time.Sleep(10 * time.Millisecond)
 		b, err = os.ReadFile(leasePath(root, id))
 	}
