@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -21,7 +22,10 @@ const nestedKept = `test "$(git -C cache/nested status --porcelain)" = "?? untra
 
 // unmadeCases are a clone as its agent finds it, old, the agent's work, work, and kept, what holds before
 // install: shell lines run in the clone, $EXT a directory outside it.
-var unmadeCases = []struct{ name, old, work, kept string }{
+var unmadeCases = []struct {
+	name, old, work, kept string
+	proof                 bool
+}{
 	{name: "new nested repository", work: "mkdir -p .tmp/go-tmp/T/001 && git -C .tmp/go-tmp/T/001 init -q && " +
 		"echo x > .tmp/go-tmp/T/001/x", kept: "test ! -e .tmp"},
 	{name: "new read-only module cache", work: "d=.tmp/go-mod/m@v1/.github/workflows && mkdir -p $d && " +
@@ -31,6 +35,10 @@ var unmadeCases = []struct{ name, old, work, kept string }{
 		"echo h > cache/nested/helper && mkdir cache/nested/sub && echo d > cache/nested/sub/d && " +
 		"chmod 555 cache/nested && echo d > cache/debris",
 		kept: nestedKept + " && test ! -e cache/nested/helper && test ! -e cache/nested/sub"},
+	{name: "proof cannot use new inner helper", old: nested, work: "chmod 755 cache/nested && " +
+		"echo h > cache/nested/helper && chmod 555 cache/nested && echo d > cache/debris && " +
+		"echo fixed > a.txt && echo 'test -e cache/nested/helper && grep -q fixed a.txt' > a_test.sh",
+		kept: nestedKept + " && test ! -e cache/nested/helper", proof: true},
 	{name: "old read-only directory", old: "mkdir -p cache/ro && echo old > cache/ro/old.txt && chmod 555 cache/ro",
 		work: "chmod 755 cache/ro && echo d > cache/ro/debris && chmod 555 cache/ro",
 		kept: "is cache/ro/old.txt old && ro cache/ro && test ! -e cache/ro/debris"},
@@ -47,13 +55,16 @@ var unmadeCases = []struct{ name, old, work, kept string }{
 func TestUnmadeKeepsWhatWasAndRemovesWhatIsNew(t *testing.T) {
 	for _, c := range unmadeCases {
 		t.Run(c.name, func(t *testing.T) {
-			dir, ext, err := unmadeChecks(t, c.old, c.work)
-			if err != nil {
+			dir, green, err := unmadeChecks(t, c.old, c.work, c.kept, c.proof)
+			if c.proof {
+				if err == nil || !strings.Contains(err.Error(), "fails with the fix") || green.Command == "" || green.Exit == 0 {
+					t.Fatalf("proof using removed helper must fail after running: green=%+v, err=%v", green, err)
+				}
+			} else if err != nil {
 				t.Fatalf("checks: %v", err)
 			}
 			if _, err := sh(dir, "is() { printf '%s\\n' \"$2\" | cmp - \"$1\"; }; "+
-				`ro() { test -n "$(find "$1" -prune -perm 555)"; }; set -x; test -e installed && `+c.kept,
-				"EXT="+ext); err != nil {
+				`ro() { test -n "$(find "$1" -prune -perm 555)"; }; set -x; test -e installed && `+c.kept); err != nil {
 				t.Fatal(err)
 			}
 		})
@@ -64,7 +75,7 @@ func TestUnmadeFailureBlocksInstallAndProof(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		t.Skip("an immutable file needs chflags, which only macOS gives a user")
 	}
-	dir, _, err := unmadeChecks(t, "", "mkdir cache && echo x > cache/stuck && chflags uchg cache/stuck")
+	dir, _, err := unmadeChecks(t, "", "mkdir cache && echo x > cache/stuck && chflags uchg cache/stuck", "", false)
 	t.Cleanup(func() { _ = exec.Command("chflags", "nouchg", filepath.Join(dir, "cache", "stuck")).Run() })
 	if !errors.Is(err, fs.ErrPermission) {
 		t.Fatalf("want the real permission error, got %v", err)
@@ -74,15 +85,16 @@ func TestUnmadeFailureBlocksInstallAndProof(t *testing.T) {
 	}
 }
 
-// unmadeChecks is the error of checks, whose install touches installed, on a clone where old ran, before
-// recorded it, then work ran as its agent: shell lines, $EXT, ext, a directory outside the clone.
-func unmadeChecks(t *testing.T, old, work string) (dir, ext string, err error) {
+// unmadeChecks is the error of checks, whose install checks kept and touches installed, on a clone where old ran, before
+// recorded it, then work ran as its agent: shell lines, $EXT, a directory outside the clone.
+func unmadeChecks(t *testing.T, old, work, kept string, proof bool) (dir string, green try, err error) {
 	t.Helper()
-	root := repo(t, "https://example.com/owner/repo.git", atmSet(atmYAML, "install", "touch installed"))
+	root := repo(t, "https://example.com/owner/repo.git", atmYAML)
 	commitBase(t, root, ".gitignore", "cache/\n.tmp/\ndebris\n")
 	runDir := checksStashRunDir(t, root)
 	dir, sha := checksStashClone(t, root)
-	ext = t.TempDir()
+	ext := t.TempDir()
+	t.Setenv("EXT", ext)
 	t.Cleanup(func() {
 		_ = exec.Command("chmod", "-R", "u+w", root, ext).Run()
 		if err := release(dir, ""); err != nil {
@@ -90,7 +102,7 @@ func unmadeChecks(t *testing.T, old, work string) (dir, ext string, err error) {
 		}
 	})
 	run := func(line string) {
-		if _, err := sh(dir, line, "EXT="+ext); line != "" && err != nil {
+		if _, err := sh(dir, line); line != "" && err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -99,6 +111,17 @@ func unmadeChecks(t *testing.T, old, work string) (dir, ext string, err error) {
 		t.Fatal(err)
 	}
 	run(work)
-	_, err = checks(dir, runDir, sha, "chore", "", checksStashConfig(t, root))
-	return dir, ext, err
+	c := checksStashConfig(t, root)
+	if kept == "" {
+		kept = "true"
+	}
+	c.Install = "is() { printf '%s\\n' \"$2\" | cmp - \"$1\"; }; " +
+		`ro() { test -n "$(find "$1" -prune -perm 555)"; }; ` + kept + " && touch installed"
+	typ, test := "chore", ""
+	if proof {
+		typ, test = "fix", "a_test.sh"
+	}
+	result, err := checks(dir, runDir, sha, typ, test, c)
+	green, _ = result["green"].(try)
+	return dir, green, err
 }

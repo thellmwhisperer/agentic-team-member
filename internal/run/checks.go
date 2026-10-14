@@ -114,24 +114,33 @@ func before(clone string) error {
 	if _, err := whole(clone); err != nil {
 		return err
 	}
+	root, err := os.OpenRoot(clone)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
 	var was []string
-	err := filepath.WalkDir(clone, func(p string, d fs.DirEntry, err error) error {
-		rel, _ := filepath.Rel(clone, p)
-		if err == nil && rel == ".git" {
-			return filepath.SkipDir
+	err = fs.WalkDir(root.FS(), ".", func(p string, d fs.DirEntry, err error) error {
+		if err == nil && p == ".git" {
+			return fs.SkipDir
 		}
-		was = append(was, filepath.ToSlash(rel))
+		was = append(was, p)
 		return err
 	})
 	if err == nil {
-		err = os.WriteFile(filepath.Join(clone, ".git", "atm-before"), []byte(strings.Join(was, "\x00")), 0o600)
+		err = root.WriteFile(".git/atm-before", []byte(strings.Join(was, "\x00")), 0o600)
 	}
 	return err
 }
 
 // unmade removes from clone every file git ignores that before did not record, except follow-up tests the run keeps.
 func unmade(clone string) error {
-	was, err := os.ReadFile(filepath.Join(clone, ".git", "atm-before"))
+	root, err := os.OpenRoot(clone)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	was, err := root.ReadFile(".git/atm-before")
 	if err != nil {
 		return err
 	}
@@ -142,7 +151,7 @@ func unmade(clone string) error {
 	now, err := git(clone, "ls-files", "-z", "--others", "--ignored", "--exclude-standard")
 	for _, p := range strings.Split(now, "\x00") {
 		if err == nil && p != "" {
-			err = prune(clone, strings.TrimSuffix(p, "/"), had) // a nested repository is listed as dir/
+			err = prune(root, strings.TrimSuffix(p, "/"), had) // a nested repository is listed as dir/
 		}
 	}
 	return err
@@ -150,19 +159,18 @@ func unmade(clone string) error {
 
 // prune removes p from clone when before did not record it, or else what it holds that before did not record. It
 // never follows a link.
-func prune(clone, p string, had map[string]bool) error {
+func prune(root *os.Root, p string, had map[string]bool) error {
 	if !had[p] {
-		return drop(clone, p, had)
+		return drop(root, p, had)
 	}
-	abs := filepath.Join(clone, filepath.FromSlash(p))
-	info, err := os.Lstat(abs)
+	info, err := root.Lstat(p)
 	if err != nil || !info.IsDir() {
 		return err
 	}
-	entries, err := os.ReadDir(abs)
+	entries, err := fs.ReadDir(root.FS(), p)
 	for _, e := range entries {
 		if err == nil {
-			err = prune(clone, p+"/"+e.Name(), had)
+			err = prune(root, p+"/"+e.Name(), had)
 		}
 	}
 	return err
@@ -170,25 +178,33 @@ func prune(clone, p string, had map[string]bool) error {
 
 // drop removes p from clone, a link as a link, a directory with all it holds, read-only or not, then each
 // directory above it that before did not record and that it leaves empty.
-func drop(clone, p string, had map[string]bool) error {
-	abs := filepath.Join(clone, filepath.FromSlash(p))
-	err := filepath.WalkDir(abs, func(q string, d fs.DirEntry, err error) error {
-		if err == nil && d.IsDir() {
-			err = os.Chmod(q, 0o700) // it goes, so what it holds can go
-		}
+func drop(root *os.Root, p string, had map[string]bool) error {
+	info, err := root.Lstat(p)
+	if err != nil {
 		return err
-	})
+	}
+	if info.IsDir() {
+		err = fs.WalkDir(root.FS(), p, func(q string, d fs.DirEntry, err error) error {
+			if err != nil || !d.IsDir() {
+				return err
+			}
+			f, err := root.Open(q)
+			if err != nil {
+				return err
+			}
+			return errors.Join(f.Chmod(0o700), f.Close())
+		})
+	}
 	if err == nil {
-		err = unlink(abs, os.RemoveAll)
+		err = unlink(root, p, root.RemoveAll)
 	}
 	if err != nil {
 		return err
 	}
 	for p = path.Dir(p); p != "." && !had[p]; p = path.Dir(p) {
-		abs = filepath.Join(clone, filepath.FromSlash(p))
-		left, err := os.ReadDir(abs)
+		left, err := fs.ReadDir(root.FS(), p)
 		if err == nil && len(left) == 0 {
-			err = unlink(abs, os.Remove)
+			err = unlink(root, p, root.Remove)
 		}
 		if err != nil || len(left) > 0 {
 			return err
@@ -197,21 +213,26 @@ func drop(clone, p string, had map[string]bool) error {
 	return nil
 }
 
-// unlink is rm of abs, with abs's directory, when rm needs it, writable for it and then as it was.
-func unlink(abs string, rm func(string) error) error {
-	err := rm(abs)
+// unlink is rm of p, with p's directory, when rm needs it, writable for it and then as it was.
+func unlink(root *os.Root, p string, rm func(string) error) error {
+	err := rm(p)
 	if !errors.Is(err, fs.ErrPermission) {
 		return err
 	}
-	dir := filepath.Dir(abs)
-	info, statErr := os.Lstat(dir)
+	dir := path.Dir(p)
+	f, openErr := root.Open(dir)
+	if openErr != nil {
+		return errors.Join(err, openErr)
+	}
+	defer f.Close()
+	info, statErr := f.Stat()
 	if statErr == nil {
-		statErr = os.Chmod(dir, info.Mode()|0o700)
+		statErr = f.Chmod(info.Mode() | 0o700)
 	}
 	if statErr != nil {
 		return errors.Join(err, statErr)
 	}
-	return errors.Join(rm(abs), os.Chmod(dir, info.Mode()))
+	return errors.Join(rm(p), f.Chmod(info.Mode()))
 }
 
 // moved is an error when HEAD in clone is not want: who made commits.
