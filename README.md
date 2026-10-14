@@ -6,7 +6,7 @@
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
 Give ATM an issue, from GitHub or a text file. It hands the issue to a coding
-agent you already pay for (Claude Code, Codex, OpenCode, pi or Cursor) inside an
+agent you already pay for (see [supported agents](docs/configuration.md#configatmconfigyaml)) inside an
 isolated clone, with a written contract. Then code, not the agent, decides:
 does the new test fail without the fix and pass with it, do the configured
 checks still pass, and does the task type's proof hold. A green run reaches
@@ -82,7 +82,7 @@ Step by step: [How a run flows](docs/how-a-run-flows.md).
 curl -fsSL https://raw.githubusercontent.com/thellmwhisperer/agentic-team-member/main/install.sh | sh
 ```
 
-You also need one coding agent CLI (`claude`, `codex`, `opencode`, `pi` or `cursor-agent`),
+You also need one of the [supported coding agent CLIs](docs/configuration.md#configatmconfigyaml),
 and `gh` for GitHub issues.
 
 ## Run it
