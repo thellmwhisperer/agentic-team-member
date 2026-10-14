@@ -1,0 +1,18 @@
+schema: 1
+id: T-PONYTAIL-20261014-153459-1
+status: accepted
+category: alien_code
+title: "Deleted the `if u.ToolCallID == \"\" { return nil }` guard at the top of acpUpdate.calls(). An update that is not a tool call has no rawInput, locations or commands, so the reach check finds nothing in it either way."
+created_at: 2026-10-14
+incident:
+  pattern: "Deleted the `if u.ToolCallID == \"\" { return nil }` guard at the top of acpUpdate.calls(). An update that is not a tool call has no rawInput, locations or commands, so the reach check finds nothing in it either way."
+  what_went_wrong: "An ATM run wrote it and ATM's ponytail pass cut it before delivery."
+  root_cause: "The coding agent wrote more than the issue needed."
+  rule_established: "Cut by the ponytail pass; it does not come back."
+  evidence:
+    - family: speculative_hardening
+      example: "Deleted the `if u.ToolCallID == \"\" { return nil }` guard at the top of acpUpdate.calls(). An update that is not a tool call has no rawInput, locations or commands, so the reach check finds nothing in it either way."
+      artifact: "internal/run/acp.go"
+match:
+  family: speculative_hardening
+  artifact: "internal/run/acp.go"
