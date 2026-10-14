@@ -27,9 +27,6 @@ const (
 	labels  = "review-required\nreview-completed"
 )
 
-// sha is the fake sha of the PR's i-th commit, counting from 0.
-func sha(i int) string { return fmt.Sprintf("%040x", i) }
-
 // fakes holds this test binary copied as gh.
 var fakes string
 
@@ -89,6 +86,13 @@ func fakeGH(args []string) int {
 	}
 	commits := strings.Split(strings.TrimSuffix(os.Getenv("FAKE_GH_COMMITS"), "\n"), "\n")
 	if len(args) > 0 && args[0] == "api" {
+		if len(args) > 1 && strings.HasSuffix(args[1], "/timeline") {
+			if os.Getenv("FAKE_GH_TIMELINE_FAIL") != "" {
+				return 1
+			}
+			fmt.Println(os.Getenv("FAKE_GH_TIMELINE"))
+			return 0
+		}
 		if len(args) > 1 && !strings.HasSuffix(args[1], "/commits") {
 			fmt.Println(os.Getenv("FAKE_GH_TOTAL"))
 			return 0
@@ -136,10 +140,11 @@ func cleared(head string) comment {
 // pr is a pull request as GitHub reports it: head is what pr view reads, live the head when pr merge runs,
 // armed whether auto-merge is on.
 type pr struct {
-	head, live, body, labels, lateLabels string
-	subjects                 []string
-	comments                 []comment
-	fail, armed              bool
+	head, live, body, labels, lateLabels, timeline string
+	subjects                                       []string
+	commitTimes                                    []string
+	comments                                       []comment
+	fail, armed, timelineFail                      bool
 }
 
 // view lists the PR's comments, which no label decision may read.
@@ -170,7 +175,11 @@ func (p pr) run(t *testing.T, command string) result {
 	t.Setenv("FAKE_GH_ARMED", fmt.Sprint(p.armed))
 	commits := make([]string, 0, len(p.subjects))
 	for i, subject := range p.subjects {
-		commits = append(commits, "commit "+subject+" "+sha(i))
+		when := "100"
+		if i < len(p.commitTimes) {
+			when = p.commitTimes[i]
+		}
+		commits = append(commits, "commit "+subject+" "+when)
 	}
 	t.Setenv("FAKE_GH_COMMITS", strings.Join(commits, "\n"))
 	t.Setenv("FAKE_GH_TOTAL", fmt.Sprint(len(p.subjects)))
@@ -179,6 +188,8 @@ func (p pr) run(t *testing.T, command string) result {
 	t.Setenv("FAKE_GH_LABELS", p.labels)
 	t.Setenv("FAKE_GH_LATE_LABELS", p.lateLabels)
 	t.Setenv("FAKE_GH_FAIL", map[bool]string{true: "1"}[p.fail])
+	t.Setenv("FAKE_GH_TIMELINE", cmp.Or(p.timeline, "200"))
+	t.Setenv("FAKE_GH_TIMELINE_FAIL", map[bool]string{true: "1"}[p.timelineFail])
 	cmd := exec.Command("sh", "-c", command)
 	cmd.Dir = ".."
 	var stderr bytes.Buffer
@@ -203,8 +214,8 @@ func TestReviewDetectsEachNoMistakesCategory(t *testing.T) {
 	for _, category := range []string{"review", "ci", "lint", "document", "test"} {
 		t.Run(category, func(t *testing.T) {
 			r := pr{head: newHead, subjects: nm(category)}.run(t, review)
-			if r.err != nil || r.out != newHead+" nm\n" {
-				t.Fatalf("review = %q, %v; want %q", r.out, r.err, newHead+" nm\n")
+			if r.err != nil || r.out != newHead+" nm 100\n" {
+				t.Fatalf("review = %q, %v; want %q", r.out, r.err, newHead+" nm 100\n")
 			}
 		})
 	}
@@ -217,7 +228,7 @@ func TestReviewDetectsNoMistakesCommitAfterFirstHundred(t *testing.T) {
 	}
 	subjects[100] = "no-mistakes(ci): added by the gate"
 	r := pr{head: newHead, subjects: subjects}.run(t, review)
-	if r.err != nil || r.out != newHead+" nm\n" || !strings.Contains(r.calls, "--paginate") {
+	if r.err != nil || r.out != newHead+" nm 100\n" || !strings.Contains(r.calls, "--paginate") {
 		t.Fatalf("review = %q, %v; calls = %q; want detected after all commits", r.out, r.err, r.calls)
 	}
 }
@@ -234,25 +245,14 @@ func TestReviewFailsClosedBeyondGitHubCommitLimit(t *testing.T) {
 	}
 }
 
-func TestReviewMarksNoMistakesCommitsPushedAfterThePreviousHead(t *testing.T) {
-	for _, tc := range []struct {
-		name, before string
-		subjects     []string
-		want         string
-	}{
-		{"pushed after", sha(1), nm("review"), "new"},
-		{"previous head gone, a force push", oldHead, nm("review"), "new"},
-		{"already there", sha(2), nm("review"), "nm"},
-		{"only an ordinary commit since", sha(2), append(nm("review"), "fix: by hand"), "nm"},
-		{"not a push", "", nm("review"), "nm"},
-		{"no no-mistakes commit", sha(0), []string{"feat: x", "fix: y"}, "none"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			r := pr{head: newHead, subjects: tc.subjects}.run(t, review+" '"+tc.before+"'")
-			if r.err != nil || r.out != newHead+" "+tc.want+"\n" {
-				t.Fatalf("review = %q, %v; want %q", r.out, r.err, newHead+" "+tc.want+"\n")
-			}
-		})
+func TestReviewReportsLatestNoMistakesCommitTime(t *testing.T) {
+	p := pr{
+		head: newHead, subjects: append(nm("ci"), "no-mistakes(lint): again", "fix: ordinary"),
+		commitTimes: []string{"1791979200", "1791979200", "1791981000", "1791986400", "1791990000"},
+	}
+	r := p.run(t, review)
+	if r.err != nil || r.out != newHead+" nm 1791986400\n" {
+		t.Fatalf("review = %q, %v; want latest no-mistakes time 1791986400", r.out, r.err)
 	}
 }
 
@@ -389,11 +389,10 @@ func load(t *testing.T, name string) workflow {
 
 var expression = regexp.MustCompile(`\$\{\{\s*(.+?)\s*\}\}`)
 
-// expand fills a step's expressions the way Actions does for a pull_request event on PR 7; before is the
-// previous head on synchronize and empty on every other action.
-func expand(t *testing.T, run, before string) string {
+// expand fills a step's expressions the way Actions does for a pull_request event on PR 7.
+func expand(t *testing.T, run string) string {
 	t.Helper()
-	event := map[string]string{"github.event.pull_request.number": "7", "github.event.before": before}
+	event := map[string]string{"github.event.pull_request.number": "7"}
 	return expression.ReplaceAllStringFunc(run, func(m string) string {
 		v, ok := event[expression.FindStringSubmatch(m)[1]]
 		if !ok {
@@ -404,14 +403,14 @@ func expand(t *testing.T, run, before string) string {
 }
 
 // armStep is the auto-merge.yml step as it runs on the pull_request action.
-func armStep(t *testing.T, action, before string) string {
+func armStep(t *testing.T, action string) string {
 	t.Helper()
 	w := load(t, "auto-merge.yml")
 	if !slices.Contains(w.On.PullRequest.Types, action) {
 		t.Fatalf("auto-merge.yml types = %v; want %s", w.On.PullRequest.Types, action)
 	}
 	steps := w.Jobs["arm"].Steps
-	return expand(t, steps[len(steps)-1].Run, before)
+	return expand(t, steps[len(steps)-1].Run)
 }
 
 func TestGoChecksRunNoNoMistakesReview(t *testing.T) {
@@ -429,7 +428,7 @@ func TestGoChecksRunNoNoMistakesReview(t *testing.T) {
 }
 
 func TestAutoMergeArmsWhenReviewCompletedIsAdded(t *testing.T) {
-	r := pr{head: newHead, subjects: nm("ci"), labels: labels}.run(t, armStep(t, "labeled", ""))
+	r := pr{head: newHead, subjects: nm("ci"), labels: labels}.run(t, armStep(t, "labeled"))
 	if r.err != nil || !strings.Contains(r.calls, merge+" --match-head-commit "+newHead) {
 		t.Fatalf("auto-merge calls = %q, %v; want %s armed", r.calls, r.err, newHead)
 	}
@@ -443,7 +442,7 @@ func TestAutoMergeSerializesRunsPerPR(t *testing.T) {
 }
 
 func TestAutoMergeLabelsAPRThatGetsANoMistakesCommit(t *testing.T) {
-	r := pr{head: newHead, subjects: nm("review"), armed: true}.run(t, armStep(t, "synchronize", sha(1)))
+	r := pr{head: newHead, subjects: nm("review"), armed: true}.run(t, armStep(t, "synchronize"))
 	if r.err != nil || !strings.Contains(r.calls, "--add-label review-required") ||
 		!strings.Contains(r.calls, disarm) || strings.Contains(r.calls, merge) {
 		t.Fatalf("auto-merge calls = %q, %v; want review-required, auto-merge disabled and no arm", r.calls, r.err)
@@ -451,14 +450,45 @@ func TestAutoMergeLabelsAPRThatGetsANoMistakesCommit(t *testing.T) {
 }
 
 func TestAutoMergeTakesReviewCompletedOffANewNoMistakesCommit(t *testing.T) {
-	p := pr{head: newHead, subjects: append(nm("ci"), "no-mistakes(lint): again"), labels: labels, armed: true}
-	r := p.run(t, armStep(t, "synchronize", sha(2)))
-	if r.err != nil || !strings.Contains(r.calls, "pr edit 7 --repo owner/repo --remove-label review-completed") ||
-		!strings.Contains(r.calls, disarm) || strings.Contains(r.calls, merge) {
-		t.Fatalf("auto-merge calls = %q, %v; want review-completed removed and no arm", r.calls, r.err)
+	for _, action := range []string{"synchronize", "labeled"} {
+		p := pr{
+			head: newHead, subjects: append(nm("ci"), "no-mistakes(lint): again", "fix: ordinary"),
+			commitTimes: []string{"100", "100", "100", "300", "400"},
+			labels:      labels, timeline: "200", armed: true,
+		}
+		r := p.run(t, armStep(t, action))
+		if r.err != nil || !strings.Contains(r.calls, "issues/7/timeline --paginate") ||
+			!strings.Contains(r.calls, "pr edit 7 --repo owner/repo --remove-label review-completed") ||
+			!strings.Contains(r.calls, disarm) || strings.Contains(r.calls, merge) {
+			t.Fatalf("%s calls = %q, %v; want review-completed removed and no arm", action, r.calls, r.err)
+		}
 	}
-	if r := p.run(t, armStep(t, "synchronize", sha(3))); r.err != nil || !strings.Contains(r.calls, merge) {
-		t.Fatalf("push without a new no-mistakes commit: calls = %q, %v; want armed", r.calls, r.err)
+}
+
+func TestAutoMergeHoldsWhenTimelineCannotBeRead(t *testing.T) {
+	for _, p := range []pr{
+		{head: newHead, subjects: nm("ci"), labels: labels, timeline: "unknown", armed: true},
+		{head: newHead, subjects: nm("ci"), labels: labels, timelineFail: true, armed: true},
+		{head: newHead, subjects: nm("ci"), commitTimes: []string{"100", "100", "unknown"}, labels: labels, armed: true},
+	} {
+		r := p.run(t, armStep(t, "labeled"))
+		if r.err != nil || !strings.Contains(r.calls, "--remove-label review-completed") ||
+			!strings.Contains(r.calls, disarm) || strings.Contains(r.calls, merge) {
+			t.Fatalf("timeline calls = %q, %v; want review-completed removed and no arm", r.calls, r.err)
+		}
+	}
+}
+
+func TestAutoMergeUsesLatestReviewCompletedTime(t *testing.T) {
+	p := pr{
+		head: newHead, subjects: nm("ci"),
+		commitTimes: []string{"1791979200", "1791979200", "1791981000"},
+		labels:      labels, timeline: "1791979200\n1791982800",
+	}
+	r := p.run(t, armStep(t, "labeled"))
+	if r.err != nil || !strings.Contains(r.calls, merge+" --match-head-commit "+newHead) ||
+		strings.Contains(r.calls, "--remove-label review-completed") {
+		t.Fatalf("calls = %q, %v; want approved head armed using latest label time", r.calls, r.err)
 	}
 }
 
@@ -467,7 +497,7 @@ func TestAutoMergeFailsClosedBeyondGitHubCommitLimit(t *testing.T) {
 	for i := range subjects {
 		subjects[i] = "feat: ordinary commit"
 	}
-	r := pr{head: newHead, subjects: subjects, labels: "review-completed"}.run(t, armStep(t, "labeled", ""))
+	r := pr{head: newHead, subjects: subjects, labels: "review-completed"}.run(t, armStep(t, "labeled"))
 	if r.err != nil || !strings.Contains(r.calls, "--add-label review-required") || strings.Contains(r.calls, merge) {
 		t.Fatalf("auto-merge calls = %q, %v; want review-required and no arm", r.calls, r.err)
 	}
