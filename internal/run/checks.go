@@ -11,6 +11,7 @@ import (
 	"go/scanner"
 	"go/token"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path"
@@ -107,32 +108,110 @@ func hideATM(clone, runDir string) (func() error, error) {
 	}, nil
 }
 
-// before records every file in clone, ignored or not, as the agent finds it, for unmade.
+// before records every file in clone, ignored or not, as the agent finds it, for reset, and the path of every
+// file and directory in it, those of a repository nested in it too, which git sees as one, for unmade.
 func before(clone string) error {
-	tree, err := whole(clone)
+	if _, err := whole(clone); err != nil {
+		return err
+	}
+	var was []string
+	err := filepath.WalkDir(clone, func(p string, d fs.DirEntry, err error) error {
+		rel, _ := filepath.Rel(clone, p)
+		if err == nil && rel == ".git" {
+			return filepath.SkipDir
+		}
+		was = append(was, filepath.ToSlash(rel))
+		return err
+	})
 	if err == nil {
-		_, err = every(clone, "update-ref", "refs/atm/before", tree)
+		err = os.WriteFile(filepath.Join(clone, ".git", "atm-before"), []byte(strings.Join(was, "\x00")), 0o600)
 	}
 	return err
 }
 
 // unmade removes from clone every file git ignores that before did not record, except follow-up tests the run keeps.
 func unmade(clone string) error {
-	was, err := every(clone, "ls-tree", "-r", "--name-only", "-z", "refs/atm/before")
+	was, err := os.ReadFile(filepath.Join(clone, ".git", "atm-before"))
 	if err != nil {
 		return err
 	}
 	had := map[string]bool{}
-	for _, p := range strings.Split(was, "\x00") {
+	for _, p := range strings.Split(string(was), "\x00") {
 		had[p] = true
 	}
 	now, err := git(clone, "ls-files", "-z", "--others", "--ignored", "--exclude-standard")
 	for _, p := range strings.Split(now, "\x00") {
-		if err == nil && p != "" && !had[p] {
-			err = os.Remove(filepath.Join(clone, filepath.FromSlash(p)))
+		if err == nil && p != "" {
+			err = prune(clone, strings.TrimSuffix(p, "/"), had) // a nested repository is listed as dir/
 		}
 	}
 	return err
+}
+
+// prune removes p from clone when before did not record it, or else what it holds that before did not record. It
+// never follows a link.
+func prune(clone, p string, had map[string]bool) error {
+	if !had[p] {
+		return drop(clone, p, had)
+	}
+	abs := filepath.Join(clone, filepath.FromSlash(p))
+	info, err := os.Lstat(abs)
+	if err != nil || !info.IsDir() {
+		return err
+	}
+	entries, err := os.ReadDir(abs)
+	for _, e := range entries {
+		if err == nil {
+			err = prune(clone, p+"/"+e.Name(), had)
+		}
+	}
+	return err
+}
+
+// drop removes p from clone, a link as a link, a directory with all it holds, read-only or not, then each
+// directory above it that before did not record and that it leaves empty.
+func drop(clone, p string, had map[string]bool) error {
+	abs := filepath.Join(clone, filepath.FromSlash(p))
+	err := filepath.WalkDir(abs, func(q string, d fs.DirEntry, err error) error {
+		if err == nil && d.IsDir() {
+			err = os.Chmod(q, 0o700) // it goes, so what it holds can go
+		}
+		return err
+	})
+	if err == nil {
+		err = unlink(abs, os.RemoveAll)
+	}
+	if err != nil {
+		return err
+	}
+	for p = path.Dir(p); p != "." && !had[p]; p = path.Dir(p) {
+		abs = filepath.Join(clone, filepath.FromSlash(p))
+		left, err := os.ReadDir(abs)
+		if err == nil && len(left) == 0 {
+			err = unlink(abs, os.Remove)
+		}
+		if err != nil || len(left) > 0 {
+			return err
+		}
+	}
+	return nil
+}
+
+// unlink is rm of abs, with abs's directory, when rm needs it, writable for it and then as it was.
+func unlink(abs string, rm func(string) error) error {
+	err := rm(abs)
+	if !errors.Is(err, fs.ErrPermission) {
+		return err
+	}
+	dir := filepath.Dir(abs)
+	info, statErr := os.Lstat(dir)
+	if statErr == nil {
+		statErr = os.Chmod(dir, info.Mode()|0o700)
+	}
+	if statErr != nil {
+		return errors.Join(err, statErr)
+	}
+	return errors.Join(rm(abs), os.Chmod(dir, info.Mode()))
 }
 
 // moved is an error when HEAD in clone is not want: who made commits.
