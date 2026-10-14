@@ -133,7 +133,7 @@ func before(clone string) error {
 	return err
 }
 
-// unmade removes from clone every file git ignores that before did not record, except follow-up tests the run keeps.
+// unmade removes agent-created ignored content using before's paths, except follow-up tests the run keeps.
 func unmade(clone string) error {
 	root, err := os.OpenRoot(clone)
 	if err != nil {

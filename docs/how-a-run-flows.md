@@ -59,7 +59,7 @@ A failed step stops the run; the steps after it are not run.
 | Clone | Resolves `--base-ref` to a commit, clones the repository there into `.atm/clones/`, runs `install` | The ref, the clone or `install` fails |
 | Contract | Writes `brief.md`, the agent's contract | The brief cannot be written |
 | Agent | Runs the coding agent in the clone on the brief | It exits non-zero, times out, says nothing for 10 min, reaches outside its clone, does not load the `ponytail` skill, or leaves no readable report |
-| Checks | Removes the ignored files the agent made, runs `install`, proves the task type, then runs `test`, `typecheck` and `lint` | A proof or a command fails, or anything committed |
+| Checks | Removes new ignored paths, then runs `install`, proof, `test`, `typecheck` and `lint`; see [Checks](#checks) | Cleanup, proof or a command fails, or anything committed |
 | Slop detector | Lets a model cut the diff; keeps the cut only if every check still passes | Its agent fails, reports badly, or anything commits |
 | Delivery | Commits the work on a branch and runs the `delivery` command | The branch or the command fails. Skipped when `delivery` is empty |
 
@@ -117,10 +117,14 @@ result text even if the process exits zero.
 
 ## Checks
 
-The agent must not have committed. ATM records every file in the clone before
-the agent starts; the checks first remove each file git ignores that the agent
-made, as delivery leaves it out, so a test that needs one fails. Ignored files
-already there remain. ATM moves `.atm/` out of the clone while Checks runs,
+The agent must not have committed. ATM records the clone's paths before the
+agent starts, including contents of ignored nested repositories. Before
+`install` or proof, Checks removes newly made ignored files and directories,
+including read-only cache trees and new contents within retained directories.
+Pre-existing contents and directory modes remain; symlinks are removed as
+links, without changing their targets. A cleanup error stops Checks before
+`install` or proof. Delivery leaves the removed paths out, so a test that
+needs one fails. ATM moves `.atm/` out of the clone while Checks runs,
 including `install`, the proof and the other commands, then restores it even
 if a check fails. This keeps follow-up tests and other `.atm/` artefacts for
 ATM to process after Checks without exposing them to a check command. Checks
