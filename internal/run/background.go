@@ -182,18 +182,39 @@ func serve(l *net.UnixListener, root, sock string, moved func() bool) error {
 		return err
 	}
 	s := &server{root: root, runs: runs, last: time.Now()}
+	// Accept has no deadline: on Windows one that expires cancels the pending accept, which can lose the connection
+	// arriving then, still open on its client's side, whose read waits forever.
+	conns, failed := make(chan net.Conn), make(chan error, 1)
+	go func() {
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				failed <- err
+				return
+			}
+			conns <- c
+		}
+	}()
 	for {
-		_ = l.SetDeadline(time.Now().Add(tick))
-		c, err := l.Accept()
-		if err != nil && !errors.Is(err, os.ErrDeadlineExceeded) {
+		var c net.Conn
+		select {
+		case c = <-conns:
+		case err := <-failed:
 			return err
+		case <-time.After(tick):
 		}
 		if s.shouldExit(c, sock, moved) {
 			_ = l.Close()
-			if c != nil { // close its unanswered request after the socket, so its client starts the next one
-				_ = c.Close()
+			for { // close each unanswered request after the socket, so its client starts the next one
+				if c != nil {
+					_ = c.Close()
+				}
+				select {
+				case c = <-conns:
+				case <-failed:
+					return nil
+				}
 			}
-			return nil
 		}
 		if c != nil {
 			go s.handleConnection(c)
