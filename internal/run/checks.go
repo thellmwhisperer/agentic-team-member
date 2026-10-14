@@ -108,10 +108,15 @@ func hideATM(clone, runDir string) (func() error, error) {
 	}, nil
 }
 
-// before records every file in clone, ignored or not, as the agent finds it, for reset, and the path of every
-// file and directory in it, those of a repository nested in it too, which git sees as one, for unmade.
+// before records every file in clone, ignored or not, as the agent finds it, for reset and, as refs/atm-before,
+// for unmade, and the path of every file and directory in it, those of a repository nested in it too, which git
+// sees as one, for unmade.
 func before(clone string) error {
-	if _, err := whole(clone); err != nil {
+	tree, err := whole(clone)
+	if err == nil {
+		_, err = every(clone, "update-ref", "refs/atm-before", tree)
+	}
+	if err != nil {
 		return err
 	}
 	root, err := os.OpenRoot(clone)
@@ -133,8 +138,36 @@ func before(clone string) error {
 	return err
 }
 
-// unmade removes agent-created ignored content using before's paths, except follow-up tests the run keeps.
+// unmade removes agent-created ignored content using before's paths, except follow-up tests the run keeps, then
+// puts back, byte for byte, each ignored file before recorded that the agent changed or deleted: a package
+// manager's own state, which would tell install the agent's dependencies are there.
 func unmade(clone string) error {
+	if err := prunes(clone); err != nil {
+		return err
+	}
+	now, err := whole(clone)
+	if err != nil {
+		return err
+	}
+	changed, err := every(clone, "diff", "--name-only", "--no-renames", "-z", "--diff-filter=DMT",
+		"refs/atm-before", now, "--", ".", ":(exclude).atm") // hideATM's
+	if err != nil || changed == "" {
+		return err
+	}
+	ignored, err := commandIn(strings.NewReader(changed), clone, clone, "git", "check-ignore", "-z", "--stdin")
+	if exit := (*exec.ExitError)(nil); errors.As(err, &exit) && exit.ExitCode() == 1 {
+		return nil // none is ignored
+	}
+	if err == nil {
+		_, err = commandIn(strings.NewReader(ignored), clone, clone, "git", "--literal-pathspecs",
+			"--git-dir=.git/atm-files", "--work-tree=.", "checkout", "refs/atm-before",
+			"--pathspec-from-file=-", "--pathspec-file-nul")
+	}
+	return err
+}
+
+// prunes removes agent-created ignored content using before's paths, except follow-up tests the run keeps.
+func prunes(clone string) error {
 	root, err := os.OpenRoot(clone)
 	if err != nil {
 		return err
