@@ -1,0 +1,18 @@
+schema: 1
+id: T-PONYTAIL-20261014-272-6
+status: accepted
+category: alien_code
+title: Remove the doctor greeting policy added outside issue 272
+created_at: 2026-10-14
+incident:
+  pattern: A Cursor Agent-step change also changed doctor greeting acceptance.
+  what_went_wrong: No-mistakes added hello error propagation and a new test outside issue 272.
+  root_cause: The fixer extended an Agent criterion to an independent doctor workflow.
+  rule_established: Keep doctor greeting policy out of issue 272; proposal tracked separately in issue 345.
+  evidence:
+    - family: speculative_feature
+      example: Removed the three hello.go changes and the new NM-only hello_test.go; worker tests preserved.
+      artifact: internal/run/hello.go
+match:
+  family: speculative_feature
+  artifact: internal/run/hello.go
