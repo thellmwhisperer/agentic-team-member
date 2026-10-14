@@ -177,12 +177,16 @@ Flags go before or after the issue. A second issue is an error.
 
 A run that fails at the checks, the slop detector or the delivery keeps its
 agent's work in `.atm/runs/<label>/resume/`: `resume.json` (the issue, the base
-commit, the failed unit's number, its agent report and the follow-up it
-chained) and `work.bundle` (the commits of the units before it, then the failed
+commit, the failed unit's number, its agent report, the follow-up it
+chained, pending follow-ups, earlier proofs and `gross_lines` accumulated
+before that unit) and `work.bundle` (the commits of the units before it, then the failed
 unit's uncommitted work, new and binary files included, ignored files left
 out). Its `report.json` says `"resumable": true` and names the unit in
 `resumable_unit`, and its `next_step` names `atm run --resume <label>`. A run
 that failed before or in the agent is not resumable.
+
+The [follow-up rules](how-a-run-flows.md#follow-ups) describe the cumulative
+budget and the dependency evidence kept when a mandatory gap blocks the run.
 
 `atm run --resume <label>` starts a new run of the same issue under its own
 label. It reads the issue and `.atm.yaml` again, so a fixed config counts,

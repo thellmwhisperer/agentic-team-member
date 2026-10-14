@@ -59,7 +59,7 @@ A failed step stops the run; the steps after it are not run.
 | Clone | Resolves `--base-ref` to a commit, clones the repository there into `.atm/clones/`, runs `install` | The ref, the clone or `install` fails |
 | Contract | Writes `brief.md`, the agent's contract | The brief cannot be written |
 | Agent | Runs the coding agent in the clone on the brief | It exits non-zero, times out, says nothing for 10 min, reaches outside its clone, does not load the `ponytail` skill, or leaves no readable report |
-| Checks | Removes new ignored paths, then runs `install`, proof, `test`, `typecheck` and `lint`; see [Checks](#checks) | Cleanup, proof or a command fails, or anything committed |
+| Checks | Removes new ignored paths, then runs `install`, proof, `test`, `typecheck` and `lint`; see [Checks](#checks) | Cleanup, proof or a command fails, anything committed, or a [follow-up limit or mandatory gap](#follow-ups) blocks the run |
 | Slop detector | Lets a model cut the diff; keeps the cut only if every check still passes | Its agent fails, reports badly, or anything commits |
 | Delivery | Commits the work on a branch and runs the `delivery` command | The branch or the command fails. Skipped when `delivery` is empty |
 
@@ -173,16 +173,42 @@ runs each follow-up test at `red_test` on the unit's work: it must fail. One
 without its test, or whose test passes or hangs, is rejected. No model judges
 a follow-up.
 
-An accepted follow-up whose `criterion` is a sentence copied from the issue
-becomes the next unit, in the same clone: the unit before is committed as a
-unit commit, the red test is put in place, and the agent gets
+The first accepted follow-up whose `criterion` quotes the issue becomes the
+next unit, while a unit remains, in the same clone: the unit before is
+committed as a unit commit, the red test is put in place, and the agent gets
 `brief-unit-<n>.md` to make it pass without editing it. The checks prove that
-unit red/green as a `feature`. Any other follow-up, and any past the third
-unit, goes to `follow-ups.json` in the run's directory, with its test, to
-become a new issue. Each accepted follow-up there has `"verified": true`.
+unit red/green as a `feature`. The quote matches a whole issue line or sentence;
+whitespace, list markers and a line's final punctuation are normalized.
+Other follow-ups go to `follow-ups.json` in the run's directory with their
+tests. Each accepted follow-up there has `"verified": true`.
 
-A unit that fails Checks still hands over every follow-up its report lists:
-none is run or chained, and each goes to `follow-ups.json` with the test the
+The run allows at most three units. Units after the first share a fixed
+200-line gross diff budget: additions plus deletions measured for each unit
+against its starting commit, then accumulated. Deleting a line added by an
+earlier unit counts again; net growth does not determine the budget. The
+primary unit is exempt. The red test ATM placed for the additional unit is
+excluded, and binary files contribute no lines. Resuming retains the earlier
+units' total and measures the resumed unit again. This budget does not apply
+to the slop detector's cuts.
+
+Exceeding the budget fails Checks and saves the chained follow-up as a
+blocking child draft in `follow-ups.json`: its title, criterion and red test
+form the contract, `diff` holds the actual unit diff, `cause` names the total
+and limit, and `dependency` names the unit's starting commit.
+
+A quoted criterion with a verified failing test is mandatory. When no next
+unit chains, including after unit three, any such pending follow-up blocks
+the run with an error naming the criterion. Neither the slop detector nor
+delivery runs. Every mandatory pending item retains its test and criterion,
+plus the stopping unit's actual `diff`, a `cause`, and the committed stopping
+unit as its `dependency`. The dependency commit is preserved in the resume
+bundle. Follow-ups without a matching quote remain out of goal, however
+small: they are persisted separately and do not block delivery. The CoS
+creates and dispatches child issues from these drafts; workers do not.
+
+A unit that fails before follow-up verification still hands over every
+follow-up its report lists: none is run or chained, and each goes to
+`follow-ups.json` with the test the
 agent left, if any, and `"verified": false`. The run ends at that failure.
 When `follow_ups` is invalid, the Checks failure remains the reason, with the
 follow-ups problem on the next line. `atm run --resume` reads that unit's
