@@ -41,6 +41,9 @@ func Hello(c config.Agent, limit time.Duration) (time.Duration, error) {
 		start := time.Now()
 		err := s.read(cmd, &log, io.Discard, c.Harness)
 		took := time.Since(start)
+		if c.Harness == "cursor" && s.failure != "" && err == nil {
+			err = errors.New(s.failure)
+		}
 		if c.Harness == "codex" {
 			b, _ := os.ReadFile(final)
 			s.final = string(b)
