@@ -90,6 +90,10 @@ The agent runs in the clone in its most minimal mode:
 | `pi` | `pi -p --no-extensions --no-skills --no-prompt-templates --no-context-files --no-session` | as its last argument |
 | `cursor` | `cursor-agent -p --output-format stream-json --trust --force --workspace <clone>`, then `--model <model>` when set and any `--harness-arg`s | as its last argument |
 
+For `claude`, ATM sets `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` for both the
+coding agent and the slop detector. It overrides an inherited value or one
+passed with `--env`, so their turns wait for running commands to finish.
+
 ATM writes the bundled `ponytail` skill into the clone, outside git, and the
 agent's log must show it loaded under that exact name and succeeded. For Cursor,
 ATM installs it at `.cursor/skills/<skill>/SKILL.md` outside git; a successful
