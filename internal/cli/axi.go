@@ -6,9 +6,11 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/thellmwhisperer/agentic-team-member/internal/plan"
 	"github.com/thellmwhisperer/agentic-team-member/internal/run"
 )
 
@@ -34,7 +36,54 @@ func axiCmd() *cobra.Command {
 				return err
 			}
 			return o.Err()
-		}}, axiList(true), axiList(false))
+		}}, axiList(true), axiList(false), axiPlan())
+	return c
+}
+
+// axiPlan is atm axi plan, which tickets of a CoS's plan can launch now; with --follow, until none is open.
+func axiPlan() *cobra.Command {
+	c := &cobra.Command{Use: "plan [--json] [--follow] <plan.json>", Short: "Print which tickets of a plan can launch",
+		Args: cobra.ExactArgs(1)}
+	asJSON := c.Flags().Bool("json", false, "print JSON")
+	follow := c.Flags().Bool("follow", false, "print a JSON line each time the plan changes, until no ticket is open")
+	c.RunE = func(cmd *cobra.Command, args []string) error {
+		root, err := toplevel()
+		if err != nil {
+			return err
+		}
+		p, err := plan.Load(args[0])
+		if err != nil {
+			return err
+		}
+		issue := plan.GitHub(run.GitHubRepo())
+		if *follow {
+			return plan.Follow(args[0], root, issue, cmd.OutOrStdout(), cmd.ErrOrStderr(), time.Now, time.Sleep)
+		}
+		s, err := plan.Read(p, root, issue)
+		if err != nil {
+			return err
+		}
+		var b strings.Builder
+		if *asJSON {
+			line, _ := json.Marshal(s)
+			b.Write(append(line, '\n'))
+		} else {
+			for _, l := range []struct {
+				key    string
+				values []int
+			}{{"open", s.Open}, {"ready", s.Ready}, {"cos_holds", s.CosHolds}, {"javi_holds", s.JaviHolds},
+				{"working", s.Working}} {
+				numbers := make([]string, len(l.values))
+				for i, n := range l.values {
+					numbers[i] = strconv.Itoa(n)
+				}
+				b.WriteString(strings.TrimSpace(l.key+"["+strconv.Itoa(len(l.values))+"]: "+strings.Join(numbers, ",")) + "\n")
+			}
+			b.WriteString("free: " + strconv.Itoa(s.Free) + "\n")
+		}
+		_, err = io.WriteString(cmd.OutOrStdout(), b.String())
+		return err
+	}
 	return c
 }
 

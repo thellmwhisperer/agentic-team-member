@@ -105,6 +105,7 @@ Run every command from inside the repository it works on.
 | `atm runs` | Retained runs: label, `running`, `passed` or `failed at <step>`, duration, watcher, issue and report |
 | `atm axi run [--json] [flags] <issue>` | Waits for the run to end, prints its outcome and exits with its code |
 | `atm axi status [--json]`, `atm axi runs [--json]` | The runs going, or retained runs, as a table |
+| `atm axi plan [--json] [--follow] <plan.json>` | Which tickets of a plan can launch now; see [following a plan](#following-a-plan) |
 
 Leaving a screen with `q` or Ctrl-C, or closing the terminal, leaves the run
 going. `atm axi` is for programs: it prints TOON, or JSON with `--json`. Its
@@ -128,6 +129,34 @@ zero process exit. Its last line is
 `FAIL agent: <harness>: <cause>: <its last 5 lines>`, the cause an exit code,
 a signal, `silent`, `timed out after 2 min 00 s`, `no OK in its final message`
 or, for Cursor, the error result text.
+
+### Following a plan
+
+`atm axi plan <plan.json>` reads a CoS's plan, never writes it, and makes no
+model call. The plan is JSON:
+
+```json
+{"version": 1, "max_active": 4, "excluded": [12],
+ "tickets": [{"issue": 10, "depends_on": [9], "conflicts_with": [11],
+              "hold": "waits for the PR", "hold_owner": "javi"}]}
+```
+
+A ticket counts while its issue is open and not in `excluded`. It is going
+when its last run in `.atm/runs.jsonl` is `running`, or `passed` with its issue
+still open (a gate or a PR not merged yet). It is ready when it has no `hold`,
+every dependency is closed (`depends_on` and each `#N` under the issue's
+`## Depends on` heading), it is not going, and it does not conflict with a
+ticket going, named in either one's `conflicts_with`. A `hold` waits on the
+CoS, or on Javi with `hold_owner: "javi"`. It prints `open`, `ready`,
+`cos_holds`, `javi_holds`, `working` and `free`: `max_active` minus the runs
+`running` in their `agent` step.
+
+With `--follow` it reads again every minute and prints a JSON line when that
+changes, and the same line every 30 minutes while a ready ticket has a free
+slot or the CoS holds one. When no ticket is open it prints
+`{"event":"plan_closed"}` and exits 0. A `gh` error goes to stderr and it tries
+again. An invalid plan (no `version: 1`, no `max_active` above 0, a ticket
+without `issue`) exits 2 naming the field.
 
 ## `atm run` flags
 
