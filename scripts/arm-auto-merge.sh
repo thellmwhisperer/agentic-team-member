@@ -43,13 +43,27 @@ level=$(printf '%s\n' "$body" | awk '
   !found && /^## Risk Assessment[[:space:]]*$/ { found = 1; next }
   found && /^#+[[:space:]]/ { exit }
   found && NF { if (match($0, /[A-Za-z]+/)) print substr($0, RSTART, RLENGTH); exit }')
+labels=$(gh pr view "$1" --repo "$GITHUB_REPOSITORY" --json labels --jq '.labels[].name')
+head=$(gh pr view "$1" --repo "$GITHUB_REPOSITORY" --json headRefOid --jq .headRefOid)
+if [ -z "$head" ] || [ "$head" != "${nm% *}" ]; then
+  echo "PR head moved: waiting for the current head"
+  hold "$1"
+fi
+if has pr-discarded; then
+  echo "pr-discarded: never arms"
+  hold "$1"
+fi
+if [ "${nm#* }" != none ] && ! has review-completed; then
+  echo "no-mistakes commits: waiting for review-completed"
+  hold "$1"
+fi
 case "$level" in
   Low|Medium) ;;
   *)
     if ! has risk-reviewed; then
       echo "risk high: waiting for risk-reviewed"
-      exit 0
+      hold "$1"
     fi
     ;;
 esac
-gh pr merge "$1" --auto --rebase --match-head-commit "${nm% *}" --repo "$GITHUB_REPOSITORY"
+gh pr merge "$1" --auto --rebase --match-head-commit "$head" --repo "$GITHUB_REPOSITORY"

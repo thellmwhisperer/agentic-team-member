@@ -83,6 +83,7 @@ func fakeGH(args []string) int {
 	}
 	_, _ = fmt.Fprintln(f, strings.Join(args, " "))
 	_ = f.Close()
+	logged, _ := os.ReadFile(os.Getenv("FAKE_GH_LOG"))
 	if os.Getenv("FAKE_GH_FAIL") != "" {
 		return 1
 	}
@@ -101,13 +102,21 @@ func fakeGH(args []string) int {
 	}
 	switch after(args, "--json") {
 	case "headRefOid":
-		fmt.Println(os.Getenv("FAKE_GH_PR"))
+		if strings.Count(string(logged), "--json headRefOid") > 1 {
+			fmt.Println(os.Getenv("FAKE_GH_HEAD"))
+		} else {
+			fmt.Println(os.Getenv("FAKE_GH_PR"))
+		}
 	case "comments":
 		fmt.Print(os.Getenv("FAKE_GH_COMMENTS"))
 	case "body":
 		fmt.Println(os.Getenv("FAKE_GH_BODY"))
 	case "labels":
-		fmt.Println(os.Getenv("FAKE_GH_LABELS"))
+		if strings.Count(string(logged), "--json labels") > 1 && os.Getenv("FAKE_GH_LATE_LABELS") != "" {
+			fmt.Println(os.Getenv("FAKE_GH_LATE_LABELS"))
+		} else {
+			fmt.Println(os.Getenv("FAKE_GH_LABELS"))
+		}
 	case "autoMergeRequest":
 		fmt.Println(os.Getenv("FAKE_GH_ARMED"))
 	}
@@ -127,7 +136,7 @@ func cleared(head string) comment {
 // pr is a pull request as GitHub reports it: head is what pr view reads, live the head when pr merge runs,
 // armed whether auto-merge is on.
 type pr struct {
-	head, live, body, labels string
+	head, live, body, labels, lateLabels string
 	subjects                 []string
 	comments                 []comment
 	fail, armed              bool
@@ -168,6 +177,7 @@ func (p pr) run(t *testing.T, command string) result {
 	t.Setenv("FAKE_GH_HEAD", cmp.Or(p.live, p.head))
 	t.Setenv("FAKE_GH_BODY", cmp.Or(p.body, lowRisk))
 	t.Setenv("FAKE_GH_LABELS", p.labels)
+	t.Setenv("FAKE_GH_LATE_LABELS", p.lateLabels)
 	t.Setenv("FAKE_GH_FAIL", map[bool]string{true: "1"}[p.fail])
 	cmd := exec.Command("sh", "-c", command)
 	cmd.Dir = ".."
@@ -308,9 +318,23 @@ func TestArmKeepsHighRiskClearance(t *testing.T) {
 }
 
 func TestArmNeverArmsANewHeadItDidNotJudge(t *testing.T) {
-	r := pr{head: oldHead, live: newHead, subjects: nm("review"), labels: labels}.run(t, arm)
-	if r.err == nil || !strings.Contains(r.calls, "--match-head-commit "+oldHead) {
-		t.Fatalf("calls = %q, %v; want the merge bound to %s and refused on %s", r.calls, r.err, oldHead, newHead)
+	r := pr{head: oldHead, live: newHead, subjects: nm("review"), labels: labels, armed: true}.run(t, arm)
+	if r.err != nil || !strings.Contains(r.calls, disarm) || strings.Contains(r.calls, merge) {
+		t.Fatalf("calls = %q, %v; want the moved head held and auto-merge disabled", r.calls, r.err)
+	}
+}
+
+func TestArmRechecksLabelsBeforeArming(t *testing.T) {
+	for _, p := range []pr{
+		{head: newHead, subjects: nm("ci"), labels: labels, lateLabels: "review-required", armed: true},
+		{head: newHead, subjects: nm("ci"), labels: labels, lateLabels: labels + "\npr-discarded", armed: true},
+		{head: newHead, subjects: []string{"feat: x"}, lateLabels: "pr-discarded", armed: true},
+		{head: newHead, subjects: nm("ci"), labels: labels + "\nrisk-reviewed", lateLabels: labels, body: high, armed: true},
+	} {
+		r := p.run(t, arm)
+		if r.err != nil || !strings.Contains(r.calls, disarm) || strings.Contains(r.calls, "pr merge 7 --auto") {
+			t.Fatalf("late labels %q: calls = %q, %v; want auto-merge disabled and no arm", p.lateLabels, r.calls, r.err)
+		}
 	}
 }
 
@@ -335,6 +359,10 @@ type step struct {
 }
 
 type workflow struct {
+	Concurrency struct {
+		Group            string `yaml:"group"`
+		CancelInProgress bool   `yaml:"cancel-in-progress"`
+	} `yaml:"concurrency"`
 	On struct {
 		PullRequest struct {
 			Types []string `yaml:"types"`
@@ -404,6 +432,13 @@ func TestAutoMergeArmsWhenReviewCompletedIsAdded(t *testing.T) {
 	r := pr{head: newHead, subjects: nm("ci"), labels: labels}.run(t, armStep(t, "labeled", ""))
 	if r.err != nil || !strings.Contains(r.calls, merge+" --match-head-commit "+newHead) {
 		t.Fatalf("auto-merge calls = %q, %v; want %s armed", r.calls, r.err, newHead)
+	}
+}
+
+func TestAutoMergeSerializesRunsPerPR(t *testing.T) {
+	w := load(t, "auto-merge.yml")
+	if w.Concurrency.Group != "auto-merge-${{ github.event.pull_request.number }}" || w.Concurrency.CancelInProgress {
+		t.Fatalf("concurrency = %+v; want per-PR group without cancellation", w.Concurrency)
 	}
 }
 
