@@ -210,6 +210,34 @@ func TestWatchLiveness(t *testing.T) {
 	}
 }
 
+// A live watcher stays live while it rewrites its lease, as it does every beat.
+func TestWatchingHoldsWhileItsWatcherRewritesItsLease(t *testing.T) {
+	top := atmRepo(t)
+	now := time.Now()
+	l := lease{os.Getpid(), now, now}
+	if err := l.write(top, "live"); err != nil {
+		t.Fatal(err)
+	}
+	stop, stopped := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(stopped)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				_ = l.write(top, "live")
+			}
+		}
+	}()
+	defer func() { close(stop); <-stopped }()
+	for i := range 2000 {
+		if !Watching(top, "live") {
+			t.Fatalf("Watching = false at check %d while its watcher rewrites its lease", i)
+		}
+	}
+}
+
 func TestWatchGateRetriesFirstStatusErrorAfterRunEnds(t *testing.T) {
 	defer func(b time.Duration) { beat = b }(beat)
 	beat = time.Millisecond
