@@ -88,8 +88,11 @@ The label is the switch; the comment is the record.
 
 A PR with `no-mistakes(...)` commits gets the `review-required` label and is
 not armed. After [the review circuit](skills/no-mistakes-review/SKILL.md), the
-CoS adds `review-completed` to arm it, or `pr-discarded` so it never merges.
-A later no-mistakes commit takes `review-completed` off again.
+CoS adds `review-completed` to arm it. If the PR cannot merge, the CoS adds
+`pr-discarded`, closes it with `gh pr close <number>`, then comments why,
+updates the issue and relaunches or splits the work. A closed PR cannot merge
+even if an auto-merge run is racing. A later no-mistakes commit takes
+`review-completed` off again.
 
 ## What is accepted
 

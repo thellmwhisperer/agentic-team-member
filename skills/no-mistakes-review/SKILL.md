@@ -4,8 +4,8 @@ description: >
   Closing the loop when no-mistakes writes code. Use when an ATM PR carries
   no-mistakes(...) commits or has the review-required label. The CoS makes
   sure the code is reviewed and passed through ponytail, then labels the PR
-  review-completed to merge it, or pr-discarded when it cannot merge. The CoS
-  launches and verifies; it does not write code.
+  review-completed to merge it, or pr-discarded and closes it when it cannot
+  merge. The CoS launches and verifies; it does not write code.
 ---
 
 # Closing the loop when no-mistakes writes code
@@ -55,8 +55,9 @@ label off and disables auto-merge. Review the new commits and label again.
 
 When the review breaks what the issue asks, or code has to be undone:
 
-1. Add `pr-discarded` to the PR. Auto-merge never arms on it and is
-   disabled if it was armed.
+1. Add `pr-discarded` to the PR, then close it with `gh pr close <number>`.
+   The label disables auto-merge if it was armed; closing the PR prevents a
+   racing auto-merge run from merging it.
 2. Comment on the PR what happened.
 3. Update the issue.
 4. Create what is needed: a relaunch, or a split into smaller issues.
