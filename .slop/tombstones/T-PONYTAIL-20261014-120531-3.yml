@@ -1,0 +1,18 @@
+schema: 1
+id: T-PONYTAIL-20261014-120531-3
+status: accepted
+category: alien_code
+title: "Removed the redundant !at.IsDir() check from openDir. OpenRoot already fails on a non-directory, and os.SameFile already rejects a symlink's Lstat against its target."
+created_at: 2026-10-14
+incident:
+  pattern: "Removed the redundant !at.IsDir() check from openDir. OpenRoot already fails on a non-directory, and os.SameFile already rejects a symlink's Lstat against its target."
+  what_went_wrong: "An ATM run wrote it and ATM's ponytail pass cut it before delivery."
+  root_cause: "The coding agent wrote more than the issue needed."
+  rule_established: "Cut by the ponytail pass; it does not come back."
+  evidence:
+    - family: speculative_hardening
+      example: "Removed the redundant !at.IsDir() check from openDir. OpenRoot already fails on a non-directory, and os.SameFile already rejects a symlink's Lstat against its target."
+      artifact: "internal/run/clone_lock_unix.go"
+match:
+  family: speculative_hardening
+  artifact: "internal/run/clone_lock_unix.go"

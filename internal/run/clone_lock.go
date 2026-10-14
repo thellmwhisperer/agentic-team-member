@@ -19,10 +19,8 @@ type cloneSelection struct {
 
 func selected(lock *os.File) (cloneSelection, bool) {
 	s, ok := cloneSelections.Load(lock)
-	if !ok {
-		return cloneSelection{}, false
-	}
-	return s.(cloneSelection), true
+	sel, _ := s.(cloneSelection)
+	return sel, ok
 }
 
 // closeClone closes lock and what it selected.

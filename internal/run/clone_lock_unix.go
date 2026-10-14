@@ -61,10 +61,7 @@ func openCloneParent(dir string) (*os.Root, error) {
 	if runtime.GOOS == "darwin" && (dir == "/var" || strings.HasPrefix(dir, "/var/")) && systemVar(r) {
 		dir = "/private" + dir
 	}
-	for _, name := range strings.Split(dir, "/") {
-		if name == "" {
-			continue
-		}
+	for _, name := range strings.FieldsFunc(dir, func(c rune) bool { return c == '/' }) {
 		next, err := openDir(r, name)
 		_ = r.Close()
 		if err != nil {
@@ -99,7 +96,7 @@ func openDir(r *os.Root, name string) (*os.Root, error) {
 	if err != nil {
 		return nil, err
 	}
-	if fi, err := next.Stat("."); err != nil || !at.IsDir() || !os.SameFile(at, fi) {
+	if fi, err := next.Stat("."); err != nil || !os.SameFile(at, fi) {
 		_ = next.Close()
 		return nil, errors.Join(err, fmt.Errorf("%s is not a plain directory", name))
 	}

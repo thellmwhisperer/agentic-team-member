@@ -1,0 +1,18 @@
+schema: 1
+id: T-PONYTAIL-20261014-120531-2
+status: accepted
+category: alien_code
+title: "In openCloneParent, replaced strings.Split plus a skip-empty-name loop guard with strings.FieldsFunc on '/'. The path components it walks are the same."
+created_at: 2026-10-14
+incident:
+  pattern: "In openCloneParent, replaced strings.Split plus a skip-empty-name loop guard with strings.FieldsFunc on '/'. The path components it walks are the same."
+  what_went_wrong: "An ATM run wrote it and ATM's ponytail pass cut it before delivery."
+  root_cause: "The coding agent wrote more than the issue needed."
+  rule_established: "Cut by the ponytail pass; it does not come back."
+  evidence:
+    - family: speculative_hardening
+      example: "In openCloneParent, replaced strings.Split plus a skip-empty-name loop guard with strings.FieldsFunc on '/'. The path components it walks are the same."
+      artifact: "internal/run/clone_lock_unix.go"
+match:
+  family: speculative_hardening
+  artifact: "internal/run/clone_lock_unix.go"
