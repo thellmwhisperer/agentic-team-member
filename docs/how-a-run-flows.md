@@ -59,7 +59,7 @@ A failed step stops the run; the steps after it are not run.
 | Clone | Resolves `--base-ref` to a commit, clones the repository there into `.atm/clones/`, runs `install` | The ref, the clone or `install` fails |
 | Contract | Writes `brief.md`, the agent's contract | The brief cannot be written |
 | Agent | Runs the coding agent in the clone on the brief | It exits non-zero, times out, says nothing for 10 min, reaches outside its clone, does not load the `ponytail` skill, or leaves no readable report |
-| Checks | Removes new ignored paths, then runs `install`, proof, `test`, `typecheck` and `lint`; see [Checks](#checks) | Cleanup, proof or a command fails, anything committed, or a [follow-up limit or mandatory gap](#follow-ups) blocks the run |
+| Checks | Prepares the clone and runs the proof and configured commands; see [Checks](#checks) | Cleanup, proof or a command fails, anything committed, or a [follow-up limit or mandatory gap](#follow-ups) blocks the run |
 | Slop detector | Lets a model cut the diff; keeps the cut only if every check still passes | Its agent fails, reports badly, or anything commits |
 | Delivery | Commits the work on a branch and runs the `delivery` command | The branch or the command fails. Skipped when `delivery` is empty |
 
@@ -125,8 +125,12 @@ The agent must not have committed. ATM records the clone's paths before the
 agent starts, including contents of ignored nested repositories. Before
 `install` or proof, Checks removes newly made ignored files and directories,
 including read-only cache trees and new contents within retained directories.
-Pre-existing contents and directory modes remain; symlinks are removed as
-links, without changing their targets. A cleanup error stops Checks before
+It then restores changed or deleted pre-existing ignored files from the
+pre-agent snapshot, byte for byte, so package-manager state cannot claim
+that removed dependencies are still installed. Existing directory modes remain;
+symlinks are removed as links, without changing their targets. Nested
+repositories are recorded as Git references, so their pre-existing file
+contents are not restored. A cleanup or restoration error stops Checks before
 `install` or proof. Delivery leaves the removed paths out, so a test that
 needs one fails. ATM moves `.atm/` out of the clone while Checks runs,
 including `install`, the proof and the other commands, then restores it even
