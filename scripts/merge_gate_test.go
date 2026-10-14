@@ -86,24 +86,32 @@ func fakeGH(args []string) int {
 	}
 	commits := strings.Split(strings.TrimSuffix(os.Getenv("FAKE_GH_COMMITS"), "\n"), "\n")
 	if len(args) > 0 && args[0] == "api" {
-		if len(args) > 1 && strings.HasSuffix(args[1], "/timeline") {
-			if os.Getenv("FAKE_GH_TIMELINE_FAIL") != "" {
-				return 1
-			}
-			fmt.Println(os.Getenv("FAKE_GH_TIMELINE"))
-			return 0
+		return fakeGHAPI(args, commits)
+	}
+	return fakeGHCommand(args, logged)
+}
+
+func fakeGHAPI(args, commits []string) int {
+	if len(args) > 1 && strings.HasSuffix(args[1], "/timeline") {
+		if os.Getenv("FAKE_GH_TIMELINE_FAIL") != "" {
+			return 1
 		}
-		if len(args) > 1 && !strings.HasSuffix(args[1], "/commits") {
-			fmt.Println(os.Getenv("FAKE_GH_TOTAL"))
-			return 0
-		}
-		if !slices.Contains(args, "--paginate") {
-			commits = commits[:min(len(commits), 100)]
-		}
-		commits = commits[:min(len(commits), 250)]
-		fmt.Println(strings.Join(commits, "\n"))
+		fmt.Println(os.Getenv("FAKE_GH_TIMELINE"))
 		return 0
 	}
+	if len(args) > 1 && !strings.HasSuffix(args[1], "/commits") {
+		fmt.Println(os.Getenv("FAKE_GH_TOTAL"))
+		return 0
+	}
+	if !slices.Contains(args, "--paginate") {
+		commits = commits[:min(len(commits), 100)]
+	}
+	commits = commits[:min(len(commits), 250)]
+	fmt.Println(strings.Join(commits, "\n"))
+	return 0
+}
+
+func fakeGHCommand(args []string, logged []byte) int {
 	switch after(args, "--json") {
 	case "headRefOid":
 		if strings.Count(string(logged), "--json headRefOid") > 1 {
