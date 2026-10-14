@@ -155,7 +155,15 @@ func (a agent) run(clone, name, skill, brief string, check func(map[string]any) 
 	case !s.used:
 		return fail(fmt.Errorf("%s; agent left no proof it used the %s skill; log: %s", exit, skill, path))
 	}
-	ev["report"], err = report(s.final, check)
+	if name == "contract-review" {
+		var r map[string]any
+		if json.Unmarshal([]byte(s.final), &r) != nil || r == nil {
+			return fail(errors.New("agent left no report: invalid contract review: want a single JSON object"))
+		}
+		ev["report"], err = r, check(r)
+	} else {
+		ev["report"], err = report(s.final, check)
+	}
 	if err != nil {
 		return fail(fmt.Errorf("%s; %w; log: %s", exit, err, path))
 	}

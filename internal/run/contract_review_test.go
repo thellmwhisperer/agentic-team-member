@@ -102,7 +102,13 @@ func TestRunContractReviewRejectsAnInvalidReport(t *testing.T) {
 	other := "0123456789012345678901234567890123456789"
 	cases := map[string][3]string{ // the variable, its value, why the review fails
 		"absent":              {"FAKE_REVIEW", "no-report", "agent left no report"},
-		"invalid JSON":        {"FAKE_REVIEW_REPORT", `{"disposition": "approved", "base": 1}`, "invalid contract review"},
+		"invalid field type":  {"FAKE_REVIEW_REPORT", `{"disposition": "approved", "base": 1}`, "invalid contract review"},
+		"unclosed array":      {"FAKE_REVIEW_REPORT", "[" + approved, "invalid contract review"},
+		"array":               {"FAKE_REVIEW_REPORT", "[" + approved + "]", "invalid contract review"},
+		"multiple objects":    {"FAKE_REVIEW_REPORT", approved + approved, "invalid contract review"},
+		"leading text":        {"FAKE_REVIEW_REPORT", "Approved: " + approved, "invalid contract review"},
+		"trailing text":       {"FAKE_REVIEW_REPORT", approved + " trailing", "invalid contract review"},
+		"null":                {"FAKE_REVIEW_REPORT", "null", "invalid contract review"},
 		"unknown disposition": {"FAKE_REVIEW_REPORT", strings.Replace(approved, `"approved"`, `"maybe"`, 1), `"maybe"`},
 		"other HEAD":          {"FAKE_REVIEW_REPORT", strings.Replace(approved, "{head}", other, 1), "HEAD " + other},
 		"other base":          {"FAKE_REVIEW_REPORT", strings.Replace(approved, "{base}", other, 1), "base " + other},
