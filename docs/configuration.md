@@ -56,18 +56,26 @@ terminal, then sends `initialize` (protocol version 1, no `fs`, no
 `terminal`), `session/new` in the clone with no MCP servers, and the brief as
 one `session/prompt`. The step ends at the prompt's reply: `end_turn` is a
 finished agent, any other `stopReason`, or a JSON-RPC error, fails the step
-with it. Any other request from the agent gets `-32601 method not found`.
+with it. Exiting without a prompt reply also fails, even with exit code zero.
+Any other request from the agent gets `-32601 method not found`.
+`--ignore-rules` prevents Hermes from automatically loading workspace rules
+and skills outside the brief.
 
-Permission requests get the first `allow_once` option when every path the
-request names, each whole, a relative one the clone's, is inside the clone and
-no command in it reaches outside, as the check after each step reads it;
-else the first `reject_once`. Never an `*_always` option. Each answer is a
-line in the agent's log. What it does without asking is the check after the
-step.
+Permission requests get the first `allow_once` option when every location
+and raw-input path value is inside the clone and no command reaches outside.
+Path values are taken whole; relative values resolve against the clone.
+Commands use the [post-step reach checker](how-a-run-flows.md#agent), with
+all absolute paths outside the clone rejected for permission requests.
+Otherwise ATM selects the first `reject_once`, never an `*_always` option.
+If the required option is absent, ATM returns `cancelled`. Each answer is a
+line in the agent's log. Tool calls remain subject to the post-step check,
+including calls made without asking permission.
 
 The ponytail skill goes in the brief's text; the agent's report proves it
-with `"skill": "ponytail"`. Hermes takes its model and effort from its own
-config: a `model` or `effort` in any layer fails before cloning with
+with `"skill": "ponytail"`. The slop detector receives `ponytail-review` the
+same way and must report `"skill": "ponytail-review"`.
+Hermes takes its model and effort from its own config: a non-empty effective
+`model` or `effort` after merging the layers fails before cloning with
 `hermes takes model and effort from its own config; unset them in .atm.yaml`.
 The next ACP agent is one entry in `config.ACP`: its command line and that
 error.
@@ -193,7 +201,7 @@ Flags go before or after the issue. A second issue is an error.
 | Flag | Default | Meaning |
 |------|---------|---------|
 | `--base-ref <ref>` | `main` | The ref the run starts from, resolved in the repository |
-| `--harness <cli>` | from the layers | `claude`, `codex`, `opencode`, `pi`, `cursor` or `hermes` |
+| `--harness <cli>` | from the layers | The `harness` value described [above](#configatmconfigyaml) |
 | `--model <model>` | from the layers | The agent's model |
 | `--effort <effort>` | from the layers | The agent's effort |
 | `--harness-arg <arg>` | none | One argument for the agent CLI, before the brief. Repeatable |

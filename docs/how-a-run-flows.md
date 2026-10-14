@@ -58,7 +58,7 @@ A failed step stops the run; the steps after it are not run.
 | Issue | Reads the issue file or GitHub issue and its `Type:` | The issue cannot be read, or has no valid type |
 | Clone | Resolves `--base-ref` to a commit, clones the repository there into `.atm/clones/`, runs `install` | The ref, the clone or `install` fails |
 | Contract | Writes `brief.md`, the agent's contract | The brief cannot be written |
-| Agent | Runs the coding agent in the clone on the brief | It exits non-zero, times out, says nothing for 10 min, reaches outside its clone, does not load the `ponytail` skill, or leaves no readable report |
+| Agent | Runs the coding agent in the clone on the brief | It fails to complete successfully, times out, says nothing for 10 min, reaches outside its clone, does not prove use of the `ponytail` skill, or leaves no readable report |
 | Checks | Prepares the clone and runs the proof and configured commands; see [Checks](#checks) | Cleanup, proof or a command fails, anything committed, or a [follow-up limit or mandatory gap](#follow-ups) blocks the run |
 | Slop detector | Lets a model cut the diff; keeps the cut only if every check still passes | Its agent fails, reports badly, or anything commits |
 | Delivery | Commits the work on a branch, has the agent review the commit against the issue, and runs the `delivery` command | The branch, the review or the command fails. Skipped when `delivery` is empty |
@@ -80,7 +80,9 @@ the surrounding repository, `.atm/runs/` and other clones.
 
 ## Agent
 
-The agent runs in the clone in its most minimal mode:
+The native agents run in the clone in their most minimal mode.
+For Hermes's ACP invocation and completion rules, see
+[Hermes](configuration.md#hermes).
 
 | Harness | Command | Reads the brief |
 |---------|---------|-----------------|
@@ -95,10 +97,11 @@ agent call, including the slop detector and contract reviewer. It overrides
 an inherited value or one passed with `--env`, so their turns wait for running
 commands to finish.
 
-ATM writes the bundled `ponytail` skill into the clone, outside git, and the
+For native agents, ATM writes the bundled `ponytail` skill into the clone, outside git, and the
 agent's log must show it loaded under that exact name and succeeded. For Cursor,
 ATM installs it at `.cursor/skills/<skill>/SKILL.md` outside git; a successful
-`read` or direct `cat` of that file proves use. Every line the agent writes
+`read` or direct `cat` of that file proves use. Hermes's skill delivery and
+proof are described in [Hermes](configuration.md#hermes). Every line the agent writes
 goes to `worker.jsonl`, and its stderr to `worker.stderr.txt` too, as it is
 written. Its report is the last JSON
 object of its final message and must name `test_file`: ATM never guesses
@@ -116,7 +119,8 @@ that writes a quoted heredoc of valid Go test source to a literal clone-relative
 must contain a recognized test function using the standard `testing.T` type.
 The exception covers URL text in that fixture only; URLs or fetch commands
 elsewhere in the shell command still fail. The error names the first offending
-call. A zero exit without a valid report fails; so does any non-zero exit.
+call. A missing or invalid report fails. For native agents, any non-zero exit
+also fails; Hermes uses the completion rules linked above.
 For Cursor, a stream result with `is_error: true` fails the step with its
 result text even if the process exits zero.
 
