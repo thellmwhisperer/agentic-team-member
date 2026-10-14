@@ -2,70 +2,61 @@
 name: no-mistakes-review
 description: >
   Closing the loop when no-mistakes writes code. Use when an ATM PR carries
-  no-mistakes(...) commits, has the review-required label, or its Go checks
-  wait for `No-mistakes reviewed:`. One trim pass and one fixer-free review,
-  then the CoS clears the exact head. The CoS launches and verifies; it does
-  not write code.
+  no-mistakes(...) commits or has the review-required label. The CoS makes
+  sure the code is reviewed and passed through ponytail, then labels the PR
+  review-completed to merge it, or pr-discarded when it cannot merge. The CoS
+  launches and verifies; it does not write code.
 ---
 
 # Closing the loop when no-mistakes writes code
 
 no-mistakes commits (`no-mistakes(review|ci|lint|document|test): ...`) do not
 go through ponytail or another review in the delivery gate. A PR that has one
-cannot merge until this circuit runs once. There is no loop: at most one trim
-pass and one read-only review.
+merges only through three labels (Decision 7524). No comment, check or login
+unblocks it.
 
-## What blocks the merge
+## 1. `review-required` blocks the merge
 
-- `scripts/no-mistakes-review.sh` reads the PR's commits. With any
-  `no-mistakes(...)` commit, **Go checks** stays red and `auto-merge.yml` adds
-  the `review-required` label instead of arming auto-merge.
-- It clears only on a comment by the login set in that script with the line
-  `No-mistakes reviewed: <full head sha>` naming the current head. Any later
-  commit changes the head, so an older comment no longer counts. Repository
-  role is not authority.
-- If GitHub returns fewer commits than the PR reports, the check stays red;
-  a review comment cannot clear an incomplete commit list.
-- A PR with no no-mistakes commits merges as before. High risk still needs
-  its `Risk reviewed:` comment and the `risk-reviewed` label.
+`auto-merge.yml` runs `scripts/arm-auto-merge.sh`, which reads every commit
+of the PR through `scripts/no-mistakes-review.sh`. With any
+`no-mistakes(...)` commit it adds `review-required` and does not arm
+auto-merge; if auto-merge was armed, it disables it. If GitHub returns fewer
+commits than the PR reports, it does the same: an incomplete list never
+merges.
 
-## The circuit
+A PR with no no-mistakes commits merges as before. High risk still needs its
+`Risk reviewed:` comment and the `risk-reviewed` label.
 
-1. **Look at the size.** A signal, not a gate. Files marked
-   `linguist-generated` in `.gitattributes` (currently `go.sum`) are left out:
+## 2. The CoS makes sure the code is reviewed
+
+1. **Look at the size.** Files marked `linguist-generated` in
+   `.gitattributes` (currently `go.sum`) are left out:
    `git diff --stat <first-nm>^ <head> -- . ':(exclude,attr:linguist-generated)'`.
-2. **Trim.** Launch one agent with the issue text and only the no-mistakes
-   commits (`git log --oneline origin/main..<head> --grep '^no-mistakes('`,
-   then `git show` of each). It classifies every hunk against the issue's
-   acceptance criteria:
-   - **legit**: meets a criterion or fixes a real bug. Keep.
-   - **bloat**: features nobody asked for, new dependencies, speculative
-     validation, weakened tests. Remove.
-   - **out of scope**: real work the issue does not ask for. Remove and open a
-     follow-up issue for it.
+   A little code, the CoS reads it. A lot, it delegates the review to an
+   agent with the issue text and the no-mistakes commits
+   (`git log --oneline origin/main..<head> --grep '^no-mistakes('`, then
+   `git show` of each).
+2. **Ponytail.** Another agent then passes over the same commits with
+   ponytail: features nobody asked for, new dependencies, speculative
+   validation and weakened tests go; real work the issue does not ask for
+   goes to a follow-up issue.
 
-   It removes bloat and out-of-scope hunks in **one** commit and lists each
-   hunk with its class.
-3. **Review, read only.** One review of the branch with no fixer: it can only
-   report and never adds commits.
-   - Clean: go to 4.
-   - A finding inside the issue's scope that does not break it: a follow-up
-     issue; the PR goes on.
-   - A finding that breaks what the issue asks: the PR goes to draft and back
-     to the worker. No merge, and this circuit ends.
-4. **Clear the head.** Verify the trim commit and the review, then comment on
-   the PR, naming the head as it is now:
+## 3. Fine: `review-completed`
 
-   ```
-   No-mistakes reviewed: <full head sha>
-   <commit>: kept | trimmed | follow-up #<n> - <one-line reason>
-   ```
+Once corrected, the CoS adds the `review-completed` label. The `labeled`
+event runs `auto-merge.yml`, which arms auto-merge under the usual risk
+rules: Low or Medium merges by itself, High waits for `risk-reviewed`.
+Removing `review-required` does nothing.
 
-   Re-run the Go checks and Auto-merge runs of that head. Go checks turns
-   green, Auto-merge removes `review-required` and arms the merge bound to
-   that head. Low or Medium risk merges by itself; High waits for
-   `risk-reviewed` as always.
+A push that adds a new no-mistakes commit after `review-completed` takes the
+label off and disables auto-merge. Review the new commits and label again.
 
-A new no-mistakes commit after step 4 blocks the PR again. Return it to the
-worker and run this circuit again for the new no-mistakes commits before
-clearing the new head.
+## 4. Cannot merge: `pr-discarded`
+
+When the review breaks what the issue asks, or code has to be undone:
+
+1. Add `pr-discarded` to the PR. Auto-merge never arms on it and is
+   disabled if it was armed.
+2. Comment on the PR what happened.
+3. Update the issue.
+4. Create what is needed: a relaunch, or a split into smaller issues.
