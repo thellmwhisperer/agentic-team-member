@@ -3,7 +3,36 @@ package run
 import (
 	"os"
 	"os/exec"
+	"sync"
 )
+
+// cloneSelections holds, for each lock openCloneLock opened on Unix, the clone it selected with it: its parent
+// and its directory, opened once, so that the decision to keep it and its removal act on that clone, never on
+// whatever its path names later. Windows selects none and works by path.
+var cloneSelections sync.Map // *os.File: cloneSelection
+
+type cloneSelection struct {
+	parent *os.Root
+	name   string
+	dir    *os.File
+}
+
+func selected(lock *os.File) (cloneSelection, bool) {
+	s, ok := cloneSelections.Load(lock)
+	if !ok {
+		return cloneSelection{}, false
+	}
+	return s.(cloneSelection), true
+}
+
+// closeClone closes lock and what it selected.
+func closeClone(lock *os.File) error {
+	if s, ok := cloneSelections.LoadAndDelete(lock); ok {
+		_ = s.(cloneSelection).dir.Close()
+		_ = s.(cloneSelection).parent.Close()
+	}
+	return lock.Close()
+}
 
 func closeCloneLease(dir string) {
 	if f, ok := cloneLeases.LoadAndDelete(dir); ok {
@@ -18,7 +47,7 @@ func tryCloneExclusive(dir string) (*os.File, bool, error) {
 	}
 	locked, err := tryLockCloneExclusive(f)
 	if err != nil || !locked {
-		_ = f.Close()
+		_ = closeClone(f)
 		return nil, false, err
 	}
 	return f, true, nil
