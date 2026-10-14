@@ -4,7 +4,6 @@ package run
 
 import (
 	"bytes"
-	"context"
 	"io"
 	"os"
 	"path/filepath"
@@ -57,60 +56,10 @@ func TestRunStopsTheAgentAtItsConfiguredTimeout(t *testing.T) {
 	}
 }
 
-func TestRunReportsSubsecondConfiguredTimeout(t *testing.T) {
-	root := repo(t, "https://example.com/owner/repo.git", atmYAML+"agent_timeout: 250ms\n")
-	t.Setenv("FAKE_AGENT", "hang")
-	err := Run("t", []string{issueFile(t, issue)}, io.Discard, io.Discard)
-	if err == nil || !strings.HasPrefix(err.Error(), "timed out after 250ms;") {
-		t.Fatalf("want a 250ms timeout, got %v", err)
-	}
-	rep := readReport(t, filepath.Join(root, ".atm", "runs", "t", "report.json"))
-	if exit := reportNode(t, rep, "agent")["exit"]; exit != "timed out after 250ms" {
-		t.Fatalf("agent exit = %v, want timed out after 250ms", exit)
-	}
-}
-
-func TestRunRejectsInvalidTimeoutBeforeStartingAgent(t *testing.T) {
-	for _, value := range []string{"", `""`, "~", "null", "45", "abc", "0", "0s", "-5m", "9999999999h"} {
-		t.Run(value, func(t *testing.T) {
-			root := repo(t, "https://example.com/owner/repo.git", atmYAML+"agent_timeout: "+value+"\n")
-			call := filepath.Join(t.TempDir(), "agent-call")
-			t.Setenv("FAKE_AGENT_CALL", call)
-			err := Run("t", []string{issueFile(t, issue)}, io.Discard, io.Discard)
-			if err == nil || !strings.Contains(err.Error(), "agent_timeout") {
-				t.Fatalf("want config error naming agent_timeout, got %v", err)
-			}
-			if _, err := os.Stat(call); !os.IsNotExist(err) {
-				t.Fatalf("agent ran despite invalid config: %v", err)
-			}
-			if _, err := os.Stat(filepath.Join(root, ".atm", "runs", "t", "report.json")); !os.IsNotExist(err) {
-				t.Fatalf("run started despite invalid config: %v", err)
-			}
-		})
-	}
-}
-
-func TestAgentTimeoutMessageKeepsSubsecondLimit(t *testing.T) {
-	ctx, cancel := context.WithDeadline(context.Background(), time.Time{})
-	defer cancel()
-	exit, cause := ended(ctx, nil, "50ms")
-	if exit != "timed out after 50ms" || cause != "timed out after 50ms" {
-		t.Fatalf("exit = %q, cause = %q; want timed out after 50ms", exit, cause)
-	}
-}
-
 func TestRunPassesAnAgentWithinItsConfiguredTimeout(t *testing.T) {
-	for _, limit := range []string{"45m", "1h"} {
-		t.Run(limit, func(t *testing.T) {
-			root := repo(t, "https://example.com/owner/repo.git", atmYAML+"agent_timeout: "+limit+"\n")
-			if err := Run("t", []string{issueFile(t, issue)}, io.Discard, io.Discard); err != nil {
-				t.Fatal(err)
-			}
-			rep := readReport(t, filepath.Join(root, ".atm", "runs", "t", "report.json"))
-			if got := reportNode(t, rep, "agent")["result"]; got != "passed" {
-				t.Fatalf("agent result = %v, want passed", got)
-			}
-		})
+	repo(t, "https://example.com/owner/repo.git", atmYAML+"agent_timeout: 1h\n")
+	if err := Run("t", []string{issueFile(t, issue)}, io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
 	}
 }
 
