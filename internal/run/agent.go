@@ -157,7 +157,7 @@ func (a agent) run(clone, name, skill, brief string, check func(map[string]any) 
 	}
 	if name == "contract-review" {
 		var r map[string]any
-		if json.Unmarshal([]byte(s.final), &r) != nil || r == nil {
+		if json.Unmarshal([]byte(s.final), &r) != nil {
 			return fail(errors.New("agent left no report: invalid contract review: want a single JSON object"))
 		}
 		ev["report"], err = r, check(r)
