@@ -252,19 +252,23 @@ func (a agent) exec(clone, skill, path string, argv []string, stdin string) (*st
 		heard: func() { quiet.Reset(agentSilence) }}
 	err = s.read(cmd, f, stderr, a.Harness)
 	quiet.Stop()
-	exit, cause := ended(ctx, cmd.ProcessState, limit)
+	limitText := Human(limit)
+	if a.timeout != 0 {
+		limitText = a.timeout.String()
+	}
+	exit, cause := ended(ctx, cmd.ProcessState, limitText)
 	return s, exit, cause, err
 }
 
 // ended is how the agent run under ctx, bounded by limit, ended, its exit, "" when it never ran, and the cause
 // its step fails with, "" when it exited 0.
-func ended(ctx context.Context, p *os.ProcessState, limit time.Duration) (exit, cause string) {
+func ended(ctx context.Context, p *os.ProcessState, limitText string) (exit, cause string) {
 	switch {
 	case errors.Is(context.Cause(ctx), errSilent):
 		return "silent for " + Human(agentSilence), "the agent said nothing for " + Human(agentSilence) +
 			"; ATM stopped it"
 	case errors.Is(ctx.Err(), context.DeadlineExceeded):
-		exit = "timed out after " + Human(limit)
+		exit = "timed out after " + limitText
 	case ctx.Err() != nil:
 		exit = "interrupted"
 	case p == nil:
