@@ -245,6 +245,9 @@ func (a agent) exec(clone, skill, path string, argv []string, stdin string) (*st
 	cmd.Env = append(slices.DeleteFunc(os.Environ(), func(kv string) bool {
 		return strings.HasPrefix(kv, "CLAUDE_CODE_CHILD_SESSION=") // set, the agent's transcripts are off
 	}), a.env...)
+	if a.Harness == "claude" { // else a background command outlives its turn, and the run its report
+		cmd.Env = append(cmd.Env, "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1")
+	}
 	if err := inheritCloneLease(cmd, clone); err != nil {
 		return nil, "", "", err
 	}
