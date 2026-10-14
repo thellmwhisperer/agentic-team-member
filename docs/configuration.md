@@ -115,8 +115,8 @@ removes, with pipes and no terminal, and gives it one brief: `Reply with the
 single word OK and nothing else.` It passes when the agent's stream ends within
 2 minutes with a final message containing `OK`, read as a run reads it. For
 Cursor, a result with `is_error: true` fails even after an earlier `OK` and a
-zero process exit. Its
-last line is `ok agent: <harness> <model> answered in <duration>`, or
+zero process exit. Its last line is
+`ok agent: <harness> <model> answered in <duration>`, or
 `FAIL agent: <harness>: <cause>: <its last 5 lines>`, the cause an exit code,
 a signal, `silent`, `timed out after 2 min 00 s`, `no OK in its final message`
 or, for Cursor, the error result text.
