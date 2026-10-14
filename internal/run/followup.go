@@ -15,14 +15,22 @@ import (
 // .atm.yaml is the upgrade.
 const maxUnits = 3
 
+// grossBudget is the most lines, added plus deleted, the units after the first change together. ponytail:
+// fixed, as maxUnits.
+const grossBudget = 200
+
 // followUp is a behaviour gap a unit's agent found and did not fix, as its report declares it. Test holds
-// the agent's red test; Verified says ATM proved it failing on the unit's work.
+// the agent's red test; Verified says ATM proved it failing on the unit's work. A follow-up that blocks the
+// run says why in Cause, with the Diff of the unit it stopped and the commit it builds on, its Dependency.
 type followUp struct {
-	Title     string `json:"title"`
-	RedTest   string `json:"red_test"`
-	Criterion string `json:"criterion"`
-	Test      string `json:"test"`
-	Verified  bool   `json:"verified"`
+	Title      string `json:"title"`
+	RedTest    string `json:"red_test"`
+	Criterion  string `json:"criterion"`
+	Test       string `json:"test"`
+	Verified   bool   `json:"verified"`
+	Diff       string `json:"diff,omitempty"`
+	Cause      string `json:"cause,omitempty"`
+	Dependency string `json:"dependency,omitempty"`
 }
 
 // declared is the follow-ups the agent's report r declares, neither tested nor verified.
@@ -32,8 +40,8 @@ func declared(r map[string]any) ([]followUp, error) {
 	if err := json.Unmarshal(b, &all); err != nil {
 		return nil, fmt.Errorf("invalid follow_ups in the agent report: %w", err)
 	}
-	for n := range all {
-		all[n].Test, all[n].Verified = "", false
+	for n, f := range all {
+		all[n] = followUp{Title: f.Title, RedTest: f.RedTest, Criterion: f.Criterion}
 	}
 	return all, nil
 }
@@ -170,6 +178,19 @@ func quoted(body, criterion string) bool {
 // chain commits the work in clone on HEAD as unit n of issue i, under the identity of the repository at
 // root, sets aside its follow-ups and puts f's red test in place for the next unit. It returns the new HEAD.
 func chain(root, clone string, n int, i Issue, f followUp) (string, error) {
+	head, err := commitUnit(root, clone, n, i)
+	if err == nil {
+		err = os.RemoveAll(filepath.Join(clone, ".atm", "follow-ups"))
+	}
+	if err == nil {
+		err = place(clone, f)
+	}
+	return head, err
+}
+
+// commitUnit commits the work in clone on HEAD as unit n of issue i, under the identity of the repository at
+// root. It returns the new HEAD.
+func commitUnit(root, clone string, n int, i Issue) (string, error) {
 	id, err := identity(root)
 	if err != nil {
 		return "", err
@@ -182,13 +203,61 @@ func chain(root, clone string, n int, i Issue, f followUp) (string, error) {
 	if err == nil {
 		_, err = git(clone, "reset", "-q", head)
 	}
-	if err == nil {
-		err = os.RemoveAll(filepath.Join(clone, ".atm", "follow-ups"))
-	}
-	if err == nil {
-		err = place(clone, f)
-	}
 	return head, err
+}
+
+// gross is the lines the work in clone adds plus those it deletes from commit head, and its diff, but for
+// the red test red ATM put there. A binary file counts none. Unlike added, a line moved counts twice.
+func gross(clone, head, red string) (int, string, error) {
+	tree, err := snapshot(clone)
+	if err != nil {
+		return 0, "", err
+	}
+	spec := []string{head, tree, "--", ".", ":(exclude,literal)" + red}
+	stat, err := git(clone, append([]string{"diff", "--numstat"}, spec...)...)
+	if err != nil {
+		return 0, "", err
+	}
+	n := 0
+	for _, line := range strings.Split(stat, "\n") {
+		if f := strings.Fields(line); len(f) > 2 {
+			a, _ := strconv.Atoi(f[0])
+			d, _ := strconv.Atoi(f[1])
+			n += a + d
+		}
+	}
+	diff, err := git(clone, append([]string{"diff"}, spec...)...)
+	return n, diff, err
+}
+
+// errUnmet is the error of a run that ends with a criterion of its issue unmet.
+var errUnmet = errors.New("criterion unmet")
+
+// unmet is the follow-ups left, pending, and those on the issue that unit n, on commit head in clone, chains,
+// in, as the run goes on: none after the last unit, in then pending. Once nothing chains, a follow-up of
+// pending that is a criterion of issue i proved unmet blocks the run: unmet commits the unit's work, under the
+// identity of the repository at root, and gives that follow-up the unit's diff, the cause and the new commit
+// as its dependency.
+func unmet(root, clone, head string, n int, i Issue, pending, in []followUp) ([]followUp, []followUp, error) {
+	if len(in) > 0 && n < maxUnits {
+		return pending, in, nil
+	}
+	pending = append(pending, in...)
+	for k, f := range pending {
+		if !f.Verified || !quoted(i.Body, f.Criterion) {
+			continue
+		}
+		sha, err := commitUnit(root, clone, n, i)
+		if err != nil {
+			return pending, nil, err
+		}
+		diff, err := git(clone, "diff", head, sha)
+		cause := fmt.Errorf("%w after unit %d of %d: %q, its red test %s in follow-ups.json", errUnmet, n,
+			maxUnits, f.Criterion, f.RedTest)
+		pending[k].Diff, pending[k].Cause, pending[k].Dependency = diff, cause.Error(), sha
+		return pending, nil, errors.Join(cause, err)
+	}
+	return pending, nil, nil
 }
 
 // saveFollowUps writes follow-ups.json in the run's directory dir: follow-ups it did not chain, including

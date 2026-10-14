@@ -70,7 +70,7 @@ func Run(label string, args []string, out, summary io.Writer) (err error) {
 		return ev, err
 	})
 	var dir, sha string
-	defer func() { err = errors.Join(err, release(dir, repo)) }()
+	defer func() { err = errors.Join(err, leave(r, dir, repo)) }()
 	r.step("clone", func() (ev map[string]any, err error) {
 		var install []cmdResult
 		dir, sha, install, err = clone(root, start, c.Install, repo, r.live)
@@ -95,6 +95,16 @@ func Run(label string, args []string, out, summary io.Writer) (err error) {
 	})
 	deliver(r, root, dir, sha, *base, c.Delivery, i, summary)
 	return r.err
+}
+
+// leave releases run r's clone dir but after an unmet criterion, whose dependency, its last unit's commit, only
+// the clone holds: then it lets the clone go to the next run's sweep.
+func leave(r *verdict, dir, repo string) error {
+	if errors.Is(r.err, errUnmet) {
+		closeCloneLease(dir)
+		return nil
+	}
+	return release(dir, repo)
 }
 
 // parseArgs is atm run's command line: its flags and the issue, in any order. It returns them as flags, then the
@@ -129,15 +139,18 @@ type proof struct{ base, test, typ, testContent string }
 // units runs the units of the run in clone dir, from base commit sha, for issue i under config c: the first on
 // brief text, each next one, up to maxUnits, on the first follow-up on the issue the one before proved. It
 // returns each unit's proof, the issue as the last unit is proven, a chained one by its red test, and the
-// follow-ups it did not chain. Each unit goes to the report, and its agent's work to keep, for atm
-// run --resume. A run that resumes from puts the work it kept back in dir, in place of its unit's agent.
+// follow-ups it did not chain. The units after the first change grossBudget lines at most, added plus deleted,
+// and a criterion of the issue left unmet blocks the run (unmet). Each unit goes to the report, and its agent's
+// work to keep, for atm run --resume. A run that resumes from puts the work it kept back in dir, in place of its
+// unit's agent.
 func (a agent) units(r *verdict, root, dir, sha, text string, i Issue, c config.Config, keep resumePoint,
 	from *resumePoint) (proofs []proof, unit Issue, pending []followUp) {
 	unit, head, n := i, sha, 1
-	var f *followUp // the follow-up a chained unit makes pass
-	var test string
+	var f *followUp      // the follow-up a chained unit makes pass
+	test, spent := "", 0 // spent: the gross lines of the units after the first
 	if from != nil {
 		n, f, proofs, pending = from.Unit, from.FollowUp, from.proofs(), append([]followUp(nil), from.Pending...)
+		spent = from.Gross
 		if f != nil {
 			unit.Type = "feature"
 		}
@@ -168,16 +181,20 @@ func (a agent) units(r *verdict, root, dir, sha, text string, i Issue, c config.
 			}
 			return ev, err
 		})
-		r.keep(a.dir, dir, keep, n, report, f, proofs, pending)
+		r.keep(a.dir, dir, keep, n, report, f, proofs, pending, spent)
 		var in []followUp
 		var ev map[string]any
 		r.step("checks", func() (map[string]any, error) {
 			var err error
 			var p proof
 			var out []followUp
-			p, in, out, ev, err = checkUnit(a.dir, dir, head, test, unit.Type, f, n, report, i.Body, c)
+			p, in, out, ev, err = checkUnit(a.dir, dir, head, test, unit.Type, f, n, spent, report, i.Body, c)
 			proofs = append(proofs, p)
 			pending = append(pending, out...)
+			spent, _ = ev["gross_lines"].(int) // none on unit 1, the primary work
+			if err == nil {
+				pending, in, err = unmet(root, dir, head, n, i, pending, in)
+			}
 			return ev, err
 		})
 		red, _ := ev["red"].(try)
@@ -188,15 +205,16 @@ func (a agent) units(r *verdict, root, dir, sha, text string, i Issue, c config.
 		if r.err != nil || len(in) == 0 {
 			return proofs, unit, pending
 		}
-		if n == maxUnits {
-			return proofs, unit, append(pending, in...)
-		}
 		f, pending = &in[0], append(pending, in[1:]...)
 	}
 }
 
+// checkUnit checks unit n, on commit head in clone dir. A unit after the first that takes the gross lines of
+// those before it, spent, over grossBudget fails with its follow-up f as a blocking child: its contract, the
+// unit's diff, the cause and head, its dependency.
 func checkUnit(
-	runDir, dir, head, test, typ string, f *followUp, n int, report map[string]any, body string, c config.Config,
+	runDir, dir, head, test, typ string, f *followUp, n, spent int, report map[string]any, body string,
+	c config.Config,
 ) (proof, []followUp, []followUp, map[string]any, error) {
 	ev := map[string]any{"unit": n}
 	// A unit that fails its checks still hands over its follow-ups, unverified, a problem with them noted
@@ -209,6 +227,19 @@ func checkUnit(
 	if f != nil {
 		if b, err := os.ReadFile(filepath.Join(dir, test)); err != nil || string(b) != f.Test {
 			return failed(fmt.Errorf("unit %d edited its red test %s, which it must make pass as it is", n, test))
+		}
+		g, diff, err := gross(dir, head, f.RedTest)
+		if err != nil {
+			return failed(err)
+		}
+		ev["gross_lines"] = spent + g
+		if spent+g > grossBudget {
+			child := *f
+			child.Diff, child.Dependency = diff, head
+			child.Cause = fmt.Sprintf("units 2 to %d change %d lines, added plus deleted, over the %d-line budget "+
+				"of the work after unit 1", n, spent+g, grossBudget)
+			p, in, out, ev, err := failed(errors.New(child.Cause))
+			return p, in, append([]followUp{child}, out...), ev, err
 		}
 	}
 	result, err := checks(dir, runDir, head, typ, test, c)

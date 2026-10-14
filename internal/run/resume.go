@@ -22,7 +22,9 @@ type resumePoint struct {
 	FollowUp *followUp      `json:"follow_up"`
 	Pending  []followUp     `json:"pending"`
 	Proofs   [][4]string    `json:"proofs"` // each unit's before: its base, test, type and test content
-	run      string         // the run that kept it
+	// Gross is the lines, added plus deleted, of the units after the first, before Unit.
+	Gross int    `json:"gross_lines"`
+	run   string // the run that kept it
 }
 
 // keepWork writes p and the work in clone, on HEAD, to resume/ in the run's directory dir. The work leaves the
@@ -88,13 +90,13 @@ func declaredFollowUpPaths(clone string, followUps any) ([]string, error) {
 }
 
 // keep keeps unit n's work in the run's clone, once its agent passed, in the run's directory dir, as p with
-// the unit, its agent's report, the follow-up it chained and the proofs of the units before.
+// the unit, its agent's report, the follow-up it chained, the proofs of the units before and their gross lines.
 func (r *verdict) keep(dir, clone string, p resumePoint, n int, report map[string]any, f *followUp,
-	proofs []proof, pending []followUp) {
+	proofs []proof, pending []followUp, gross int) {
 	if r.saved = 0; r.err != nil {
 		return
 	}
-	p.Unit, p.Report, p.FollowUp = n, report, f
+	p.Unit, p.Report, p.FollowUp, p.Gross = n, report, f, gross
 	p.Pending = append([]followUp(nil), pending...)
 	for _, q := range proofs {
 		p.Proofs = append(p.Proofs, [4]string{q.base, q.test, q.typ, q.testContent})
