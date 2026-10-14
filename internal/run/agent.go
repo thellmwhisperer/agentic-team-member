@@ -939,7 +939,11 @@ func outside(calls []use, root, clone string) string {
 	if root == "/" {
 		pattern = "/[^" + sep + "]*"
 	}
-	paths := regexp.MustCompile(pattern)
+	quoted := regexp.QuoteMeta(root)
+	if root != "/" {
+		quoted += "/"
+	}
+	paths := regexp.MustCompile(`"` + quoted + `[^"]*"` + `|'` + quoted + `[^']*'|` + pattern)
 	for _, c := range calls {
 		if reachesPath(c.args, root, clone, paths) || c.command != "" && fetchesAt(c.command, clone) {
 			r := []rune(c.args)
@@ -956,7 +960,11 @@ func reachesPath(args, root, clone string, paths *regexp.Regexp) bool {
 			m[1] < len(text) && !strings.ContainsRune(" \t\r\n\"'`;|&()<>,=/", rune(text[m[1]])) {
 			continue
 		}
-		p := path.Clean(text[m[0]:m[1]])
+		p := text[m[0]:m[1]]
+		if p[0] == '\'' || p[0] == '"' {
+			p = p[1 : len(p)-1]
+		}
+		p = path.Clean(p)
 		if p != clone && !strings.HasPrefix(p, clone+"/") {
 			return true
 		}
