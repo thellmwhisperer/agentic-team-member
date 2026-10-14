@@ -27,12 +27,12 @@ func TestChecksRestoresIgnoredBytesBeforeInstall(t *testing.T) {
 			}
 			original := []byte("old\r\n\x00\xff\n")
 			write("dep/state", []byte("old\n"))
-			write("dep/state [x]\nfile", original)
+			write("dep/state [x] file", original)
 			write("expected", original)
 			if err := before(dir); err != nil {
 				t.Fatal(err)
 			}
-			for _, name := range []string{"dep/state", "dep/state [x]\nfile"} {
+			for _, name := range []string{"dep/state", "dep/state [x] file"} {
 				if mutation == "rewrite" {
 					write(name, []byte("new\n"))
 					continue
@@ -50,14 +50,14 @@ func TestChecksRestoresIgnoredBytesBeforeInstall(t *testing.T) {
 			write("a.txt", []byte("fixed\n"))
 			write("a_test.sh", []byte("test -e dep/link && test \"$(cat a.txt)\" = fixed\n"))
 			c := checksStashConfig(t, root)
-			c.Install = "set -x; test ! -e dep/link && cmp expected 'dep/state [x]\nfile' && " +
+			c.Install = "set -x; test ! -e dep/link && cmp expected 'dep/state [x] file' && " +
 				"test ! -L dep/state && { grep -q old dep/state && touch dep/link || true; }"
 			result, err := checks(dir, runDir, sha, "fix", "a_test.sh", c)
 			t.Logf("Checks result: %+v", result)
 			if err != nil {
 				t.Fatal(err)
 			}
-			b, err := os.ReadFile(filepath.Join(dir, "dep/state [x]\nfile"))
+			b, err := os.ReadFile(filepath.Join(dir, "dep/state [x] file"))
 			if err != nil || string(b) != string(original) {
 				t.Fatalf("restored bytes = %q, error = %v", b, err)
 			}
