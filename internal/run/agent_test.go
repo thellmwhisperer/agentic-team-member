@@ -44,7 +44,9 @@ var work = map[string]string{"fix": fixWork, "feature": fixWork, "greenfield": f
 // grandchild in its own session; hang-orphan starts it in its own session through a child that exits at once,
 // so init adopts it. The ponytail pass plays the same with the ponytail-review skill,
 // $FAKE_PONYTAIL as its mode, $FAKE_PONYTAIL_WORK as its work and $FAKE_PONYTAIL_REPORT, or no findings, as
-// its report; its call goes to $FAKE_AGENT_CALL.ponytail. $FAKE_AGENT_STREAM goes to its stdout after its first
+// its report; its call goes to $FAKE_AGENT_CALL.ponytail. The contract review plays the same with $FAKE_REVIEW,
+// $FAKE_REVIEW_WORK and $FAKE_REVIEW_REPORT, or an approval, {base} and {head} in it its brief's; its call goes
+// to $FAKE_AGENT_CALL.review. $FAKE_AGENT_STREAM goes to its stdout after its first
 // line, <clone> in it its working directory.
 func fakeAgent(name string) int {
 	mode := os.Getenv("FAKE_AGENT")
@@ -111,7 +113,18 @@ func fakeAgentTask(name string, args []string, mode *string) ([]byte, string, st
 	_, typ, _ := strings.Cut(brief, "Task type: ")
 	typ, _, _ = strings.Cut(typ, ".")
 	skill, call, todo, text := "ponytail", "", cmp.Or(os.Getenv("FAKE_AGENT_WORK"), work[typ]), fakeReport
-	if strings.Contains(brief, "`ponytail-review`") {
+	if strings.Contains(brief, "# Contract review") {
+		*mode = os.Getenv("FAKE_REVIEW")
+		skill, call, todo = "ponytail-review", ".review", os.Getenv("FAKE_REVIEW_WORK")
+		field := func(key string) string {
+			_, v, _ := strings.Cut(brief, "\n- "+key+": ")
+			v, _, _ = strings.Cut(v, "\n")
+			return v
+		}
+		text = strings.NewReplacer("{base}", field("Base"), "{head}", field("HEAD")).Replace(cmp.Or(
+			os.Getenv("FAKE_REVIEW_REPORT"),
+			`{"disposition": "approved", "base": "{base}", "head": "{head}", "findings": [], "summary": "s"}`))
+	} else if strings.Contains(brief, "`ponytail-review`") {
 		*mode = os.Getenv("FAKE_PONYTAIL")
 		skill, call, todo = "ponytail-review", ".ponytail", os.Getenv("FAKE_PONYTAIL_WORK")
 		text = cmp.Or(os.Getenv("FAKE_PONYTAIL_REPORT"), `{"findings": [], "summary": "Lean already."}`)

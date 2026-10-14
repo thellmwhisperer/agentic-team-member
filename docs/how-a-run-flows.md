@@ -61,7 +61,7 @@ A failed step stops the run; the steps after it are not run.
 | Agent | Runs the coding agent in the clone on the brief | It exits non-zero, times out, says nothing for 10 min, reaches outside its clone, does not load the `ponytail` skill, or leaves no readable report |
 | Checks | Removes new ignored paths, then runs `install`, proof, `test`, `typecheck` and `lint`; see [Checks](#checks) | Cleanup, proof or a command fails, anything committed, or a [follow-up limit or mandatory gap](#follow-ups) blocks the run |
 | Slop detector | Lets a model cut the diff; keeps the cut only if every check still passes | Its agent fails, reports badly, or anything commits |
-| Delivery | Commits the work on a branch and runs the `delivery` command | The branch or the command fails. Skipped when `delivery` is empty |
+| Delivery | Commits the work on a branch, has the agent review the commit against the issue, and runs the `delivery` command | The branch, the review or the command fails. Skipped when `delivery` is empty |
 
 Agent and Checks run again for each chained follow-up, at most three units in
 one run; see [Follow-ups](#follow-ups).
@@ -250,8 +250,17 @@ an email ending in `@localhost`, fails the run.
 When `delivery` is set, the clone goes on a new branch
 `atm/<title slug>-<timestamp>`, whatever is left uncommitted is committed as
 the next unit commit, and the clone's `origin` becomes the repository's. Every
-commit after the base must carry the repository's git identity. Then the
-command runs with `sh -c` in the clone, without a time limit, with these
+commit after the base must carry the repository's git identity.
+
+Then the agent, with the `ponytail-review` skill, reviews read only the issue
+and the diff from the base to that HEAD, and reports `approved` or `blocked`,
+each block quoting the issue's criterion and its evidence in the diff.
+`contract-review.json` in the run's directory keeps the issue, base, HEAD,
+report and reason. A block, a report that is not valid or names another base
+or HEAD, a failed reviewer, or a reviewer that changes the clone or HEAD fails
+Delivery before its command runs; nothing retries it.
+
+Once approved, the command runs with `sh -c` in the clone, without a time limit, with these
 variables:
 
 | Variable | Value |
