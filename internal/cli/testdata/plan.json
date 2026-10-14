@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "max_active": 3,
+  "tickets": [
+    {"issue": 1, "depends_on": [], "conflicts_with": []},
+    {"issue": 2, "depends_on": [1], "conflicts_with": []},
+    {"issue": 3, "depends_on": [4], "conflicts_with": []},
+    {"issue": 5, "depends_on": [], "conflicts_with": [], "hold": "waits for the CoS"},
+    {"issue": 6, "depends_on": [], "conflicts_with": [], "hold": "waits for Javi", "hold_owner": "javi"},
+    {"issue": 7, "depends_on": [], "conflicts_with": []},
+    {"issue": 8, "depends_on": [], "conflicts_with": [7]},
+    {"issue": 9, "depends_on": [], "conflicts_with": []}
+  ],
+  "excluded": [9]
+}
