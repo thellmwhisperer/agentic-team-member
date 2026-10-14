@@ -3,6 +3,7 @@ package run
 import (
 	"cmp"
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -277,22 +278,50 @@ type gate struct {
 }
 
 // gateState is what `no-mistakes axi status` says of a gate: its PR, the first step that waits for approval or a
-// decision and the first that failed, and whether it has steps, CI is being fixed or green, and the PR merged.
+// decision and the first that failed, and whether it has steps, CI is being fixed or green, and the PR merged;
+// read, also the findings of its gate and its PR's CI repair commits, or the error that kept them unread.
 type gateState struct {
 	pr, waiting, failed         string
 	seen, fixing, green, merged bool
+	findings                    []gateFinding
+	ci                          []ciCommit
+	err                         error
 }
 
+// gateFinding is a finding of a gate as no-mistakes reports it.
+type gateFinding struct{ id, severity, file, description string }
+
+// ciCommit is a commit no-mistakes pushed to repair CI: its full SHA and subject.
+type ciCommit struct{ sha, subject string }
+
+// findingsTable is the header of the gate's findings in `no-mistakes axi status`, whose rows are CSV.
+const findingsTable = "{id,severity,file,action,description}:"
+
 func parseGate(status string) (s gateState) {
-	steps, parked := false, false // parked: its fix_review step waits for a decision
+	parked := false       // its fix_review step waits for a decision
+	table, depth := "", 0 // the table whose rows, deeper than its header, follow
 	for _, l := range strings.Split(status, "\n") {
 		trimmed := strings.TrimSpace(l)
+		indent := len(l) - len(strings.TrimLeft(l, " "))
+		if table != "" && indent > depth {
+			if table == "steps" {
+				s.step(trimmed, parked)
+			} else {
+				s.finding(trimmed)
+			}
+			continue
+		}
 		key, value, isKey := strings.Cut(trimmed, ": ")
+		table, depth = "", indent
 		switch {
 		case strings.HasPrefix(trimmed, "steps["):
-			steps = true
-		case isKey || strings.HasSuffix(trimmed, ":"):
-			steps = false
+			table = "steps"
+		case strings.HasPrefix(trimmed, "findings["):
+			table = "findings"
+			if !strings.HasSuffix(trimmed, findingsTable) {
+				s.err = cmp.Or(s.err, fmt.Errorf("findings are not %s: %q", findingsTable, trimmed))
+			}
+		case isKey:
 			if unquoted, err := strconv.Unquote(value); err == nil {
 				value = unquoted
 			}
@@ -304,11 +333,60 @@ func parseGate(status string) (s gateState) {
 			case "awaiting_agent":
 				parked = strings.HasPrefix(value, "parked")
 			}
-		case steps && l != trimmed:
-			s.step(trimmed, parked)
 		}
 	}
 	return s
+}
+
+// finding adds to s a row of its gate's findings, `id,severity,file,action,description`, quoted where CSV quotes.
+func (s *gateState) finding(row string) {
+	f, err := csv.NewReader(strings.NewReader(row)).Read()
+	if err == nil && len(f) != 5 {
+		err = fmt.Errorf("finding %q has %d fields, want 5", row, len(f))
+	}
+	if err != nil {
+		s.err = cmp.Or(s.err, err)
+		return
+	}
+	s.findings = append(s.findings, gateFinding{f[0], f[1], f[2], f[4]})
+}
+
+// Read is what the follow stream reads of the gate of clone's branch, through `no-mistakes axi status` and
+// `gh pr view`: its state, the findings of the step it waits at, if one does, and its PR's CI repair commits,
+// those whose subject starts `no-mistakes(ci):`, in order. It changes nothing; nor s, when it fails.
+func (s *gateState) Read(clone string) error {
+	status, err := gateStatus(clone)
+	if err != nil {
+		return err
+	}
+	r := parseGate(status)
+	switch {
+	case r.err != nil:
+		return r.err
+	case !r.seen:
+		return errors.New("no-mistakes axi status has no gate")
+	case r.waiting == "":
+		r.findings = nil
+	}
+	if strings.HasPrefix(r.pr, "http") {
+		var pr struct {
+			Commits []struct{ OID, MessageHeadline string }
+		}
+		out, err := command(clone, "gh", "pr", "view", r.pr, "--json", "commits")
+		if err == nil {
+			err = json.Unmarshal([]byte(out), &pr)
+		}
+		if err != nil {
+			return err
+		}
+		for _, c := range pr.Commits {
+			if strings.HasPrefix(c.MessageHeadline, "no-mistakes(ci):") {
+				r.ci = append(r.ci, ciCommit{c.OID, c.MessageHeadline})
+			}
+		}
+	}
+	*s = r
+	return nil
 }
 
 // step adds to s a row of the gate's steps, `step,status,...`, of a run parked or not.

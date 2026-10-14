@@ -43,6 +43,9 @@ func TestMain(m *testing.M) {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+	if strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe") == "no-mistakes" { // before gh: a test fakes both
+		fakeNoMistakes()
+	}
 	if out, ok := os.LookupEnv("FAKE_GH_OUT"); ok {
 		_ = os.WriteFile(os.Getenv("FAKE_GH_ARGS"), []byte(strings.Join(os.Args[1:], " ")), 0o600)
 		fmt.Print(out)
@@ -50,9 +53,6 @@ func TestMain(m *testing.M) {
 			os.Exit(1)
 		}
 		os.Exit(0)
-	}
-	if strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe") == "no-mistakes" {
-		fakeNoMistakes()
 	}
 	dir, err := linkFakes()
 	if err != nil {
