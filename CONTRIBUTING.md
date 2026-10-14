@@ -85,6 +85,10 @@ Risk reviewed:
 
 The label is the switch; the comment is the record.
 
+A PR with `no-mistakes(...)` commits gets the `review-required` label and a
+red **Go checks** until the CoS comments `No-mistakes reviewed: <head sha>`
+for its current head ([the circuit](skills/no-mistakes-review/SKILL.md)).
+
 ## What is accepted
 
 - **Yes**: bug fixes with a red test, a new gate with the slop it catches

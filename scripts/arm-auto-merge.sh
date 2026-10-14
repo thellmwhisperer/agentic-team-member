@@ -2,11 +2,19 @@
 # Arms GitHub auto-merge by rebase on PR $1: GitHub merges it once main's required checks pass.
 # Low and Medium risk arm at once. High risk, or a body without a readable level under
 # `## Risk Assessment`, waits for the `risk-reviewed` label (see CONTRIBUTING.md).
+# No-mistakes commits first wait for the CoS review of their exact head, labelled review-required.
 set -eu
 # The workflow token's merges start no workflow and close no issue, so never fall back to it.
 if [ -z "${GH_TOKEN:-}" ]; then
   echo "AUTO_MERGE_TOKEN is not set" >&2
   exit 1
+fi
+if ! nm=$("$(dirname "$0")/no-mistakes-review.sh" "$1"); then
+  gh pr edit "$1" --repo "$GITHUB_REPOSITORY" --add-label review-required
+  exit 0
+fi
+if [ "${nm#* }" = cleared ]; then
+  gh pr edit "$1" --repo "$GITHUB_REPOSITORY" --remove-label review-required
 fi
 body=$(gh pr view "$1" --repo "$GITHUB_REPOSITORY" --json body --jq .body)
 level=$(printf '%s\n' "$body" | awk '
@@ -24,4 +32,4 @@ case "$level" in
     fi
     ;;
 esac
-gh pr merge "$1" --auto --rebase --repo "$GITHUB_REPOSITORY"
+gh pr merge "$1" --auto --rebase --match-head-commit "${nm% *}" --repo "$GITHUB_REPOSITORY"
