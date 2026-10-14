@@ -205,3 +205,11 @@ the locked clone is still the one at its original directory name. Cleanup
 rejects symlinks in the clone's parent path, including an inherited `TMPDIR`
 alias; on macOS, the system `/var` to `/private/var` alias is accepted when
 its ownership and permissions can be verified.
+
+An eligible clone is removed even when it contains owner-controlled read-only
+directories; symlinks inside it are removed as links. If content removal
+fails, the remaining clone and its existing `.lock`, `.delivered` and `.pid`
+sidecars stay, and release returns the error. If a partly removed delivered
+clone has no `.git`, ATM does not consult the enclosing repository: `gh` can
+still confirm that its PR is closed or merged; without that answer, ATM keeps
+the clone.
