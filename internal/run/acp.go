@@ -71,10 +71,7 @@ func (s *stream) chunkEnd() []map[string]any {
 
 // calls is u's tool call as the reach check reads it: its rawInput, its locations and each of its commands.
 func (u acpUpdate) calls() []use {
-	if u.ToolCallID == "" {
-		return nil
-	}
-	cs := []use{{u.Kind, strs(u.RawInput, writesFile(u.Kind)), ""}}
+	cs :=[]use{{u.Kind, strs(u.RawInput, writesFile(u.Kind)), ""}}
 	for _, l := range u.Locations {
 		cs = append(cs, use{u.Kind, l.Path, ""})
 	}
