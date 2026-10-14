@@ -64,7 +64,7 @@ func TestUnmadeKeepsWhatWasAndRemovesWhatIsNew(t *testing.T) {
 				t.Fatalf("checks: %v", err)
 			}
 			if _, err := sh(dir, "is() { printf '%s\\n' \"$2\" | cmp - \"$1\"; }; "+
-				`ro() { test -n "$(find "$1" -prune -perm 555)"; }; set -x; test -e installed && `+c.kept); err != nil {
+				`ro() { test "$ATM_TEST_GOOS" = windows || test -n "$(find "$1" -prune -perm 555)"; }; set -x; test -e installed && `+c.kept); err != nil {
 				t.Fatal(err)
 			}
 		})
@@ -95,6 +95,7 @@ func unmadeChecks(t *testing.T, old, work, kept string, proof bool) (dir string,
 	dir, sha := checksStashClone(t, root)
 	ext := t.TempDir()
 	t.Setenv("EXT", ext)
+	t.Setenv("ATM_TEST_GOOS", runtime.GOOS)
 	t.Cleanup(func() {
 		_ = exec.Command("chmod", "-R", "u+w", root, ext).Run()
 		if err := release(dir, ""); err != nil {
@@ -116,7 +117,7 @@ func unmadeChecks(t *testing.T, old, work, kept string, proof bool) (dir string,
 		kept = "true"
 	}
 	c.Install = "is() { printf '%s\\n' \"$2\" | cmp - \"$1\"; }; " +
-		`ro() { test -n "$(find "$1" -prune -perm 555)"; }; ` + kept + " && touch installed"
+		`ro() { test "$ATM_TEST_GOOS" = windows || test -n "$(find "$1" -prune -perm 555)"; }; ` + kept + " && touch installed"
 	typ, test := "chore", ""
 	if proof {
 		typ, test = "fix", "a_test.sh"
