@@ -13,7 +13,6 @@ func TestLoadAcceptsAnOptionalAgentTimeout(t *testing.T) {
 		if _, err := Load(root, t.TempDir(), Agent{}); err != nil {
 			t.Fatalf("%q: %v", line, err)
 		}
-		t.Logf("loaded .atm.yaml with %q", strings.TrimSpace(line))
 	}
 }
 
