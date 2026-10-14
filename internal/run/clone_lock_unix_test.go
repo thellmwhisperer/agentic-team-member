@@ -75,6 +75,30 @@ func TestReleaseThroughTMPDIRAliasChangesNothing(t *testing.T) {
 	}
 }
 
+// A symlink inside a removable clone is removed as a link, without changing its external target.
+func TestReleaseDoesNotFollowCloneSymlink(t *testing.T) {
+	clone := filepath.Join(t.TempDir(), "atm-run-20261001-120000")
+	if err := os.Mkdir(clone, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	external := t.TempDir()
+	file := filepath.Join(external, "outside")
+	write(t, file, "keep these bytes")
+	if err := os.Symlink(external, filepath.Join(clone, "external")); err != nil {
+		t.Fatal(err)
+	}
+	before := fixtures(t, external, file)
+	if err := release(clone, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(clone); !os.IsNotExist(err) {
+		t.Fatalf("clone still exists after release: %v", err)
+	}
+	if after := fixtures(t, external, file); !slices.Equal(after, before) {
+		t.Fatalf("release changed the symlink target: %v, want %v", after, before)
+	}
+}
+
 // A clone whose directory was replaced after its lock was taken is not the clone remove selected: the
 // replacement and its sidecars stay.
 func TestRemoveKeepsADirectoryThatReplacedTheSelectedClone(t *testing.T) {
