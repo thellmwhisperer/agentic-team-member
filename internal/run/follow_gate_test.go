@@ -132,3 +132,16 @@ func TestFollowGateDataFailsOnAFailedCommandWithoutInventingEvents(t *testing.T)
 		})
 	}
 }
+
+// The fixed TOON header declares two findings. A truncated response must not
+// turn that waiting gate into a successful snapshot with no findings.
+func TestFollowGateDataRejectsTruncatedFindings(t *testing.T) {
+	status, _, ok := strings.Cut(recorded(t, "atm_watch_status_parked.txt"), "    doctor-duplicate-watcher,")
+	if !ok {
+		t.Fatal("recorded waiting gate is missing its first finding")
+	}
+	s, err := readGate(t, status, false)
+	if err == nil {
+		t.Fatalf("truncated findings[2] accepted: waiting=%q findings=%d; want a read error", s.FieldByName("waiting").String(), s.FieldByName("findings").Len())
+	}
+}
