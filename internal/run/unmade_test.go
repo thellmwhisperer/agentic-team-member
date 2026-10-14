@@ -64,7 +64,8 @@ func TestUnmadeKeepsWhatWasAndRemovesWhatIsNew(t *testing.T) {
 				t.Fatalf("checks: %v", err)
 			}
 			if _, err := sh(dir, "is() { printf '%s\\n' \"$2\" | cmp - \"$1\"; }; "+
-				`ro() { test "$ATM_TEST_GOOS" = windows || test -n "$(find "$1" -prune -perm 555)"; }; set -x; test -e installed && `+c.kept); err != nil {
+				`ro() { test "$ATM_TEST_GOOS" = windows || test -n "$(find "$1" -prune -perm 555)"; }; `+
+				"set -x; test -e installed && "+c.kept); err != nil {
 				t.Fatal(err)
 			}
 		})
@@ -85,8 +86,8 @@ func TestUnmadeFailureBlocksInstallAndProof(t *testing.T) {
 	}
 }
 
-// unmadeChecks is the error of checks, whose install checks kept and touches installed, on a clone where old ran, before
-// recorded it, then work ran as its agent: shell lines, $EXT, a directory outside the clone.
+// unmadeChecks is the error of checks, whose install checks kept and touches installed, on a clone where old ran,
+// before recorded it, then work ran as its agent: shell lines, $EXT, a directory outside the clone.
 func unmadeChecks(t *testing.T, old, work, kept string, proof bool) (dir string, green try, err error) {
 	t.Helper()
 	root := repo(t, "https://example.com/owner/repo.git", atmYAML)
@@ -117,7 +118,8 @@ func unmadeChecks(t *testing.T, old, work, kept string, proof bool) (dir string,
 		kept = "true"
 	}
 	c.Install = "is() { printf '%s\\n' \"$2\" | cmp - \"$1\"; }; " +
-		`ro() { test "$ATM_TEST_GOOS" = windows || test -n "$(find "$1" -prune -perm 555)"; }; ` + kept + " && touch installed"
+		`ro() { test "$ATM_TEST_GOOS" = windows || test -n "$(find "$1" -prune -perm 555)"; }; ` +
+		kept + " && touch installed"
 	typ, test := "chore", ""
 	if proof {
 		typ, test = "fix", "a_test.sh"
