@@ -62,15 +62,14 @@ Either way:
 
 | Workflow | Runs on | Filtered jobs | Does |
 |---|---|---|---|
-| `go.yml` | every PR to `main`, push to `main` | Test/lint: paths classified by [`scripts/changed-areas.sh`](scripts/changed-areas.sh); review check: every PR | `make test` and `make lint` on ubuntu, macos, windows; checks no-mistakes review on PRs |
+| `go.yml` | every PR to `main`, push to `main` | Test/lint: paths classified by [`scripts/changed-areas.sh`](scripts/changed-areas.sh) | `make test` and `make lint` on ubuntu, macos, windows |
 | `release.yml` | push to `main` | always | release-please keeps a release PR with the changelog from the commits; when it merges, builds the darwin, linux and windows archives (amd64, arm64) and their checksums into the draft release, then publishes it as a prerelease; a maintainer marks the blessed release as latest for `atm update` and `install.sh` |
-| `auto-merge.yml` | every PR to `main` | always | manages `review-required` and arms auto-merge (below) |
+| `auto-merge.yml` | every PR to `main` | always | manages `review-required` and `review-completed`, and arms or disarms auto-merge (below) |
 
 `go.yml` starts on every PR and skips its test jobs when its paths did not
 change. It reports one summary check that is always present: **Go checks**.
-The summary fails when tests fail or are cancelled (`scripts/ci-summary.sh`),
-or when the no-mistakes review check does not clear the current PR head.
-Otherwise it passes, including when no Go test job is needed. It is the
+The summary is green when its tests and lint passed or were skipped, red when
+they failed or were cancelled (`scripts/ci-summary.sh`). It is the
 required check on `main`; a path-filtered workflow that never starts would
 leave its check pending and block the merge.
 
@@ -87,9 +86,12 @@ Risk reviewed:
 
 The label is the switch; the comment is the record.
 
-A PR with `no-mistakes(...)` commits gets the `review-required` label and a
-red **Go checks**. The CoS clears its current head through
-[the review circuit](skills/no-mistakes-review/SKILL.md).
+A PR with `no-mistakes(...)` commits gets the `review-required` label and is
+not armed. The CoS has it reviewed through
+[the review circuit](skills/no-mistakes-review/SKILL.md), then adds
+`review-completed`, which arms it under the risk rules above, or
+`pr-discarded`, which never arms and disarms it. Any push removes
+`review-completed`, so the new head is reviewed again.
 
 ## What is accepted
 

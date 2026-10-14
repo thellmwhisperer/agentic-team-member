@@ -36,8 +36,8 @@ it.
 
 | Mechanism | Where | What it does |
 |-----------|-------|--------------|
-| `go.yml` | GitHub Actions | Change-filtered tests and required PR review check; see [CI](../CONTRIBUTING.md#ci) |
-| `auto-merge.yml` + `scripts/arm-auto-merge.sh` | GitHub Actions | Manages `review-required` and arms auto-merge with `AUTO_MERGE_TOKEN`, a fine-grained token for this repository only. The workflow token is never used: merges made with it start no workflow and close no issue |
+| `go.yml` | GitHub Actions | Change-filtered tests and lint, summarised in the required **Go checks**; see [CI](../CONTRIBUTING.md#ci) |
+| `auto-merge.yml` + `scripts/arm-auto-merge.sh` | GitHub Actions | Manages `review-required` and `review-completed`, honours `pr-discarded`, and arms auto-merge with `AUTO_MERGE_TOKEN`, a fine-grained token for this repository only. The workflow token is never used: merges made with it start no workflow and close no issue |
 | `scripts/test.sh`, `scripts/lint.sh` | local and the gate | Contribution checks; see [Contributing](../CONTRIBUTING.md) |
 | `.githooks/pre-commit` | local, after `git config core.hooksPath .githooks` | The same slopslint check |
 | `.no-mistakes.yaml` | no-mistakes | Runs the contribution checks, tells the reviewer that only a defect against the issue's criteria or the checks is a finding, and allows one re-run of a CI check GitHub cancelled without a verdict |
@@ -60,5 +60,6 @@ next time.
 
 Read `git log --oneline origin/main..<branch>` and the run's `report.json` for
 the unit commit, any cuts and follow-ups. If the gate added a
-`no-mistakes(...)` commit, follow [the bounded review circuit](../skills/no-mistakes-review/SKILL.md)
-before clearing the current PR head.
+`no-mistakes(...)` commit, the PR carries `review-required`: follow
+[the review circuit](../skills/no-mistakes-review/SKILL.md), then add
+`review-completed` to merge it or `pr-discarded` to stop it.

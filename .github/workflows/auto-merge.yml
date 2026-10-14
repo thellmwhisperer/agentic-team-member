@@ -14,6 +14,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: scripts/arm-auto-merge.sh "${{ github.event.pull_request.number }}"
+      - run: scripts/arm-auto-merge.sh "${{ github.event.pull_request.number }}" "${{ github.event.action }}"
         env:
           GH_TOKEN: ${{ secrets.AUTO_MERGE_TOKEN }}
