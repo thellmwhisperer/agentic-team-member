@@ -183,7 +183,8 @@ func init() {
 	os.Exit(1)
 }
 
-// gitAt runs git in the directory dir is open on, through cloneGitHelper, so that no path names it.
+// gitAt runs git in the directory dir is open on, through cloneGitHelper, so that no path names it, on that
+// directory's own .git: without one git fails rather than answer for a repository around it.
 func gitAt(dir *os.File, args ...string) (string, error) {
 	exe, err := os.Executable()
 	if err != nil {
@@ -193,6 +194,7 @@ func gitAt(dir *os.File, args ...string) (string, error) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, exe, append([]string{cloneGitHelper}, args...)...)
 	cmd.ExtraFiles = []*os.File{dir}
+	cmd.Env = append(os.Environ(), "GIT_DIR=.git")
 	out, err := cmd.Output()
 	return strings.TrimSpace(string(out)), err
 }
@@ -218,7 +220,7 @@ func remove(dir string, lock *os.File) error {
 }
 
 // remove deletes the selected clone and its sidecars while its lock and directory still hold their names: its
-// contents through the directory it selected, then its emptied name.
+// contents through the directory it selected, read-only ones too, then its emptied name.
 func (s cloneSelection) remove(lock *os.File) error {
 	if !s.holds(s.name+".lock", lock) {
 		return nil // another clone's lock now
@@ -237,7 +239,7 @@ func (s cloneSelection) remove(lock *os.File) error {
 	}
 	entries, err := fs.ReadDir(clone.FS(), ".")
 	for _, e := range entries {
-		err = errors.Join(err, clone.RemoveAll(e.Name()))
+		err = errors.Join(err, drop(clone, e.Name(), nil))
 	}
 	if err != nil {
 		return err
