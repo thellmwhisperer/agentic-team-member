@@ -26,7 +26,7 @@ Optional. It says which agent you run everywhere.
 
 | Key | Meaning |
 |-----|---------|
-| `harness` | The coding agent CLI: `claude`, `codex`, `opencode`, `pi` or `cursor` (local models go through `pi`). Any other fails the run |
+| `harness` | The coding agent CLI: `claude`, `codex`, `opencode`, `pi`, `cursor` or `hermes` (local models go through `pi`). Any other fails the run |
 | `model` | Its model; empty is the CLI's default |
 | `effort` | Its effort; empty is the CLI's default |
 
@@ -46,6 +46,31 @@ Cursor has no effort flag. Leave `effort` unset in every configuration layer
 and put it in a parameterized model, for example `model: 'grok[effort=high]'`.
 A configured effort fails before cloning with
 `cursor has no effort flag: put it in the model, as '<model>[effort=<effort>]'`.
+
+### Hermes
+
+Hermes has no native headless mode ATM uses: ATM speaks ACP (Agent Client
+Protocol, JSON-RPC over the agent's stdin and stdout) with it itself, without
+acpx. It starts `hermes --ignore-rules acp` in the clone, with pipes and no
+terminal, then sends `initialize` (protocol version 1, no `fs`, no
+`terminal`), `session/new` in the clone with no MCP servers, and the brief as
+one `session/prompt`. The step ends at the prompt's reply: `end_turn` is a
+finished agent, any other `stopReason`, or a JSON-RPC error, fails the step
+with it. Any other request from the agent gets `-32601 method not found`.
+
+Permission requests get the first `allow_once` option when every path the
+request names, each whole, a relative one the clone's, is inside the clone and
+no command in it reaches outside, as the check after each step reads it;
+else the first `reject_once`. Never an `*_always` option. Each answer is a
+line in the agent's log. What it does without asking is the check after the
+step.
+
+The ponytail skill goes in the brief's text; the agent's report proves it
+with `"skill": "ponytail"`. Hermes takes its model and effort from its own
+config: a `model` or `effort` in any layer fails before cloning with
+`hermes takes model and effort from its own config; unset them in .atm.yaml`.
+The next ACP agent is one entry in `config.ACP`: its command line and that
+error.
 
 ## `.atm.yaml`
 
@@ -168,7 +193,7 @@ Flags go before or after the issue. A second issue is an error.
 | Flag | Default | Meaning |
 |------|---------|---------|
 | `--base-ref <ref>` | `main` | The ref the run starts from, resolved in the repository |
-| `--harness <cli>` | from the layers | `claude`, `codex`, `opencode`, `pi` or `cursor` |
+| `--harness <cli>` | from the layers | `claude`, `codex`, `opencode`, `pi`, `cursor` or `hermes` |
 | `--model <model>` | from the layers | The agent's model |
 | `--effort <effort>` | from the layers | The agent's effort |
 | `--harness-arg <arg>` | none | One argument for the agent CLI, before the brief. Repeatable |
