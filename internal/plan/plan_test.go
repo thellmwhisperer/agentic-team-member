@@ -108,6 +108,9 @@ func TestReadSaysWhichTicketsCanLaunch(t *testing.T) {
 		{"a passed ticket with its issue closed is gone", gh{closed: map[int]bool{2: true}},
 			`{"version":1,"max_active":2,"tickets":[{"issue":1,"conflicts_with":[2]},{"issue":2}]}`,
 			[]string{runLine("2", "passed", "delivery")}, Status{Open: ints(1), Ready: ints(1), Free: 2}},
+		{"a running ticket with its issue closed is gone", gh{closed: map[int]bool{2: true}},
+			`{"version":1,"max_active":2,"tickets":[{"issue":1,"conflicts_with":[2]},{"issue":2}]}`,
+			[]string{runLine("2", "running", "delivery")}, Status{Open: ints(1), Ready: ints(1), Free: 2}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			for _, l := range []*[]int{&c.want.CosHolds, &c.want.JaviHolds, &c.want.Working} {
