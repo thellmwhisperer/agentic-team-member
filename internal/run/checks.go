@@ -188,11 +188,7 @@ func drop(root *os.Root, p string, had map[string]bool) error {
 			if err != nil || !d.IsDir() {
 				return err
 			}
-			f, err := root.Open(q)
-			if err != nil {
-				return err
-			}
-			return errors.Join(f.Chmod(0o700), f.Close())
+			return root.Chmod(q, 0o700)
 		})
 	}
 	if err == nil {
@@ -220,19 +216,14 @@ func unlink(root *os.Root, p string, rm func(string) error) error {
 		return err
 	}
 	dir := path.Dir(p)
-	f, openErr := root.Open(dir)
-	if openErr != nil {
-		return errors.Join(err, openErr)
-	}
-	defer f.Close()
-	info, statErr := f.Stat()
+	info, statErr := root.Stat(dir)
 	if statErr == nil {
-		statErr = f.Chmod(info.Mode() | 0o700)
+		statErr = root.Chmod(dir, info.Mode()|0o700)
 	}
 	if statErr != nil {
 		return errors.Join(err, statErr)
 	}
-	return errors.Join(rm(p), f.Chmod(info.Mode()))
+	return errors.Join(rm(p), root.Chmod(dir, info.Mode()))
 }
 
 // moved is an error when HEAD in clone is not want: who made commits.
