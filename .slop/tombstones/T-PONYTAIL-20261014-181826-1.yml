@@ -1,0 +1,18 @@
+schema: 1
+id: T-PONYTAIL-20261014-181826-1
+status: accepted
+category: alien_code
+title: "Cut the pre-review clean(clone, head, \"the tree to review\") call: onBranch has just committed everything and set HEAD, and the checks after the review (whole snapshot, git status, moved) still block on any leftover dirt or HEAD change; the one-caller clean helper is inlined into those post-review checks."
+created_at: 2026-10-14
+incident:
+  pattern: "Cut the pre-review clean(clone, head, \"the tree to review\") call: onBranch has just committed everything and set HEAD, and the checks after the review (whole snapshot, git status, moved) still block on any leftover dirt or HEAD change; the one-caller clean helper is inlined into those post-review checks."
+  what_went_wrong: "An ATM run wrote it and ATM's ponytail pass cut it before delivery."
+  root_cause: "The coding agent wrote more than the issue needed."
+  rule_established: "Cut by the ponytail pass; it does not come back."
+  evidence:
+    - family: speculative_hardening
+      example: "Cut the pre-review clean(clone, head, \"the tree to review\") call: onBranch has just committed everything and set HEAD, and the checks after the review (whole snapshot, git status, moved) still block on any leftover dirt or HEAD change; the one-caller clean helper is inlined into those post-review checks."
+      artifact: "internal/run/contract_review.go"
+match:
+  family: speculative_hardening
+  artifact: "internal/run/contract_review.go"

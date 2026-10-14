@@ -27,17 +27,11 @@ func (a agent) reviewContract(clone, base, head, tombs string, i Issue) error {
 }
 
 func (a agent) contractReview(clone, base, head, tombs string, i Issue, rec map[string]any) error {
-	if err := clean(clone, head, "the tree to review"); err != nil {
-		return err
-	}
 	diff, err := git(clone, "diff", base, head)
 	if err != nil {
 		return err
 	}
 	text := reviewBrief(intent(i.Text, tombs), base, head, diff)
-	if err := os.WriteFile(filepath.Join(a.dir, "brief-contract-review.md"), []byte(text), 0o644); err != nil {
-		return err
-	}
 	if _, err := placeSkill(clone, a.Harness, "ponytail-review"); err != nil { // ATM's file, before the snapshot
 		return err
 	}
@@ -53,16 +47,11 @@ func (a agent) contractReview(clone, base, head, tombs string, i Issue, rec map[
 	if e == nil && now != tree {
 		e = errors.New("the contract reviewer changed the clone")
 	}
-	return errors.Join(err, e, clean(clone, head, "the contract reviewer"))
-}
-
-// clean is an error when clone is not at commit head with nothing to commit, who to blame.
-func clean(clone, head, who string) error {
-	left, err := git(clone, "status", "--porcelain")
-	if err == nil && left != "" {
-		err = fmt.Errorf("%s left uncommitted changes: %s", who, left)
+	left, dirty := git(clone, "status", "--porcelain")
+	if dirty == nil && left != "" {
+		dirty = errors.New("the contract reviewer left uncommitted changes: " + left)
 	}
-	return errors.Join(err, moved(clone, head, who))
+	return errors.Join(err, e, dirty, moved(clone, head, "the contract reviewer"))
 }
 
 // approved is nil when the contract reviewer's report r, on base commit base and HEAD head, approves them, and
