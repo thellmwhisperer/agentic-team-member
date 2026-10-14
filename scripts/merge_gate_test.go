@@ -82,9 +82,14 @@ func fakeGH(args []string) int {
 	}
 	commits := strings.Split(strings.TrimSuffix(os.Getenv("FAKE_GH_COMMITS"), "\n"), "\n")
 	if len(args) > 0 && args[0] == "api" {
+		if len(args) > 1 && !strings.HasSuffix(args[1], "/commits") {
+			fmt.Println(os.Getenv("FAKE_GH_TOTAL"))
+			return 0
+		}
 		if !slices.Contains(args, "--paginate") {
 			commits = commits[:min(len(commits), 100)]
 		}
+		commits = commits[:min(len(commits), 250)]
 		fmt.Println(strings.Join(commits, "\n"))
 		return 0
 	}
@@ -149,6 +154,7 @@ func (p pr) run(t *testing.T, command string) result {
 		commits = append(commits, "commit "+subject)
 	}
 	t.Setenv("FAKE_GH_COMMITS", strings.Join(commits, "\n"))
+	t.Setenv("FAKE_GH_TOTAL", fmt.Sprint(len(p.subjects)))
 	t.Setenv("FAKE_GH_HEAD", cmp.Or(p.live, p.head))
 	t.Setenv("FAKE_GH_BODY", cmp.Or(p.body, lowRisk))
 	t.Setenv("FAKE_GH_LABELS", p.labels)
@@ -194,6 +200,18 @@ func TestReviewBlocksNoMistakesCommitAfterFirstHundred(t *testing.T) {
 	if r.err == nil || !strings.Contains(r.out, "No-mistakes reviewed: "+newHead) ||
 		!strings.Contains(r.calls, "--paginate") {
 		t.Fatalf("review = %q, %v; calls = %q; want blocked after all commits", r.out, r.err, r.calls)
+	}
+}
+
+func TestReviewFailsClosedBeyondGitHubCommitLimit(t *testing.T) {
+	subjects := make([]string, 251)
+	for i := range subjects {
+		subjects[i] = "feat: ordinary commit"
+	}
+	subjects[250] = "no-mistakes(ci): added by the gate"
+	r := pr{head: newHead, subjects: subjects}.run(t, review)
+	if r.err == nil || !strings.Contains(r.out, "commit list is incomplete: saw 250 of 251 commits") {
+		t.Fatalf("review = %q, %v; want fail-closed incomplete list", r.out, r.err)
 	}
 }
 

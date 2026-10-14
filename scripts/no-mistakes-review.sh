@@ -10,15 +10,20 @@ details=$(gh pr view "$1" --repo "$GITHUB_REPOSITORY" --json headRefOid,comments
   (.comments[] | .author.login as $a | .body | split("\n")[] | "comment \($a) \(.)")')
 commits=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$1/commits" --paginate --jq '
   .[] | "commit \(.commit.message | split("\n")[0])"')
+total=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$1" --jq '.commits')
 printf '%s\n%s\n' "$details" "$commits" |
-  awk -v login="$cos" -v want="${2:-}" '
+  awk -v login="$cos" -v want="${2:-}" -v total="$total" '
     { sub(/\r$/, "") }
     $1 == "head" { head = $2 }
-    $1 == "commit" && $2 ~ /^no-mistakes\(/ { nm = 1 }
+    $1 == "commit" { listed++; if ($2 ~ /^no-mistakes\(/) nm = 1 }
     $1 == "comment" && $2 == login && $3 == "No-mistakes" && $4 == "reviewed:" && NF == 5 { ok[$5] = 1 }
     END {
       if (head == "") { print "could not read the head of the PR" > "/dev/stderr"; exit 1 }
       if (want != "" && want != head) { print "the PR head moved to " head ", past " want > "/dev/stderr"; exit 1 }
+      if (total !~ /^[0-9]+$/ || listed != total + 0) {
+        print "commit list is incomplete: saw " listed " of " total " commits" > "/dev/stderr"
+        exit 1
+      }
       if (!nm) { print head, "none"; exit }
       if (head in ok) { print head, "cleared"; exit }
       print "no-mistakes commits: waiting for `No-mistakes reviewed: " head "` from " login > "/dev/stderr"
