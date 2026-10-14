@@ -3,7 +3,6 @@
 package plan
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -12,7 +11,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -104,7 +102,7 @@ func GitHub(repo string) func(int) (Issue, error) {
 }
 
 var (
-	dependsSection = regexp.MustCompile(`(?ms)^##[ \t]+Depends on[ \t]*\r?$(.*?)(?:^#|\z)`)
+	dependsSection = regexp.MustCompile(`(?ms)^##[ \t]+Depends on[ \t]*\r?$(.*?)(?:^##[ \t]|\z)`)
 	issueRef       = regexp.MustCompile(`#(\d+)`)
 )
 
@@ -115,7 +113,7 @@ func Read(p Plan, root string, issue func(int) (Issue, error)) (Status, error) {
 	if err != nil {
 		return s, err
 	}
-	s.Free = max(*p.MaxActive-agents, 0)
+	s.Free = *p.MaxActive - agents
 	r := &reader{issue: issue, issues: map[int]Issue{}, last: last}
 	for _, t := range p.Tickets {
 		n := *t.Issue
@@ -184,29 +182,9 @@ func (r *reader) blocked(p Plan, t Ticket) bool {
 // runs reads root's .atm/runs.jsonl: how the last run of each issue stands, and how many runs are in their agent.
 func runs(root string) (last map[string]string, agents int, err error) {
 	last = map[string]string{}
-	f, err := os.Open(filepath.Join(root, ".atm", "runs.jsonl"))
-	if errors.Is(err, os.ErrNotExist) {
-		return last, 0, nil
-	}
+	all, err := run.RecordedRuns(root)
 	if err != nil {
 		return last, 0, err
-	}
-	defer func() { _ = f.Close() }()
-	var all []run.Outcome
-	at := map[string]int{} // a run's later line stands for it, as in the background process
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 64*1024), 1024*1024)
-	for sc.Scan() {
-		var o run.Outcome
-		if json.Unmarshal(sc.Bytes(), &o) != nil {
-			continue
-		}
-		if i, ok := at[o.Run]; ok {
-			all[i] = o
-			continue
-		}
-		at[o.Run] = len(all)
-		all = append(all, o)
 	}
 	for _, o := range all {
 		last[o.Issue] = o.Outcome
@@ -214,7 +192,7 @@ func runs(root string) (last map[string]string, agents int, err error) {
 			agents++
 		}
 	}
-	return last, agents, sc.Err()
+	return last, agents, nil
 }
 
 const (
@@ -224,17 +202,17 @@ const (
 
 // Follow reads the plan at path and its status every minute until no ticket is open, then writes plan_closed.
 // It writes the status to out, a JSON line, when it changes, and again every 30 minutes while a ticket can launch
-// or the CoS holds one. Errors go to errOut and it tries again.
+// or the CoS holds one. Issue and runs-file errors go to errOut and it tries again.
 func Follow(path, root string, issue func(int) (Issue, error), out, errOut io.Writer, now func() time.Time,
 	sleep func(time.Duration)) error {
 	var last []byte
 	var wrote time.Time
 	for ; ; sleep(poll) {
 		p, err := Load(path)
-		var s Status
-		if err == nil {
-			s, err = Read(p, root, issue)
+		if err != nil {
+			return err
 		}
+		s, err := Read(p, root, issue)
 		if err != nil {
 			_, _ = fmt.Fprintln(errOut, "atm:", err)
 			continue
