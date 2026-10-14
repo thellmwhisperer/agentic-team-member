@@ -126,18 +126,24 @@ func TestRunChainsAFollowUpOnTheIssueUpToThreeUnits(t *testing.T) {
 	t.Setenv("FAKE_PONYTAIL_WORK", "grep -v extra a.txt > cut; mv cut a.txt")
 	t.Setenv("FAKE_PONYTAIL_REPORT", cut)
 	var out bytes.Buffer
-	if err := Run("t", []string{issueFile(t, followUpIssue)}, &out, io.Discard); err != nil {
-		t.Fatal(err)
+	err := Run("t", []string{issueFile(t, followUpIssue)}, &out, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "A retry runs once after a timeout.") {
+		t.Fatalf("want the run blocked on the criterion unit 3 leaves unmet, got %v", err)
 	}
-	agents := ends(t, &out, "agent")
+	agents := ends(t, bytes.NewBuffer(out.Bytes()), "agent")
 	if len(agents) != 3 || agents[2]["unit"] != float64(3) || agents[2]["state"] != "passed" {
 		t.Fatalf("want three units, got %v", agents)
 	}
-	b, _ := os.ReadFile(got)
-	want := "ponytail: 1 cuts\nfeat: Retry on timeout\nfeat: Retry on timeout\n" +
-		"fix: Retry on timeout\ninit\n"
-	if string(b) != want {
-		t.Fatalf("want each unit committed on the one before, then the cut, got\n%s\nwant\n%s", b, want)
+	if p := ends(t, bytes.NewBuffer(out.Bytes()), "ponytail"); len(p) != 0 {
+		t.Fatalf("want no ponytail cut on a blocked run, got %v", p)
+	}
+	if _, err := os.Stat(got); !os.IsNotExist(err) {
+		t.Fatalf("want no delivery on a blocked run, got %v", err)
+	}
+	clone, _ := ends(t, &out, "clone")[0]["clone"].(string)
+	want := "feat: Retry on timeout\nfeat: Retry on timeout\nfix: Retry on timeout\ninit"
+	if b := gitT(t, clone, "log", "--format=%s"); b != want {
+		t.Fatalf("want each unit committed on the one before, got\n%s\nwant\n%s", b, want)
 	}
 	brief, err := os.ReadFile(filepath.Join(root, ".atm", "runs", "t", "brief-unit-2.md"))
 	if err != nil || !strings.Contains(string(brief), "`c1_test.sh`") {
