@@ -1,13 +1,16 @@
 package run
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -98,8 +101,8 @@ func sweep(clones, repo string) {
 		if err != nil || !locked {
 			continue
 		}
-		if kept(dir, repo) {
-			_ = lock.Close()
+		if kept(dir, repo, lock) {
+			_ = closeClone(lock)
 			continue
 		}
 		_ = remove(dir, lock)
@@ -116,22 +119,29 @@ func release(dir, repo string) error {
 	if err != nil || !locked {
 		return err
 	}
-	if kept(dir, repo) {
-		return lock.Close()
+	if kept(dir, repo, lock) {
+		return closeClone(lock)
 	}
 	return remove(dir, lock)
 }
 
 // kept says whether the clone at dir delivered and its PR is still open: its branch is not merged into its
-// base, as fetched again from the source, and GitHub, when configured, does not say its PR is closed.
-func kept(dir, repo string) bool {
-	b, err := os.ReadFile(dir + ".delivered")
+// base, as fetched again from the source, and GitHub, when configured, does not say its PR is closed. The
+// clone lock selected, on Unix, is the one asked: its .delivered read beside it, git run in its open directory.
+func kept(dir, repo string, lock *os.File) bool {
+	delivered := func() ([]byte, error) { return os.ReadFile(dir + ".delivered") }
+	gitIn, ghDir := func(args ...string) (string, error) { return git(dir, args...) }, dir
+	if s, ok := selected(lock); ok {
+		delivered = func() ([]byte, error) { return s.parent.ReadFile(s.name + ".delivered") }
+		gitIn, ghDir = func(args ...string) (string, error) { return gitAt(s.dir, args...) }, ""
+	}
+	b, err := delivered()
 	if err != nil {
 		return false
 	}
 	branch, base, _ := strings.Cut(strings.TrimSpace(string(b)), " ")
-	if _, err := git(dir, "fetch", "-q", "origin", base); err == nil {
-		if merged, _ := git(dir, "branch", "--merged", "FETCH_HEAD", "--list", branch); merged != "" {
+	if _, err := gitIn("fetch", "-q", "origin", base); err == nil {
+		if merged, _ := gitIn("branch", "--merged", "FETCH_HEAD", "--list", branch); merged != "" {
 			return false
 		}
 	}
@@ -139,11 +149,48 @@ func kept(dir, repo string) bool {
 		return true
 	}
 	// A gh that cannot tell keeps the clone: the next run asks again.
-	state, err := command(dir, "gh", "pr", "view", branch, "--repo", repo, "--json", "state", "--jq", ".state")
+	state, err := command(ghDir, "gh", "pr", "view", branch, "--repo", repo, "--json", "state", "--jq", ".state")
 	return err != nil || state == "OPEN"
 }
 
+// cloneGitHelper is atm's one hidden entry, gitAt's: atm cloneGitHelper <git args> changes into the directory
+// open on fd 3, closes it and becomes git there. init reaches it before any command line parsing.
+const cloneGitHelper = "__atm-clone-git"
+
+func init() {
+	if len(os.Args) < 2 || os.Args[1] != cloneGitHelper {
+		return
+	}
+	err := syscall.Fchdir(3)
+	if err == nil {
+		_ = syscall.Close(3)
+		var git string
+		if git, err = exec.LookPath("git"); err == nil {
+			err = syscall.Exec(git, append([]string{"git"}, os.Args[2:]...), os.Environ())
+		}
+	}
+	fmt.Fprintln(os.Stderr, "atm:", err)
+	os.Exit(1)
+}
+
+// gitAt runs git in the directory dir is open on, through cloneGitHelper, so that no path names it.
+func gitAt(dir *os.File, args ...string) (string, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, exe, append([]string{cloneGitHelper}, args...)...)
+	cmd.ExtraFiles = []*os.File{dir}
+	out, err := cmd.Output()
+	return strings.TrimSpace(string(out)), err
+}
+
 func remove(dir string, lock *os.File) error {
+	if s, ok := selected(lock); ok {
+		return errors.Join(s.remove(lock), closeClone(lock))
+	}
 	opened, err := lock.Stat()
 	if err != nil {
 		return errors.Join(err, lock.Close())
@@ -158,4 +205,50 @@ func remove(dir string, lock *os.File) error {
 	}
 	err = errors.Join(os.RemoveAll(dir+".pid"), os.RemoveAll(dir+".delivered"), os.RemoveAll(dir+".lock"))
 	return errors.Join(err, lock.Close())
+}
+
+// remove deletes the selected clone and its sidecars while its lock and directory still hold their names: its
+// contents through the directory it selected, then its emptied name.
+func (s cloneSelection) remove(lock *os.File) error {
+	if !s.holds(s.name+".lock", lock) {
+		return nil // another clone's lock now
+	}
+	replaced := fmt.Errorf("%s was replaced since it was selected: kept", s.name)
+	if !s.holds(s.name, s.dir) {
+		return replaced
+	}
+	clone, err := s.parent.OpenRoot(s.name)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = clone.Close() }()
+	if at, err := clone.Stat("."); !sameAs(s.dir, at, err) {
+		return replaced
+	}
+	entries, err := fs.ReadDir(clone.FS(), ".")
+	for _, e := range entries {
+		err = errors.Join(err, clone.RemoveAll(e.Name()))
+	}
+	if err != nil {
+		return err
+	}
+	if !s.holds(s.name, s.dir) {
+		return replaced
+	}
+	if err := s.parent.Remove(s.name); err != nil {
+		return err
+	}
+	return errors.Join(s.parent.RemoveAll(s.name+".pid"), s.parent.RemoveAll(s.name+".delivered"),
+		s.parent.RemoveAll(s.name+".lock"))
+}
+
+// holds says whether name in the selected parent is the file f is open on, not a symlink to it.
+func (s cloneSelection) holds(name string, f *os.File) bool {
+	at, err := s.parent.Lstat(name)
+	return sameAs(f, at, err)
+}
+
+func sameAs(f *os.File, at fs.FileInfo, err error) bool {
+	held, heldErr := f.Stat()
+	return err == nil && heldErr == nil && os.SameFile(at, held)
 }
