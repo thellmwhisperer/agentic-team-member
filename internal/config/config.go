@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -35,6 +36,20 @@ type Config struct {
 	TestPatterns []string `yaml:"test_patterns"`
 	DocsPatterns []string `yaml:"docs_patterns"`
 	Delivery     string   `yaml:"delivery"`
+	AgentTimeout Timeout  `yaml:"agent_timeout"` // optional; 0 when absent, the run's default
+}
+
+// Timeout is agent_timeout: a positive duration in Go's syntax, as 45m.
+type Timeout time.Duration
+
+// UnmarshalYAML parses n with time.ParseDuration. yaml never calls it for a null, which Load rejects.
+func (d *Timeout) UnmarshalYAML(n *yaml.Node) error {
+	v, err := time.ParseDuration(n.Value)
+	if err != nil || v <= 0 {
+		return fmt.Errorf("agent_timeout %q: want a positive duration, as 45m or 1h", n.Value)
+	}
+	*d = Timeout(v)
+	return nil
 }
 
 // required is every key .atm.yaml must declare; an empty value is a deliberate "none".
@@ -61,6 +76,9 @@ func Load(root, home string, flags Agent) (Config, error) {
 	}
 	if len(missing) > 0 {
 		return c, fmt.Errorf("config incomplete: %s lacks %s", project, strings.Join(missing, ", "))
+	}
+	if _, ok := keys["agent_timeout"]; ok && c.AgentTimeout == 0 {
+		return c, errors.New("agent_timeout is empty: want a positive duration, as 45m or 1h")
 	}
 	if c.TestFile != "" && !strings.Contains(c.TestFile, "{file}") && !strings.Contains(c.TestFile, "{dir}") {
 		return c, fmt.Errorf("test_file %q: want {file} or {dir} in it", c.TestFile)

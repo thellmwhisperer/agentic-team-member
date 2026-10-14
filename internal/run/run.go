@@ -56,7 +56,7 @@ func Run(label string, args []string, out, summary io.Writer) (err error) {
 	if err != nil {
 		return err
 	}
-	a.Agent, a.root, a.dir = c.Agent, root, runDir(root, label)
+	a.Agent, a.root, a.dir, a.timeout = c.Agent, root, runDir(root, label), time.Duration(c.AgentTimeout)
 	r := newVerdict(a.dir, out)
 	defer func() { r.resumable(a.dir); err = r.finish(err, summary) }()
 	var i Issue
@@ -436,7 +436,7 @@ func runDir(root, label string) string { return filepath.Join(root, ".atm", "run
 // .atm.yaml and a process group for command are the upgrades.
 var timeout = 10 * time.Minute
 
-// agentTimeout bounds the agent. ponytail: one fixed ceiling; a flag or a key in .atm.yaml is the upgrade.
+// agentTimeout bounds the agent when .atm.yaml sets no agent_timeout.
 var agentTimeout = 30 * time.Minute
 
 // command runs name in dir, "" for the working directory, and returns its trimmed stdout; a failure or a
