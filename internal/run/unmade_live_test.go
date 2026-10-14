@@ -15,11 +15,7 @@ func TestChecksRestoresIgnoredBytesBeforeInstall(t *testing.T) {
 			commitBase(t, root, ".gitignore", "dep/\n")
 			runDir := checksStashRunDir(t, root)
 			dir, sha := checksStashClone(t, root)
-			t.Cleanup(func() {
-				if err := release(dir, ""); err != nil {
-					t.Error(err)
-				}
-			})
+			t.Cleanup(func() { closeCloneLease(dir) })
 			write := func(name string, data []byte) {
 				t.Helper()
 				if err := os.WriteFile(filepath.Join(dir, name), data, 0o600); err != nil {
@@ -54,7 +50,8 @@ func TestChecksRestoresIgnoredBytesBeforeInstall(t *testing.T) {
 			write("a.txt", []byte("fixed\n"))
 			write("a_test.sh", []byte("test -e dep/link && test \"$(cat a.txt)\" = fixed\n"))
 			c := checksStashConfig(t, root)
-			c.Install = "set -x; test ! -e dep/link && cmp expected 'dep/state [x]\nfile' && test ! -L dep/state && { grep -q old dep/state && touch dep/link || true; }"
+			c.Install = "set -x; test ! -e dep/link && cmp expected 'dep/state [x]\nfile' && " +
+				"test ! -L dep/state && { grep -q old dep/state && touch dep/link || true; }"
 			result, err := checks(dir, runDir, sha, "fix", "a_test.sh", c)
 			t.Logf("Checks result: %+v", result)
 			if err != nil {
@@ -64,7 +61,8 @@ func TestChecksRestoresIgnoredBytesBeforeInstall(t *testing.T) {
 			if err != nil || string(b) != string(original) {
 				t.Fatalf("restored bytes = %q, error = %v", b, err)
 			}
-			t.Logf("restored bytes=%q; install observed no agent link and recreated it; proof rejected base and accepted fixed source", b)
+			t.Logf("restored bytes=%q; install observed no agent link and recreated it; "+
+				"proof rejected base and accepted fixed source", b)
 		})
 	}
 }
