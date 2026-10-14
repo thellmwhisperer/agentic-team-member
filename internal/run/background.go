@@ -779,8 +779,8 @@ func send(root string, req request, in <-chan Input, fn func(reply)) (again bool
 			return false, errors.New(r.Error)
 		}
 		fn(r)
-		if req.Cmd != "attach" {
-			return false, nil // run and runs each have one reply
+		if req.Cmd != "attach" || r.Run != nil {
+			return false, nil // run and runs each have one reply; attach's last says how the run ended
 		}
 	}
 }
