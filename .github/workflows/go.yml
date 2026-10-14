@@ -62,3 +62,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: scripts/ci-summary.sh "${{ needs.changes.result }}" "${{ needs.test.result }}"
+      # No-mistakes commits keep this check red until the CoS reviews this exact head.
+      - if: github.event_name == 'pull_request'
+        run: scripts/no-mistakes-review.sh "${{ github.event.pull_request.number }}" "${{ github.event.pull_request.head.sha }}"
+        env:
+          GH_TOKEN: ${{ github.token }}
