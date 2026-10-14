@@ -50,9 +50,10 @@ A configured effort fails before cloning with
 ## `.atm.yaml`
 
 The repository declares every command a run needs. ATM detects nothing and
-defaults nothing per language. Every key below is required: an empty value is
-a deliberate "none", a missing key fails with `config incomplete`. `harness`,
-`model` and `effort` may go here too, over your machine's file.
+defaults nothing per language. Every key in the table below is required: an
+empty value is a deliberate "none", a missing key fails with
+`config incomplete`. `harness`, `model` and `effort` may go here too, over
+your machine's file.
 
 | Key | Meaning |
 |-----|---------|
@@ -82,10 +83,12 @@ The `delivery` line hands the branch to
 [no-mistakes](https://github.com/kunchenguid/no-mistakes). Without `--yes` it
 only reports: whoever launched the run answers each finding.
 
-One key is optional: `agent_timeout`, the most an agent may run, as a positive
-Go duration such as `45m` or `1h`. Without it, `30m`. An empty, unitless, zero
-or negative value fails before the agent starts. Past it, the agent's group is
-killed and its step fails with `timed out after <agent_timeout>`.
+One key is optional: `agent_timeout`, the limit for each agent call, including
+the slop detector, as a positive Go duration such as `45m` or `1h`. Without it,
+the limit is `30m`. An empty, null, unitless, invalid, zero, negative or
+overflowed value fails before the agent starts. Past the limit, the agent's
+group is killed and its step fails with `timed out after <duration>`, where the
+duration is the effective limit.
 
 ## Commands
 

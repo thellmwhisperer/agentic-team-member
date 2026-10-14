@@ -245,7 +245,7 @@ or opens a pull request: that is the command's business.
 |------|-------|
 | Reading a GitHub issue | 60 s |
 | Each command (`install`, `test`, `typecheck`, `lint`, a proof) | 10 min |
-| Each agent call, the slop detector's included | 30 min |
+| Each agent call, the slop detector's included | See [`agent_timeout`](configuration.md) |
 | An agent that writes nothing on stdout or stderr | 10 min |
 | The delivery command | none |
 
