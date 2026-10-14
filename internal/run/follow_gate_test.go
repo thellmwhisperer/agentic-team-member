@@ -142,6 +142,7 @@ func TestFollowGateDataRejectsTruncatedFindings(t *testing.T) {
 	}
 	s, err := readGate(t, status, false)
 	if err == nil {
-		t.Fatalf("truncated findings[2] accepted: waiting=%q findings=%d; want a read error", s.FieldByName("waiting").String(), s.FieldByName("findings").Len())
+		t.Fatalf("truncated findings[2] accepted: waiting=%q findings=%d; want a read error",
+			s.FieldByName("waiting").String(), s.FieldByName("findings").Len())
 	}
 }

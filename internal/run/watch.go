@@ -319,13 +319,7 @@ func parseGate(status string) (s gateState) {
 			table = "steps"
 		case strings.HasPrefix(trimmed, "findings["):
 			table = "findings"
-			count, valid := strings.CutSuffix(strings.TrimPrefix(trimmed, "findings["), "]"+findingsTable)
-			n, err := strconv.Atoi(count)
-			if !valid || err != nil || n < 0 {
-				s.err = cmp.Or(s.err, fmt.Errorf("findings are not %s: %q", findingsTable, trimmed))
-			} else {
-				expectedFindings += n
-			}
+			expectedFindings += s.findingCount(trimmed)
 		case isKey:
 			if unquoted, err := strconv.Unquote(value); err == nil {
 				value = unquoted
@@ -344,6 +338,16 @@ func parseGate(status string) (s gateState) {
 		s.err = cmp.Or(s.err, fmt.Errorf("findings has %d rows, want %d", len(s.findings), expectedFindings))
 	}
 	return s
+}
+
+func (s *gateState) findingCount(header string) int {
+	count, valid := strings.CutSuffix(strings.TrimPrefix(header, "findings["), "]"+findingsTable)
+	n, err := strconv.Atoi(count)
+	if !valid || err != nil || n < 0 {
+		s.err = cmp.Or(s.err, fmt.Errorf("findings are not %s: %q", findingsTable, header))
+		return 0
+	}
+	return n
 }
 
 // finding adds to s a row of its gate's findings, `id,severity,file,action,description`, quoted where CSV quotes.
