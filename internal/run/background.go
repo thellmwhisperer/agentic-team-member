@@ -23,8 +23,8 @@ import (
 
 // The background process of a repository runs its runs, each in itself, so closing the terminal that started
 // one leaves it going. The first atm command that needs it starts it, as atm serve, and it listens on
-// .atm/atm.sock until it has had no run for idle. A client sends it one request, a JSON line, and reads JSON
-// lines back until it closes the connection. How each run ended goes to .atm/runs.jsonl.
+// .atm/atm.sock until it has had no run for idle. Requests and replies are JSON lines; send handles reply
+// completion. How each run ended goes to .atm/runs.jsonl.
 // ponytail: a Unix socket on Windows too, which Windows 10 and later have; a named pipe is the upgrade.
 
 // Outcome is a run of the background process: running, or how it ended.
@@ -779,8 +779,9 @@ func send(root string, req request, in <-chan Input, fn func(reply)) (again bool
 			return false, errors.New(r.Error)
 		}
 		fn(r)
+		// Attach's final Run is authoritative: closing with unread input can reset the socket on Linux.
 		if req.Cmd != "attach" || r.Run != nil {
-			return false, nil // run and runs each have one reply; attach's last says how the run ended
+			return false, nil
 		}
 	}
 }
