@@ -148,3 +148,66 @@ func TestRunPersistsTinyOutOfGoalWorkOfAnAdditionalUnit(t *testing.T) {
 		t.Fatalf("want unit 2's tiny out-of-goal follow-up in follow-ups.json, got %v", left)
 	}
 }
+
+func TestRunKeepsUnmetDependencyInTheResumeBundle(t *testing.T) {
+	root, _, out, err := threeUnits(t, "A retry runs once after a timeout.")
+	if err == nil || !strings.Contains(err.Error(), "A retry runs once after a timeout.") {
+		t.Fatalf("want a mandatory gap to block, got %v", err)
+	}
+	left := readFollowUps(t, root)
+	if len(left) != 1 {
+		t.Fatalf("want one mandatory gap, got %v", left)
+	}
+	dependency, _ := left[0]["dependency"].(string)
+	clone, _ := ends(t, out, "clone")[0]["clone"].(string)
+	before := gitT(t, clone, "rev-parse", "HEAD^")
+	if err := os.RemoveAll(clone); err != nil {
+		t.Fatal(err)
+	}
+	gitT(t, root, "fetch", "-q", filepath.Join(root, ".atm", "runs", "t", "resume", "work.bundle"),
+		"refs/atm/resume")
+	if got := gitT(t, root, "cat-file", "-t", dependency); got != "commit" {
+		t.Fatalf("want the exact child dependency recoverable without the clone, got %q", got)
+	}
+	if got := gitT(t, root, "rev-parse", "FETCH_HEAD^"); got != before {
+		t.Fatalf("want resume to replay unit 3 from %s, got %s", before, got)
+	}
+}
+
+func TestRunKeepsEvidenceForEveryMandatoryPendingFollowUp(t *testing.T) {
+	for _, unit := range []string{"1", "3"} {
+		t.Run("pending-from-unit-"+unit, func(t *testing.T) {
+			root := repo(t, "https://example.com/owner/repo.git", atmYAML)
+			t.Setenv("ATM_TEST_CRITERION", "A retry runs once after a timeout.")
+			t.Setenv("FAKE_AGENT_WORK", chainWork+`; if [ "$k" = `+unit+` ]; then `+
+				`mkdir -p .atm/follow-ups/2; echo 'test -f error.txt' > .atm/follow-ups/2/error_test.sh; `+
+				`printf '{"test_file":"a_test.sh","follow_ups":[{"title":"gap","red_test":"c%s_test.sh",`+
+				`"criterion":"A retry runs once after a timeout."},{"title":"error gap",`+
+				`"red_test":"error_test.sh","criterion":"The retry error is reported."}]}' "$k" `+
+				`> .atm/fake-report.json; fi`)
+			var out bytes.Buffer
+			err := Run("t", []string{issueFile(t, followUpIssue)}, &out, io.Discard)
+			if err == nil || !strings.Contains(err.Error(), "The retry error is reported.") ||
+				!strings.Contains(err.Error(), "A retry runs once after a timeout.") {
+				t.Fatalf("want both mandatory criteria to block, got %v", err)
+			}
+			left := readFollowUps(t, root)
+			if len(left) != 2 {
+				t.Fatalf("want two mandatory pending follow-ups, got %v", left)
+			}
+			clone, _ := ends(t, &out, "clone")[0]["clone"].(string)
+			dependency := gitT(t, clone, "rev-parse", "HEAD")
+			for _, f := range left {
+				diff, _ := f["diff"].(string)
+				cause, _ := f["cause"].(string)
+				criterion, _ := f["criterion"].(string)
+				test, _ := f["test"].(string)
+				if !strings.Contains(diff, "+u3") || !strings.Contains(cause, "unit 3") ||
+					!strings.Contains(cause, criterion) || f["dependency"] != dependency ||
+					f["verified"] != true || test == "" {
+					t.Errorf("want every mandatory gap's diff, cause, dependency and red test, got %v", f)
+				}
+			}
+		})
+	}
+}
