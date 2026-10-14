@@ -52,7 +52,8 @@ type agent struct {
 	config.Agent
 	args, env []string
 	root, dir string
-	watcher   string // the run's atm watch, which atm run --watcher names
+	watcher   string        // the run's atm watch, which atm run --watcher names
+	timeout   time.Duration // .atm.yaml's agent_timeout, 0 for agentTimeout
 }
 
 // flags adds the agent's flags to fs.
@@ -232,7 +233,8 @@ func (a agent) exec(clone, skill, path string, argv []string, stdin string) (*st
 	defer func() { _ = stderr.Close() }()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	ctx, cancel := context.WithTimeout(ctx, agentTimeout)
+	limit := cmp.Or(a.timeout, agentTimeout)
+	ctx, cancel := context.WithTimeout(ctx, limit)
 	defer cancel()
 	ctx, hush := context.WithCancelCause(ctx)
 	defer hush(nil)
@@ -250,19 +252,19 @@ func (a agent) exec(clone, skill, path string, argv []string, stdin string) (*st
 		heard: func() { quiet.Reset(agentSilence) }}
 	err = s.read(cmd, f, stderr, a.Harness)
 	quiet.Stop()
-	exit, cause := ended(ctx, cmd.ProcessState)
+	exit, cause := ended(ctx, cmd.ProcessState, limit)
 	return s, exit, cause, err
 }
 
-// ended is how the agent run under ctx ended, its exit, "" when it never ran, and the cause its step fails
-// with, "" when it exited 0.
-func ended(ctx context.Context, p *os.ProcessState) (exit, cause string) {
+// ended is how the agent run under ctx, bounded by limit, ended, its exit, "" when it never ran, and the cause
+// its step fails with, "" when it exited 0.
+func ended(ctx context.Context, p *os.ProcessState, limit time.Duration) (exit, cause string) {
 	switch {
 	case errors.Is(context.Cause(ctx), errSilent):
 		return "silent for " + Human(agentSilence), "the agent said nothing for " + Human(agentSilence) +
 			"; ATM stopped it"
 	case errors.Is(ctx.Err(), context.DeadlineExceeded):
-		exit = "timed out after " + Human(agentTimeout)
+		exit = "timed out after " + Human(limit)
 	case ctx.Err() != nil:
 		exit = "interrupted"
 	case p == nil:

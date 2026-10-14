@@ -82,6 +82,11 @@ The `delivery` line hands the branch to
 [no-mistakes](https://github.com/kunchenguid/no-mistakes). Without `--yes` it
 only reports: whoever launched the run answers each finding.
 
+One key is optional: `agent_timeout`, the most an agent may run, as a positive
+Go duration such as `45m` or `1h`. Without it, `30m`. An empty, unitless, zero
+or negative value fails before the agent starts. Past it, the agent's group is
+killed and its step fails with `timed out after <agent_timeout>`.
+
 ## Commands
 
 Run every command from inside the repository it works on.
