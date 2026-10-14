@@ -60,6 +60,5 @@ next time.
 
 Read `git log --oneline origin/main..<branch>` and the run's `report.json` for
 the unit commit, any cuts and follow-ups. If the gate added a
-`no-mistakes(...)` commit, the PR carries `review-required`: follow
-[the review circuit](../skills/no-mistakes-review/SKILL.md), then add
-`review-completed` to merge it or `pr-discarded` to stop it.
+`no-mistakes(...)` commit, follow
+[the review circuit](../skills/no-mistakes-review/SKILL.md) before merging.

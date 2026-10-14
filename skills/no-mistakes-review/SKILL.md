@@ -13,20 +13,23 @@ description: >
 no-mistakes commits (`no-mistakes(review|ci|lint|document|test): ...`) do not
 go through ponytail or another review in the delivery gate. A PR that has one
 merges only through three labels (Decision 7524). There is no unblocking
-comment, no red check and no particular user: the labels are the circuit.
+comment, no check made red by this review and no particular user: the labels
+are the circuit. [Go checks](../../CONTRIBUTING.md#ci) reports tests and lint.
 
 ## What the labels do
 
 - **`review-required` blocks the merge.** `scripts/arm-auto-merge.sh` reads
-  the PR's commits on every Auto-merge run. With any `no-mistakes(...)`
-  commit it adds `review-required` and does not arm auto-merge. If GitHub
+  the PR's commits. With any `no-mistakes(...)` commit awaiting review it adds
+  `review-required` and leaves auto-merge disabled. If GitHub
   lists fewer commits than the PR has, it fails closed the same way.
-- **`review-completed` merges it.** Adding the label runs Auto-merge, which
-  arms the merge bound to the head it read. Low or Medium risk merges by
-  itself; High still waits for its `Risk reviewed:` comment and the
-  `risk-reviewed` label.
-- **Any push removes `review-completed`.** A review covers one head: after a
-  new push the PR is not armed and needs a new review.
+- **`review-completed` allows auto-merge.** Adding the label triggers the
+  `labeled` event and arms the merge bound to the head detection read, subject
+  to [the risk rules and required checks](../../CONTRIBUTING.md#ci).
+  `review-required` can remain: removing it is not a workflow trigger and
+  does not replace `review-completed`.
+- **Any push invalidates the review.** On `synchronize`, a PR with any
+  `no-mistakes(...)` commit loses `review-completed` and is left unarmed,
+  even when the new commit is not from no-mistakes. Review covers one head.
 - **`pr-discarded` never merges.** Auto-merge never arms it, and disables
   auto-merge if it was armed.
 - A PR with no no-mistakes commits merges as before.
