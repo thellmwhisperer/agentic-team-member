@@ -10,8 +10,8 @@ description: >
 
 # Closing the loop when no-mistakes writes code
 
-no-mistakes commits (`no-mistakes(review|ci|lint|document|test): ...`) are
-never reviewed again and never go through ponytail. So a PR that has one
+no-mistakes commits (`no-mistakes(review|ci|lint|document|test): ...`) do not
+go through ponytail or another review in the delivery gate. A PR that has one
 cannot merge until this circuit runs once. There is no loop: at most one trim
 pass and one read-only review.
 
@@ -24,13 +24,15 @@ pass and one read-only review.
   `No-mistakes reviewed: <full head sha>` naming the current head. Any later
   commit changes the head, so an older comment no longer counts. Repository
   role is not authority.
+- If GitHub returns fewer commits than the PR reports, the check stays red;
+  a review comment cannot clear an incomplete commit list.
 - A PR with no no-mistakes commits merges as before. High risk still needs
   its `Risk reviewed:` comment and the `risk-reviewed` label.
 
 ## The circuit
 
-1. **Look at the size.** A signal, not a gate. Generated files are marked
-   `linguist-generated` in `.gitattributes` and left out:
+1. **Look at the size.** A signal, not a gate. Files marked
+   `linguist-generated` in `.gitattributes` (currently `go.sum`) are left out:
    `git diff --stat <first-nm>^ <head> -- . ':(exclude,attr:linguist-generated)'`.
 2. **Trim.** Launch one agent with the issue text and only the no-mistakes
    commits (`git log --oneline origin/main..<head> --grep '^no-mistakes('`,

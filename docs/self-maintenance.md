@@ -7,7 +7,7 @@ it.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/self-maintenance-dark.svg">
-  <img alt="The loop. An issue with a red test goes to an ATM run. FAIL goes back to the issue. PASS goes to the no-mistakes gate; its findings go to whoever launched the run, who answers them, then the gate opens a PR. A Low or Medium risk PR gets auto-merge; a High risk one waits for the risk-reviewed label. Merged on main, the issue closes." src="assets/self-maintenance-light.svg" width="900">
+  <img alt="The loop. An issue with a red test goes to an ATM run. FAIL goes back to the issue. PASS goes to the no-mistakes gate; its findings go to whoever launched the run, who answers them, then the gate opens a PR. Required risk or no-mistakes review precedes auto-merge. Merged on main, the issue closes." src="assets/self-maintenance-light.svg" width="900">
 </picture>
 
 ## The loop
@@ -27,17 +27,17 @@ it.
    Review, test, lint and document run as fenced model steps. The reviewer
    only reports (`auto_fix.review: 0`); whoever launched the run answers each
    finding, fixing real defects and dismissing guesses.
-5. **The merge.** `auto-merge.yml` arms `gh pr merge --auto --rebase` when the
-   PR's `## Risk Assessment` says Low or Medium. High risk waits for a
-   `Risk reviewed:` comment and the `risk-reviewed` label. GitHub merges once
-   the PR checks pass, closes the issue and deletes the branch.
+5. **The merge.** `auto-merge.yml` arms `gh pr merge --auto --rebase` after
+   any required review. GitHub merges when the checks pass, then closes the
+   issue and deletes the branch. See [the merge conditions](../CONTRIBUTING.md#ci)
+   and [the no-mistakes review circuit](../skills/no-mistakes-review/SKILL.md).
 
 ## What holds the line
 
 | Mechanism | Where | What it does |
 |-----------|-------|--------------|
-| `go.yml` | GitHub Actions | Change-filtered checks; see [CI](../CONTRIBUTING.md#ci) |
-| `auto-merge.yml` + `scripts/arm-auto-merge.sh` | GitHub Actions | Arms auto-merge with `AUTO_MERGE_TOKEN`, a fine-grained token for this repository only. The workflow token is never used: merges made with it start no workflow and close no issue |
+| `go.yml` | GitHub Actions | Change-filtered tests and required PR review check; see [CI](../CONTRIBUTING.md#ci) |
+| `auto-merge.yml` + `scripts/arm-auto-merge.sh` | GitHub Actions | Manages `review-required` and arms auto-merge with `AUTO_MERGE_TOKEN`, a fine-grained token for this repository only. The workflow token is never used: merges made with it start no workflow and close no issue |
 | `scripts/test.sh`, `scripts/lint.sh` | local and the gate | Contribution checks; see [Contributing](../CONTRIBUTING.md) |
 | `.githooks/pre-commit` | local, after `git config core.hooksPath .githooks` | The same slopslint check |
 | `.no-mistakes.yaml` | no-mistakes | Runs the contribution checks, tells the reviewer that only a defect against the issue's criteria or the checks is a finding, and allows one re-run of a CI check GitHub cancelled without a verdict |
@@ -58,13 +58,7 @@ next time.
 
 ## Before a PR merges
 
-Auto-merge is armed, so this is the last look, and it is short:
-
-1. `git log --oneline origin/main..<branch>`: the unit commit,
-   `fix: <title>` or `feat: <title>` with `atm unit <n>` in its body, a
-   `ponytail:` commit if a cut was kept, then the `no-mistakes(...)` commits
-   the gate added.
-2. `git show --stat` of each gate commit. Review and test are models: a uuid,
-   a new loop, a deleted or mock-heavy test, a reformat to another width gets
-   reverted on the branch, a tombstone, and another gate run.
-3. The run's `report.json`: every check green, follow-ups with their reasons.
+Read `git log --oneline origin/main..<branch>` and the run's `report.json` for
+the unit commit, any cuts and follow-ups. If the gate added a
+`no-mistakes(...)` commit, follow [the bounded review circuit](../skills/no-mistakes-review/SKILL.md)
+before clearing the current PR head.
