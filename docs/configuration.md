@@ -143,8 +143,10 @@ model call. The plan is JSON:
 ```
 
 A ticket counts while its issue is open and not in `excluded`. It is going
-when its last run in `.atm/runs.jsonl` is `running`, or `passed` with its issue
-still open (a gate or a PR not merged yet). It is ready when it has no `hold`,
+when its issue is open and its last run in `.atm/runs.jsonl` is `running` or
+`passed` (a gate or a PR not merged yet). A closed issue never blocks a
+conflicting ticket, even if its last run still says `running`.
+It is ready when it has no `hold`,
 every dependency is closed (`depends_on` and each `#N` under the issue's
 `## Depends on` heading), it is not going, and it does not conflict with a
 ticket going, named in either one's `conflicts_with`. A `hold` waits on the
