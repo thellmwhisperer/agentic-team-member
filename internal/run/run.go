@@ -489,11 +489,16 @@ func commandFor(lockDir, dir, name string, args ...string) (string, error) {
 }
 
 func commandForRaw(lockDir, dir, name string, args ...string) (string, error) {
+	return commandIn(nil, lockDir, dir, name, args...)
+}
+
+// commandIn is commandForRaw with stdin, nil for none.
+func commandIn(stdin io.Reader, lockDir, dir, name string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, name, args...)
 	var stderr bytes.Buffer
-	cmd.Dir, cmd.Stderr, cmd.WaitDelay = dir, &stderr, time.Second
+	cmd.Dir, cmd.Stdin, cmd.Stderr, cmd.WaitDelay = dir, stdin, &stderr, time.Second
 	if err := inheritCloneLease(cmd, lockDir); err != nil {
 		return "", err
 	}
