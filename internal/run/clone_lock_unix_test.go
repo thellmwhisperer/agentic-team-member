@@ -43,6 +43,21 @@ func write(t *testing.T, path, text string) {
 	}
 }
 
+func fakeGitScript(t *testing.T, script string) {
+	t.Helper()
+	gitPath, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := t.TempDir()
+	write(t, filepath.Join(bin, "git"), script)
+	if err := os.Chmod(filepath.Join(bin, "git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ATM_TEST_GIT", gitPath)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
 // An inherited TMPDIR that is a symlink is no trusted way to a clone: release through it changes nothing past
 // the link and does not report the clone gone.
 func TestReleaseThroughTMPDIRAliasChangesNothing(t *testing.T) {
@@ -142,28 +157,18 @@ func TestReleaseDecidesOnTheSelectedClone(t *testing.T) {
 	gitT(t, b, "fetch", "-q", "origin", "main") // B's own FETCH_HEAD: atm/fix is merged there
 	write(t, filepath.Join(b, "b"), "b")
 	head := gitT(t, b, "rev-parse", "HEAD")
-	gitPath, err := exec.LookPath("git")
-	if err != nil {
-		t.Fatal(err)
-	}
-	bin := t.TempDir()
 	// The first fetch moves A away and B into its place, then fetches where it was started.
-	write(t, filepath.Join(bin, "git"), `#!/bin/sh
+	fakeGitScript(t, `#!/bin/sh
 if [ "$1" = fetch ] && [ -e "$ATM_TEST_SWAP" ]; then
 	rm "$ATM_TEST_SWAP" && mv "$ATM_TEST_A" "$ATM_TEST_A.moved" && mv "$ATM_TEST_B" "$ATM_TEST_A" || exit 9
 fi
 exec "$ATM_TEST_GIT" "$@"
 `)
-	if err := os.Chmod(filepath.Join(bin, "git"), 0o755); err != nil {
-		t.Fatal(err)
-	}
 	swap := filepath.Join(t.TempDir(), "swap")
 	write(t, swap, "")
 	t.Setenv("ATM_TEST_SWAP", swap)
 	t.Setenv("ATM_TEST_A", a)
 	t.Setenv("ATM_TEST_B", b)
-	t.Setenv("ATM_TEST_GIT", gitPath)
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	if err := release(a, ""); err != nil {
 		t.Fatal(err)
 	}
@@ -244,23 +249,13 @@ func TestReleaseKeepsCloneWhenHelperCannotStart(t *testing.T) {
 func TestReleaseKeepsCloneWhenBranchQueryFails(t *testing.T) {
 	root := repo(t, "https://example.com/owner/repo.git", atmYAML)
 	a := oldClone(t, root, false, true, true)
-	gitPath, err := exec.LookPath("git")
-	if err != nil {
-		t.Fatal(err)
-	}
-	bin := t.TempDir()
-	write(t, filepath.Join(bin, "git"), `#!/bin/sh
+	fakeGitScript(t, `#!/bin/sh
 if [ "$1" = branch ]; then
 	printf '  atm/fix\n'
 	exit 9
 fi
 exec "$ATM_TEST_GIT" "$@"
 `)
-	if err := os.Chmod(filepath.Join(bin, "git"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("ATM_TEST_GIT", gitPath)
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	if err := release(a, ""); err != nil {
 		t.Fatal(err)
 	}
