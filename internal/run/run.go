@@ -97,8 +97,6 @@ func Run(label string, args []string, out, summary io.Writer) (err error) {
 	return r.err
 }
 
-// leave releases run r's clone dir but after an unmet criterion, whose dependency, its last unit's commit, only
-// the clone holds: then it lets the clone go to the next run's sweep.
 func leave(r *verdict, dir, repo string) error {
 	if errors.Is(r.err, errUnmet) {
 		closeCloneLease(dir)
@@ -194,6 +192,11 @@ func (a agent) units(r *verdict, root, dir, sha, text string, i Issue, c config.
 			spent, _ = ev["gross_lines"].(int) // none on unit 1, the primary work
 			if err == nil {
 				pending, in, err = unmet(root, dir, head, n, i, pending, in)
+				if errors.Is(err, errUnmet) && r.saved != 0 {
+					_, bundleErr := git(dir, "bundle", "create", filepath.Join(a.dir, "resume", "work.bundle"),
+						"refs/atm/resume", "HEAD", "^"+keep.Base)
+					err = errors.Join(err, bundleErr)
+				}
 			}
 			return ev, err
 		})

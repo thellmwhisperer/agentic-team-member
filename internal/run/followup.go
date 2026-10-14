@@ -243,21 +243,27 @@ func unmet(root, clone, head string, n int, i Issue, pending, in []followUp) ([]
 		return pending, in, nil
 	}
 	pending = append(pending, in...)
+	var sha, diff string
+	var blocked error
 	for k, f := range pending {
 		if !f.Verified || !quoted(i.Body, f.Criterion) {
 			continue
 		}
-		sha, err := commitUnit(root, clone, n, i)
-		if err != nil {
-			return pending, nil, err
+		if sha == "" {
+			var err error
+			sha, err = commitUnit(root, clone, n, i)
+			if err != nil {
+				return pending, nil, err
+			}
+			diff, err = git(clone, "diff", head, sha)
+			blocked = errors.Join(blocked, err)
 		}
-		diff, err := git(clone, "diff", head, sha)
 		cause := fmt.Errorf("%w after unit %d of %d: %q, its red test %s in follow-ups.json", errUnmet, n,
 			maxUnits, f.Criterion, f.RedTest)
 		pending[k].Diff, pending[k].Cause, pending[k].Dependency = diff, cause.Error(), sha
-		return pending, nil, errors.Join(cause, err)
+		blocked = errors.Join(blocked, cause)
 	}
-	return pending, nil, nil
+	return pending, nil, blocked
 }
 
 // saveFollowUps writes follow-ups.json in the run's directory dir: follow-ups it did not chain, including
