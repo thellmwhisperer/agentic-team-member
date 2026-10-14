@@ -200,16 +200,20 @@ func (a agent) units(r *verdict, root, dir, sha, text string, i Issue, c config.
 			}
 			return ev, err
 		})
-		red, _ := ev["red"].(try)
-		green, _ := ev["green"].(try)
-		proofSpan, _ := ev["proof_span"].(span)
-		r.Units = append(r.Units, unitResult{Unit: n, Base: head, TestFile: test, Type: unit.Type,
-			Red: red, Green: green, Result: outcome(r.err), ResumedFrom: resumed, span: proofSpan})
+		r.recordUnit(n, head, test, unit.Type, resumed, ev)
 		if r.err != nil || len(in) == 0 {
 			return proofs, unit, pending
 		}
 		f, pending = &in[0], append(pending, in[1:]...)
 	}
+}
+
+func (r *verdict) recordUnit(n int, head, test, typ, resumed string, ev map[string]any) {
+	red, _ := ev["red"].(try)
+	green, _ := ev["green"].(try)
+	proofSpan, _ := ev["proof_span"].(span)
+	r.Units = append(r.Units, unitResult{Unit: n, Base: head, TestFile: test, Type: typ,
+		Red: red, Green: green, Result: outcome(r.err), ResumedFrom: resumed, span: proofSpan})
 }
 
 // checkUnit checks unit n, on commit head in clone dir. A unit after the first that takes the gross lines of
