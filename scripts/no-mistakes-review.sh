@@ -5,10 +5,12 @@
 # commit changes the head, so an older clearance never counts. See skills/no-mistakes-review/SKILL.md.
 set -eu
 cos=teseo # the one login whose comment clears; repository association is not authority
-gh pr view "$1" --repo "$GITHUB_REPOSITORY" --json headRefOid,commits,comments --jq '
+details=$(gh pr view "$1" --repo "$GITHUB_REPOSITORY" --json headRefOid,comments --jq '
   "head \(.headRefOid)",
-  (.commits[] | "commit \(.messageHeadline)"),
-  (.comments[] | .author.login as $a | .body | split("\n")[] | "comment \($a) \(.)")' |
+  (.comments[] | .author.login as $a | .body | split("\n")[] | "comment \($a) \(.)")')
+commits=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$1/commits" --paginate --jq '
+  .[] | "commit \(.commit.message | split("\n")[0])"')
+printf '%s\n%s\n' "$details" "$commits" |
   awk -v login="$cos" -v want="${2:-}" '
     { sub(/\r$/, "") }
     $1 == "head" { head = $2 }
