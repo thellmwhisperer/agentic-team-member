@@ -118,7 +118,7 @@ func before(clone string) error {
 	if err != nil {
 		return err
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 	var was []string
 	err = fs.WalkDir(root.FS(), ".", func(p string, d fs.DirEntry, err error) error {
 		if err == nil && p == ".git" {
@@ -139,7 +139,7 @@ func unmade(clone string) error {
 	if err != nil {
 		return err
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 	was, err := root.ReadFile(".git/atm-before")
 	if err != nil {
 		return err
