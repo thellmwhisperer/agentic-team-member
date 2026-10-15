@@ -28,19 +28,24 @@ type slicingChild struct {
 	Contract map[string]string `json:"contract"`
 }
 
+var errInvalidSlicing = errors.New("invalid task_slicing")
+
 // slicingApproved validates the report, then blocks unready issues, mixed contracts and mandatory work
 // still pending. An optional proposal, absent from the product diff, does not invalidate a fulfilled contract.
 func slicingApproved(s *taskSlicingReview) error {
 	if s == nil {
-		return errors.New("invalid contract review: missing task_slicing report")
+		return fmt.Errorf("%w: invalid contract review: missing task_slicing report", errInvalidSlicing)
 	}
 	if strings.TrimSpace(s.Reason) == "" || s.Pending == nil || s.Drafts == nil {
-		return errors.New("invalid task_slicing: want reason, mandatory_pending and drafts")
+		return fmt.Errorf("%w: want reason, mandatory_pending and drafts", errInvalidSlicing)
 	}
 	if !slices.Contains([]string{"ready", "unready", "split-required"}, s.Disposition) {
-		return fmt.Errorf("invalid task_slicing disposition %q", s.Disposition)
+		return fmt.Errorf("%w disposition %q", errInvalidSlicing, s.Disposition)
 	}
 	fields := slicingFields(s.Fields)
+	if fields != nil {
+		fields = errors.Join(errInvalidSlicing, fields)
+	}
 	drafts := slicingDrafts(*s.Drafts, s.Disposition)
 	var pending error
 	if len(*s.Pending) > 0 {
@@ -75,12 +80,12 @@ func slicingFields(fields map[string]slicingField) error {
 
 func slicingDrafts(drafts []slicingChild, disposition string) error {
 	if disposition == "split-required" && len(drafts) == 0 {
-		return errors.New("invalid task_slicing: split-required needs a local child draft")
+		return fmt.Errorf("%w: split-required needs a local child draft", errInvalidSlicing)
 	}
 	var blocks []error
 	for _, d := range drafts {
 		if err := slicingChildValid(d); err != nil {
-			return err
+			return errors.Join(errInvalidSlicing, err)
 		}
 		if d.Purpose != "optional" {
 			blocks = append(blocks, fmt.Errorf("task_slicing %s draft blocks delivery: %s", d.Purpose, d.Cause))

@@ -344,7 +344,12 @@ func (a agent) deliver(r *verdict, root, clone, sha, base, line string, i Issue,
 			r.HeadSHA, err = git(clone, "rev-parse", "HEAD")
 		}
 		if err == nil {
-			r.HeadSHA, err = a.reviewedDelivery(clone, sha, r.HeadSHA, tombs, i, root, history, c)
+			var repairs repairEvidence
+			r.HeadSHA, repairs, err = a.reviewedDelivery(clone, sha, r.HeadSHA, tombs, i, root, history, c)
+			for _, attempt := range repairs.Attempts {
+				r.Reproofs = attempt.Reproofs
+				r.Commands = append(r.Commands, attempt.Commands...)
+			}
 		}
 		if err == nil {
 			err = r.write()
