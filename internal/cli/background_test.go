@@ -253,16 +253,20 @@ func TestTwoRunsAtOnceShareOneBackgroundProcess(t *testing.T) {
 
 func assertBothRunsServed(t *testing.T, dir, ready string) {
 	t.Helper()
-	// Synchronize on the agents; the test runner's timeout bounds a stuck run.
-	for {
+	barrierReached := false
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
 		entries, err := os.ReadDir(ready)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if len(entries) == 2 {
+			barrierReached = true
 			break
 		}
-		time.Sleep(10 * time.Millisecond)
+	}
+	if !barrierReached {
+		entries, _ := os.ReadDir(ready)
+		t.Fatalf("only %d fake agents reached the barrier", len(entries))
 	}
 	var runs struct{ Runs []map[string]string }
 	if err := json.Unmarshal([]byte(atmIn(t, 0, "axi", "runs", "--json")), &runs); err != nil || len(runs.Runs) != 2 {
@@ -304,15 +308,15 @@ func assertBothRunsFinish(t *testing.T, release string) {
 		t.Fatal(err)
 	}
 	var runs struct{ Runs []map[string]string }
-	for {
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
 		if err := json.Unmarshal([]byte(atmIn(t, 0, "axi", "runs", "--json")), &runs); err != nil {
 			t.Fatal(err)
 		}
 		if len(runs.Runs) == 2 && runs.Runs[0]["outcome"] == "failed" && runs.Runs[1]["outcome"] == "failed" {
 			return
 		}
-		time.Sleep(10 * time.Millisecond)
 	}
+	t.Fatalf("both runs did not finish after release: %+v", runs)
 }
 
 func setupRetryRepo(t *testing.T) string {
