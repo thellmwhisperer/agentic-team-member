@@ -12,15 +12,13 @@ import (
 	"github.com/thellmwhisperer/agentic-team-member/internal/tui"
 )
 
-// followOut is --follow's stdout. With HERDR_ENV=1 and herdr_workspace set, the first line opens the run's tab
-// and a terminal line (merged, closed, run_failed) closes it after that line is written, before exit.
 type followOut struct {
 	w   io.Writer
 	buf []byte
 	tab *runTab
 }
 
-func newFollowOut(root string, args []string, w io.Writer) *followOut {
+func newFollowOut(root string, w io.Writer) *followOut {
 	o := &followOut{w: w}
 	if os.Getenv("HERDR_ENV") != "1" {
 		return o
@@ -33,8 +31,20 @@ func newFollowOut(root string, args []string, w io.Writer) *followOut {
 	if err != nil || ws == "" {
 		return o
 	}
-	o.tab = &runTab{workspace: ws, label: "atm-" + issueArg(args), cwd: root}
+	o.tab = &runTab{workspace: ws, cwd: root}
 	return o
+}
+
+func (o *followOut) open(issue string) string {
+	if o.tab == nil {
+		return ""
+	}
+	id, pane, err := tui.OpenHerdrTab(o.tab.workspace, "atm-"+issue, o.tab.cwd)
+	o.tab.id, o.tab.pane = id, pane
+	if err != nil {
+		herdrLine(err)
+	}
+	return pane
 }
 
 func (o *followOut) Write(p []byte) (int, error) {
@@ -59,8 +69,11 @@ func (o *followOut) seen(line []byte) {
 	if json.Unmarshal(line, &ev) != nil || ev.Run == "" {
 		return
 	}
-	if o.tab.id == "" && !o.tab.gaveUp {
-		o.tab.open(ev.Run)
+	if o.tab.pane != "" {
+		if err := tui.RunHerdrPane(o.tab.pane, "atm attach "+ev.Run); err != nil {
+			herdrLine(err)
+		}
+		o.tab.pane = ""
 	}
 	if ev.Event == "merged" || ev.Event == "closed" || ev.Event == "run_failed" {
 		o.tab.terminal = true
@@ -79,41 +92,10 @@ func (o *followOut) close() {
 }
 
 type runTab struct {
-	workspace, label, cwd, id string
-	terminal, gaveUp          bool
-}
-
-func (t *runTab) open(runID string) {
-	id, err := tui.OpenHerdrTab(t.workspace, t.label, t.cwd, "atm attach "+runID)
-	t.id = id
-	if id == "" {
-		t.gaveUp = true
-	}
-	if err != nil {
-		herdrLine(err)
-	}
+	workspace, cwd, id, pane string
+	terminal                 bool
 }
 
 func herdrLine(err error) {
 	fmt.Fprintf(os.Stderr, "atm: herdr: %s\n", strings.ReplaceAll(err.Error(), "\n", " "))
-}
-
-// issueArg is the issue on atm run's command line, flags and their values skipped.
-func issueArg(args []string) string {
-	skip := map[string]bool{"--base-ref": true, "--harness": true, "--model": true, "--effort": true,
-		"--harness-arg": true, "--env": true, "--watcher": true, "--resume": true}
-	for i := 0; i < len(args); i++ {
-		a := args[i]
-		if name, _, cut := strings.Cut(a, "="); cut && skip[name] {
-			continue
-		}
-		if skip[a] {
-			i++
-			continue
-		}
-		if !strings.HasPrefix(a, "-") {
-			return a
-		}
-	}
-	return ""
 }
