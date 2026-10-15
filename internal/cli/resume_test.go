@@ -33,7 +33,8 @@ func init() {
 		}
 	}
 	fmt.Printf(`{"type": "item.completed", "item": {"id": "1", "type": "command_execution", `+
-		`"command": "cat .agents/skills/%s/SKILL.md", "status": "completed", "exit_code": 0}}`+"\n", skill)
+		`"command": "cat .agents/skills/%s/SKILL.md", "status": "completed", "exit_code": 0, `+
+		`"aggregated_output": "---\nname: %s\n---\n"}}`+"\n", skill, skill)
 	if err := os.WriteFile(args[slices.Index(args, "-o")+1], []byte(report), 0o600); err != nil {
 		os.Exit(1)
 	}

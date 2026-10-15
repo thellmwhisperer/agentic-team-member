@@ -527,6 +527,9 @@ func (s *stream) see(harness string, line []byte) {
 		s.flush(e.Type == "result" && (harness == "claude" && ends || harness == "cursor"))
 	}
 	s.loads = append(s.loads, e.skillLoads(harness, s.skill, s.clone)...)
+	if harness == "codex" && slices.Contains(s.loads, e.Item.ID) {
+		s.used = true // a codex read proves the skill once its output holds it, whatever the command's exit code
+	}
 	s.reach = cmp.Or(s.reach, outside(e.calls(harness), s.root, s.clone))
 	s.show(e.activity(harness))
 }
@@ -598,13 +601,15 @@ func (s *stream) flush(report bool) {
 
 // skillLoads is the ids of e's calls that load skill, by its exact name: a Skill tool call for claude, a read
 // of its SKILL.md for pi and codex, a skill call for opencode, a read or cat of its SKILL.md for cursor. A load
-// proves the agent used skill once its result is not an error.
+// proves the agent used skill once its result is not an error, except codex's, which proves it whatever its
+// exit code once its output holds the skill's name line.
 func (e event) skillLoads(harness, skill, clone string) []string {
 	read := func(path string) bool { return strings.Contains(filepath.ToSlash(path), "/"+skill+"/SKILL.md") }
 	switch {
 	case harness == "claude":
 		return e.skillCalls(skill)
-	case harness == "codex" && e.Item.Type == "command_execution" && read(e.Item.Command):
+	case harness == "codex" && e.Item.Type == "command_execution" && read(e.Item.Command) &&
+		namesSkill(e.Item.AggregatedOutput, skill):
 		return []string{e.Item.ID}
 	case harness == "opencode" && e.Type == "tool_use" && e.Part.Tool == "skill" &&
 		names(e.Part.State.Input, "name", skill):
@@ -660,6 +665,17 @@ func cursorCatReads(command string, exact func(string) bool) bool {
 		words = append(words[:1], words[2])
 	}
 	return len(words) == 2 && (words[0] == "cat" || words[0] == "/bin/cat") && exact(words[1])
+}
+
+// namesSkill says whether output holds skill's SKILL.md name line, so the command that printed it read the
+// skill in. A line is matched with any trailing \r trimmed, so CRLF output counts.
+func namesSkill(output, skill string) bool {
+	for _, line := range strings.Split(output, "\n") {
+		if strings.TrimSuffix(line, "\r") == "name: "+skill {
+			return true
+		}
+	}
+	return false
 }
 
 // skillCalls is the ids of claude's Skill tool calls in e that load skill.

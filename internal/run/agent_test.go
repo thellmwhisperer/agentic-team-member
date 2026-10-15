@@ -239,13 +239,14 @@ func fakeAgentSkill(name string, args []string, skill, mode string) {
 	}
 	failed := mode == "skill-error"
 	exit := map[bool]int{true: 1}[failed]
+	output := map[bool]string{true: "name: " + skill + "\n"}[!failed] // a codex read proves only what it prints
 	for _, ev := range map[string][]obj{
 		"claude": {{"type": "assistant", "message": obj{"content": []obj{{"type": "tool_use", "id": "s1", "name": "Skill",
 			"input": obj{"skill": skill}}}}},
 			{"type": "user", "message": obj{"content": []obj{{"type": "tool_result", "tool_use_id": "s1",
 				"is_error": failed}}}}},
 		"codex": {{"type": "item.completed", "item": obj{"id": "s1", "type": "command_execution",
-			"command": "cat " + path, "exit_code": exit}}},
+			"command": "cat " + path, "exit_code": exit, "aggregated_output": output}}},
 		"opencode": {{"type": "tool_use", "part": obj{"callID": "s1", "tool": "skill", "state": obj{
 			"status": map[bool]string{true: "error", false: "completed"}[failed], "input": obj{"name": skill}}}}},
 		"pi": {{"type": "tool_execution_start", "toolCallId": "s1", "toolName": "read", "args": obj{"path": path}},
