@@ -10,21 +10,55 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/thellmwhisperer/agentic-team-member/internal/config"
 )
 
 // reviewContract has the agent review, read only, the commit head in clone, from base commit base, against
-// issue i, tombs the slop detector's tombstones, and returns why the delivery may not go on, nil when it
-// approved them as they still are. The issue, base, head, report and reason go to contract-review.json in the
-// run's directory.
-func (a agent) reviewContract(clone, base, head, tombs string, i Issue) error {
+// issue i, tombs the slop detector's tombstones, and repairs up to two original-contract blocks with the
+// worker. It returns why the delivery may not go on, nil when the latest review approved them as they still
+// are. A repair invalidates any earlier approval. The issue, base, head, report and reason go to
+// contract-review.json in the run's directory.
+func (a agent) reviewContract(clone, base, head, tombs string, i Issue, root string, history []proof,
+	c config.Config) error {
+	rec, err := a.reviewed(clone, base, head, tombs, i)
+	rec, err = a.repairBlocked(clone, base, tombs, i, root, history, c, rec, err)
+	return writeReview(a.dir, rec, err)
+}
+
+// reviewedDelivery reviews head, repairs an original-contract block, then returns the head delivery may use.
+func (a agent) reviewedDelivery(clone, base, head, tombs string, i Issue, root string, history []proof,
+	c config.Config) (string, error) {
+	err := a.reviewContract(clone, base, head, tombs, i, root, history, c)
+	if err != nil {
+		return head, err
+	}
+	if head, err = git(clone, "rev-parse", "HEAD"); err != nil {
+		return head, err
+	}
+	return head, dirtyTree(clone)
+}
+
+func dirtyTree(clone string) error {
+	left, err := git(clone, "status", "--porcelain")
+	if err != nil || left == "" {
+		return err
+	}
+	return errors.New("delivery needs a clean tree: " + left)
+}
+
+func (a agent) reviewed(clone, base, head, tombs string, i Issue) (map[string]any, error) {
 	rec := map[string]any{"issue": i.Text, "base": base, "head": head}
-	err := a.contractReview(clone, base, head, tombs, i, rec)
+	return rec, a.contractReview(clone, base, head, tombs, i, rec)
+}
+
+func writeReview(dir string, rec map[string]any, err error) error {
 	rec["approved"], rec["reason"] = err == nil, ""
 	if err != nil {
 		rec["reason"] = err.Error()
 	}
 	b, _ := json.MarshalIndent(rec, "", "  ")
-	return errors.Join(err, os.WriteFile(filepath.Join(a.dir, "contract-review.json"), b, 0o644))
+	return errors.Join(err, os.WriteFile(filepath.Join(dir, "contract-review.json"), b, 0o644))
 }
 
 func (a agent) contractReview(clone, base, head, tombs string, i Issue, rec map[string]any) error {

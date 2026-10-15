@@ -2,6 +2,7 @@ package run
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -33,7 +34,8 @@ func reviewRun(t *testing.T, atm string, env ...string) (runDir, base, got, call
 	for ; len(env) > 1; env = env[2:] {
 		t.Setenv(env[0], env[1])
 	}
-	err = Run("t", []string{issueFile(t, reviewIssue)}, &bytes.Buffer{}, &bytes.Buffer{})
+	issue := cmp.Or(os.Getenv("ATM_TEST_ISSUE"), reviewIssue)
+	err = Run("t", []string{issueFile(t, issue)}, &bytes.Buffer{}, &bytes.Buffer{})
 	top := gitT(t, root, "rev-parse", "--show-toplevel")
 	return filepath.Join(top, ".atm", "runs", "t"), gitT(t, root, "rev-parse", "HEAD"), got, call, err
 }
