@@ -54,9 +54,6 @@ func (o Outcome) Stream(
 		if t := now(); t.Sub(s.said) >= time.Hour {
 			s.say("stalled", map[string]any{"minutes": int(t.Sub(s.quiet).Minutes())})
 		}
-		if s.err != nil {
-			return 1 // no one reads it
-		}
 		select {
 		case <-ctx.Done():
 			return 1
@@ -75,7 +72,6 @@ func (o Outcome) Stream(
 type observer struct {
 	o                          Outcome
 	w                          io.Writer
-	err                        error
 	now                        func() time.Time
 	said, quiet                time.Time
 	clone, branch, pr, waiting string
@@ -91,9 +87,7 @@ func (s *observer) say(event string, fields map[string]any) {
 		"event": event}
 	maps.Copy(line, fields)
 	b, _ := json.Marshal(line)
-	if _, err := s.w.Write(append(b, '\n')); err != nil {
-		s.err = err
-	}
+	_, _ = s.w.Write(append(b, '\n'))
 	s.said = t
 	if event != "stalled" {
 		s.quiet = t
