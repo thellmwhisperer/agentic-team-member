@@ -72,7 +72,7 @@ func TestAgentBoxRendersCursorToolStartOrder(t *testing.T) {
 	checkAgentBox(t, eventGolden(t, "cursor.events.jsonl"), []string{
 		"∴ I'll run the failing command, read hello.txt, and reply DONE.",
 		"✎ I'll run the failing cat, then read hello.txt.",
-		"✗ failed shell cat nope.txt",
+		"✗ failed shell cat nope.txt · cat: nope.txt: No such file or directory",
 		"· 1 tool: read",
 		"∴ The first command failed as expected.",
 		"✎ DONE",
