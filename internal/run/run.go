@@ -498,7 +498,12 @@ func commandForRaw(lockDir, dir, name string, args ...string) (string, error) {
 
 // commandIn is commandForRaw with stdin, nil for none.
 func commandIn(stdin io.Reader, lockDir, dir, name string, args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	return commandCtx(context.Background(), stdin, lockDir, dir, name, args...)
+}
+
+// commandCtx is commandIn until parent ends.
+func commandCtx(parent context.Context, stdin io.Reader, lockDir, dir, name string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, name, args...)
 	var stderr bytes.Buffer
@@ -507,7 +512,7 @@ func commandIn(stdin io.Reader, lockDir, dir, name string, args ...string) (stri
 		return "", err
 	}
 	out, err := cmd.Output()
-	if ctx.Err() != nil {
+	if ctx.Err() != nil && parent.Err() == nil {
 		err = fmt.Errorf("timed out after %s", Human(timeout))
 	}
 	if err != nil {
