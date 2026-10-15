@@ -1,0 +1,18 @@
+schema: 1
+id: T-PONYTAIL-20261015-143821-1
+status: accepted
+category: alien_code
+title: "Removed the observer's `err` field, the check in `say` that stored a stdout write error, and Stream's per-loop `if s.err != nil { return 1 }` early exit. `say` now writes with `_, _ = s.w.Write(...)`; no part of the contract or its tests calls for ending observation when stdout breaks."
+created_at: 2026-10-15
+incident:
+  pattern: "Removed the observer's `err` field, the check in `say` that stored a stdout write error, and Stream's per-loop `if s.err != nil { return 1 }` early exit. `say` now writes with `_, _ = s.w.Write(...)`; no part of the contract or its tests calls for ending observation when stdout breaks."
+  what_went_wrong: "An ATM run wrote it and ATM's ponytail pass cut it before delivery."
+  root_cause: "The coding agent wrote more than the issue needed."
+  rule_established: "Cut by the ponytail pass; it does not come back."
+  evidence:
+    - family: speculative_hardening
+      example: "Removed the observer's `err` field, the check in `say` that stored a stdout write error, and Stream's per-loop `if s.err != nil { return 1 }` early exit. `say` now writes with `_, _ = s.w.Write(...)`; no part of the contract or its tests calls for ending observation when stdout breaks."
+      artifact: "internal/run/follow_stream.go"
+match:
+  family: speculative_hardening
+  artifact: "internal/run/follow_stream.go"
