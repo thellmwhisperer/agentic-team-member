@@ -211,11 +211,12 @@ Flags go before or after the issue. A second issue is an error.
 ### Resuming a failed run
 
 A run that fails at the checks, the slop detector or the delivery keeps its
-agent's work in `.atm/runs/<label>/resume/`: `resume.json` (the issue, the base
-commit, the failed unit's number, its agent report, the follow-up it
-chained, pending follow-ups, earlier proofs and `gross_lines` accumulated
-before that unit) and `work.bundle` (the commits of the units before it, then the failed
-unit's uncommitted work, new and binary files included, ignored files left
+agent's work in `.atm/runs/<label>/resume/`: `resume.json` (the issue argument
+and original issue text, the base commit, the failed unit's number, its agent
+report, the follow-up it chained with its scope review, pending follow-ups,
+earlier proofs and `gross_lines` accumulated before that unit) and
+`work.bundle` (the commits of the units before it, then the failed unit's
+uncommitted work, new and binary files included, ignored files left
 out). Its `report.json` says `"resumable": true` and names the unit in
 `resumable_unit`, and its `next_step` names `atm run --resume <label>`. A run
 that failed before or in the agent is not resumable.
@@ -224,14 +225,18 @@ The [follow-up rules](how-a-run-flows.md#follow-ups) describe the cumulative
 budget and the dependency evidence kept when a mandatory gap blocks the run.
 
 `atm run --resume <label>` starts a new run of the same issue under its own
-label. It reads the issue and `.atm.yaml` again, so a fixed config counts,
-clones the saved base commit and puts the work back. The failed unit's agent
-does not run again: its Agent row reads `resumed from <label>`, also as
+label. It uses the saved original issue for briefs, scope review and final
+contract review; it never re-reads the live issue. It reads `.atm.yaml` again,
+so a fixed config counts, clones the saved base commit and puts the work back.
+The failed unit's agent does not run again: its Agent row reads
+`resumed from <label>`, also as
 `resumed_from` on its unit in `report.json`, and the run goes on from that
 unit's checks as any run does. The other flags apply as usual, `--base-ref`
 aside: the resumed run keeps the base ref of the one it resumes. A run that
 does not exist, is not resumable, or whose base commit the repository no longer
-has fails before cloning, saying which.
+has fails before cloning, saying which. Missing or blank saved original issue
+text also blocks resume before cloning with `saved original issue text is
+missing`, including for older runs that did not save it.
 
 ## The issue
 
