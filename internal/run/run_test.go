@@ -54,6 +54,12 @@ func TestMain(m *testing.M) {
 		}
 		os.Exit(0)
 	}
+	if runtime.GOOS == "windows" {
+		if err := nativeWindowsTestTools(); err != nil {
+			fmt.Fprintln(os.Stderr, "native test tools:", err)
+			os.Exit(1)
+		}
+	}
 	dir, err := linkFakes()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "fake agents:", err)
