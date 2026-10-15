@@ -25,8 +25,8 @@ are the circuit. [Go checks](../../CONTRIBUTING.md#ci) reports tests and lint.
 - **`review-completed` allows auto-merge.** Adding the label triggers the
   `labeled` event and arms the merge bound to the head detection read, subject
   to [the risk rules and required checks](../../CONTRIBUTING.md#ci).
-  `review-required` can remain: removing it is not a workflow trigger and
-  does not replace `review-completed`.
+  When `review-completed` is accepted, the script removes `review-required`
+  if present.
 - **Any push invalidates the review.** On `synchronize`, a PR with any
   `no-mistakes(...)` commit loses `review-completed` and is left unarmed,
   even when the new commit is not from no-mistakes. Review covers one head.
