@@ -149,7 +149,12 @@ an inherited value or one passed with `--env`, so their turns wait for running
 commands to finish.
 
 For native agents, ATM writes the bundled `ponytail` skill into the clone, outside git, and the
-agent's log must show it loaded under that exact name and succeeded. For Cursor,
+agent's log must show it loaded under that exact name. For Codex, a
+`command_execution` naming the skill's `SKILL.md` proves use only when its
+`aggregated_output` contains an exact `name: <skill>` line, even if the command
+exits nonzero. A trailing `\r` is ignored, so CRLF output counts. Naming the
+path without that output line proves nothing, even with exit code zero.
+Other native agents still require a successful load. For Cursor,
 ATM installs it at `.cursor/skills/<skill>/SKILL.md` outside git; a successful
 `read` or direct `cat` of that file proves use. Hermes's skill delivery and
 proof are described in [Hermes](configuration.md#hermes). Every line the agent writes
