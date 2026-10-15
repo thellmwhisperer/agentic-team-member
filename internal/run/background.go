@@ -56,6 +56,7 @@ func (o Outcome) Err() error {
 }
 
 type request struct {
+	Pane    string   `json:"pane,omitempty"`
 	Cmd     string   `json:"cmd"` // run, attach, runs or adopt
 	Args    []string `json:"args,omitempty"`
 	Run     string   `json:"run,omitempty"`
@@ -161,6 +162,7 @@ type server struct {
 // attached to it; pty is the terminal its delivery command runs on, while it does.
 type bgRun struct {
 	Outcome
+	pane   string
 	frames []Frame
 	more   chan struct{}
 	ttys   int
@@ -302,7 +304,7 @@ func (s *server) handle(c net.Conn) {
 	enc := json.NewEncoder(c)
 	switch req.Cmd {
 	case "run":
-		o, err := s.start(req.Args)
+		o, err := s.start(req.Args, req.Pane)
 		if err != nil {
 			if errors.Is(err, errHandoff) {
 				return
@@ -342,7 +344,7 @@ func (s *server) handle(c net.Conn) {
 var errHandoff = errors.New("background process is handing off")
 
 // start runs args, atm run's command line, in the background and returns the run, just started.
-func (s *server) start(args []string) (Outcome, error) {
+func (s *server) start(args []string, pane string) (Outcome, error) {
 	issue := ""
 	if len(args) > 0 {
 		issue = args[len(args)-1]
@@ -371,7 +373,7 @@ func (s *server) start(args []string) (Outcome, error) {
 	for _, entry := range entries {
 		max(entry.Name())
 	}
-	r := &bgRun{more: make(chan struct{}), Outcome: Outcome{Outcome: "running", Issue: issue, Started: time.Now(),
+	r := &bgRun{pane: pane, more: make(chan struct{}), Outcome: Outcome{Outcome: "running", Issue: issue, Started: time.Now(),
 		Run: cmp.Or(strings.Trim(name, "-"), "run") + "-" + strconv.Itoa(n+1)}}
 	if _, _, _, a, err := parseArgs(args); err == nil {
 		r.Watcher = a.watcher
@@ -659,6 +661,10 @@ func (s *server) save() {
 // Start checks args, atm run's command line, and has the background process of the repository at root run it.
 // It returns the run, just started. A run that resumes another takes that one's issue.
 func Start(root string, args []string) (Outcome, error) {
+	return start(root, args, "")
+}
+
+func start(root string, args []string, pane string) (Outcome, error) {
 	args, _, resume, a, err := parseArgs(args)
 	if err == nil && !Watching(root, a.watcher) {
 		err = errNoWatcher
@@ -678,7 +684,7 @@ func Start(root string, args []string) (Outcome, error) {
 		}
 	}
 	var o Outcome
-	err = call(root, request{Cmd: "run", Args: args}, nil, func(r reply) { o = *r.Run })
+	err = call(root, request{Cmd: "run", Args: args, Pane: pane}, nil, func(r reply) { o = *r.Run })
 	return o, err
 }
 

@@ -415,7 +415,7 @@ func TestBackgroundKeepsLabelMonotonicWhenNewestIsPruned(t *testing.T) {
 		t.Fatalf("history after newest run ended = %d runs, %v; want 200 with issue-201 pruned", len(saved), err)
 	}
 	t.Setenv("FAKE_AGENT", "fail")
-	started, err := s.start([]string{issueFile(t, issue)})
+	started, err := s.start([]string{issueFile(t, issue)}, "")
 	wantReport := filepath.Join(top, ".atm", "runs", "issue-202", "report.json")
 	if err != nil || started.Run != "issue-202" || started.Report != wantReport {
 		t.Fatalf("Start = %+v, %v; want issue-202 and its unique run directory", started, err)

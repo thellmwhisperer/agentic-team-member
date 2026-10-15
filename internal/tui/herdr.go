@@ -157,29 +157,28 @@ func herdrRun(args ...string) ([]byte, error) {
 	return exec.CommandContext(ctx, cmp.Or(os.Getenv("HERDR_BIN_PATH"), "herdr"), args...).Output()
 }
 
-// OpenHerdrTab creates a tab labelled tabLabel in the workspace named workspace, cwd the repository, and runs
-// command in its root pane. The tab id is the one tab create returned. herdr's --workspace wants that id, not
-// the label: workspace list matches label.
-func OpenHerdrTab(workspace, tabLabel, cwd, command string) (string, error) {
+func OpenHerdrTab(workspace, tabLabel, cwd string) (string, string, error) {
 	id, err := herdrWorkspaceID(workspace)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	b, err := herdrRun("tab", "create", "--workspace", id, "--label", tabLabel, "--no-focus", "--cwd", cwd)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	tab, pane, err := createdTab(b)
 	if err != nil || pane == "" {
 		if err == nil {
 			err = fmt.Errorf("tab create: no root pane")
 		}
-		return tab, err
+		return tab, "", err
 	}
-	if _, err = herdrRun("pane", "run", pane, command); err != nil {
-		return tab, err
-	}
-	return tab, nil
+	return tab, pane, nil
+}
+
+func RunHerdrPane(pane, command string) error {
+	_, err := herdrRun("pane", "run", pane, command)
+	return err
 }
 
 // CloseHerdrTab closes the tab id tab create returned, gate pane included.

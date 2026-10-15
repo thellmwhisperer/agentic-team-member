@@ -42,6 +42,72 @@ func TestFollowTabClosesAfterRunFailed(t *testing.T) {
 	assertTabLife(t, got, "chore.md", "chore-1")
 }
 
+func TestFollowTabDeliveryUsesItsRootPane(t *testing.T) {
+	for _, existingServer := range []bool{false, true} {
+		t.Run(fmt.Sprintf("existing_server_%t", existingServer), func(t *testing.T) {
+			delivered := filepath.Join(t.TempDir(), "delivery-panes")
+			command := "printf '%s\\n' \"$HERDR_PANE_ID\" >> " + strconvQuote(delivered)
+			dir := followTabRepo(t, followTabATM("\"\"", fmt.Sprintf("%q", command)))
+			calls := followTabFakes(t, 0)
+			writeWorkspace(t, "ATM")
+			t.Setenv("HERDR_ENV", "1")
+			t.Setenv("HERDR_PANE_ID", "wA:p1")
+			t.Setenv("HERDR_BIN_PATH", "")
+			if existingServer {
+				if _, err := run.Runs(dir); err != nil {
+					t.Fatal(err)
+				}
+				t.Setenv("HERDR_PANE_ID", "wB:p3")
+			}
+			out, err := atm(t, "run", "--follow", "chore.md")
+			if err != nil || lastEvent(t, out) != "merged" {
+				t.Fatalf("follow: %v\n%s", err, out)
+			}
+			if got := read(t, delivered); got != "wM:p9\n" {
+				t.Fatalf("delivery pane = %q, want tab root wM:p9", got)
+			}
+			assertTabLife(t, followTabRun{dir: dir, calls: followTabCalls(t, calls)}, "chore.md", "chore-1")
+			writeWorkspace(t, "")
+			out, err = atm(t, "run", "--follow", "chore.md")
+			if err != nil || lastEvent(t, out) != "merged" {
+				t.Fatalf("follow without tab: %v\n%s", err, out)
+			}
+			if got := read(t, delivered); got != "wM:p9\nwA:p1\n" {
+				t.Fatalf("delivery panes = %q, tab pane must belong only to its run", got)
+			}
+		})
+	}
+}
+
+func TestFollowTabLabelUsesParsedIssue(t *testing.T) {
+	for _, tc := range []struct {
+		issue string
+		args  []string
+	}{
+		{"42", []string{"--follow", "-model", "fast", "42"}},
+		{"-chore.md", []string{"--follow", "--", "-chore.md"}},
+	} {
+		t.Run(tc.issue, func(t *testing.T) {
+			dir := followTabRepo(t, followTabATM("exit 1", "\"\""))
+			if err := os.WriteFile(filepath.Join(dir, "-chore.md"), []byte("# Chore\nType: chore\nDo it.\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			calls := followTabFakes(t, 0)
+			writeWorkspace(t, "ATM")
+			t.Setenv("HERDR_ENV", "1")
+			t.Setenv("HERDR_BIN_PATH", "")
+			out, err := atm(t, append([]string{"run"}, tc.args...)...)
+			if run.ExitCode(err) != 1 || lastEvent(t, out) != "run_failed" {
+				t.Fatalf("follow: %v\n%s", err, out)
+			}
+			create := callWith(followTabCalls(t, calls), "tab|create|")
+			if !strings.Contains(create, "--label|atm-"+tc.issue+"|") {
+				t.Fatalf("tab create = %q, want label atm-%s", create, tc.issue)
+			}
+		})
+	}
+}
+
 func TestFollowTabSkipsHerdrUnlessConfigured(t *testing.T) {
 	atm := followTabATM("exit 1", "\"\"")
 	for _, c := range []struct{ name, env, workspace string }{
