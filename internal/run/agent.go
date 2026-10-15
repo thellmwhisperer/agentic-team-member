@@ -823,8 +823,9 @@ func toolCall(id, name, detail, result string) map[string]any {
 
 // summed is tool call ev with its summary: the first line of its output, or of its error, when it has one.
 func summed(ev map[string]any, output string) map[string]any {
-	if line, _, _ := strings.Cut(strings.TrimSpace(output), "\n"); line != "" {
-		ev["summary"] = strings.TrimSpace(line)
+	line, _, _ := strings.Cut(output, "\n")
+	if line = strings.TrimSpace(line); line != "" {
+		ev["summary"] = line
 	}
 	return ev
 }
