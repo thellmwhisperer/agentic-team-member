@@ -291,6 +291,31 @@ func TestFollowStreamGateFailedWithOpenPR(t *testing.T) {
 	s.ended(1)
 }
 
+func TestFollowStreamGateFailureBeforePRTerminal(t *testing.T) {
+	for _, state := range []string{"MERGED", "CLOSED"} {
+		t.Run(state, func(t *testing.T) {
+			s := followStream(t, atmSet(atmYAML, "delivery", "true"))
+			s.delivered()
+			s.gate("completed", "ci,completed,", "ci,failed,")
+			s.pr(state, "no-mistakes(ci): Repair CI")
+			bin := t.TempDir()
+			writeFixture(t, filepath.Join(bin, "gh"), `#!/bin/sh
+case "$*" in
+  *"--json commits") printf '%s\n' '{"state":"OPEN","commits":[]}' ;;
+  *) printf '%s\n' "$FAKE_GH_OUT" ;;
+esac
+`, 0o755)
+			t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+			s.advance(10 * time.Second)
+			s.next("pr_opened", map[string]any{"url": recordedPR})
+			s.next("gate_fixing_ci", map[string]any{"commit": map[string]any{
+				"sha": "0000000000000000000000000000000000000001", "subject": "no-mistakes(ci): Repair CI"}})
+			s.next("run_failed", map[string]any{"step": "ci", "reason": "no-mistakes step ci failed"})
+			s.ended(1)
+		})
+	}
+}
+
 // A PR closed unmerged ends the stream with closed, last, and 1.
 func TestFollowStreamClosedPR(t *testing.T) {
 	s := followStream(t, atmSet(atmYAML, "delivery", "true"))

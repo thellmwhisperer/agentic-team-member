@@ -149,14 +149,21 @@ func (s *observer) poll(ctx context.Context, root string) (int, bool) {
 	default:
 		s.diag(err)
 	}
+	var prState string
 	if err != nil || s.pr != "" {
-		if code, done := s.prState(ctx, root); done {
-			return code, true
-		}
+		prState = s.prState(ctx, root)
 	}
 	if err == nil && g.failed != "" {
 		s.say("run_failed", map[string]any{"step": g.failed,
 			"reason": cmp.Or(s.reason, "no-mistakes step "+g.failed+" failed")})
+		return 1, true
+	}
+	switch prState {
+	case "MERGED":
+		s.say("merged", map[string]any{"url": s.pr})
+		return 0, true
+	case "CLOSED":
+		s.say("closed", map[string]any{"url": s.pr})
 		return 1, true
 	}
 	return 0, false
@@ -187,10 +194,10 @@ func (s *observer) gate(g gateState) {
 }
 
 // prState reads the PR, by its URL or the delivery's branch, through gh: its CI repair commits, then its end.
-func (s *observer) prState(ctx context.Context, root string) (int, bool) {
+func (s *observer) prState(ctx context.Context, root string) string {
 	ref := cmp.Or(s.pr, s.branch)
 	if ref == "" {
-		return 0, false
+		return ""
 	}
 	var pr prView
 	out, err := ghPR(ctx, root, ref, "--json", "url,state,commits")
@@ -199,19 +206,11 @@ func (s *observer) prState(ctx context.Context, root string) (int, bool) {
 	}
 	if err != nil {
 		s.diag(err)
-		return 0, false
+		return ""
 	}
 	s.opened(pr.URL)
 	s.commits(pr.ci())
-	switch pr.State {
-	case "MERGED":
-		s.say("merged", map[string]any{"url": s.pr})
-		return 0, true
-	case "CLOSED":
-		s.say("closed", map[string]any{"url": s.pr})
-		return 1, true
-	}
-	return 0, false
+	return pr.State
 }
 
 func (s *observer) opened(url string) {
