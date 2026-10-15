@@ -33,10 +33,11 @@ import (
 	"mvdan.cc/sh/v3/syntax"
 )
 
-// skills are the ponytail skills (github.com/DietrichGebert/ponytail, MIT): the implementing agent loads
-// ponytail, the slop detector ponytail-review, always.
+// skills are the ponytail skills (github.com/DietrichGebert/ponytail, MIT) and task-slicing:
+// the implementing agent loads ponytail, the slop detector ponytail-review, and the contract reviewer both
+// ponytail-review and task-slicing.
 //
-//go:embed ponytail/SKILL.md ponytail-review/SKILL.md
+//go:embed ponytail/SKILL.md ponytail-review/SKILL.md task-slicing/SKILL.md
 var skills embed.FS
 
 // skillDirs is where each harness finds a project skill; pi finds it where --skill points, under .atm/.
