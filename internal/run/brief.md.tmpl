@@ -24,10 +24,16 @@ Task type: {{.Type}}. The issue, verbatim:
 {{- else if eq .Type "fix"}}
 1. Write a test on the existing code that fails today on behaviour, not on a missing symbol or module.
    The fix may add files: the test must still fail with those files present and the fix reverted.
+   ATM runs the red test with your source changes reverted to the base commit, so the test may only name
+   identifiers that already exist there; reach new behaviour at runtime through an existing entry point, and
+   check it by building or vetting with only the test file changed.
 2. Fix the source. The test passes.
 {{- else if eq .Type "feature"}}
 1. Write a test that fails today, possibly on a missing symbol at runtime. It must parse/compile and reach
    an assertion: a parse, compile or load error before any assertion is not a red.
+   ATM runs the red test with your source changes reverted to the base commit, so the test may only name
+   identifiers that already exist there; reach new behaviour at runtime through an existing entry point, and
+   check it by building or vetting with only the test file changed.
 2. Implement the feature. The test passes.
 {{- else if eq .Type "greenfield"}}
 1. Write a test that fails today, possibly on a missing module at runtime. It must parse/compile and reach
