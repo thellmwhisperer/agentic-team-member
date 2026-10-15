@@ -456,14 +456,15 @@ type event struct {
 		Changes                               []struct {
 			Path string
 		} `json:"changes"`
-		ExitCode *int `json:"exit_code"`
+		ExitCode         *int   `json:"exit_code"`
+		AggregatedOutput string `json:"aggregated_output"`
 	}
 	Part struct { // opencode
 		CallID     string `json:"callID"`
 		Tool, Text string
 		State      struct {
-			Status string
-			Input  json.RawMessage
+			Status, Output, Error string
+			Input                 json.RawMessage
 		}
 	}
 	Subtype, Text string                     // cursor
@@ -472,19 +473,26 @@ type event struct {
 	ResultIsError bool                       `json:"is_error"`
 }
 
-// cursorTool ignores metadata beside the <kind>ToolCall key.
-func (e event) cursorTool() (kind string, args json.RawMessage, passed bool) {
+// cursorTool ignores metadata beside the <kind>ToolCall key. Its output is a shell's stdout or a read's content,
+// a failure's stderr before its stdout.
+func (e event) cursorTool() (kind string, args json.RawMessage, passed bool, output string) {
 	for k, v := range e.ToolCall {
 		if kind, ok := strings.CutSuffix(k, "ToolCall"); ok {
 			var c struct {
 				Args   json.RawMessage
-				Result struct{ Success json.RawMessage }
+				Result struct {
+					Success json.RawMessage
+					Failure struct{ Stdout, Stderr string }
+				}
 			}
 			_ = json.Unmarshal(v, &c)
-			return kind, c.Args, c.Result.Success != nil && string(c.Result.Success) != "null"
+			var out struct{ Stdout, Content string }
+			_ = json.Unmarshal(c.Result.Success, &out)
+			return kind, c.Args, c.Result.Success != nil && string(c.Result.Success) != "null",
+				cmp.Or(c.Result.Failure.Stderr, c.Result.Failure.Stdout, out.Stdout, out.Content)
 		}
 	}
-	return "", nil, false
+	return "", nil, false, ""
 }
 
 type block struct {
@@ -492,6 +500,7 @@ type block struct {
 	ToolUseID                      string          `json:"tool_use_id"`
 	IsError                        bool            `json:"is_error"`
 	Input, Arguments               json.RawMessage // claude's and pi's
+	Content                        json.RawMessage // claude's tool_result: a string or text blocks
 }
 
 // see reads one JSON line of harness's stream.
@@ -607,7 +616,7 @@ func (e event) cursorSkillLoads(skill, clone string) []string {
 	if e.Type != "tool_call" || e.Subtype != "started" {
 		return nil
 	}
-	kind, args, _ := e.cursorTool()
+	kind, args, _, _ := e.cursorTool()
 	var input struct{ Path, Command string }
 	_ = json.Unmarshal(args, &input)
 	target := filepath.Join(clone, skillDirs["cursor"], skill, "SKILL.md")
@@ -718,12 +727,12 @@ func (e event) cursor() []map[string]any {
 	case e.Type == "assistant":
 		return e.blocks()
 	case e.Type == "tool_call" && (e.Subtype == "started" || e.Subtype == "completed"):
-		kind, args, passed := e.cursorTool()
+		kind, args, passed, output := e.cursorTool()
 		if kind == "" {
 			return nil
 		}
 		r := cmp.Or(map[string]string{"started": "running"}[e.Subtype], result(!passed))
-		return []map[string]any{toolCall(e.CallID, kind, detail(args), r)}
+		return []map[string]any{summed(toolCall(e.CallID, kind, detail(args), r), output)}
 	}
 	return nil
 }
@@ -735,9 +744,13 @@ func (e event) pi() []map[string]any {
 	case "tool_execution_start":
 		return []map[string]any{toolCall(e.ToolCallID, e.ToolName, detail(e.Args), "running")}
 	case "tool_execution_end":
-		var r struct{ IsError bool }
+		var r struct {
+			IsError bool
+			Content json.RawMessage
+		}
 		_ = json.Unmarshal(e.Result, &r)
-		return []map[string]any{toolCall(e.ToolCallID, e.ToolName, "", result(e.IsError || r.IsError))}
+		return []map[string]any{summed(toolCall(e.ToolCallID, e.ToolName, "", result(e.IsError || r.IsError)),
+			contentText(r.Content))}
 	}
 	return nil
 }
@@ -754,7 +767,7 @@ func (e event) codex() []map[string]any {
 		return []map[string]any{toolCall(e.Item.ID, "shell", e.Item.Command, "running")}
 	}
 	failed := e.Item.Status == "failed" || e.Item.ExitCode != nil && *e.Item.ExitCode != 0
-	return []map[string]any{toolCall(e.Item.ID, "shell", e.Item.Command, result(failed))}
+	return []map[string]any{summed(toolCall(e.Item.ID, "shell", e.Item.Command, result(failed)), e.Item.AggregatedOutput)}
 }
 
 func (e event) opencode() []map[string]any {
@@ -764,8 +777,10 @@ func (e event) opencode() []map[string]any {
 	case "text":
 		return says(e.Part.Text)
 	case "tool_use":
-		r := map[string]string{"completed": "passed", "error": "failed"}[e.Part.State.Status]
-		return []map[string]any{toolCall(e.Part.CallID, e.Part.Tool, detail(e.Part.State.Input), cmp.Or(r, "running"))}
+		s := e.Part.State
+		r := map[string]string{"completed": "passed", "error": "failed"}[s.Status]
+		return []map[string]any{summed(toolCall(e.Part.CallID, e.Part.Tool, detail(s.Input), cmp.Or(r, "running")),
+			cmp.Or(s.Output, s.Error))}
 	}
 	return nil
 }
@@ -787,7 +802,7 @@ func (e event) blocks() (evs []map[string]any) {
 		case "toolCall": // pi's, which its tool_execution_start may never follow
 			evs = append(evs, toolCall(b.ID, b.Name, detail(b.Arguments), "running"))
 		case "tool_result":
-			evs = append(evs, toolCall(b.ToolUseID, "", "", result(b.IsError)))
+			evs = append(evs, summed(toolCall(b.ToolUseID, "", "", result(b.IsError)), contentText(b.Content)))
 		}
 	}
 	return evs
@@ -804,6 +819,28 @@ func says(text string) []map[string]any {
 // toolCall is a tool call's live event; a later one with its id and empty fields leaves those as they were.
 func toolCall(id, name, detail, result string) map[string]any {
 	return map[string]any{"id": id, "tool": name, "detail": detail, "result": result}
+}
+
+// summed is tool call ev with its summary: the first line of its output, or of its error, when it has one.
+func summed(ev map[string]any, output string) map[string]any {
+	if line, _, _ := strings.Cut(strings.TrimSpace(output), "\n"); line != "" {
+		ev["summary"] = strings.TrimSpace(line)
+	}
+	return ev
+}
+
+// contentText is a tool result's content: a string, or the text of its blocks.
+func contentText(content json.RawMessage) string {
+	var text string
+	if json.Unmarshal(content, &text) == nil {
+		return text
+	}
+	var blocks []block
+	_ = json.Unmarshal(content, &blocks)
+	for _, b := range blocks {
+		text += b.Text
+	}
+	return text
 }
 
 func result(failed bool) string {
@@ -831,7 +868,7 @@ type use struct{ tool, args, command string }
 func (e event) calls(harness string) (cs []use) {
 	switch {
 	case harness == "cursor" && e.Type == "tool_call":
-		kind, args, _ := e.cursorTool()
+		kind, args, _, _ := e.cursorTool()
 		return []use{{kind, strs(args, writesFile(kind)), shellCommand(kind, args)}}
 	case harness == "codex":
 		return codexCalls(e.Item)
@@ -862,6 +899,7 @@ func codexCalls(item struct {
 	Arguments                             json.RawMessage         `json:"arguments"`
 	Changes                               []struct{ Path string } `json:"changes"`
 	ExitCode                              *int                    `json:"exit_code"`
+	AggregatedOutput                      string                  `json:"aggregated_output"`
 }) []use {
 	switch item.Type {
 	case "command_execution":

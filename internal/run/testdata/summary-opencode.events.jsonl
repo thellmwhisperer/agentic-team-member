@@ -1,0 +1,2 @@
+{"detail":"ls packages","id":"call_1","result":"passed","summary":"analytics","tool":"bash"}
+{"detail":"/repo/nope.md","id":"call_2","result":"failed","summary":"Error: File not found: /repo/nope.md","tool":"read"}

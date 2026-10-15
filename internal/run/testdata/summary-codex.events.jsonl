@@ -1,0 +1,3 @@
+{"detail":"/bin/bash -lc 'ls packages'","id":"item_1","result":"running","tool":"shell"}
+{"detail":"/bin/bash -lc 'ls packages'","id":"item_1","result":"passed","summary":"analytics","tool":"shell"}
+{"detail":"/bin/bash -lc 'cat nope.txt'","id":"item_2","result":"failed","summary":"cat: nope.txt: No such file or directory","tool":"shell"}
