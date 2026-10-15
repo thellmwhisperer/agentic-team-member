@@ -162,19 +162,23 @@ func (a agent) run(clone, name, skill, brief string, check func(map[string]any) 
 	case !s.used:
 		return fail(fmt.Errorf("%s; agent left no proof it used the %s skill; log: %s", exit, skill, path))
 	}
-	if name == "contract-review" {
-		var r map[string]any
-		if json.Unmarshal([]byte(s.final), &r) != nil {
-			return fail(errors.New("agent left no report: invalid contract review: want a single JSON object"))
-		}
-		ev["report"], err = r, check(r)
-	} else {
-		ev["report"], err = report(s.final, check)
-	}
-	if err != nil {
+	if ev["report"], err = finalReport(name, s.final, check); err != nil {
 		return fail(fmt.Errorf("%s; %w; log: %s", exit, err, path))
 	}
 	return ev, nil
+}
+
+// finalReport is the report in the agent's final message, which check accepts. The contract review's must be a
+// single JSON object, nothing around it.
+func finalReport(name, final string, check func(map[string]any) error) (map[string]any, error) {
+	if name != "contract-review" {
+		return report(final, check)
+	}
+	var r map[string]any
+	if json.Unmarshal([]byte(final), &r) != nil {
+		return nil, errors.New("agent left no report: invalid contract review: want a single JSON object")
+	}
+	return r, check(r)
 }
 
 // relative is live with each tool call's detail relative to clone: a path in it without clone, clone itself ".".
