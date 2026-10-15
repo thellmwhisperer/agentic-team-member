@@ -388,12 +388,18 @@ func (s *gateState) finding(row string) {
 // Read is what the follow stream reads of the gate of clone's branch, through `no-mistakes axi status` and
 // `gh pr view`: its state, the findings of the step it waits at, if one does, and its PR's CI repair commits,
 // those whose subject starts `no-mistakes(ci):`, in order. It changes nothing; nor s, when it fails.
-func (s *gateState) Read(clone string) error { return s.read(context.Background(), clone) }
+func (s *gateState) Read(clone string) error {
+	var r gateState
+	if err := r.read(context.Background(), clone); err != nil {
+		return err
+	}
+	*s = r
+	return nil
+}
 
 // errNoGate is a gate read whose status has no gate.
 var errNoGate = errors.New("no-mistakes axi status has no gate")
 
-// read is Read until ctx ends.
 func (s *gateState) read(ctx context.Context, clone string) error {
 	status, err := gateStatus(ctx, clone)
 	if err != nil {
@@ -408,6 +414,7 @@ func (s *gateState) read(ctx context.Context, clone string) error {
 	case r.waiting == "":
 		r.findings = nil
 	}
+	*s = r
 	if strings.HasPrefix(r.pr, "http") {
 		var pr prView
 		out, err := commandCtx(ctx, nil, clone, clone, "gh", "pr", "view", r.pr, "--json", "commits")
@@ -417,9 +424,8 @@ func (s *gateState) read(ctx context.Context, clone string) error {
 		if err != nil {
 			return err
 		}
-		r.ci = pr.ci()
+		s.ci = pr.ci()
 	}
-	*s = r
 	return nil
 }
 

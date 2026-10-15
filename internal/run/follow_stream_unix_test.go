@@ -291,6 +291,59 @@ func TestFollowStreamGateFailedWithOpenPR(t *testing.T) {
 	s.ended(1)
 }
 
+func TestFollowStreamPublicGateReadRemainsAtomic(t *testing.T) {
+	for _, commandFails := range []bool{true, false} {
+		t.Run(fmt.Sprint(commandFails), func(t *testing.T) {
+			fakeStatus(t)
+			status := filepath.Join(t.TempDir(), "status.txt")
+			writeFixture(t, status, recorded(t, "atm_watch_status_completed.txt"))
+			t.Setenv("ATM_STATUS_LIVE", status)
+			fakeGH(t, "invalid JSON", commandFails)
+			before := gateState{pr: "https://github.com/o/r/pull/1", waiting: "review", seen: true}
+			got := before
+			if err := got.Read(t.TempDir()); err == nil {
+				t.Fatal("Read succeeded despite the failed commit read")
+			}
+			if !reflect.DeepEqual(got, before) {
+				t.Fatalf("failed Read changed the snapshot: got %+v, want %+v", got, before)
+			}
+		})
+	}
+}
+
+func TestFollowStreamGateFailureSurvivesCommitReadError(t *testing.T) {
+	for _, broken := range []string{"exit 1", "printf 'invalid JSON'"} {
+		for _, state := range []string{"MERGED", "CLOSED", "OPEN", "unreadable"} {
+			t.Run(broken+"/"+state, func(t *testing.T) {
+				s := followStream(t, atmSet(atmYAML, "delivery", "true"))
+				s.delivered()
+				s.gate("completed", "ci,completed,", "ci,failed,")
+				s.pr(state, "no-mistakes(ci): Repair CI")
+				if state == "unreadable" {
+					t.Setenv("FAKE_GH_FAIL", "1")
+				}
+				bin := t.TempDir()
+				writeFixture(t, filepath.Join(bin, "gh"), `#!/bin/sh
+case "$*" in
+  *"--json commits") `+broken+` ;;
+  *) test -z "$FAKE_GH_FAIL" || exit 1
+     printf '%s\n' "$FAKE_GH_OUT" ;;
+esac
+`, 0o755)
+				t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+				s.advance(10 * time.Second)
+				s.next("pr_opened", map[string]any{"url": recordedPR})
+				if state != "unreadable" {
+					s.next("gate_fixing_ci", map[string]any{"commit": map[string]any{
+						"sha": "0000000000000000000000000000000000000001", "subject": "no-mistakes(ci): Repair CI"}})
+				}
+				s.next("run_failed", map[string]any{"step": "ci", "reason": "no-mistakes step ci failed"})
+				s.ended(1)
+			})
+		}
+	}
+}
+
 func TestFollowStreamGateFailureBeforePRTerminal(t *testing.T) {
 	for _, state := range []string{"MERGED", "CLOSED"} {
 		t.Run(state, func(t *testing.T) {

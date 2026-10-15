@@ -139,21 +139,22 @@ func (s *observer) poll(ctx context.Context, root string) (int, bool) {
 	}
 	var g gateState
 	err := g.read(ctx, s.clone)
-	switch {
-	case err == nil:
-		s.seen = true
-		s.gate(g)
-	case errors.Is(err, errNoGate) && s.reason != "" && !s.seen: // the delivery failed and started none
+	if errors.Is(err, errNoGate) && s.reason != "" && !s.seen { // the delivery failed and started none
 		s.say("run_failed", map[string]any{"step": "delivery", "reason": s.reason})
 		return 1, true
-	default:
+	}
+	if err != nil {
 		s.diag(err)
+	}
+	if g.seen {
+		s.seen = true
+		s.gate(g)
 	}
 	var prState string
 	if err != nil || s.pr != "" {
 		prState = s.prState(ctx, root)
 	}
-	if err == nil && g.failed != "" {
+	if g.failed != "" {
 		s.say("run_failed", map[string]any{"step": g.failed,
 			"reason": cmp.Or(s.reason, "no-mistakes step "+g.failed+" failed")})
 		return 1, true
