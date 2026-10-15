@@ -94,6 +94,9 @@ func (a agent) ponytail(root, clone, sha string, proofs []proof, i Issue, c conf
 // the commands of those checks.
 func reprove(runDir, clone, base string, history []proof, c config.Config) (string, []unitResult, []cmdResult, error) {
 	for n, p := range history {
+		if p.typ != "fix" && p.typ != "feature" && p.typ != "greenfield" && p.typ != "tests" {
+			continue
+		}
 		content, err := os.ReadFile(filepath.Join(clone, p.test))
 		if err != nil || string(content) != p.testContent {
 			return fmt.Sprintf("unit %d: test %s changed since it was proven", n+1, p.test), nil, nil, nil

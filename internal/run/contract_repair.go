@@ -20,11 +20,13 @@ const maxRepairRounds = 2
 type repairFinding struct{ Criterion, Evidence string }
 
 type repairAttempt struct {
-	Round    int      `json:"round"`
-	From     string   `json:"from"`
-	Head     string   `json:"head,omitempty"`
-	Criteria []string `json:"criteria"`
-	Result   string   `json:"result"`
+	Round    int          `json:"round"`
+	From     string       `json:"from"`
+	Head     string       `json:"head,omitempty"`
+	Criteria []string     `json:"criteria"`
+	Result   string       `json:"result"`
+	Reproofs []unitResult `json:"reproofs,omitempty"`
+	Commands []cmdResult  `json:"commands,omitempty"`
 }
 
 type unmatchedFinding struct {
@@ -52,12 +54,13 @@ type repairEvidence struct {
 }
 
 func (a agent) repairBlocked(clone, base, tombs string, i Issue, root string, history []proof, c config.Config,
-	rec map[string]any, err error) (map[string]any, error) {
+	rec map[string]any, err error) (map[string]any, repairEvidence, error) {
 	ev := repairEvidence{Heads: []string{textOf(rec, "head")}}
 	var last []repairFinding
+	_, stray, _ := selectable(err, rec, i.Text)
+	ev.keep(stray, optionalDrafts(rec))
 	for round := 1; round <= maxRepairRounds; round++ {
-		findings, stray, ok := selectable(err, rec, i.Text)
-		ev.keep(stray, optionalDrafts(rec))
+		findings, _, ok := selectable(err, rec, i.Text)
 		if !ok {
 			break
 		}
@@ -71,21 +74,19 @@ func (a agent) repairBlocked(clone, base, tombs string, i Issue, root string, hi
 		}
 		ev.Heads = append(ev.Heads, next)
 		rec, err = a.reviewed(clone, base, next, tombs, i)
+		_, stray, _ = selectable(err, rec, i.Text)
+		ev.keep(stray, optionalDrafts(rec))
 	}
 	ev.finish(i, rec, last, err)
-	if ev.Rounds > 0 || len(ev.Unmatched) > 0 {
+	if ev.Rounds > 0 || len(ev.Unmatched) > 0 || len(ev.Optional) > 0 {
 		rec["repair"] = ev
 	}
-	return rec, err
+	return rec, ev, err
 }
 
 func (ev *repairEvidence) keep(stray []unmatchedFinding, optional []any) {
-	if len(stray) > 0 {
-		ev.Unmatched = stray
-	}
-	if len(optional) > 0 {
-		ev.Optional = optional
-	}
+	ev.Unmatched = append(ev.Unmatched, stray...)
+	ev.Optional = append(ev.Optional, optional...)
 }
 
 func (ev *repairEvidence) fail(i Issue, findings []repairFinding, err error) {
@@ -119,7 +120,8 @@ func (a agent) oneRepair(clone, root, head string, i Issue, history []proof, c c
 	if _, err := git(clone, "reset", "-q", base); err != nil {
 		return head, attempt, repairErr(round, err)
 	}
-	why, _, _, err := reprove(a.dir, clone, base, history, c)
+	why, reproofs, commands, err := reprove(a.dir, clone, base, history, c)
+	attempt.Reproofs, attempt.Commands = reproofs, commands
 	if err != nil {
 		return head, attempt, repairErr(round, err)
 	}
@@ -205,19 +207,8 @@ func selectable(err error, rec map[string]any, issue string) ([]repairFinding, [
 }
 
 func repairStopped(err error, rec map[string]any) bool {
-	if err == nil {
-		return true
-	}
-	msg := err.Error()
-	if strings.Contains(msg, "invalid contract review") || strings.Contains(msg, "invalid task_slicing") ||
-		strings.Contains(msg, "changed the clone") || strings.Contains(msg, "uncommitted changes") ||
-		strings.Contains(msg, "made commits") {
-		return true
-	}
-	if slicingStops(rec) {
-		return true
-	}
-	return !strings.Contains(msg, "the contract review blocked the delivery")
+	return !errors.Is(err, errContractBlocked) || errors.Is(err, errInvalidSlicing) ||
+		errors.Is(err, errReviewMutation) || slicingStops(rec)
 }
 
 func slicingStops(rec map[string]any) bool {

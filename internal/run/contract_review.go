@@ -20,23 +20,23 @@ import (
 // are. A repair invalidates any earlier approval. The issue, base, head, report and reason go to
 // contract-review.json in the run's directory.
 func (a agent) reviewContract(clone, base, head, tombs string, i Issue, root string, history []proof,
-	c config.Config) error {
+	c config.Config) (repairEvidence, error) {
 	rec, err := a.reviewed(clone, base, head, tombs, i)
-	rec, err = a.repairBlocked(clone, base, tombs, i, root, history, c, rec, err)
-	return writeReview(a.dir, rec, err)
+	rec, repairs, err := a.repairBlocked(clone, base, tombs, i, root, history, c, rec, err)
+	return repairs, writeReview(a.dir, rec, err)
 }
 
 // reviewedDelivery reviews head, repairs an original-contract block, then returns the head delivery may use.
 func (a agent) reviewedDelivery(clone, base, head, tombs string, i Issue, root string, history []proof,
-	c config.Config) (string, error) {
-	err := a.reviewContract(clone, base, head, tombs, i, root, history, c)
+	c config.Config) (string, repairEvidence, error) {
+	repairs, err := a.reviewContract(clone, base, head, tombs, i, root, history, c)
 	if err != nil {
-		return head, err
+		return head, repairs, err
 	}
 	if head, err = git(clone, "rev-parse", "HEAD"); err != nil {
-		return head, err
+		return head, repairs, err
 	}
-	return head, dirtyTree(clone)
+	return head, repairs, dirtyTree(clone)
 }
 
 func dirtyTree(clone string) error {
@@ -89,7 +89,10 @@ func (a agent) contractReview(clone, base, head, tombs string, i Issue, rec map[
 		if dirty == nil && left != "" {
 			dirty = errors.New("the contract reviewer left uncommitted changes: " + left)
 		}
-		return errors.Join(err, dirty)
+		if dirty != nil {
+			return errors.Join(err, errReviewMutation, dirty)
+		}
+		return err
 	})
 }
 
@@ -108,7 +111,10 @@ func (a agent) readonly(clone, head, who string, review func() error) error {
 	if e == nil && now != tree {
 		e = errors.New("the " + who + " changed the clone")
 	}
-	return errors.Join(err, e, moved(clone, head, "the "+who))
+	if changed := errors.Join(e, moved(clone, head, "the "+who)); changed != nil {
+		return errors.Join(err, errReviewMutation, changed)
+	}
+	return err
 }
 
 // reviewScope has the agent review, read only, the paths follow-up f's unit n would change, on commit head in
@@ -210,6 +216,9 @@ func scopeBrief(issue string, n int, f followUp, paths []string) string {
 		"finding.\n"
 }
 
+var errContractBlocked = errors.New("the contract review blocked the delivery")
+var errReviewMutation = errors.New("review mutation or inspection failure")
+
 // approved is nil when the contract reviewer's report r, on base commit base and HEAD head, approves them, and
 // else why not: a block, with its findings, or a report that is not one.
 func approved(r map[string]any, base, head string) error {
@@ -242,7 +251,7 @@ func approved(r map[string]any, base, head string) error {
 	case *got.Disposition == "approved" && len(why) == 0:
 		return slicingApproved(got.TaskSlicing)
 	case *got.Disposition == "blocked" && len(why) > 0:
-		return errors.Join(errors.New("the contract review blocked the delivery: "+strings.Join(why, "; ")),
+		return errors.Join(fmt.Errorf("%w: %s", errContractBlocked, strings.Join(why, "; ")),
 			slicingApproved(got.TaskSlicing))
 	}
 	return fmt.Errorf("invalid contract review: disposition %q with %d findings", *got.Disposition, len(why))
