@@ -37,7 +37,7 @@ func StartFollowing(ctx context.Context, root string, args []string, w io.Writer
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithCancel(ctx)
+	stopBeating := make(chan struct{})
 	beating := make(chan struct{})
 	go func() {
 		defer close(beating)
@@ -45,7 +45,7 @@ func StartFollowing(ctx context.Context, root string, args []string, w io.Writer
 		defer t.Stop()
 		for {
 			select {
-			case <-ctx.Done():
+			case <-stopBeating:
 				return
 			case <-t.C:
 				l.Heartbeat = time.Now()
@@ -53,7 +53,7 @@ func StartFollowing(ctx context.Context, root string, args []string, w io.Writer
 			}
 		}
 	}()
-	defer func() { cancel(); <-beating; _ = os.Remove(leasePath(root, id)) }()
+	defer func() { close(stopBeating); <-beating; _ = os.Remove(leasePath(root, id)) }()
 	o, err := Start(root, append([]string{"--watcher", id}, args...))
 	if err != nil {
 		return err

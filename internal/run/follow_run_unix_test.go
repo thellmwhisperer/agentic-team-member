@@ -6,10 +6,12 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -253,6 +255,75 @@ func TestRunFollowKilledLeavesTheRunGoing(t *testing.T) {
 	release()
 	if end, err := Attach(top, f.o.Run, new(strings.Builder)); err != nil || end.Outcome != "passed" {
 		t.Fatalf("the run after its follow process died: %+v, %v", end, err)
+	}
+}
+
+func TestRunFollowCancellationDuringDelayedLaunchKeepsLeaseAlive(t *testing.T) {
+	bin := builtATM(t)
+	top := atmRepo(t)
+	l, err := net.ListenUnix("unix", &net.UnixAddr{Name: short(socket(top)), Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = l.Close() }()
+	_ = l.SetDeadline(time.Now().Add(10 * time.Second))
+	f := runFollow(t, bin, top, false, nil, "--follow")
+	c, err := l.Accept()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = c.Close() }()
+	_ = c.SetDeadline(time.Now().Add(10 * time.Second))
+	var req request
+	if err := json.NewDecoder(c).Decode(&req); err != nil {
+		t.Fatal(err)
+	}
+	_, _, _, a, err := parseArgs(req.Args)
+	if err != nil || req.Cmd != "run" || !Watching(top, a.watcher) {
+		t.Fatalf("launch request = %+v, %v; want run with a live lease", req, err)
+	}
+	var held lease
+	b, err := os.ReadFile(leasePath(top, a.watcher))
+	if err != nil || json.Unmarshal(b, &held) != nil || held.PID != f.cmd.Process.Pid {
+		t.Fatalf("lease = %s, %v; want follow pid %d", b, err, f.cmd.Process.Pid)
+	}
+	if err := f.cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(31 * time.Second)
+	if !Watching(top, a.watcher) {
+		t.Fatal("cancellation expired the lease while launch was still pending")
+	}
+	if runs, err := RecordedRuns(top); err != nil || len(runs) != 0 {
+		t.Fatalf("runs before releasing launch = %+v, %v; want none", runs, err)
+	}
+	_ = l.Close()
+	background(t, top)
+	_ = c.Close()
+	deadline := time.After(10 * time.Second)
+observing:
+	for {
+		select {
+		case line, ok := <-f.lines:
+			if !ok {
+				break observing
+			}
+			if !json.Valid([]byte(line)) {
+				t.Fatalf("non-JSON stdout: %q", line)
+			}
+		case <-deadline:
+			t.Fatal("canceled follow did not exit after launch settled")
+		}
+	}
+	f.ended(1)
+	if runs, err := Runs(top); err != nil || len(runs) != 1 || runs[0].Watcher != a.watcher {
+		t.Fatalf("runs after launch = %+v, %v; want one bound to %s", runs, err, a.watcher)
+	}
+	if paths := leases(t, top); len(paths) != 0 {
+		t.Fatalf("leases left after cancellation: %v", paths)
+	}
+	if end, err := Attach(top, f.o.Run, new(strings.Builder)); err != nil || end.Outcome != "passed" {
+		t.Fatalf("background run after cancellation = %+v, %v", end, err)
 	}
 }
 
