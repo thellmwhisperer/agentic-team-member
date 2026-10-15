@@ -11,7 +11,8 @@ import (
 
 // reviewIssue is an issue with criteria and invariants, which the contract reviewer gets whole.
 const reviewIssue = "# Retry on timeout\nType: fix\n\n## Acceptance\n\n1. Retry once on a timeout.\n\n" +
-	"## Invariants\n\nNo second retry.\n"
+	"Run go test ./retry.\n## Invariants\n\nNo second retry.\n## Non-goals\nNo logging changes.\n" +
+	"## Split triggers\nPersistent failure handling requires another contract.\n"
 
 // reviewDelivery is a delivery command that records in $ATM_TEST_OUT its HEAD, its clone and each call.
 const reviewDelivery = `git rev-parse HEAD > "$ATM_TEST_OUT/head"; printenv ATM_CLONE > "$ATM_TEST_OUT/clone"; ` +

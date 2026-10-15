@@ -24,6 +24,12 @@ type obj = map[string]any
 const fakeReport = "Done.\n{\"draft\": true}\n" + `{"test_file": "a_test.sh", "changed_files": ["a.txt"], ` +
 	`"summary": "s", "commands_run": [], "follow_ups": [{"title": "t", "red_test": "b_test.sh"}]}`
 
+const fakeSlicing = `{"disposition":"ready","reason":"One fulfilled contract","fields":{` +
+	`"non_goals":{"status":"present","reason":"Explicit exclusions"},` +
+	`"invariants":{"status":"present","reason":"Explicit invariants"},` +
+	`"acceptance":{"status":"present","reason":"Runnable check supplied"},` +
+	`"split_triggers":{"status":"present","reason":"Explicit triggers"}},"mandatory_pending":[],"drafts":[]}`
+
 // fixTest writes a test that a.txt, which repo's base commit has broken, is fixed and broken no longer.
 const fixTest = "; echo 'grep -q fixed a.txt && ! grep -q broken a.txt' > a_test.sh"
 
@@ -126,7 +132,8 @@ func fakeAgentTask(name string, args []string, mode *string) ([]byte, string, st
 		}
 		text = strings.NewReplacer("{base}", field("Base"), "{head}", field("HEAD")).Replace(cmp.Or(
 			os.Getenv("FAKE_REVIEW_REPORT"),
-			`{"disposition": "approved", "base": "{base}", "head": "{head}", "findings": [], "summary": "s"}`))
+			`{"disposition": "approved", "base": "{base}", "head": "{head}", "findings": [], "summary": "s",`+
+				`"task_slicing":`+fakeSlicing+`}`))
 	} else if strings.Contains(brief, "`ponytail-review`") {
 		*mode = os.Getenv("FAKE_PONYTAIL")
 		skill, call, todo = "ponytail-review", ".ponytail", os.Getenv("FAKE_PONYTAIL_WORK")

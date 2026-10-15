@@ -33,6 +33,19 @@ func (a agent) contractReview(clone, base, head, tombs string, i Issue, rec map[
 		return err
 	}
 	text := reviewBrief(intent(i.Text, tombs), base, head, diff)
+	dir, err := placeSkill(clone, a.Harness, "task-slicing") // before readonly's snapshot, like ponytail-review
+	if err != nil {
+		return err
+	}
+	if dir == "" { // ACP distributes skills in the prompt; ponytail-review still supplies its proof field.
+		b, _ := skills.ReadFile("task-slicing/SKILL.md")
+		text += "\n## SKILL `task-slicing`\n" + string(b)
+	} else {
+		text += "\nRead the complete `task-slicing` skill at `" + filepath.Join(dir, "SKILL.md") + "`.\n"
+	}
+	if a.Harness == "pi" {
+		a.args = append(slices.Clone(a.args), "--skill", dir)
+	}
 	return a.readonly(clone, head, "contract reviewer", func() error {
 		ev, err := a.run(clone, "contract-review", "ponytail-review", text, func(r map[string]any) error {
 			return approved(r, base, head)
@@ -172,6 +185,7 @@ func approved(r map[string]any, base, head string) error {
 	var got struct {
 		Disposition, Base, Head, Summary *string
 		Findings                         *[]struct{ Criterion, Evidence string }
+		TaskSlicing                      *taskSlicingReview `json:"task_slicing"`
 	}
 	if err := dec.Decode(&got); err != nil {
 		return fmt.Errorf("invalid contract review: %w", err)
@@ -192,9 +206,10 @@ func approved(r map[string]any, base, head string) error {
 	}
 	switch {
 	case *got.Disposition == "approved" && len(why) == 0:
-		return nil
+		return slicingApproved(got.TaskSlicing)
 	case *got.Disposition == "blocked" && len(why) > 0:
-		return errors.New("the contract review blocked the delivery: " + strings.Join(why, "; "))
+		return errors.Join(errors.New("the contract review blocked the delivery: "+strings.Join(why, "; ")),
+			slicingApproved(got.TaskSlicing))
 	}
 	return fmt.Errorf("invalid contract review: disposition %q with %d findings", *got.Disposition, len(why))
 }
@@ -207,6 +222,15 @@ func reviewBrief(issue, base, head, diff string) string {
 		"\n\n## COMMIT\n- Base: " + base + "\n- HEAD: " + head + "\n\n## RULES\n" +
 		"Use the `ponytail-review` skill for its one-line findings; this brief wins over its scope: judge the diff " +
 		"against the issue, not its complexity.\n" +
+		"Also load the complete `task-slicing` skill. Report explicitly whether Non-goals, Invariants, executable " +
+		"Acceptance and Split triggers are present in the literal issue, and whether the diff needs splitting. " +
+		"Use the skill's task_slicing report schema below, alongside this review's existing fields.\n" +
+		"- Judge meaning, including prose without Markdown headings; empty headings do not supply requirements.\n" +
+		"- Unready issues and independent contracts in the diff block delivery. Never repair them in this review.\n" +
+		"- Optional improvements outside the goal belong in local drafts, not product changes; their absence alone " +
+		"does not block delivery. Mandatory pending requirements always block, even in drafts or existing follow-ups.\n" +
+		"- Supply drafts with all ten task-slicing contract fields, cause and parent dependency. ATM saves the report " +
+		"in the run directory; do not write drafts to the product clone or publish or execute children.\n" +
 		"- Read only: edit, create, delete, stage, commit or check out nothing. ATM blocks the delivery if the clone " +
 		"or HEAD changes.\n" +
 		"- Block when the diff breaks a criterion or invariant the issue makes mandatory, or changes what is outside " +
@@ -217,6 +241,7 @@ func reviewBrief(issue, base, head, diff string) string {
 		"## DIFF\n```diff\n" + diff + "\n```\n\n## REPORT\nYour final message must be ONLY this JSON object, " +
 		"nothing else:\n" + `{"disposition": "<approved or blocked>", "base": "` + base + `", "head": "` + head +
 		`", "findings": [{"criterion": "<the issue's criterion or invariant, verbatim>", "evidence": "<file:line ` +
-		`in the diff and what it does>"}], "summary": "<one paragraph>"}` + "\nUse `\"approved\"` with " +
+		`in the diff and what it does>"}], "summary": "<one paragraph>", "task_slicing": ` + slicingSchema + `}` +
+		"\nUse `\"approved\"` with " +
 		"`\"findings\": []` only when nothing blocks; `\"blocked\"` needs at least one finding.\n"
 }
