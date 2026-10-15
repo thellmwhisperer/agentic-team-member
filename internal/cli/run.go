@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
@@ -18,11 +20,18 @@ import (
 // completed screen open until the user closes it. Closing the terminal leaves it going.
 func runCmd() *cobra.Command {
 	return &cobra.Command{Use: "run", Short: "Fix an issue: " + run.Usage,
-		Long: "On a terminal, the completed screen stays open until q or Ctrl+C.", DisableFlagParsing: true,
+		Long: "On a terminal, the completed screen stays open until q or Ctrl+C.\n" +
+			"With --follow instead of --watcher, atm is the run's watcher and prints its events as JSON lines until " +
+			"it ends: exit 0 on merge, 1 otherwise.", DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			root, err := toplevel()
 			if err != nil {
 				return err
+			}
+			if run.Follows(args) {
+				ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+				defer stop()
+				return run.StartFollowing(ctx, root, args, cmd.OutOrStdout())
 			}
 			o, err := run.Start(root, args)
 			if err != nil {

@@ -122,6 +122,7 @@ func parseArgs(args []string) (ordered []string, base, resume *string, a *agent,
 	resume = fs.String("resume", "", "a run that failed after its agent: its issue again, from its agent's work")
 	a = &agent{}
 	fs.StringVar(&a.watcher, "watcher", "", "the atm watch the run is bound to")
+	fs.BoolVar(&a.follow, "follow", false, "be the run's watcher and print its events as JSON until it ends")
 	a.flags(fs)
 	// flag stops at the first argument that is not one: the issue, after which the flags go on.
 	for err = fs.Parse(args); err == nil && fs.NArg() > 0; err = fs.Parse(fs.Args()[1:]) {
