@@ -9,14 +9,28 @@ import (
 	"testing"
 )
 
-// TestBriefRedRequiresExecution pins the whole rendered ACCEPTANCE section for feature and greenfield: a missing
-// symbol or module is a red only at runtime, and the red must parse/compile and reach an assertion, as Checks
-// enforces.
+// redOnBase says the red runs with the source reverted: in Go a test naming a function the worker is about to add
+// does not compile there.
+const redOnBase = "   ATM runs the red test with your source changes reverted to the base commit, " +
+	"so the test may only name\n" +
+	"   identifiers that already exist there; reach new behaviour at runtime through an existing entry " +
+	"point, and\n" +
+	"   check it by building or vetting with only the test file changed.\n"
+
+// TestBriefRedRequiresExecution pins the whole rendered ACCEPTANCE section for fix, feature and greenfield: a
+// missing symbol or module is a red only at runtime, the red must parse/compile and reach an assertion, as Checks
+// enforces, and for fix and feature it runs on the base commit.
 func TestBriefRedRequiresExecution(t *testing.T) {
 	for typ, steps := range map[string]string{
+		"fix": "1. Write a test on the existing code that fails today on behaviour, not on a missing symbol or " +
+			"module.\n" +
+			"   The fix may add files: the test must still fail with those files present and the fix reverted.\n" +
+			redOnBase +
+			"2. Fix the source. The test passes.\n",
 		"feature": "1. Write a test that fails today, possibly on a missing symbol at runtime. " +
 			"It must parse/compile and reach\n" +
 			"   an assertion: a parse, compile or load error before any assertion is not a red.\n" +
+			redOnBase +
 			"2. Implement the feature. The test passes.\n",
 		"greenfield": "1. Write a test that fails today, possibly on a missing module at runtime. " +
 			"It must parse/compile and reach\n" +
