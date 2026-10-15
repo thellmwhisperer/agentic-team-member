@@ -13,7 +13,8 @@ it:
 - **Evidence**: what happened. For a failed run, the `report.json` of the run
   and the relevant lines of `worker*.jsonl`, with the harness and model
   named. Strip paths and hostnames you do not want published.
-- **Acceptance criteria**: numbered, each one checkable by a test.
+- **Issue contract**: follow [the issue requirements](docs/configuration.md#the-issue).
+  Number the acceptance criteria.
 - **Red test**: the test that fails today, or a sentence describing it.
 
 An issue without a red test gets one before any code is written.

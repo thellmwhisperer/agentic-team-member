@@ -12,9 +12,9 @@ it.
 
 ## The loop
 
-1. **An issue with a contract.** Title, a `Type: fix` line, evidence,
-   acceptance criteria a test can check, and a `## Red test` section naming
-   the test that fails today.
+1. **An issue with a contract.** Follow
+   [the issue requirements](configuration.md#the-issue), with evidence and a
+   `## Red test` section naming the test that fails today.
    The agent gets exactly this text; a vague issue gives a vague run.
 2. **An ATM run.** Start `atm watch` in the launching session and pass its ID
    with `atm run --watcher <id> <number>`. Fill `.atm.yaml` once with the
