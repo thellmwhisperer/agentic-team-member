@@ -13,6 +13,57 @@ import (
 	"time"
 )
 
+// Follows says whether args, atm run's command line, ask for --follow.
+func Follows(args []string) bool {
+	_, _, _, a, err := parseArgs(args)
+	return err == nil && a.follow
+}
+
+// StartFollowing is atm run --follow with args: this process takes a lease, refreshed each beat, has the
+// background process of the repository at root run args bound to it, and streams that run on w until it ends,
+// then drops the lease. Its error is nil on merge, exit code 1 when the run did not merge, else that no run started.
+// Ending ctx leaves the run going.
+func StartFollowing(ctx context.Context, root string, args []string, w io.Writer) error {
+	_, _, resume, a, err := parseArgs(args)
+	switch {
+	case err != nil:
+		return err
+	case *resume != "":
+		return errors.New("--follow does not resume: follow the run again with atm watch --adopt <run>")
+	case a.watcher != "":
+		return errors.New("--follow makes this process the run's watcher: drop --watcher")
+	}
+	id, l, err := newLease(root)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	beating := make(chan struct{})
+	go func() {
+		defer close(beating)
+		t := time.NewTicker(beat)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				l.Heartbeat = time.Now()
+				_ = l.write(root, id) // a missed beat is caught up at the next
+			}
+		}
+	}()
+	defer func() { cancel(); <-beating; _ = os.Remove(leasePath(root, id)) }()
+	o, err := Start(root, append([]string{"--watcher", id}, args...))
+	if err != nil {
+		return err
+	}
+	if o.Stream(ctx, root, w, time.Now, time.After) != 0 {
+		return exitError{1, errors.New(o.Run + " ended without a merge")}
+	}
+	return nil
+}
+
 // Stream observes existing run o.Run in root, writing each event immediately as one JSON line on w
 // with time, run, issue and event. It returns 0 on merge, or 1 on closure or run/gate failure.
 // An observed gate failure takes precedence over a later PR result in the same poll.

@@ -53,6 +53,7 @@ type agent struct {
 	args, env []string
 	root, dir string
 	watcher   string        // the run's atm watch, which atm run --watcher names
+	follow    bool          // atm run --follow: the launching process watches the run itself
 	timeout   time.Duration // .atm.yaml's agent_timeout, 0 for agentTimeout
 }
 

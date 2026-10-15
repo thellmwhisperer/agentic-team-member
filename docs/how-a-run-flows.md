@@ -18,7 +18,8 @@ output line), and passes the id from its first line, `watching as <id>`, to
 `atm run --watcher <id>`. It replaces the CoS skill's `vigia.sh`: it never
 exits on an event, so there is nothing to re-arm.
 
-`atm run` without `--watcher`, or naming a watcher that is not alive, fails
+`atm run` without `--watcher` or [`--follow`](#following-one-run), or naming a
+watcher that is not alive, fails
 before cloning with exit code 2:
 `no watcher: start atm watch in the session that launches this run and pass --watcher <id>`.
 A watcher is alive while its lease, `.atm/watch/<id>.json`, names a process
@@ -48,6 +49,50 @@ When a watcher dies, each running run bound to it shows
 `WATCHER GONE at <time>: no one is watching this run` once, on its screen and
 in `.atm/serve.log`. `atm watch --adopt <run>` binds the run to a new watcher,
 which prints its current state first, as `adopted: running at <step>`.
+
+### Following one run
+
+`atm run <issue> --follow` launches the run and watches it in one process, so
+no separate `atm watch` is needed. `--follow` goes before or after the issue,
+like any flag; a value-taking flag's value is that flag's, so
+`--model --follow` is a model, not `--follow`. Before the run starts, the
+process writes its own lease, `.atm/watch/<id>.json` with its PID, and binds
+the run to it. It rewrites the lease every 10 s while it follows and removes
+it when it exits. If the lease cannot be written, no run starts.
+
+`--follow` with `--watcher` fails before launch, since the follow process is
+the run's watcher. `--follow` with `--resume` fails too: follow a resumed or
+running run with `atm watch --adopt <run>`. A launch failure prints its reason
+on stderr and exits 2, with no event.
+
+Its stdout carries only JSON lines, one per event, also on a terminal; it shows
+no screen and no run label. Diagnostics, such as a gate or `gh` read that
+failed and is retried, go to stderr. Every line has `time` (RFC 3339, UTC),
+`run`, `issue` and `event`, and these fields:
+
+| `event` | Fields | When |
+|---------|--------|------|
+| `step` | `step` | A step starts |
+| `delivery` | `clone` | Delivery starts, right after its `step` |
+| `gate_waiting` | `step`, `clone`, `findings` (`id`, `severity`, `file`, `description` each) | The gate waits at a step for approval or a decision, once per new wait |
+| `pr_opened` | `url` | The PR is first seen |
+| `gate_fixing_ci` | `commit` (`sha`, `subject`) | A new CI repair commit, one whose subject starts with `no-mistakes(ci):` |
+| `ci_green` | `url` | CI turns green |
+| `stalled` | `minutes` | 60 minutes pass with no other event; `minutes` counts since the last event other than `stalled` |
+| `merged` | `url` | The PR merged; the last line, exit 0 |
+| `closed` | `url` | The PR closed unmerged; the last line, exit 1 |
+| `run_failed` | `step`, `reason` | The run or a gate step failed; the last line, exit 1 |
+
+From delivery on, it reads the gate with `no-mistakes axi status` in the clone
+and the PR with `gh`, at most once every 10 s. If the clone is gone, it finds
+the PR by the delivery's branch. It exits 0 after `merged` and 1 after `closed`
+or `run_failed`. It also exits 1, with no final event, when the run delivers
+nothing or when it is interrupted.
+
+A CoS launches it as a background command under its streaming monitor, which
+wakes the session on each line, and reads the result from the exit code.
+Killing or interrupting the process stops only the following: the run goes on,
+shows `WATCHER GONE` as above, and `atm watch --adopt <run>` takes it over.
 
 ## The steps
 

@@ -51,6 +51,14 @@ func (l lease) write(root, id string) error {
 	return err
 }
 
+// newLease writes a new lease of this process in the repository at root and returns its watcher id.
+func newLease(root string) (string, lease, error) {
+	now := time.Now()
+	id := strconv.Itoa(os.Getpid()) + "-" + strconv.FormatInt(now.Unix(), 36)
+	l := lease{os.Getpid(), now, now}
+	return id, l, l.write(root, id)
+}
+
 // Watching says whether watcher id of the repository at root lives: its process runs and its heartbeat is fresh.
 func Watching(root, id string) bool {
 	var l lease
@@ -82,12 +90,11 @@ func Watchers(root string) (ids []string) {
 // no-mistakes gate once it reaches delivery.
 // ponytail: it asks for the runs every beat, which keeps the background process from ending idle.
 func Watch(ctx context.Context, root, adopt string, w io.Writer) error {
-	since := time.Now()
-	id := strconv.Itoa(os.Getpid()) + "-" + strconv.FormatInt(since.Unix(), 36)
-	l := lease{os.Getpid(), since, since}
-	if err := l.write(root, id); err != nil {
+	id, l, err := newLease(root)
+	if err != nil {
 		return err
 	}
+	since := l.Started
 	defer func() { _ = os.Remove(leasePath(root, id)) }()
 	lines := make(chan string)
 	say := func(label, event string) {
