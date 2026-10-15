@@ -10,11 +10,12 @@ import (
 )
 
 // resumePoint is what a run that fails after its agent keeps in resume/, in its directory, for atm run
-// --resume: its issue, base ref and base commit, the unit it failed at with its agent's report and the
-// follow-up it chained, the proofs of the units before, and work.bundle: their commits, then the failed unit's
-// work as one commit on them.
+// --resume: its issue, as given and as first read, base ref and base commit, the unit it failed at with its
+// agent's report and the follow-up it chained, the proofs of the units before, and work.bundle: their commits,
+// then the failed unit's work as one commit on them.
 type resumePoint struct {
 	Issue    string         `json:"issue"`
+	Original *Issue         `json:"original"`
 	BaseRef  string         `json:"base_ref"`
 	Base     string         `json:"base"`
 	Unit     int            `json:"unit"`

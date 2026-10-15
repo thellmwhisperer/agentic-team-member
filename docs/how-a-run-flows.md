@@ -179,7 +179,7 @@ an unchanged or longer test is allowed.
 ## Follow-ups
 
 A follow-up is a behaviour gap the agent found and did not fix. Its report
-lists each as `{"title", "red_test", "criterion"}`, with the failing test
+lists each as `{"title", "red_test", "criterion", "paths"}`, with the failing test
 written at `.atm/follow-ups/<n>/<red_test>`. After a unit passes Checks, ATM
 runs each follow-up test at `red_test` on the unit's work: it must fail. One
 without its test, or whose test passes or hangs, is rejected. No model judges
@@ -193,6 +193,20 @@ unit red/green as a `feature`. The quote matches a whole issue line or sentence;
 whitespace, list markers and a line's final punctuation are normalized.
 Other follow-ups go to `follow-ups.json` in the run's directory with their
 tests. Each accepted follow-up there has `"verified": true`.
+
+Before that next unit starts, a read-only reviewer, run like the
+[contract review](#delivery), compares the follow-up's `paths` plus its
+red test with the issue as the run first read it: its declared scope, non-goals
+and paths it reserves to another owner. Quoting a criterion widens none of
+them. Its verdict must be a single JSON object echoing exactly those paths;
+each finding names a path, the issue's clause verbatim and a reason. No paths,
+a missing, malformed or stale verdict, a block, or a reviewer that changes the
+clone or HEAD stops the run before the worker starts: the follow-up becomes a
+mandatory pending item, as below, with the review under `scope`. Once approved,
+`brief-unit-<n>.md` names the approved paths, and Checks fail the unit when it
+changes any other path, saving a blocking child draft as for the budget below.
+A resumed run reviews and briefs against the issue text the first run saved,
+never the live issue.
 
 The run allows at most three units. Units after the first share a fixed
 200-line gross diff budget: additions plus deletions measured for each unit

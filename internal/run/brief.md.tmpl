@@ -20,7 +20,8 @@ Task type: {{.Type}}. The issue, verbatim:
 {{- if .Next}}
 1. The previous unit is committed. Its follow-up "{{.Next.Title}}" left its red test, `{{.Next.RedTest}}`, in
    place: it fails today. Do not edit it.
-2. Make it pass. Report `{{.Next.RedTest}}` as test_file.
+2. Make it pass, changing only the paths its scope review approved: {{code .Next.Scope.Paths}}. Any other
+   blocks the unit. Report `{{.Next.RedTest}}` as test_file.
 {{- else if eq .Type "fix"}}
 1. Write a test on the existing code that fails today on behaviour, not on a missing symbol or module.
    The fix may add files: the test must still fail with those files present and the fix reverted.
@@ -71,8 +72,10 @@ Use the `ponytail` skill.
   ATM runs it at `<red_test>`: one without its test, or whose test passes today, is rejected.
 - Its `criterion` is one sentence copied verbatim from the issue that the gap breaks: ATM then runs it as the
   next unit. Any other goes to `follow-ups.json`, to become a new issue.
+- Its `paths` are every path that next unit would change, its red test aside. A reviewer checks them, and the
+  red test, against the issue's scope before the unit starts; the unit may change no other.
 
 ## REPORT
 Your final message must be ONLY this JSON object, nothing else:
-{"test_file": "<repo-relative path of the new test, or empty>", "changed_files": ["<path>"], "summary": "<one paragraph>", "commands_run": ["<command>"], "follow_ups": [{"title": "<gap>", "red_test": "<repo-relative path of its failing test>", "criterion": "<sentence copied from the issue>"}]}
+{"test_file": "<repo-relative path of the new test, or empty>", "changed_files": ["<path>"], "summary": "<one paragraph>", "commands_run": ["<command>"], "follow_ups": [{"title": "<gap>", "red_test": "<repo-relative path of its failing test>", "criterion": "<sentence copied from the issue>", "paths": ["<repo-relative path its unit would change>"]}]}
 Use `"follow_ups": []` when there are none.

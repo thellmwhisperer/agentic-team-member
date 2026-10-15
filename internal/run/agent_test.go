@@ -113,7 +113,10 @@ func fakeAgentTask(name string, args []string, mode *string) ([]byte, string, st
 	_, typ, _ := strings.Cut(brief, "Task type: ")
 	typ, _, _ = strings.Cut(typ, ".")
 	skill, call, todo, text := "ponytail", "", cmp.Or(os.Getenv("FAKE_AGENT_WORK"), work[typ]), fakeReport
-	if strings.Contains(brief, "# Contract review") {
+	if strings.Contains(brief, "# Scope review") {
+		*mode = os.Getenv("FAKE_SCOPE")
+		skill, call, todo, text = "ponytail-review", ".scope", os.Getenv("FAKE_SCOPE_WORK"), fakeScope(brief, *mode)
+	} else if strings.Contains(brief, "# Contract review") {
 		*mode = os.Getenv("FAKE_REVIEW")
 		skill, call, todo = "ponytail-review", ".review", os.Getenv("FAKE_REVIEW_WORK")
 		field := func(key string) string {
@@ -276,10 +279,46 @@ func waitForFakeAgentRelease() {
 	}
 }
 
+// fakeScope is the scope reviewer's report on brief: $FAKE_SCOPE_REPORT, or an approval, {paths} in it the
+// brief's. In mode issue it blocks each path its brief's issue does not name, on the issue's Scope line.
+func fakeScope(brief, mode string) string {
+	_, paths, _ := strings.Cut(brief, "\n- Paths: ")
+	paths, _, _ = strings.Cut(paths, "\n")
+	if mode == "issue" {
+		_, issue, _ := strings.Cut(brief, "## ISSUE\n")
+		issue, _, _ = strings.Cut(issue, "\n## PLAN")
+		_, clause, _ := strings.Cut(issue, "\nScope:")
+		clause, _, _ = strings.Cut(clause, "\n")
+		var all []string
+		_ = json.Unmarshal([]byte(paths), &all)
+		findings := []obj{}
+		for _, p := range all {
+			if !strings.Contains(issue, p) {
+				findings = append(findings, obj{"path": p, "clause": "Scope:" + clause, "reason": "not in the scope"})
+			}
+		}
+		b, _ := json.Marshal(obj{"disposition": map[bool]string{true: "approved", false: "blocked"}[len(findings) == 0],
+			"paths": json.RawMessage(paths), "findings": findings, "summary": "s"})
+		return string(b)
+	}
+	return strings.ReplaceAll(cmp.Or(os.Getenv("FAKE_SCOPE_REPORT"),
+		`{"disposition": "approved", "paths": {paths}, "findings": [], "summary": "s"}`), "{paths}", paths)
+}
+
 // workReport is the report the worker's work left in .atm/fake-report.json, "" for none or for the ponytail
-// pass, whose call is ".ponytail".
+// pass, whose call is ".ponytail". A follow-up in it without paths proposes the whole clone, ".".
 func workReport(call string) string {
 	b, _ := os.ReadFile(".atm/fake-report.json")
+	var r obj
+	if json.Unmarshal(b, &r) == nil {
+		fs, _ := r["follow_ups"].([]any)
+		for _, f := range fs {
+			if f, ok := f.(obj); ok && f["paths"] == nil {
+				f["paths"] = []string{"."}
+			}
+		}
+		b, _ = json.Marshal(r)
+	}
 	return map[bool]string{true: string(b)}[call == ""]
 }
 

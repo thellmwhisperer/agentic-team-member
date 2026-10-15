@@ -61,7 +61,7 @@ func Run(label string, args []string, out, summary io.Writer) (err error) {
 	defer func() { r.resumable(a.dir); err = r.finish(err, summary) }()
 	var i Issue
 	r.step("issue", func() (map[string]any, error) {
-		i, err = readIssue(args[len(args)-1], repo)
+		i, err = theIssue(from, args[len(args)-1], repo)
 		r.Type, r.Watcher = i.Type, a.watcher
 		ev := map[string]any{"title": i.Title, "type": i.Type}
 		if i.Number != 0 {
@@ -84,7 +84,7 @@ func Run(label string, args []string, out, summary io.Writer) (err error) {
 	byClone.Store(dir, r)
 	defer byClone.Delete(dir)
 	proofs, unit, pending := a.units(r, root, dir, sha, text, i, c,
-		resumePoint{Issue: args[len(args)-1], BaseRef: *base, Base: sha}, from)
+		resumePoint{Issue: args[len(args)-1], Original: &i, BaseRef: *base, Base: sha}, from)
 	if err := saveFollowUps(a.dir, pending); err != nil {
 		return err
 	}
@@ -95,6 +95,15 @@ func Run(label string, args []string, out, summary io.Writer) (err error) {
 	})
 	a.deliver(r, root, dir, sha, *base, c.Delivery, i, summary)
 	return r.err
+}
+
+// theIssue is the issue of run from, as it first read it, or else arg's, read from the GitHub repository repo
+// when a number.
+func theIssue(from *resumePoint, arg, repo string) (Issue, error) {
+	if from != nil && from.Original != nil {
+		return *from.Original, nil
+	}
+	return readIssue(arg, repo)
 }
 
 func leave(r *verdict, dir, repo string) error {
@@ -191,7 +200,7 @@ func (a agent) units(r *verdict, root, dir, sha, text string, i Issue, c config.
 			pending = append(pending, out...)
 			spent, _ = ev["gross_lines"].(int) // none on unit 1, the primary work
 			if err == nil {
-				pending, in, err = unmet(root, dir, head, n, i, pending, in)
+				pending, in, err = a.scoped(root, dir, head, n, i, pending, in)
 				if errors.Is(err, errUnmet) && r.saved != 0 {
 					_, bundleErr := git(dir, "bundle", "create", filepath.Join(a.dir, "resume", "work.bundle"),
 						"refs/atm/resume", "HEAD", "^"+keep.Base)
@@ -216,9 +225,9 @@ func (r *verdict) recordUnit(n int, head, test, typ, resumed string, ev map[stri
 		Red: red, Green: green, Result: outcome(r.err), ResumedFrom: resumed, span: proofSpan})
 }
 
-// checkUnit checks unit n, on commit head in clone dir. A unit after the first that takes the gross lines of
-// those before it, spent, over grossBudget fails with its follow-up f as a blocking child: its contract, the
-// unit's diff, the cause and head, its dependency.
+// checkUnit checks unit n, on commit head in clone dir. A unit after the first that changes a path its follow-up
+// f's scope review did not approve, or takes the gross lines of those before it, spent, over grossBudget, fails
+// with f as a blocking child: its contract, the unit's diff, the cause and head, its dependency.
 func checkUnit(
 	runDir, dir, head, test, typ string, f *followUp, n, spent int, report map[string]any, body string,
 	c config.Config,
@@ -235,16 +244,14 @@ func checkUnit(
 		if b, err := os.ReadFile(filepath.Join(dir, test)); err != nil || string(b) != f.Test {
 			return failed(fmt.Errorf("unit %d edited its red test %s, which it must make pass as it is", n, test))
 		}
-		g, diff, err := gross(dir, head, f.RedTest)
+		g, diff, cause, err := beyond(dir, head, *f, n, spent)
 		if err != nil {
 			return failed(err)
 		}
 		ev["gross_lines"] = spent + g
-		if spent+g > grossBudget {
+		if cause != "" {
 			child := *f
-			child.Diff, child.Dependency = diff, head
-			child.Cause = fmt.Sprintf("units 2 to %d change %d lines, added plus deleted, over the %d-line budget "+
-				"of the work after unit 1", n, spent+g, grossBudget)
+			child.Diff, child.Dependency, child.Cause = diff, head, cause
 			p, in, out, ev, err := failed(errors.New(child.Cause))
 			return p, in, append([]followUp{child}, out...), ev, err
 		}
