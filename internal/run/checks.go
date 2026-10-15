@@ -109,12 +109,18 @@ func hideATM(clone, runDir string) (func() error, error) {
 }
 
 // before records every file in clone, ignored or not, as the agent finds it, for reset and, as refs/atm-before,
-// for unmade, and the path of every file and directory in it, those of a repository nested in it too, which git
-// sees as one, for unmade.
+// for unmade, those of an ignored repository nested in it, which whole sees as one, as refs/atm-before of
+// .git/atm-nested, and the path of every file and directory in it, those of a nested repository too, for unmade.
 func before(clone string) error {
 	tree, err := whole(clone)
 	if err == nil {
 		_, err = every(clone, "update-ref", "refs/atm-before", tree)
+	}
+	if err == nil {
+		tree, err = nestedTree(clone)
+	}
+	if err == nil {
+		_, err = nestedGit(clone, ".", "update-ref", "refs/atm-before", tree)
 	}
 	if err != nil {
 		return err
@@ -139,12 +145,22 @@ func before(clone string) error {
 }
 
 // unmade removes agent-created ignored content using before's paths, except follow-up tests the run keeps, then
-// puts back, byte for byte, each ignored file before recorded that the agent changed or deleted: a package
-// manager's own state, which would tell install the agent's dependencies are there.
+// puts back, byte for byte, each ignored file before recorded that the agent changed or deleted, those of an
+// ignored nested repository too: a package manager's own state, which would tell install the agent's
+// dependencies are there.
 func unmade(clone string) error {
-	if err := prunes(clone); err != nil {
-		return err
+	err := prunes(clone)
+	if err == nil {
+		err = putBackIgnored(clone)
 	}
+	if err == nil {
+		err = putBackNested(clone)
+	}
+	return err
+}
+
+// putBackIgnored puts back, byte for byte, each ignored file before recorded that the agent changed or deleted.
+func putBackIgnored(clone string) error {
 	now, err := whole(clone)
 	if err != nil {
 		return err
@@ -164,6 +180,84 @@ func unmade(clone string) error {
 			"--pathspec-from-file=-", "--pathspec-file-nul")
 	}
 	return err
+}
+
+// putBackNested puts back, byte for byte, each file of an ignored nested repository before recorded that the
+// agent changed or deleted, the directory it is in writable meanwhile. It never touches the repository's .git.
+func putBackNested(clone string) error {
+	now, err := nestedTree(clone)
+	if err != nil {
+		return err
+	}
+	changed, err := nestedGit(clone, ".", "diff", "--name-only", "--no-renames", "-z", "--diff-filter=DMT",
+		"refs/atm-before", now)
+	if err != nil || changed == "" {
+		return err
+	}
+	root, err := os.OpenRoot(clone)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
+	modes := map[string]fs.FileMode{}
+	for _, p := range strings.Split(strings.TrimSuffix(changed, "\x00"), "\x00") {
+		d := path.Dir(p)
+		if info, statErr := root.Stat(d); statErr == nil && modes[d] == 0 { // a deleted one's may be gone
+			modes[d] = info.Mode()
+			err = errors.Join(err, root.Chmod(d, info.Mode()|0o700))
+		}
+	}
+	if err == nil {
+		_, err = commandIn(strings.NewReader(changed), clone, clone, "git", "--literal-pathspecs",
+			"--git-dir=.git/atm-nested", "--work-tree=.", "checkout", "refs/atm-before",
+			"--pathspec-from-file=-", "--pathspec-file-nul")
+	}
+	for d, m := range modes {
+		err = errors.Join(err, root.Chmod(d, m))
+	}
+	return err
+}
+
+// nestedTree records in .git/atm-nested the files, all but .git, of each ignored repository nested in clone,
+// which whole sees as one gitlink, and is their tree. ponytail: a repository nested in one of them stays a
+// gitlink; recurse if a cache ever nests them.
+func nestedTree(clone string) (string, error) {
+	out, err := git(clone, "ls-files", "-z", "--others", "--ignored", "--exclude-standard")
+	if err == nil {
+		err = store(clone, "atm-nested")
+	}
+	var trees [][2]string
+	for _, p := range strings.Split(out, "\x00") {
+		if err != nil || !strings.HasSuffix(p, "/") { // a nested repository is listed as dir/
+			continue
+		}
+		var tree string
+		if _, err = nestedGit(clone, p, "read-tree", "--empty"); err == nil {
+			_, err = nestedGit(clone, p, "add", "-A", "-f", ".")
+		}
+		if err == nil {
+			tree, err = nestedGit(clone, p, "write-tree")
+		}
+		trees = append(trees, [2]string{p, tree})
+	}
+	if err == nil {
+		_, err = nestedGit(clone, ".", "read-tree", "--empty")
+	}
+	for _, t := range trees {
+		if err == nil {
+			_, err = nestedGit(clone, ".", "read-tree", "--prefix="+t[0], t[1])
+		}
+	}
+	if err != nil {
+		return "", err
+	}
+	return nestedGit(clone, ".", "write-tree")
+}
+
+// nestedGit runs git in clone on .git/atm-nested, as every does on .git/atm-files, with dir its working tree.
+func nestedGit(clone, dir string, args ...string) (string, error) {
+	return git(clone, append([]string{"-c", "core.bigFileThreshold=1", "--git-dir=.git/atm-nested",
+		"--work-tree=" + dir}, args...)...)
 }
 
 // prunes removes agent-created ignored content using before's paths, except follow-up tests the run keeps.
@@ -661,14 +755,7 @@ func keep(clone string) (string, error) {
 // whole records every file in clone, ignored or not, as reset knows them, byte for byte: no line ending is
 // converted, whatever core.autocrlf or .gitattributes say. It is their tree.
 func whole(clone string) (string, error) {
-	info := filepath.Join(clone, ".git", "atm-files", "info")
-	_, err := git(clone, "init", "-q", "--bare", ".git/atm-files")
-	if err == nil {
-		err = os.MkdirAll(info, 0o700)
-	}
-	if err == nil {
-		err = os.WriteFile(filepath.Join(info, "attributes"), []byte("* -text\n"), 0o600)
-	}
+	err := store(clone, "atm-files")
 	if err == nil {
 		_, err = every(clone, "add", "-A", "-f", ".")
 	}
@@ -676,6 +763,19 @@ func whole(clone string) (string, error) {
 		return "", err
 	}
 	return every(clone, "write-tree")
+}
+
+// store makes .git/name in clone a bare repository that converts no line ending of the files it records.
+func store(clone, name string) error {
+	info := filepath.Join(clone, ".git", name, "info")
+	_, err := git(clone, "init", "-q", "--bare", ".git/"+name)
+	if err == nil {
+		err = os.MkdirAll(info, 0o700)
+	}
+	if err == nil {
+		err = os.WriteFile(filepath.Join(info, "attributes"), []byte("* -text\n"), 0o600)
+	}
+	return err
 }
 
 // reset brings clone's working tree back to what keep recorded, byte for byte, new files gone, the ignored ones
