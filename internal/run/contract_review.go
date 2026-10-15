@@ -81,11 +81,6 @@ func (a agent) scopeReview(clone, head string, n int, i Issue, f followUp, s *sc
 	if len(f.Paths) == 0 {
 		return fmt.Errorf("follow-up %s has no proposed paths for unit %d", f.RedTest, n)
 	}
-	for _, p := range f.Paths {
-		if !filepath.IsLocal(filepath.FromSlash(p)) {
-			return fmt.Errorf("follow-up %s proposes %q, not a path in the clone", f.RedTest, p)
-		}
-	}
 	text := scopeBrief(i.Text, n, f, s.Paths)
 	return a.readonly(clone, head, "scope reviewer", func() error {
 		ev, err := a.run(clone, "scope-review-unit"+strconv.Itoa(n), "ponytail-review", text,
