@@ -128,10 +128,13 @@ agent starts, including contents of ignored nested repositories. Before
 including read-only cache trees and new contents within retained directories.
 It then restores changed or deleted pre-existing ignored files from the
 pre-agent snapshot, byte for byte, so package-manager state cannot claim
-that removed dependencies are still installed. Existing directory modes remain;
-symlinks are removed as links, without changing their targets. Nested
-repositories are recorded as Git references, so their pre-existing file
-contents are not restored. A cleanup or restoration error stops Checks before
+that removed dependencies are still installed. This includes tracked and
+untracked files inside pre-existing ignored nested repositories, even when
+their HEAD has not changed; restoring those files leaves their `.git` unchanged.
+A repository nested inside one of those repositories is still recorded only
+as a Git reference, so its file contents are not restored. Existing directory
+modes remain; symlinks are removed as links, without changing their targets.
+A cleanup or restoration error stops Checks before
 `install` or proof. Delivery leaves the removed paths out, so a test that
 needs one fails. ATM moves `.atm/` out of the clone while Checks runs,
 including `install`, the proof and the other commands, then restores it even
