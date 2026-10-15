@@ -179,18 +179,23 @@ func TestFollowUpScopeFailsClosed(t *testing.T) {
 	}
 }
 
+func blockedScopeRunDir(t *testing.T, root, label string, err error, why string) string {
+	t.Helper()
+	if label == "resumed" {
+		err = Run(label, []string{"--resume", "t", issueFile(t, androidIssue)}, io.Discard, io.Discard)
+	}
+	if err == nil || !strings.Contains(err.Error(), why) {
+		t.Fatalf("%s: want unit 2 blocked on %q, got %v", label, why, err)
+	}
+	return filepath.Join(root, ".atm", "runs", label)
+}
+
 func TestFollowUpScopeBlocksAnUnplannedPathAcrossResume(t *testing.T) {
 	root, _, _, _, err := scopeRun(t, androidIssue, "c1_test.sh",
 		scopeFollowUp("c1_test.sh", "The android card opens the route.", `["a.txt"]`),
 		"ATM_TEST_UNIT2", "echo u2 >> a.txt; echo extra > b.txt")
 	for _, label := range []string{"t", "resumed"} {
-		if label == "resumed" {
-			err = Run(label, []string{"--resume", "t", issueFile(t, androidIssue)}, io.Discard, io.Discard)
-		}
-		if err == nil || !strings.Contains(err.Error(), "b.txt") {
-			t.Fatalf("%s: want unit 2 blocked on its unplanned b.txt alone, got %v", label, err)
-		}
-		dir := filepath.Join(root, ".atm", "runs", label)
+		dir := blockedScopeRunDir(t, root, label, err, "b.txt")
 		var left []obj
 		b, _ := os.ReadFile(filepath.Join(dir, "follow-ups.json"))
 		if json.Unmarshal(b, &left) != nil || len(left) != 1 || left[0]["red_test"] != "c1_test.sh" ||
@@ -283,13 +288,7 @@ func TestFollowUpScopeRequiresExactPlannedFiles(t *testing.T) {
 				scopeFollowUp("c1_test.sh", "The android card opens the route.", string(paths)),
 				"ATM_TEST_UNIT2", "echo u2 >> a.txt; mkdir -p android; echo extra > android/unplanned.txt")
 			for _, label := range []string{"t", "resumed"} {
-				if label == "resumed" {
-					err = Run(label, []string{"--resume", "t", issueFile(t, androidIssue)}, io.Discard, io.Discard)
-				}
-				if err == nil || !strings.Contains(err.Error(), "changes android/unplanned.txt, outside the paths") {
-					t.Fatalf("%s: want only the unplanned file blocked, got %v", label, err)
-				}
-				dir := filepath.Join(root, ".atm", "runs", label)
+				dir := blockedScopeRunDir(t, root, label, err, "changes android/unplanned.txt, outside the paths")
 				report := readReport(t, filepath.Join(dir, "report.json"))
 				if report["failed_node"] != "checks" {
 					t.Fatalf("%s: want delivery blocked at checks, got %v", label, report)
