@@ -249,12 +249,24 @@ lowercase: `fix` (or `hotfix`), `feature`, `greenfield`, `refactor`, `tests`,
 `docs` or `chore`. The type picks the proof the checks ask for; see
 [How a run flows](how-a-run-flows.md#what-each-task-type-proves).
 
+For [delivery](how-a-run-flows.md#delivery), the issue must also supply
+Non-goals, Invariants, executable Acceptance and Split triggers. The reviewer
+judges their meaning: prose is valid, but empty Markdown headings are not.
+Acceptance must specify a runnable check and its expected result. Split
+triggers identify discoveries that require separating work or replanning.
+
 ```markdown
 # Retry the upload on a timeout
 
 Type: fix
 
 An upload that times out is lost. It should be retried once.
+
+Non-goals: Do not add retries for errors other than timeouts.
+Invariants: Successful uploads and other errors keep their current behavior.
+Acceptance: Run `go test ./upload -run TestUploadTimeout -count=1`.
+The test must pass, proving one retry on timeout and no second retry.
+Split triggers: Persistent retry queues require a separate contract.
 ```
 
 ## What a run leaves on disk

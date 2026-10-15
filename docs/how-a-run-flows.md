@@ -286,13 +286,33 @@ When `delivery` is set, the clone goes on a new branch
 the next unit commit, and the clone's `origin` becomes the repository's. Every
 commit after the base must carry the repository's git identity.
 
-Then the agent, with the `ponytail-review` skill, reviews read only the issue
-and the committed diff from the original base to that HEAD. Its final message
+Then the agent, with the bundled `ponytail-review` and `task-slicing` skills,
+reviews read only the literal issue and the committed diff from the original
+base to that HEAD. Both skills use the existing harness skill distribution;
+proof of loading `ponytail-review` remains required. Its final message
 must be a single JSON object reporting `approved` or `blocked`, with no
 surrounding text; approval requires no findings, and each block quotes the
 issue's criterion and its evidence in the diff.
+
+The same report must include `task_slicing`: a disposition, reason, results
+for all four [issue readiness fields](configuration.md#the-issue), pending
+mandatory requirements and local child drafts. ATM validates the report's
+fields, types and dispositions; it does not infer readiness from Markdown.
+`unready` and `split-required` block delivery without starting a repair round.
+Delivery requires both the original approval and a valid `ready` result with
+no mandatory work pending. Recording a mandatory requirement in a draft or
+an existing follow-up does not satisfy it.
+
 `contract-review.json` in the run's directory keeps the issue, base, HEAD,
-report and reason. A block, a report that is not valid or names another base
+report and reason, including drafts outside the product branch. A split
+requires a draft with its cause, parent dependency and all ten
+[child contract fields](../internal/run/task-slicing/SKILL.md#local-child-contracts).
+An optional improvement outside the goal can remain a local draft without
+blocking fulfilled work; an unrelated change already in the diff still
+blocks. ATM neither publishes nor executes these drafts, and they do not use
+the worker's [follow-up format](#follow-ups).
+
+A block, a report that is not valid or names another base
 or HEAD, a failed reviewer, a reviewer that changes the clone or HEAD, or
 uncommitted changes after review fails Delivery before its command runs;
 nothing retries it. With no `delivery` command, neither the review nor the
