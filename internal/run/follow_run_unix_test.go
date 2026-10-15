@@ -333,6 +333,11 @@ func TestRunFollowCancellationDuringDelayedLaunchKeepsLeaseAlive(t *testing.T) {
 	_ = l.Close()
 	background(t, top)
 	_ = c.Close()
+	assertCanceledFollowAfterLaunch(t, f, top, a.watcher)
+}
+
+func assertCanceledFollowAfterLaunch(t *testing.T, f *followed, top, watcher string) {
+	t.Helper()
 	deadline := time.After(10 * time.Second)
 observing:
 	for {
@@ -349,8 +354,8 @@ observing:
 		}
 	}
 	f.ended(1)
-	if runs, err := Runs(top); err != nil || len(runs) != 1 || runs[0].Watcher != a.watcher {
-		t.Fatalf("runs after launch = %+v, %v; want one bound to %s", runs, err, a.watcher)
+	if runs, err := Runs(top); err != nil || len(runs) != 1 || runs[0].Watcher != watcher {
+		t.Fatalf("runs after launch = %+v, %v; want one bound to %s", runs, err, watcher)
 	}
 	if paths := leases(t, top); len(paths) != 0 {
 		t.Fatalf("leases left after cancellation: %v", paths)
