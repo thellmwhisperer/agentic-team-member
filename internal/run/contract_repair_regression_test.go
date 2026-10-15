@@ -36,18 +36,11 @@ func TestContractReviewRepairDeliversCurrentEvidence(t *testing.T) {
 			if err := json.Unmarshal(mustRead(t, filepath.Join(runDir, "contract-review.json")), &review); err != nil {
 				t.Fatal(err)
 			}
-			if delivered.HeadSHA != reader(t, got)("head") || review.Head != delivered.HeadSHA || len(review.Repair.Attempts) != rounds {
+			if delivered.HeadSHA != reader(t, got)("head") || review.Head != delivered.HeadSHA ||
+				len(review.Repair.Attempts) != rounds {
 				t.Fatalf("wrong delivered head or attempts: %+v %+v", delivered, review)
 			}
-			for n, attempt := range review.Repair.Attempts {
-				want := []string{"fixed\nround-one", "fixed\nround-two"}[n]
-				if len(attempt.Reproofs) != 1 || attempt.Reproofs[0].Green.Tail != want || attempt.Head != review.Repair.Heads[n+1] {
-					t.Fatalf("round %d lost its proof or head: %+v", n+1, attempt)
-				}
-				if len(attempt.Commands) != 3 || attempt.Commands[2].Name != "lint" || attempt.Commands[2].Tail != want {
-					t.Fatalf("round %d lost its checks: %+v", n+1, attempt.Commands)
-				}
-			}
+			assertRepairAttemptEvidence(t, review.Repair)
 			want := []string{"fixed\nround-one", "fixed\nround-two"}[rounds-1]
 			if len(delivered.Reproofs) != 1 || delivered.Reproofs[0].Green.Tail != want {
 				t.Fatalf("delivery received stale proofs: %+v", delivered.Reproofs)
@@ -67,7 +60,8 @@ func TestContractReviewRepairTypesWithoutTestFile(t *testing.T) {
 				blocked := repairBlocked(t, "Retry once on a timeout.", file+":1 incomplete", nil)
 				repairEnv(t, []string{blocked, slicingJSON(t, slicingReport())}, []string{"echo repaired > " + file})
 				t.Setenv("ATM_TEST_ISSUE", strings.Replace(reviewIssue, "Type: fix", "Type: "+typ, 1))
-				t.Setenv("FAKE_AGENT_WORK", work[typ]+`; mkdir -p .atm; printf '{"test_file":"","follow_ups":[]}' > .atm/fake-report.json`)
+				t.Setenv("FAKE_AGENT_WORK",
+					work[typ]+`; mkdir -p .atm; printf '{"test_file":"","follow_ups":[]}' > .atm/fake-report.json`)
 				atm := repairATM()
 				if fail {
 					atm = atmSet(atm, "lint", "! grep -q repaired "+file)
@@ -88,12 +82,7 @@ func TestContractReviewRepairTypesWithoutTestFile(t *testing.T) {
 					t.Fatal(err)
 				}
 				attempt := review.Repair.Attempts[0]
-				if len(attempt.Reproofs) != 1 || attempt.Reproofs[0].Type != typ || attempt.Reproofs[0].TestFile != "" || len(attempt.Commands) != 3 {
-					t.Fatalf("type-specific proof or checks missing: %+v", attempt)
-				}
-				if typ == "refactor" && (attempt.Reproofs[0].Red.Command == "" || attempt.Reproofs[0].Red.Exit != 0) {
-					t.Fatalf("refactor lost its base-suite proof: %+v", attempt)
-				}
+				assertRepairTypeProof(t, attempt, typ)
 			})
 		}
 	}
@@ -117,7 +106,8 @@ func TestContractReviewRepairRetainsFindingsAcrossRounds(t *testing.T) {
 					t.Fatal(err)
 				}
 				if !approve || n < 3 {
-					report["findings"] = append(report["findings"].([]any), obj{"criterion": "Owner " + strconv.Itoa(n), "evidence": "Separate work"})
+					report["findings"] = append(report["findings"].([]any),
+						obj{"criterion": "Owner " + strconv.Itoa(n), "evidence": "Separate work"})
 				}
 				b, err := json.Marshal(report)
 				if err != nil {
@@ -130,38 +120,7 @@ func TestContractReviewRepairRetainsFindingsAcrossRounds(t *testing.T) {
 			if approve && err != nil || !approve && err == nil {
 				t.Fatalf("unexpected review result: %v", err)
 			}
-			if !approve {
-				if _, err := os.Stat(filepath.Join(got, "calls")); err == nil {
-					t.Fatal("blocked run delivered")
-				}
-			}
-			var review struct{ Repair repairEvidence }
-			if err := json.Unmarshal(mustRead(t, filepath.Join(runDir, "contract-review.json")), &review); err != nil {
-				t.Fatal(err)
-			}
-			owners := 3
-			if approve {
-				owners = 2
-			}
-			if len(review.Repair.Optional) != 3 || len(review.Repair.Unmatched) != owners {
-				t.Fatalf("lost optional drafts or owner findings: %+v", review.Repair)
-			}
-			for n, draft := range review.Repair.Optional {
-				if draft.(map[string]any)["contract"].(map[string]any)["goal"] != "Optional "+strconv.Itoa(n+1) {
-					t.Fatalf("lost round %d optional draft", n+1)
-				}
-			}
-			for n, finding := range review.Repair.Unmatched {
-				if finding.Criterion != "Owner "+strconv.Itoa(n+1) || finding.Disposition != "owner" {
-					t.Fatalf("lost round %d owner finding: %+v", n+1, finding)
-				}
-			}
-			for n := 1; n <= 2; n++ {
-				brief := agentCall(t, call+".repair"+strconv.Itoa(n)).Stdin
-				if strings.Contains(brief, "Owner ") || strings.Contains(brief, "Optional ") {
-					t.Fatalf("unrelated work sent to repair: %s", brief)
-				}
-			}
+			assertRepairRetainedFindings(t, runDir, got, call, approve)
 		})
 	}
 }
@@ -214,5 +173,65 @@ func TestContractReviewRepairClassifiesErrorsByIdentity(t *testing.T) {
 				t.Fatal("invalid reviewer report triggered repair")
 			}
 		})
+	}
+}
+
+func assertRepairAttemptEvidence(t *testing.T, evidence repairEvidence) {
+	t.Helper()
+	for n, attempt := range evidence.Attempts {
+		want := []string{"fixed\nround-one", "fixed\nround-two"}[n]
+		if len(attempt.Reproofs) != 1 || attempt.Reproofs[0].Green.Tail != want || attempt.Head != evidence.Heads[n+1] {
+			t.Fatalf("round %d lost its proof or head: %+v", n+1, attempt)
+		}
+		if len(attempt.Commands) != 3 || attempt.Commands[2].Name != "lint" || attempt.Commands[2].Tail != want {
+			t.Fatalf("round %d lost its checks: %+v", n+1, attempt.Commands)
+		}
+	}
+}
+
+func assertRepairTypeProof(t *testing.T, attempt repairAttempt, typ string) {
+	t.Helper()
+	if len(attempt.Reproofs) != 1 || attempt.Reproofs[0].Type != typ ||
+		attempt.Reproofs[0].TestFile != "" || len(attempt.Commands) != 3 {
+		t.Fatalf("type-specific proof or checks missing: %+v", attempt)
+	}
+	if typ == "refactor" && (attempt.Reproofs[0].Red.Command == "" || attempt.Reproofs[0].Red.Exit != 0) {
+		t.Fatalf("refactor lost its base-suite proof: %+v", attempt)
+	}
+}
+
+func assertRepairRetainedFindings(t *testing.T, runDir, got, call string, approve bool) {
+	t.Helper()
+	if !approve {
+		if _, err := os.Stat(filepath.Join(got, "calls")); err == nil {
+			t.Fatal("blocked run delivered")
+		}
+	}
+	var review struct{ Repair repairEvidence }
+	if err := json.Unmarshal(mustRead(t, filepath.Join(runDir, "contract-review.json")), &review); err != nil {
+		t.Fatal(err)
+	}
+	owners := 3
+	if approve {
+		owners = 2
+	}
+	if len(review.Repair.Optional) != 3 || len(review.Repair.Unmatched) != owners {
+		t.Fatalf("lost optional drafts or owner findings: %+v", review.Repair)
+	}
+	for n, draft := range review.Repair.Optional {
+		if draft.(map[string]any)["contract"].(map[string]any)["goal"] != "Optional "+strconv.Itoa(n+1) {
+			t.Fatalf("lost round %d optional draft", n+1)
+		}
+	}
+	for n, finding := range review.Repair.Unmatched {
+		if finding.Criterion != "Owner "+strconv.Itoa(n+1) || finding.Disposition != "owner" {
+			t.Fatalf("lost round %d owner finding: %+v", n+1, finding)
+		}
+	}
+	for n := 1; n <= 2; n++ {
+		brief := agentCall(t, call+".repair"+strconv.Itoa(n)).Stdin
+		if strings.Contains(brief, "Owner ") || strings.Contains(brief, "Optional ") {
+			t.Fatalf("unrelated work sent to repair: %s", brief)
+		}
 	}
 }
