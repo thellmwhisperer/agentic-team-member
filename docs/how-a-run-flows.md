@@ -334,19 +334,37 @@ pending, a spinner running, `⏸` waiting, `✓` passed, `✗` failed, `–` ski
 note, and beside it, from 100 columns, the Agent box while an agent works,
 the Findings box with a failure or the slop detector's cuts, and the Log box.
 The Agent box renders the agent's Markdown prose within the panel width as
-`✎` lines; non-empty thinking appears as `∴` lines. Consecutive successful or running tool calls appear as one dim line
-below them, with tool names and repeat counts. A running batch has a spinner
-and its active tool's detail; a failed tool keeps its own row. It omits empty thinking, user messages, skill text,
-tool-result text and the JSON report at the end of the agent's final message.
-Its `N tools` note counts tool calls only.
+`✎` lines; non-empty thinking appears as `∴` lines. By default, consecutive
+successful or running tool calls are folded into one dim line below them,
+with tool names and repeat counts. A running group has a spinner and its
+active tool's detail; a failed tool keeps its own row, including the first
+line of its error when available. The box omits empty thinking, user messages,
+skill text, full tool output and the JSON report at the end of the agent's
+final message. Its `N tools` note counts tool calls only.
+
+In both `atm run` and `atm attach`, press `t` to unfold all tool groups and
+press it again to fold them. Each press clears individual group choices.
+Click a group's `N tools` header to toggle just that group; clicking an
+individual call does nothing. The header remains visible when unfolded.
+Each unfolded call occupies one row: a state icon and word (`running`, `ok`
+or `failed`), the tool name, the first line of its detail, and, after ` · `,
+the first line of its result. Rows are cut to the panel width, with terminal
+controls filtered out. Result summaries are read for pi, Claude, Codex,
+OpenCode and Cursor. If the result is absent or its first line is blank,
+the separator and summary are omitted. The footer shows `t tools` beside
+`q detach` while the Agent box is visible. Fold choices are not saved across
+attaches.
+
 The ATM box and the Agent box each keep every line and scroll on their own.
 The mouse wheel scrolls the box under the pointer. The keys scroll the box
 with the `*` marker in its title: the Agent box while it shows, the ATM box
 after `Tab`. `↑` and `↓` move by a line, `PgUp` and `PgDn` by a page, and
 `Home` and `End` go to the first and the last lines. A box scrolled above its
 last line stays where it is as new lines come; back at its last line it follows
-them again. Stacked under 100 columns, the ATM box takes at most two thirds of
-the space left after the footer and panel gap.
+them again. Folding or unfolding preserves the reading position; a call
+hidden by folding anchors to its group header. Stacked under 100 columns,
+the ATM box takes at most two thirds of the space left after the footer and
+panel gap.
 On Unix, ATM keeps its screen live while the delivery command is silent. From
 the command's first output until it ends, ATM gives it the attached terminal
 and its keys, so no-mistakes shows its own screen there; ATM's screen comes
