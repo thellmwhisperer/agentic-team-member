@@ -16,7 +16,7 @@ against the issue before handing the branch to your configured command.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/pipeline-dark.svg">
-  <img alt="ATM pipeline: issue, isolated clone, contract, coding agent, checks. FAIL stops the run. PASS goes to the slop detector, a code quality gate where a model may only cut, then to the delivery and code review gate. The documented example of that gate is no-mistakes, a graph of its own where review and document are models, test and PR are code with a model part, and rebase, lint and CI call a model only after a fix answer. A passed unit with a proven follow-up goes back to the agent, at most three units." src="docs/assets/pipeline-light.svg" width="1000">
+  <img alt="ATM pipeline: issue, isolated clone, contract, coding agent, checks. FAIL stops the run. PASS goes to the slop detector, a code quality gate where a model may only cut, then to the delivery and code review gate. The documented example of that gate is no-mistakes, a graph of its own where review and document are models, test and PR are code with a model part, and rebase, lint and CI call a model only after a fix answer. Follow-up dispatch is described in the run-flow guide." src="docs/assets/pipeline-light.svg" width="1000">
 </picture>
 
 ## A real run
@@ -70,7 +70,7 @@ every check ran again before it was kept.
 | Write the fix | **model** | nothing: it decides nothing |
 | Red / green | code | a test that passes without the fix or fails with it |
 | The project's configured `install`, `test`, `typecheck` and `lint` commands | code | any failure |
-| Follow-ups | code | unproved gaps after Checks pass; see [Follow-ups](docs/how-a-run-flows.md#follow-ups) |
+| Follow-ups | code and **model** | See [Follow-ups](docs/how-a-run-flows.md#follow-ups) for verification and scope approval |
 | Slop detector (code quality gate, not code review) | **model**, may only cut | a cut that breaks any check or does not shrink the diff: the clone goes back |
 | Delivery and code review gate | **model**, then your command | See [Delivery](docs/how-a-run-flows.md#delivery) for the review that must approve before the command runs |
 
