@@ -1,0 +1,4 @@
+{"type":"tool_execution_start","toolCallId":"call-0","toolName":"bash","args":{"command":"ls packages"}}
+{"type":"tool_execution_end","toolCallId":"call-0","toolName":"bash","result":{"content":[{"type":"text","text":"analytics\nweb\n"}],"details":{}},"isError":false}
+{"type":"tool_execution_start","toolCallId":"call-1","toolName":"read","args":{"path":"nope.md"}}
+{"type":"tool_execution_end","toolCallId":"call-1","toolName":"read","result":{"content":[{"type":"text","text":"ENOENT: no such file or directory, access 'nope.md'"}],"details":{}},"isError":true}

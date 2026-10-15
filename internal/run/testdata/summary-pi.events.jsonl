@@ -1,0 +1,4 @@
+{"detail":"ls packages","id":"call-0","result":"running","tool":"bash"}
+{"detail":"","id":"call-0","result":"passed","summary":"analytics","tool":"bash"}
+{"detail":"nope.md","id":"call-1","result":"running","tool":"read"}
+{"detail":"","id":"call-1","result":"failed","summary":"ENOENT: no such file or directory, access 'nope.md'","tool":"read"}

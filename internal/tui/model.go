@@ -24,9 +24,10 @@ type row struct {
 	hasDuration              bool
 }
 
-// activity is a line of the Agent box: a tool call, by its id, and its result, or what the agent says or thinks.
+// activity is a line of the Agent box: a tool call, by its id, its result and the first line of its output, or
+// what the agent says or thinks.
 type activity struct {
-	id, tool, detail, result, thinking, says string
+	id, tool, detail, result, summary, thinking, says string
 }
 
 // finding is a row of the Findings box, as no-mistakes has them: a severity, error or warning, a reference and
@@ -53,11 +54,14 @@ type Model struct {
 	pipeline, history             pane
 	pipelineFocus                 bool
 	pipelineBounds, historyBounds bounds
+	unfold                        bool            // t: every tool call of the Agent box on its own line
+	open                          map[string]bool // a run of tool calls, by its key, clicked open or closed
+	toggles                       []string        // the run each shown row of the Agent box opens or closes on a click
 }
 
 type bounds struct{ x, y, width, height int }
 
-type paneLine struct{ key, parent, text string }
+type paneLine struct{ key, parent, text, toggle string }
 
 type pane struct {
 	top, last, h, part int
@@ -185,10 +189,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// key scrolls the focused box, or, on tab, focuses the other.
+// key scrolls the focused box, or, on tab, focuses the other, or, on t, folds or unfolds every tool call.
 func (m *Model) key(k string) {
 	p := m.focused()
 	switch k {
+	case "t":
+		m.unfold, m.open = !m.unfold, nil
 	case "tab":
 		if m.agentRuns() {
 			m.pipelineFocus = !m.pipelineFocus
@@ -208,7 +214,8 @@ func (m *Model) key(k string) {
 	}
 }
 
-// wheel scrolls the box under the pointer: the ATM box, or the Agent box while it shows.
+// wheel scrolls the box under the pointer: the ATM box, or the Agent box while it shows. A click on a row of
+// folded tool calls in the Agent box unfolds them, and on the line over unfolded ones folds them.
 func (m *Model) wheel(msg tea.MouseMsg) {
 	var p *pane
 	if m.pipelineBounds.contains(msg.X, msg.Y) {
@@ -223,7 +230,24 @@ func (m *Model) wheel(msg tea.MouseMsg) {
 		p.scroll(-3)
 	case tea.MouseButtonWheelDown:
 		p.scroll(3)
+	case tea.MouseButtonLeft:
+		row := msg.Y - m.historyBounds.y - 1 // under the box's top border
+		if p == &m.history && msg.Action == tea.MouseActionPress && row >= 0 && row < len(m.toggles) &&
+			m.toggles[row] != "" {
+			if m.open == nil {
+				m.open = map[string]bool{}
+			}
+			m.open[m.toggles[row]] = !m.unfolded(m.toggles[row])
+		}
 	}
+}
+
+// unfolded says whether the run of tool calls by key shows each call on its own line.
+func (m *Model) unfolded(key string) bool {
+	if open, ok := m.open[key]; ok {
+		return open
+	}
+	return m.unfold
 }
 
 func (b bounds) contains(x, y int) bool {
@@ -233,7 +257,8 @@ func (b bounds) contains(x, y int) bool {
 // event is every field of a node's or a live event the screen reads.
 type event struct {
 	Step, State, Error, TS, Title, Type, SHA, Branch string
-	Check, ID, Tool, Detail, Result, Thinking, Says  string
+	Check, ID, Tool, Detail, Result, Summary         string
+	Thinking, Says                                   string
 	ResumedFrom                                      string `json:"resumed_from"`
 	Output                                           *string
 	Number                                           int
@@ -295,7 +320,7 @@ func (m *Model) started(step string, at time.Time) {
 	}
 	if step == "agent" || step == "ponytail" {
 		m.pipelineFocus = false
-		m.agent, m.history = nil, pane{}
+		m.agent, m.history, m.open = nil, pane{}, nil
 	}
 	r.state, r.start = "running", at
 }
@@ -383,7 +408,8 @@ func (m *Model) tool(e event) {
 		i = len(m.agent) - 1
 	}
 	a := m.agent[i]
-	for to, v := range map[*string]string{&a.tool: e.Tool, &a.detail: e.Detail, &a.result: e.Result} {
+	for to, v := range map[*string]string{&a.tool: e.Tool, &a.detail: e.Detail, &a.result: e.Result,
+		&a.summary: e.Summary} {
 		if v != "" {
 			*to = v
 		}

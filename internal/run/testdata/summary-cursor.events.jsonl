@@ -1,0 +1,4 @@
+{"detail":"ls packages","id":"call-0","result":"running","tool":"shell"}
+{"detail":"ls packages","id":"call-0","result":"passed","summary":"analytics","tool":"shell"}
+{"detail":"retry.go","id":"call-1","result":"passed","summary":"package retry","tool":"read"}
+{"detail":"go test ./...","id":"call-2","result":"failed","summary":"exit status 1","tool":"shell"}

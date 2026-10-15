@@ -1,0 +1,4 @@
+{"detail":"go test ./...","id":"toolu_01","result":"running","tool":"Bash"}
+{"detail":"","id":"toolu_01","result":"failed","summary":"Exit code 1","tool":""}
+{"detail":"retry.go","id":"toolu_02","result":"running","tool":"Read"}
+{"detail":"","id":"toolu_02","result":"passed","summary":"package retry","tool":""}

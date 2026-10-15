@@ -1,0 +1,4 @@
+{"type":"tool_call","subtype":"started","call_id":"call-0","tool_call":{"shellToolCall":{"args":{"command":"ls packages"}}}}
+{"type":"tool_call","subtype":"completed","call_id":"call-0","tool_call":{"shellToolCall":{"args":{"command":"ls packages"},"result":{"success":{"command":"ls packages","exitCode":0,"stdout":"analytics\nweb\n","stderr":""}}}}}
+{"type":"tool_call","subtype":"completed","call_id":"call-1","tool_call":{"readToolCall":{"args":{"path":"retry.go"},"result":{"success":{"content":"package retry\n","totalLines":1}}}}}
+{"type":"tool_call","subtype":"completed","call_id":"call-2","tool_call":{"shellToolCall":{"args":{"command":"go test ./..."},"result":{"failure":{"exitCode":1,"stdout":"--- FAIL: TestRetry\n","stderr":"exit status 1\n"}}}}}

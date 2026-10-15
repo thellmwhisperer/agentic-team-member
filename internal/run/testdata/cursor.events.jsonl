@@ -3,6 +3,6 @@
 {"detail":"cat nope.txt","id":"call-0","result":"running","tool":"shell"}
 {"detail":"hello.txt","id":"call-1","result":"running","tool":"read"}
 {"detail":"hello.txt","id":"call-1","result":"passed","tool":"read"}
-{"detail":"cat nope.txt","id":"call-0","result":"failed","tool":"shell"}
+{"detail":"cat nope.txt","id":"call-0","result":"failed","summary":"cat: nope.txt: No such file or directory","tool":"shell"}
 {"thinking":"The first command failed as expected."}
 {"says":"DONE"}
