@@ -368,14 +368,42 @@ blocking fulfilled work; an unrelated change already in the diff still
 blocks. ATM neither publishes nor executes these drafts, and they do not use
 the worker's [follow-up format](#follow-ups).
 
-A block, a report that is not valid or names another base
-or HEAD, a failed reviewer, a reviewer that changes the clone or HEAD, or
-uncommitted changes after review fails Delivery before its command runs;
-nothing retries it. With no `delivery` command, neither the review nor the
-command runs.
+A valid `blocked` review of a `ready` issue can start a contract repair when
+a finding quotes a criterion or invariant from the original issue. ATM
+matches the quote against that issue with whitespace normalized. Findings
+without a matching quote never go to the repair worker; they remain for the
+owner or as optional improvements according to the review's drafts.
 
-Once approved, the command runs with `sh -c` in the clone, without a time limit, with these
-variables:
+Repairs use the existing worker harness and `ponytail` skill, one writer at a
+time. The worker receives only the selected original criteria and evidence,
+with instructions to make the minimal change and preserve tests. ATM rejects
+changes to or deletion of existing files matching `test_patterns` and checks
+that saved proof test files retain their contents. Adding tests does not
+replace the saved proofs. It re-runs every unit's task-type proof and the
+configured checks through the existing checks machinery; `docs`, `chore` and
+`refactor` retain their own checks without requiring a proof test file.
+Failure stops delivery. A successful changed tree is committed using the
+repository's Git identity, then both review skills review the current commit
+again. Any repair invalidates the earlier approval. The slop detector's
+cut-only policy does not apply to contract repairs, which may add lines.
+
+There are at most two repair rounds total per run in this phase, even when
+successive findings cite different criteria. There is no third attempt or
+configuration to raise the limit. A report that is invalid or names another
+base or HEAD, a failed reviewer, or a reviewer that changes the clone or HEAD
+blocks delivery without starting a repair. With no `delivery` command,
+neither review, repair nor the command runs.
+
+The `repair` record in `contract-review.json` keeps the round count, reviewed
+commits and each attempt's starting commit, resulting commit when successful,
+criteria, result, repeated proofs and commands. Optional drafts and unmatched
+findings accumulate across rounds. A failed repair or a block remaining after
+repair also records the cause and a continuation draft for the owner. These
+records remain outside the product branch.
+
+Delivery requires fresh approval of the current commit and a clean working
+tree. Once approved, the command runs once with `sh -c` in the clone, without
+a time limit, with these variables:
 
 | Variable | Value |
 |----------|-------|
@@ -419,7 +447,7 @@ it is on disk before delivery reads it.
 | `nodes` | Each step's `result` (`passed`, `failed`, `running`, `skipped` or `not run`), `started_at` (UTC, RFC 3339 with milliseconds) when it starts, and `duration_ms` when it ends; the agent node also has `exit` and `tail` when the agent ran but its step failed |
 | `type` | The task type |
 | `units` | Each unit's number, base commit, test file, type, result, red/green proof row span, and red and green trials: command, exit code, last 60 lines, `started_at` and `duration_ms` |
-| `reproofs` | The same proof rows and spans, run again after a kept cut |
+| `reproofs` | The latest repeated unit proofs and spans, after a kept cut or the latest contract repair attempt; successful delivery uses the approved commit's proofs |
 | `commands` | Every configured command that ran, the clone's `install` included, with its result, last 60 lines, `started_at` and `duration_ms` |
 | `head_sha` | The delivered branch's final commit |
 
