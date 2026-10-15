@@ -235,43 +235,28 @@ func checkUnit(
 	ev := map[string]any{"unit": n}
 	// A unit that fails its checks still hands over its follow-ups, unverified, a problem with them noted
 	// after its checks' reason.
-	failed := func(err error) (proof, []followUp, []followUp, map[string]any, error) {
+	failed := func(err error, children ...followUp) (proof, []followUp, []followUp, map[string]any, error) {
 		out, verdicts, bad := unverified(dir, report)
 		ev["follow_ups"] = verdicts
+		if len(children) > 0 {
+			out = append(children, out...)
+		}
 		return proof{}, nil, out, ev, errors.Join(err, bad)
 	}
 	if f != nil {
 		if b, err := os.ReadFile(filepath.Join(dir, test)); err != nil || string(b) != f.Test {
 			return failed(fmt.Errorf("unit %d edited its red test %s, which it must make pass as it is", n, test))
 		}
-		g, diff, cause, err := beyond(dir, head, *f, n, spent)
-		if err != nil {
-			return failed(err)
-		}
-		ev["gross_lines"] = spent + g
-		if cause != "" {
-			child := *f
-			child.Diff, child.Dependency, child.Cause = diff, head, cause
-			p, in, out, ev, err := failed(errors.New(child.Cause))
-			return p, in, append([]followUp{child}, out...), ev, err
-		}
+	}
+	if children, err := unitBounds(dir, head, f, n, spent, ev); err != nil {
+		return failed(err, children...)
 	}
 	result, err := checks(dir, runDir, head, typ, test, c)
 	for key, value := range result {
 		ev[key] = value
 	}
-	if f != nil {
-		g, diff, cause, boundErr := beyond(dir, head, *f, n, spent)
-		if boundErr != nil {
-			return failed(errors.Join(err, boundErr))
-		}
-		ev["gross_lines"] = spent + g
-		if cause != "" {
-			child := *f
-			child.Diff, child.Dependency, child.Cause = diff, head, cause
-			p, in, out, ev, err := failed(errors.Join(err, errors.New(child.Cause)))
-			return p, in, append([]followUp{child}, out...), ev, err
-		}
+	if children, boundErr := unitBounds(dir, head, f, n, spent, ev); boundErr != nil {
+		return failed(errors.Join(err, boundErr), children...)
 	}
 	if err != nil {
 		return failed(err)
@@ -287,6 +272,23 @@ func checkUnit(
 	in, out, followUpEvent, err := followUps(dir, report, body, c.TestFile)
 	ev["follow_ups"] = followUpEvent
 	return p, in, out, ev, err
+}
+
+func unitBounds(dir, head string, f *followUp, n, spent int, ev map[string]any) ([]followUp, error) {
+	if f == nil {
+		return nil, nil
+	}
+	g, diff, cause, err := beyond(dir, head, *f, n, spent)
+	if err != nil {
+		return nil, err
+	}
+	ev["gross_lines"] = spent + g
+	if cause == "" {
+		return nil, nil
+	}
+	child := *f
+	child.Diff, child.Dependency, child.Cause = diff, head, cause
+	return []followUp{child}, errors.New(child.Cause)
 }
 
 func (a agent) runUnit(

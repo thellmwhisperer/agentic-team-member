@@ -332,29 +332,34 @@ func TestFollowUpScopeBlocksUnplannedCheckChanges(t *testing.T) {
 					if status == "false" && !strings.Contains(err.Error(), command+":") {
 						t.Fatalf("%s: want the command failure preserved, got %v", label, err)
 					}
-					dir := filepath.Join(root, ".atm", "runs", label)
-					var report struct {
-						FailedNode string       `json:"failed_node"`
-						Units      []unitResult `json:"units"`
-					}
-					b, err := os.ReadFile(filepath.Join(dir, "report.json"))
-					if err != nil || json.Unmarshal(b, &report) != nil || report.FailedNode != "checks" ||
-						len(report.Units) == 0 {
-						t.Fatalf("%s: want delivery blocked at checks, got %s, %v", label, b, err)
-					}
-					var left []followUp
-					b, err = os.ReadFile(filepath.Join(dir, "follow-ups.json"))
-					if err != nil || json.Unmarshal(b, &left) != nil || len(left) != 1 ||
-						!strings.Contains(left[0].Cause, "changes b.txt, outside the paths") ||
-						!strings.Contains(left[0].Diff, "+extra") || left[0].RedTest != "c1_test.sh" ||
-						left[0].Dependency != report.Units[len(report.Units)-1].Base {
-						t.Fatalf("%s: want discrepancy, diff and dependency persisted, got %s, %v", label, b, err)
-					}
+					assertUnplannedCheckEvidence(t, root, label)
 					if _, err := os.Stat(delivered); !os.IsNotExist(err) {
 						t.Fatalf("%s: delivery ran despite the unplanned path: %v", label, err)
 					}
 				}
 			})
 		}
+	}
+}
+
+func assertUnplannedCheckEvidence(t *testing.T, root, label string) {
+	t.Helper()
+	dir := filepath.Join(root, ".atm", "runs", label)
+	var report struct {
+		FailedNode string       `json:"failed_node"`
+		Units      []unitResult `json:"units"`
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "report.json"))
+	if err != nil || json.Unmarshal(b, &report) != nil || report.FailedNode != "checks" ||
+		len(report.Units) == 0 {
+		t.Fatalf("%s: want delivery blocked at checks, got %s, %v", label, b, err)
+	}
+	var left []followUp
+	b, err = os.ReadFile(filepath.Join(dir, "follow-ups.json"))
+	if err != nil || json.Unmarshal(b, &left) != nil || len(left) != 1 ||
+		!strings.Contains(left[0].Cause, "changes b.txt, outside the paths") ||
+		!strings.Contains(left[0].Diff, "+extra") || left[0].RedTest != "c1_test.sh" ||
+		left[0].Dependency != report.Units[len(report.Units)-1].Base {
+		t.Fatalf("%s: want discrepancy, diff and dependency persisted, got %s, %v", label, b, err)
 	}
 }
