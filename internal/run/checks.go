@@ -119,7 +119,7 @@ func before(clone string) error {
 	if err == nil {
 		tree, err = nestedTree(clone)
 	}
-	if err == nil {
+	if err == nil && tree != "" {
 		_, err = nestedGit(clone, ".", "update-ref", "refs/atm-before", tree)
 	}
 	if err != nil {
@@ -186,7 +186,7 @@ func putBackIgnored(clone string) error {
 // agent changed or deleted, its nearest existing directory writable meanwhile. It never touches the repository's .git.
 func putBackNested(clone string) error {
 	now, err := nestedTree(clone)
-	if err != nil {
+	if err != nil || now == "" {
 		return err
 	}
 	changed, err := nestedGit(clone, ".", "diff", "--name-only", "--no-renames", "-z", "--diff-filter=DMT",
@@ -232,9 +232,19 @@ func putBackNested(clone string) error {
 // gitlink; recurse if a cache ever nests them.
 func nestedTree(clone string) (string, error) {
 	out, err := git(clone, "ls-files", "-z", "--others", "--ignored", "--exclude-standard")
-	if err == nil {
-		err = store(clone, "atm-nested")
+	if err != nil {
+		return "", err
 	}
+	if !strings.Contains(out, "/\x00") {
+		// No nested files to record. An existing store still needs an empty tree
+		// so deletions and a later before can replace its previous snapshot.
+		if _, err := os.Stat(filepath.Join(clone, ".git", "atm-nested")); errors.Is(err, fs.ErrNotExist) {
+			return "", nil
+		} else if err != nil {
+			return "", err
+		}
+	}
+	err = store(clone, "atm-nested")
 	var trees [][2]string
 	for _, p := range strings.Split(out, "\x00") {
 		if err != nil || !strings.HasSuffix(p, "/") { // a nested repository is listed as dir/
