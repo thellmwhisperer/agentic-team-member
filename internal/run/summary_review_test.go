@@ -8,11 +8,15 @@ import (
 
 func TestToolSummaryPreservesAnEmptyFirstLine(t *testing.T) {
 	for harness, format := range map[string]string{
-		"pi":       `{"type":"tool_execution_end","toolCallId":"c","toolName":"bash","result":{"content":[{"type":"text","text":%s}]}}`,
-		"claude":   `{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"c","content":%s}]}}`,
-		"codex":    `{"type":"item.completed","item":{"id":"c","type":"command_execution","status":"completed","aggregated_output":%s}}`,
+		"pi": `{"type":"tool_execution_end","toolCallId":"c","toolName":"bash",` +
+			`"result":{"content":[{"type":"text","text":%s}]}}`,
+		"claude": `{"type":"user","message":{"role":"user",` +
+			`"content":[{"type":"tool_result","tool_use_id":"c","content":%s}]}}`,
+		"codex": `{"type":"item.completed","item":{"id":"c","type":"command_execution",` +
+			`"status":"completed","aggregated_output":%s}}`,
 		"opencode": `{"type":"tool_use","part":{"callID":"c","tool":"bash","state":{"status":"completed","output":%s}}}`,
-		"cursor":   `{"type":"tool_call","subtype":"completed","call_id":"c","tool_call":{"shellToolCall":{"result":{"success":{"stdout":%s}}}}}`,
+		"cursor": `{"type":"tool_call","subtype":"completed","call_id":"c",` +
+			`"tool_call":{"shellToolCall":{"result":{"success":{"stdout":%s}}}}}`,
 	} {
 		t.Run(harness, func(t *testing.T) {
 			for _, tc := range []struct{ output, want string }{

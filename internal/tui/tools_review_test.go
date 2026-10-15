@@ -11,7 +11,8 @@ import (
 
 func TestFoldedFailureShowsErrorOnOneRow(t *testing.T) {
 	m := modelWithEvents(240, eventGolden(t, "cursor.events.jsonl"))
-	if got := agentLines(m, 240); !slices.Contains(got, "✗ failed shell cat nope.txt · cat: nope.txt: No such file or directory") {
+	if got := agentLines(m, 240); !slices.Contains(got,
+		"✗ failed shell cat nope.txt · cat: nope.txt: No such file or directory") {
 		t.Fatalf("criterion 4 requires the folded error: %q", got)
 	}
 	m = screen(240, 40, `{"step":"agent","state":"started"}`,
@@ -19,8 +20,11 @@ func TestFoldedFailureShowsErrorOnOneRow(t *testing.T) {
 		`{"id":"b","tool":"read","detail":"b.go","result":"passed"}`)
 	s := view(m)
 	rows := strings.Split(s, "\n")
-	at := slices.IndexFunc(rows, func(row string) bool { return strings.Contains(row, "failed shell cat missing · missing") })
-	if at < 0 || at+1 >= len(rows) || !strings.Contains(rows[at+1], "1 tool: read") || strings.Contains(s, "echo extra") || strings.Contains(s, "more") {
+	at := slices.IndexFunc(rows, func(row string) bool {
+		return strings.Contains(row, "failed shell cat missing · missing")
+	})
+	if at < 0 || at+1 >= len(rows) || !strings.Contains(rows[at+1], "1 tool: read") ||
+		strings.Contains(s, "echo extra") || strings.Contains(s, "more") {
 		t.Fatalf("criterion 2 requires one row per call:\n%s", s)
 	}
 	clickRow(m, at+1)
