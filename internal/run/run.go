@@ -26,7 +26,7 @@ import (
 var githubURL = regexp.MustCompile(`^(?:[a-z][a-z0-9+.-]*://)?(?:[^/@]+@)?github\.com[:/]([^/]+/[^/]+?)(\.git)?/?$`)
 
 // Usage is atm run's command line.
-const Usage = "usage: atm run --watcher id [--base-ref r] [--harness h] [--model m] [--effort e] " +
+const Usage = "usage: atm run (--watcher id | --follow) [--base-ref r] [--harness h] [--model m] [--effort e] " +
 	"[--harness-arg a]... [--env KEY=VALUE]... <issue.md | issue number | --resume run>"
 
 // Run is atm run with args, its flags and the issue: a file, or an issue number of origin's repository.

@@ -125,7 +125,7 @@ effort. Both are in [Configuration](docs/configuration.md).
 A run goes on in the background: leaving its screen or closing the terminal
 does not stop it.
 
-For `atm run` and `atm axi run`:
+For `atm run` without `--follow` and `atm axi run`; for `--follow` exit codes, see [Following one run](docs/how-a-run-flows.md#following-one-run):
 
 | Exit | Meaning |
 |------|---------|
