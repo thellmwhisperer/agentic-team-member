@@ -54,7 +54,7 @@ Either way:
    speculative hardening, no helpers nobody calls. The repository's slopslint
    ceilings only go down.
 5. `scripts/test.sh` and `scripts/lint.sh` must pass locally. They run
-   `go test ./...` and `golangci-lint run` plus slopslint, respectively.
+   `go test -timeout 30m ./...` and `golangci-lint run` plus slopslint, respectively.
 6. PR titles use a conventional-commit subject (`fix:`, `feat:`, `docs:`,
    `chore:`, `refactor:`, `test:`). The body says why and links the issue.
 
