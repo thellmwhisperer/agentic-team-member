@@ -16,8 +16,8 @@ import (
 	"github.com/thellmwhisperer/agentic-team-member/internal/tui"
 )
 
-// runCmd is atm run: the run goes to the repository's background process and, on a terminal, atm keeps its
-// completed screen open until the user closes it. Closing the terminal leaves it going.
+// runCmd hands the run to the repository's background process, so closing the terminal leaves it going.
+// Without --follow, a terminal keeps the completed screen open until the user closes it.
 func runCmd() *cobra.Command {
 	return &cobra.Command{Use: "run", Short: "Fix an issue: " + run.Usage,
 		Long: "On a terminal, the completed screen stays open until q or Ctrl+C.\n" +

@@ -12,22 +12,22 @@ set before a run is in [Configuration](configuration.md).
 
 ## The watcher
 
-No watcher, no run. The session that launches a run starts `atm watch` first,
+No watcher, no run. For a watcher owned by the launch process, see
+[Following one run](#following-one-run). With `--watcher`, the session starts `atm watch` first,
 under its harness's streaming monitor (any tool that wakes the session on each
 output line), and passes the id from its first line, `watching as <id>`, to
 `atm run --watcher <id>`. It replaces the CoS skill's `vigia.sh`: it never
 exits on an event, so there is nothing to re-arm.
 
 `atm run` without `--watcher` or [`--follow`](#following-one-run), or naming a
-watcher that is not alive, fails
-before cloning with exit code 2:
+watcher that is not alive, fails before cloning with exit code 2:
 `no watcher: start atm watch in the session that launches this run and pass --watcher <id>`.
 A watcher is alive while its lease, `.atm/watch/<id>.json`, names a process
 that runs and a heartbeat it rewrites every 10 s is under 30 s old.
 `report.json` and `atm runs` record the run's watcher, and `atm doctor` says
 whether one is alive.
 
-The watcher prints one line per event of each run bound to it, the time and
+`atm watch` prints one line per event of each run bound to it, the time and
 the run first, until it is killed:
 
 | Line | When |
@@ -57,8 +57,12 @@ no separate `atm watch` is needed. `--follow` goes before or after the issue,
 like any flag; a value-taking flag's value is that flag's, so
 `--model --follow` is a model, not `--follow`. Before the run starts, the
 process writes its own lease, `.atm/watch/<id>.json` with its PID, and binds
-the run to it. It rewrites the lease every 10 s while it follows and removes
-it when it exits. If the lease cannot be written, no run starts.
+the run to it. It rewrites the lease every 10 s during launch and observation,
+then removes it on normal exit or handled cancellation. If SIGINT or SIGTERM
+arrives during launch, the process keeps refreshing the lease until launch
+returns, then stops observation and removes the lease. SIGKILL leaves the
+lease file behind, but its dead PID makes the watcher no longer alive.
+If the lease cannot be created, no run starts.
 
 `--follow` with `--watcher` fails before launch, since the follow process is
 the run's watcher. `--follow` with `--resume` fails too: follow a resumed or
@@ -78,16 +82,18 @@ failed and is retried, go to stderr. Every line has `time` (RFC 3339, UTC),
 | `pr_opened` | `url` | The PR is first seen |
 | `gate_fixing_ci` | `commit` (`sha`, `subject`) | A new CI repair commit, one whose subject starts with `no-mistakes(ci):` |
 | `ci_green` | `url` | CI turns green |
-| `stalled` | `minutes` | 60 minutes pass with no other event; `minutes` counts since the last event other than `stalled` |
+| `stalled` | `minutes` | Each 60 minutes without another event; `minutes` counts since the last event other than `stalled`, so continued silence reports 60, 120, 180, ... |
 | `merged` | `url` | The PR merged; the last line, exit 0 |
 | `closed` | `url` | The PR closed unmerged; the last line, exit 1 |
 | `run_failed` | `step`, `reason` | The run or a gate step failed; the last line, exit 1 |
 
-From delivery on, it reads the gate with `no-mistakes axi status` in the clone
-and the PR with `gh`, at most once every 10 s. If the clone is gone, it finds
-the PR by the delivery's branch. It exits 0 after `merged` and 1 after `closed`
-or `run_failed`. It also exits 1, with no final event, when the run delivers
-nothing or when it is interrupted.
+From delivery on, polling rounds start at least 10 s apart. Each reads the
+gate with `no-mistakes axi status` in the clone and, when available, the PR
+with `gh`; commit and PR-state reads can be separate calls in the same round.
+If the clone is gone, it finds the PR by its known URL or the delivery's branch.
+An observed gate failure takes precedence over a PR result in the same round.
+The terminal events and exit codes are listed above. It also exits 1, with no
+final event, when the run delivers nothing or when it is interrupted.
 
 A CoS launches it as a background command under its streaming monitor, which
 wakes the session on each line, and reads the result from the exit code.
@@ -371,9 +377,11 @@ or opens a pull request: that is the command's business.
 | An agent that writes nothing on stdout or stderr | 10 min |
 | The delivery command | none |
 
-Past its limit, or when ATM gets Ctrl-C or SIGTERM, a process is killed with
+Past its limit, or when the background process executing the run gets
+Ctrl-C or SIGTERM, a process is killed with
 every process it started, on Unix and Windows, including those that started a
 session or process group of their own and, on Unix, those already orphaned.
+For cancellation of `atm run --follow`, see [Following one run](#following-one-run).
 
 ## The report
 
@@ -396,7 +404,9 @@ it is on disk before delivery reads it.
 repository, started by the first command that needs it and ended after
 10 min without a run. Closing the terminal does not stop the run.
 
-On a terminal the screen is the ATM box, a row per step with its icon (`○`
+Without `--follow`, `atm run` attaches the screen on a terminal; see
+[Following one run](#following-one-run) for that flag's output. The screen is
+the ATM box, a row per step with its icon (`○`
 pending, a spinner running, `⏸` waiting, `✓` passed, `✗` failed, `–` skipped), duration and
 note, and beside it, from 100 columns, the Agent box while an agent works,
 the Findings box with a failure or the slop detector's cuts, and the Log box.
