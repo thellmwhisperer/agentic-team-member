@@ -530,34 +530,19 @@ func (m *Model) agentBox(width, lines int) string {
 	return result
 }
 
-// toolLines is a run of tool calls between two things the agent says or thinks. Folded, a dim line for those
-// between two failed ones and a row for each failed one; unfolded, a dim line for them all and a row for each.
-// A click on a dim line folds or unfolds the run.
 func (m *Model) toolLines(out []paneLine, calls []*activity) []paneLine {
-	if len(calls) == 0 {
-		return out
-	}
-	run := fmt.Sprintf("tools:%p", calls[0])
-	if m.unfolded(run) {
-		out = appendToolGroup(m, out, calls, false, run)
-		for _, a := range calls {
-			out = append(out, m.callLine(a, run))
-		}
-		return out
-	}
 	start := 0
 	for i, a := range calls {
 		if a.result == "failed" {
-			out = appendToolGroup(m, out, calls[start:i], true, run)
-			out = append(out, failedAgentLine(m, a, run))
+			out = appendToolGroup(m, out, calls[start:i])
+			out = append(out, m.callLine(a, ""))
 			start = i + 1
 		}
 	}
-	return appendToolGroup(m, out, calls[start:], true, run)
+	return appendToolGroup(m, out, calls[start:])
 }
 
-// appendToolGroup is calls on one dim line: how many of each tool, with the running one's detail when detail.
-func appendToolGroup(m *Model, out []paneLine, calls []*activity, detail bool, run string) []paneLine {
+func appendToolGroup(m *Model, out []paneLine, calls []*activity) []paneLine {
 	if len(calls) == 0 {
 		return out
 	}
@@ -582,21 +567,22 @@ func appendToolGroup(m *Model, out []paneLine, calls []*activity, detail bool, r
 	n := len(calls)
 	line := fmt.Sprintf("%d tool%s: %s", n, map[bool]string{true: "s"}[n > 1], strings.Join(parts, ", "))
 	key := fmt.Sprintf("tools:%p", calls[0])
+	unfolded := m.unfolded(key)
 	if running {
-		if detail && runningDetail != "" {
+		if !unfolded && runningDetail != "" {
 			line += " · " + runningDetail
 		}
-		return append(out, paneLine{key: key, parent: run, toggle: run,
+		out = append(out, paneLine{key: key, toggle: key,
 			text: "  " + m.icon("running") + " " + paint(dim, line)})
+	} else {
+		out = append(out, paneLine{key: key, toggle: key, text: "  " + paint(dim, "· "+line)})
 	}
-	return append(out, paneLine{key: key, parent: run, toggle: run, text: "  " + paint(dim, "· "+line)})
-}
-
-func failedAgentLine(m *Model, a *activity, run string) paneLine {
-	return paneLine{
-		key: fmt.Sprintf("activity:%p", a), parent: run, toggle: run,
-		text: m.icon("failed") + " " + paint(red, "failed") + " " + paint(dim, a.tool+" "+a.detail),
+	if unfolded {
+		for _, a := range calls {
+			out = append(out, m.callLine(a, key))
+		}
 	}
+	return out
 }
 
 // callLine is call a on one row: its state's icon and word, its tool, its detail and, after " · ", the first line
