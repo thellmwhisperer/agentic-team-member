@@ -306,7 +306,7 @@ func fakeScope(brief, mode string) string {
 }
 
 // workReport is the report the worker's work left in .atm/fake-report.json, "" for none or for the ponytail
-// pass, whose call is ".ponytail". A follow-up in it without paths proposes the whole clone, ".".
+// pass, whose call is ".ponytail".
 func workReport(call string) string {
 	b, _ := os.ReadFile(".atm/fake-report.json")
 	var r obj
@@ -314,7 +314,7 @@ func workReport(call string) string {
 		fs, _ := r["follow_ups"].([]any)
 		for _, f := range fs {
 			if f, ok := f.(obj); ok && f["paths"] == nil {
-				f["paths"] = []string{"."}
+				f["paths"] = []string{"a.txt", "source.txt", "big.txt", "more.txt", "x.txt"}
 			}
 		}
 		b, _ = json.Marshal(r)
