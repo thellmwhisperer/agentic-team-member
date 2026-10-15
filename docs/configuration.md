@@ -18,7 +18,7 @@ Each layer overrides the one before. A key no layer knows fails the run.
 | Built-in defaults | the binary | `harness: claude` |
 | Your machine | `~/.config/atm/config.yaml` | `harness`, `model`, `effort` only |
 | The repository | `.atm.yaml` at its root | every key below |
-| One run | `atm run` flags | `--watcher`, `--base-ref`, `--harness`, `--model`, `--effort`, `--harness-arg`, `--env`, `--resume` |
+| One run | `atm run` flags | `--watcher`, [`--follow`](how-a-run-flows.md#following-one-run), `--base-ref`, `--harness`, `--model`, `--effort`, `--harness-arg`, `--env`, `--resume` |
 
 ## `~/.config/atm/config.yaml`
 

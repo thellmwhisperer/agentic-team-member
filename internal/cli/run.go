@@ -20,9 +20,10 @@ import (
 // Without --follow, a terminal keeps the completed screen open until the user closes it.
 func runCmd() *cobra.Command {
 	return &cobra.Command{Use: "run", Short: "Fix an issue: " + run.Usage,
-		Long: "On a terminal, the completed screen stays open until q or Ctrl+C.\n" +
+		Long: "Without --follow, on a terminal the completed screen stays open until q or Ctrl+C.\n" +
 			"With --follow instead of --watcher, atm is the run's watcher and prints its events as JSON lines until " +
-			"it ends: exit 0 on merge, 1 otherwise.", DisableFlagParsing: true,
+			"it ends: exit 0 on merge, 1 on closure or run failure (also on interruption or no delivery), " +
+			"2 on launch failure. --follow cannot be combined with --resume; use atm watch --adopt <run> to reattach.", DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			root, err := toplevel()
 			if err != nil {
