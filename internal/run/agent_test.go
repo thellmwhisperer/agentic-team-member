@@ -52,7 +52,10 @@ var work = map[string]string{"fix": fixWork, "feature": fixWork, "greenfield": f
 // $FAKE_PONYTAIL as its mode, $FAKE_PONYTAIL_WORK as its work and $FAKE_PONYTAIL_REPORT, or no findings, as
 // its report; its call goes to $FAKE_AGENT_CALL.ponytail. The contract review plays the same with $FAKE_REVIEW,
 // $FAKE_REVIEW_WORK and $FAKE_REVIEW_REPORT, or an approval, {base} and {head} in it its brief's; its call goes
-// to $FAKE_AGENT_CALL.review. $FAKE_AGENT_STREAM goes to its stdout after its first
+// to $FAKE_AGENT_CALL.review. A brief headed "# Contract repair" plays $FAKE_REPAIR, $FAKE_REPAIR_WORK
+// and $FAKE_REPAIR_REPORT, or the worker's report; its call goes to $FAKE_AGENT_CALL.repairN. Review reports
+// and repair work may be sequenced as FAKE_REVIEW_REPORT_N and FAKE_REPAIR_WORK_N. $FAKE_AGENT_ORDER, when
+// set, receives one line per call. $FAKE_AGENT_STREAM goes to its stdout after its first
 // line, <clone> in it its working directory.
 func fakeAgent(name string) int {
 	mode := os.Getenv("FAKE_AGENT")
@@ -118,29 +121,83 @@ func fakeAgentTask(name string, args []string, mode *string) ([]byte, string, st
 	brief := map[bool]string{true: string(stdin), false: args[len(args)-1]}[name == "claude"]
 	_, typ, _ := strings.Cut(brief, "Task type: ")
 	typ, _, _ = strings.Cut(typ, ".")
-	skill, call, todo, text := "ponytail", "", cmp.Or(os.Getenv("FAKE_AGENT_WORK"), work[typ]), fakeReport
-	if strings.Contains(brief, "# Scope review") {
+	skill, call, todo, text, kind := fakeAgentKind(brief, typ, mode)
+	recordFakeAgentCall(args, stdin, call)
+	recordOrder(kind)
+	return stdin, call, skill, todo, text
+}
+
+// fakeAgentKind is which fake the brief plays, and the call suffix its recording uses.
+func fakeAgentKind(brief, typ string, mode *string) (skill, call, todo, text, kind string) {
+	skill, call, todo, text, kind = "ponytail", "", cmp.Or(os.Getenv("FAKE_AGENT_WORK"), work[typ]), fakeReport, "worker"
+	switch {
+	case strings.Contains(brief, "# Scope review"):
 		*mode = os.Getenv("FAKE_SCOPE")
-		skill, call, todo, text = "ponytail-review", ".scope", os.Getenv("FAKE_SCOPE_WORK"), fakeScope(brief, *mode)
-	} else if strings.Contains(brief, "# Contract review") {
+		skill, call, todo = "ponytail-review", ".scope", os.Getenv("FAKE_SCOPE_WORK")
+		text, kind = fakeScope(brief, *mode), "scope"
+	case strings.Contains(brief, "# Contract repair"):
+		skill, call, todo, text, kind = fakeRepair(mode)
+	case strings.Contains(brief, "# Contract review"):
 		*mode = os.Getenv("FAKE_REVIEW")
-		skill, call, todo = "ponytail-review", ".review", os.Getenv("FAKE_REVIEW_WORK")
-		field := func(key string) string {
-			_, v, _ := strings.Cut(brief, "\n- "+key+": ")
-			v, _, _ = strings.Cut(v, "\n")
-			return v
-		}
-		text = strings.NewReplacer("{base}", field("Base"), "{head}", field("HEAD")).Replace(cmp.Or(
-			os.Getenv("FAKE_REVIEW_REPORT"),
-			`{"disposition": "approved", "base": "{base}", "head": "{head}", "findings": [], "summary": "s",`+
-				`"task_slicing":`+fakeSlicing+`}`))
-	} else if strings.Contains(brief, "`ponytail-review`") {
+		n := bump("review")
+		skill, call, kind = "ponytail-review", ".review", "review"
+		todo = cmp.Or(os.Getenv("FAKE_REVIEW_WORK_"+strconv.Itoa(n)), os.Getenv("FAKE_REVIEW_WORK"))
+		text = substituteBrief(brief, cmp.Or(os.Getenv("FAKE_REVIEW_REPORT_"+strconv.Itoa(n)),
+			os.Getenv("FAKE_REVIEW_REPORT"), defaultReview))
+	case strings.Contains(brief, "`ponytail-review`"):
 		*mode = os.Getenv("FAKE_PONYTAIL")
-		skill, call, todo = "ponytail-review", ".ponytail", os.Getenv("FAKE_PONYTAIL_WORK")
+		skill, call, kind = "ponytail-review", ".ponytail", "ponytail"
+		todo = os.Getenv("FAKE_PONYTAIL_WORK")
 		text = cmp.Or(os.Getenv("FAKE_PONYTAIL_REPORT"), `{"findings": [], "summary": "Lean already."}`)
 	}
-	recordFakeAgentCall(args, stdin, call)
-	return stdin, call, skill, todo, text
+	return skill, call, todo, text, kind
+}
+
+const defaultReview = `{"disposition": "approved", "base": "{base}", "head": "{head}", "findings": [], ` +
+	`"summary": "s", "task_slicing":` + fakeSlicing + `}`
+
+func substituteBrief(brief, raw string) string {
+	field := func(key string) string {
+		_, v, _ := strings.Cut(brief, "\n- "+key+": ")
+		v, _, _ = strings.Cut(v, "\n")
+		return v
+	}
+	return strings.NewReplacer("{base}", field("Base"), "{head}", field("HEAD")).Replace(raw)
+}
+
+func fakeRepair(mode *string) (skill, call, todo, text, kind string) {
+	*mode = os.Getenv("FAKE_REPAIR")
+	n := bump("repair")
+	return "ponytail", ".repair" + strconv.Itoa(n),
+		cmp.Or(os.Getenv("FAKE_REPAIR_WORK_"+strconv.Itoa(n)), os.Getenv("FAKE_REPAIR_WORK")),
+		cmp.Or(os.Getenv("FAKE_REPAIR_REPORT_"+strconv.Itoa(n)), os.Getenv("FAKE_REPAIR_REPORT"), fakeReport),
+		"repair"
+}
+
+func bump(kind string) int {
+	base := os.Getenv("FAKE_AGENT_CALL")
+	if base == "" {
+		return 1
+	}
+	path := base + "." + kind + ".n"
+	b, _ := os.ReadFile(path)
+	n, _ := strconv.Atoi(strings.TrimSpace(string(b)))
+	n++
+	_ = os.WriteFile(path, []byte(strconv.Itoa(n)), 0o600)
+	return n
+}
+
+func recordOrder(kind string) {
+	path := os.Getenv("FAKE_AGENT_ORDER")
+	if path == "" {
+		return
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return
+	}
+	_, _ = fmt.Fprintln(f, kind)
+	_ = f.Close()
 }
 
 func fakeAgentSetup(mode string) bool {
