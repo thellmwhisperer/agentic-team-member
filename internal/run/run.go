@@ -260,6 +260,19 @@ func checkUnit(
 	for key, value := range result {
 		ev[key] = value
 	}
+	if f != nil {
+		g, diff, cause, boundErr := beyond(dir, head, *f, n, spent)
+		if boundErr != nil {
+			return failed(errors.Join(err, boundErr))
+		}
+		ev["gross_lines"] = spent + g
+		if cause != "" {
+			child := *f
+			child.Diff, child.Dependency, child.Cause = diff, head, cause
+			p, in, out, ev, err := failed(errors.Join(err, errors.New(child.Cause)))
+			return p, in, append([]followUp{child}, out...), ev, err
+		}
+	}
 	if err != nil {
 		return failed(err)
 	}

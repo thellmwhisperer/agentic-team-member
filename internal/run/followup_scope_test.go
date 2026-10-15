@@ -304,3 +304,57 @@ func TestFollowUpScopeRequiresExactPlannedFiles(t *testing.T) {
 		})
 	}
 }
+
+func TestFollowUpScopeBlocksUnplannedCheckChanges(t *testing.T) {
+	for _, command := range []string{"install", "test", "typecheck", "lint"} {
+		for _, status := range []string{"true", "false"} {
+			t.Run(command+"/"+status, func(t *testing.T) {
+				line := "if [ -f c1_test.sh ]; then echo extra > b.txt; " + status + "; fi"
+				root := repo(t, "https://example.com/owner/repo.git", atmSet(atmSet(atmYAML,
+					command, line), "delivery", `echo delivered > "$ATM_TEST_DELIVERED"`))
+				delivered := filepath.Join(t.TempDir(), "delivered.txt")
+				t.Setenv("ATM_TEST_DELIVERED", delivered)
+				t.Setenv("FAKE_AGENT_WORK", scopeWork)
+				t.Setenv("ATM_TEST_RED", "c1_test.sh")
+				t.Setenv("ATM_TEST_FOLLOWUP", scopeFollowUp("c1_test.sh",
+					"The android card opens the route.", `["a.txt"]`))
+				t.Setenv("ATM_TEST_UNIT2", "echo u2 >> a.txt")
+				for _, label := range []string{"t", "resumed"} {
+					args := []string{issueFile(t, androidIssue)}
+					if label == "resumed" {
+						args = append([]string{"--resume", "t"}, args...)
+					}
+					var out bytes.Buffer
+					err := Run(label, args, &out, io.Discard)
+					if err == nil || !strings.Contains(err.Error(), "changes b.txt, outside the paths") {
+						t.Fatalf("%s: want the check's unplanned b.txt blocked, got %v", label, err)
+					}
+					if status == "false" && !strings.Contains(err.Error(), command+":") {
+						t.Fatalf("%s: want the command failure preserved, got %v", label, err)
+					}
+					dir := filepath.Join(root, ".atm", "runs", label)
+					var report struct {
+						FailedNode string       `json:"failed_node"`
+						Units      []unitResult `json:"units"`
+					}
+					b, err := os.ReadFile(filepath.Join(dir, "report.json"))
+					if err != nil || json.Unmarshal(b, &report) != nil || report.FailedNode != "checks" ||
+						len(report.Units) == 0 {
+						t.Fatalf("%s: want delivery blocked at checks, got %s, %v", label, b, err)
+					}
+					var left []followUp
+					b, err = os.ReadFile(filepath.Join(dir, "follow-ups.json"))
+					if err != nil || json.Unmarshal(b, &left) != nil || len(left) != 1 ||
+						!strings.Contains(left[0].Cause, "changes b.txt, outside the paths") ||
+						!strings.Contains(left[0].Diff, "+extra") || left[0].RedTest != "c1_test.sh" ||
+						left[0].Dependency != report.Units[len(report.Units)-1].Base {
+						t.Fatalf("%s: want discrepancy, diff and dependency persisted, got %s, %v", label, b, err)
+					}
+					if _, err := os.Stat(delivered); !os.IsNotExist(err) {
+						t.Fatalf("%s: delivery ran despite the unplanned path: %v", label, err)
+					}
+				}
+			})
+		}
+	}
+}
