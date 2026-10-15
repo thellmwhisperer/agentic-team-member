@@ -78,6 +78,9 @@ func startFollow(t *testing.T, bin, top string, tty bool, args ...string) *follo
 		}
 		defer func() { _ = tt.Close() }() // the child holds it: its end ends the reads
 		t.Cleanup(func() { _ = p.Close() })
+		if err := pty.Setsize(tt, &pty.Winsize{Rows: 24, Cols: 100}); err != nil {
+			t.Fatal(err)
+		}
 		f.cmd.Stdout, out = tt, p
 	} else {
 		r, err := f.cmd.StdoutPipe()
@@ -104,6 +107,14 @@ func (f *followed) errors() string {
 	return string(b)
 }
 
+func (f *followed) next(event string, want map[string]any) map[string]any {
+	f.t.Helper()
+	got := f.streamed.next(event, want)
+	b, _ := json.Marshal(got)
+	f.t.Logf("stdout: %s", b)
+	return got
+}
+
 // runFollow starts atm run with the issue between flags before and after, the first run of the repository at top.
 func runFollow(t *testing.T, bin, top string, tty bool, before []string, after ...string) *followed {
 	t.Helper()
@@ -120,6 +131,7 @@ func (f *followed) ended(code int) {
 		f.t.Fatalf("stdout line %q after the last", l)
 	}
 	_ = f.cmd.Wait()
+	f.t.Logf("exit: %d; stderr: %s", f.cmd.ProcessState.ExitCode(), f.errors())
 	if got := f.cmd.ProcessState.ExitCode(); got != code {
 		f.t.Fatalf("atm exit %d, want %d; stderr:\n%s", got, code, f.errors())
 	}
@@ -204,6 +216,7 @@ func TestRunFollowAsAFlagValueLeavesRunAsItWas(t *testing.T) {
 	cmd := exec.Command(bin, "run", "--model", "--follow", issueFile(t, issue), "--watcher", "live")
 	cmd.Dir = top
 	out, err := cmd.Output()
+	t.Logf("atm run --model --follow: stdout %q, error %v", out, err)
 	if err != nil || string(out) != "issue-1\n" {
 		t.Fatalf("atm run --model --follow: %q, %v", out, err)
 	}
@@ -215,6 +228,15 @@ func TestRunFollowAsAFlagValueLeavesRunAsItWas(t *testing.T) {
 // The follow process holds the run's lease. Killed while the worker waits, it leaves the run going: the run says
 // WATCHER GONE, atm watch --adopt takes it over, and it finishes.
 func TestRunFollowKilledLeavesTheRunGoing(t *testing.T) {
+	runFollowInterrupted(t, syscall.SIGKILL)
+}
+
+func TestRunFollowCanceledLeavesTheRunGoing(t *testing.T) {
+	runFollowInterrupted(t, syscall.SIGINT)
+}
+
+func runFollowInterrupted(t *testing.T, signal syscall.Signal) {
+	t.Helper()
 	bin, top, _, _ := followRepo(t, atmYAML)
 	_, release := holdFakeAgents(t, 1)
 	f := runFollow(t, bin, top, false, nil, "--follow")
@@ -231,12 +253,20 @@ func TestRunFollowKilledLeavesTheRunGoing(t *testing.T) {
 			}
 		})
 	}()
-	if err := f.cmd.Process.Kill(); err != nil {
+	if err := f.cmd.Process.Signal(signal); err != nil {
 		t.Fatal(err)
 	}
-	_ = f.cmd.Wait()
+	if signal == syscall.SIGKILL {
+		_ = f.cmd.Wait()
+	} else {
+		f.ended(1)
+		if paths := leases(t, top); len(paths) != 0 {
+			t.Fatalf("leases left after cancellation: %v", paths)
+		}
+	}
 	select {
 	case line := <-gone:
+		t.Log(line)
 		assertWatcherGoneLine(t, line)
 	case <-time.After(60 * time.Second):
 		t.Fatal("no WATCHER GONE on the run's screen after the follow process died")
@@ -245,6 +275,7 @@ func TestRunFollowKilledLeavesTheRunGoing(t *testing.T) {
 	for _, want := range []string{"watching as ", f.o.Run + " adopted: running at agent"} {
 		select {
 		case line := <-adopter.lines:
+			t.Logf("adopter stdout: %s", line)
 			if !strings.Contains(line, want) {
 				t.Fatalf("atm watch --adopt printed %q, want %q", line, want)
 			}
@@ -294,6 +325,8 @@ func TestRunFollowCancellationDuringDelayedLaunchKeepsLeaseAlive(t *testing.T) {
 	if !Watching(top, a.watcher) {
 		t.Fatal("cancellation expired the lease while launch was still pending")
 	}
+	b, _ = os.ReadFile(leasePath(top, a.watcher))
+	t.Logf("lease after SIGTERM and 31 seconds: %s; follow PID: %d", b, f.cmd.Process.Pid)
 	if runs, err := RecordedRuns(top); err != nil || len(runs) != 0 {
 		t.Fatalf("runs before releasing launch = %+v, %v; want none", runs, err)
 	}
@@ -341,6 +374,7 @@ func (f *followed) holdsTheLease(top string) {
 		f.t.Fatalf("lease %s: %s, %v; want pid %d", l[0], b, err, f.cmd.Process.Pid)
 	}
 	id := strings.TrimSuffix(filepath.Base(l[0]), ".json")
+	f.t.Logf("lease: %s; follow PID: %d; run: %s; watcher: %s", b, f.cmd.Process.Pid, f.o.Run, id)
 	if runs, err := Runs(top); err != nil || len(runs) != 1 || runs[0].Run != f.o.Run || runs[0].Watcher != id ||
 		runs[0].Outcome != "running" {
 		f.t.Fatalf("runs = %+v, %v; want %s alone, running, bound to %s", runs, err, f.o.Run, id)
@@ -360,6 +394,10 @@ func TestRunFollowRejectsBeforeLaunch(t *testing.T) {
 	}{
 		{[]string{"run", path, "--follow", "--watcher", "live"}, "--watcher"},
 		{[]string{"run", "--follow", "--resume", "issue-1"}, "atm watch --adopt"},
+		{[]string{"run", "--follow"}, "usage:"},
+		{[]string{"run", path, "--follow", "--unknown"}, "flag provided but not defined"},
+		{[]string{"run", path, "--follow", "--model"}, "flag needs an argument"},
+		{[]string{"run", path}, "no watcher:"},
 		{[]string{"run", "--follow", path}, filepath.Join(".atm", "watch")},
 	} {
 		if c.why == filepath.Join(".atm", "watch") { // a file where the leases go
@@ -373,6 +411,7 @@ func TestRunFollowRejectsBeforeLaunch(t *testing.T) {
 		var stderr strings.Builder
 		cmd.Stderr = &stderr
 		out, err := cmd.Output()
+		t.Logf("atm %v: stdout %q, stderr %q, error %v", c.args, out, stderr.String(), err)
 		if err == nil || len(out) != 0 || !strings.Contains(stderr.String(), c.why) {
 			t.Fatalf("atm %v: %v, stdout %q, stderr %q; want an error naming %s", c.args, err, out, stderr.String(), c.why)
 		}
@@ -381,5 +420,25 @@ func TestRunFollowRejectsBeforeLaunch(t *testing.T) {
 				t.Fatalf("atm %v: .atm/%s exists: %v", c.args, p, err)
 			}
 		}
+	}
+}
+
+// A failure starting the background server is a launch error, not a failed run event.
+func TestRunFollowLaunchFailureCleansLeaseWithoutAnEvent(t *testing.T) {
+	bin := builtATM(t)
+	top := atmRepo(t)
+	if err := os.Mkdir(filepath.Join(top, ".atm", "serve.log"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f := runFollow(t, bin, top, false, nil, "--follow")
+	f.ended(2)
+	if !strings.Contains(f.errors(), "serve.log") {
+		t.Fatalf("launch diagnostic: %q", f.errors())
+	}
+	if paths := leases(t, top); len(paths) != 0 {
+		t.Fatalf("leases left after launch failed: %v", paths)
+	}
+	if runs, err := RecordedRuns(top); err != nil || len(runs) != 0 {
+		t.Fatalf("runs after launch failed = %+v, %v; want none", runs, err)
 	}
 }
