@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -22,15 +23,94 @@ const grossBudget = 200
 // followUp is a behaviour gap a unit's agent found and did not fix, as its report declares it. Test holds
 // the agent's red test; Verified says ATM proved it failing on the unit's work. A follow-up that blocks the
 // run says why in Cause, with the Diff of the unit it stopped and the commit it builds on, its Dependency.
+// Paths are the paths its unit would change, and Scope their review against the issue before that unit starts.
 type followUp struct {
-	Title      string `json:"title"`
-	RedTest    string `json:"red_test"`
-	Criterion  string `json:"criterion"`
-	Test       string `json:"test"`
-	Verified   bool   `json:"verified"`
-	Diff       string `json:"diff,omitempty"`
-	Cause      string `json:"cause,omitempty"`
-	Dependency string `json:"dependency,omitempty"`
+	Title      string       `json:"title"`
+	RedTest    string       `json:"red_test"`
+	Criterion  string       `json:"criterion"`
+	Paths      []string     `json:"paths,omitempty"`
+	Test       string       `json:"test"`
+	Verified   bool         `json:"verified"`
+	Scope      *scopeReview `json:"scope,omitempty"`
+	Diff       string       `json:"diff,omitempty"`
+	Cause      string       `json:"cause,omitempty"`
+	Dependency string       `json:"dependency,omitempty"`
+}
+
+// scopeReview is the review of Paths, a follow-up's paths and its red test, against the issue: approved, or why
+// not, with the reviewer's report, when it ran.
+type scopeReview struct {
+	Paths    []string       `json:"paths"`
+	Approved bool           `json:"approved"`
+	Reason   string         `json:"reason,omitempty"`
+	Report   map[string]any `json:"report,omitempty"`
+}
+
+// proposed is the paths f's unit would change, its red test last, as slash paths.
+func proposed(f followUp) []string {
+	var ps []string
+	for _, p := range append(slices.Clone(f.Paths), f.RedTest) {
+		ps = append(ps, filepath.ToSlash(filepath.Clean(filepath.FromSlash(p))))
+	}
+	return ps
+}
+
+// scoped is unmet once the first follow-up of in, which unit n+1 would make pass, had its paths reviewed against
+// issue i: on a block, nothing chains, and unmet's error carries why.
+func (a agent) scoped(root, clone, head string, n int, i Issue, pending, in []followUp) ([]followUp, []followUp,
+	error) {
+	var blocked error
+	if len(in) > 0 && n < maxUnits {
+		if blocked = a.reviewScope(clone, head, n+1, i, &in[0]); blocked != nil {
+			pending, in = append(pending, in...), nil
+		}
+	}
+	pending, in, err := unmet(root, clone, head, n, i, pending, in)
+	return pending, in, errors.Join(err, blocked)
+}
+
+// beyond is the gross lines and the diff of the work in clone from commit head, f's unit n, and why it goes
+// beyond what it may: a path f's scope review did not approve, or the gross lines of the units before, spent,
+// and its own over grossBudget; "" when it does not.
+func beyond(clone, head string, f followUp, n, spent int) (int, string, string, error) {
+	g, diff, err := gross(clone, head, f.RedTest)
+	var left []string
+	if err == nil {
+		left, err = unplanned(clone, head, f)
+	}
+	switch {
+	case err != nil:
+		return 0, "", "", err
+	case len(left) > 0:
+		return g, diff, fmt.Sprintf("unit %d changes %s, outside the paths its scope review approved: %s", n,
+			strings.Join(left, ", "), strings.Join(f.Scope.Paths, ", ")), nil
+	case spent+g > grossBudget:
+		return g, diff, fmt.Sprintf("units 2 to %d change %d lines, added plus deleted, over the %d-line budget "+
+			"of the work after unit 1", n, spent+g, grossBudget), nil
+	}
+	return g, diff, "", nil
+}
+
+// unplanned is the paths the work in clone changes from commit head that f's approved scope review did not
+// approve, a path approved with what lies under it, "." the whole clone.
+func unplanned(clone, head string, f followUp) ([]string, error) {
+	if f.Scope == nil || !f.Scope.Approved || !slices.Equal(f.Scope.Paths, proposed(f)) {
+		return nil, fmt.Errorf("follow-up %s has no scope review that approved its paths", f.RedTest)
+	}
+	tree, err := snapshot(clone)
+	if err != nil {
+		return nil, err
+	}
+	out, err := git(clone, "diff", "--name-only", "--no-renames", "-z", head, tree)
+	var left []string
+	for _, p := range strings.Split(out, "\x00") {
+		if p != "" && !slices.ContainsFunc(f.Scope.Paths, func(q string) bool {
+			return q == "." || p == q || strings.HasPrefix(p, q+"/")
+		}) {
+			left = append(left, p)
+		}
+	}
+	return left, err
 }
 
 // declared is the follow-ups the agent's report r declares, neither tested nor verified.
@@ -41,7 +121,7 @@ func declared(r map[string]any) ([]followUp, error) {
 		return nil, fmt.Errorf("invalid follow_ups in the agent report: %w", err)
 	}
 	for n, f := range all {
-		all[n] = followUp{Title: f.Title, RedTest: f.RedTest, Criterion: f.Criterion}
+		all[n] = followUp{Title: f.Title, RedTest: f.RedTest, Criterion: f.Criterion, Paths: f.Paths}
 	}
 	return all, nil
 }

@@ -168,15 +168,19 @@ func (a agent) run(clone, name, skill, brief string, check func(map[string]any) 
 	return ev, nil
 }
 
-// finalReport is the report in the agent's final message, which check accepts. The contract review's must be a
+// strict is the review each agent run, by its name without its unit number, whose final message must be a
 // single JSON object, nothing around it.
+var strict = map[string]string{"contract-review": "contract review", "scope-review-unit": "scope review"}
+
+// finalReport is the report in the agent's final message, which check accepts.
 func finalReport(name, final string, check func(map[string]any) error) (map[string]any, error) {
-	if name != "contract-review" {
+	review, ok := strict[strings.TrimRight(name, "0123456789")]
+	if !ok {
 		return report(final, check)
 	}
 	var r map[string]any
 	if json.Unmarshal([]byte(final), &r) != nil {
-		return nil, errors.New("agent left no report: invalid contract review: want a single JSON object")
+		return nil, fmt.Errorf("agent left no report: invalid %s: want a single JSON object", review)
 	}
 	return r, check(r)
 }
