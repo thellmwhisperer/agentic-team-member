@@ -100,7 +100,7 @@ func Run(label string, args []string, out, summary io.Writer) (err error) {
 // theIssue is the issue of run from, as it first read it, or else arg's, read from the GitHub repository repo
 // when a number.
 func theIssue(from *resumePoint, arg, repo string) (Issue, error) {
-	if from != nil && from.Original != nil {
+	if from != nil {
 		return *from.Original, nil
 	}
 	return readIssue(arg, repo)

@@ -92,7 +92,7 @@ func beyond(clone, head string, f followUp, n, spent int) (int, string, string, 
 }
 
 // unplanned is the paths the work in clone changes from commit head that f's approved scope review did not
-// approve, a path approved with what lies under it, "." the whole clone.
+// approve.
 func unplanned(clone, head string, f followUp) ([]string, error) {
 	if f.Scope == nil || !f.Scope.Approved || !slices.Equal(f.Scope.Paths, proposed(f)) {
 		return nil, fmt.Errorf("follow-up %s has no scope review that approved its paths", f.RedTest)
@@ -104,9 +104,7 @@ func unplanned(clone, head string, f followUp) ([]string, error) {
 	out, err := git(clone, "diff", "--name-only", "--no-renames", "-z", head, tree)
 	var left []string
 	for _, p := range strings.Split(out, "\x00") {
-		if p != "" && !slices.ContainsFunc(f.Scope.Paths, func(q string) bool {
-			return q == "." || p == q || strings.HasPrefix(p, q+"/")
-		}) {
+		if p != "" && !slices.Contains(f.Scope.Paths, p) {
 			left = append(left, p)
 		}
 	}

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 )
 
 // resumePoint is what a run that fails after its agent keeps in resume/, in its directory, for atm run
@@ -162,6 +163,9 @@ func resumeFrom(root, label string) (p resumePoint, err error) {
 	}
 	if !r.Resumable || err != nil {
 		return p, fmt.Errorf("run %s is not resumable: only a run that failed after its agent is", label)
+	}
+	if p.Original == nil || strings.TrimSpace(p.Original.Text) == "" {
+		return p, fmt.Errorf("cannot resume run %s: saved original issue text is missing", label)
 	}
 	if _, err := git(root, "rev-parse", "--verify", "-q", p.Base+"^{commit}"); err != nil {
 		return p, fmt.Errorf("cannot resume run %s: the repository no longer has its base commit %s", label, p.Base)

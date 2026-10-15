@@ -3,6 +3,7 @@ package run
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -233,5 +234,73 @@ func TestFollowUpScopeResumeReviewsTheOriginalIssue(t *testing.T) {
 	if brief := agentCall(t, call+".scope").Stdin; !strings.Contains(brief, original) ||
 		strings.Contains(brief, "b.txt and") {
 		t.Fatalf("want the resumed scope review to get the original issue, got:\n%s", brief)
+	}
+}
+
+func TestFollowUpScopeResumeRequiresSavedOriginalIssue(t *testing.T) {
+	root, dir, _, _, err := scopeRun(t, androidIssue, "c1_test.sh",
+		scopeFollowUp("c1_test.sh", "The android card opens the route.", `["a.txt"]`),
+		"ATM_TEST_UNIT2", "echo u2 >> a.txt; echo extra > b.txt")
+	if err == nil || !strings.Contains(err.Error(), "b.txt") {
+		t.Fatalf("want a resumable run blocked on b.txt, got %v", err)
+	}
+	path := filepath.Join(dir, "resume", "resume.json")
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var saved obj
+	if err := json.Unmarshal(b, &saved); err != nil {
+		t.Fatal(err)
+	}
+	delete(saved, "original")
+	b, err = json.Marshal(saved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	changed := strings.Replace(androidIssue, "android/** and the plugin only", "all files", 1)
+	var out bytes.Buffer
+	err = Run("resumed", []string{"--resume", "t", issueFile(t, changed)}, &out, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "saved original issue text is missing") {
+		t.Fatalf("want resume blocked without the original issue, got %v", err)
+	}
+	if out.Len() != 0 {
+		t.Fatalf("want no run steps without the original issue, got %s", out.String())
+	}
+	if _, err := os.Stat(filepath.Join(root, ".atm", "runs", "resumed")); !os.IsNotExist(err) {
+		t.Fatalf("want no resumed run created, got %v", err)
+	}
+}
+
+func TestFollowUpScopeRequiresExactPlannedFiles(t *testing.T) {
+	for _, plan := range []string{".", "android", ""} {
+		t.Run("plan="+plan, func(t *testing.T) {
+			paths, _ := json.Marshal([]string{"a.txt", plan})
+			root, _, _, _, err := scopeRun(t, androidIssue, "c1_test.sh",
+				scopeFollowUp("c1_test.sh", "The android card opens the route.", string(paths)),
+				"ATM_TEST_UNIT2", "echo u2 >> a.txt; mkdir -p android; echo extra > android/unplanned.txt")
+			for _, label := range []string{"t", "resumed"} {
+				if label == "resumed" {
+					err = Run(label, []string{"--resume", "t", issueFile(t, androidIssue)}, io.Discard, io.Discard)
+				}
+				if err == nil || !strings.Contains(err.Error(), "changes android/unplanned.txt, outside the paths") {
+					t.Fatalf("%s: want only the unplanned file blocked, got %v", label, err)
+				}
+				dir := filepath.Join(root, ".atm", "runs", label)
+				report := readReport(t, filepath.Join(dir, "report.json"))
+				if report["failed_node"] != "checks" {
+					t.Fatalf("%s: want delivery blocked at checks, got %v", label, report)
+				}
+				var left []obj
+				b, err := os.ReadFile(filepath.Join(dir, "follow-ups.json"))
+				if err != nil || json.Unmarshal(b, &left) != nil || len(left) != 1 ||
+					!strings.Contains(fmt.Sprint(left[0]["cause"]), "changes android/unplanned.txt, outside the paths") {
+					t.Fatalf("%s: want the exact discrepancy persisted, got %s, %v", label, b, err)
+				}
+			}
+		})
 	}
 }
