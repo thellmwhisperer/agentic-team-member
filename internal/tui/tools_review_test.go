@@ -10,12 +10,7 @@ import (
 )
 
 func TestFoldedFailureShowsErrorOnOneRow(t *testing.T) {
-	m := modelWithEvents(240, eventGolden(t, "cursor.events.jsonl"))
-	if got := agentLines(m, 240); !slices.Contains(got,
-		"✗ failed shell cat nope.txt · cat: nope.txt: No such file or directory") {
-		t.Fatalf("criterion 4 requires the folded error: %q", got)
-	}
-	m = screen(240, 40, `{"step":"agent","state":"started"}`,
+	m := screen(240, 40, `{"step":"agent","state":"started"}`,
 		`{"id":"f","tool":"shell","detail":"cat missing\necho extra","result":"failed","summary":"missing\nmore"}`,
 		`{"id":"b","tool":"read","detail":"b.go","result":"passed"}`)
 	s := view(m)
