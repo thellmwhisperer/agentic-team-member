@@ -385,7 +385,7 @@ func (s *gateState) finding(row string) {
 	s.findings = append(s.findings, gateFinding{f[0], f[1], f[2], f[4]})
 }
 
-// Read is what the follow stream reads of the gate of clone's branch, through `no-mistakes axi status` and
+// Read reads the gate of clone's branch through `no-mistakes axi status` and
 // `gh pr view`: its state, the findings of the step it waits at, if one does, and its PR's CI repair commits,
 // those whose subject starts `no-mistakes(ci):`, in order. It changes nothing; nor s, when it fails.
 func (s *gateState) Read(clone string) error {
@@ -400,6 +400,8 @@ func (s *gateState) Read(clone string) error {
 // errNoGate is a gate read whose status has no gate.
 var errNoGate = errors.New("no-mistakes axi status has no gate")
 
+// read retains parsed gate state even if the later commit read fails, so an observed gate failure
+// cannot be lost to a transient gh error. Read wraps this with all-or-nothing updates for other callers.
 func (s *gateState) read(ctx context.Context, clone string) error {
 	status, err := gateStatus(ctx, clone)
 	if err != nil {

@@ -13,12 +13,16 @@ import (
 	"time"
 )
 
-// Stream follows run o.Run of the repository at root until its PR merges, 0, or closes, or the run or its gate
-// fails, 1: a JSON object a line on w, its time, run, issue and event, as each happens. Its steps and delivery come
-// from the run's screen; its gate's waits, CI repair commits and green CI from `no-mistakes axi status` in the
-// clone, and its PR from gh, by the delivery's branch once the clone is gone. It reads them every 10 s at most,
-// on now and after, time.Now and time.After but in tests; an hour without a line is stalled, and so each hour
-// after. Read errors go to stderr: the next poll reads again. Ending ctx stops it, never the run: 1.
+// Stream observes existing run o.Run in root, writing each event immediately as one JSON line on w
+// with time, run, issue and event. It returns 0 on merge, or 1 on closure or run/gate failure.
+// An observed gate failure takes precedence over a later PR result in the same poll.
+// Steps and delivery come from run frames; waits and green CI from `no-mistakes axi status` in the clone;
+// CI repair commits and PR state from gh. The delivery branch locates the PR if the clone is gone.
+// Observation continues through gate decisions and after the delivery command returns.
+// Polls start at least 10 seconds apart. Pass time.Now and time.After for now and after outside tests.
+// Each hour without another event emits stalled, with minutes since the last non-stalled event.
+// Read errors go to stderr and are retried; they do not erase successfully observed gate state.
+// Ending ctx stops only the observer and returns 1, leaving the run going.
 func (o Outcome) Stream(
 	ctx context.Context,
 	root string,
