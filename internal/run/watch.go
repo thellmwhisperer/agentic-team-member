@@ -189,12 +189,12 @@ func follow(ctx context.Context, root, label string, since time.Time, say func(l
 // at is " at step", or "" for no step.
 func at(step string) string { return strings.TrimSuffix(" at "+step, " at ") }
 
-// gateStatus is `no-mistakes axi status` in clone: the state of the gate on its branch.
-func gateStatus(clone string) (string, error) {
+// gateStatus is `no-mistakes axi status` in clone, until ctx ends: the state of the gate on its branch.
+func gateStatus(ctx context.Context, clone string) (string, error) {
 	if _, err := os.Stat(clone); err != nil {
 		return "", err
 	}
-	cmd := exec.Command("no-mistakes", "axi", "status")
+	cmd := exec.CommandContext(ctx, "no-mistakes", "axi", "status")
 	cmd.Dir = clone
 	out, err := cmd.Output()
 	return string(out), err
@@ -219,7 +219,7 @@ func watchGate(
 		case deliveredBranch = <-branch:
 		default:
 		}
-		status, err := gateStatus(clone)
+		status, err := gateStatus(ctx, clone)
 		var lines []string
 		done := false
 		if err == nil {
@@ -259,6 +259,11 @@ func (g *gate) failedFirst(root, label string) bool {
 }
 
 func gatePRState(root, branch string) (string, error) {
+	return ghPR(context.Background(), root, branch, "--json", "state", "--jq", ".state")
+}
+
+// ghPR is `gh pr view pr` with args, of the GitHub repository of root's origin, until ctx ends.
+func ghPR(ctx context.Context, root, pr string, args ...string) (string, error) {
 	origin, err := git(root, "remote", "get-url", "origin")
 	if err != nil {
 		return "", err
@@ -267,7 +272,23 @@ func gatePRState(root, branch string) (string, error) {
 	if repo == nil {
 		return "", errors.New("repository has no GitHub origin")
 	}
-	return command(root, "gh", "pr", "view", branch, "--repo", repo[1], "--json", "state", "--jq", ".state")
+	return commandCtx(ctx, nil, root, root, "gh", append([]string{"pr", "view", pr, "--repo", repo[1]}, args...)...)
+}
+
+// prView is what `gh pr view --json url,state,commits` says of a PR.
+type prView struct {
+	URL, State string
+	Commits    []struct{ OID, MessageHeadline string }
+}
+
+// ci is p's CI repair commits, those whose subject starts `no-mistakes(ci):`, in order.
+func (p prView) ci() (cs []ciCommit) {
+	for _, c := range p.Commits {
+		if strings.HasPrefix(c.MessageHeadline, "no-mistakes(ci):") {
+			cs = append(cs, ciCommit{c.OID, c.MessageHeadline})
+		}
+	}
+	return cs
 }
 
 // gate is what a watcher printed of a gate.
@@ -367,8 +388,14 @@ func (s *gateState) finding(row string) {
 // Read is what the follow stream reads of the gate of clone's branch, through `no-mistakes axi status` and
 // `gh pr view`: its state, the findings of the step it waits at, if one does, and its PR's CI repair commits,
 // those whose subject starts `no-mistakes(ci):`, in order. It changes nothing; nor s, when it fails.
-func (s *gateState) Read(clone string) error {
-	status, err := gateStatus(clone)
+func (s *gateState) Read(clone string) error { return s.read(context.Background(), clone) }
+
+// errNoGate is a gate read whose status has no gate.
+var errNoGate = errors.New("no-mistakes axi status has no gate")
+
+// read is Read until ctx ends.
+func (s *gateState) read(ctx context.Context, clone string) error {
+	status, err := gateStatus(ctx, clone)
 	if err != nil {
 		return err
 	}
@@ -377,26 +404,20 @@ func (s *gateState) Read(clone string) error {
 	case r.err != nil:
 		return r.err
 	case !r.seen:
-		return errors.New("no-mistakes axi status has no gate")
+		return errNoGate
 	case r.waiting == "":
 		r.findings = nil
 	}
 	if strings.HasPrefix(r.pr, "http") {
-		var pr struct {
-			Commits []struct{ OID, MessageHeadline string }
-		}
-		out, err := command(clone, "gh", "pr", "view", r.pr, "--json", "commits")
+		var pr prView
+		out, err := commandCtx(ctx, nil, clone, clone, "gh", "pr", "view", r.pr, "--json", "commits")
 		if err == nil {
 			err = json.Unmarshal([]byte(out), &pr)
 		}
 		if err != nil {
 			return err
 		}
-		for _, c := range pr.Commits {
-			if strings.HasPrefix(c.MessageHeadline, "no-mistakes(ci):") {
-				r.ci = append(r.ci, ciCommit{c.OID, c.MessageHeadline})
-			}
-		}
+		r.ci = pr.ci()
 	}
 	*s = r
 	return nil

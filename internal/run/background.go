@@ -749,13 +749,14 @@ func send(root string, req request, in <-chan Input, fn func(reply)) (again bool
 	if err := enc.Encode(req); err != nil {
 		return true, err
 	}
-	done := make(chan struct{})
+	done, left := make(chan struct{}), make(chan struct{}) // left: in closed, the caller left
 	defer close(done)
 	go func() {
 		for {
 			select {
 			case i, ok := <-in: // never, when in is nil
 				if !ok {
+					close(left)
 					_ = c.Close()
 					return
 				}
@@ -770,7 +771,13 @@ func send(root string, req request, in <-chan Input, fn func(reply)) (again bool
 	dec := json.NewDecoder(c)
 	for replied := false; ; replied = true {
 		var r reply
-		if err := dec.Decode(&r); errors.Is(err, io.EOF) {
+		err := dec.Decode(&r)
+		select {
+		case <-left: // no try again
+			return false, nil
+		default:
+		}
+		if errors.Is(err, io.EOF) {
 			return !replied, nil
 		} else if err != nil {
 			return !replied, err
