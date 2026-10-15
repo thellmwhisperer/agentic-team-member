@@ -37,7 +37,13 @@ head=${nm% *}
 case "${nm#* }" in
   none) ;;
   # A review covers one head: any push needs a new review-completed.
-  found) if [ "${2:-}" = synchronize ] || ! has 'label review-completed'; then block "$1"; fi ;;
+  found)
+    if [ "${2:-}" = synchronize ] || ! has 'label review-completed'; then block "$1"; fi
+    # Reviewed: review-required never stays beside review-completed.
+    if has 'label review-required'; then
+      gh api -X DELETE "repos/$repo/issues/$1/labels/review-required"
+    fi
+    ;;
   *) block "$1" ;;
 esac
 body=$(gh pr view "$1" --repo "$repo" --json body --jq .body)

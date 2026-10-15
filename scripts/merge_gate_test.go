@@ -325,6 +325,54 @@ func TestAnyPushRemovesReviewCompleted(t *testing.T) {
 	}
 }
 
+var labelDeleted = regexp.MustCompile(`^api -X DELETE \S+/labels/(\S+)$`)
+
+// ends replays the label edits in calls on labels, returning the labels the PR ends the run with.
+func ends(labels []string, calls string) []string {
+	set := map[string]bool{}
+	for _, l := range labels {
+		set[l] = true
+	}
+	for _, call := range strings.Split(calls, "\n") {
+		args := strings.Fields(call)
+		if l := after(args, "--add-label"); l != "" {
+			set[l] = true
+		}
+		if l := after(args, "--remove-label"); l != "" {
+			delete(set, l)
+		}
+		if m := labelDeleted.FindStringSubmatch(call); m != nil {
+			delete(set, m[1])
+		}
+	}
+	out := make([]string, 0, len(set))
+	for l := range set {
+		out = append(out, l)
+	}
+	slices.Sort(out)
+	return out
+}
+
+func TestPREndsWithOnlyOneReviewLabel(t *testing.T) {
+	both := []string{"review-required", "review-completed"}
+	for _, tc := range []struct {
+		event string
+		armed bool
+		want  string
+	}{
+		{"labeled", true, "review-completed"},
+		{"synchronize", false, "review-required"},
+	} {
+		t.Run(tc.event, func(t *testing.T) {
+			r := pr{head: newHead, subjects: nm("review"), labels: both}.run(t, arm+" "+tc.event)
+			got := ends(both, r.calls)
+			if r.err != nil || strings.Contains(r.calls, armed) != tc.armed || !slices.Equal(got, []string{tc.want}) {
+				t.Fatalf("calls = %q, %v; labels = %q, want only %q, armed %v", r.calls, r.err, got, tc.want, tc.armed)
+			}
+		})
+	}
+}
+
 func TestArmNeverArmsAHeadDetectionDidNotRead(t *testing.T) {
 	p := pr{head: oldHead, live: newHead, subjects: nm("review"), labels: []string{"review-completed"}}
 	if r := p.run(t, arm+" labeled"); r.err == nil || !strings.Contains(r.calls, "--match-head-commit "+oldHead) {
