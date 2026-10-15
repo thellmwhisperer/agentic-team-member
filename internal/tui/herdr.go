@@ -145,11 +145,88 @@ func (h *herdr) issue() string {
 // call runs herdr pane cmd with args, a second at most; whatever happens to it changes nothing.
 // ponytail: on the screen's path, a hung herdr holds the screen a second per call.
 func (h *herdr) call(cmd string, args ...string) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
 	args = append([]string{"pane", cmd, h.pane, "--source", "atm", "--agent", "atm"}, args...)
 	args = append(args, "--seq", strconv.FormatInt(time.Now().UnixNano(), 10))
-	_ = exec.CommandContext(ctx, cmp.Or(os.Getenv("HERDR_BIN_PATH"), "herdr"), args...).Run()
+	_, _ = herdrRun(args...)
+}
+
+// herdrRun runs herdr with args, a second at most, and returns its stdout.
+func herdrRun(args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	return exec.CommandContext(ctx, cmp.Or(os.Getenv("HERDR_BIN_PATH"), "herdr"), args...).Output()
+}
+
+// OpenHerdrTab creates a tab labelled tabLabel in the workspace named workspace, cwd the repository, and runs
+// command in its root pane. The tab id is the one tab create returned. herdr's --workspace wants that id, not
+// the label: workspace list matches label.
+func OpenHerdrTab(workspace, tabLabel, cwd, command string) (string, error) {
+	id, err := herdrWorkspaceID(workspace)
+	if err != nil {
+		return "", err
+	}
+	b, err := herdrRun("tab", "create", "--workspace", id, "--label", tabLabel, "--no-focus", "--cwd", cwd)
+	if err != nil {
+		return "", err
+	}
+	tab, pane, err := createdTab(b)
+	if err != nil || pane == "" {
+		if err == nil {
+			err = fmt.Errorf("tab create: no root pane")
+		}
+		return tab, err
+	}
+	if _, err = herdrRun("pane", "run", pane, command); err != nil {
+		return tab, err
+	}
+	return tab, nil
+}
+
+// CloseHerdrTab closes the tab id tab create returned, gate pane included.
+func CloseHerdrTab(id string) error {
+	_, err := herdrRun("tab", "close", id)
+	return err
+}
+
+func herdrWorkspaceID(label string) (string, error) {
+	b, err := herdrRun("workspace", "list")
+	if err != nil {
+		return "", err
+	}
+	var listed struct {
+		Result struct {
+			Workspaces []struct {
+				ID    string `json:"workspace_id"`
+				Label string `json:"label"`
+			} `json:"workspaces"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(b, &listed); err != nil {
+		return "", err
+	}
+	for _, w := range listed.Result.Workspaces {
+		if w.Label == label {
+			return w.ID, nil
+		}
+	}
+	return "", fmt.Errorf("no workspace %q", label)
+}
+
+func createdTab(b []byte) (tab, pane string, err error) {
+	var resp struct {
+		Result struct {
+			Tab struct {
+				ID string `json:"tab_id"`
+			} `json:"tab"`
+			Pane struct {
+				ID string `json:"pane_id"`
+			} `json:"root_pane"`
+		} `json:"result"`
+	}
+	if err = json.Unmarshal(b, &resp); err != nil || resp.Result.Tab.ID == "" {
+		return "", "", fmt.Errorf("tab create: no tab id")
+	}
+	return resp.Result.Tab.ID, resp.Result.Pane.ID, nil
 }
 
 // step is the label of the node that runs, and of its proof or command that runs, if one does; "" when none.

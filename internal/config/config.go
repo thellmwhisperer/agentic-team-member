@@ -66,13 +66,32 @@ var ACP = map[string]struct {
 var required = []string{"install", "test", "typecheck", "lint", "test_file", "test_patterns", "docs_patterns",
 	"delivery"}
 
+// machine is ~/.config/atm/config.yaml: the agent, and the herdr workspace a follow opens a tab in.
+type machine struct {
+	Harness, Model, Effort string
+	HerdrWorkspace         string `yaml:"herdr_workspace"`
+}
+
+// HerdrWorkspace is home's herdr_workspace, empty when unset. A missing file is empty, not an error.
+func HerdrWorkspace(home string) (string, error) {
+	m, err := readMachine(home)
+	return m.HerdrWorkspace, err
+}
+
+func readMachine(home string) (machine, error) {
+	m := machine{Harness: "claude"}
+	_, err := decode(filepath.Join(home, ".config", "atm", "config.yaml"), &m)
+	return m, err
+}
+
 // Load is the defaults, overridden by home's .config/atm/config.yaml, root's .atm.yaml and the non-empty
 // fields of flags.
 func Load(root, home string, flags Agent) (Config, error) {
-	c := Config{Agent: Agent{Harness: "claude"}}
-	if _, err := decode(filepath.Join(home, ".config", "atm", "config.yaml"), &c.Agent); err != nil {
-		return c, err
+	m, err := readMachine(home)
+	if err != nil {
+		return Config{}, err
 	}
+	c := Config{Agent: Agent{Harness: m.Harness, Model: m.Model, Effort: m.Effort}}
 	project := filepath.Join(root, ".atm.yaml")
 	keys, err := decode(project, &c)
 	if err != nil {

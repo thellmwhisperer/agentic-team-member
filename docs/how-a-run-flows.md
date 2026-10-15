@@ -524,6 +524,21 @@ end or by `q`, takes `atm` out of the section. ATM runs `$HERDR_BIN_PATH` or
 `herdr`, a second at most per call; a failing or missing `herdr` changes
 nothing. The coding agent keeps its own herdr reporting, if it has any.
 
+With `HERDR_ENV=1` and `herdr_workspace` set (the workspace's label; empty
+opens none), `atm run --follow` owns the run's tab. It resolves the label
+with `herdr workspace list`, creates a tab in that workspace labelled
+`atm-<issue>`, `--no-focus`, with the repository as cwd, and runs
+`atm attach <run>` in the tab's root pane. The delivery split happens there.
+When `--follow` prints its last line (`merged`, `closed` or `run_failed`),
+ATM closes that tab with `herdr tab close` on the id `tab create` returned,
+gate pane included, and only then exits. It never closes a tab it did not
+create, and never closes one on a non-terminal line. Killing the follow
+before that line leaves the tab; the run reports `WATCHER GONE`. A missing
+`herdr`, a failed `tab create` or `tab close`, or no open workspace with that
+label, prints one line on stderr and changes nothing else. Without
+`--follow`, or with the key empty or `HERDR_ENV` unset, no tab is opened or
+closed.
+
 Off a terminal, or with `NO_COLOR` or `TERM=dumb`, the screen is plain lines:
 one per step start and end, then the delivery's output and the summary. Every
 duration ATM prints reads like `0.9 s`, `4 min 28 s` or `1 h 02 min`.

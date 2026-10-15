@@ -13,16 +13,20 @@ import (
 )
 
 // init is a fake codex, this test binary under that name, when FAKE_AGENT is resume: the implementing agent
-// writes done.txt and a line to FAKE_AGENT_CALLS, the slop detector cuts nothing.
+// writes done.txt and a line to FAKE_AGENT_CALLS, the slop detector cuts nothing, and a contract review approves.
 func init() {
 	if strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe") != "codex" || os.Getenv("FAKE_AGENT") != "resume" {
 		return
 	}
 	args := os.Args[1:]
+	brief := args[len(args)-1]
 	skill, report := "ponytail", `{"test_file": "", "changed_files": ["done.txt"], "summary": "s", "follow_ups": []}`
-	if strings.Contains(args[len(args)-1], "`ponytail-review`") {
+	switch {
+	case strings.Contains(brief, "# Contract review"):
+		skill, report = "ponytail-review", contractApproval(brief)
+	case strings.Contains(brief, "`ponytail-review`"):
 		skill, report = "ponytail-review", `{"findings": [], "summary": "Lean already."}`
-	} else {
+	default:
 		f, err := os.OpenFile(os.Getenv("FAKE_AGENT_CALLS"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 		if err == nil {
 			_, err = fmt.Fprintln(f, "agent")
@@ -39,6 +43,19 @@ func init() {
 		os.Exit(1)
 	}
 	os.Exit(0)
+}
+
+func contractApproval(brief string) string {
+	field := func(key string) string {
+		_, v, _ := strings.Cut(brief, "\n- "+key+": ")
+		v, _, _ = strings.Cut(v, "\n")
+		return strings.TrimSpace(v)
+	}
+	return fmt.Sprintf(`{"disposition":"approved","base":%q,"head":%q,"findings":[],"summary":"s",`+
+		`"task_slicing":{"disposition":"ready","reason":"ok","fields":{"non_goals":{"status":"present","reason":"n"},`+
+		`"invariants":{"status":"present","reason":"i"},"acceptance":{"status":"present","reason":"a"},`+
+		`"split_triggers":{"status":"present","reason":"s"}},"mandatory_pending":[],"drafts":[]}}`,
+		field("Base"), field("HEAD"))
 }
 
 // resumeRepo is a repository whose agent is the fake codex of init, and whose .atm.yaml runs install and test.

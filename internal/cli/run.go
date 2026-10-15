@@ -33,7 +33,10 @@ func runCmd() *cobra.Command {
 			if run.Follows(args) {
 				ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 				defer stop()
-				return run.StartFollowing(ctx, root, args, cmd.OutOrStdout())
+				out := newFollowOut(root, args, cmd.OutOrStdout())
+				err := run.StartFollowing(ctx, root, args, out)
+				out.close()
+				return err
 			}
 			o, err := run.Start(root, args)
 			if err != nil {
