@@ -183,7 +183,7 @@ func putBackIgnored(clone string) error {
 }
 
 // putBackNested puts back, byte for byte, each file of an ignored nested repository before recorded that the
-// agent changed or deleted, the directory it is in writable meanwhile. It never touches the repository's .git.
+// agent changed or deleted, its nearest existing directory writable meanwhile. It never touches the repository's .git.
 func putBackNested(clone string) error {
 	now, err := nestedTree(clone)
 	if err != nil {
@@ -202,7 +202,16 @@ func putBackNested(clone string) error {
 	modes := map[string]fs.FileMode{}
 	for _, p := range strings.Split(strings.TrimSuffix(changed, "\x00"), "\x00") {
 		d := path.Dir(p)
-		if info, statErr := root.Stat(d); statErr == nil && modes[d] == 0 { // a deleted one's may be gone
+		info, statErr := root.Stat(d)
+		for errors.Is(statErr, fs.ErrNotExist) && d != "." {
+			d = path.Dir(d)
+			info, statErr = root.Stat(d)
+		}
+		if statErr != nil {
+			err = errors.Join(err, statErr)
+			continue
+		}
+		if modes[d] == 0 {
 			modes[d] = info.Mode()
 			err = errors.Join(err, root.Chmod(d, info.Mode()|0o700))
 		}
