@@ -468,7 +468,7 @@ title: %[2]q
 created_at: %[3]s
 incident:
   pattern: %[2]q
-  what_went_wrong: "An ATM run wrote it and ATM's ponytail pass cut it before delivery."
+  what_went_wrong: "A coding agent wrote it and the ponytail pass cut it before delivery."
   root_cause: "The coding agent wrote more than the issue needed."
   rule_established: "Cut by the ponytail pass; it does not come back."
   evidence:

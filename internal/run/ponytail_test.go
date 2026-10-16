@@ -223,6 +223,30 @@ func TestPonytailKeepsAShorterGreenCut(t *testing.T) {
 	}
 }
 
+func TestTombstonesNameNoProducer(t *testing.T) {
+	clone := t.TempDir()
+	paths, err := tombstones(clone, []finding{
+		{File: "a.txt", Family: "speculative_feature", Finding: "dropped two lines"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(paths) != 1 {
+		t.Fatalf("want one tombstone, got %v", paths)
+	}
+	text, err := os.ReadFile(filepath.Join(clone, paths[0]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `  what_went_wrong: "A coding agent wrote it and the ponytail pass cut it before delivery."` + "\n"
+	if !strings.Contains(string(text), want) {
+		t.Errorf("tombstone lacks %q:\n%s", want, text)
+	}
+	if strings.Contains(strings.ToLower(string(text)), "atm") {
+		t.Errorf("tombstone names ATM:\n%s", text)
+	}
+}
+
 func TestReproveFailsWhenAPriorUnitTestCommits(t *testing.T) {
 	_, clone, sha, cfg := unitDone(t, "echo fixed > a.txt")
 	cfg.TestFile = "sh {file} && git -c user.name=Test -c user.email=test@example.com commit --allow-empty -qm test"
