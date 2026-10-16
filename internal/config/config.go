@@ -18,14 +18,14 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Agent is what the global file and the flags set. Empty model or effort: the harness's default.
+// Agent is the agent selection shared by configuration layers. Empty model or effort: the harness's default.
 type Agent struct {
 	Harness string `yaml:"harness"`
 	Model   string `yaml:"model"`
 	Effort  string `yaml:"effort"`
 }
 
-// Config is every key ATM reads. Nothing in it is per language: the repository declares its commands.
+// Config is the repository configuration. Nothing in it is per language: the repository declares its commands.
 type Config struct {
 	Agent        `yaml:",inline"`
 	Install      string   `yaml:"install"`
