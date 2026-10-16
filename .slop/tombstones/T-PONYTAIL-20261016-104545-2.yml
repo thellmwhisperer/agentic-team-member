@@ -1,0 +1,18 @@
+schema: 1
+id: T-PONYTAIL-20261016-104545-2
+status: accepted
+category: alien_code
+title: "git reset after checkout of rejected files. Nothing; snapshot's add -A and reset already leave the index at HEAD."
+created_at: 2026-10-16
+incident:
+  pattern: "git reset after checkout of rejected files. Nothing; snapshot's add -A and reset already leave the index at HEAD."
+  what_went_wrong: "An ATM run wrote it and ATM's ponytail pass cut it before delivery."
+  root_cause: "The coding agent wrote more than the issue needed."
+  rule_established: "Cut by the ponytail pass; it does not come back."
+  evidence:
+    - family: speculative_hardening
+      example: "git reset after checkout of rejected files. Nothing; snapshot's add -A and reset already leave the index at HEAD."
+      artifact: "internal/run/ponytail.go"
+match:
+  family: speculative_hardening
+  artifact: "internal/run/ponytail.go"
