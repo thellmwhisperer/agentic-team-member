@@ -90,7 +90,7 @@ func (h *herdr) failedNode(o run.Outcome) string {
 			return h.m.failedAt(r)
 		}
 	}
-	return gateLabels[o.FailedNode]
+	return ""
 }
 
 // resolve chooses the run that an empty-label attach will follow, once.
