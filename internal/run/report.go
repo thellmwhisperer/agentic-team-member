@@ -58,7 +58,7 @@ type rejectedFile struct {
 }
 
 // span is when a node, trial or command started, in UTC to the millisecond, and how long it took: "" and 0 when
-// it never ran.
+// it never ran. StartedAt is also empty when the start time is unknown.
 type span struct {
 	StartedAt  string `json:"started_at,omitempty"`
 	DurationMS int64  `json:"duration_ms"`
