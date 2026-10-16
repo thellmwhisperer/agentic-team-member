@@ -541,8 +541,8 @@ func followGate(ctx context.Context, r *verdict, root, clone, branch string, com
 			return true, nil
 		}
 		select {
-		case <-ctx.Done():
-			return true, ctx.Err()
+		case <-ctx.Done(): // cancelled, not finished: the delivery fails as the command would
+			return false, ctx.Err()
 		case err := <-command:
 			return false, err
 		case <-t.C:
