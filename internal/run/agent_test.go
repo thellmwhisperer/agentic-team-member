@@ -58,6 +58,18 @@ var work = map[string]string{"fix": fixWork, "feature": fixWork, "greenfield": f
 // set, receives one line per call. $FAKE_AGENT_STREAM goes to its stdout after its first
 // line, <clone> in it its working directory.
 func fakeAgent(name string) int {
+	if script := os.Getenv("REJECTION_SCRIPT"); script != "" {
+		cmd := exec.Command("sh", script)
+		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+		if err := cmd.Run(); err != nil {
+			if exit, ok := err.(*exec.ExitError); ok {
+				return exit.ExitCode()
+			}
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		return 0
+	}
 	mode := os.Getenv("FAKE_AGENT")
 	if fakeAgentSetup(mode) {
 		return 0
