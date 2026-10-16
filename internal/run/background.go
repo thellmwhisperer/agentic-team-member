@@ -703,6 +703,13 @@ func start(root string, args []string, pane string) (Outcome, error) {
 	if err != nil {
 		return Outcome{}, err
 	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return Outcome{}, err
+	}
+	if _, err := loadConfig(root, home, a.Agent); err != nil {
+		return Outcome{}, err
+	}
 	if _, err := strconv.Atoi(args[len(args)-1]); err != nil { // a file, which the background process reads from root
 		if args[len(args)-1], err = filepath.Abs(args[len(args)-1]); err != nil {
 			return Outcome{}, err
