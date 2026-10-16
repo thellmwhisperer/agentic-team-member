@@ -343,7 +343,9 @@ func clonePathRune(r rune) bool {
 // how it ended, as ended says; a nil stream when it never got to run. Every line it writes goes to the log at
 // path, in the run's directory, which outlives the clone, and its stderr to <name>.stderr.txt next to it as
 // well. The timeout, agentSilence without a line, SIGINT and SIGTERM kill the group.
-func (a agent) exec(clone, skill, path string, argv []string, stdin string, appendLog bool) (*stream, string, string, error) {
+func (a agent) exec(
+	clone, skill, path string, argv []string, stdin string, appendLog bool,
+) (*stream, string, string, error) {
 	flags := os.O_CREATE | os.O_WRONLY | os.O_TRUNC
 	if appendLog {
 		flags = os.O_CREATE | os.O_WRONLY | os.O_APPEND

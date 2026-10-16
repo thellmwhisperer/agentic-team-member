@@ -39,27 +39,7 @@ func TestReportRejectionPersistsAcrossConsumers(t *testing.T) {
 					second = "still not json"
 				}
 				rejectionHarness(t, first, second, outcome == "process failure")
-				var err error
-				switch name {
-				case "contract-review":
-					err = a.contractReview(root, head, head, "", Issue{Text: reviewIssue}, obj{})
-				case "scope-review-unit2":
-					err = a.scopeReview(root, head, 2, Issue{Text: reviewIssue}, followUp{Paths: []string{"a.txt"}},
-						&scopeReview{Paths: []string{"a.txt"}})
-				case "repair-1":
-					err = a.repairWork(root, head, config.Config{}, 1, nil)
-				case "ponytail":
-					_, err = a.run(root, name, "ponytail-review", "brief", func(r obj) error {
-						_, err := findings(r, nil)
-						return err
-					})
-				default:
-					var ev obj
-					ev, err = a.run(root, name, "ponytail", "brief", testFile)
-					if outcome != "valid" && ev["rejected"] != wantError {
-						t.Fatalf("rejection metadata lost: %v", ev)
-					}
-				}
+				err := runRejectionConsumer(t, a, root, head, name, outcome, wantError)
 				wantFailure := outcome == "invalid twice" || outcome == "process failure"
 				if (err != nil) != wantFailure {
 					t.Fatalf("outcome %s: %v", outcome, err)
@@ -67,43 +47,75 @@ func TestReportRejectionPersistsAcrossConsumers(t *testing.T) {
 				if outcome == "process failure" && !strings.Contains(err.Error(), "exit code 3") {
 					t.Fatalf("want continuation process failure, got %v", err)
 				}
-				log, err := os.ReadFile(filepath.Join(a.dir, name+".jsonl"))
-				if err != nil {
-					t.Fatal(err)
-				}
-				rejections, results := 0, 0
-				dec := json.NewDecoder(bytes.NewReader(log))
-				for dec.More() {
-					var value any
-					if err := dec.Decode(&value); err != nil {
-						t.Fatal(err)
-					}
-					ev, ok := value.(map[string]any)
-					if !ok {
-						continue
-					}
-					if ev["type"] == "report_rejected" {
-						rejections++
-						if ev["error"] != wantError || results != 1 {
-							t.Fatalf("rejection must follow the original report with its exact error: %v", ev)
-						}
-					}
-					if ev["type"] == "result" {
-						results++
-					}
-				}
-				wantRejections, wantResults, wantStderr := 1, 2, "first\nsecond\n"
-				if outcome == "valid" {
-					wantRejections, wantResults, wantStderr = 0, 1, "first\n"
-				} else if outcome == "process failure" {
-					wantResults = 1
-				}
-				stderr, err := os.ReadFile(filepath.Join(a.dir, name+".stderr.txt"))
-				if err != nil || rejections != wantRejections || results != wantResults || string(stderr) != wantStderr {
-					t.Fatalf("lost attempt evidence: rejections %d, reports %d, stderr %q, error %v", rejections, results, stderr, err)
-				}
+				assertRejectionLogs(t, a, name, outcome, wantError)
 			})
 		}
+	}
+}
+
+func runRejectionConsumer(t *testing.T, a agent, root, head, name, outcome, wantError string) error {
+	t.Helper()
+	var err error
+	switch name {
+	case "contract-review":
+		err = a.contractReview(root, head, head, "", Issue{Text: reviewIssue}, obj{})
+	case "scope-review-unit2":
+		err = a.scopeReview(root, head, 2, Issue{Text: reviewIssue}, followUp{Paths: []string{"a.txt"}},
+			&scopeReview{Paths: []string{"a.txt"}})
+	case "repair-1":
+		err = a.repairWork(root, head, config.Config{}, 1, nil)
+	case "ponytail":
+		_, err = a.run(root, name, "ponytail-review", "brief", func(r obj) error {
+			_, err := findings(r, nil)
+			return err
+		})
+	default:
+		var ev obj
+		ev, err = a.run(root, name, "ponytail", "brief", testFile)
+		if outcome != "valid" && ev["rejected"] != wantError {
+			t.Fatalf("rejection metadata lost: %v", ev)
+		}
+	}
+	return err
+}
+
+func assertRejectionLogs(t *testing.T, a agent, name, outcome, wantError string) {
+	t.Helper()
+	log, err := os.ReadFile(filepath.Join(a.dir, name+".jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rejections, results := 0, 0
+	dec := json.NewDecoder(bytes.NewReader(log))
+	for dec.More() {
+		var value any
+		if err := dec.Decode(&value); err != nil {
+			t.Fatal(err)
+		}
+		ev, ok := value.(map[string]any)
+		if !ok {
+			continue
+		}
+		if ev["type"] == "report_rejected" {
+			rejections++
+			if ev["error"] != wantError || results != 1 {
+				t.Fatalf("rejection must follow the original report with its exact error: %v", ev)
+			}
+		}
+		if ev["type"] == "result" {
+			results++
+		}
+	}
+	wantRejections, wantResults, wantStderr := 1, 2, "first\nsecond\n"
+	switch outcome {
+	case "valid":
+		wantRejections, wantResults, wantStderr = 0, 1, "first\n"
+	case "process failure":
+		wantResults = 1
+	}
+	stderr, err := os.ReadFile(filepath.Join(a.dir, name+".stderr.txt"))
+	if err != nil || rejections != wantRejections || results != wantResults || string(stderr) != wantStderr {
+		t.Fatalf("lost attempt evidence: rejections %d, reports %d, stderr %q, error %v", rejections, results, stderr, err)
 	}
 }
 
