@@ -87,6 +87,13 @@ failed and is retried, go to stderr. Every line has `time` (RFC 3339, UTC),
 | `closed` | `url` | The PR closed unmerged; the last line, exit 1 |
 | `run_failed` | `step`, `reason` | The run or a gate step failed; the last line, exit 1 |
 
+A terminal gate failure emits `run_failed` with `step: "delivery"` and the
+[gate failure reason](#delivery), whether observed by polling or received in
+the terminal run result. Checks and other non-gate failures keep their own
+step. Any gate, PR and commit events observed in that round precede the
+single terminal line; nothing follows it, and the process exits 1 even if
+the PR is still open.
+
 From delivery on, polling rounds start at least 10 s apart. Each reads the
 gate with `no-mistakes axi status` in the clone and, when available, the PR
 with `gh`. Commit events come only from that PR read, even while the clone
@@ -470,10 +477,12 @@ or opens a pull request: that is the command's business. When the configured
 line contains `no-mistakes`, ATM starts reading `no-mistakes axi status` in
 the clone as soon as the command starts, then every 10 s. It keeps following
 the gate until the PR is merged or closed, or a gate step fails, even if the
-delivery command exits nonzero while the gate is active. That command error
-remains recorded; following the gate does not erase it. If the gate ends
-while the command is still running, ATM stops the command and uses the gate
-outcome.
+delivery command exits nonzero while the gate is active. On gate failure,
+the gate's `error:` text, unquoted, becomes the run's reason. If that text is
+absent, ATM uses `no-mistakes step <step> failed`. A delivery command error
+remains recorded separately and does not replace the gate failure reason.
+If the gate ends while the command is still running, ATM stops the command
+and uses the gate outcome.
 
 If the gate reports `status: completed`, its `ci` step is `skipped`, and
 `pr_state` is absent, ATM checks the branch's PR with `gh` even while the
@@ -512,7 +521,7 @@ when a node's state or duration changes.
 
 | Field | Holds |
 |-------|-------|
-| `failed_node`, `reason` | The step that failed, if any, and the reason for failure or PR closure |
+| `failed_node`, `reason` | The step that failed, if any, including the actual gate node such as `push`, and the reason for failure or PR closure |
 | `agent` | The effective requested `harness`, `model`, `effort` and ordered `harness_args`, after global config, `.atm.yaml` and flags. Unset model and effort stay `""`; no extra arguments is `[]` |
 | `nodes` | Each step's `result` (`passed`, `failed`, `running`, `waiting`, `pending`, `skipped` or `not run`), `started_at` (UTC, RFC 3339 with milliseconds) when its start is known, and `duration_ms` when it ends; the agent node also has `exit` and `tail` when the agent ran but its step failed. Once seen, the [Delivery gate nodes](#delivery) are included with the state and duration from `no-mistakes axi status` |
 | `type` | The task type |
