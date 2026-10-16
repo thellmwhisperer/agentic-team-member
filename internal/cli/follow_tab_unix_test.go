@@ -218,6 +218,11 @@ func runFollowTab(t *testing.T, atm, workspace, herdrEnv string, herdrCode int, 
 func followTabRepo(t *testing.T, atm string) string {
 	t.Helper()
 	dir, _ := resumeRepo(t, "", "")
+	// Match git's physical root, including macOS's /var -> /private/var symlink.
+	dir, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(dir, ".atm.yaml"), []byte(atm), 0o600); err != nil {
 		t.Fatal(err)
 	}
