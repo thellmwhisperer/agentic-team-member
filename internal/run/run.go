@@ -321,7 +321,8 @@ var nonSlug = regexp.MustCompile(`[^a-z0-9]+`)
 // approved, runs the delivery command line in clone, its output on screen and in delivery-output.txt next to
 // report.json. ATM never pushes: that is line's business.
 // line has no ceiling: it lasts as long as what it hands the work to. SIGINT and SIGTERM cancel its
-// process group on Unix or process tree on Windows.
+// process group on Unix or process tree on Windows. A no-mistakes hand-off does not end the run: it follows
+// that gate until the PR merges or closes, or a step fails.
 // ponytail: line gets the clone after the slop detector.
 func (a agent) deliver(r *verdict, root, clone, sha, base, line string, i Issue, history []proof,
 	c config.Config, screen io.Writer) {
@@ -331,10 +332,12 @@ func (a agent) deliver(r *verdict, root, clone, sha, base, line string, i Issue,
 		}
 		return
 	}
+	var handed string
 	r.step("delivery", func() (map[string]any, error) {
 		s := nonSlug.ReplaceAllString(strings.ToLower(i.Title), "-")
 		branch := "atm/" + cmp.Or(strings.Trim(s[:min(len(s), 40)], "-"), "run") + "-" +
 			strings.TrimPrefix(filepath.Base(clone), "atm-run-") // the clone's timestamp, as unique
+		handed = branch
 		ev := map[string]any{"branch": branch}
 		cuts, tombs, err := onBranch(root, clone, sha, branch, i)
 		if err == nil {
@@ -383,6 +386,18 @@ func (a agent) deliver(r *verdict, root, clone, sha, base, line string, i Issue,
 		return ev, errors.Join(wrap(err, "delivery"), os.WriteFile(clone+".delivered", []byte(branch+" "+base+"\n"),
 			0o644))
 	})
+	r.err = errors.Join(r.err, followHandOff(line, root, clone, handed, r))
+}
+
+// followHandOff keeps a no-mistakes delivery up until the PR merges or closes, or the gate fails.
+// ponytail: the hand-off is a command that names no-mistakes; a wrapper that hides the name is not followed.
+func followHandOff(line, root, clone, branch string, r *verdict) error {
+	if r == nil || r.err != nil || !strings.Contains(line, "no-mistakes") {
+		return nil
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return followGate(ctx, r, root, clone, branch)
 }
 
 // conventional maps a task type to its conventional commit type, which release-please reads.

@@ -290,10 +290,58 @@ func (m *Model) apply(f run.Frame) {
 	case e.Output != nil:
 		m.output = append(m.output[max(0, len(m.output)-199):], ansi.Strip(*e.Output))
 	case e.State == "started":
+		m.ensureGate(e.Step)
 		m.started(e.Step, at)
 	case e.State != "":
+		m.ensureGate(e.Step)
 		m.ended(e)
 	}
+	switch {
+	case m.running():
+		m.state = "running"
+	case m.waits():
+		m.state = "waiting"
+	}
+}
+
+// gateLabels are the no-mistakes steps shown below Delivery.
+var gateLabels = map[string]string{
+	"review": "Review", "test": "Test", "document": "Document", "lint": "Lint",
+	"push": "Push", "pr": "PR", "ci": "CI",
+}
+
+func gateOrder(step string) int {
+	for i, name := range []string{"review", "test", "document", "lint", "push", "pr", "ci"} {
+		if name == step {
+			return i + 1
+		}
+	}
+	return 0
+}
+
+// ensureGate inserts step below Delivery, in gate order, the first time the gate reports it.
+func (m *Model) ensureGate(step string) {
+	if m.current(step) != nil || gateLabels[step] == "" {
+		return
+	}
+	r := &row{step: step, label: gateLabels[step], state: "pending"}
+	at := len(m.rows)
+	for i, row := range m.rows {
+		if !row.check && row.step == "delivery" {
+			at = i + 1
+		}
+	}
+	for at < len(m.rows) && m.rows[at].check {
+		at++
+	}
+	for at < len(m.rows) && gateBefore(m.rows[at], step) {
+		at++
+	}
+	m.rows = slices.Insert(m.rows, at, r)
+}
+
+func gateBefore(r *row, step string) bool {
+	return !r.check && gateOrder(r.step) > 0 && gateOrder(r.step) < gateOrder(step)
 }
 
 // current is the last row of node step.
@@ -347,7 +395,11 @@ func (m *Model) tools() (n int) {
 
 func (m *Model) ended(e event) {
 	r := m.current(e.Step)
-	r.state, r.took, r.hasDuration = e.State, time.Duration(e.DurationMS)*time.Millisecond, true
+	if r == nil {
+		return
+	}
+	r.state, r.took = e.State, time.Duration(e.DurationMS)*time.Millisecond
+	r.hasDuration = e.State != "pending" || e.DurationMS > 0
 	switch e.Step {
 	case "issue":
 		m.title, m.number, r.note = e.Title, e.Number, e.Type

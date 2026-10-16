@@ -310,12 +310,24 @@ type gate struct {
 // decision and the first that failed, and whether it has steps, CI is being fixed or green, and the PR merged;
 // read, also the findings of its gate and its PR's CI repair commits, or the error that kept them unread.
 type gateState struct {
-	pr, waiting, failed         string
-	seen, fixing, green, merged bool
-	findings                    []gateFinding
-	ci                          []ciCommit
-	err                         error
+	pr, waiting, failed                 string
+	seen, fixing, green, merged, closed bool
+	findings                            []gateFinding
+	ci                                  []ciCommit
+	steps                               []gateStep
+	err                                 error
 }
+
+// gateStep is one row of a gate's steps: its name, no-mistakes status and duration.
+type gateStep struct {
+	name, status string
+	ms           int64
+}
+
+// gateNodes are the no-mistakes steps a run keeps below delivery, in that order.
+var gateNodes = []string{"review", "test", "document", "lint", "push", "pr", "ci"}
+
+func gateStepName(name string) bool { return slices.Contains(gateNodes, name) }
 
 // gateFinding is a finding of a gate as no-mistakes reports it.
 type gateFinding struct{ id, severity, file, description string }
@@ -357,7 +369,7 @@ func parseGate(status string) (s gateState) {
 			case "pr":
 				s.pr = value
 			case "pr_state":
-				s.merged = value == "merged"
+				s.merged, s.closed = value == "merged", value == "closed"
 			case "awaiting_agent":
 				parked = strings.HasPrefix(value, "parked")
 			}
@@ -441,7 +453,10 @@ func (s *gateState) read(ctx context.Context, clone string) error {
 // step adds to s a row of the gate's steps, `step,status,...`, of a run parked or not.
 func (s *gateState) step(row string, parked bool) {
 	step, rest, _ := strings.Cut(row, ",")
-	state, _, _ := strings.Cut(rest, ",")
+	state, rest, _ := strings.Cut(rest, ",")
+	_, dur, _ := strings.Cut(rest, ",")
+	ms, _ := strconv.ParseInt(dur, 10, 64)
+	s.steps = append(s.steps, gateStep{step, state, ms})
 	s.seen = true
 	switch {
 	case state == "awaiting_approval" || parked && state == "fix_review":
@@ -504,5 +519,117 @@ func (g *gate) prState(state string) (lines []string, done bool) {
 		return lines, true
 	default:
 		return nil, false
+	}
+}
+
+// followGate polls the gate of clone every beat until the PR merges or closes, or a step fails.
+// ponytail: one beat-wide poll; a push model if status grows a watch.
+func followGate(ctx context.Context, r *verdict, root, clone, branch string) error {
+	t := time.NewTicker(beat)
+	defer t.Stop()
+	for {
+		done, err := applyGate(ctx, r, root, clone, branch)
+		if done || err != nil {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-t.C:
+		}
+	}
+}
+
+func applyGate(ctx context.Context, r *verdict, root, clone, branch string) (bool, error) {
+	status, err := gateStatus(ctx, clone)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		return prEnded(ctx, r, root, branch)
+	case err != nil:
+		return false, nil
+	}
+	g := parseGate(status)
+	if g.err != nil || !g.seen {
+		return false, nil
+	}
+	r.noteGate(g)
+	return g.outcome(r)
+}
+
+func (g gateState) outcome(r *verdict) (bool, error) {
+	switch {
+	case g.failed != "":
+		r.failGate(g.failed, "no-mistakes step "+g.failed+" failed")
+		return false, errors.New(r.Reason)
+	case g.closed:
+		r.failGate("pr", "PR closed")
+		return false, errors.New(r.Reason)
+	case g.merged:
+		return true, nil
+	default:
+		return false, nil
+	}
+}
+
+func prEnded(ctx context.Context, r *verdict, root, branch string) (bool, error) {
+	if branch == "" {
+		return false, nil
+	}
+	state, err := ghPR(ctx, root, branch, "--json", "state", "--jq", ".state")
+	if err != nil {
+		return false, nil
+	}
+	switch strings.TrimSpace(state) {
+	case "MERGED":
+		return true, nil
+	case "CLOSED":
+		r.failGate("pr", "PR closed")
+		return false, errors.New(r.Reason)
+	default:
+		return false, nil
+	}
+}
+
+func (r *verdict) noteGate(g gateState) {
+	got := map[string]gateStep{}
+	for _, s := range g.steps {
+		got[s.name] = s
+	}
+	for _, name := range gateNodes {
+		s, ok := got[name]
+		if !ok {
+			continue
+		}
+		why := ""
+		if s.status == "failed" {
+			why = "no-mistakes step " + name + " failed"
+		}
+		r.gateNode(name, gateResult(name, s.status, g), s.ms, why)
+	}
+}
+
+func (r *verdict) failGate(name, why string) {
+	r.FailedNode, r.Reason = name, why
+	n := r.ensureNode(name)
+	if n.Result != "failed" {
+		r.gateNode(name, "failed", n.DurationMS, why)
+	}
+}
+
+func gateResult(name, status string, g gateState) string {
+	if g.waiting != "" && name == g.waiting {
+		return "waiting"
+	}
+	switch status {
+	case "completed":
+		return "passed"
+	case "failed":
+		return "failed"
+	case "pending":
+		return "pending"
+	case "skipped":
+		return "skipped"
+	default:
+		return "running"
 	}
 }

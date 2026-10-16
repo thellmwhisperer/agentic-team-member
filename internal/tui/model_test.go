@@ -167,6 +167,24 @@ func TestScreenCutsARowsNoteBeforeItsName(t *testing.T) {
 	}
 }
 
+func TestScreenKeepsGateStepsBelowDelivery(t *testing.T) {
+	m := screen(100, 40,
+		`{"step":"delivery","state":"passed","duration_ms":10,"branch":"atm/x"}`,
+		`{"step":"review","state":"passed","duration_ms":129822}`,
+		`{"step":"test","state":"running","duration_ms":843130}`,
+		`{"step":"document","state":"pending"}`,
+		`{"step":"lint","state":"pending"}`,
+		`{"step":"push","state":"pending"}`,
+		`{"step":"pr","state":"waiting","duration_ms":1000}`,
+		`{"step":"ci","state":"pending"}`,
+	)
+	s := view(m)
+	if !order(s, "Delivery", "Review", "2 min 09 s", "passed", "Test", "14 min 03 s", "running",
+		"Document", "Lint", "Push", "PR", "1.0 s", "waiting", "CI") {
+		t.Fatalf("gate nodes:\n%s", s)
+	}
+}
+
 func TestScreenStatesHaveAnIconAWordAndANSIColours(t *testing.T) {
 	m := screen(80, 40)
 	if s := view(m); !strings.Contains(s, "⏸ waiting") || !order(s, "○ Issue", "pending") {
