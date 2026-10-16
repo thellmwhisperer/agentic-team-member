@@ -190,6 +190,16 @@ also fails; Hermes uses the completion rules linked above.
 For Cursor, a stream result with `is_error: true` fails the step with its
 result text even if the process exits zero.
 
+For pi, an assistant `message_end` with `stopReason: "error"` and a nonempty
+`errorMessage` fails the step with `<exit>; pi: <errorMessage>; log: <path>`,
+preserving the provider's message verbatim, even with exit code zero. This
+applies to every pi agent step, including the worker, slop detector and
+contract reviewer, before skill-proof or report validation. A forbidden tool
+call still takes precedence. A later assistant `message_end` with
+`stopReason: "stop"`, `"length"` or `"toolUse"` clears the model error; the
+usual skill-proof and report checks then apply. ATM does not retry a model
+error or return it as a rejected report.
+
 ### Rejected reports
 
 When final-report parsing or validation fails, ATM sends the following
