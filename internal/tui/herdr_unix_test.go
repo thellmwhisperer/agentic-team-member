@@ -25,6 +25,29 @@ func TestFailedCheckReportsItsLabelInIdleOutcome(t *testing.T) {
 	}
 }
 
+func TestHerdrBlocksWhileAGateStepWaits(t *testing.T) {
+	calls, h := newHerdrRecorder(t)
+	for _, ev := range []string{
+		`{"step":"issue","state":"started"}`,
+		`{"step":"issue","state":"passed","title":"Retry","number":7}`,
+		`{"step":"delivery","state":"passed"}`,
+		`{"step":"test","state":"running","duration_ms":843130}`,
+		`{"step":"test","state":"passed","duration_ms":843130}`,
+		`{"step":"review","state":"waiting","duration_ms":4697267}`,
+	} {
+		h.frame(run.Frame{Event: []byte(ev)})
+	}
+	b, err := os.ReadFile(calls)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(b)
+	if !strings.Contains(got, "--state|working|--message|#7 Test|") ||
+		!strings.Contains(got, "--state|blocked|--message|#7 Review|") {
+		t.Fatalf("herdr status was not working while a node ran and blocked while the gate waited: %q", got)
+	}
+}
+
 func TestRecoveredSlopCheckDoesNotReplaceLaterDeliveryFailure(t *testing.T) {
 	calls, h := newHerdrRecorder(t)
 	for _, ev := range []string{

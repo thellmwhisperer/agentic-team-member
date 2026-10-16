@@ -30,7 +30,7 @@ func openHerdr(label, start string) *herdr {
 	}
 	h := &herdr{pane: pane, label: label, m: New(label, 0, 0)}
 	h.call("report-agent-session", "--agent-session-id", label, "--session-start-source", start)
-	h.report(h.issue())
+	h.report("working", h.issue())
 	return h
 }
 
@@ -54,13 +54,17 @@ func (h *herdr) frame(f run.Frame) {
 	if h.step != "Issue" {
 		msg = h.issue() + " " + h.step
 	}
-	h.report(msg)
+	state := "working"
+	if h.m.waits() && !h.m.running() {
+		state = "blocked"
+	}
+	h.report(state, msg)
 }
 
-func (h *herdr) report(msg string) {
-	if msg != h.last {
-		h.last = msg
-		h.call("report-agent", "--state", "working", "--message", msg)
+func (h *herdr) report(state, msg string) {
+	if state+"\n"+msg != h.last {
+		h.last = state + "\n" + msg
+		h.call("report-agent", "--state", state, "--message", msg)
 	}
 }
 
@@ -231,9 +235,11 @@ func createdTab(b []byte) (tab, pane string, err error) {
 
 // step is the label of the node that runs, and of its proof or command that runs, if one does; "" when none.
 func (m *Model) step() string {
-	s := ""
+	s, wait := "", ""
 	for _, r := range m.rows {
 		switch {
+		case r.state == "waiting" && !r.check:
+			wait = r.label
 		case r.state != "running":
 		case !r.check:
 			s = r.label
@@ -241,5 +247,18 @@ func (m *Model) step() string {
 			s += " · " + r.label
 		}
 	}
+	if s == "" {
+		return wait
+	}
 	return s
+}
+
+// waits says whether a gate step is waiting for a decision.
+func (m *Model) waits() bool {
+	for _, r := range m.rows {
+		if r.state == "waiting" {
+			return true
+		}
+	}
+	return false
 }
