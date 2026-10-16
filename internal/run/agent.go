@@ -143,6 +143,7 @@ func (a agent) run(clone, name, skill, brief string, check func(map[string]any) 
 		s.final = string(b)
 	}
 	s.finish()
+	ev["agent_model"] = s.model
 	fail := func(err error) (map[string]any, error) {
 		if exit != "" {
 			ev["exit"], ev["tail"] = exit, strings.Join(s.tail, "\n")
@@ -373,6 +374,7 @@ func exclude(clone, pattern string) error {
 // prohibited path or network call. Live gets what each line tells the screen.
 type stream struct {
 	final, skill string
+	model        string   // first model named by this invocation's stream; never the requested model
 	loads        []string // the ids of the agent's calls that load its skill
 	root, clone  string
 	reach        string
@@ -447,10 +449,12 @@ func (s *stream) read(cmd *exec.Cmd, log, stderr io.Writer, harness string) erro
 // skill.
 type event struct {
 	Type    string
+	Model   string
 	Result  json.RawMessage // claude and pi
 	Message struct {
-		Role    string
-		Content []block
+		Role            string
+		Model, Provider string
+		Content         []block
 	}
 	ToolName   string `json:"toolName"` // pi
 	ToolCallID string `json:"toolCallId"`
@@ -517,6 +521,9 @@ func (s *stream) see(harness string, line []byte) {
 	}
 	var e event
 	_ = json.Unmarshal(line, &e) // a field of another type is left empty, the rest is read
+	if s.model == "" {
+		s.model = e.agentModel(harness)
+	}
 	if harness == "cursor" {
 		s.cursorState(&e)
 	}
@@ -533,6 +540,26 @@ func (s *stream) see(harness string, line []byte) {
 	}
 	s.reach = cmp.Or(s.reach, outside(e.calls(harness), s.root, s.clone))
 	s.show(e.activity(harness))
+}
+
+// agentModel reads only model metadata, never text or a tool's arguments.
+func (e event) agentModel(harness string) string {
+	switch harness {
+	case "claude", "cursor":
+		if e.Type == "system" && e.Subtype == "init" {
+			return e.Model
+		}
+	case "pi":
+		if e.Type == "message_end" && e.Message.Role == "assistant" && e.Message.Model != "" {
+			if e.Message.Provider != "" {
+				return e.Message.Provider + "/" + e.Message.Model
+			}
+			return e.Message.Model
+		}
+	case "codex", "opencode":
+		return e.Model
+	}
+	return ""
 }
 
 // show tells the screen evs, what the agent says once the stream knows whether it ends with a report.

@@ -57,7 +57,7 @@ func Run(label string, args []string, out, summary io.Writer) (err error) {
 		return err
 	}
 	a.Agent, a.root, a.dir, a.timeout = c.Agent, root, runDir(root, label), time.Duration(c.AgentTimeout)
-	r := newVerdict(a.dir, out)
+	r := a.verdict(out)
 	defer func() { r.resumable(a.dir); err = r.finish(err, summary) }()
 	var i Issue
 	r.step("issue", func() (map[string]any, error) {
@@ -223,7 +223,8 @@ func (r *verdict) recordUnit(n int, head, test, typ, resumed string, ev map[stri
 	green, _ := ev["green"].(try)
 	proofSpan, _ := ev["proof_span"].(span)
 	r.Units = append(r.Units, unitResult{Unit: n, Base: head, TestFile: test, Type: typ,
-		Red: red, Green: green, Result: outcome(r.err), ResumedFrom: resumed, span: proofSpan})
+		Red: red, Green: green, Result: outcome(r.err), ResumedFrom: resumed, span: proofSpan,
+		AgentModel: r.node("agent").AgentModel})
 }
 
 // checkUnit checks unit n, on commit head in clone dir. A unit after the first that changes a path its follow-up

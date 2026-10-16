@@ -17,15 +17,16 @@ import (
 // verdict is report.json, written at every node's start and end: why the run stopped, then each node's result,
 // the task type, each unit's proof, the proofs the slop detector re-ran and each command's result.
 type verdict struct {
-	FailedNode string       `json:"failed_node"`
-	Reason     string       `json:"reason"`
-	Nodes      []*node      `json:"nodes"`
-	Type       string       `json:"type"`
-	Units      []unitResult `json:"units"`
-	Reproofs   []unitResult `json:"reproofs"`
-	Commands   []cmdResult  `json:"commands"`
-	HeadSHA    string       `json:"head_sha,omitempty"` // the delivered branch's
-	Watcher    string       `json:"watcher,omitempty"`  // the atm watch the run was bound to
+	FailedNode string         `json:"failed_node"`
+	Reason     string         `json:"reason"`
+	Agent      *AgentSettings `json:"agent,omitempty"`
+	Nodes      []*node        `json:"nodes"`
+	Type       string         `json:"type"`
+	Units      []unitResult   `json:"units"`
+	Reproofs   []unitResult   `json:"reproofs"`
+	Commands   []cmdResult    `json:"commands"`
+	HeadSHA    string         `json:"head_sha,omitempty"` // the delivered branch's
+	Watcher    string         `json:"watcher,omitempty"`  // the atm watch the run was bound to
 	path       string
 	out        io.Writer // the log: each node's start and end, one JSON object a line
 	err        error     // the failed node's
@@ -38,10 +39,11 @@ type verdict struct {
 }
 
 type node struct {
-	Name   string  `json:"name"`
-	Result string  `json:"result"`
-	Exit   string  `json:"exit,omitempty"` // how its agent ended, when it failed after it ran
-	Tail   *string `json:"tail,omitempty"` // the last 20 lines that agent wrote, stdout and stderr
+	Name       string  `json:"name"`
+	AgentModel *string `json:"agent_model,omitempty"`
+	Result     string  `json:"result"`
+	Exit       string  `json:"exit,omitempty"` // how its agent ended, when it failed after it ran
+	Tail       *string `json:"tail,omitempty"` // the last 20 lines that agent wrote, stdout and stderr
 	span
 	Kept          *bool          `json:"kept,omitempty"` // the ponytail decision, absent until it decides
 	Reason        *string        `json:"reason,omitempty"`
@@ -71,13 +73,14 @@ func timed(fn func()) span {
 
 // unitResult is a unit's proof: the unit, its base commit, test and task type, its trials and how it ended.
 type unitResult struct {
-	Unit     int    `json:"unit"`
-	Base     string `json:"base"`
-	TestFile string `json:"test_file"`
-	Type     string `json:"type"`
-	Red      try    `json:"red,omitzero"`
-	Green    try    `json:"green,omitzero"`
-	Result   string `json:"result"`
+	Unit       int     `json:"unit"`
+	AgentModel *string `json:"agent_model,omitempty"`
+	Base       string  `json:"base"`
+	TestFile   string  `json:"test_file"`
+	Type       string  `json:"type"`
+	Red        try     `json:"red,omitzero"`
+	Green      try     `json:"green,omitzero"`
+	Result     string  `json:"result"`
 	span
 	// ResumedFrom is the run whose agent's work the unit picked up, instead of a new agent call.
 	ResumedFrom string `json:"resumed_from,omitempty"`
@@ -91,11 +94,22 @@ type cmdResult struct {
 	span
 }
 
+// verdict starts the report with the effective requested agent, before its first node is emitted.
+func (a agent) verdict(out io.Writer) *verdict {
+	r := newVerdict(a.dir, out)
+	r.Agent = &AgentSettings{Harness: a.Harness, Model: a.Model, Effort: a.Effort,
+		HarnessArgs: append([]string{}, a.args...)}
+	return r
+}
+
 // newVerdict is the report of a run in its directory dir, every node not run yet.
 func newVerdict(dir string, out io.Writer) *verdict {
 	r := &verdict{path: filepath.Join(dir, "report.json"), out: out}
 	for _, name := range []string{"issue", "clone", "contract", "agent", "checks", "ponytail", "delivery"} {
 		r.Nodes = append(r.Nodes, &node{Name: name, Result: "not run"})
+	}
+	for _, name := range []string{"agent", "ponytail"} {
+		r.node(name).AgentModel = new(string)
 	}
 	return r
 }
@@ -144,6 +158,9 @@ func (r *verdict) step(name string, fn func() (map[string]any, error)) {
 		return
 	}
 	n := r.node(name)
+	if n.AgentModel != nil {
+		n.AgentModel = new(string)
+	}
 	n.Result, r.at = "running", name
 	start := time.Now()
 	n.StartedAt = start.UTC().Format("2006-01-02T15:04:05.000Z07:00")
@@ -158,6 +175,9 @@ func (r *verdict) step(name string, fn func() (map[string]any, error)) {
 	cmds, _ := ev["commands"].([]cmdResult)
 	r.Commands = append(r.Commands, cmds...)
 	n.Exit, _ = ev["exit"].(string)
+	if model, ok := ev["agent_model"].(string); ok {
+		n.AgentModel = &model
+	}
 	if tail, ok := ev["tail"].(string); ok {
 		n.Tail = &tail
 	}
@@ -182,6 +202,9 @@ func (r *verdict) step(name string, fn func() (map[string]any, error)) {
 }
 
 func (r *verdict) emit(name string, ev map[string]any) {
+	if name == "issue" && ev["state"] == "started" {
+		ev["agent"] = r.Agent
+	}
 	ev["ts"], ev["step"] = time.Now().UTC().Format(time.RFC3339Nano), name
 	b, _ := json.Marshal(ev)
 	_, _ = r.out.Write(append(b, '\n'))

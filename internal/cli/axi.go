@@ -145,17 +145,17 @@ func outcome(w io.Writer, asJSON bool, o run.Outcome) error {
 
 // list prints runs as a table, runs: the runs going, when going, else every run.
 func list(w io.Writer, asJSON, going bool, runs []run.Outcome) error {
-	keys := []string{"run", "issue", "outcome", "failed_node", "duration", "report"}
+	keys := []string{"run", "issue", "outcome", "failed_node", "duration", "report", "agent"}
 	if going {
-		keys = []string{"run", "issue", "step", "duration"}
+		keys = []string{"run", "issue", "step", "duration", "agent"}
 	}
 	var rows [][]string
 	for _, o := range runs {
 		switch {
 		case going && o.Outcome == "running":
-			rows = append(rows, []string{o.Run, o.Issue, o.Step, o.Duration()})
+			rows = append(rows, []string{o.Run, o.Issue, o.Step, o.Duration(), o.AgentLabel()})
 		case !going:
-			rows = append(rows, []string{o.Run, o.Issue, o.Outcome, o.FailedNode, o.Duration(), o.Report})
+			rows = append(rows, []string{o.Run, o.Issue, o.Outcome, o.FailedNode, o.Duration(), o.Report, o.AgentLabel()})
 		}
 	}
 	var b strings.Builder

@@ -104,6 +104,7 @@ func listCmd(going bool) *cobra.Command {
 	if going {
 		c.Use, c.Short = "status", "Show what runs in the repository now"
 	}
+	asJSON := c.Flags().Bool("json", false, "print JSON")
 	c.RunE = func(cmd *cobra.Command, _ []string) error {
 		root, err := toplevel()
 		if err != nil {
@@ -112,6 +113,9 @@ func listCmd(going bool) *cobra.Command {
 		runs, err := run.Runs(root)
 		if err != nil {
 			return err
+		}
+		if *asJSON {
+			return list(cmd.OutOrStdout(), true, going, runs)
 		}
 		w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
 		n := 0
@@ -133,7 +137,8 @@ func listCmd(going bool) *cobra.Command {
 			if !going && o.Report != "" {
 				report = "\t" + o.Report
 			}
-			_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s%s\n", o.Run, how, o.Duration(), watcher+o.Issue, report)
+			_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s%s\n",
+				o.Run, how, o.Duration(), o.AgentLabel(), watcher+o.Issue, report)
 		}
 		if n == 0 {
 			_, _ = fmt.Fprintln(w, map[bool]string{true: "nothing runs", false: "no run yet"}[going])

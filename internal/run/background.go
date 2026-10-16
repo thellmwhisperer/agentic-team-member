@@ -29,17 +29,35 @@ import (
 
 // Outcome is a run of the background process: running, or how it ended.
 type Outcome struct {
-	Outcome    string    `json:"outcome"` // running, passed or failed
-	Run        string    `json:"run"`     // its label: the issue's name and the run's number in the repository
-	FailedNode string    `json:"failed_node"`
-	Reason     string    `json:"reason"`
-	Report     string    `json:"report"` // report.json, none when the run failed before its first node
-	NextStep   string    `json:"next_step"`
-	Issue      string    `json:"issue"`
-	Step       string    `json:"step"`              // the last node it started
-	Watcher    string    `json:"watcher,omitempty"` // the atm watch it is bound to
-	Started    time.Time `json:"started"`
-	Ended      time.Time `json:"ended"`
+	Outcome    string         `json:"outcome"` // running, passed or failed
+	Run        string         `json:"run"`     // its label: the issue's name and the run's number in the repository
+	FailedNode string         `json:"failed_node"`
+	Reason     string         `json:"reason"`
+	Report     string         `json:"report"` // report.json, none when the run failed before its first node
+	NextStep   string         `json:"next_step"`
+	Issue      string         `json:"issue"`
+	Step       string         `json:"step"` // the last node it started
+	Agent      *AgentSettings `json:"agent,omitempty"`
+	Watcher    string         `json:"watcher,omitempty"` // the atm watch it is bound to
+	Started    time.Time      `json:"started"`
+	Ended      time.Time      `json:"ended"`
+}
+
+// AgentSettings is the effective requested selection, kept independently of observed models.
+// A nil selection on an old run means it predates attribution.
+type AgentSettings struct {
+	Harness     string   `json:"harness"`
+	Model       string   `json:"model"`
+	Effort      string   `json:"effort"`
+	HarnessArgs []string `json:"harness_args"`
+}
+
+// AgentLabel is the requested harness and model for run listings; default is display only.
+func (o Outcome) AgentLabel() string {
+	if o.Agent == nil {
+		return "-"
+	}
+	return o.Agent.Harness + " " + cmp.Or(o.Agent.Model, "default")
 }
 
 // Duration is how long the run took, or has taken so far, as ATM prints every time.
@@ -559,6 +577,7 @@ func (w *screen) watch(ev []byte) {
 func (r *bgRun) event(line string) string {
 	var ev struct {
 		Step, State, Error string
+		Agent              *AgentSettings
 		DurationMS         *int64 `json:"duration_ms"`
 		ResumedFrom        string `json:"resumed_from"`
 	}
@@ -566,6 +585,9 @@ func (r *bgRun) event(line string) string {
 		return line
 	}
 	r.Step = ev.Step
+	if ev.Agent != nil {
+		r.Agent = ev.Agent
+	}
 	if ev.State == "failed" {
 		r.FailedNode = ev.Step
 	}

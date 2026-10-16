@@ -469,6 +469,7 @@ when a node's state or duration changes.
 | Field | Holds |
 |-------|-------|
 | `failed_node`, `reason` | The step that failed, if any, and the reason for failure or PR closure |
+| `agent` | The effective requested `harness`, `model`, `effort` and ordered `harness_args`, after global config, `.atm.yaml` and flags. Unset model and effort stay `""`; no extra arguments is `[]` |
 | `nodes` | Each step's `result` (`passed`, `failed`, `running`, `waiting`, `pending`, `skipped` or `not run`), `started_at` (UTC, RFC 3339 with milliseconds) when it starts, and `duration_ms` when it ends; the agent node also has `exit` and `tail` when the agent ran but its step failed. Once seen, the [Delivery gate nodes](#delivery) are included with the state and duration from `no-mistakes axi status` |
 | `type` | The task type |
 | `units` | Each unit's number, base commit, test file, type, result, red/green proof row span, and red and green trials: command, exit code, last 60 lines, `started_at` and `duration_ms` |
@@ -479,6 +480,21 @@ when a node's state or duration changes.
 For gate nodes, `completed` becomes `passed`, and a step awaiting a decision
 becomes `waiting`. `pending`, `skipped` and `failed` keep those results;
 other active states become `running`.
+
+The Agent and `ponytail` nodes also have `agent_model`: the first model named
+by that invocation's stream, or `""` when none is named. Claude names it in
+its `system` / `init` event; Pi's assistant `message_end` names it as
+`<provider>/<model>`. Codex and OpenCode retain a model when their events
+explicitly name one. This value never falls back to the requested model.
+Each `units` entry keeps its own `agent_model`, so a later unit or the slop
+detector cannot replace an earlier unit's attribution. A resumed unit that
+does not invoke an agent has an empty observed model.
+
+`atm runs` and `atm status`, including their `axi` forms and `--json` output,
+include an `agent` column: `<harness> <model>`, or `<harness> default` when
+the requested model is empty. `.atm/runs.jsonl` retains the requested
+`agent` object for finished runs and after the server restarts. Old history
+without attribution displays `-`; ATM does not infer it from current config.
 
 The `ponytail` node also records `kept` (`true` or `false`) once ATM decides
 whether to keep the cut, and `reason`: the exact rejection reason from the
