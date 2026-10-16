@@ -223,7 +223,11 @@ func (a agent) reported(name, skill, path, final, exit, cause string, runErr err
 			ev["exit"], ev["tail"] = exit, strings.Join(s.tail, "\n")
 		}
 		if s.failure != "" && s.reach == "" {
-			err = fmt.Errorf("%w; cursor: %s", err, s.failure)
+			if a.Harness == "pi" {
+				err = fmt.Errorf("%s; pi: %s; log: %s", exit, s.failure, path)
+			} else {
+				err = fmt.Errorf("%w; cursor: %s", err, s.failure)
+			}
 		}
 		return err
 	}
@@ -464,7 +468,7 @@ type stream struct {
 	live         func(map[string]any)
 	pending      string
 	thought      string   // cursor's thinking deltas until completed
-	failure      string   // cursor's error result, even when the process exits 0
+	failure      string   // cursor's error result or pi's unrecovered model error, even when the process exits 0
 	tail         []string // the last 20 lines the agent wrote
 	heard        func()   // each line calls it
 	session      string   // the harness session, so a rejected report is returned to it
@@ -535,9 +539,10 @@ type event struct {
 	Model   string
 	Result  json.RawMessage // claude and pi
 	Message struct {
-		Role            string
-		Model, Provider string
-		Content         []block
+		Role                     string
+		Model, Provider          string
+		StopReason, ErrorMessage string // pi
+		Content                  []block
 	}
 	ToolName   string `json:"toolName"` // pi
 	ToolCallID string `json:"toolCallId"`
@@ -614,6 +619,14 @@ func (s *stream) see(harness string, line []byte) {
 	final, ends := e.final(harness)
 	if ends {
 		s.final = final
+		if harness == "pi" {
+			switch e.Message.StopReason {
+			case "error":
+				s.failure = e.Message.ErrorMessage
+			case "stop", "length", "toolUse":
+				s.failure = ""
+			}
+		}
 	}
 	if s.pending != "" {
 		s.flush(e.Type == "result" && (harness == "claude" && ends || harness == "cursor"))
