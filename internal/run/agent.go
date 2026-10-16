@@ -108,10 +108,69 @@ func (a agent) argv(clone, skill, final, brief string) (argv []string, stdin str
 		argv = with(argv, a.Model, "--model", a.Model)
 	case "pi":
 		argv = []string{"pi", "-p", "--mode", "json", "--no-extensions", "--no-skills", "--no-prompt-templates",
-			"--no-context-files", "--no-session", "--skill", skill}
+			"--no-context-files", "--skill", skill}
 		argv = with(with(argv, a.Model, "--model", a.Model), a.Effort, "--thinking", a.Effort)
 	}
 	return append(append(argv, a.args...), brief), ""
+}
+
+// resumeArgv continues the harness's session with prompt, the rejected report sent back once. ok is false when
+// the harness keeps no session ATM can continue.
+func (a agent) resumeArgv(clone, skill, final, session, prompt string) (argv []string, stdin string, ok bool) {
+	if !resumes(a.Harness) {
+		return nil, "", false
+	}
+	argv, stdin = a.argv(clone, skill, final, prompt)
+	switch a.Harness {
+	case "claude":
+		return append(argv, resumeFlag(session)...), stdin, true
+	case "codex":
+		return codexResume(argv, session), "", true
+	default:
+		flag := resumeFlag(session)
+		if a.Harness == "pi" && session != "" {
+			flag = []string{"--session", session}
+		}
+		last := argv[len(argv)-1]
+		return append(append(slices.Clone(argv[:len(argv)-1]), flag...), last), "", true
+	}
+}
+
+func resumes(harness string) bool {
+	switch harness {
+	case "claude", "codex", "pi", "cursor":
+		return true
+	}
+	return false
+}
+
+func resumeFlag(session string) []string {
+	if session == "" {
+		return []string{"--continue"}
+	}
+	return []string{"--resume", session}
+}
+
+// codexResume is `codex exec resume`: it takes neither -C nor --sandbox (codex-cli 0.155.1), so the clone is the
+// process working directory and the sandbox is -c sandbox_mode="workspace-write". It keeps the first call's
+// --json, -o, -m and -c model settings.
+func codexResume(argv []string, session string) []string {
+	out := []string{argv[0], argv[1], "resume"}
+	args := argv[2 : len(argv)-1]
+	for i := 0; i < len(args); i++ {
+		if args[i] == "-C" || args[i] == "--cd" || args[i] == "--sandbox" {
+			i++
+			continue
+		}
+		out = append(out, args[i])
+	}
+	out = append(out, "-c", `sandbox_mode="workspace-write"`)
+	if session == "" {
+		out = append(out, "--last")
+	} else {
+		out = append(out, session)
+	}
+	return append(out, argv[len(argv)-1])
 }
 
 // errSilent cancels an agent that said nothing for agentSilence.
@@ -120,8 +179,10 @@ var errSilent = errors.New("silent")
 // agentSilence is how long the agent may write nothing, on stdout or stderr, before ATM stops it.
 var agentSilence = 10 * time.Minute
 
-// run runs the agent on brief in clone with skill and returns its report, which check accepts. Once it ran, a
-// failure puts in ev how it ended, its exit, and the last lines it wrote, its tail.
+// run runs the agent on brief in clone with skill and returns its report, which check accepts. A report check
+// rejects is sent back once, in the same session, with that error; the step passes with the new report, and ev
+// records the rejection. A second rejection fails as the first did. Once it ran, a failure puts in ev how it
+// ended, its exit, and the last lines it wrote, its tail.
 func (a agent) run(clone, name, skill, brief string, check func(map[string]any) error) (map[string]any, error) {
 	path := filepath.Join(a.dir, name+".jsonl")
 	ev := map[string]any{"log": path}
@@ -134,9 +195,43 @@ func (a agent) run(clone, name, skill, brief string, check func(map[string]any) 
 	}
 	final := strings.TrimSuffix(path, ".jsonl") + ".final.md"
 	argv, stdin := a.argv(clone, dir, final, brief)
+	return a.drive(clone, name, skill, dir, path, final, argv, stdin, check, ev)
+}
+
+// drive runs argv and, when the final report fails validation, returns it once in the same session.
+func (a agent) drive(clone, name, skill, skillDir, path, final string, argv []string, stdin string,
+	check func(map[string]any) error, ev map[string]any) (map[string]any, error) {
 	s, exit, cause, err := a.exec(clone, skill, path, argv, stdin)
-	if s == nil {
+	invalid, err := a.reported(name, skill, path, final, exit, cause, err, s, false, check, ev)
+	if invalid == nil || !resumes(a.Harness) {
 		return ev, err
+	}
+	argv, stdin, ok := a.resumeArgv(clone, skillDir, final, s.session, rejectMessage(invalid))
+	if !ok {
+		return ev, err
+	}
+	s, exit, cause, err = a.exec(clone, skill, path, argv, stdin)
+	_, err = a.reported(name, skill, path, final, exit, cause, err, s, true, check, ev)
+	if err != nil {
+		return ev, err
+	}
+	delete(ev, "exit")
+	delete(ev, "tail")
+	ev["rejected"] = invalid.Error()
+	return ev, nil
+}
+
+func rejectMessage(err error) string {
+	return "Your final message was rejected: " + err.Error() +
+		". Reply with only the JSON object the brief asks for, nothing else."
+}
+
+// reported reads the run's report into ev. invalid is a validation error, so the caller can return it once;
+// fatal is why the step fails, that error wrapped as today when the report is what failed.
+func (a agent) reported(name, skill, path, final, exit, cause string, runErr error, s *stream, proved bool,
+	check func(map[string]any) error, ev map[string]any) (invalid, fatal error) {
+	if s == nil {
+		return nil, runErr
 	}
 	if a.Harness == "codex" {
 		b, _ := os.ReadFile(final) // none is no report
@@ -144,31 +239,36 @@ func (a agent) run(clone, name, skill, brief string, check func(map[string]any) 
 	}
 	s.finish()
 	ev["agent_model"] = s.model
-	fail := func(err error) (map[string]any, error) {
+	if proved { // the first run already proved the skill; a continued session need not load it again
+		s.used = true
+	}
+	fail := func(err error) error {
 		if exit != "" {
 			ev["exit"], ev["tail"] = exit, strings.Join(s.tail, "\n")
 		}
 		if s.failure != "" && s.reach == "" {
 			err = fmt.Errorf("%w; cursor: %s", err, s.failure)
 		}
-		return ev, err
+		return err
 	}
 	switch {
 	case s.reach != "":
-		return fail(fmt.Errorf("%s; the agent reached outside its clone: %s; log: %s", exit, s.reach, path))
+		return nil, fail(fmt.Errorf("%s; the agent reached outside its clone: %s; log: %s", exit, s.reach, path))
 	case cause != "":
-		return fail(fmt.Errorf("%s; log: %s", cause, path))
-	case err != nil:
-		return fail(fmt.Errorf("agent: %w; log: %s", err, path))
+		return nil, fail(fmt.Errorf("%s; log: %s", cause, path))
+	case runErr != nil:
+		return nil, fail(fmt.Errorf("agent: %w; log: %s", runErr, path))
 	case s.failure != "":
-		return fail(fmt.Errorf("%s; log: %s", exit, path))
+		return nil, fail(fmt.Errorf("%s; log: %s", exit, path))
 	case !s.used:
-		return fail(fmt.Errorf("%s; agent left no proof it used the %s skill; log: %s", exit, skill, path))
+		return nil, fail(fmt.Errorf("%s; agent left no proof it used the %s skill; log: %s", exit, skill, path))
 	}
-	if ev["report"], err = finalReport(name, s.final, check); err != nil {
-		return fail(fmt.Errorf("%s; %w; log: %s", exit, err, path))
+	report, err := finalReport(name, s.final, check)
+	ev["report"] = report
+	if err != nil {
+		return err, fail(fmt.Errorf("%s; %w; log: %s", exit, err, path))
 	}
-	return ev, nil
+	return nil, nil
 }
 
 // strict is the review each agent run, by its name without its unit number, whose final message must be a
@@ -385,6 +485,7 @@ type stream struct {
 	failure      string   // cursor's error result, even when the process exits 0
 	tail         []string // the last 20 lines the agent wrote
 	heard        func()   // each line calls it
+	session      string   // the harness session, so a rejected report is returned to it
 	// An ACP agent's: its prompt, its stdin until its prompt's reply, the reply's stopReason or the failed call,
 	// and the chunks of one thought or message so far.
 	prompt, stop   string
@@ -515,6 +616,7 @@ type block struct {
 
 // see reads one JSON line of harness's stream.
 func (s *stream) see(harness string, line []byte) {
+	s.noteSession(line)
 	if _, acp := config.ACP[harness]; acp {
 		s.show(s.acp(line))
 		return
@@ -558,6 +660,39 @@ func (e event) agentModel(harness string) string {
 		}
 	case "codex", "opencode":
 		return e.Model
+	}
+	return ""
+}
+
+// noteSession keeps the first session id the harness's stream names, so a rejected report returns to it.
+func (s *stream) noteSession(line []byte) {
+	if s.session != "" {
+		return
+	}
+	var v map[string]any
+	if json.Unmarshal(line, &v) != nil {
+		return
+	}
+	s.session = sessionOf(v)
+}
+
+func sessionOf(v map[string]any) string {
+	for _, k := range []string{"session_id", "thread_id", "sessionId"} {
+		if id, ok := v[k].(string); ok && id != "" {
+			return id
+		}
+	}
+	if v["type"] == "session" {
+		if id, ok := v["id"].(string); ok && id != "" {
+			return id
+		}
+	}
+	for _, k := range []string{"msg", "payload"} {
+		if m, ok := v[k].(map[string]any); ok {
+			if id := sessionOf(m); id != "" {
+				return id
+			}
+		}
 	}
 	return ""
 }
