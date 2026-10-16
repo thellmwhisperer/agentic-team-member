@@ -20,7 +20,7 @@ func TestPonytailDecisionPersistsInReport(t *testing.T) {
 		{name: "touches issue", work: "echo fixed > a.txt",
 			report: strings.Replace(cut, `"issue_sentence": ""`, `"issue_sentence": "Retry once."`, 1),
 			reason: "the cut touches the issue: Retry once."},
-		{name: "touches test", work: "echo fixed > a.txt; echo bad > a_test.sh", report: cut,
+		{name: "touches test", work: "echo bad > a_test.sh", report: cut,
 			reason: "the cut touches the test a_test.sh"},
 		{name: "fresh", work: "echo fixed > a.txt; mkdir -p .atm; echo injected > .atm/injected.txt", report: cut,
 			reason: "the cut adds .atm/injected.txt"},
@@ -29,6 +29,11 @@ func TestPonytailDecisionPersistsInReport(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			root, clone, sha, cfg := unitDone(t, c.work)
+			if c.name == "touches test" {
+				if _, err := sh(clone, "echo fixed > a.txt; printf 'true\ntrue\n' >> a_test.sh"); err != nil {
+					t.Fatal(err)
+				}
+			}
 			t.Setenv("FAKE_PONYTAIL_REPORT", c.report)
 			dir := t.TempDir()
 			r := newVerdict(dir, io.Discard)
