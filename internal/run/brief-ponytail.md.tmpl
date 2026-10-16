@@ -29,6 +29,9 @@ Use the `ponytail-review` skill, and make its cuts yourself: this brief wins ove
 
 ## FORBIDDEN
 - `git commit`, `git push`, `git rebase`, any `gh` command.
+- Writing or changing files through shell commands (heredocs, `cat >`, `sed -i`, `python -c` and the like). Use your edit and write tools.
+- A URL inside any shell command. ATM ends the run on it, even with no network access. A URL may appear only in files written with your edit tools.
+- Running a command in the background, or ending your turn while one runs. Run every command in the foreground. Your turn ends only with the report.
 
 ## DIFF
 ```diff
