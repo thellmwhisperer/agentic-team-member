@@ -385,6 +385,10 @@ func (a agent) deliver(r *verdict, root, clone, sha, base, line string, i Issue,
 	if handed != "" && !gateDone {
 		_, gateErr = followGate(ctx, r, root, clone, handed, nil)
 	}
+	r.finishDelivery(gateErr)
+}
+
+func (r *verdict) finishDelivery(gateErr error) {
 	if gateErr != nil && (gateStepName(r.FailedNode) || r.FailedNode == "intent" || r.FailedNode == "rebase") {
 		r.err, r.Reason = gateErr, gateErr.Error()
 	} else if errors.Is(gateErr, errPRClosed) {

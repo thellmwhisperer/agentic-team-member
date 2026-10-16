@@ -80,18 +80,7 @@ func TestFollowTerminalGateResult(t *testing.T) {
 			if err == nil || err.Error() != terminalGateReason || r.Reason != terminalGateReason || r.FailedNode != "push" {
 				t.Fatalf("gate outcome = %s, %q, %v", r.FailedNode, r.Reason, err)
 			}
-			failedEvents := 0
-			for _, ev := range events(t, &gateOut) {
-				if ev["state"] == "failed" {
-					failedEvents++
-					if ev["step"] != "push" || ev["error"] != terminalGateReason {
-						t.Fatalf("failed gate event = %v", ev)
-					}
-				}
-			}
-			if failedEvents != 1 {
-				t.Fatalf("failed gate events = %d, want 1", failedEvents)
-			}
+			assertFailedGateEvent(t, &gateOut)
 			if !statusFails {
 				writeFixture(t, count, "0")
 			}
@@ -105,6 +94,22 @@ func TestFollowTerminalGateResult(t *testing.T) {
 			}
 			assertTerminalDeliveryEvents(t, &out, terminalGateReason)
 		})
+	}
+}
+
+func assertFailedGateEvent(t *testing.T, gateOut io.Reader) {
+	t.Helper()
+	failedEvents := 0
+	for _, ev := range events(t, gateOut) {
+		if ev["state"] == "failed" {
+			failedEvents++
+			if ev["step"] != "push" || ev["error"] != terminalGateReason {
+				t.Fatalf("failed gate event = %v", ev)
+			}
+		}
+	}
+	if failedEvents != 1 {
+		t.Fatalf("failed gate events = %d, want 1", failedEvents)
 	}
 }
 
@@ -138,29 +143,12 @@ func TestFollowTerminalCommandExitsBeforeGateFailure(t *testing.T) {
 	if r.Outcome.Outcome != "failed" || r.FailedNode != "push" || r.Reason != terminalGateReason {
 		t.Fatalf("terminal run outcome = %+v", r.Outcome)
 	}
-	report := readReport(t, r.Report)
-	if report["failed_node"] != "push" || report["reason"] != terminalGateReason {
-		t.Fatalf("terminal report = %v", report)
-	}
-	commandFailed, gateFailed := false, false
-	for _, f := range r.frames {
-		var ev struct{ Step, State, Error string }
-		if json.Unmarshal(f.Event, &ev) != nil {
-			continue
-		}
-		if ev.Step == "delivery" && ev.Error == "delivery: exit status 1" {
-			commandFailed = true
-		}
-		if ev.Step == "push" && ev.State == "failed" {
-			if !commandFailed || ev.Error != terminalGateReason {
-				t.Fatalf("gate failure preceded command diagnostic or lost its reason: %+v", ev)
-			}
-			gateFailed = true
-		}
-	}
-	if !commandFailed || !gateFailed {
-		t.Fatalf("missing command or gate failure: command=%t, gate=%t", commandFailed, gateFailed)
-	}
+	assertCommandAndGateFailure(t, r)
+	assertCommandFailureStream(t, root, count, r)
+}
+
+func assertCommandFailureStream(t *testing.T, root, count string, r *bgRun) {
+	t.Helper()
 	fakeGH(t, `{"url":"https://github.com/thellmwhisperer/agentic-team-member/pull/424",
 		"state":"OPEN","commits":[
 		{"oid":"abc123","messageHeadline":"no-mistakes(review): Repair finding"}]}`, false)
@@ -187,6 +175,33 @@ func TestFollowTerminalCommandExitsBeforeGateFailure(t *testing.T) {
 		t.Fatalf("terminal poll: code %d, ended %t; output %s", code, ended, out.String())
 	}
 	assertTerminalDeliveryEvents(t, &out, terminalGateReason)
+}
+
+func assertCommandAndGateFailure(t *testing.T, r *bgRun) {
+	t.Helper()
+	report := readReport(t, r.Report)
+	if report["failed_node"] != "push" || report["reason"] != terminalGateReason {
+		t.Fatalf("terminal report = %v", report)
+	}
+	commandFailed, gateFailed := false, false
+	for _, f := range r.frames {
+		var ev struct{ Step, State, Error string }
+		if json.Unmarshal(f.Event, &ev) != nil {
+			continue
+		}
+		if ev.Step == "delivery" && ev.Error == "delivery: exit status 1" {
+			commandFailed = true
+		}
+		if ev.Step == "push" && ev.State == "failed" {
+			if !commandFailed || ev.Error != terminalGateReason {
+				t.Fatalf("gate failure preceded command diagnostic or lost its reason: %+v", ev)
+			}
+			gateFailed = true
+		}
+	}
+	if !commandFailed || !gateFailed {
+		t.Fatalf("missing command or gate failure: command=%t, gate=%t", commandFailed, gateFailed)
+	}
 }
 
 func assertTerminalDeliveryEvents(t *testing.T, out io.Reader, reason string) {

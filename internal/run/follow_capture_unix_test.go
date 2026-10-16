@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -46,7 +47,9 @@ func TestFollowStreamCapturedFailureAfterCommandExit(t *testing.T) {
 			writeFixture(t, count, "1") // first read fails, so the command ends first
 			t.Setenv("ATM_STATUS_LIVE", failed)
 			t.Setenv("ATM_STATUS_WAITING", failed)
-			fakeGH(t, `{"url":"https://github.com/thellmwhisperer/agentic-team-member/pull/424","state":"OPEN","commits":[{"oid":"abc123","messageHeadline":"no-mistakes(review): Repair finding"}]}`, false)
+			fakeGH(t, `{"url":"https://github.com/thellmwhisperer/agentic-team-member/pull/424",
+				"state":"OPEN","commits":[
+				{"oid":"abc123","messageHeadline":"no-mistakes(review): Repair finding"}]}`, false)
 			t.Setenv("FAKE_GH_FAIL", "")
 			background(t, root)
 			o, err := startWithWatcher(t, root, []string{issueFile(t, issue)})
@@ -61,27 +64,7 @@ func TestFollowStreamCapturedFailureAfterCommandExit(t *testing.T) {
 			if code != 1 || ctx.Err() != nil {
 				t.Fatalf("exit=%d context=%v", code, ctx.Err())
 			}
-			lines := events(t, &out)
-			if len(lines) < 3 {
-				t.Fatalf("missing terminal observations: %v", lines)
-			}
-			for i, name := range []string{"pr_opened", "gate_fixing_ci", "run_failed"} {
-				if lines[len(lines)-3+i]["event"] != name {
-					t.Fatalf("terminal ordering: %v", lines)
-				}
-			}
-			terminal := 0
-			for _, line := range lines {
-				if line["event"] == "run_failed" {
-					terminal++
-					if line["step"] != "delivery" || line["reason"] != terminalGateReason {
-						t.Fatalf("terminal event: %v", line)
-					}
-				}
-			}
-			if terminal != 1 {
-				t.Fatalf("terminal events=%d", terminal)
-			}
+			assertCapturedTerminalEvents(t, &out)
 			end, err := Attach(root, o.Run, &bytes.Buffer{})
 			if err != nil || end.FailedNode != "push" || end.Reason != terminalGateReason {
 				t.Fatalf("terminal run result=%+v err=%v", end, err)
@@ -92,6 +75,31 @@ func TestFollowStreamCapturedFailureAfterCommandExit(t *testing.T) {
 			}
 			t.Logf("persisted report:\n%s", b)
 		})
+	}
+}
+
+func assertCapturedTerminalEvents(t *testing.T, out io.Reader) {
+	t.Helper()
+	lines := events(t, out)
+	if len(lines) < 3 {
+		t.Fatalf("missing terminal observations: %v", lines)
+	}
+	for i, name := range []string{"pr_opened", "gate_fixing_ci", "run_failed"} {
+		if lines[len(lines)-3+i]["event"] != name {
+			t.Fatalf("terminal ordering: %v", lines)
+		}
+	}
+	terminal := 0
+	for _, line := range lines {
+		if line["event"] == "run_failed" {
+			terminal++
+			if line["step"] != "delivery" || line["reason"] != terminalGateReason {
+				t.Fatalf("terminal event: %v", line)
+			}
+		}
+	}
+	if terminal != 1 {
+		t.Fatalf("terminal events=%d", terminal)
 	}
 }
 

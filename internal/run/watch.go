@@ -347,8 +347,7 @@ func parseGate(status string) (s gateState) {
 		trimmed := strings.TrimSpace(l)
 		indent := len(l) - len(strings.TrimLeft(l, " "))
 		key, value, isKey := strings.Cut(trimmed, ": ")
-		if table != "" && (indent > depth || table == "steps" && indent == depth &&
-			strings.Contains(trimmed, ",") && !isKey && !strings.HasSuffix(trimmed, ":")) {
+		if gateTableRow(table, trimmed, indent, depth, isKey) {
 			if table == "steps" {
 				s.step(trimmed, parked)
 			} else {
@@ -386,6 +385,11 @@ func parseGate(status string) (s gateState) {
 		s.err = cmp.Or(s.err, fmt.Errorf("findings has %d rows, want %d", len(s.findings), expectedFindings))
 	}
 	return s
+}
+
+func gateTableRow(table, trimmed string, indent, depth int, isKey bool) bool {
+	return table != "" && (indent > depth || table == "steps" && indent == depth &&
+		strings.Contains(trimmed, ",") && !isKey && !strings.HasSuffix(trimmed, ":"))
 }
 
 func (s *gateState) findingCount(header string) int {
