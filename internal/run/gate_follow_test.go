@@ -204,6 +204,20 @@ func TestFailedDeliveryWithoutGateStepsEndsOnAnUnreadableStatus(t *testing.T) {
 	}
 }
 
+// Ctrl-C while the delivery command runs fails the delivery, as before the gate was followed: a cancelled
+// follow never counts as a finished gate, whichever of the two the select picks.
+func TestCancelledFollowIsNoFinishedGate(t *testing.T) {
+	root := repo(t, "https://github.com/o/r.git", "")
+	fakeGH(t, "OPEN", false)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	r := newVerdict(t.TempDir(), io.Discard)
+	done, err := followGate(ctx, r, root, filepath.Join(root, "missing"), "feature", make(chan error))
+	if done || !errors.Is(err, context.Canceled) {
+		t.Fatalf("follow = %v, %v; want an unfinished gate and the cancellation", done, err)
+	}
+}
+
 func TestClosedPRPreservesGateResultsAndEndsStreamAsClosed(t *testing.T) {
 	for _, source := range []string{"gate", "released clone"} {
 		t.Run(source, func(t *testing.T) {
