@@ -571,6 +571,22 @@ files put back carry the whole-cut rejection reason. See
 repository, started by the first command that needs it and ended after
 10 min without a run. Closing the terminal does not stop the run.
 
+Before sending a run, the launcher checks the connected `atm serve` process's
+full build identity against its own. It reads the last PID/version pair for
+that process in `.atm/serve.log`, so the check also works with older serves
+and binaries installed through a symlink or under a different filename.
+Matching builds accept the run as usual. A different or unverifiable build
+rejects the launch with `serve <A> is older than atm <B>`; a missing version
+is shown as `unknown`. This is an exact match check, not version ordering.
+The rejected run is not queued, and runs already executing remain untouched.
+
+When an idle serve detects that its executable file was replaced and closes
+the connection to hand off, the launcher reconnects, starting its own serve
+if needed, and checks again before sending the run. A version mismatch alone
+does not stop the old serve or start a second serve alongside it. After a
+rejected launch, retry once the old serve has exited and a matching serve can
+take the run.
+
 Without `--follow`, `atm run` attaches the screen on a terminal; see
 [Following one run](#following-one-run) for that flag's output. The screen is
 the ATM box, a row per step with its icon (`○`

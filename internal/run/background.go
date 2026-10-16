@@ -23,7 +23,7 @@ import (
 
 // The background process of a repository runs its runs, each in itself, so closing the terminal that started
 // one leaves it going. The first atm command that needs it starts it, as atm serve, and it listens on
-// .atm/atm.sock until it has had no run for idle. Requests and replies are JSON lines; send handles reply
+// .atm/atm.sock until it has had no run for idle. Requests and replies are JSON lines; exchange handles reply
 // completion. How each run ended goes to .atm/runs.jsonl.
 // ponytail: a Unix socket on Windows too, which Windows 10 and later have; a named pipe is the upgrade.
 
