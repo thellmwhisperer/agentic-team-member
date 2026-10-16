@@ -41,6 +41,9 @@ func clone(root, base, install, repo string, live func(map[string]any)) (dir, sh
 			return dir, sha, nil, err
 		}
 	}
+	if err = copySlopslint(root, dir); err != nil {
+		return dir, sha, nil, fmt.Errorf("copy slopslint cache: %w", err)
+	}
 	if err = exclude(dir, "/.atm/"); err != nil || install == "" { // ATM's scratch
 		return dir, sha, nil, err
 	}
@@ -50,6 +53,32 @@ func clone(root, base, install, repo string, live func(map[string]any)) (dir, sh
 		return err
 	})
 	return dir, sha, []cmdResult{{"install", install, outcome(err), tail, s}}, wrap(err, "install")
+}
+
+func copySlopslint(root, dir string) error {
+	source := filepath.Join(root, ".tmp", "slopslint")
+	if _, err := os.Stat(source); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	dest := filepath.Join(dir, ".tmp", "slopslint")
+	cache := os.DirFS(source)
+	if err := os.CopyFS(dest, cache); err != nil {
+		return err
+	}
+	// CopyFS adds writable permissions; restore the cache's exact modes.
+	return fs.WalkDir(cache, ".", func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		return os.Chmod(filepath.Join(dest, path), info.Mode())
+	})
 }
 
 // claim makes a fresh atm-run-<now> directory under root: mkdir either succeeds or the name is taken, so two
