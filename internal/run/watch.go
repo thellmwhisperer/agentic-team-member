@@ -530,7 +530,8 @@ func followGate(ctx context.Context, r *verdict, root, clone, branch string, com
 	for {
 		done, err := applyGate(ctx, r, root, clone, branch)
 		if errors.Is(err, errNoGate) {
-			if command == nil && r.err != nil && !slices.ContainsFunc(r.Nodes, func(n *node) bool { return gateStepName(n.Name) }) {
+			if command == nil && r.err != nil &&
+				!slices.ContainsFunc(r.Nodes, func(n *node) bool { return gateStepName(n.Name) }) {
 				return true, nil
 			}
 			err = nil

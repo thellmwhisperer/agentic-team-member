@@ -133,40 +133,13 @@ func TestDeliveryObservesGateBeforeCommandExitAndKeepsFollowingAfterFailure(t *t
 			var out bytes.Buffer
 			done := make(chan error, 1)
 			go func() { done <- Run("t", []string{arg}, &out, io.Discard) }()
-			wait := func(delivery, review string) {
-				t.Helper()
-				deadline := time.After(30 * time.Second)
-				tick := time.NewTicker(time.Millisecond)
-				defer tick.Stop()
-				for {
-					select {
-					case err := <-done:
-						t.Fatalf("run ended before merge: %v", err)
-					case <-deadline:
-						t.Fatalf("report never showed delivery %s and review %s", delivery, review)
-					case <-tick.C:
-						var report verdict
-						b, err := os.ReadFile(path)
-						if err != nil || json.Unmarshal(b, &report) != nil {
-							continue
-						}
-						states := map[string]string{}
-						for _, n := range report.Nodes {
-							states[n.Name] = n.Result
-						}
-						if states["delivery"] == delivery && states["review"] == review {
-							return
-						}
-					}
-				}
-			}
-			wait("running", "waiting")
+			waitForDeliveryAndReview(t, done, path, "running", "waiting")
 			writeFixture(t, commandRelease, "")
 			want := "passed"
 			if exit != 0 {
 				want = "failed"
 			}
-			wait(want, "waiting")
+			waitForDeliveryAndReview(t, done, path, want, "waiting")
 			writeFixture(t, gateRelease, "")
 			select {
 			case err := <-done:
@@ -183,6 +156,34 @@ func TestDeliveryObservesGateBeforeCommandExitAndKeepsFollowingAfterFailure(t *t
 				t.Fatal("screen missed the gate wait or completion")
 			}
 		})
+	}
+}
+
+func waitForDeliveryAndReview(t *testing.T, done <-chan error, path, delivery, review string) {
+	t.Helper()
+	deadline := time.After(30 * time.Second)
+	tick := time.NewTicker(time.Millisecond)
+	defer tick.Stop()
+	for {
+		select {
+		case err := <-done:
+			t.Fatalf("run ended before merge: %v", err)
+		case <-deadline:
+			t.Fatalf("report never showed delivery %s and review %s", delivery, review)
+		case <-tick.C:
+			var report verdict
+			b, err := os.ReadFile(path)
+			if err != nil || json.Unmarshal(b, &report) != nil {
+				continue
+			}
+			states := map[string]string{}
+			for _, n := range report.Nodes {
+				states[n.Name] = n.Result
+			}
+			if states["delivery"] == delivery && states["review"] == review {
+				return
+			}
+		}
 	}
 }
 
@@ -211,12 +212,15 @@ func TestClosedPRPreservesGateResultsAndEndsStreamAsClosed(t *testing.T) {
 				t.Fatal(err)
 			}
 			report := readReport(t, r.path)
-			if n := reportNode(t, report, "pr"); n["result"] != "passed" || n["duration_ms"] != float64(16070) || r.FailedNode != "" {
+			if n := reportNode(t, report, "pr"); n["result"] != "passed" ||
+				n["duration_ms"] != float64(16070) || r.FailedNode != "" {
 				t.Fatalf("closure changed the gate result: %v, failed node %q", n, r.FailedNode)
 			}
 			var out bytes.Buffer
 			s := observer{w: &out, now: time.Now, pr: recordedPR}
-			code, ended := s.end(root, Outcome{Outcome: "failed", Ended: time.Now(), FailedNode: r.FailedNode, Reason: err.Error()})
+			code, ended := s.end(root, Outcome{
+				Outcome: "failed", Ended: time.Now(), FailedNode: r.FailedNode, Reason: err.Error(),
+			})
 			events := events(t, &out)
 			if !ended || code != 1 || len(events) != 1 || events[0]["event"] != "closed" {
 				t.Fatalf("stream closure = %d, %v, %v", code, ended, events)
