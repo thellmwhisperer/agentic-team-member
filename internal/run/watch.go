@@ -310,8 +310,9 @@ type gate struct {
 // decision and the first that failed, and whether it has steps, CI is being fixed or green, and the PR merged;
 // read, also the findings of its gate and its PR's CI repair commits, or the error that kept them unread.
 type gateState struct {
-	pr, waiting, failed                 string
+	pr, waiting, failed, status         string
 	seen, fixing, green, merged, closed bool
+	hasPRState                          bool
 	findings                            []gateFinding
 	ci                                  []ciCommit
 	steps                               []gateStep
@@ -366,9 +367,12 @@ func parseGate(status string) (s gateState) {
 				value = unquoted
 			}
 			switch key {
+			case "status":
+				s.status = value
 			case "pr":
 				s.pr = value
 			case "pr_state":
+				s.hasPRState = true
 				s.merged, s.closed = value == "merged", value == "closed"
 			case "awaiting_agent":
 				parked = strings.HasPrefix(value, "parked")
@@ -568,7 +572,13 @@ func applyGate(ctx context.Context, r *verdict, root, clone, branch string) (boo
 		return false, errNoGate
 	}
 	r.noteGate(g)
-	return g.outcome(r)
+	done, err := g.outcome(r)
+	// A completed gate with skipped CI may never publish pr_state; follow its PR directly.
+	if !done && err == nil && g.status == "completed" && !g.hasPRState &&
+		slices.ContainsFunc(g.steps, func(s gateStep) bool { return s.name == "ci" && s.status == "skipped" }) {
+		return prEnded(ctx, root, branch)
+	}
+	return done, err
 }
 
 func (g gateState) outcome(r *verdict) (bool, error) {
