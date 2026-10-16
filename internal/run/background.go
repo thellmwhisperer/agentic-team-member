@@ -373,8 +373,9 @@ func (s *server) start(args []string, pane string) (Outcome, error) {
 	for _, entry := range entries {
 		max(entry.Name())
 	}
-	r := &bgRun{pane: pane, more: make(chan struct{}), Outcome: Outcome{Outcome: "running", Issue: issue, Started: time.Now(),
-		Run: cmp.Or(strings.Trim(name, "-"), "run") + "-" + strconv.Itoa(n+1)}}
+	r := &bgRun{pane: pane, more: make(chan struct{}),
+		Outcome: Outcome{Outcome: "running", Issue: issue, Started: time.Now(),
+			Run: cmp.Or(strings.Trim(name, "-"), "run") + "-" + strconv.Itoa(n+1)}}
 	if _, _, _, a, err := parseArgs(args); err == nil {
 		r.Watcher = a.watcher
 	}
