@@ -263,3 +263,30 @@ func TestAttachErrorWithoutCompletedRunStillQuits(t *testing.T) {
 		t.Fatal("attach error did not quit")
 	}
 }
+
+func TestCompletedScreenRestoresSkippedGateNodes(t *testing.T) {
+	for _, outcome := range []run.Outcome{{Outcome: "passed"}, {Outcome: "failed", FailedNode: "test"}} {
+		m := completedFromReport(t, "gate-skips", outcome, `{"nodes":[
+			{"name":"review","result":"skipped"},
+			{"name":"test","result":"failed","duration_ms":100},
+			{"name":"document","result":"skipped"},
+			{"name":"lint","result":"skipped"},
+			{"name":"push","result":"skipped"},
+			{"name":"pr","result":"skipped"},
+			{"name":"ci","result":"skipped"}
+		]}`)
+		for _, name := range []string{"review", "document", "lint", "push", "pr", "ci"} {
+			if r := m.current(name); r == nil || r.state != "skipped" {
+				t.Fatalf("%s run lost skipped %s: %+v", outcome.Outcome, name, r)
+			}
+		}
+		if outcome.Outcome == "failed" && m.current("test").state != "failed" {
+			t.Fatal("restoring skipped nodes lost the gate failure")
+		}
+	}
+	m := completedFromReport(t, "skipped-test", run.Outcome{Outcome: "passed"},
+		`{"nodes":[{"name":"test","result":"skipped"}]}`)
+	if m.current("test").state != "skipped" {
+		t.Fatal("restoring a passed run lost skipped test")
+	}
+}

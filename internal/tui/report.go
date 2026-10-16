@@ -84,6 +84,9 @@ func consistentResult(name, result string, outcome run.Outcome) bool {
 	case "failed":
 		return outcome.Outcome == "failed" && outcome.FailedNode == name
 	case "skipped":
+		if gateLabels[name] != "" {
+			return outcome.Outcome == "passed" || outcome.Outcome == "failed"
+		}
 		return name == "delivery" && (outcome.Outcome == "passed" || outcome.Outcome == "failed" && outcome.FailedNode == "")
 	case "not run":
 		return outcome.Outcome == "failed"

@@ -175,6 +175,9 @@ func (s *observer) end(root string, o Outcome) (int, bool) {
 	switch {
 	case o.Ended.IsZero(): // its screen is lost; its gate is not
 		return 0, false
+	case o.Reason == errPRClosed.Error():
+		s.say("closed", map[string]any{"url": s.pr})
+		return 1, true
 	case o.Outcome == "passed" && s.delivering:
 		return 0, false
 	case o.Outcome == "passed":
