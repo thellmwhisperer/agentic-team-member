@@ -340,7 +340,7 @@ func TestRunGoesToTheBackgroundAndEveryCommandSeesIt(t *testing.T) {
 		t.Fatalf("atm status: %q", out)
 	}
 	if out := atmIn(t, 0, "runs"); !strings.HasPrefix(out, "retry-1  failed  ") ||
-		!strings.HasSuffix(out, " s  w  "+filepath.Join(dir, "retry.md")+"\n") {
+		!strings.HasSuffix(out, " s  -  w  "+filepath.Join(dir, "retry.md")+"\n") {
 		t.Fatalf("atm runs: %q", out)
 	}
 	watcher(t, dir, "w2", 0)
@@ -354,7 +354,7 @@ func TestRunGoesToTheBackgroundAndEveryCommandSeesIt(t *testing.T) {
 		runs.Runs[1]["run"] != "retry-2" || runs.Runs[1]["outcome"] != "failed" {
 		t.Fatalf("atm axi runs --json: %+v, %v", runs, err)
 	}
-	if out := atmIn(t, 0, "axi", "status"); out != "runs[0]{run,issue,step,duration}:\n" {
+	if out := atmIn(t, 0, "axi", "status"); out != "runs[0]{run,issue,step,duration,agent}:\n" {
 		t.Fatalf("atm axi status: %q", out)
 	}
 }
