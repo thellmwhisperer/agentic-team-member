@@ -341,12 +341,14 @@ const findingsTable = "{id,severity,file,action,description}:"
 
 func parseGate(status string) (s gateState) {
 	expectedFindings := 0
-	parked := false       // its fix_review step waits for a decision
-	table, depth := "", 0 // the table whose rows, deeper than its header, follow
+	parked := false // its fix_review step waits for a decision
+	table, depth := "", 0
 	for _, l := range strings.Split(status, "\n") {
 		trimmed := strings.TrimSpace(l)
 		indent := len(l) - len(strings.TrimLeft(l, " "))
-		if table != "" && indent > depth {
+		flatStep := table == "steps" && indent == depth && strings.Contains(trimmed, ",") &&
+			!strings.Contains(trimmed, ":")
+		if table != "" && (indent > depth || flatStep) {
 			if table == "steps" {
 				s.step(trimmed, parked)
 			} else {
