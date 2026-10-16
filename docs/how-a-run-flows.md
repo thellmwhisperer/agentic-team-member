@@ -493,7 +493,7 @@ reports that outcome as `closed`.
 | What | Limit |
 |------|-------|
 | Reading a GitHub issue | 60 s |
-| Each command (`install`, `test`, `typecheck`, `lint`, a proof) | 10 min |
+| Each checks command (`install`, `test`, `typecheck`, `lint`, a proof) | See [`check_timeout`](configuration.md#atmyaml) |
 | Each agent call, the slop detector's included | See [`agent_timeout`](configuration.md) |
 | An agent that writes nothing on stdout or stderr | 10 min |
 | The delivery command | none |
