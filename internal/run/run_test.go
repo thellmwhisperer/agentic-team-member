@@ -83,7 +83,11 @@ func fakeNoMistakes() {
 	b, _ := os.ReadFile(countPath)
 	n, _ := strconv.Atoi(string(b))
 	n++
-	_ = os.WriteFile(countPath, []byte(strconv.Itoa(n)), 0o600)
+	// Cancellation may kill this process mid-write; publish a complete counter.
+	if countPath != "" {
+		_ = os.WriteFile(countPath+".next", []byte(strconv.Itoa(n)), 0o600)
+		_ = os.Rename(countPath+".next", countPath)
+	}
 	if live := os.Getenv("ATM_STATUS_LIVE"); live != "" {
 		switch n {
 		case 1:

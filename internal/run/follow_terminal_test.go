@@ -135,11 +135,11 @@ func TestFollowTerminalCommandExitsBeforeGateFailure(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("delivery did not terminate after the command and gate failed")
 	}
-	if r.Outcome.Outcome != "failed" || r.FailedNode != "delivery" || r.Reason != terminalGateReason {
+	if r.Outcome.Outcome != "failed" || r.FailedNode != "push" || r.Reason != terminalGateReason {
 		t.Fatalf("terminal run outcome = %+v", r.Outcome)
 	}
 	report := readReport(t, r.Report)
-	if report["failed_node"] != "delivery" || report["reason"] != terminalGateReason {
+	if report["failed_node"] != "push" || report["reason"] != terminalGateReason {
 		t.Fatalf("terminal report = %v", report)
 	}
 	commandFailed, gateFailed := false, false

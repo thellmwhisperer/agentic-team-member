@@ -186,16 +186,7 @@ func (s *observer) end(ctx context.Context, root string, o Outcome) (int, bool) 
 		s.diag(errors.New("the run delivered nothing: no PR to follow"))
 		return 1, true
 	case o.FailedNode == "delivery":
-		var report verdict
-		b, _ := os.ReadFile(o.Report)
-		if json.Unmarshal(b, &report) == nil {
-			for _, n := range report.Nodes {
-				if n.Result == "failed" && (gateStepName(n.Name) || n.Name == "intent" || n.Name == "rebase") {
-					terminalGate = true
-				}
-			}
-		}
-		if !terminalGate && !(&gate{seen: s.seen}).failedFirst(root, o.Run) {
+		if !(&gate{seen: s.seen}).failedFirst(root, o.Run) {
 			s.reason = o.Reason
 			return 0, false
 		}
