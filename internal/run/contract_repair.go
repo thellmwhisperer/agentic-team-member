@@ -4,9 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -109,7 +106,7 @@ func (ev *repairEvidence) finish(i Issue, rec map[string]any, last []repairFindi
 func (a agent) oneRepair(clone, root, head string, i Issue, history []proof, c config.Config, round int,
 	findings []repairFinding) (string, repairAttempt, error) {
 	attempt := repairAttempt{Round: round, From: head, Criteria: criteriaOf(findings), Result: "blocked"}
-	if err := a.repairWork(clone, c, round, findings); err != nil {
+	if err := a.repairWork(clone, head, c, round, findings); err != nil {
 		return head, attempt, repairErr(round, err)
 	}
 	if len(history) == 0 {
@@ -136,18 +133,17 @@ func (a agent) oneRepair(clone, root, head string, i Issue, history []proof, c c
 	return next, attempt, nil
 }
 
-func (a agent) repairWork(clone string, c config.Config, round int, findings []repairFinding) error {
-	before, err := snapshotTests(clone, c.TestPatterns)
-	if err != nil {
+func (a agent) repairWork(clone, head string, c config.Config, round int, findings []repairFinding) error {
+	if _, err := a.run(clone, "repair-"+strconv.Itoa(round), "ponytail", repairBrief(findings), testFile); err != nil {
 		return err
 	}
-	if _, err = a.run(clone, "repair-"+strconv.Itoa(round), "ponytail", repairBrief(findings), testFile); err != nil {
-		return err
+	changed, err := git(clone, "diff", "--name-status", "--no-renames", "-z", head)
+	for f := strings.Split(changed, "\x00"); err == nil && len(f) > 1; f = f[2:] {
+		if f[0] != "A" && first([]string{f[1]}, c.TestPatterns, true) != "" {
+			return errors.New("changed protected test " + f[1])
+		}
 	}
-	if why := protectedTests(clone, c.TestPatterns, before); why != "" {
-		return errors.New(why)
-	}
-	return nil
+	return err
 }
 
 func repairErr(round int, err error) error {
@@ -295,51 +291,4 @@ func criteriaOf(findings []repairFinding) []string {
 func textOf(rec map[string]any, key string) string {
 	s, _ := rec[key].(string)
 	return s
-}
-
-func snapshotTests(clone string, patterns []string) (map[string]string, error) {
-	got := map[string]string{}
-	err := filepath.WalkDir(clone, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() && (d.Name() == ".git" || d.Name() == ".atm") {
-			if err == nil {
-				return filepath.SkipDir
-			}
-			return err
-		}
-		if d.IsDir() {
-			return nil
-		}
-		rel, err := filepath.Rel(clone, path)
-		if err != nil {
-			return err
-		}
-		rel = filepath.ToSlash(rel)
-		if first([]string{rel}, patterns, true) == "" {
-			return nil
-		}
-		b, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		got[rel] = string(b)
-		return nil
-	})
-	return got, err
-}
-
-func protectedTests(clone string, patterns []string, before map[string]string) string {
-	after, err := snapshotTests(clone, patterns)
-	if err != nil {
-		return err.Error()
-	}
-	for path, content := range before {
-		now, ok := after[path]
-		if !ok {
-			return "deleted protected test " + path
-		}
-		if now != content {
-			return "modified protected test " + path
-		}
-	}
-	return ""
 }
