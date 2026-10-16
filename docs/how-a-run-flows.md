@@ -316,22 +316,25 @@ A chained unit, a `feature`, is a `feat`.
 Once every unit passed, the same agent gets `brief-ponytail.md`, the issue and
 the run's diff, with the bundled `ponytail-review` skill, proven loaded the
 same way. It may only cut: delete, shrink, or swap in the standard library or
-an existing helper, in the diff's files, keeping every test. Its report is
-`{"findings": [{"file", "family", "finding"}], "summary"}`, each `family` a
-slopslint family.
+an existing helper, in the diff's files, keeping every test. The required
+report format is in the [ponytail brief](../internal/run/brief-ponytail.md.tmpl).
 
-ATM snapshots the whole clone first and restores it byte for byte, discarding
-the cut, if the cut:
+ATM snapshots the whole clone first, then judges the cut per file. It rejects
+a file when a finding naming it has a missing or non-empty `issue_sentence`,
+or the cut adds or deletes it, touches it as a test, or changes it outside the
+run's diff. Only rejected files return to their contents before the cut;
+newly added rejected files are removed. Other files' cuts stay for validation.
+There is no splitting within a file. If no file survives, the whole cut is
+discarded as before.
 
-| Discarded when the cut |
-|------------------------|
-| adds or deletes a file |
-| reports no finding, or does not lower the run's net added lines |
-| touches a test file, a file outside the diff, or a unit's proven test |
-| fails any unit's red/green proof again, or the last unit's checks |
+The remaining cut must report a finding and lower the run's net added lines.
+ATM then checks for new files, including ignored files, and repeats every
+unit's proof and the last unit's checks, preserving each unit's proven test.
+If any of these requirements fails, ATM restores the whole clone byte for
+byte and discards the entire cut.
 
-A kept cut is its own commit, `ponytail: <n> cuts`, one line per finding,
-after the unit commit, with one slopslint tombstone per finding under
+A kept cut is its own commit, `ponytail: <n> cuts`, one line per surviving finding,
+after the unit commit, with one slopslint tombstone per surviving finding under
 `.slop/tombstones/`. Both commits use the repository's git identity; none, or
 an email ending in `@localhost`, fails the run.
 
@@ -455,10 +458,12 @@ The `ponytail` node also records `kept` (`true` or `false`) once ATM decides
 whether to keep the cut, and `reason`: the exact rejection reason from the
 cut policy, new-file check or repeated proofs and checks, or `""` when kept.
 `net_lines` is `[before, after]`, the run's net added lines before and after
-the attempted cut, measured against the run's base. `findings` preserves the
-agent's findings as reported. Discarding the cut does not remove these fields
-or replace the attempted cut's line count with the restored count. If the
-step stops early, fields whose values are not yet available are omitted.
+the judged cut, measured against the run's base. When some files survive and
+others are restored, `after` measures the remaining cut. `findings` preserves
+the agent's findings as reported, including findings for rejected files.
+Discarding the whole cut does not remove these fields or replace the judged
+cut's line count with the restored count. If the step stops early, fields
+whose values are not yet available are omitted.
 
 ## The screen
 

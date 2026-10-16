@@ -71,7 +71,7 @@ every check ran again before it was kept.
 | Red / green | code | a test that passes without the fix or fails with it |
 | The project's configured `install`, `test`, `typecheck` and `lint` commands | code | any failure |
 | Follow-ups | code and **model** | See [Follow-ups](docs/how-a-run-flows.md#follow-ups) for verification and scope approval |
-| Slop detector (code quality gate, not code review) | **model**, may only cut | a cut that breaks any check or does not shrink the diff: the clone goes back |
+| Slop detector (code quality gate, not code review) | **model**, may only cut | See [Slop detector](docs/how-a-run-flows.md#slop-detector) for file rejection and validation of the remaining cut |
 | Delivery and code review gate | **model**, then your command | See [Delivery](docs/how-a-run-flows.md#delivery) for the review that must approve before the command runs |
 
 Step by step: [How a run flows](docs/how-a-run-flows.md).
