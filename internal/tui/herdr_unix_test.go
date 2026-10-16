@@ -3,6 +3,7 @@
 package tui
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -45,6 +46,42 @@ func TestHerdrBlocksWhileAGateStepWaits(t *testing.T) {
 	if !strings.Contains(got, "--state|working|--message|#7 Test|") ||
 		!strings.Contains(got, "--state|blocked|--message|#7 Review|") {
 		t.Fatalf("herdr status was not working while a node ran and blocked while the gate waited: %q", got)
+	}
+}
+
+func TestGateActivityOverridesRunningDelivery(t *testing.T) {
+	for _, gate := range []struct{ step, label string }{
+		{"review", "Review"}, {"test", "Test"}, {"document", "Document"}, {"lint", "Lint"},
+		{"push", "Push"}, {"pr", "PR"}, {"ci", "CI"},
+	} {
+		t.Run(gate.step, func(t *testing.T) {
+			calls, h := newHerdrRecorder(t)
+			h.m.width, h.m.height = 80, 40
+			h.frame(run.Frame{Event: []byte(`{"step":"issue","state":"passed","number":7}`)})
+			h.frame(run.Frame{Event: []byte(`{"step":"delivery","state":"started"}`)})
+			for _, state := range []string{"waiting", "running", "waiting"} {
+				h.frame(run.Frame{Event: []byte(fmt.Sprintf(`{"step":%q,"state":%q}`, gate.step, state))})
+				want, icon := "blocked", "⏸ waiting"
+				if state == "running" {
+					want, icon = "working", "running"
+				}
+				b, err := os.ReadFile(calls)
+				if err != nil {
+					t.Fatal(err)
+				}
+				lines := strings.Split(strings.TrimSpace(string(b)), "\n")
+				if !strings.Contains(lines[len(lines)-1], "--state|"+want+"|--message|#7 "+gate.label+"|") {
+					t.Fatalf("gate %s hidden by delivery: %s", state, b)
+				}
+				if h.m.state != state || !strings.Contains(view(h.m), icon) || h.m.current("delivery").state != "running" {
+					t.Fatalf("gate %s changed delivery or lost its screen state: %s", state, view(h.m))
+				}
+			}
+			h.frame(run.Frame{Event: []byte(`{"step":"delivery","state":"passed"}`)})
+			if h.m.state != "waiting" || h.m.step() != gate.label {
+				t.Fatal("delivery completion replaced the waiting gate")
+			}
+		})
 	}
 }
 
