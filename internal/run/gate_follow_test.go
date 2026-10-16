@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -28,6 +29,26 @@ func TestRunStaysAliveUntilTheGateMergesAndReportsItsNodes(t *testing.T) {
 	go func() { done <- Run("t", []string{arg}, &out, &bytes.Buffer{}) }()
 	waitForGateNode(t, done, report, release)
 	checkMergedGate(t, report, &out)
+}
+
+func TestFakeNoMistakesKeepsReadFailureExclusiveToStatus(t *testing.T) {
+	count := realStatus(t, filepath.Join(t.TempDir(), "release"))
+	clone := t.TempDir()
+	if _, err := gateStatus(context.Background(), clone); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("no-mistakes", "axi", "run").CombinedOutput(); err != nil {
+		t.Fatalf("delivery consumed the status read failure: %v, %s", err, out)
+	}
+	if _, err := gateStatus(context.Background(), clone); err == nil {
+		t.Fatal("second status read lost its injected failure")
+	}
+	if out, err := exec.Command("no-mistakes", "axi", "run").CombinedOutput(); err != nil {
+		t.Fatalf("delivery failed after the status read failure: %v, %s", err, out)
+	}
+	if b, err := os.ReadFile(count); err != nil || string(b) != "2" {
+		t.Fatalf("two status reads counted as %q: %v", b, err)
+	}
 }
 
 func waitForGateNode(t *testing.T, done <-chan error, report, release string) {

@@ -281,7 +281,7 @@ func (m *Model) right(width, height int) string {
 }
 
 func (m *Model) running() bool {
-	for _, r := range m.rows {
+	for _, r := range m.activityRows() {
 		if !r.check && r.state == "running" {
 			return true
 		}

@@ -310,6 +310,15 @@ var gateLabels = map[string]string{
 	"push": "Push", "pr": "PR", "ci": "CI",
 }
 
+func (m *Model) activityRows() []*row {
+	for i, r := range m.rows {
+		if !r.check && gateLabels[r.step] != "" {
+			return m.rows[i:]
+		}
+	}
+	return m.rows
+}
+
 func gateOrder(step string) int {
 	for i, name := range []string{"review", "test", "document", "lint", "push", "pr", "ci"} {
 		if name == step {

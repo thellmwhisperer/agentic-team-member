@@ -236,7 +236,7 @@ func createdTab(b []byte) (tab, pane string, err error) {
 // step is the label of the node that runs, and of its proof or command that runs, if one does; "" when none.
 func (m *Model) step() string {
 	s, wait := "", ""
-	for _, r := range m.rows {
+	for _, r := range m.activityRows() {
 		switch {
 		case r.state == "waiting" && !r.check:
 			wait = r.label
@@ -255,7 +255,7 @@ func (m *Model) step() string {
 
 // waits says whether a gate step is waiting for a decision.
 func (m *Model) waits() bool {
-	for _, r := range m.rows {
+	for _, r := range m.activityRows() {
 		if r.state == "waiting" {
 			return true
 		}

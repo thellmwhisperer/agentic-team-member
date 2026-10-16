@@ -72,6 +72,13 @@ func TestMain(m *testing.M) {
 }
 
 func fakeNoMistakes() {
+	switch strings.Join(os.Args[1:], " ") {
+	case "axi run":
+		os.Exit(0)
+	case "axi status":
+	default:
+		os.Exit(2)
+	}
 	countPath := os.Getenv("ATM_STATUS_COUNT")
 	b, _ := os.ReadFile(countPath)
 	n, _ := strconv.Atoi(string(b))
