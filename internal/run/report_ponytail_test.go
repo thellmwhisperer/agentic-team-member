@@ -7,6 +7,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/thellmwhisperer/agentic-team-member/internal/config"
 )
 
 func TestPonytailDecisionPersistsInReport(t *testing.T) {
@@ -35,20 +37,11 @@ func TestPonytailDecisionPersistsInReport(t *testing.T) {
 				}
 			}
 			t.Setenv("FAKE_PONYTAIL_REPORT", c.report)
-			dir := t.TempDir()
-			r := newVerdict(dir, io.Discard)
-			r.step("ponytail", func() (map[string]any, error) {
-				return agent{Agent: cfg.Agent, dir: dir}.ponytail(root, clone, sha,
-					[]proof{unitProof(t, clone, sha)}, fixIssue, cfg)
-			})
-			if r.err != nil {
-				t.Fatal(r.err)
-			}
+			n := ponytailReport(t, root, clone, sha, cfg)
 			var reported obj
 			if err := json.Unmarshal([]byte(c.report), &reported); err != nil {
 				t.Fatal(err)
 			}
-			n := reportNode(t, readReport(t, filepath.Join(dir, "report.json")), "ponytail")
 			for key, want := range map[string]any{
 				"kept": c.reason == "", "reason": c.reason,
 				"net_lines": []any{float64(2), float64(c.after)}, "findings": reported["findings"],
@@ -59,4 +52,64 @@ func TestPonytailDecisionPersistsInReport(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPonytailRejectedFilesInReport(t *testing.T) {
+	for _, c := range []struct {
+		name, work, report string
+		kept               bool
+		rejected           []obj
+	}{
+		{name: "kept in full", work: "echo fixed > a.txt", kept: true},
+		{name: "no cut"},
+		{name: "partly kept beside a test", work: "echo fixed > a.txt; echo bad > a_test.sh", kept: true,
+			rejected: []obj{{"path": "a_test.sh", "reason": "the cut touches the test a_test.sh"}}},
+		{name: "partly kept beside a deletion", work: "echo fixed > a.txt; rm b.txt", kept: true,
+			rejected: []obj{{"path": "b.txt", "reason": "the cut deletes b.txt"}}},
+		{name: "partly kept beside an addition", work: "echo fixed > a.txt; echo new > c.txt", kept: true,
+			rejected: []obj{{"path": "c.txt", "reason": "the cut adds c.txt"}}},
+		{name: "partly kept beside an outside file", work: "echo fixed > a.txt; echo changed > b.txt", kept: true,
+			rejected: []obj{{"path": "b.txt", "reason": "the cut touches b.txt, outside the run's diff"}}},
+		{name: "rejected in full", work: "echo fixed > a.txt",
+			report:   strings.Replace(cut, `"issue_sentence": ""`, `"issue_sentence": "Retry once."`, 1),
+			rejected: []obj{{"path": "a.txt", "reason": "the cut touches the issue: Retry once."}}},
+		{name: "remainder fails proof", work: "echo broken > a.txt; echo bad > a_test.sh",
+			rejected: []obj{
+				{"path": "a.txt", "reason": "a_test.sh fails with the fix: exit status 1"},
+				{"path": "a_test.sh", "reason": "the cut touches the test a_test.sh"},
+			}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			root, clone, sha, cfg := unitDone(t, c.work)
+			if c.report == "" {
+				c.report = cut
+			}
+			t.Setenv("FAKE_PONYTAIL_REPORT", c.report)
+			n := ponytailReport(t, root, clone, sha, cfg)
+			if n["kept"] != c.kept {
+				t.Fatalf("kept = %v, want %t", n["kept"], c.kept)
+			}
+			want := make([]any, 0, len(c.rejected))
+			for _, f := range c.rejected {
+				want = append(want, f)
+			}
+			if got := n["rejected_files"]; !reflect.DeepEqual(got, want) {
+				t.Errorf("rejected_files = %#v, want %#v", got, want)
+			}
+		})
+	}
+}
+
+func ponytailReport(t *testing.T, root, clone, sha string, cfg config.Config) obj {
+	t.Helper()
+	dir := t.TempDir()
+	r := newVerdict(dir, io.Discard)
+	r.step("ponytail", func() (map[string]any, error) {
+		return agent{Agent: cfg.Agent, dir: dir}.ponytail(root, clone, sha,
+			[]proof{unitProof(t, clone, sha)}, fixIssue, cfg)
+	})
+	if r.err != nil {
+		t.Fatal(r.err)
+	}
+	return reportNode(t, readReport(t, filepath.Join(dir, "report.json")), "ponytail")
 }

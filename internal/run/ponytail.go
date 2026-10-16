@@ -64,7 +64,8 @@ func (a agent) ponytail(root, clone, sha string, proofs []proof, i Issue, c conf
 	if err != nil {
 		return ev, err
 	}
-	why, lines, found, err := judge(clone, sha, before, after, files, found, c.TestPatterns)
+	why, lines, found, rejectedFiles, err := judge(clone, sha, before, after, files, found, c.TestPatterns)
+	ev["rejected_files"] = rejectedFiles
 	if err != nil {
 		return ev, err
 	}
@@ -85,10 +86,30 @@ func (a agent) ponytail(root, clone, sha string, proofs []proof, i Issue, c conf
 	ev["kept"] = why == ""
 	if why != "" {
 		ev["reason"] = why
-		return ev, restore(clone, all)
+		ev["rejected_files"], err = restoreCut(clone, all, why, rejectedFiles)
+		return ev, err
 	}
 	ev["commits"], ev["tombstones"], err = commit(root, clone, sha, before, i, found)
 	return ev, err
+}
+
+// restoreCut puts the remaining cut back and records why, preserving each file's earlier rejection reason.
+func restoreCut(clone, tree, why string, rejectedFiles []rejectedFile) ([]rejectedFile, error) {
+	now, err := whole(clone)
+	if err != nil {
+		return rejectedFiles, err
+	}
+	changed, err := every(clone, "diff", "--name-only", "--no-renames", "-z", tree, now)
+	if err != nil {
+		return rejectedFiles, err
+	}
+	for _, path := range strings.Split(changed, "\x00") {
+		if path != "" && !slices.ContainsFunc(rejectedFiles, func(f rejectedFile) bool { return f.Path == path }) {
+			rejectedFiles = append(rejectedFiles, rejectedFile{Path: path, Reason: why})
+		}
+	}
+	slices.SortFunc(rejectedFiles, func(a, b rejectedFile) int { return strings.Compare(a.Path, b.Path) })
+	return rejectedFiles, restore(clone, tree)
 }
 
 // reprove says why the work in clone, on HEAD base, the last unit's, fails a unit's proof again, each unit
@@ -203,42 +224,48 @@ func fault(clone, sha, before, after string, files []string, found []finding, te
 // judge is fault on the cut from before to after, once each file a finding names with a missing or non-empty
 // issue sentence, or that the cut deletes, adds, or touches as a test or outside files, is back as before.
 // Nothing of the cut left is fault on it as it stands, the same "no cut". kept are the findings of the files
-// that stay.
+// that stay; rejectedFiles names each rejected file with its rule's reason.
 func judge(clone, sha, before, after string, files []string, found []finding, tests []string) (why string,
-	lines [2]int, kept []finding, err error) {
+	lines [2]int, kept []finding, rejectedFiles []rejectedFile, err error) {
+	rejectedFiles = []rejectedFile{}
 	changed, err := git(clone, "diff", "--name-status", "--no-renames", "-z", before, after)
 	if err != nil {
-		return "", lines, nil, err
+		return "", lines, nil, rejectedFiles, err
 	}
 	bad, live := rejected(changed, files, found, tests)
+	for f := strings.Split(changed, "\x00"); len(f) > 1; f = f[2:] {
+		if reason := bad[f[1]]; reason != "" {
+			rejectedFiles = append(rejectedFiles, rejectedFile{Path: f[1], Reason: reason})
+		}
+	}
 	if !live || len(bad) == 0 {
 		why, lines, err = fault(clone, sha, before, after, files, found, tests)
-		return why, lines, found, err
+		return why, lines, found, rejectedFiles, err
 	}
 	if err = restoreFiles(clone, before, changed, bad); err != nil {
-		return "", lines, nil, err
+		return "", lines, nil, rejectedFiles, err
 	}
 	if after, err = snapshot(clone); err != nil {
-		return "", lines, nil, err
+		return "", lines, nil, rejectedFiles, err
 	}
-	kept = slices.DeleteFunc(found, func(f finding) bool { return bad[f.File] })
+	kept = slices.DeleteFunc(found, func(f finding) bool { return bad[f.File] != "" })
 	why, lines, err = fault(clone, sha, before, after, files, kept, tests)
-	return why, lines, kept, err
+	return why, lines, kept, rejectedFiles, err
 }
 
 // rejected is each file of changed, the cut's name-status, that does not stay, and whether any file of it does.
-func rejected(changed string, files []string, found []finding, tests []string) (bad map[string]bool, live bool) {
-	bad = map[string]bool{}
+func rejected(changed string, files []string, found []finding, tests []string) (bad map[string]string, live bool) {
+	bad = map[string]string{}
 	for _, f := range found {
-		if sentenceFault(f) != "" {
-			bad[f.File] = true
+		if why := sentenceFault(f); why != "" && bad[f.File] == "" {
+			bad[f.File] = why
 		}
 	}
 	for f := strings.Split(changed, "\x00"); len(f) > 1; f = f[2:] {
-		if fileFault(f[0], f[1], files, tests) != "" {
-			bad[f[1]] = true
+		if why := fileFault(f[0], f[1], files, tests); why != "" && bad[f[1]] == "" {
+			bad[f[1]] = why
 		}
-		live = live || !bad[f[1]]
+		live = live || bad[f[1]] == ""
 	}
 	return bad, live
 }
@@ -271,10 +298,10 @@ func fileFault(status, path string, files, tests []string) string {
 
 // restoreFiles puts each path of changed, the cut's name-status, that bad names back to tree in clone. An
 // added file is removed; any other is checked out of tree.
-func restoreFiles(clone, tree, changed string, bad map[string]bool) error {
+func restoreFiles(clone, tree, changed string, bad map[string]string) error {
 	var back []string
 	for f := strings.Split(changed, "\x00"); len(f) > 1; f = f[2:] {
-		if !bad[f[1]] {
+		if bad[f[1]] == "" {
 			continue
 		}
 		if f[0] == "A" {
