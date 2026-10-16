@@ -385,6 +385,15 @@ func (a agent) deliver(r *verdict, root, clone, sha, base, line string, i Issue,
 	if handed != "" && !gateDone {
 		_, gateErr = followGate(ctx, r, root, clone, handed, nil)
 	}
+	r.keepGateReason(gateErr)
+}
+
+// keepGateReason makes a gate failure the run's reason, ahead of a delivery command error, which stays joined.
+func (r *verdict) keepGateReason(gateErr error) {
+	if gateErr != nil && r.Reason == gateErr.Error() {
+		r.err = errors.Join(gateErr, r.err)
+		return
+	}
 	r.err = errors.Join(r.err, gateErr)
 	if errors.Is(gateErr, errPRClosed) {
 		r.err, r.Reason = gateErr, gateErr.Error()

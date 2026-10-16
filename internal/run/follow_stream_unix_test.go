@@ -287,7 +287,7 @@ func TestFollowStreamGateFailedWithOpenPR(t *testing.T) {
 	s.gate("completed", "ci,completed,", "ci,failed,")
 	s.advance(10 * time.Second)
 	s.next("pr_opened", map[string]any{"url": recordedPR})
-	s.next("run_failed", map[string]any{"step": "ci"})
+	s.next("run_failed", map[string]any{"step": "delivery"})
 	s.ended(1)
 }
 
@@ -337,7 +337,7 @@ esac
 					s.next("gate_fixing_ci", map[string]any{"commit": map[string]any{
 						"sha": "0000000000000000000000000000000000000001", "subject": "no-mistakes(ci): Repair CI", "step": "ci"}})
 				}
-				s.next("run_failed", map[string]any{"step": "ci", "reason": "no-mistakes step ci failed"})
+				s.next("run_failed", map[string]any{"step": "delivery", "reason": "no-mistakes step ci failed"})
 				s.ended(1)
 			})
 		}
@@ -363,7 +363,7 @@ esac
 			s.next("pr_opened", map[string]any{"url": recordedPR})
 			s.next("gate_fixing_ci", map[string]any{"commit": map[string]any{
 				"sha": "0000000000000000000000000000000000000001", "subject": "no-mistakes(ci): Repair CI", "step": "ci"}})
-			s.next("run_failed", map[string]any{"step": "ci", "reason": "no-mistakes step ci failed"})
+			s.next("run_failed", map[string]any{"step": "delivery", "reason": "no-mistakes step ci failed"})
 			s.ended(1)
 		})
 	}
