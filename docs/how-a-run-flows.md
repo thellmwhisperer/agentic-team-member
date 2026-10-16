@@ -16,8 +16,8 @@ No watcher, no run. For a watcher owned by the launch process, see
 [Following one run](#following-one-run). With `--watcher`, the session starts `atm watch` first,
 under its harness's streaming monitor (any tool that wakes the session on each
 output line), and passes the id from its first line, `watching as <id>`, to
-`atm run --watcher <id>`. It replaces the CoS skill's `vigia.sh`: it never
-exits on an event, so there is nothing to re-arm.
+`atm run --watcher <id>`. It never exits on an event, so there is nothing to
+re-arm.
 
 `atm run` without `--watcher` or [`--follow`](#following-one-run), or naming a
 watcher that is not alive, fails before cloning with exit code 2:
