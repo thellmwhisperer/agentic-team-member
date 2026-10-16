@@ -31,8 +31,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # windows-latest off until #398: internal/run is over the 30-minute limit there (Javi, 16-oct).
-        os: [ubuntu-latest, macos-latest]
+        # Experiment for #398: Windows only, with Defender exclusions. Not for merge.
+        os: [windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -48,6 +48,20 @@ jobs:
       - name: Install make on Windows
         if: runner.os == 'Windows'
         run: choco install make --no-progress
+
+      # Same step as no-mistakes' ci.yml: Defender scans every process spawn and temp file the tests make.
+      - name: Exclude build and test trees from Defender
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          try {
+            $paths = @($env:GITHUB_WORKSPACE, $env:RUNNER_TEMP, $env:TEMP, (go env GOCACHE), (go env GOMODCACHE), (go env GOROOT)) | Where-Object { $_ } | Sort-Object -Unique
+            Add-MpPreference -ExclusionPath $paths -ErrorAction Stop
+            Add-MpPreference -ExclusionProcess 'go.exe', 'git.exe' -ErrorAction Stop
+            Write-Host "Defender exclusions added for: $($paths -join ', ')"
+          } catch {
+            Write-Host "::warning::Defender exclusions unavailable: $_"
+          }
 
       - name: Test
         run: make test
