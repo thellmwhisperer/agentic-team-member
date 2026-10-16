@@ -26,8 +26,7 @@ func onPath(t *testing.T, names ...string) {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
-// lines is doctor's output, one check a line, checked to start with ok or fail, without its last line, checked
-// to say how to say hello to the agent.
+// lines checks doctor's prerequisite and skill lines, excluding its final hello hint.
 func lines(t *testing.T, out string) []string {
 	t.Helper()
 	ls := strings.Split(strings.TrimSpace(out), "\n")
@@ -36,6 +35,9 @@ func lines(t *testing.T, out string) []string {
 	}
 	ls = ls[:len(ls)-1]
 	for _, l := range ls {
+		if l == "skill: ok" || l == "skill: missing" || l == "skill: outdated (run atm skill install --force)" {
+			continue
+		}
 		if !strings.HasPrefix(l, "ok ") && !strings.HasPrefix(l, "fail ") {
 			t.Fatalf("want every line to start with ok or fail, got %q in\n%s", l, out)
 		}
@@ -45,8 +47,8 @@ func lines(t *testing.T, out string) []string {
 
 func TestDoctorPassesWhenEveryCheckPasses(t *testing.T) {
 	for _, c := range []struct{ origin, want string }{
-		{"https://github.com/o/r.git", "ok git|ok claude|ok gh|ok .atm.yaml|ok watcher"},
-		{"https://example.com/o/r.git", "ok git|ok claude|ok .atm.yaml|ok watcher"},
+		{"https://github.com/o/r.git", "ok git|ok claude|ok gh|ok .atm.yaml|ok watcher|skill"},
+		{"https://example.com/o/r.git", "ok git|ok claude|ok .atm.yaml|ok watcher|skill"},
 	} {
 		t.Run(c.origin, func(t *testing.T) {
 			watcher(t, repo(t, c.origin), "w", 0)
@@ -78,7 +80,7 @@ func TestDoctorRunsEveryCheckAndFailsWhenAnyFails(t *testing.T) {
 		t.Chdir(t.TempDir())
 		out, err := atm(t, "doctor")
 		ls := lines(t, out)
-		if len(ls) != 3 || !strings.HasPrefix(ls[0], "fail git") || !strings.HasPrefix(ls[1], "fail claude") ||
+		if len(ls) != 4 || !strings.HasPrefix(ls[0], "fail git") || !strings.HasPrefix(ls[1], "fail claude") ||
 			!strings.HasPrefix(ls[2], "fail .atm.yaml") {
 			t.Fatalf("want git, claude and .atm.yaml to fail, got\n%s", out)
 		}
@@ -90,8 +92,8 @@ func TestDoctorRunsEveryCheckAndFailsWhenAnyFails(t *testing.T) {
 		doctorRepoWithConfig(t, "test: go test ./...\n")
 		out, err := atm(t, "doctor")
 		ls := lines(t, out)
-		if len(ls) != 5 || !strings.HasPrefix(ls[3], "fail .atm.yaml") || !strings.Contains(ls[3], "lint") {
-			t.Fatalf("want 5 checks, .atm.yaml failing on lint, got\n%s", out)
+		if len(ls) != 6 || !strings.HasPrefix(ls[3], "fail .atm.yaml") || !strings.Contains(ls[3], "lint") {
+			t.Fatalf("want 6 checks, .atm.yaml failing on lint, got\n%s", out)
 		}
 		if run.ExitCode(err) == 0 {
 			t.Fatal("want a non-zero exit")
@@ -101,8 +103,8 @@ func TestDoctorRunsEveryCheckAndFailsWhenAnyFails(t *testing.T) {
 		doctorRepoWithConfig(t, "install: ''\ninstall: ''\n")
 		out, err := atm(t, "doctor")
 		ls := lines(t, out)
-		if len(ls) != 5 || !strings.HasPrefix(ls[3], "fail .atm.yaml") {
-			t.Fatalf("want five one-line checks and .atm.yaml failing, got\n%s", out)
+		if len(ls) != 6 || !strings.HasPrefix(ls[3], "fail .atm.yaml") {
+			t.Fatalf("want six one-line checks and .atm.yaml failing, got\n%s", out)
 		}
 		if run.ExitCode(err) == 0 {
 			t.Fatal("want a non-zero exit")
