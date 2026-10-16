@@ -574,7 +574,8 @@ func applyGate(ctx context.Context, r *verdict, root, clone, branch string) (boo
 func (g gateState) outcome(r *verdict) (bool, error) {
 	switch {
 	case g.failed != "":
-		r.failGate(g.failed, "no-mistakes step "+g.failed+" failed")
+		r.FailedNode, r.Reason = g.failed, "no-mistakes step "+g.failed+" failed"
+		r.gateNode(g.failed, "failed", r.ensureNode(g.failed).DurationMS, r.Reason) // a no-op when already failed
 		return false, errors.New(r.Reason)
 	case g.closed:
 		return true, errPRClosed
@@ -623,28 +624,14 @@ func (r *verdict) noteGate(g gateState) {
 	}
 }
 
-func (r *verdict) failGate(name, why string) {
-	r.FailedNode, r.Reason = name, why
-	n := r.ensureNode(name)
-	if n.Result != "failed" {
-		r.gateNode(name, "failed", n.DurationMS, why)
-	}
-}
-
 func gateResult(name, status string, g gateState) string {
-	if g.waiting != "" && name == g.waiting {
+	switch {
+	case name == g.waiting:
 		return "waiting"
-	}
-	switch status {
-	case "completed":
+	case status == "completed":
 		return "passed"
-	case "failed":
-		return "failed"
-	case "pending":
-		return "pending"
-	case "skipped":
-		return "skipped"
-	default:
-		return "running"
+	case status == "failed" || status == "pending" || status == "skipped":
+		return status
 	}
+	return "running"
 }
