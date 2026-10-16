@@ -482,10 +482,12 @@ becomes `waiting`. `pending`, `skipped` and `failed` keep those results;
 other active states become `running`.
 
 The Agent and `ponytail` nodes also have `agent_model`: the first model named
-by that invocation's stream, or `""` when none is named. Claude names it in
-its `system` / `init` event; Pi's assistant `message_end` names it as
-`<provider>/<model>`. Codex and OpenCode retain a model when their events
-explicitly name one. This value never falls back to the requested model.
+by that invocation's stream, or `""` when none is named. Claude and Cursor
+supply the `model` in a `system` / `init` event. Pi's assistant `message_end`
+supplies `message.provider` and `message.model`, recorded as
+`<provider>/<model>` or just `<model>` when the provider is absent. For Codex
+and OpenCode, ATM reads only an event's top-level `model` field. This value never
+falls back to the requested model.
 Each `units` entry keeps its own `agent_model`, so a later unit or the slop
 detector cannot replace an earlier unit's attribution. A resumed unit that
 does not invoke an agent has an empty observed model.

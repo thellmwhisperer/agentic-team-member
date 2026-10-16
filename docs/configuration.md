@@ -136,9 +136,9 @@ Run every command from inside the repository it works on.
 | `atm doctor [--agent]` | Checks git, the configured agent CLI on `PATH`, `gh` when `origin` is on GitHub, `.atm.yaml`, and whether an `atm watch` lease is alive. One `ok` or `fail` line each; every check runs, and any failure exits non-zero. Its last line says `run atm doctor --agent to say hello to <harness>`: it makes no model call. With `--agent` it says hello instead, see [saying hello to the agent](#saying-hello-to-the-agent) |
 | `atm watch [--adopt <run>]` | Watches runs bound to it until killed; see [the watcher](how-a-run-flows.md#the-watcher) |
 | `atm run --watcher <id> [flags] <issue>` | Starts a run bound to a live watcher. On a terminal it keeps the completed screen open until q or Ctrl+C, then exits with the run's code; off one it prints the run's label and returns. See [the watcher](how-a-run-flows.md#the-watcher) and [resuming a failed run](#resuming-a-failed-run) |
-| `atm status` | Each run going: label, step, duration, issue; or `nothing runs` |
+| `atm status [--json]` | Each run going; text shows label, step, duration, agent and issue, or `nothing runs` |
 | `atm attach [run]` | The run's screen, the last one going by default; completed screens stay until q or Ctrl+C |
-| `atm runs` | Retained runs: label, `running`, `passed` or `failed at <step>`, duration, watcher, issue and report |
+| `atm runs [--json]` | Retained runs; text shows label, `running`, `passed` or `failed at <step>`, duration, agent, watcher, issue and report |
 | `atm axi run [--json] [flags] <issue>` | Waits for the run to end, prints its outcome and exits with its code |
 | `atm axi status [--json]`, `atm axi runs [--json]` | The runs going, or retained runs, as a table |
 | `atm axi plan [--json] [--follow] <plan.json>` | Which tickets of a plan can launch now; see [following a plan](#following-a-plan) |
@@ -148,8 +148,12 @@ going. `atm axi` is for programs: it prints TOON, or JSON with `--json`;
 `axi plan --follow` always prints JSON lines. The `axi run` outcome carries
 `outcome`, `run`, `failed_node`, `reason`, `report` (empty when the run failed
 before its first step) and `next_step`. The `axi status` and `axi runs` tables
-have `run`, `issue`, `step` and `duration` for `status`, and `run`, `issue`,
-`outcome`, `failed_node`, `duration` and `report` for `runs`.
+have `run`, `issue`, `step`, `duration` and `agent` for `status`, and `run`,
+`issue`, `outcome`, `failed_node`, `duration`, `report` and `agent` for `runs`.
+`atm status --json` and `atm runs --json` use the same JSON format as their
+`axi` forms: a `runs` array of objects, empty when no runs match. The
+[report reference](how-a-run-flows.md#the-report) defines the `agent` label
+and how requested settings differ from the observed model.
 
 The exit codes are in the [README](../README.md#run-it).
 
