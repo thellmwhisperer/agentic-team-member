@@ -9,6 +9,21 @@ in [How a run flows](how-a-run-flows.md).
   <img alt="Configuration layers, each overriding shared keys from the one before: built-in defaults (harness claude), then ~/.config/atm/config.yaml (see machine settings below), then .atm.yaml at the repository root (every command and pattern, and optionally harness, model, effort), then the flags of one atm run (--harness, --model, --effort)." src="assets/config-layers-light.svg" width="900">
 </picture>
 
+## Skill
+
+`atm skill` prints the embedded `skills/atm/SKILL.md` verbatim. This project
+skill is the only ATM driving skill ATM maintains; machine-specific overlays
+are maintained separately.
+
+`atm skill install` writes it to `~/.claude/skills/atm/SKILL.md`.
+Use `--dir <path>` to choose another skills directory. Directory symlinks are
+followed. An identical installation is left alone; different content is
+refused with exit 2 unless `--force` is given.
+
+`atm doctor` reports `skill: ok`, `skill: missing`, or
+`skill: outdated (run atm skill install --force)` for the default location.
+This advisory line does not change the exit status of the prerequisite checks.
+
 ## Layers
 
 Each layer overrides shared keys from the one before. A key not supported

@@ -57,13 +57,13 @@ func TestDoctorSaysWhetherAWatcherLives(t *testing.T) {
 		t.Fatalf("atm init: %v\n%s", err, out)
 	}
 	out, err := atm(t, "doctor")
-	if ls := lines(t, out); err == nil || ls[len(ls)-1] !=
+	if ls := lines(t, out); err == nil || ls[len(ls)-1] != "skill: missing" || ls[len(ls)-2] !=
 		"fail watcher: none alive: start atm watch in the session that launches the run" {
 		t.Fatalf("doctor without a watcher: %v\n%s", err, out)
 	}
 	watcher(t, dir, "w1", 0)
 	out, err = atm(t, "doctor")
-	if ls := lines(t, out); err != nil || ls[len(ls)-1] != "ok watcher: w1" {
+	if ls := lines(t, out); err != nil || ls[len(ls)-1] != "skill: missing" || ls[len(ls)-2] != "ok watcher: w1" {
 		t.Fatalf("doctor with watcher w1: %v\n%s", err, out)
 	}
 }

@@ -19,7 +19,7 @@ import (
 // runCmd hands the run to the repository's background process, so closing the terminal leaves it going.
 // Without --follow, a terminal keeps the completed screen open until the user closes it.
 func runCmd() *cobra.Command {
-	return &cobra.Command{Use: "run", Short: "Fix an issue: " + run.Usage,
+	c := &cobra.Command{Use: "run", Short: "Fix an issue: " + run.Usage,
 		Long: "Without --follow, on a terminal the completed screen stays open until q or Ctrl+C.\n" +
 			"With --follow instead of --watcher, atm is the run's watcher and prints its events as JSON lines until " +
 			"it ends: exit 0 on merge, 1 on closure or run failure (also on interruption or no delivery), " +
@@ -48,6 +48,9 @@ func runCmd() *cobra.Command {
 			}
 			return attach(root, o.Run, "startup", cmd.OutOrStdout())
 		}}
+	// Publish the skill's flag in cobra too; run still owns argument parsing.
+	c.Flags().Bool("follow", false, "be the run's watcher and print its events as JSON until it ends")
+	return c
 }
 
 func terminal(f *os.File) bool {
