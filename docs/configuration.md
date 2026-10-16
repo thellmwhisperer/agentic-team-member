@@ -11,14 +11,15 @@ in [How a run flows](how-a-run-flows.md).
 
 ## Skill
 
-`atm skill` prints the embedded `skills/atm/SKILL.md` verbatim. This project
+`atm skill` prints the embedded [skills/atm/SKILL.md](../skills/atm/SKILL.md) verbatim. This project
 skill is the only ATM driving skill ATM maintains; machine-specific overlays
 are maintained separately.
 
 `atm skill install` writes it to `~/.claude/skills/atm/SKILL.md`.
 Use `--dir <path>` to choose another skills directory. Directory symlinks are
 followed. An identical installation is left alone; different content is
-refused with exit 2 unless `--force` is given.
+refused with exit 2 unless `--force` is given. Neither skill command requires
+a repository.
 
 `atm doctor` reports `skill: ok`, `skill: missing`, or
 `skill: outdated (run atm skill install --force)` for the default location.
@@ -143,12 +144,13 @@ duration is the effective limit.
 
 ## Commands
 
-Run every command from inside the repository it works on.
+Run repository commands from inside the repository they work on.
 
 | Command | Does |
 |---------|------|
 | `atm init` | Writes a commented `.atm.yaml` with every key empty, unless there is one, and adds `/.atm/` to `.gitignore` unless it is there. Run twice, it changes nothing |
-| `atm doctor [--agent]` | Checks git, the configured agent CLI on `PATH`, `gh` when `origin` is on GitHub, `.atm.yaml`, and whether an `atm watch` lease is alive. One `ok` or `fail` line each; every check runs, and any failure exits non-zero. Its last line says `run atm doctor --agent to say hello to <harness>`: it makes no model call. With `--agent` it says hello instead, see [saying hello to the agent](#saying-hello-to-the-agent) |
+| `atm doctor [--agent]` | Checks git, the configured agent CLI on `PATH`, `gh` when `origin` is on GitHub, `.atm.yaml`, and whether an `atm watch` lease is alive. One `ok` or `fail` line per prerequisite; every check runs, and any prerequisite failure exits non-zero. It also reports the advisory [skill status](#skill). Its last line says `run atm doctor --agent to say hello to <harness>`: it makes no model call. With `--agent` it says hello instead, see [saying hello to the agent](#saying-hello-to-the-agent) |
+| `atm skill`, `atm skill install [--dir <path>] [--force]` | See [Skill](#skill) |
 | `atm watch [--adopt <run>]` | Watches runs bound to it until killed; see [the watcher](how-a-run-flows.md#the-watcher) |
 | `atm run --watcher <id> [flags] <issue>` | Starts a run bound to a live watcher. On a terminal it keeps the completed screen open until q or Ctrl+C, then exits with the run's code; off one it prints the run's label and returns. See [the watcher](how-a-run-flows.md#the-watcher) and [resuming a failed run](#resuming-a-failed-run) |
 | `atm status [--json]` | Each run going; text shows label, step, duration, agent and issue, or `nothing runs` |

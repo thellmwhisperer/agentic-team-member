@@ -7,8 +7,9 @@ description: Launch ATM runs, act on their streamed events, judge no-mistakes fi
 
 Before the first run, run `atm doctor` in the project. Check `.atm.yaml`
 declares the project's checks and delivery command, and that `no-mistakes`
-is reachable on PATH. Resolve failing prerequisites. A separate watcher is
-not needed when using the followed launch below.
+is reachable on PATH. Resolve failing prerequisites except `fail watcher`
+when no watcher is alive: the followed launch below creates its own watcher,
+so that failure alone does not block it.
 
 Launch each ready issue with your harness's background-process facility:
 

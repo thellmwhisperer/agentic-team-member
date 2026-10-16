@@ -113,6 +113,7 @@ effort. Both are in [Configuration](docs/configuration.md).
 |---------|------|
 | `atm init` | Writes a commented `.atm.yaml` and ignores `.atm/` |
 | `atm doctor` | Checks that a run can start, a live watcher included |
+| `atm skill`, `atm skill install` | See [ATM's driving skill](docs/configuration.md#skill) |
 | `atm watch [--adopt <run>]` | Watches the runs bound to it until killed, one line per event; see [The watcher](docs/how-a-run-flows.md#the-watcher) |
 | `atm run --watcher <id> [flags] <issue>` | Runs an issue: a GitHub number or a file with a `Type:` line. Without a live watcher it does not start |
 | `atm run --resume <run>` | Runs a failed run's issue again from its agent's work, at its checks |
