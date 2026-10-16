@@ -52,11 +52,8 @@ func Run(label string, args []string, out, summary io.Writer) (err error) {
 		return err
 	}
 	// The steps after the issue take the config from here.
-	c, err := config.Load(root, home, a.Agent)
+	c, err := loadRunConfig(root, home, a.Agent)
 	if err != nil {
-		return err
-	}
-	if err := checkInstall(c.Install, root); err != nil {
 		return err
 	}
 	a.Agent, a.root, a.dir, a.timeout = c.Agent, root, runDir(root, label), time.Duration(c.AgentTimeout)
@@ -98,6 +95,14 @@ func Run(label string, args []string, out, summary io.Writer) (err error) {
 	})
 	a.deliver(r, root, dir, sha, *base, c.Delivery, i, proofs, c, summary)
 	return r.err
+}
+
+func loadRunConfig(root, home string, agent config.Agent) (config.Config, error) {
+	c, err := config.Load(root, home, agent)
+	if err != nil {
+		return c, err
+	}
+	return c, checkInstall(c.Install, root)
 }
 
 // checkInstall refuses an install the reach guard would reject when the worker runs it from the brief.
