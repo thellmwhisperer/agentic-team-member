@@ -475,6 +475,13 @@ remains recorded; following the gate does not erase it. If the gate ends
 while the command is still running, ATM stops the command and uses the gate
 outcome.
 
+If the gate reports `status: completed`, its `ci` step is `skipped`, and
+`pr_state` is absent, ATM checks the branch's PR with `gh` even while the
+clone remains. An open PR keeps the run following; a merged PR passes the
+run and Delivery, leaving the CI node `skipped`. A closed, unmerged PR fails
+as described below. When `pr_state` is present, the gate's result remains
+authoritative. ATM does not skip CI or remove the clone to end the run.
+
 Review, test, document, lint, push, PR and CI are nodes of the same run,
 below Delivery. A closed, unmerged PR preserves the gate's recorded node
 results and records `PR closed` as the run's reason; it does not turn a
