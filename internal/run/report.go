@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/thellmwhisperer/agentic-team-member/internal/buildinfo"
 )
 
 // verdict is report.json, written at every node's start and end: why the run stopped, then each node's result,
@@ -27,6 +29,7 @@ type verdict struct {
 	Commands   []cmdResult    `json:"commands"`
 	HeadSHA    string         `json:"head_sha,omitempty"` // the delivered branch's
 	Watcher    string         `json:"watcher,omitempty"`  // the atm watch the run was bound to
+	Serve      string         `json:"serve,omitempty"`    // buildinfo.String() of the serve that wrote it
 	path       string
 	out        io.Writer // the log: each node's start and end, one JSON object a line
 	err        error     // the failed node's
@@ -104,7 +107,7 @@ func (a agent) verdict(out io.Writer) *verdict {
 
 // newVerdict is the report of a run in its directory dir, every node not run yet.
 func newVerdict(dir string, out io.Writer) *verdict {
-	r := &verdict{path: filepath.Join(dir, "report.json"), out: out}
+	r := &verdict{path: filepath.Join(dir, "report.json"), out: out, Serve: buildinfo.String()}
 	for _, name := range []string{"issue", "clone", "contract", "agent", "checks", "ponytail", "delivery"} {
 		r.Nodes = append(r.Nodes, &node{Name: name, Result: "not run"})
 	}
