@@ -310,7 +310,7 @@ type gate struct {
 // decision and the first that failed, and whether it has steps, CI is being fixed or green, and the PR merged;
 // read, also the findings of its gate and its PR's CI repair commits, or the error that kept them unread.
 type gateState struct {
-	pr, waiting, failed, status         string
+	pr, waiting, failed, status, reason string // reason is the top-level error: line, unquoted
 	seen, fixing, green, merged, closed bool
 	hasPRState                          bool
 	findings                            []gateFinding
@@ -366,23 +366,32 @@ func parseGate(status string) (s gateState) {
 			if unquoted, err := strconv.Unquote(value); err == nil {
 				value = unquoted
 			}
-			switch key {
-			case "status":
-				s.status = value
-			case "pr":
-				s.pr = value
-			case "pr_state":
-				s.hasPRState = true
-				s.merged, s.closed = value == "merged", value == "closed"
-			case "awaiting_agent":
-				parked = strings.HasPrefix(value, "parked")
-			}
+			parked = s.field(key, value, indent, parked)
 		}
 	}
 	if len(s.findings) != expectedFindings {
 		s.err = cmp.Or(s.err, fmt.Errorf("findings has %d rows, want %d", len(s.findings), expectedFindings))
 	}
 	return s
+}
+
+func (s *gateState) field(key, value string, indent int, parked bool) bool {
+	switch key {
+	case "status":
+		s.status = value
+	case "pr":
+		s.pr = value
+	case "pr_state":
+		s.hasPRState = true
+		s.merged, s.closed = value == "merged", value == "closed"
+	case "awaiting_agent":
+		return strings.HasPrefix(value, "parked")
+	case "error":
+		if indent == 0 {
+			s.reason = value
+		}
+	}
+	return parked
 }
 
 func (s *gateState) findingCount(header string) int {
@@ -584,7 +593,8 @@ func applyGate(ctx context.Context, r *verdict, root, clone, branch string) (boo
 func (g gateState) outcome(r *verdict) (bool, error) {
 	switch {
 	case g.failed != "":
-		r.FailedNode, r.Reason = g.failed, "no-mistakes step "+g.failed+" failed"
+		r.FailedNode = g.failed
+		r.Reason = cmp.Or(g.reason, "no-mistakes step "+g.failed+" failed")
 		r.gateNode(g.failed, "failed", r.ensureNode(g.failed).DurationMS, r.Reason) // a no-op when already failed
 		return false, errors.New(r.Reason)
 	case g.closed:

@@ -187,8 +187,16 @@ func (s *observer) end(root string, o Outcome) (int, bool) {
 		s.reason = o.Reason
 		return 0, false
 	}
-	s.say("run_failed", map[string]any{"step": cmp.Or(o.FailedNode, o.Step), "reason": o.Reason})
+	s.say("run_failed", map[string]any{"step": deliveryStep(cmp.Or(o.FailedNode, o.Step)), "reason": o.Reason})
 	return 1, true
+}
+
+// deliveryStep maps a failed gate step, intent and rebase included, to delivery.
+func deliveryStep(step string) string {
+	if step == "intent" || step == "rebase" || gateStepName(step) {
+		return "delivery"
+	}
+	return step
 }
 
 // poll reads the gate, once the run delivers, and its PR, once there is one or the gate cannot be read.
@@ -220,8 +228,8 @@ func (s *observer) poll(ctx context.Context, root string) (int, bool) {
 		s.green = g.green
 	}
 	if g.failed != "" {
-		s.say("run_failed", map[string]any{"step": g.failed,
-			"reason": cmp.Or(s.reason, "no-mistakes step "+g.failed+" failed")})
+		s.say("run_failed", map[string]any{"step": deliveryStep(g.failed),
+			"reason": cmp.Or(s.reason, g.reason, "no-mistakes step "+g.failed+" failed")})
 		return 1, true
 	}
 	switch prState {
