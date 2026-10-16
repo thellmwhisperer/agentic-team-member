@@ -220,8 +220,8 @@ func (s *observer) poll(ctx context.Context, root string) (int, bool) {
 		s.green = g.green
 	}
 	if g.failed != "" {
-		s.say("run_failed", map[string]any{"step": g.failed,
-			"reason": cmp.Or(s.reason, "no-mistakes step "+g.failed+" failed")})
+		s.say("run_failed", map[string]any{"step": "delivery",
+			"reason": cmp.Or(s.reason, g.reason, "no-mistakes step "+g.failed+" failed")})
 		return 1, true
 	}
 	switch prState {

@@ -310,7 +310,7 @@ type gate struct {
 // decision and the first that failed, and whether it has steps, CI is being fixed or green, and the PR merged;
 // read, also the findings of its gate and its PR's CI repair commits, or the error that kept them unread.
 type gateState struct {
-	pr, waiting, failed, status         string
+	pr, waiting, failed, status, reason string
 	seen, fixing, green, merged, closed bool
 	hasPRState                          bool
 	findings                            []gateFinding
@@ -367,6 +367,8 @@ func parseGate(status string) (s gateState) {
 				value = unquoted
 			}
 			switch key {
+			case "error":
+				s.reason = value
 			case "status":
 				s.status = value
 			case "pr":
