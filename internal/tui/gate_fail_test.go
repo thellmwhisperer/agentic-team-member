@@ -17,9 +17,7 @@ import (
 	"github.com/thellmwhisperer/agentic-team-member/internal/run"
 )
 
-// A gate poll can jump from Test running to Document failed. herdr must name Document, and report.json must
-// keep no-mistakes' start times instead of the time ATM noticed the snapshot.
-func TestGateJumpNamesTheFailedNodeAndKeepsItsStart(t *testing.T) {
+func TestGateJumpNamesTheFailedNodeAndOmitsUnknownStarts(t *testing.T) {
 	root, bin := gateRepo(t)
 	snaps := filepath.Join(bin, "snaps")
 	if err := os.Mkdir(snaps, 0o700); err != nil {
@@ -102,22 +100,24 @@ func checkGateStarts(t *testing.T, report map[string]any) {
 	if report["failed_node"] != "document" {
 		t.Fatalf("failed_node = %v, want document", report["failed_node"])
 	}
-	want := map[string]string{
-		"review": "2020-01-02T03:04:05.006Z", "test": "2020-01-02T03:04:06.007Z",
-		"document": "2020-01-02T03:04:07.008Z",
+	want := map[string]struct {
+		result string
+		ms     float64
+	}{
+		"review": {"passed", 100}, "test": {"passed", 80},
+		"document": {"failed", 12}, "lint": {"skipped", 0},
+		"push": {"passed", 1}, "pr": {"pending", 0}, "ci": {"pending", 0},
 	}
-	for _, raw := range report["nodes"].([]any) {
-		n := raw.(map[string]any)
-		name, _ := n["name"].(string)
-		got, ok := n["started_at"].(string)
-		if expect, named := want[name]; named {
-			if !ok || got != expect {
-				t.Fatalf("node %s started_at = %v, want %s", name, n["started_at"], expect)
-			}
-			continue
-		}
-		if (name == "lint" || name == "push") && ok {
+	for name, expect := range want {
+		n := gateNode(t, report, name)
+		if got, ok := n["started_at"]; ok {
 			t.Fatalf("node %s invented started_at %v", name, got)
+		}
+		if n["result"] != expect.result {
+			t.Fatalf("node %s result = %v, want %s", name, n["result"], expect.result)
+		}
+		if n["duration_ms"] != expect.ms {
+			t.Fatalf("node %s duration_ms = %v, want %v", name, n["duration_ms"], expect.ms)
 		}
 	}
 	if gateNode(t, report, "lint")["result"] != "skipped" || gateNode(t, report, "push")["result"] != "passed" {
@@ -151,15 +151,15 @@ func readGateReport(t *testing.T, path string) map[string]any {
 
 func writeGateSnaps(t *testing.T, dir string) {
 	t.Helper()
-	header := "steps[7]{step,status,findings,duration_ms,started_at}:\n"
-	running := header + "  review,completed,0,100,2020-01-02T03:04:05.006Z\n" +
-		"  test,fixing,0,50,2020-01-02T03:04:06.007Z\n" +
-		"  document,pending,0,0,\n  lint,pending,0,0,\n  push,pending,0,0,\n  pr,pending,0,0,\n  ci,pending,0,0,\n"
-	failed := header + "  review,completed,0,100,2020-01-02T03:04:05.006Z\n" +
-		"  test,completed,0,80,2020-01-02T03:04:06.007Z\n" +
-		"  document,failed,1,12,2020-01-02T03:04:07.008Z\n" +
-		"  lint,skipped,0,0,2020-01-02T03:04:08.009Z\n" +
-		"  push,completed,0,1,\n  pr,pending,0,0,\n  ci,pending,0,0,\n"
+	header := "steps[7]{step,status,findings,duration_ms}:\n"
+	running := header + "  review,completed,0,100\n" +
+		"  test,fixing,0,50\n" +
+		"  document,pending,0,0\n  lint,pending,0,0\n  push,pending,0,0\n  pr,pending,0,0\n  ci,pending,0,0\n"
+	failed := header + "  review,completed,0,100\n" +
+		"  test,completed,0,80\n" +
+		"  document,failed,1,12\n" +
+		"  lint,skipped,0,0\n" +
+		"  push,completed,0,1\n  pr,pending,0,0\n  ci,pending,0,0\n"
 	for name, text := range map[string]string{"running": running, "failed": failed} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(text), 0o600); err != nil {
 			t.Fatal(err)

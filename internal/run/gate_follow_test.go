@@ -259,3 +259,29 @@ func TestClosedPRPreservesGateResultsAndEndsStreamAsClosed(t *testing.T) {
 		})
 	}
 }
+
+func TestRecordedGateSnapshotsOmitUnknownStarts(t *testing.T) {
+	for _, snapshot := range []string{"running", "parked", "completed"} {
+		t.Run(snapshot, func(t *testing.T) {
+			r := newVerdict(t.TempDir(), io.Discard)
+			g := parseGate(recorded(t, "atm_watch_status_"+snapshot+".txt"))
+			if g.err != nil {
+				t.Fatal(g.err)
+			}
+			r.noteGate(g)
+			if _, err := g.outcome(r); err != nil {
+				t.Fatal(err)
+			}
+			if err := r.write(); err != nil {
+				t.Fatal(err)
+			}
+			report := readReport(t, r.path)
+			for _, name := range []string{"review", "test", "document", "lint", "push", "pr", "ci"} {
+				n := reportNode(t, report, name)
+				if got, ok := n["started_at"]; ok {
+					t.Errorf("node %s invented started_at %v from %s capture", name, got, snapshot)
+				}
+			}
+		})
+	}
+}
