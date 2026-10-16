@@ -776,6 +776,15 @@ func send(root string, req request, in <-chan Input, fn func(reply)) (again bool
 		return false, err
 	}
 	defer func() { _ = c.Close() }()
+	if req.Cmd == "run" {
+		if again, err := matchingServe(root, c); again || err != nil {
+			return again, err
+		}
+	}
+	return exchange(c, req, in, fn)
+}
+
+func exchange(c net.Conn, req request, in <-chan Input, fn func(reply)) (again bool, err error) {
 	enc := json.NewEncoder(c)
 	if err := enc.Encode(req); err != nil {
 		return true, err
