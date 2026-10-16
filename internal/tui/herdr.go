@@ -170,13 +170,10 @@ func OpenHerdrTab(workspace, tabLabel, cwd string) (string, string, error) {
 		return "", "", err
 	}
 	tab, pane, err := createdTab(b)
-	if err != nil || pane == "" {
-		if err == nil {
-			err = fmt.Errorf("tab create: no root pane")
-		}
-		return tab, "", err
+	if err == nil && pane == "" {
+		err = fmt.Errorf("tab create: no root pane")
 	}
-	return tab, pane, nil
+	return tab, pane, err
 }
 
 // RunHerdrPane runs command in herdr pane pane.

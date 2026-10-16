@@ -16,34 +16,28 @@ import (
 // run starts, the first line runs atm attach in its root pane, and after a terminal line (merged, closed,
 // run_failed) is written, close closes the tab before exit.
 type followOut struct {
-	w   io.Writer
-	buf []byte
-	tab *runTab
+	w                        io.Writer
+	buf                      []byte
+	workspace, cwd, id, pane string
+	terminal                 bool
 }
 
 func newFollowOut(root string, w io.Writer) *followOut {
-	o := &followOut{w: w}
-	if os.Getenv("HERDR_ENV") != "1" {
-		return o
+	o := &followOut{w: w, cwd: root}
+	if home, err := os.UserHomeDir(); err == nil && os.Getenv("HERDR_ENV") == "1" {
+		if ws, err := config.HerdrWorkspace(home); err == nil {
+			o.workspace = ws
+		}
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return o
-	}
-	ws, err := config.HerdrWorkspace(home)
-	if err != nil || ws == "" {
-		return o
-	}
-	o.tab = &runTab{workspace: ws, cwd: root}
 	return o
 }
 
 func (o *followOut) open(issue string) string {
-	if o.tab == nil {
+	if o.workspace == "" {
 		return ""
 	}
-	id, pane, err := tui.OpenHerdrTab(o.tab.workspace, "atm-"+issue, o.tab.cwd)
-	o.tab.id, o.tab.pane = id, pane
+	id, pane, err := tui.OpenHerdrTab(o.workspace, "atm-"+issue, o.cwd)
+	o.id, o.pane = id, pane
 	if err != nil {
 		herdrLine(err)
 	}
@@ -52,7 +46,7 @@ func (o *followOut) open(issue string) string {
 
 func (o *followOut) Write(p []byte) (int, error) {
 	n, err := o.w.Write(p)
-	if o.tab == nil || n == 0 {
+	if o.workspace == "" || n == 0 {
 		return n, err
 	}
 	o.buf = append(o.buf, p[:n]...)
@@ -72,31 +66,24 @@ func (o *followOut) seen(line []byte) {
 	if json.Unmarshal(line, &ev) != nil || ev.Run == "" {
 		return
 	}
-	if o.tab.pane != "" {
-		if err := tui.RunHerdrPane(o.tab.pane, "atm attach "+ev.Run); err != nil {
+	if o.pane != "" {
+		if err := tui.RunHerdrPane(o.pane, "atm attach "+ev.Run); err != nil {
 			herdrLine(err)
 		}
-		o.tab.pane = ""
+		o.pane = ""
 	}
 	if ev.Event == "merged" || ev.Event == "closed" || ev.Event == "run_failed" {
-		o.tab.terminal = true
+		o.terminal = true
 	}
 }
 
 func (o *followOut) close() {
-	if o == nil || o.tab == nil || !o.tab.terminal || o.tab.id == "" {
+	if !o.terminal || o.id == "" {
 		return
 	}
-	id := o.tab.id
-	o.tab.id = ""
-	if err := tui.CloseHerdrTab(id); err != nil {
+	if err := tui.CloseHerdrTab(o.id); err != nil {
 		herdrLine(err)
 	}
-}
-
-type runTab struct {
-	workspace, cwd, id, pane string
-	terminal                 bool
 }
 
 func herdrLine(err error) {
