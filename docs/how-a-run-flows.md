@@ -110,9 +110,9 @@ a delivery command that has started a gate: see [Delivery](#delivery).
 | Issue | Reads the issue file or GitHub issue and its `Type:` | The issue cannot be read, or has no valid type |
 | Clone | Resolves `--base-ref` to a commit, clones the repository there into `.atm/clones/`, runs `install` | The ref, the clone or `install` fails |
 | Contract | Writes `brief.md`, the agent's contract | The brief cannot be written |
-| Agent | Runs the coding agent in the clone on the brief | It fails to complete successfully, times out, says nothing for 10 min, reaches outside its clone, does not prove use of the `ponytail` skill, or leaves no readable report |
+| Agent | Runs the coding agent in the clone on the brief | It fails to complete successfully, times out, says nothing for 10 min, reaches outside its clone, does not prove use of the `ponytail` skill, or fails [report validation](#rejected-reports) |
 | Checks | Prepares the clone and runs the proof and configured commands; see [Checks](#checks) | Cleanup, proof or a command fails, anything committed, or a [follow-up limit or mandatory gap](#follow-ups) blocks the run |
-| Slop detector | Lets a model cut the diff; keeps the cut only if every check still passes | Its agent fails, reports badly, or anything commits |
+| Slop detector | Lets a model cut the diff; keeps the cut only if every check still passes | Its agent fails, fails [report validation](#rejected-reports), or anything commits |
 | Delivery | Commits the work on a branch, has the agent review the commit against the issue, and runs the `delivery` command | The branch, the review or the command fails. Skipped when `delivery` is empty |
 
 Agent and Checks run again for each chained follow-up, at most three units in
@@ -148,7 +148,7 @@ For Hermes's ACP invocation and completion rules, see
 | `claude` | `claude -p --setting-sources project --strict-mcp-config --thinking-display summarized`, tools `Read,Edit,Write,Bash,Glob,Grep,Skill` only; `--harness-arg`s follow this default | on stdin |
 | `codex` | `codex exec`, which still loads your skills | as its last argument |
 | `opencode` | `opencode run --pure`, which still loads your skills | as its last argument |
-| `pi` | `pi -p --no-extensions --no-skills --no-prompt-templates --no-context-files --no-session` | as its last argument |
+| `pi` | `pi -p --no-extensions --no-skills --no-prompt-templates --no-context-files` | as its last argument |
 | `cursor` | `cursor-agent -p --output-format stream-json --trust --force --workspace <clone>`, then `--model <model>` when set and any `--harness-arg`s | as its last argument |
 
 For `claude`, ATM sets `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` for every
@@ -183,10 +183,35 @@ that writes a quoted heredoc of valid Go test source to a literal clone-relative
 must contain a recognized test function using the standard `testing.T` type.
 The exception covers URL text in that fixture only; URLs or fetch commands
 elsewhere in the shell command still fail. The error names the first offending
-call. A missing or invalid report fails. For native agents, any non-zero exit
+call. Missing or invalid reports follow [Rejected reports](#rejected-reports).
+For native agents, any non-zero exit
 also fails; Hermes uses the completion rules linked above.
 For Cursor, a stream result with `is_error: true` fails the step with its
 result text even if the process exits zero.
+
+### Rejected reports
+
+When final-report parsing or validation fails, ATM sends the following
+message once to the same `claude`, `codex`, `pi` or `cursor` session, using
+the exact validation error:
+
+```text
+Your final message was rejected: <the exact validation error>. Reply with only the JSON object the brief asks for, nothing else.
+```
+
+This applies to the worker, slop detector, contract reviewer, scope reviewer
+and contract repair worker. Pi keeps its session for this continuation. If
+ATM has no session ID, or the harness is OpenCode or Hermes, the report
+failure ends the step without a return. A report that passes validation the
+first time is never returned. If the second report validates, the step uses
+it; otherwise the step fails with the second error. The report requirements
+and parsing rules stay the same, and ATM does not repair the rejected report.
+
+The agent's `.jsonl` log records a `report_rejected` event with the exact
+error in `error`, even if continuation is unavailable or fails. Both
+attempts' output stays in that log, and both attempts' stderr stays in its
+companion `.stderr.txt` file. Process failures, timeouts, forbidden tool
+calls and missing skill proof fail without returning the report.
 
 ## Checks
 
@@ -400,9 +425,10 @@ cut-only policy does not apply to contract repairs, which may add lines.
 
 There are at most two repair rounds total per run in this phase, even when
 successive findings cite different criteria. There is no third attempt or
-configuration to raise the limit. A report that is invalid or names another
-base or HEAD, a failed reviewer, or a reviewer that changes the clone or HEAD
-blocks delivery without starting a repair. With no `delivery` command,
+configuration to raise the limit. A report that still fails
+[report validation](#rejected-reports), including one naming another base or
+HEAD, a failed reviewer, or a reviewer that changes the clone or HEAD blocks
+delivery without starting a repair. With no `delivery` command,
 neither review, repair nor the command runs.
 
 The `repair` record in `contract-review.json` keeps the round count, reviewed
