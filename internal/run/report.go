@@ -43,6 +43,10 @@ type node struct {
 	Exit   string  `json:"exit,omitempty"` // how its agent ended, when it failed after it ran
 	Tail   *string `json:"tail,omitempty"` // the last 20 lines that agent wrote, stdout and stderr
 	span
+	Kept     *bool   `json:"kept,omitempty"` // the ponytail decision, absent until it decides
+	Reason   *string `json:"reason,omitempty"`
+	NetLines *[2]int `json:"net_lines,omitempty"`
+	Findings any     `json:"findings,omitempty"`
 }
 
 // span is when a node, trial or command started, in UTC to the millisecond, and how long it took: "" and 0 when
@@ -122,6 +126,17 @@ func (r *verdict) step(name string, fn func() (map[string]any, error)) {
 	n.Exit, _ = ev["exit"].(string)
 	if tail, ok := ev["tail"].(string); ok {
 		n.Tail = &tail
+	}
+	if name == "ponytail" {
+		if kept, ok := ev["kept"].(bool); ok {
+			reason, _ := ev["reason"].(string)
+			n.Kept, n.Reason = &kept, &reason
+		}
+		if lines, ok := ev["net_lines"].([2]int); ok {
+			n.NetLines = &lines
+		}
+		report, _ := ev["report"].(map[string]any)
+		n.Findings = report["findings"]
 	}
 	n.Result = outcome(err)
 	ev["state"], ev["duration_ms"] = n.Result, n.DurationMS
