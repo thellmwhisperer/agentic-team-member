@@ -3,6 +3,7 @@ package run
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -63,29 +64,23 @@ func gateErrorLine(t *testing.T, status string) string {
 	return ""
 }
 
-// gateFailureFix is the shared no-mistakes and gh doubles: the first status read is first, the rest later.
 func gateFailureFix(t *testing.T, atm, first, later string) (root, clone string) {
 	t.Helper()
 	root = repo(t, "https://github.com/o/r.git", atm)
 	clone = t.TempDir()
-	installCountedStatus(t, first, later)
+	count := fakeStatus(t)
+	writeFixture(t, filepath.Join(clone, "first.txt"), first)
+	writeFixture(t, filepath.Join(clone, "later.txt"), later)
+	t.Setenv("ATM_STATUS_LIVE", filepath.Join(clone, "first.txt"))
+	for _, env := range []string{"ATM_STATUS_WAITING", "ATM_STATUS_MERGED"} {
+		t.Setenv(env, filepath.Join(clone, "later.txt"))
+	}
+	if first == later {
+		writeFixture(t, count, "2")
+	}
 	fakeGH(t, `{"url":"https://github.com/o/r/pull/424","state":"OPEN","commits":[
 		{"oid":"b46fd21ba38c","messageHeadline":"no-mistakes(ci): Repair CI"}]}`, false)
 	return root, clone
-}
-
-func installCountedStatus(t *testing.T, first, later string) {
-	t.Helper()
-	dir := t.TempDir()
-	writeFixture(t, filepath.Join(dir, "first.txt"), first)
-	writeFixture(t, filepath.Join(dir, "later.txt"), later)
-	count := filepath.Join(dir, "count")
-	script := "#!/bin/sh\nn=0\n[ -f '" + count + "' ] && n=$(cat '" + count + "')\n" +
-		"n=$((n+1))\nprintf '%s' \"$n\" > '" + count + "'\n" +
-		"if [ \"$n\" -eq 1 ]; then cat '" + filepath.Join(dir, "first.txt") + "'; " +
-		"else cat '" + filepath.Join(dir, "later.txt") + "'; fi\n"
-	writeFixture(t, filepath.Join(dir, "no-mistakes"), script, 0o755)
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
 func observePoll(t *testing.T, status, commandReason string) []map[string]any {
@@ -207,5 +202,25 @@ func TestFollowStreamTerminalGateFailureSurvivesLaterReads(t *testing.T) {
 			}
 			wantDeliveryFailure(t, evs, reason)
 		})
+	}
+}
+
+func TestFollowStreamParkedGateDoesNotDiscoverPR(t *testing.T) {
+	status := recorded(t, "atm_watch_status_parked.txt")
+	root, clone := gateFailureFix(t, atmYAML, status, status)
+	var out bytes.Buffer
+	s := observer{o: Outcome{Run: "t", Issue: "i"}, w: &out, now: time.Now,
+		clone: clone, branch: "branch", delivering: true, ci: map[string]bool{}}
+	for range 2 {
+		if code, done := s.poll(context.Background(), root); code != 0 || done {
+			t.Fatalf("parked gate ended observation: %d, %v", code, done)
+		}
+	}
+	if _, err := os.Stat(os.Getenv("FAKE_GH_ARGS")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("parked gate triggered a PR lookup: %v", err)
+	}
+	evs := events(t, &out)
+	if len(evs) != 1 || evs[0]["event"] != "gate_waiting" || evs[0]["step"] != "review" {
+		t.Fatalf("want one review wait: %v", evs)
 	}
 }
