@@ -5,82 +5,13 @@ package run
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
-	"strings"
 	"testing"
 	"time"
 )
-
-// Exercise the shipped CLI with disposable repositories and local command-boundary
-// responses. The issue's oracle is PR order, full commit identity, and one event
-// per prefixed commit, even when the gate can independently see both ci commits.
-func TestRunFollowNoMistakesCommitsInPROrder(t *testing.T) {
-	for _, deleted := range []bool{false, true} {
-		t.Run(fmt.Sprintf("clone_deleted=%t", deleted), func(t *testing.T) {
-			parked := recorded(t, "atm_watch_status_parked.txt")
-			fixing := strings.NewReplacer(streamFixingCI...).Replace(recorded(t, "atm_watch_status_completed.txt"))
-			bin, top, gh, nm := followRepo(t, atmSet(atmYAML, "delivery", "true"))
-			writeFixture(t, nm, parked)
-			f := runFollow(t, bin, top, false, nil, "--follow")
-			next := func(event string, want map[string]any) map[string]any {
-				got := f.next(event, want)
-				b, _ := json.Marshal(got)
-				t.Log(string(b))
-				return got
-			}
-			for _, step := range followSteps {
-				next("step", map[string]any{"step": step})
-			}
-			clone := next("delivery", nil)["clone"].(string)
-			next("gate_waiting", map[string]any{"step": "review", "clone": clone})
-			if deleted {
-				if err := os.RemoveAll(clone); err != nil {
-					t.Fatal(err)
-				}
-			} else {
-				writeFixture(t, nm, fixing)
-			}
-			subjects := []string{
-				"no-mistakes(ci): Fix lint",
-				"no-mistakes(review): Remove duplicate check",
-				"fix: Plain worker commit",
-				"no-mistakes(ci): Fix lint",
-				"no-mistakes(lint): Format code",
-				"no-mistakes(document): Document \"step\"",
-				"fix: mention no-mistakes(review): in prose",
-				" no-mistakes(ci): Leading space",
-			}
-			commits := make([]map[string]string, len(subjects))
-			for i, subject := range subjects {
-				commits[i] = map[string]string{"oid": fmt.Sprintf("%040x", i+1), "messageHeadline": subject}
-			}
-			publish := func(state string) {
-				b, _ := json.Marshal(map[string]any{"url": recordedPR, "state": state, "commits": commits})
-				writeFixture(t, gh, string(b))
-			}
-			publish("OPEN")
-			next("pr_opened", map[string]any{"url": recordedPR})
-			for _, c := range []struct {
-				index int
-				step  string
-			}{{0, "ci"}, {1, "review"}, {3, "ci"}, {4, "lint"}, {5, "document"}} {
-				next("gate_fixing_ci", map[string]any{"commit": map[string]any{
-					"sha": commits[c.index]["oid"], "subject": subjects[c.index], "step": c.step,
-				}})
-			}
-			// Allow another real ten-second poll before merging the same PR list.
-			// Any repeated or plain commit is queued and fails the next assertion.
-			time.Sleep(11 * time.Second)
-			publish("MERGED")
-			next("merged", map[string]any{"url": recordedPR})
-			f.ended(0)
-		})
-	}
-}
 
 func TestFollowStreamNoMistakesCommitsInPROrder(t *testing.T) {
 	for _, deleted := range []bool{false, true} {
