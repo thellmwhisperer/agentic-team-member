@@ -355,6 +355,36 @@ const twoCuts = `{"findings": [` +
 	`{"file": "c.txt", "family": "speculative_feature", "finding": "touches the issue", "issue_sentence": "Retry once."}` +
 	`], "summary": "s"}`
 
+// A rejected test must retain the bytes that were proven, even when Git would
+// convert them on checkout. Otherwise a valid neighboring cut loses its proof.
+func TestPonytailRestoresRejectedTestBytes(t *testing.T) {
+	for _, autocrlf := range []string{"false", "true"} {
+		for _, eol := range []struct{ name, text string }{{"LF", "\n"}, {"CRLF", "\r\n"}} {
+			for _, work := range []string{"echo bad > a_test.sh", "rm a_test.sh"} {
+				t.Run(autocrlf+"/"+eol.name+"/"+work, func(t *testing.T) {
+					root, clone, sha, cfg := unitDone(t, "echo fixed > a.txt; "+work)
+					gitT(t, clone, "config", "core.autocrlf", autocrlf)
+					path := filepath.Join(clone, "a_test.sh")
+					want := "grep -q fixed a.txt && ! grep -q broken a.txt # proof" + eol.text
+					if err := os.WriteFile(path, []byte(want), 0o600); err != nil {
+						t.Fatal(err)
+					}
+					t.Setenv("FAKE_PONYTAIL_REPORT", cut)
+					ev, err := agent{Agent: cfg.Agent, dir: t.TempDir()}.ponytail(root, clone, sha,
+						[]proof{unitProof(t, clone, sha)}, fixIssue, cfg)
+					if err != nil || ev["kept"] != true {
+						t.Fatalf("want the valid cut kept after restoring the test, got %v, %v", err, ev)
+					}
+					if got, err := os.ReadFile(path); err != nil || string(got) != want {
+						t.Fatalf("restored test = %q, %v; want %q", got, err, want)
+					}
+					keptCut(t, clone, sha)
+				})
+			}
+		}
+	}
+}
+
 func TestPonytailJudgesACutPerFile(t *testing.T) {
 	touched := strings.Replace(cut, `"issue_sentence": ""`, `"issue_sentence": "Retry once."`, 1)
 	longer := "printf 'fixed\\nextra\\nmore\\n" + strings.Repeat("extra\\n", 5) +
