@@ -58,20 +58,26 @@ func TestCloneCopiesOnlySlopslintCache(t *testing.T) {
 				return
 			}
 			for _, f := range files {
-				info, err := os.Stat(filepath.Join(root, ".tmp", "slopslint", f.path))
-				if err != nil {
-					t.Fatal(err)
-				}
-				if runtime.GOOS != "windows" && info.Mode() != f.mode {
-					t.Errorf("source %s: mode %v, want %v", f.path, info.Mode(), f.mode)
-				}
-				assertCachedFile(t, filepath.Join(dir, ".tmp", "slopslint", f.path), f.content, info.Mode())
+				mode := cachedSourceMode(t, filepath.Join(root, ".tmp", "slopslint", f.path), f.mode)
+				assertCachedFile(t, filepath.Join(dir, ".tmp", "slopslint", f.path), f.content, mode)
 			}
 			if _, err := os.Stat(filepath.Join(dir, ".tmp", "other-cache")); !os.IsNotExist(err) {
 				t.Fatalf("unrelated cache was copied: %v", err)
 			}
 		})
 	}
+}
+
+func cachedSourceMode(t *testing.T, path string, mode os.FileMode) os.FileMode {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS != "windows" && info.Mode() != mode {
+		t.Errorf("source %s: mode %v, want %v", path, info.Mode(), mode)
+	}
+	return info.Mode()
 }
 
 func assertCachedFile(t *testing.T, path, content string, mode os.FileMode) {
