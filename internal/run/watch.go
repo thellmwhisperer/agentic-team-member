@@ -530,14 +530,15 @@ func followGate(ctx context.Context, r *verdict, root, clone, branch string, com
 	for {
 		done, err := applyGate(ctx, r, root, clone, branch)
 		if errors.Is(err, errNoGate) {
-			if command == nil && r.err != nil &&
-				!slices.ContainsFunc(r.Nodes, func(n *node) bool { return gateStepName(n.Name) }) {
-				return true, nil
-			}
 			err = nil
 		}
 		if done || err != nil {
 			return true, err
+		}
+		// A delivery that failed before the gate showed a step started no gate: nothing left to follow.
+		if command == nil && r.err != nil &&
+			!slices.ContainsFunc(r.Nodes, func(n *node) bool { return gateStepName(n.Name) }) {
+			return true, nil
 		}
 		select {
 		case <-ctx.Done():

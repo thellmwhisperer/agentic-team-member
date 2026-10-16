@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -184,6 +185,22 @@ func waitForDeliveryAndReview(t *testing.T, done <-chan error, path, delivery, r
 				return
 			}
 		}
+	}
+}
+
+// A delivery that failed before the gate showed a step has no gate to follow: an unreadable status, here a
+// released clone whose branch has an open PR, ends the follow instead of polling it forever.
+func TestFailedDeliveryWithoutGateStepsEndsOnAnUnreadableStatus(t *testing.T) {
+	defer func(b time.Duration) { beat = b }(beat)
+	beat = time.Millisecond
+	root := repo(t, "https://github.com/o/r.git", "")
+	fakeGH(t, "OPEN", false)
+	r := newVerdict(t.TempDir(), io.Discard)
+	r.err = errors.New("delivery failed")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if done, err := followGate(ctx, r, root, filepath.Join(root, "missing"), "feature", nil); !done || err != nil {
+		t.Fatalf("follow = %v, %v; want it ended, the run keeping the delivery's own failure", done, err)
 	}
 }
 
