@@ -101,7 +101,7 @@ func TestAgentMetadataFailedInvocation(t *testing.T) {
 }
 
 func TestAgentMetadataHistoryLiveAndReloaded(t *testing.T) {
-	root := repo(t, t.TempDir(), atmYAML)
+	root := gitT(t, repo(t, t.TempDir(), atmYAML), "rev-parse", "--show-toplevel")
 	stop := background(t, root)
 	wait, release := holdFakeAgents(t, 1)
 	o, err := startWithWatcher(t, root, []string{"--harness", "claude", "--model", "m1", "--effort", "high",
