@@ -423,6 +423,15 @@ it is on disk before delivery reads it.
 | `commands` | Every configured command that ran, the clone's `install` included, with its result, last 60 lines, `started_at` and `duration_ms` |
 | `head_sha` | The delivered branch's final commit |
 
+The `ponytail` node also records `kept` (`true` or `false`) once ATM decides
+whether to keep the cut, and `reason`: the exact rejection reason from the
+cut policy, new-file check or repeated proofs and checks, or `""` when kept.
+`net_lines` is `[before, after]`, the run's net added lines before and after
+the attempted cut, measured against the run's base. `findings` preserves the
+agent's findings as reported. Discarding the cut does not remove these fields
+or replace the attempted cut's line count with the restored count. If the
+step stops early, fields whose values are not yet available are omitted.
+
 ## The screen
 
 `atm run` hands the run to the repository's background process, one per
