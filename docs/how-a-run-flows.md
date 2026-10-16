@@ -471,6 +471,14 @@ Discarding the whole cut does not remove these fields or replace the judged
 cut's line count with the restored count. If the step stops early, fields
 whose values are not yet available are omitted.
 
+`rejected_files` lists each file ATM put back, once, with its `path` and the
+exact rejection `reason`. It is `[]` when nothing was put back, including a
+cut kept in full. A partly kept cut still has `kept: true` and `reason: ""`;
+its rejected files carry their individual policy reasons. If the remaining
+cut also fails, files already rejected retain their reasons, and the other
+files put back carry the whole-cut rejection reason. See
+[Slop detector](#slop-detector) for the rejection rules.
+
 ## The screen
 
 `atm run` hands the run to the repository's background process, one per
