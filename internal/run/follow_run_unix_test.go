@@ -280,7 +280,9 @@ func runFollowInterrupted(t *testing.T, signal syscall.Signal) {
 
 func TestRunFollowCancellationDuringDelayedLaunchKeepsLeaseAlive(t *testing.T) {
 	bin := builtATM(t)
+	buildVersionATM(t, bin, "follow-test", false)
 	top := atmRepo(t)
+	stampServeFixture(t, top, "follow-test")
 	l, err := net.ListenUnix("unix", &net.UnixAddr{Name: short(socket(top)), Net: "unix"})
 	if err != nil {
 		t.Fatal(err)
