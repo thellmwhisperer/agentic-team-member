@@ -12,6 +12,9 @@ import (
 	"github.com/thellmwhisperer/agentic-team-member/internal/tui"
 )
 
+// followOut is --follow's stdout. With HERDR_ENV=1 and herdr_workspace set, open makes the run's tab before the
+// run starts, the first line runs atm attach in its root pane, and after a terminal line (merged, closed,
+// run_failed) is written, close closes the tab before exit.
 type followOut struct {
 	w   io.Writer
 	buf []byte
