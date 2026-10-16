@@ -3,6 +3,7 @@ package run
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -57,7 +58,14 @@ func TestCloneCopiesOnlySlopslintCache(t *testing.T) {
 				return
 			}
 			for _, f := range files {
-				assertCachedFile(t, filepath.Join(dir, ".tmp", "slopslint", f.path), f.content, f.mode)
+				info, err := os.Stat(filepath.Join(root, ".tmp", "slopslint", f.path))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if runtime.GOOS != "windows" && info.Mode() != f.mode {
+					t.Errorf("source %s: mode %v, want %v", f.path, info.Mode(), f.mode)
+				}
+				assertCachedFile(t, filepath.Join(dir, ".tmp", "slopslint", f.path), f.content, info.Mode())
 			}
 			if _, err := os.Stat(filepath.Join(dir, ".tmp", "other-cache")); !os.IsNotExist(err) {
 				t.Fatalf("unrelated cache was copied: %v", err)
