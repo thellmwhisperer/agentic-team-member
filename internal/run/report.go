@@ -134,16 +134,24 @@ func (r *verdict) ensureNode(name string) *node {
 	return n
 }
 
-// gateNode records a no-mistakes step on the report and tells the screen, once the state or duration changes.
-func (r *verdict) gateNode(name, result string, ms int64, why string) {
+// gateNode records a no-mistakes step on the report and tells the screen, once the state, duration or
+// start changes. started is that step's own start, already UTC RFC3339 with milliseconds, or "" when its
+// state has none: the field is left out, never the time ATM noticed it. A skipped step has none either.
+func (r *verdict) gateNode(name, result string, ms int64, started, why string) {
 	n := r.ensureNode(name)
-	if n.Result == result && n.DurationMS == ms {
+	want := n.StartedAt
+	switch result {
+	case "skipped", "pending", "not run":
+		want = ""
+	default:
+		if started != "" {
+			want = started
+		}
+	}
+	if n.Result == result && n.DurationMS == ms && n.StartedAt == want {
 		return
 	}
-	if n.StartedAt == "" && result != "pending" && result != "not run" {
-		n.StartedAt = time.Now().UTC().Format("2006-01-02T15:04:05.000Z07:00")
-	}
-	n.Result, n.DurationMS = result, ms
+	n.StartedAt, n.Result, n.DurationMS = want, result, ms
 	ev := map[string]any{"state": result, "duration_ms": ms}
 	if why != "" {
 		ev["error"] = why

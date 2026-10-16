@@ -318,10 +318,10 @@ type gateState struct {
 	err                                 error
 }
 
-// gateStep is one row of a gate's steps: its name, no-mistakes status and duration.
+// gateStep is one row of a gate's steps: its name, no-mistakes status, duration and own start time.
 type gateStep struct {
-	name, status string
-	ms           int64
+	name, status, started string
+	ms                    int64
 }
 
 // gateNodes are the no-mistakes steps a run keeps below delivery, in that order.
@@ -342,22 +342,23 @@ func parseGate(status string) (s gateState) {
 	expectedFindings := 0
 	parked := false       // its fix_review step waits for a decision
 	table, depth := "", 0 // the table whose rows, deeper than its header, follow
+	var cols []string
 	for _, l := range strings.Split(status, "\n") {
 		trimmed := strings.TrimSpace(l)
 		indent := len(l) - len(strings.TrimLeft(l, " "))
 		if table != "" && indent > depth {
 			if table == "steps" {
-				s.step(trimmed, parked)
+				s.step(trimmed, parked, cols)
 			} else {
 				s.finding(trimmed)
 			}
 			continue
 		}
 		key, value, isKey := strings.Cut(trimmed, ": ")
-		table, depth = "", indent
+		table, depth, cols = "", indent, nil
 		switch {
 		case strings.HasPrefix(trimmed, "steps["):
-			table = "steps"
+			table, cols = "steps", stepColumns(trimmed)
 		case strings.HasPrefix(trimmed, "findings["):
 			table = "findings"
 			expectedFindings += s.findingCount(trimmed)
@@ -450,13 +451,30 @@ func (s *gateState) read(ctx context.Context, clone string) error {
 	return nil
 }
 
+// stepColumns is the header's column names, `steps[N]{step,status,...}`.
+func stepColumns(header string) []string {
+	i, j := strings.Index(header, "{"), strings.Index(header, "}")
+	if i < 0 || j <= i {
+		return nil
+	}
+	return strings.Split(header[i+1:j], ",")
+}
+
 // step adds to s a row of the gate's steps, `step,status,...`, of a run parked or not.
-func (s *gateState) step(row string, parked bool) {
-	step, rest, _ := strings.Cut(row, ",")
-	state, rest, _ := strings.Cut(rest, ",")
-	_, dur, _ := strings.Cut(rest, ",")
-	ms, _ := strconv.ParseInt(dur, 10, 64)
-	s.steps = append(s.steps, gateStep{step, state, ms})
+func (s *gateState) step(row string, parked bool, cols []string) {
+	vals := strings.Split(row, ",")
+	get := func(name string, at int) string {
+		if i := slices.Index(cols, name); i >= 0 && i < len(vals) {
+			return strings.TrimSpace(vals[i])
+		}
+		if at >= 0 && at < len(vals) {
+			return strings.TrimSpace(vals[at])
+		}
+		return ""
+	}
+	step, state := get("step", 0), get("status", 1)
+	ms, _ := strconv.ParseInt(get("duration_ms", 3), 10, 64)
+	s.steps = append(s.steps, gateStep{step, state, gateStart(get("started_at", -1)), ms})
 	s.seen = true
 	switch {
 	case state == "awaiting_approval" || parked && state == "fix_review":
@@ -466,6 +484,22 @@ func (s *gateState) step(row string, parked bool) {
 	case step == "ci":
 		s.fixing, s.green = state == "fixing", state == "completed"
 	}
+}
+
+// gateStart is v, a step's own start from axi status, as report.json writes started_at; "" when v is not one.
+func gateStart(v string) string {
+	v = strings.TrimSpace(v)
+	if u, err := strconv.Unquote(v); err == nil {
+		v = u
+	}
+	if v == "" || v == "0" {
+		return ""
+	}
+	t, err := time.Parse(time.RFC3339Nano, v)
+	if err != nil {
+		return ""
+	}
+	return t.UTC().Format("2006-01-02T15:04:05.000Z07:00")
 }
 
 // events is the lines status, the gate's `no-mistakes axi status`, adds at now to those g printed; done once the
@@ -575,7 +609,7 @@ func (g gateState) outcome(r *verdict) (bool, error) {
 	switch {
 	case g.failed != "":
 		r.FailedNode, r.Reason = g.failed, "no-mistakes step "+g.failed+" failed"
-		r.gateNode(g.failed, "failed", r.ensureNode(g.failed).DurationMS, r.Reason) // a no-op when already failed
+		r.gateNode(g.failed, "failed", r.ensureNode(g.failed).DurationMS, "", r.Reason) // a no-op when already failed
 		return false, errors.New(r.Reason)
 	case g.closed:
 		return true, errPRClosed
@@ -620,7 +654,7 @@ func (r *verdict) noteGate(g gateState) {
 		if s.status == "failed" {
 			why = "no-mistakes step " + name + " failed"
 		}
-		r.gateNode(name, gateResult(name, s.status, g), s.ms, why)
+		r.gateNode(name, gateResult(name, s.status, g), s.ms, s.started, why)
 	}
 }
 
