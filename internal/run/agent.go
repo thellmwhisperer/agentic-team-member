@@ -117,18 +117,18 @@ func (a agent) argv(clone, skill, final, brief string) (argv []string, stdin str
 // resumeArgv continues the harness's session with prompt, the rejected report sent back once. ok is false when
 // the harness keeps no session ATM can continue.
 func (a agent) resumeArgv(clone, skill, final, session, prompt string) (argv []string, stdin string, ok bool) {
-	if !resumes(a.Harness) {
+	if !resumes(a.Harness) || session == "" {
 		return nil, "", false
 	}
 	argv, stdin = a.argv(clone, skill, final, prompt)
 	switch a.Harness {
 	case "claude":
-		return append(argv, resumeFlag(session)...), stdin, true
+		return append(argv, "--resume", session), stdin, true
 	case "codex":
 		return codexResume(argv, session), "", true
 	default:
-		flag := resumeFlag(session)
-		if a.Harness == "pi" && session != "" {
+		flag := []string{"--resume", session}
+		if a.Harness == "pi" {
 			flag = []string{"--session", session}
 		}
 		last := argv[len(argv)-1]
@@ -142,13 +142,6 @@ func resumes(harness string) bool {
 		return true
 	}
 	return false
-}
-
-func resumeFlag(session string) []string {
-	if session == "" {
-		return []string{"--continue"}
-	}
-	return []string{"--resume", session}
 }
 
 // codexResume is `codex exec resume`: it takes neither -C nor --sandbox (codex-cli 0.155.1), so the clone is the
@@ -165,11 +158,7 @@ func codexResume(argv []string, session string) []string {
 		out = append(out, args[i])
 	}
 	out = append(out, "-c", `sandbox_mode="workspace-write"`)
-	if session == "" {
-		out = append(out, "--last")
-	} else {
-		out = append(out, session)
-	}
+	out = append(out, session)
 	return append(out, argv[len(argv)-1])
 }
 
@@ -201,23 +190,31 @@ func (a agent) run(clone, name, skill, brief string, check func(map[string]any) 
 // drive runs argv and, when the final report fails validation, returns it once in the same session.
 func (a agent) drive(clone, name, skill, skillDir, path, final string, argv []string, stdin string,
 	check func(map[string]any) error, ev map[string]any) (map[string]any, error) {
-	s, exit, cause, err := a.exec(clone, skill, path, argv, stdin)
+	s, exit, cause, err := a.exec(clone, skill, path, argv, stdin, false)
 	invalid, err := a.reported(name, skill, path, final, exit, cause, err, s, false, check, ev)
-	if invalid == nil || !resumes(a.Harness) {
+	if invalid == nil {
 		return ev, err
+	}
+	ev["rejected"] = invalid.Error()
+	f, logErr := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0o666)
+	if logErr != nil {
+		return ev, errors.Join(err, logErr)
+	}
+	logErr = json.NewEncoder(f).Encode(map[string]any{"type": "report_rejected", "error": invalid.Error()})
+	if logErr = errors.Join(logErr, f.Close()); logErr != nil {
+		return ev, errors.Join(err, logErr)
 	}
 	argv, stdin, ok := a.resumeArgv(clone, skillDir, final, s.session, rejectMessage(invalid))
 	if !ok {
 		return ev, err
 	}
-	s, exit, cause, err = a.exec(clone, skill, path, argv, stdin)
+	s, exit, cause, err = a.exec(clone, skill, path, argv, stdin, true)
 	_, err = a.reported(name, skill, path, final, exit, cause, err, s, true, check, ev)
 	if err != nil {
 		return ev, err
 	}
 	delete(ev, "exit")
 	delete(ev, "tail")
-	ev["rejected"] = invalid.Error()
 	return ev, nil
 }
 
@@ -346,13 +343,17 @@ func clonePathRune(r rune) bool {
 // how it ended, as ended says; a nil stream when it never got to run. Every line it writes goes to the log at
 // path, in the run's directory, which outlives the clone, and its stderr to <name>.stderr.txt next to it as
 // well. The timeout, agentSilence without a line, SIGINT and SIGTERM kill the group.
-func (a agent) exec(clone, skill, path string, argv []string, stdin string) (*stream, string, string, error) {
-	f, err := os.Create(path)
+func (a agent) exec(clone, skill, path string, argv []string, stdin string, appendLog bool) (*stream, string, string, error) {
+	flags := os.O_CREATE | os.O_WRONLY | os.O_TRUNC
+	if appendLog {
+		flags = os.O_CREATE | os.O_WRONLY | os.O_APPEND
+	}
+	f, err := os.OpenFile(path, flags, 0o666)
 	if err != nil {
 		return nil, "", "", err
 	}
 	defer func() { _ = f.Close() }()
-	stderr, err := os.Create(strings.TrimSuffix(path, ".jsonl") + ".stderr.txt")
+	stderr, err := os.OpenFile(strings.TrimSuffix(path, ".jsonl")+".stderr.txt", flags, 0o666)
 	if err != nil {
 		return nil, "", "", err
 	}
@@ -677,7 +678,7 @@ func (s *stream) noteSession(line []byte) {
 }
 
 func sessionOf(v map[string]any) string {
-	for _, k := range []string{"session_id", "thread_id", "sessionId"} {
+	for _, k := range []string{"session_id", "thread_id"} {
 		if id, ok := v[k].(string); ok && id != "" {
 			return id
 		}
@@ -685,13 +686,6 @@ func sessionOf(v map[string]any) string {
 	if v["type"] == "session" {
 		if id, ok := v["id"].(string); ok && id != "" {
 			return id
-		}
-	}
-	for _, k := range []string{"msg", "payload"} {
-		if m, ok := v[k].(map[string]any); ok {
-			if id := sessionOf(m); id != "" {
-				return id
-			}
 		}
 	}
 	return ""
