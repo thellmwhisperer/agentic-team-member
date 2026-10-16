@@ -23,7 +23,7 @@ func TestSkillPrintsRepositoryFile(t *testing.T) {
 	if out != want {
 		t.Fatalf("atm skill differs from skills/atm/SKILL.md: got %q", out)
 	}
-	if !strings.HasPrefix(out, "---\nname: atm\ndescription:") {
+	if !strings.HasPrefix(strings.ReplaceAll(out, "\r\n", "\n"), "---\nname: atm\ndescription:") {
 		t.Fatal("skill must have harness frontmatter")
 	}
 }
