@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/thellmwhisperer/agentic-team-member/internal/buildinfo"
 	"github.com/thellmwhisperer/agentic-team-member/internal/run"
 )
 
@@ -340,7 +341,7 @@ func TestRunGoesToTheBackgroundAndEveryCommandSeesIt(t *testing.T) {
 		t.Fatalf("atm status: %q", out)
 	}
 	if out := atmIn(t, 0, "runs"); !strings.HasPrefix(out, "retry-1  failed  ") ||
-		!strings.HasSuffix(out, " s  -  w  "+filepath.Join(dir, "retry.md")+"\n") {
+		!strings.HasSuffix(out, " s  -  w  "+filepath.Join(dir, "retry.md")+"  "+buildinfo.String()+"\n") {
 		t.Fatalf("atm runs: %q", out)
 	}
 	watcher(t, dir, "w2", 0)

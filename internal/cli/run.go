@@ -140,8 +140,12 @@ func listCmd(going bool) *cobra.Command {
 			if !going && o.Report != "" {
 				report = "\t" + o.Report
 			}
-			_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s%s\n",
-				o.Run, how, o.Duration(), o.AgentLabel(), watcher+o.Issue, report)
+			serve := ""
+			if !going {
+				serve = "\t" + o.ServeLabel()
+			}
+			_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s%s%s\n",
+				o.Run, how, o.Duration(), o.AgentLabel(), watcher+o.Issue, report, serve)
 		}
 		if n == 0 {
 			_, _ = fmt.Fprintln(w, map[bool]string{true: "nothing runs", false: "no run yet"}[going])

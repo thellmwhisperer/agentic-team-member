@@ -41,6 +41,7 @@ type Outcome struct {
 	Watcher    string         `json:"watcher,omitempty"` // the atm watch it is bound to
 	Started    time.Time      `json:"started"`
 	Ended      time.Time      `json:"ended"`
+	Serve      string         `json:"serve,omitempty"` // buildinfo.String() of the serve that executed it
 }
 
 // AgentSettings is the effective requested selection, kept independently of observed models.
@@ -59,6 +60,9 @@ func (o Outcome) AgentLabel() string {
 	}
 	return o.Agent.Harness + " " + cmp.Or(o.Agent.Model, "default")
 }
+
+// ServeLabel is that version, or - when the run was recorded before it.
+func (o Outcome) ServeLabel() string { return cmp.Or(o.Serve, "-") }
 
 // Duration is how long the run took, or has taken so far, as ATM prints every time.
 func (o Outcome) Duration() string {
@@ -392,7 +396,7 @@ func (s *server) start(args []string, pane string) (Outcome, error) {
 		max(entry.Name())
 	}
 	r := &bgRun{pane: pane, more: make(chan struct{}),
-		Outcome: Outcome{Outcome: "running", Issue: issue, Started: time.Now(),
+		Outcome: Outcome{Outcome: "running", Issue: issue, Started: time.Now(), Serve: buildinfo.String(),
 			Run: cmp.Or(strings.Trim(name, "-"), "run") + "-" + strconv.Itoa(n+1)}}
 	if _, _, _, a, err := parseArgs(args); err == nil {
 		r.Watcher = a.watcher
