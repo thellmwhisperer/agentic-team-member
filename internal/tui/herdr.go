@@ -157,6 +157,9 @@ func herdrRun(args ...string) ([]byte, error) {
 	return exec.CommandContext(ctx, cmp.Or(os.Getenv("HERDR_BIN_PATH"), "herdr"), args...).Output()
 }
 
+// OpenHerdrTab creates a tab labelled tabLabel in the workspace named workspace, cwd the repository, and returns
+// the tab id tab create returned and its root pane. herdr's --workspace wants that id, not the label: workspace
+// list matches label.
 func OpenHerdrTab(workspace, tabLabel, cwd string) (string, string, error) {
 	id, err := herdrWorkspaceID(workspace)
 	if err != nil {
@@ -176,6 +179,7 @@ func OpenHerdrTab(workspace, tabLabel, cwd string) (string, string, error) {
 	return tab, pane, nil
 }
 
+// RunHerdrPane runs command in herdr pane pane.
 func RunHerdrPane(pane, command string) error {
 	_, err := herdrRun("pane", "run", pane, command)
 	return err
