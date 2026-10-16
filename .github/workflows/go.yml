@@ -31,8 +31,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # windows-latest off until #398: internal/run is over the 30-minute limit there (Javi, 16-oct).
-        os: [ubuntu-latest, macos-latest]
+        # Experiment for #398, not for merge: Windows only, internal/run split in 3 parallel shards, the rest in shard 0.
+        os: [windows-latest]
+        shard: [0, 1, 2, 3]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -50,10 +51,15 @@ jobs:
         run: choco install make --no-progress
 
       - name: Test
-        run: make test
-
-      - name: Lint
-        run: make lint
+        shell: bash
+        run: |
+          if [ "${{ matrix.shard }}" = 0 ]; then
+            go test -timeout 30m $(go list ./... | grep -v '/internal/run$')
+          else
+            names=$(go test -list . ./internal/run | grep '^Test' | awk "NR % 3 == ${{ matrix.shard }} % 3" | paste -sd '|' -)
+            echo "shard ${{ matrix.shard }}: $(echo "$names" | tr '|' '\n' | wc -l) tests"
+            go test -timeout 30m -run "^(${names})\$" ./internal/run
+          fi
 
   summary:
     name: Go checks
