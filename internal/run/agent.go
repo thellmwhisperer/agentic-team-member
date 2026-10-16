@@ -1158,8 +1158,8 @@ func outside(calls []use, root, clone string) string {
 }
 
 func InstallReach(install, root string) string {
-	clone := filepath.Join(root, ".atm", "clones", "atm-run-install")
-	return strings.TrimSpace(outside([]use{{"", install, install}}, root, clone))
+	// Before cloning, no absolute path in the repository belongs to the future clone.
+	return strings.TrimSpace(outside([]use{{"", install, install}}, root, "."))
 }
 
 func reachesPath(args, root, clone string, paths *regexp.Regexp) bool {

@@ -18,27 +18,31 @@ func installConfig(install string) string {
 // atm doctor flags an install the reach guard would reject if the worker ran it from its clone, and passes
 // one that stays inside.
 func TestDoctorFlagsInstallReachingOutsideTheClone(t *testing.T) {
-	root := doctorRepoWithConfig(t, installConfig(""))
-	top, err := toplevel()
-	if err != nil {
-		t.Fatal(err)
-	}
-	install := "cp " + filepath.ToSlash(top) + "/.tmp/slopslint/x .tmp/x"
-	if err := os.WriteFile(filepath.Join(root, ".atm.yaml"), []byte(installConfig(install)), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	out, err := atm(t, "doctor")
-	fail := ""
-	for _, l := range lines(t, out) {
-		if strings.HasPrefix(l, "fail install: ") {
-			fail = l
-		}
-	}
-	if fail != "fail install: install reaches outside the clone: "+install {
-		t.Fatalf("want the install line failing on its reach, got\n%s", out)
-	}
-	if run.ExitCode(err) == 0 {
-		t.Fatal("want a non-zero exit")
+	for _, source := range []string{"/.tmp/slopslint/x", "/.atm/clones/atm-run-install/x"} {
+		t.Run(source, func(t *testing.T) {
+			root := doctorRepoWithConfig(t, installConfig(""))
+			top, err := toplevel()
+			if err != nil {
+				t.Fatal(err)
+			}
+			install := "cp " + filepath.ToSlash(top) + source + " .tmp/x"
+			if err := os.WriteFile(filepath.Join(root, ".atm.yaml"), []byte(installConfig(install)), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			out, err := atm(t, "doctor")
+			fail := ""
+			for _, l := range lines(t, out) {
+				if strings.HasPrefix(l, "fail install: ") {
+					fail = l
+				}
+			}
+			if fail != "fail install: install reaches outside the clone: "+install {
+				t.Fatalf("want the install line failing on its reach, got\n%s", out)
+			}
+			if run.ExitCode(err) == 0 {
+				t.Fatal("want a non-zero exit")
+			}
+		})
 	}
 }
 
