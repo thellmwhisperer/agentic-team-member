@@ -116,7 +116,7 @@ func (o Outcome) Stream(
 		case f := <-frames:
 			s.frame(f)
 		case end := <-ended:
-			if code, done := s.end(root, end); done {
+			if code, done := s.end(ctx, root, end); done {
 				return code
 			}
 		case <-after(polled.Add(10 * time.Second).Sub(now())):
@@ -171,7 +171,7 @@ func (s *observer) frame(f Frame) {
 
 // end takes how the run ended. One that failed at delivery after its delivery command ran may leave its gate
 // going, which says how it ends.
-func (s *observer) end(root string, o Outcome) (int, bool) {
+func (s *observer) end(ctx context.Context, root string, o Outcome) (int, bool) {
 	switch {
 	case o.Ended.IsZero(): // its screen is lost; its gate is not
 		return 0, false
@@ -187,7 +187,20 @@ func (s *observer) end(root string, o Outcome) (int, bool) {
 		s.reason = o.Reason
 		return 0, false
 	}
-	s.say("run_failed", map[string]any{"step": cmp.Or(o.FailedNode, o.Step), "reason": o.Reason})
+	step := cmp.Or(o.FailedNode, o.Step)
+	if gateStepName(step) || step == "intent" || step == "rebase" {
+		var g gateState
+		if err := g.read(ctx, s.clone); err != nil {
+			s.diag(err)
+		}
+		if g.seen {
+			s.seen = true
+			s.gate(g)
+		}
+		s.prState(ctx, root)
+		step = "delivery"
+	}
+	s.say("run_failed", map[string]any{"step": step, "reason": o.Reason})
 	return 1, true
 }
 

@@ -346,7 +346,9 @@ func parseGate(status string) (s gateState) {
 	for _, l := range strings.Split(status, "\n") {
 		trimmed := strings.TrimSpace(l)
 		indent := len(l) - len(strings.TrimLeft(l, " "))
-		if table != "" && indent > depth {
+		key, value, isKey := strings.Cut(trimmed, ": ")
+		if table != "" && (indent > depth || table == "steps" && indent == depth &&
+			strings.Contains(trimmed, ",") && !isKey && !strings.HasSuffix(trimmed, ":")) {
 			if table == "steps" {
 				s.step(trimmed, parked)
 			} else {
@@ -354,7 +356,6 @@ func parseGate(status string) (s gateState) {
 			}
 			continue
 		}
-		key, value, isKey := strings.Cut(trimmed, ": ")
 		table, depth = "", indent
 		switch {
 		case strings.HasPrefix(trimmed, "steps["):
@@ -586,7 +587,7 @@ func applyGate(ctx context.Context, r *verdict, root, clone, branch string) (boo
 func (g gateState) outcome(r *verdict) (bool, error) {
 	switch {
 	case g.failed != "":
-		r.FailedNode, r.Reason = g.failed, "no-mistakes step "+g.failed+" failed"
+		r.FailedNode, r.Reason = g.failed, cmp.Or(g.reason, "no-mistakes step "+g.failed+" failed")
 		r.gateNode(g.failed, "failed", r.ensureNode(g.failed).DurationMS, r.Reason) // a no-op when already failed
 		return false, errors.New(r.Reason)
 	case g.closed:
@@ -630,7 +631,7 @@ func (r *verdict) noteGate(g gateState) {
 		}
 		why := ""
 		if s.status == "failed" {
-			why = "no-mistakes step " + name + " failed"
+			why = cmp.Or(g.reason, "no-mistakes step "+name+" failed")
 		}
 		r.gateNode(name, gateResult(name, s.status, g), s.ms, why)
 	}

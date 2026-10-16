@@ -249,7 +249,7 @@ func TestClosedPRPreservesGateResultsAndEndsStreamAsClosed(t *testing.T) {
 			}
 			var out bytes.Buffer
 			s := observer{w: &out, now: time.Now, pr: recordedPR}
-			code, ended := s.end(root, Outcome{
+			code, ended := s.end(context.Background(), root, Outcome{
 				Outcome: "failed", Ended: time.Now(), FailedNode: r.FailedNode, Reason: err.Error(),
 			})
 			events := events(t, &out)
