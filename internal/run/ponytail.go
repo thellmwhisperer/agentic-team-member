@@ -64,7 +64,7 @@ func (a agent) ponytail(root, clone, sha string, proofs []proof, i Issue, c conf
 	if err != nil {
 		return ev, err
 	}
-	why, lines, found, rejectedFiles, err := judge(clone, sha, before, after, files, found, c.TestPatterns)
+	why, lines, found, rejectedFiles, err := judge(clone, sha, before, after, all, files, found, c.TestPatterns)
 	ev["rejected_files"] = rejectedFiles
 	if err != nil {
 		return ev, err
@@ -222,10 +222,11 @@ func fault(clone, sha, before, after string, files []string, found []finding, te
 }
 
 // judge is fault on the cut from before to after, once each file a finding names with a missing or non-empty
-// issue sentence, or that the cut deletes, adds, or touches as a test or outside files, is back as before.
+// issue sentence, or that the cut deletes, adds, or touches as a test or outside files, is back byte for byte
+// from whole's tree all.
 // Nothing of the cut left is fault on it as it stands, the same "no cut". kept are the findings of the files
 // that stay; rejectedFiles names each rejected file with its rule's reason.
-func judge(clone, sha, before, after string, files []string, found []finding, tests []string) (why string,
+func judge(clone, sha, before, after, all string, files []string, found []finding, tests []string) (why string,
 	lines [2]int, kept []finding, rejectedFiles []rejectedFile, err error) {
 	rejectedFiles = []rejectedFile{}
 	changed, err := git(clone, "diff", "--name-status", "--no-renames", "-z", before, after)
@@ -242,7 +243,7 @@ func judge(clone, sha, before, after string, files []string, found []finding, te
 		why, lines, err = fault(clone, sha, before, after, files, found, tests)
 		return why, lines, found, rejectedFiles, err
 	}
-	if err = restoreFiles(clone, before, changed, bad); err != nil {
+	if err = restoreFiles(clone, all, changed, bad); err != nil {
 		return "", lines, nil, rejectedFiles, err
 	}
 	if after, err = snapshot(clone); err != nil {
@@ -296,8 +297,8 @@ func fileFault(status, path string, files, tests []string) string {
 	return ""
 }
 
-// restoreFiles puts each path of changed, the cut's name-status, that bad names back to tree in clone. An
-// added file is removed; any other is checked out of tree.
+// restoreFiles puts each path of changed, the cut's name-status, that bad names back to whole's tree in clone.
+// An added file is removed; any other is checked out byte for byte.
 func restoreFiles(clone, tree, changed string, bad map[string]string) error {
 	var back []string
 	for f := strings.Split(changed, "\x00"); len(f) > 1; f = f[2:] {
@@ -315,7 +316,7 @@ func restoreFiles(clone, tree, changed string, bad map[string]string) error {
 	if len(back) == 0 {
 		return nil
 	}
-	_, err := git(clone, append([]string{"--literal-pathspecs", "checkout", tree, "--"}, back...)...)
+	_, err := every(clone, append([]string{"--literal-pathspecs", "checkout", tree, "--"}, back...)...)
 	return err
 }
 
