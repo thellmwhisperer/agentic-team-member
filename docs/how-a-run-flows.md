@@ -470,7 +470,7 @@ when a node's state or duration changes.
 |-------|-------|
 | `failed_node`, `reason` | The step that failed, if any, and the reason for failure or PR closure |
 | `agent` | The effective requested `harness`, `model`, `effort` and ordered `harness_args`, after global config, `.atm.yaml` and flags. Unset model and effort stay `""`; no extra arguments is `[]` |
-| `nodes` | Each step's `result` (`passed`, `failed`, `running`, `waiting`, `pending`, `skipped` or `not run`), `started_at` (UTC, RFC 3339 with milliseconds) when it starts, and `duration_ms` when it ends; the agent node also has `exit` and `tail` when the agent ran but its step failed. Once seen, the [Delivery gate nodes](#delivery) are included with the state and duration from `no-mistakes axi status` |
+| `nodes` | Each step's `result` (`passed`, `failed`, `running`, `waiting`, `pending`, `skipped` or `not run`), `started_at` (UTC, RFC 3339 with milliseconds) when its start is known, and `duration_ms` when it ends; the agent node also has `exit` and `tail` when the agent ran but its step failed. Once seen, the [Delivery gate nodes](#delivery) are included with the state and duration from `no-mistakes axi status` |
 | `type` | The task type |
 | `units` | Each unit's number, base commit, test file, type, result, red/green proof row span, and red and green trials: command, exit code, last 60 lines, `started_at` and `duration_ms` |
 | `reproofs` | The latest repeated unit proofs and spans, after a kept cut or the latest contract repair attempt; successful delivery uses the approved commit's proofs |
@@ -497,6 +497,10 @@ include an `agent` column: `<harness> <model>`, or `<harness> default` when
 the requested model is empty. `.atm/runs.jsonl` retains the requested
 `agent` object for finished runs and after the server restarts. Old history
 without attribution displays `-`; ATM does not infer it from current config.
+
+Gate nodes omit `started_at`, including skipped steps: the current
+`no-mistakes axi status` step table supplies no start times. ATM does not
+substitute the time it observed a step.
 
 The `ponytail` node also records `kept` (`true` or `false`) once ATM decides
 whether to keep the cut, and `reason`: the exact rejection reason from the
@@ -584,7 +588,9 @@ are observed, they determine activity: `working` while a gate node runs,
 Delivery parent does not hide that wait. The run stays listed throughout
 [gate observation](#delivery) while its screen remains attached. On completion,
 it reports
-`idle` with `#7 passed` or `#7 failed at <step>` when the run ends. An issue
+`idle` with `#7 passed` or `#7 failed at <step>` when the run ends. The failure
+label names the failed node even if ATM never observed it running: Test
+running followed by Document failed reports `#7 failed at Document`. An issue
 file goes by the run's label instead of `#7`. Leaving the screen, by the run's
 end or by `q`, takes `atm` out of the section. ATM runs `$HERDR_BIN_PATH` or
 `herdr`, a second at most per call; a failing or missing `herdr` changes

@@ -80,7 +80,7 @@ func (h *herdr) end(o run.Outcome, err error) {
 	h.call("report-agent", "--state", "idle", "--message", msg)
 }
 
-// failedNode is the label of the node that failed, from the outcome or a failed row, even if it never ran.
+// failedNode names the failed node even if no running state was observed.
 func (h *herdr) failedNode(o run.Outcome) string {
 	if r := h.m.current(o.FailedNode); r != nil {
 		return h.m.failedAt(r)
