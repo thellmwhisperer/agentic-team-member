@@ -6,30 +6,31 @@ in [How a run flows](how-a-run-flows.md).
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/config-layers-dark.svg">
-  <img alt="Configuration layers, each overriding the one before: built-in defaults (harness claude), then ~/.config/atm/config.yaml (harness, model, effort, herdr_workspace), then .atm.yaml at the repository root (every command and pattern, and optionally harness, model, effort), then the flags of one atm run (--harness, --model, --effort)." src="assets/config-layers-light.svg" width="900">
+  <img alt="Configuration layers, each overriding shared keys from the one before: built-in defaults (harness claude), then ~/.config/atm/config.yaml (see machine settings below), then .atm.yaml at the repository root (every command and pattern, and optionally harness, model, effort), then the flags of one atm run (--harness, --model, --effort)." src="assets/config-layers-light.svg" width="900">
 </picture>
 
 ## Layers
 
-Each layer overrides the one before. A key no layer knows fails the run.
+Each layer overrides shared keys from the one before. A key not supported
+in its file fails the run.
 
 | Layer | Where | Sets |
 |-------|-------|------|
 | Built-in defaults | the binary | `harness: claude` |
 | Your machine | `~/.config/atm/config.yaml` | `harness`, `model`, `effort`, `herdr_workspace` |
-| The repository | `.atm.yaml` at its root | every key below |
+| The repository | `.atm.yaml` at its root | keys in [`.atm.yaml`](#atmyaml) below |
 | One run | `atm run` flags | `--watcher`, [`--follow`](how-a-run-flows.md#following-one-run), `--base-ref`, `--harness`, `--model`, `--effort`, `--harness-arg`, `--env`, `--resume` |
 
 ## `~/.config/atm/config.yaml`
 
-Optional. It says which agent you run everywhere.
+Optional. It selects your agent and the herdr workspace for run tabs.
 
 | Key | Meaning |
 |-----|---------|
 | `harness` | The coding agent CLI: `claude`, `codex`, `opencode`, `pi`, `cursor` or `hermes` (local models go through `pi`). Any other fails the run |
 | `model` | Its model; empty is the CLI's default |
 | `effort` | Its effort; empty is the CLI's default |
-| `herdr_workspace` | Label of the herdr workspace [`atm run --follow`](how-a-run-flows.md#the-screen) opens the run's tab in, when `HERDR_ENV=1`. Empty, the default, opens none. ATM resolves the label to an id with `herdr workspace list` |
+| `herdr_workspace` | Machine-only; not accepted in `.atm.yaml` or as a run flag. Label of the herdr workspace [`atm run --follow`](how-a-run-flows.md#the-screen) opens the run's tab in, when `HERDR_ENV=1`. Empty, the default, opens none. ATM resolves the label to an id with `herdr workspace list` |
 
 ```yaml
 harness: claude
