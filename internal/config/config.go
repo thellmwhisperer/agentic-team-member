@@ -28,15 +28,16 @@ type Agent struct {
 // Config is the repository configuration. Nothing in it is per language: the repository declares its commands.
 type Config struct {
 	Agent        `yaml:",inline"`
-	Install      string   `yaml:"install"`
-	Test         string   `yaml:"test"`
-	Typecheck    string   `yaml:"typecheck"`
-	Lint         string   `yaml:"lint"`
-	TestFile     string   `yaml:"test_file"` // runs one test: {file} or {dir}; {tests} selects Go tests in that file
-	TestPatterns []string `yaml:"test_patterns"`
-	DocsPatterns []string `yaml:"docs_patterns"`
-	Delivery     string   `yaml:"delivery"`
-	AgentTimeout Timeout  `yaml:"agent_timeout"` // optional; 0 when absent, the run's default
+	Install      string       `yaml:"install"`
+	Test         string       `yaml:"test"`
+	Typecheck    string       `yaml:"typecheck"`
+	Lint         string       `yaml:"lint"`
+	TestFile     string       `yaml:"test_file"` // runs one test: {file} or {dir}; {tests} selects Go tests in that file
+	TestPatterns []string     `yaml:"test_patterns"`
+	DocsPatterns []string     `yaml:"docs_patterns"`
+	Delivery     string       `yaml:"delivery"`
+	AgentTimeout Timeout      `yaml:"agent_timeout"` // optional; 0 when absent, the run's default
+	CheckTimeout CheckTimeout `yaml:"check_timeout"` // optional; 0 when absent, the run's default
 }
 
 // Timeout is agent_timeout: a positive duration in Go's syntax, as 45m.
@@ -44,12 +45,26 @@ type Timeout time.Duration
 
 // UnmarshalYAML parses n with time.ParseDuration. yaml never calls it for a null, which Load rejects.
 func (d *Timeout) UnmarshalYAML(n *yaml.Node) error {
-	v, err := time.ParseDuration(n.Value)
-	if err != nil || v <= 0 {
-		return fmt.Errorf("agent_timeout %q: want a positive duration, as 45m or 1h", n.Value)
-	}
+	v, err := parseTimeout(n.Value, "agent_timeout")
 	*d = Timeout(v)
-	return nil
+	return err
+}
+
+// CheckTimeout is the positive Go duration for each checks command.
+type CheckTimeout time.Duration
+
+func (d *CheckTimeout) UnmarshalYAML(n *yaml.Node) error {
+	v, err := parseTimeout(n.Value, "check_timeout")
+	*d = CheckTimeout(v)
+	return err
+}
+
+func parseTimeout(value, key string) (time.Duration, error) {
+	v, err := time.ParseDuration(value)
+	if err != nil || v <= 0 {
+		return 0, fmt.Errorf("%s %q: want a positive duration, as 45m or 1h", key, value)
+	}
+	return v, nil
 }
 
 // ACP is the agents ATM speaks ACP with, by harness: the command line it runs in the clone, and, since it takes
@@ -108,6 +123,9 @@ func Load(root, home string, flags Agent) (Config, error) {
 	}
 	if _, ok := keys["agent_timeout"]; ok && c.AgentTimeout == 0 {
 		return c, errors.New("agent_timeout is empty: want a positive duration, as 45m or 1h")
+	}
+	if _, ok := keys["check_timeout"]; ok && c.CheckTimeout == 0 {
+		return c, errors.New("check_timeout is empty: want a positive duration, as 45m or 1h")
 	}
 	if c.TestFile != "" && !strings.Contains(c.TestFile, "{file}") && !strings.Contains(c.TestFile, "{dir}") {
 		return c, fmt.Errorf("test_file %q: want {file} or {dir} in it", c.TestFile)

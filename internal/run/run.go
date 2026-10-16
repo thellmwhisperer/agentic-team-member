@@ -548,9 +548,8 @@ func writeBrief(path string, i Issue, c config.Config, next *followUp) (string, 
 // runDir is the directory of run label in the repository at root, which nothing removes.
 func runDir(root, label string) string { return filepath.Join(root, ".atm", "runs", label) }
 
-// timeout bounds every command a step runs but the delivery command. ponytail: one fixed ceiling, and on
-// timeout command kills only the command itself, not what it started, while sh kills its group; a key in
-// .atm.yaml and a process group for command are the upgrades.
+// timeout is the default limit for checks commands and the limit for other non-agent, non-delivery commands.
+// ponytail: command kills only the command itself; a process group, as sh uses, is the upgrade.
 var timeout = 10 * time.Minute
 
 // agentTimeout bounds the agent when .atm.yaml sets no agent_timeout.

@@ -135,7 +135,9 @@ The `delivery` line hands the branch to
 [no-mistakes](https://github.com/kunchenguid/no-mistakes). Without `--yes` it
 only reports: whoever launched the run answers each finding.
 
-One key is optional: `agent_timeout`, the limit for each agent call, including
+Optional: `check_timeout`, a positive Go duration such as `20m`, limits each checks command (install, test, typecheck, lint and red/green); absent means `10m`, and empty, null, invalid or non-positive values fail configuration.
+
+Also optional: `agent_timeout`, the limit for each agent call, including
 the slop detector, as a positive Go duration such as `45m` or `1h`. Without it,
 the limit is `30m`. An empty, null, unitless, invalid, zero, negative or
 overflowed value fails before the agent starts. Past the limit, the agent's
