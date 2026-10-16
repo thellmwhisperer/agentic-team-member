@@ -20,9 +20,10 @@ it.
    with `atm run --watcher <id> <number>`. Fill `.atm.yaml` once with the
    repository commands, file patterns and the no-mistakes delivery line; see
    [the watcher](how-a-run-flows.md#the-watcher) and [Configuration](configuration.md).
-3. **The verdict.** `report.json`, or the summary at the end of the run. A FAIL
-   ends here: the report says which check failed and why, and the issue gets a
-   better contract or the code a better check.
+3. **The checks.** A failed check stops the run: the report says which check
+   failed and why, and the issue gets a better contract or the code a better
+   check. The final [report](how-a-run-flows.md#the-report) also covers the
+   [delivery gate](how-a-run-flows.md#delivery).
 4. **The gate.** The green branch goes to `no-mistakes axi run` without `--yes`.
    Review, test, lint and document run as fenced model steps. The reviewer
    only reports (`auto_fix.review: 0`); whoever launched the run answers each

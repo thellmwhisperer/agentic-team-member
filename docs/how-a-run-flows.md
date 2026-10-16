@@ -102,7 +102,8 @@ shows `WATCHER GONE` as above, and `atm watch --adopt <run>` takes it over.
 
 ## The steps
 
-A failed step stops the run; the steps after it are not run.
+A failed step stops the run; the steps after it are not run. The exception is
+a delivery command that has started a gate: see [Delivery](#delivery).
 
 | Step | Does | Fails the run when |
 |------|------|--------------------|
@@ -115,9 +116,8 @@ A failed step stops the run; the steps after it are not run.
 | Delivery | Commits the work on a branch, has the agent review the commit against the issue, and runs the `delivery` command | The branch, the review or the command fails. Skipped when `delivery` is empty |
 
 Agent and Checks run again for each chained follow-up, at most three units in
-one run; see [Follow-ups](#follow-ups). After a no-mistakes hand-off the run
-stays in Delivery's gate until the PR is merged or closed, or a gate step
-fails; those steps are nodes of the same run.
+one run; see [Follow-ups](#follow-ups). For the gate nodes that follow
+Delivery, see [Delivery](#delivery).
 
 ## Issue, clone and contract
 
@@ -429,11 +429,20 @@ a time limit, with these variables:
 
 With no-mistakes, the line is `no-mistakes axi run --intent "$ATM_INTENT"`.
 Its output goes to the screen and to `delivery-output.txt`. ATM never pushes
-or opens a pull request: that is the command's business. When that command
-hands the branch to no-mistakes, the run does not end. It reads
-`no-mistakes axi status` in the clone, every 10 s, until the PR is merged or
-closed, or a gate step fails. Review, test, document, lint, push, PR and CI
-are nodes of the same run, below Delivery.
+or opens a pull request: that is the command's business. When the configured
+line contains `no-mistakes`, ATM starts reading `no-mistakes axi status` in
+the clone as soon as the command starts, then every 10 s. It keeps following
+the gate until the PR is merged or closed, or a gate step fails, even if the
+delivery command exits nonzero while the gate is active. That command error
+remains recorded; following the gate does not erase it. If the gate ends
+while the command is still running, ATM stops the command and uses the gate
+outcome.
+
+Review, test, document, lint, push, PR and CI are nodes of the same run,
+below Delivery. A closed, unmerged PR preserves the gate's recorded node
+results and records `PR closed` as the run's reason; it does not turn a
+completed PR node into a failed step. The [`--follow` stream](#following-one-run)
+reports that outcome as `closed`.
 
 ## Time limits
 
@@ -454,17 +463,22 @@ For cancellation of `atm run --follow`, see [Following one run](#following-one-r
 ## The report
 
 `.atm/runs/<label>/report.json` is rewritten at every step's start and end, so
-it is on disk before delivery reads it.
+it is on disk before delivery reads it. Gate observations also rewrite it
+when a node's state or duration changes.
 
 | Field | Holds |
 |-------|-------|
-| `failed_node`, `reason` | The step that failed and why |
-| `nodes` | Each step's `result` (`passed`, `failed`, `running`, `waiting`, `pending`, `skipped` or `not run`), `started_at` (UTC, RFC 3339 with milliseconds) when it starts, and `duration_ms` when it ends; the agent node also has `exit` and `tail` when the agent ran but its step failed. Once the gate is seen, the no-mistakes steps (`review`, `test`, `document`, `lint`, `push`, `pr`, `ci`) are nodes too, with the state and duration from `no-mistakes axi status` |
+| `failed_node`, `reason` | The step that failed, if any, and the reason for failure or PR closure |
+| `nodes` | Each step's `result` (`passed`, `failed`, `running`, `waiting`, `pending`, `skipped` or `not run`), `started_at` (UTC, RFC 3339 with milliseconds) when it starts, and `duration_ms` when it ends; the agent node also has `exit` and `tail` when the agent ran but its step failed. Once seen, the [Delivery gate nodes](#delivery) are included with the state and duration from `no-mistakes axi status` |
 | `type` | The task type |
 | `units` | Each unit's number, base commit, test file, type, result, red/green proof row span, and red and green trials: command, exit code, last 60 lines, `started_at` and `duration_ms` |
 | `reproofs` | The latest repeated unit proofs and spans, after a kept cut or the latest contract repair attempt; successful delivery uses the approved commit's proofs |
 | `commands` | Every configured command that ran, the clone's `install` included, with its result, last 60 lines, `started_at` and `duration_ms` |
 | `head_sha` | The delivered branch's final commit |
+
+For gate nodes, `completed` becomes `passed`, and a step awaiting a decision
+becomes `waiting`. `pending`, `skipped` and `failed` keep those results;
+other active states become `running`.
 
 The `ponytail` node also records `kept` (`true` or `false`) once ATM decides
 whether to keep the cut, and `reason`: the exact rejection reason from the
@@ -533,11 +547,10 @@ On Unix, ATM keeps its screen live while the delivery command is silent. From
 the command's first output until it ends, ATM gives it the attached terminal
 and its keys, so no-mistakes shows its own screen there; ATM's screen comes
 back when the command ends. That split stays: no-mistakes' screen is where its
-decisions are made. After the hand-off, ATM's screen keeps the gate's steps
-below Delivery, each with its state and duration from `no-mistakes axi status`
-in the clone: completed is passed, a step at work is running, one waiting for
-a decision is waiting, a failed step is failed. The run, and so this screen,
-stays up until the PR is merged or closed, or the gate fails.
+decisions are made. ATM's screen shows the [Delivery gate nodes](#delivery)
+as soon as they are observed, with the states and durations saved in
+[the report](#the-report). Reattaching to a completed run restores those
+nodes, including skipped results.
 On Windows, the delivery command runs without ATM's attached terminal, so its
 output appears as lines.
 After a terminal run completes, the ATM screen stays open until `q` or
@@ -547,10 +560,12 @@ In a herdr pane (`HERDR_ENV=1` and
 `HERDR_PANE_ID` set), the screen also shows the run in herdr's Agents section
 as `atm`, with the run's label as its session: `working` with the issue, then
 with each step it reaches (`#7 Agent · unit 2`, `#7 Checks · red/green`). Until
-the issue title is available, `working` uses the run label. While a node runs
-the state is `working`; while a gate step waits for a decision it is `blocked`.
-The run stays in the list until the PR is merged or closed, or the gate fails,
-because that is how long this process stays up. On completion, it reports
+the issue title is available, `working` uses the run label. Once gate nodes
+are observed, they determine activity: `working` while a gate node runs,
+`blocked` while one waits for a decision and none runs. A still-running
+Delivery parent does not hide that wait. The run stays listed throughout
+[gate observation](#delivery) while its screen remains attached. On completion,
+it reports
 `idle` with `#7 passed` or `#7 failed at <step>` when the run ends. An issue
 file goes by the run's label instead of `#7`. Leaving the screen, by the run's
 end or by `q`, takes `atm` out of the section. ATM runs `$HERDR_BIN_PATH` or
