@@ -70,6 +70,10 @@ func fakeAgent(name string) int {
 		}
 		return 0
 	}
+	return fakeAgentCLI(name)
+}
+
+func fakeAgentCLI(name string) int {
 	mode := os.Getenv("FAKE_AGENT")
 	if fakeAgentSetup(mode) {
 		return 0
