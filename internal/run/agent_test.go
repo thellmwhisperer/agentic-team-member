@@ -64,6 +64,10 @@ func fakeAgent(name string) int {
 	}
 	args := os.Args[1:]
 	_, call, skill, todo, text := fakeAgentTask(name, args, &mode)
+	if flag := codexResumeRejected(name, args); flag != "" {
+		fmt.Fprintf(os.Stderr, "unexpected argument '%s'\n", flag)
+		return 2
+	}
 	waitForFakeAgentRelease()
 	wd, _ := os.Getwd()
 	stream := strings.ReplaceAll(os.Getenv("FAKE_AGENT_STREAM"), "<clone>", filepath.ToSlash(wd))
@@ -129,6 +133,10 @@ func fakeAgentTask(name string, args []string, mode *string) ([]byte, string, st
 
 // fakeAgentKind is which fake the brief plays, and the call suffix its recording uses.
 func fakeAgentKind(brief, typ string, mode *string) (skill, call, todo, text, kind string) {
+	if k, ok := continuedKind(brief); ok {
+		*mode = k.Mode
+		return k.Skill, k.Call + ".return", k.Todo, k.Text, k.Kind
+	}
 	skill, call, todo, text, kind = "ponytail", "", cmp.Or(os.Getenv("FAKE_AGENT_WORK"), work[typ]), fakeReport, "worker"
 	switch {
 	case strings.Contains(brief, "# Scope review"):
@@ -150,7 +158,33 @@ func fakeAgentKind(brief, typ string, mode *string) (skill, call, todo, text, ki
 		todo = os.Getenv("FAKE_PONYTAIL_WORK")
 		text = cmp.Or(os.Getenv("FAKE_PONYTAIL_REPORT"), `{"findings": [], "summary": "Lean already."}`)
 	}
+	saveKind(fakeKind{skill, call, todo, text, kind, *mode})
 	return skill, call, todo, text, kind
+}
+
+// fakeKind is the brief's fake, kept outside the clone so a returned report replays a review, not a new worker.
+type fakeKind struct{ Skill, Call, Todo, Text, Kind, Mode string }
+
+func saveKind(k fakeKind) {
+	b, _ := json.Marshal(k)
+	_ = os.WriteFile(kindPath(), b, 0o600)
+}
+
+func continuedKind(brief string) (fakeKind, bool) {
+	if !strings.HasPrefix(strings.TrimSpace(brief), "Your final message was rejected:") {
+		return fakeKind{}, false
+	}
+	var k fakeKind
+	b, err := os.ReadFile(kindPath())
+	if err != nil || json.Unmarshal(b, &k) != nil || k.Kind == "" || k.Kind == "worker" {
+		return fakeKind{}, false
+	}
+	return k, true
+}
+
+func kindPath() string {
+	wd, _ := os.Getwd()
+	return filepath.Join(os.TempDir(), "atm-fake-"+strings.NewReplacer("/", "_", "\\", "_").Replace(wd))
 }
 
 const defaultReview = `{"disposition": "approved", "base": "{base}", "head": "{head}", "findings": [], ` +
@@ -325,6 +359,19 @@ func fakeAgentSkill(name string, args []string, skill, mode string) {
 	}
 }
 
+// codexResumeRejected is the flag codex exec resume rejects, as the real CLI does, "" when the call is not one.
+func codexResumeRejected(name string, args []string) string {
+	if name != "codex" || !slices.Contains(args, "resume") {
+		return ""
+	}
+	for _, flag := range []string{"-C", "--sandbox"} {
+		if slices.Contains(args, flag) {
+			return flag
+		}
+	}
+	return ""
+}
+
 func recordFakeAgentCall(args []string, stdin []byte, call string) {
 	if path := os.Getenv("FAKE_AGENT_CALL"); path != "" {
 		b, _ := json.Marshal(obj{"args": args, "stdin": string(stdin), "env": os.Environ()})
@@ -424,7 +471,7 @@ func TestRunDrivesTheAgent(t *testing.T) {
 		"codex": `exec --json -C <clone> --sandbox workspace-write -o <log>.final.md -c model="m" ` +
 			`-c model_reasoning_effort="e" --x y <brief>`,
 		"opencode": "run --pure --format json --dir <clone> -m m --variant e --x y <brief>",
-		"pi": "-p --mode json --no-extensions --no-skills --no-prompt-templates --no-context-files --no-session " +
+		"pi": "-p --mode json --no-extensions --no-skills --no-prompt-templates --no-context-files " +
 			"--skill <clone>/.atm/skills/ponytail --model m --thinking e --x y <brief>",
 		"cursor": "-p --output-format stream-json --trust --force --workspace <clone> --model m --x y <brief>",
 	}
