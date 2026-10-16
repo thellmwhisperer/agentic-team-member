@@ -18,9 +18,9 @@ import (
 // helloLimit bounds atm doctor --agent's hello.
 var helloLimit = 2 * time.Minute
 
-// doctorCmd is atm doctor: git, the configured agent CLI, gh when origin is on GitHub, .atm.yaml and a live
-// atm watch, one line each, then, with --agent, the agent's answer to a hello. Every check runs; any failure
-// fails the command.
+// doctorCmd is atm doctor: git, the configured agent CLI, gh when origin is on GitHub, .atm.yaml, its
+// install and a live atm watch, one line each, then, with --agent, the agent's answer to a hello. Every check
+// runs; any failure fails the command.
 func doctorCmd() *cobra.Command {
 	var hello bool
 	c := &cobra.Command{Use: "doctor", Short: "Check what atm run needs", Args: cobra.NoArgs,
@@ -38,11 +38,7 @@ func doctorCmd() *cobra.Command {
 			root, err := toplevel()
 			check("git", root, err)
 			// Load reads the harness before it checks the keys, so a failing .atm.yaml still names the agent.
-			var c config.Config
-			home, cfgErr := os.UserHomeDir()
-			if cfgErr == nil {
-				c, cfgErr = config.Load(cmp.Or(root, "."), home, config.Agent{})
-			}
+			c, home, cfgErr, install := doctorConfig(root)
 			harness := cmp.Or(c.Harness, "claude")
 			bin := cmp.Or(map[string]string{"cursor": "cursor-agent"}[harness], harness)
 			path, err := exec.LookPath(bin)
@@ -52,6 +48,9 @@ func doctorCmd() *cobra.Command {
 				check("gh", path, err)
 			}
 			check(".atm.yaml", "every key declared", cfgErr)
+			if cfgErr == nil { // the install the brief quotes the worker must stay inside its clone
+				check("install", "stays inside the clone", install)
+			}
 			last := "run atm doctor --agent to say hello to " + harness
 			if hello {
 				if cfgErr != nil {
@@ -83,4 +82,20 @@ func doctorCmd() *cobra.Command {
 		}}
 	c.Flags().BoolVar(&hello, "agent", false, "say hello to the agent the way a run does")
 	return c
+}
+
+// doctorConfig is the config doctor checks, and why it cannot: home for its skill line, cfgErr, and the error
+// of the install, which must stay inside the clone as the reach guard reads the worker running it. Nothing
+// loads when the config does not.
+func doctorConfig(root string) (c config.Config, home string, cfgErr, install error) {
+	home, cfgErr = os.UserHomeDir()
+	if cfgErr == nil {
+		c, cfgErr = config.Load(cmp.Or(root, "."), home, config.Agent{})
+	}
+	if cfgErr == nil {
+		if reach := run.InstallReach(c.Install, root); reach != "" {
+			install = fmt.Errorf("install reaches outside the clone: %s", reach)
+		}
+	}
+	return c, home, cfgErr, install
 }

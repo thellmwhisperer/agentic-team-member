@@ -109,7 +109,7 @@ your machine's file.
 
 | Key | Meaning |
 |-----|---------|
-| `install` | Installs dependencies in a fresh clone |
+| `install` | Installs dependencies in a fresh clone; the worker's brief quotes it, so a run refuses one the reach guard would reject in the clone (`install reaches outside the clone: <the reach>`), as `atm doctor` reports |
 | `test` | Runs the whole test suite |
 | `typecheck` | Typechecks |
 | `lint` | Lints |
@@ -149,7 +149,7 @@ Run repository commands from inside the repository they work on.
 | Command | Does |
 |---------|------|
 | `atm init` | Writes a commented `.atm.yaml` with every key empty, unless there is one, and adds `/.atm/` to `.gitignore` unless it is there. Run twice, it changes nothing |
-| `atm doctor [--agent]` | Checks git, the configured agent CLI on `PATH`, `gh` when `origin` is on GitHub, `.atm.yaml`, and whether an `atm watch` lease is alive. One `ok` or `fail` line per prerequisite; every check runs, and any prerequisite failure exits non-zero. It also reports the advisory [skill status](#skill). Its last line says `run atm doctor --agent to say hello to <harness>`: it makes no model call. With `--agent` it says hello instead, see [saying hello to the agent](#saying-hello-to-the-agent) |
+| `atm doctor [--agent]` | Checks git, the configured agent CLI on `PATH`, `gh` when `origin` is on GitHub, `.atm.yaml`, its `install` staying inside the clone, and whether an `atm watch` lease is alive. One `ok` or `fail` line per prerequisite; every check runs, and any prerequisite failure exits non-zero. It also reports the advisory [skill status](#skill). Its last line says `run atm doctor --agent to say hello to <harness>`: it makes no model call. With `--agent` it says hello instead, see [saying hello to the agent](#saying-hello-to-the-agent) |
 | `atm skill`, `atm skill install [--dir <path>] [--force]` | See [Skill](#skill) |
 | `atm watch [--adopt <run>]` | Watches runs bound to it until killed; see [the watcher](how-a-run-flows.md#the-watcher) |
 | `atm run --watcher <id> [flags] <issue>` | Starts a run bound to a live watcher. On a terminal it keeps the completed screen open until q or Ctrl+C, then exits with the run's code; off one it prints the run's label and returns. See [the watcher](how-a-run-flows.md#the-watcher) and [resuming a failed run](#resuming-a-failed-run) |

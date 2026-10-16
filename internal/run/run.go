@@ -52,7 +52,7 @@ func Run(label string, args []string, out, summary io.Writer) (err error) {
 		return err
 	}
 	// The steps after the issue take the config from here.
-	c, err := config.Load(root, home, a.Agent)
+	c, err := loadConfig(root, home, a.Agent)
 	if err != nil {
 		return err
 	}
@@ -95,6 +95,18 @@ func Run(label string, args []string, out, summary io.Writer) (err error) {
 	})
 	a.deliver(r, root, dir, sha, *base, c.Delivery, i, proofs, c, summary)
 	return r.err
+}
+
+// loadConfig is the run's config, refusing an install that reaches outside the clone before anything
+// starts: the brief quotes it to the worker, who runs it in the clone, where the reach guard would kill it.
+func loadConfig(root, home string, flags config.Agent) (config.Config, error) {
+	c, err := config.Load(root, home, flags)
+	if err == nil {
+		if reach := InstallReach(c.Install, root); reach != "" {
+			err = fmt.Errorf("install reaches outside the clone: %s", reach)
+		}
+	}
+	return c, err
 }
 
 // theIssue is the issue of run from, as it first read it, or else arg's, read from the GitHub repository repo

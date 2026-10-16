@@ -47,8 +47,8 @@ func lines(t *testing.T, out string) []string {
 
 func TestDoctorPassesWhenEveryCheckPasses(t *testing.T) {
 	for _, c := range []struct{ origin, want string }{
-		{"https://github.com/o/r.git", "ok git|ok claude|ok gh|ok .atm.yaml|ok watcher|skill"},
-		{"https://example.com/o/r.git", "ok git|ok claude|ok .atm.yaml|ok watcher|skill"},
+		{"https://github.com/o/r.git", "ok git|ok claude|ok gh|ok .atm.yaml|ok install|ok watcher|skill"},
+		{"https://example.com/o/r.git", "ok git|ok claude|ok .atm.yaml|ok install|ok watcher|skill"},
 	} {
 		t.Run(c.origin, func(t *testing.T) {
 			watcher(t, repo(t, c.origin), "w", 0)
