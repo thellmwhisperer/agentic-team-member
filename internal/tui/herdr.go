@@ -75,9 +75,22 @@ func (h *herdr) end(o run.Outcome, err error) {
 	}
 	msg := h.issue() + " passed"
 	if err != nil || o.Outcome != "passed" {
-		msg = h.issue() + " failed at " + cmp.Or(h.failedStep, h.step, "start")
+		msg = h.issue() + " failed at " + cmp.Or(h.failedStep, h.failedNode(o), h.step, "start")
 	}
 	h.call("report-agent", "--state", "idle", "--message", msg)
+}
+
+// failedNode is the label of the node that failed, from the outcome or a failed row, even if it never ran.
+func (h *herdr) failedNode(o run.Outcome) string {
+	if r := h.m.current(o.FailedNode); r != nil {
+		return h.m.failedAt(r)
+	}
+	for i := len(h.m.rows) - 1; i >= 0; i-- {
+		if r := h.m.rows[i]; !r.check && r.state == "failed" {
+			return h.m.failedAt(r)
+		}
+	}
+	return gateLabels[o.FailedNode]
 }
 
 // resolve chooses the run that an empty-label attach will follow, once.
