@@ -172,6 +172,8 @@ func (s *observer) frame(f Frame) {
 // end takes how the run ended. One that failed at delivery after its delivery command ran may leave its gate
 // going, which says how it ends.
 func (s *observer) end(ctx context.Context, root string, o Outcome) (int, bool) {
+	step := cmp.Or(o.FailedNode, o.Step)
+	terminalGate := gateStepName(step) || step == "intent" || step == "rebase"
 	switch {
 	case o.Ended.IsZero(): // its screen is lost; its gate is not
 		return 0, false
@@ -183,12 +185,22 @@ func (s *observer) end(ctx context.Context, root string, o Outcome) (int, bool) 
 	case o.Outcome == "passed":
 		s.diag(errors.New("the run delivered nothing: no PR to follow"))
 		return 1, true
-	case o.FailedNode == "delivery" && !(&gate{seen: s.seen}).failedFirst(root, o.Run):
-		s.reason = o.Reason
-		return 0, false
+	case o.FailedNode == "delivery":
+		var report verdict
+		b, _ := os.ReadFile(o.Report)
+		if json.Unmarshal(b, &report) == nil {
+			for _, n := range report.Nodes {
+				if n.Result == "failed" && (gateStepName(n.Name) || n.Name == "intent" || n.Name == "rebase") {
+					terminalGate = true
+				}
+			}
+		}
+		if !terminalGate && !(&gate{seen: s.seen}).failedFirst(root, o.Run) {
+			s.reason = o.Reason
+			return 0, false
+		}
 	}
-	step := cmp.Or(o.FailedNode, o.Step)
-	if gateStepName(step) || step == "intent" || step == "rebase" {
+	if terminalGate {
 		var g gateState
 		if err := g.read(ctx, s.clone); err != nil {
 			s.diag(err)
@@ -234,7 +246,7 @@ func (s *observer) poll(ctx context.Context, root string) (int, bool) {
 	}
 	if g.failed != "" {
 		s.say("run_failed", map[string]any{"step": "delivery",
-			"reason": cmp.Or(s.reason, g.reason, "no-mistakes step "+g.failed+" failed")})
+			"reason": cmp.Or(g.reason, s.reason, "no-mistakes step "+g.failed+" failed")})
 		return 1, true
 	}
 	switch prState {

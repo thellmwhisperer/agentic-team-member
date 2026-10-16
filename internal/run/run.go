@@ -385,9 +385,15 @@ func (a agent) deliver(r *verdict, root, clone, sha, base, line string, i Issue,
 	if handed != "" && !gateDone {
 		_, gateErr = followGate(ctx, r, root, clone, handed, nil)
 	}
-	r.err = errors.Join(r.err, gateErr)
-	if errors.Is(gateErr, errPRClosed) {
+	if gateErr != nil && (gateStepName(r.FailedNode) || r.FailedNode == "intent" || r.FailedNode == "rebase") {
+		r.err, r.Reason, r.FailedNode = gateErr, gateErr.Error(), "delivery"
+		r.node("delivery").Result = "failed"
+		r.emit("delivery", map[string]any{"state": "failed", "error": r.Reason,
+			"duration_ms": r.node("delivery").DurationMS})
+	} else if errors.Is(gateErr, errPRClosed) {
 		r.err, r.Reason = gateErr, gateErr.Error()
+	} else {
+		r.err = errors.Join(r.err, gateErr)
 	}
 }
 

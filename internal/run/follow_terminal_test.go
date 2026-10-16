@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -105,6 +106,87 @@ func TestFollowTerminalGateResult(t *testing.T) {
 			assertTerminalDeliveryEvents(t, &out, terminalGateReason)
 		})
 	}
+}
+
+func TestFollowTerminalCommandExitsBeforeGateFailure(t *testing.T) {
+	defer func(b time.Duration) { beat = b }(beat)
+	beat = time.Hour
+	failed, err := filepath.Abs(filepath.Join("testdata", "atm_watch_status_failed.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := repo(t, "https://github.com/o/r.git", atmSet(atmYAML, "delivery", ": no-mistakes; exit 1"))
+	count := fakeStatus(t)
+	writeFixture(t, count, "1")
+	t.Setenv("ATM_STATUS_LIVE", failed)
+	t.Setenv("ATM_STATUS_WAITING", failed)
+	fakeGH(t, "OPEN", false)
+	r := &bgRun{Outcome: Outcome{Run: "failed", Issue: "433", Outcome: "running",
+		Report: filepath.Join(runDir(root, "failed"), "report.json")}, more: make(chan struct{})}
+	if err := os.MkdirAll(filepath.Dir(r.Report), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	server := &server{root: root, runs: []*bgRun{r}}
+	args := []string{issueFile(t, issue)}
+	done := make(chan struct{})
+	go func() { server.run(r, args); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("delivery did not terminate after the command and gate failed")
+	}
+	if r.Outcome.Outcome != "failed" || r.FailedNode != "delivery" || r.Reason != terminalGateReason {
+		t.Fatalf("terminal run outcome = %+v", r.Outcome)
+	}
+	report := readReport(t, r.Report)
+	if report["failed_node"] != "delivery" || report["reason"] != terminalGateReason {
+		t.Fatalf("terminal report = %v", report)
+	}
+	commandFailed, gateFailed := false, false
+	for _, f := range r.frames {
+		var ev struct{ Step, State, Error string }
+		if json.Unmarshal(f.Event, &ev) != nil {
+			continue
+		}
+		if ev.Step == "delivery" && ev.Error == "delivery: exit status 1" {
+			commandFailed = true
+		}
+		if ev.Step == "push" && ev.State == "failed" {
+			if !commandFailed || ev.Error != terminalGateReason {
+				t.Fatalf("gate failure preceded command diagnostic or lost its reason: %+v", ev)
+			}
+			gateFailed = true
+		}
+	}
+	if !commandFailed || !gateFailed {
+		t.Fatalf("missing command or gate failure: command=%t, gate=%t", commandFailed, gateFailed)
+	}
+	fakeGH(t, `{"url":"https://github.com/thellmwhisperer/agentic-team-member/pull/424",
+		"state":"OPEN","commits":[
+		{"oid":"abc123","messageHeadline":"no-mistakes(review): Repair finding"}]}`, false)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	for _, counter := range []string{"0", "1"} {
+		writeFixture(t, count, counter)
+		var out bytes.Buffer
+		s := observer{o: r.Outcome, w: &out, now: time.Now, ci: map[string]bool{}}
+		for _, f := range r.frames {
+			s.frame(f)
+		}
+		out.Reset()
+		if code, ended := s.end(ctx, root, r.Outcome); code != 1 || !ended {
+			t.Fatalf("terminal outcome: code %d, ended %t; output %s", code, ended, out.String())
+		}
+		assertTerminalDeliveryEvents(t, &out, terminalGateReason)
+	}
+	writeFixture(t, count, "0")
+	var out bytes.Buffer
+	s := observer{o: r.Outcome, w: &out, now: time.Now, clone: root, delivering: true,
+		reason: "delivery: exit status 1", ci: map[string]bool{}}
+	if code, ended := s.poll(ctx, root); code != 1 || !ended {
+		t.Fatalf("terminal poll: code %d, ended %t; output %s", code, ended, out.String())
+	}
+	assertTerminalDeliveryEvents(t, &out, terminalGateReason)
 }
 
 func assertTerminalDeliveryEvents(t *testing.T, out io.Reader, reason string) {
