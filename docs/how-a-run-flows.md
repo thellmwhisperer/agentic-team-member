@@ -80,7 +80,7 @@ failed and is retried, go to stderr. Every line has `time` (RFC 3339, UTC),
 | `delivery` | `clone` | Delivery starts, right after its `step` |
 | `gate_waiting` | `step`, `clone`, `findings` (`id`, `severity`, `file`, `description` each) | The gate waits at a step for approval or a decision, once per new wait |
 | `pr_opened` | `url` | The PR is first seen |
-| `gate_fixing_ci` | `commit` (`sha`, `subject`, `step`) | Each PR commit whose subject starts with `no-mistakes(`, once, in PR order; `step` is the word inside the parentheses |
+| `gate_fixing_ci` | `commit` (`sha`, `subject`, `step`) | Each PR commit whose subject starts with `no-mistakes(`, once per full `sha`, in PR order; `step` is the word inside the parentheses |
 | `ci_green` | `url` | CI turns green |
 | `stalled` | `minutes` | Each 60 minutes without another event; `minutes` counts since the last event other than `stalled`, so continued silence reports 60, 120, 180, ... |
 | `merged` | `url` | The PR merged; the last line, exit 0 |
@@ -89,7 +89,8 @@ failed and is retried, go to stderr. Every line has `time` (RFC 3339, UTC),
 
 From delivery on, polling rounds start at least 10 s apart. Each reads the
 gate with `no-mistakes axi status` in the clone and, when available, the PR
-with `gh`; commit and PR-state reads can be separate calls in the same round.
+with `gh`. Commit events come only from that PR read, even while the clone
+is available.
 If the clone is gone, it finds the PR by its known URL or the delivery's branch.
 An observed gate failure takes precedence over a PR result in the same round.
 The terminal events and exit codes are listed above. It also exits 1, with no
