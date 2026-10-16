@@ -221,7 +221,7 @@ func judge(clone, sha, before, after string, files []string, found []finding, te
 	if after, err = snapshot(clone); err != nil {
 		return "", lines, nil, err
 	}
-	kept = slices.DeleteFunc(slices.Clone(found), func(f finding) bool { return bad[f.File] })
+	kept = slices.DeleteFunc(found, func(f finding) bool { return bad[f.File] })
 	why, lines, err = fault(clone, sha, before, after, files, kept, tests)
 	return why, lines, kept, err
 }
@@ -278,8 +278,7 @@ func restoreFiles(clone, tree, changed string, bad map[string]bool) error {
 			continue
 		}
 		if f[0] == "A" {
-			err := os.Remove(filepath.Join(clone, filepath.FromSlash(f[1])))
-			if err != nil && !os.IsNotExist(err) {
+			if err := os.Remove(filepath.Join(clone, filepath.FromSlash(f[1]))); err != nil {
 				return err
 			}
 			continue
@@ -289,10 +288,7 @@ func restoreFiles(clone, tree, changed string, bad map[string]bool) error {
 	if len(back) == 0 {
 		return nil
 	}
-	if _, err := git(clone, append([]string{"checkout", tree, "--"}, back...)...); err != nil {
-		return err
-	}
-	_, err := git(clone, "reset", "-q")
+	_, err := git(clone, append([]string{"checkout", tree, "--"}, back...)...)
 	return err
 }
 
