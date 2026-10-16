@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/thellmwhisperer/agentic-team-member/internal/buildinfo"
+	"github.com/thellmwhisperer/agentic-team-member/internal/config"
 )
 
 // The background process of a repository runs its runs, each in itself, so closing the terminal that started
@@ -707,8 +708,11 @@ func start(root string, args []string, pane string) (Outcome, error) {
 	if err != nil {
 		return Outcome{}, err
 	}
-	if _, err := loadConfig(root, home, a.Agent); err != nil {
-		return Outcome{}, err
+	// Other config failures remain background run outcomes; only the install reach is a launch refusal.
+	if c, err := config.Load(root, home, a.Agent); err == nil {
+		if err := checkInstall(c.Install, root); err != nil {
+			return Outcome{}, err
+		}
 	}
 	if _, err := strconv.Atoi(args[len(args)-1]); err != nil { // a file, which the background process reads from root
 		if args[len(args)-1], err = filepath.Abs(args[len(args)-1]); err != nil {

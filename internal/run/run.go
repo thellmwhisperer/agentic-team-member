@@ -52,8 +52,11 @@ func Run(label string, args []string, out, summary io.Writer) (err error) {
 		return err
 	}
 	// The steps after the issue take the config from here.
-	c, err := loadConfig(root, home, a.Agent)
+	c, err := config.Load(root, home, a.Agent)
 	if err != nil {
+		return err
+	}
+	if err := checkInstall(c.Install, root); err != nil {
 		return err
 	}
 	a.Agent, a.root, a.dir, a.timeout = c.Agent, root, runDir(root, label), time.Duration(c.AgentTimeout)
@@ -97,16 +100,12 @@ func Run(label string, args []string, out, summary io.Writer) (err error) {
 	return r.err
 }
 
-// loadConfig is the run's config, refusing an install that reaches outside the clone before anything
-// starts: the brief quotes it to the worker, who runs it in the clone, where the reach guard would kill it.
-func loadConfig(root, home string, flags config.Agent) (config.Config, error) {
-	c, err := config.Load(root, home, flags)
-	if err == nil {
-		if reach := InstallReach(c.Install, root); reach != "" {
-			err = fmt.Errorf("install reaches outside the clone: %s", reach)
-		}
+// checkInstall refuses an install the reach guard would reject when the worker runs it from the brief.
+func checkInstall(install, root string) error {
+	if reach := InstallReach(install, root); reach != "" {
+		return fmt.Errorf("install reaches outside the clone: %s", reach)
 	}
-	return c, err
+	return nil
 }
 
 // theIssue is the issue of run from, as it first read it, or else arg's, read from the GitHub repository repo
