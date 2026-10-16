@@ -28,9 +28,7 @@ func TestAcceptanceOperatorGateTerminalDeliveryStep(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
-			root := t.TempDir()
-			gitT(t, root, "init", "-q")
-			gitT(t, root, "remote", "add", "origin", "https://github.com/o/r.git")
+			root := terminalGateRepo(t)
 			if held {
 				assertUnrelatedHeldGate(t, ctx, root)
 			}
@@ -62,9 +60,7 @@ func TestFollowTerminalGateResult(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
-			root := t.TempDir()
-			gitT(t, root, "init", "-q")
-			gitT(t, root, "remote", "add", "origin", "https://github.com/o/r.git")
+			root := terminalGateRepo(t)
 			count := fakeStatus(t)
 			failed, err := filepath.Abs(filepath.Join("testdata", "atm_watch_status_failed.txt"))
 			if err != nil {
@@ -95,6 +91,14 @@ func TestFollowTerminalGateResult(t *testing.T) {
 			assertTerminalDeliveryEvents(t, &out, terminalGateReason)
 		})
 	}
+}
+
+func terminalGateRepo(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	gitT(t, root, "init", "-q")
+	gitT(t, root, "remote", "add", "origin", "https://github.com/o/r.git")
+	return root
 }
 
 func assertFailedGateEvent(t *testing.T, gateOut io.Reader) {
