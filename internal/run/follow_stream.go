@@ -191,7 +191,7 @@ func (s *observer) end(ctx context.Context, root string, o Outcome) (int, bool) 
 	if step != "delivery" && deliveryStep(step) == "delivery" {
 		var g gateState
 		err := g.read(ctx, s.clone)
-		s.observe(ctx, root, g, err)
+		s.observe(ctx, root, g, err, true)
 	}
 	s.say("run_failed", map[string]any{"step": deliveryStep(step), "reason": o.Reason})
 	return 1, true
@@ -216,7 +216,7 @@ func (s *observer) poll(ctx context.Context, root string) (int, bool) {
 		s.say("run_failed", map[string]any{"step": "delivery", "reason": s.reason})
 		return 1, true
 	}
-	prState := s.observe(ctx, root, g, err)
+	prState := s.observe(ctx, root, g, err, false)
 	if g.failed != "" {
 		s.say("run_failed", map[string]any{"step": deliveryStep(g.failed),
 			"reason": cmp.Or(g.reason, s.reason, "no-mistakes step "+g.failed+" failed")})
@@ -233,7 +233,7 @@ func (s *observer) poll(ctx context.Context, root string) (int, bool) {
 	return 0, false
 }
 
-func (s *observer) observe(ctx context.Context, root string, g gateState, err error) string {
+func (s *observer) observe(ctx context.Context, root string, g gateState, err error, terminal bool) string {
 	if err != nil {
 		s.diag(err)
 	}
@@ -241,7 +241,10 @@ func (s *observer) observe(ctx context.Context, root string, g gateState, err er
 		s.seen = true
 		s.gate(g)
 	}
-	prState := s.prState(ctx, root)
+	var prState string
+	if terminal || err != nil || s.pr != "" {
+		prState = s.prState(ctx, root)
+	}
 	if g.seen {
 		if g.green && !s.green {
 			s.say("ci_green", map[string]any{"url": s.pr})
