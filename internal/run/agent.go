@@ -1157,13 +1157,9 @@ func outside(calls []use, root, clone string) string {
 	return ""
 }
 
-// InstallReach is the reach of install as the guard reads it run from a fresh clone of the repository at
-// root, every absolute path the root as the permission check reads a call: "" when it stays inside the clone,
-// else what it reaches, which a run and doctor report. The clone is one nothing has made yet, so an absolute
-// path the install names reaches unless it is under where clones live.
 func InstallReach(install, root string) string {
 	clone := filepath.Join(root, ".atm", "clones", "atm-run-install")
-	return strings.TrimSpace(outside([]use{{"", install, install}}, "/", clone))
+	return strings.TrimSpace(outside([]use{{"", install, install}}, root, clone))
 }
 
 func reachesPath(args, root, clone string, paths *regexp.Regexp) bool {
