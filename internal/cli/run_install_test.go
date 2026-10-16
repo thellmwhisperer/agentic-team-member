@@ -41,10 +41,15 @@ func TestRunRefusesInstallBeforeBackgroundLaunch(t *testing.T) {
 				t.Fatalf("want %q, got %q", want, out)
 			}
 			for _, path := range []string{"clones", "atm.sock", "runs"} {
-				if _, err := os.Stat(filepath.Join(dir, ".atm", path)); !os.IsNotExist(err) {
-					t.Fatalf(".atm/%s exists: %v", path, err)
-				}
+				assertPathAbsent(t, filepath.Join(dir, ".atm", path))
 			}
 		})
+	}
+}
+
+func assertPathAbsent(t *testing.T, path string) {
+	t.Helper()
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("%s exists: %v", path, err)
 	}
 }
