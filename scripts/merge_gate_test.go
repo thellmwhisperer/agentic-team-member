@@ -29,6 +29,10 @@ const (
 var fakes string
 
 func TestMain(m *testing.M) {
+	if strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe") == "go" {
+		fmt.Println(strings.Join(os.Args[1:], "\n"))
+		os.Exit(0)
+	}
 	if strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe") == "gh" {
 		os.Exit(fakeGH(os.Args[1:]))
 	}
