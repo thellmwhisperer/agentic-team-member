@@ -44,9 +44,8 @@ it.
 | `.slop/config.yml`, `.slop/ceilings.yml` | slopslint | Two duplication scopes, production and tests, under ceilings that may go down and never up |
 | `.slop/tombstones/` | slopslint | One record per slop incident, with its family and evidence |
 
-`scripts/slopslint.sh` downloads the pinned slopslint release into
-`.tmp/slopslint/`, checks its SHA256 and runs it. The first run needs the
-network.
+For slopslint setup and offline ATM runs, see
+[Development setup](../CONTRIBUTING.md#development-setup).
 
 ## The tombstones
 

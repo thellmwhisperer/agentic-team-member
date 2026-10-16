@@ -31,8 +31,11 @@ scripts/test.sh
 Use the Go version in [go.mod](go.mod). `golangci-lint` must be on `PATH` to
 run `scripts/lint.sh`.
 The suite runs real git and fake harness subprocesses.
-The pre-commit hook runs slopslint; its first run downloads the pinned binary
-into `.tmp/slopslint/` and needs the network.
+The pre-commit hook and lint script run `scripts/slopslint.sh`. If the pinned
+binary for the current platform is not cached and executable, the script needs
+network access to download it into `.tmp/slopslint/` and verify its SHA256.
+Run `scripts/slopslint.sh --version` in the source repository before an offline
+ATM run; see [clone preparation](docs/how-a-run-flows.md#issue-clone-and-contract).
 
 To run ATM on this repository you need one coding agent CLI (`claude`,
 `codex`, `opencode`, `pi` or `cursor-agent`) and, for delivery, `no-mistakes`. See
