@@ -69,7 +69,7 @@ func StartFollowing(ctx context.Context, root string, args []string, w io.Writer
 // with time, run, issue and event. It returns 0 on merge, or 1 on closure or run/gate failure.
 // An observed gate failure takes precedence over a later PR result in the same poll.
 // Steps and delivery come from run frames; waits and green CI from `no-mistakes axi status` in the clone;
-// CI repair commits and PR state from gh. The delivery branch locates the PR if the clone is gone.
+// No-mistakes commits and PR state from gh. The delivery branch locates the PR if the clone is gone.
 // Observation continues through gate decisions and after the delivery command returns.
 // Polls start at least 10 seconds apart. Pass time.Now and time.After for now and after outside tests.
 // Each hour without another event emits stalled, with minutes since the last non-stalled event.
@@ -213,6 +213,12 @@ func (s *observer) poll(ctx context.Context, root string) (int, bool) {
 	if err != nil || s.pr != "" {
 		prState = s.prState(ctx, root)
 	}
+	if g.seen {
+		if g.green && !s.green {
+			s.say("ci_green", map[string]any{"url": s.pr})
+		}
+		s.green = g.green
+	}
 	if g.failed != "" {
 		s.say("run_failed", map[string]any{"step": g.failed,
 			"reason": cmp.Or(s.reason, "no-mistakes step "+g.failed+" failed")})
@@ -229,7 +235,7 @@ func (s *observer) poll(ctx context.Context, root string) (int, bool) {
 	return 0, false
 }
 
-// gate takes a gate's state: a new wait, the PR, new CI repair commits, CI going green.
+// gate takes a gate's state: a new wait and the PR.
 func (s *observer) gate(g gateState) {
 	switch {
 	case g.waiting == "":
@@ -246,14 +252,9 @@ func (s *observer) gate(g gateState) {
 	if strings.HasPrefix(g.pr, "http") {
 		s.opened(g.pr)
 	}
-	s.commits(g.ci)
-	if g.green && !s.green {
-		s.say("ci_green", map[string]any{"url": s.pr})
-	}
-	s.green = g.green
 }
 
-// prState reads the PR, by its URL or the delivery's branch, through gh: its CI repair commits, then its end.
+// prState reads the PR, by its URL or the delivery's branch, through gh: its no-mistakes commits, then its end.
 func (s *observer) prState(ctx context.Context, root string) string {
 	ref := cmp.Or(s.pr, s.branch)
 	if ref == "" {
@@ -269,7 +270,7 @@ func (s *observer) prState(ctx context.Context, root string) string {
 		return ""
 	}
 	s.opened(pr.URL)
-	s.commits(pr.ci())
+	s.commits(pr)
 	return pr.State
 }
 
@@ -280,11 +281,14 @@ func (s *observer) opened(url string) {
 	}
 }
 
-func (s *observer) commits(cs []ciCommit) {
-	for _, c := range cs {
-		if !s.ci[c.sha] {
-			s.ci[c.sha] = true
-			s.say("gate_fixing_ci", map[string]any{"commit": map[string]string{"sha": c.sha, "subject": c.subject}})
+func (s *observer) commits(pr prView) {
+	for _, c := range pr.Commits {
+		if rest, ok := strings.CutPrefix(c.MessageHeadline, "no-mistakes("); ok && !s.ci[c.OID] {
+			step, _, _ := strings.Cut(rest, ")")
+			s.ci[c.OID] = true
+			s.say("gate_fixing_ci", map[string]any{"commit": map[string]string{
+				"sha": c.OID, "subject": c.MessageHeadline, "step": step,
+			}})
 		}
 	}
 }
