@@ -116,7 +116,7 @@ func (o Outcome) Stream(
 		case f := <-frames:
 			s.frame(f)
 		case end := <-ended:
-			if code, done := s.end(root, end); done {
+			if code, done := s.end(ctx, root, end); done {
 				return code
 			}
 		case <-after(polled.Add(10 * time.Second).Sub(now())):
@@ -171,7 +171,7 @@ func (s *observer) frame(f Frame) {
 
 // end takes how the run ended. One that failed at delivery after its delivery command ran may leave its gate
 // going, which says how it ends.
-func (s *observer) end(root string, o Outcome) (int, bool) {
+func (s *observer) end(ctx context.Context, root string, o Outcome) (int, bool) {
 	switch {
 	case o.Ended.IsZero(): // its screen is lost; its gate is not
 		return 0, false
@@ -187,7 +187,13 @@ func (s *observer) end(root string, o Outcome) (int, bool) {
 		s.reason = o.Reason
 		return 0, false
 	}
-	s.say("run_failed", map[string]any{"step": deliveryStep(cmp.Or(o.FailedNode, o.Step)), "reason": o.Reason})
+	step := cmp.Or(o.FailedNode, o.Step)
+	if step != "delivery" && deliveryStep(step) == "delivery" {
+		var g gateState
+		err := g.read(ctx, s.clone)
+		s.observe(ctx, root, g, err)
+	}
+	s.say("run_failed", map[string]any{"step": deliveryStep(step), "reason": o.Reason})
 	return 1, true
 }
 
@@ -210,26 +216,10 @@ func (s *observer) poll(ctx context.Context, root string) (int, bool) {
 		s.say("run_failed", map[string]any{"step": "delivery", "reason": s.reason})
 		return 1, true
 	}
-	if err != nil {
-		s.diag(err)
-	}
-	if g.seen {
-		s.seen = true
-		s.gate(g)
-	}
-	var prState string
-	if err != nil || s.pr != "" {
-		prState = s.prState(ctx, root)
-	}
-	if g.seen {
-		if g.green && !s.green {
-			s.say("ci_green", map[string]any{"url": s.pr})
-		}
-		s.green = g.green
-	}
+	prState := s.observe(ctx, root, g, err)
 	if g.failed != "" {
 		s.say("run_failed", map[string]any{"step": deliveryStep(g.failed),
-			"reason": cmp.Or(s.reason, g.reason, "no-mistakes step "+g.failed+" failed")})
+			"reason": cmp.Or(g.reason, s.reason, "no-mistakes step "+g.failed+" failed")})
 		return 1, true
 	}
 	switch prState {
@@ -241,6 +231,24 @@ func (s *observer) poll(ctx context.Context, root string) (int, bool) {
 		return 1, true
 	}
 	return 0, false
+}
+
+func (s *observer) observe(ctx context.Context, root string, g gateState, err error) string {
+	if err != nil {
+		s.diag(err)
+	}
+	if g.seen {
+		s.seen = true
+		s.gate(g)
+	}
+	prState := s.prState(ctx, root)
+	if g.seen {
+		if g.green && !s.green {
+			s.say("ci_green", map[string]any{"url": s.pr})
+		}
+		s.green = g.green
+	}
+	return prState
 }
 
 // gate takes a gate's state: a new wait and the PR.

@@ -17,7 +17,10 @@ func TestFollowStreamGateTerminalDeliveryStep(t *testing.T) {
 	status := readGateFailure(t)
 	reason := gateErrorLine(t, status)
 	t.Run("poll", func(t *testing.T) {
-		wantDeliveryFailure(t, observePoll(t, status), reason)
+		wantDeliveryFailure(t, observePoll(t, status, ""), reason)
+	})
+	t.Run("command exits before observer read", func(t *testing.T) {
+		wantDeliveryFailure(t, observePoll(t, status, "delivery: exit status 1"), reason)
 	})
 	t.Run("terminal", func(t *testing.T) {
 		wantDeliveryFailure(t, observeEnd(t, status), reason)
@@ -27,8 +30,8 @@ func TestFollowStreamGateTerminalDeliveryStep(t *testing.T) {
 	})
 	for _, step := range []string{"intent", "rebase"} {
 		t.Run(step, func(t *testing.T) {
-			failed := strings.Replace(status, "\n    "+step+",completed,", "\n    "+step+",failed,", 1)
-			wantDeliveryFailure(t, observePoll(t, failed), reason)
+			failed := strings.Replace(status, "\n"+step+",completed,", "\n"+step+",failed,", 1)
+			wantDeliveryFailure(t, observePoll(t, failed, ""), reason)
 			wantDeliveryFailure(t, observeEnd(t, failed), reason)
 		})
 	}
@@ -66,7 +69,8 @@ func gateFailureFix(t *testing.T, atm, first, later string) (root, clone string)
 	root = repo(t, "https://github.com/o/r.git", atm)
 	clone = t.TempDir()
 	installCountedStatus(t, first, later)
-	fakeGH(t, `{"url":"https://github.com/o/r/pull/424","state":"OPEN","commits":[]}`, false)
+	fakeGH(t, `{"url":"https://github.com/o/r/pull/424","state":"OPEN","commits":[
+		{"oid":"b46fd21ba38c","messageHeadline":"no-mistakes(ci): Repair CI"}]}`, false)
 	return root, clone
 }
 
@@ -84,12 +88,19 @@ func installCountedStatus(t *testing.T, first, later string) {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
-func observePoll(t *testing.T, status string) []map[string]any {
+func observePoll(t *testing.T, status, commandReason string) []map[string]any {
 	t.Helper()
 	root, clone := gateFailureFix(t, atmYAML, status, status)
 	var out bytes.Buffer
 	s := observer{o: Outcome{Run: "t", Issue: "i"}, w: &out, now: func() time.Time { return time.Unix(0, 0).UTC() },
 		delivering: true, clone: clone, ci: map[string]bool{}}
+	if commandReason != "" {
+		code, done := s.end(context.Background(), root, Outcome{Run: "t", Outcome: "failed",
+			Ended: time.Now(), FailedNode: "delivery", Reason: commandReason})
+		if done || code != 0 || out.Len() != 0 {
+			t.Fatalf("command failure ended observation: %d, %v, %s", code, done, &out)
+		}
+	}
 	code, done := s.poll(context.Background(), root)
 	if code != 1 || !done {
 		t.Fatalf("poll = %d, %v", code, done)
@@ -106,9 +117,10 @@ func observeEnd(t *testing.T, status string) []map[string]any {
 		t.Fatalf("applyGate err=%v node=%q reason=%q", err, r.FailedNode, r.Reason)
 	}
 	var out bytes.Buffer
-	s := observer{o: Outcome{Run: "t", Issue: "i"}, w: &out, now: time.Now, delivering: true}
-	code, done := s.end(root, Outcome{Outcome: "failed", Ended: time.Now(), FailedNode: r.FailedNode,
-		Reason: r.Reason, Run: "t", Issue: "i"})
+	s := observer{o: Outcome{Run: "t", Issue: "i"}, w: &out, now: time.Now, delivering: true,
+		clone: clone, ci: map[string]bool{}}
+	code, done := s.end(context.Background(), root, Outcome{Outcome: "failed", Ended: time.Now(),
+		FailedNode: r.FailedNode, Reason: r.Reason, Run: "t", Issue: "i"})
 	if code != 1 || !done {
 		t.Fatalf("end = %d, %v", code, done)
 	}
@@ -117,8 +129,12 @@ func observeEnd(t *testing.T, status string) []map[string]any {
 
 func wantDeliveryFailure(t *testing.T, evs []map[string]any, reason string) {
 	t.Helper()
-	if len(evs) == 0 {
-		t.Fatal("no events")
+	if len(evs) != 3 || evs[0]["event"] != "pr_opened" || evs[1]["event"] != "gate_fixing_ci" {
+		t.Fatalf("want PR, repair commit, then failure; got %v", evs)
+	}
+	commit, _ := evs[1]["commit"].(map[string]any)
+	if commit["sha"] != "b46fd21ba38c" || commit["subject"] != "no-mistakes(ci): Repair CI" {
+		t.Fatalf("repair commit = %v", commit)
 	}
 	last := evs[len(evs)-1]
 	if last["event"] != "run_failed" || last["step"] != "delivery" || last["reason"] != reason {
@@ -151,5 +167,45 @@ func wantCommandThenGate(t *testing.T, status, reason string) {
 	}
 	if reportNode(t, report, "delivery")["result"] != "failed" {
 		t.Fatal("delivery command error was erased")
+	}
+}
+
+func TestFollowStreamTerminalGateFailureSurvivesLaterReads(t *testing.T) {
+	status := readGateFailure(t)
+	reason := gateErrorLine(t, status)
+	for _, tc := range []struct {
+		name, status, prState string
+		ghFails               bool
+	}{
+		{"stale gate", runningGate, "OPEN", false},
+		{"unreadable gate", "", "OPEN", false},
+		{"merged PR", status, "MERGED", false},
+		{"closed PR", status, "CLOSED", false},
+		{"unreadable gate and PR", "", "OPEN", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, clone := gateFailureFix(t, atmYAML, tc.status, tc.status)
+			t.Setenv("FAKE_GH_OUT", strings.Replace(os.Getenv("FAKE_GH_OUT"), "OPEN", tc.prState, 1))
+			if tc.ghFails {
+				t.Setenv("FAKE_GH_FAIL", "1")
+			}
+			var out bytes.Buffer
+			s := observer{o: Outcome{Run: "t", Issue: "i"}, w: &out, now: time.Now,
+				clone: clone, branch: "branch", delivering: true, ci: map[string]bool{}}
+			code, done := s.end(context.Background(), root, Outcome{Outcome: "failed", Ended: time.Now(),
+				FailedNode: "push", Reason: reason})
+			if code != 1 || !done {
+				t.Fatalf("end = %d, %v", code, done)
+			}
+			evs := events(t, &out)
+			if tc.ghFails {
+				if len(evs) != 1 || evs[0]["event"] != "run_failed" ||
+					evs[0]["step"] != "delivery" || evs[0]["reason"] != reason {
+					t.Fatalf("known failure lost: %v", evs)
+				}
+				return
+			}
+			wantDeliveryFailure(t, evs, reason)
+		})
 	}
 }
