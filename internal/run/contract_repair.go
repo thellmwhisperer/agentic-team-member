@@ -78,7 +78,7 @@ func (a agent) repairBlocked(clone, base, tombs string, i Issue, root string, hi
 		ev.keep(stray, optionalDrafts(rec))
 	}
 	ev.finish(i, rec, last, err)
-	if ev.Rounds > 0 || len(ev.Unmatched) > 0 || len(ev.Optional) > 0 {
+	if ev.Rounds > 0 || len(ev.Unmatched) > 0 {
 		rec["repair"] = ev
 	}
 	return rec, ev, err
