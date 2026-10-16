@@ -39,7 +39,7 @@ type verdict struct {
 
 type node struct {
 	Name   string  `json:"name"`
-	Result string  `json:"result"`         // passed, failed, running, skipped or not run
+	Result string  `json:"result"`
 	Exit   string  `json:"exit,omitempty"` // how its agent ended, when it failed after it ran
 	Tail   *string `json:"tail,omitempty"` // the last 20 lines that agent wrote, stdout and stderr
 	span
