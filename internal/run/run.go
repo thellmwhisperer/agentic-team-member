@@ -338,28 +338,8 @@ func (a agent) deliver(r *verdict, root, clone, sha, base, line string, i Issue,
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	r.step("delivery", func() (map[string]any, error) {
-		s := nonSlug.ReplaceAllString(strings.ToLower(i.Title), "-")
-		branch := "atm/" + cmp.Or(strings.Trim(s[:min(len(s), 40)], "-"), "run") + "-" +
-			strings.TrimPrefix(filepath.Base(clone), "atm-run-") // the clone's timestamp, as unique
+		branch, cuts, tombs, err := a.prepareDelivery(r, root, clone, sha, i, history, c)
 		ev := map[string]any{"branch": branch}
-		cuts, tombs, err := onBranch(root, clone, sha, branch, i)
-		if err == nil {
-			err = foreign(root, clone, sha)
-		}
-		if err == nil {
-			r.HeadSHA, err = git(clone, "rev-parse", "HEAD")
-		}
-		if err == nil {
-			var repairs repairEvidence
-			r.HeadSHA, repairs, err = a.reviewedDelivery(clone, sha, r.HeadSHA, tombs, i, root, history, c)
-			for _, attempt := range repairs.Attempts {
-				r.Reproofs = attempt.Reproofs
-				r.Commands = append(r.Commands, attempt.Commands...)
-			}
-		}
-		if err == nil {
-			err = r.write()
-		}
 		if err != nil {
 			return ev, err
 		}
@@ -389,15 +369,7 @@ func (a agent) deliver(r *verdict, root, clone, sha, base, line string, i Issue,
 		}
 		if strings.Contains(line, "no-mistakes") {
 			handed = branch
-			done := make(chan error, 1)
-			go func() { done <- command() }()
-			gateDone, gateErr = followGate(ctx, r, root, clone, branch, done)
-			if gateDone {
-				stop()
-				err = <-done
-			} else {
-				err, gateErr = gateErr, nil
-			}
+			gateDone, err, gateErr = r.deliverToGate(ctx, stop, root, clone, branch, command)
 		} else {
 			err = command()
 		}
@@ -416,6 +388,46 @@ func (a agent) deliver(r *verdict, root, clone, sha, base, line string, i Issue,
 	if errors.Is(gateErr, errPRClosed) {
 		r.err, r.Reason = gateErr, gateErr.Error()
 	}
+}
+
+func (r *verdict) deliverToGate(ctx context.Context, stop context.CancelFunc, root, clone, branch string,
+	command func() error) (gateDone bool, commandErr, gateErr error) {
+	done := make(chan error, 1)
+	go func() { done <- command() }()
+	gateDone, gateErr = followGate(ctx, r, root, clone, branch, done)
+	if gateDone {
+		stop()
+		commandErr = <-done
+	} else {
+		commandErr, gateErr = gateErr, nil
+	}
+	return gateDone, commandErr, gateErr
+}
+
+func (a agent) prepareDelivery(r *verdict, root, clone, sha string, i Issue, history []proof,
+	c config.Config) (branch, cuts, tombs string, err error) {
+	s := nonSlug.ReplaceAllString(strings.ToLower(i.Title), "-")
+	branch = "atm/" + cmp.Or(strings.Trim(s[:min(len(s), 40)], "-"), "run") + "-" +
+		strings.TrimPrefix(filepath.Base(clone), "atm-run-") // the clone's timestamp, as unique
+	cuts, tombs, err = onBranch(root, clone, sha, branch, i)
+	if err == nil {
+		err = foreign(root, clone, sha)
+	}
+	if err == nil {
+		r.HeadSHA, err = git(clone, "rev-parse", "HEAD")
+	}
+	if err == nil {
+		var repairs repairEvidence
+		r.HeadSHA, repairs, err = a.reviewedDelivery(clone, sha, r.HeadSHA, tombs, i, root, history, c)
+		for _, attempt := range repairs.Attempts {
+			r.Reproofs = attempt.Reproofs
+			r.Commands = append(r.Commands, attempt.Commands...)
+		}
+	}
+	if err == nil {
+		err = r.write()
+	}
+	return branch, cuts, tombs, err
 }
 
 // conventional maps a task type to its conventional commit type, which release-please reads.
