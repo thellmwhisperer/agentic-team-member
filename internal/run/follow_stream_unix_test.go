@@ -231,7 +231,7 @@ func TestFollowStreamPassingTrace(t *testing.T) {
 	s.advance(10 * time.Second)
 	s.next("pr_opened", map[string]any{"url": recordedPR})
 	s.next("gate_fixing_ci", map[string]any{"commit": map[string]any{"sha": fmt.Sprintf("%040d", 1),
-		"subject": `no-mistakes(ci): Fix lint, "unused" import`}})
+		"subject": `no-mistakes(ci): Fix lint, "unused" import`, "step": "ci"}})
 	s.advance(10 * time.Second) // the same commit: no line
 	s.gate("completed")
 	s.advance(10 * time.Second)
@@ -243,7 +243,7 @@ func TestFollowStreamPassingTrace(t *testing.T) {
 	s.pr("MERGED", `no-mistakes(ci): Fix lint, "unused" import`, "no-mistakes(ci): Retry the lease read on Windows")
 	s.advance(10 * time.Second) // a CI commit and the merge between two polls
 	s.next("gate_fixing_ci", map[string]any{"commit": map[string]any{"sha": fmt.Sprintf("%040d", 2),
-		"subject": "no-mistakes(ci): Retry the lease read on Windows"}})
+		"subject": "no-mistakes(ci): Retry the lease read on Windows", "step": "ci"}})
 	s.next("merged", map[string]any{"url": recordedPR})
 	s.ended(0)
 }
@@ -335,7 +335,7 @@ esac
 				s.next("pr_opened", map[string]any{"url": recordedPR})
 				if state != "unreadable" {
 					s.next("gate_fixing_ci", map[string]any{"commit": map[string]any{
-						"sha": "0000000000000000000000000000000000000001", "subject": "no-mistakes(ci): Repair CI"}})
+						"sha": "0000000000000000000000000000000000000001", "subject": "no-mistakes(ci): Repair CI", "step": "ci"}})
 				}
 				s.next("run_failed", map[string]any{"step": "ci", "reason": "no-mistakes step ci failed"})
 				s.ended(1)
@@ -362,7 +362,7 @@ esac
 			s.advance(10 * time.Second)
 			s.next("pr_opened", map[string]any{"url": recordedPR})
 			s.next("gate_fixing_ci", map[string]any{"commit": map[string]any{
-				"sha": "0000000000000000000000000000000000000001", "subject": "no-mistakes(ci): Repair CI"}})
+				"sha": "0000000000000000000000000000000000000001", "subject": "no-mistakes(ci): Repair CI", "step": "ci"}})
 			s.next("run_failed", map[string]any{"step": "ci", "reason": "no-mistakes step ci failed"})
 			s.ended(1)
 		})

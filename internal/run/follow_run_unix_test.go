@@ -162,7 +162,8 @@ func TestRunFollowMergesAfterTheWholeTrace(t *testing.T) {
 		`","messageHeadline":"no-mistakes(ci): Fix lint"}]}`)
 	writeFixture(t, nm, completed)
 	f.next("pr_opened", map[string]any{"url": recordedPR})
-	f.next("gate_fixing_ci", map[string]any{"commit": map[string]any{"sha": ci, "subject": "no-mistakes(ci): Fix lint"}})
+	f.next("gate_fixing_ci", map[string]any{"commit": map[string]any{
+		"sha": ci, "subject": "no-mistakes(ci): Fix lint", "step": "ci"}})
 	f.next("ci_green", map[string]any{"url": recordedPR})
 	f.next("merged", map[string]any{"url": recordedPR})
 	f.ended(0)

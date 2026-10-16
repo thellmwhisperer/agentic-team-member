@@ -80,7 +80,7 @@ failed and is retried, go to stderr. Every line has `time` (RFC 3339, UTC),
 | `delivery` | `clone` | Delivery starts, right after its `step` |
 | `gate_waiting` | `step`, `clone`, `findings` (`id`, `severity`, `file`, `description` each) | The gate waits at a step for approval or a decision, once per new wait |
 | `pr_opened` | `url` | The PR is first seen |
-| `gate_fixing_ci` | `commit` (`sha`, `subject`) | A new CI repair commit, one whose subject starts with `no-mistakes(ci):` |
+| `gate_fixing_ci` | `commit` (`sha`, `subject`, `step`) | Each PR commit whose subject starts with `no-mistakes(`, once, in PR order; `step` is the word inside the parentheses |
 | `ci_green` | `url` | CI turns green |
 | `stalled` | `minutes` | Each 60 minutes without another event; `minutes` counts since the last event other than `stalled`, so continued silence reports 60, 120, 180, ... |
 | `merged` | `url` | The PR merged; the last line, exit 0 |
