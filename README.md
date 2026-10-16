@@ -132,7 +132,7 @@ For `atm run` without `--follow` and `atm axi run`; for `--follow` exit codes, s
 |------|---------|
 | `0` | Every unit passed, Delivery passed or was skipped, and any observed no-mistakes gate reached merge; see [Delivery](docs/how-a-run-flows.md#delivery) |
 | `1` | A unit failed; nothing is delivered |
-| `2` | No live watcher; configuration, issue, clone or contract failed; or a no-mistakes gate failed or its PR closed unmerged |
+| `2` | No live watcher; [serve build check](docs/how-a-run-flows.md#the-screen), configuration, issue, clone or contract failed; or a no-mistakes gate failed or its PR closed unmerged |
 | `4` | Every unit passed, but Delivery failed, including its contract review |
 
 ## Read more
