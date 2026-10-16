@@ -168,13 +168,7 @@ func TestReportReturnRequiresNativeSession(t *testing.T) {
 			`{"payload":{"thread_id":"wrong"}}`, `{"type":"message","id":"wrong"}`,
 		} {
 			t.Run(harness+"/"+stream, func(t *testing.T) {
-				root := repo(t, "https://example.com/owner/repo.git", "")
-				order := filepath.Join(t.TempDir(), "order")
-				t.Setenv("FAKE_AGENT_ORDER", order)
-				t.Setenv("FAKE_AGENT_STREAM", stream+"\n")
-				t.Setenv("FAKE_AGENT_WORK", reportWork)
-				t.Setenv("FAKE_REPORT_1", "not json")
-				t.Setenv("FAKE_REPORT_2", validWorker)
+				root, order := nativeReportSession(t, stream)
 				a := agent{Agent: config.Agent{Harness: harness}, root: root, dir: t.TempDir()}
 				ev, err := a.run(root, "worker", "ponytail", "brief", testFile)
 				if err == nil || !strings.Contains(err.Error(), noJSON) || ev["rejected"] != noJSON || workerCalls(t, order) != 1 {
@@ -193,15 +187,9 @@ func TestReportReturnUsesNativeSession(t *testing.T) {
 		"cursor": `{"session_id":"sess-1"}`,
 	} {
 		t.Run(harness, func(t *testing.T) {
-			root := repo(t, "https://example.com/owner/repo.git", "")
+			root, order := nativeReportSession(t, stream)
 			call := filepath.Join(t.TempDir(), "call.json")
-			order := filepath.Join(t.TempDir(), "order")
 			t.Setenv("FAKE_AGENT_CALL", call)
-			t.Setenv("FAKE_AGENT_ORDER", order)
-			t.Setenv("FAKE_AGENT_STREAM", stream+"\n")
-			t.Setenv("FAKE_AGENT_WORK", reportWork)
-			t.Setenv("FAKE_REPORT_1", "not json")
-			t.Setenv("FAKE_REPORT_2", validWorker)
 			a := agent{Agent: config.Agent{Harness: harness, Model: "m", Effort: "e"}, root: root, dir: t.TempDir()}
 			ev, err := a.run(root, "worker", "ponytail", "brief", testFile)
 			if err != nil || ev["rejected"] != noJSON || workerCalls(t, order) != 2 {
@@ -214,4 +202,16 @@ func TestReportReturnUsesNativeSession(t *testing.T) {
 			assertResumeArgv(t, harness, got.Args)
 		})
 	}
+}
+
+func nativeReportSession(t *testing.T, stream string) (root, order string) {
+	t.Helper()
+	root = repo(t, "https://example.com/owner/repo.git", "")
+	order = filepath.Join(t.TempDir(), "order")
+	t.Setenv("FAKE_AGENT_ORDER", order)
+	t.Setenv("FAKE_AGENT_STREAM", stream+"\n")
+	t.Setenv("FAKE_AGENT_WORK", reportWork)
+	t.Setenv("FAKE_REPORT_1", "not json")
+	t.Setenv("FAKE_REPORT_2", validWorker)
+	return root, order
 }
