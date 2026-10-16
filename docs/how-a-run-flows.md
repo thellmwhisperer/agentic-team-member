@@ -121,7 +121,13 @@ one run; see [Follow-ups](#follow-ups).
 
 `.atm.yaml` is read before the issue, so a bad configuration fails before
 anything else. The clone is detached at the base commit, has `/.atm/` excluded,
-and gets its `install` run once. The contract, `brief.md` in the run's
+and gets its `install` run once. Before `install`, ATM copies the repository's
+`.tmp/slopslint/` into the clone at the same path, preserving file bytes and
+modes so a cached executable can run without a download. No other `.tmp/`
+contents are copied. If the cache is absent, cloning proceeds without creating
+`.tmp/`; a copy failure stops the clone step.
+
+The contract, `brief.md` in the run's
 directory, tells the agent to read `AGENTS.md` if there is one, then gives the
 issue, the acceptance criteria of its task type, the commands from
 `.atm.yaml`, the style, what is forbidden and the JSON report it must end
