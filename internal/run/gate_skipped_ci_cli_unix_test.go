@@ -110,6 +110,7 @@ func finishSkippedCICLI(
 func runSkippedCICLICase(t *testing.T, bin string, c skippedCICLICase) {
 	t.Helper()
 	top := repo(t, "https://github.com/o/r.git", atmSet(atmYAML, "delivery", ": no-mistakes; touch \"$ATM_LIVE_READY\""))
+	top = gitT(t, top, "rev-parse", "--show-toplevel")
 	stopServing(t, top)
 	dir := t.TempDir()
 	nm, gh := filepath.Join(dir, "status"), filepath.Join(dir, "state")
