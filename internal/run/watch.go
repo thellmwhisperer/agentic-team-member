@@ -524,17 +524,25 @@ func (g *gate) prState(state string) (lines []string, done bool) {
 
 // followGate polls the gate of clone every beat until the PR merges or closes, or a step fails.
 // ponytail: one beat-wide poll; a push model if status grows a watch.
-func followGate(ctx context.Context, r *verdict, root, clone, branch string) error {
+func followGate(ctx context.Context, r *verdict, root, clone, branch string, command <-chan error) (bool, error) {
 	t := time.NewTicker(beat)
 	defer t.Stop()
 	for {
 		done, err := applyGate(ctx, r, root, clone, branch)
+		if errors.Is(err, errNoGate) {
+			if command == nil && r.err != nil && !slices.ContainsFunc(r.Nodes, func(n *node) bool { return gateStepName(n.Name) }) {
+				return true, nil
+			}
+			err = nil
+		}
 		if done || err != nil {
-			return err
+			return true, err
 		}
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return true, ctx.Err()
+		case err := <-command:
+			return false, err
 		case <-t.C:
 		}
 	}
@@ -544,13 +552,18 @@ func applyGate(ctx context.Context, r *verdict, root, clone, branch string) (boo
 	status, err := gateStatus(ctx, clone)
 	switch {
 	case errors.Is(err, os.ErrNotExist):
-		return prEnded(ctx, r, root, branch)
+		return prEnded(ctx, root, branch)
+	case errors.Is(err, exec.ErrNotFound):
+		return false, errNoGate
 	case err != nil:
 		return false, nil
 	}
 	g := parseGate(status)
-	if g.err != nil || !g.seen {
+	if g.err != nil {
 		return false, nil
+	}
+	if !g.seen {
+		return false, errNoGate
 	}
 	r.noteGate(g)
 	return g.outcome(r)
@@ -562,8 +575,7 @@ func (g gateState) outcome(r *verdict) (bool, error) {
 		r.failGate(g.failed, "no-mistakes step "+g.failed+" failed")
 		return false, errors.New(r.Reason)
 	case g.closed:
-		r.failGate("pr", "PR closed")
-		return false, errors.New(r.Reason)
+		return true, errPRClosed
 	case g.merged:
 		return true, nil
 	default:
@@ -571,7 +583,9 @@ func (g gateState) outcome(r *verdict) (bool, error) {
 	}
 }
 
-func prEnded(ctx context.Context, r *verdict, root, branch string) (bool, error) {
+var errPRClosed = errors.New("PR closed")
+
+func prEnded(ctx context.Context, root, branch string) (bool, error) {
 	if branch == "" {
 		return false, nil
 	}
@@ -583,8 +597,7 @@ func prEnded(ctx context.Context, r *verdict, root, branch string) (bool, error)
 	case "MERGED":
 		return true, nil
 	case "CLOSED":
-		r.failGate("pr", "PR closed")
-		return false, errors.New(r.Reason)
+		return true, errPRClosed
 	default:
 		return false, nil
 	}

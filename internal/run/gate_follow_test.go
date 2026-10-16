@@ -3,8 +3,12 @@ package run
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -90,4 +94,112 @@ func gateEvent(t *testing.T, out *bytes.Buffer, step, state string, ms float64) 
 		}
 	}
 	return false
+}
+
+func TestDeliveryObservesGateBeforeCommandExitAndKeepsFollowingAfterFailure(t *testing.T) {
+	defer func(b time.Duration) { beat = b }(beat)
+	beat = time.Millisecond
+	for _, exit := range []int{0, 1} {
+		t.Run(fmt.Sprint(exit), func(t *testing.T) {
+			dir := t.TempDir()
+			commandRelease, gateRelease := filepath.Join(dir, "command"), filepath.Join(dir, "gate")
+			realStatus(t, gateRelease)
+			t.Setenv("ATM_COMMAND_RELEASE", commandRelease)
+			line := fmt.Sprintf(`: no-mistakes; while [ ! -f "$ATM_COMMAND_RELEASE" ]; do sleep 0.01; done; exit %d`, exit)
+			root := repo(t, "https://github.com/o/r.git", atmSet(atmYAML, "delivery", line))
+			arg := issueFile(t, issue)
+			path := filepath.Join(root, ".atm", "runs", "t", "report.json")
+			var out bytes.Buffer
+			done := make(chan error, 1)
+			go func() { done <- Run("t", []string{arg}, &out, io.Discard) }()
+			wait := func(delivery, review string) {
+				t.Helper()
+				deadline := time.After(30 * time.Second)
+				tick := time.NewTicker(time.Millisecond)
+				defer tick.Stop()
+				for {
+					select {
+					case err := <-done:
+						t.Fatalf("run ended before merge: %v", err)
+					case <-deadline:
+						t.Fatalf("report never showed delivery %s and review %s", delivery, review)
+					case <-tick.C:
+						var report verdict
+						b, err := os.ReadFile(path)
+						if err != nil || json.Unmarshal(b, &report) != nil {
+							continue
+						}
+						states := map[string]string{}
+						for _, n := range report.Nodes {
+							states[n.Name] = n.Result
+						}
+						if states["delivery"] == delivery && states["review"] == review {
+							return
+						}
+					}
+				}
+			}
+			wait("running", "waiting")
+			writeFixture(t, commandRelease, "")
+			want := "passed"
+			if exit != 0 {
+				want = "failed"
+			}
+			wait(want, "waiting")
+			writeFixture(t, gateRelease, "")
+			select {
+			case err := <-done:
+				if (err != nil) != (exit != 0) {
+					t.Fatalf("command exit %d: run error %v", exit, err)
+				}
+			case <-time.After(30 * time.Second):
+				t.Fatal("run did not end after merge")
+			}
+			if n := reportNode(t, readReport(t, path), "ci"); n["result"] != "passed" {
+				t.Fatalf("final CI result = %v", n)
+			}
+			if !gateEvent(t, &out, "review", "waiting", 4697267) || !gateEvent(t, &out, "ci", "passed", 1310737) {
+				t.Fatal("screen missed the gate wait or completion")
+			}
+		})
+	}
+}
+
+func TestClosedPRPreservesGateResultsAndEndsStreamAsClosed(t *testing.T) {
+	for _, source := range []string{"gate", "released clone"} {
+		t.Run(source, func(t *testing.T) {
+			completed := recorded(t, "atm_watch_status_completed.txt")
+			root := repo(t, "https://github.com/o/r.git", "")
+			r := newVerdict(t.TempDir(), io.Discard)
+			r.noteGate(parseGate(completed))
+			clone := filepath.Join(root, "missing")
+			if source == "gate" {
+				clone = t.TempDir()
+				status := filepath.Join(t.TempDir(), "closed.txt")
+				writeFixture(t, status, strings.ReplaceAll(completed, "pr_state: merged", "pr_state: closed"))
+				fakeStatus(t)
+				t.Setenv("ATM_STATUS_LIVE", status)
+			} else {
+				fakeGH(t, "CLOSED", false)
+			}
+			done, err := applyGate(context.Background(), r, root, clone, "feature")
+			if !done || err == nil || err.Error() != "PR closed" {
+				t.Fatalf("closure = %v, %v", done, err)
+			}
+			if err := r.write(); err != nil {
+				t.Fatal(err)
+			}
+			report := readReport(t, r.path)
+			if n := reportNode(t, report, "pr"); n["result"] != "passed" || n["duration_ms"] != float64(16070) || r.FailedNode != "" {
+				t.Fatalf("closure changed the gate result: %v, failed node %q", n, r.FailedNode)
+			}
+			var out bytes.Buffer
+			s := observer{w: &out, now: time.Now, pr: recordedPR}
+			code, ended := s.end(root, Outcome{Outcome: "failed", Ended: time.Now(), FailedNode: r.FailedNode, Reason: err.Error()})
+			events := events(t, &out)
+			if !ended || code != 1 || len(events) != 1 || events[0]["event"] != "closed" {
+				t.Fatalf("stream closure = %d, %v, %v", code, ended, events)
+			}
+		})
+	}
 }

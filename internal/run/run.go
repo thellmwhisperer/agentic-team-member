@@ -333,11 +333,14 @@ func (a agent) deliver(r *verdict, root, clone, sha, base, line string, i Issue,
 		return
 	}
 	var handed string
+	var gateDone bool
+	var gateErr error
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	r.step("delivery", func() (map[string]any, error) {
 		s := nonSlug.ReplaceAllString(strings.ToLower(i.Title), "-")
 		branch := "atm/" + cmp.Or(strings.Trim(s[:min(len(s), 40)], "-"), "run") + "-" +
 			strings.TrimPrefix(filepath.Base(clone), "atm-run-") // the clone's timestamp, as unique
-		handed = branch
 		ev := map[string]any{"branch": branch}
 		cuts, tombs, err := onBranch(root, clone, sha, branch, i)
 		if err == nil {
@@ -370,34 +373,49 @@ func (a agent) deliver(r *verdict, root, clone, sha, base, line string, i Issue,
 			issue = strconv.Itoa(i.Number)
 		}
 		t, _ := screen.(terminal)
-		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-		defer stop()
 		var tail string
+		var took span
 		// Delivery owns the attached terminal. Its node event is the screen row; emitting
 		// a nested check event here would arrive after the terminal output and duplicate it.
-		took, err := row(func(map[string]any) {}, "delivery", func() error {
-			tail, err = tee(ctx, t, io.MultiWriter(f, screen), clone, line, "ATM_TITLE="+i.Title, "ATM_ISSUE="+issue,
-				"ATM_ISSUE_TEXT="+i.Text, "ATM_INTENT="+intent(i.Text, tombs), "ATM_BRANCH="+branch,
-				"ATM_CLONE="+clone, "ATM_REPORT="+r.path, "ATM_PONYTAIL="+cuts)
-			return err
-		})
+		command := func() error {
+			var commandErr error
+			took, commandErr = row(func(map[string]any) {}, "delivery", func() error {
+				tail, commandErr = tee(ctx, t, io.MultiWriter(f, screen), clone, line, "ATM_TITLE="+i.Title, "ATM_ISSUE="+issue,
+					"ATM_ISSUE_TEXT="+i.Text, "ATM_INTENT="+intent(i.Text, tombs), "ATM_BRANCH="+branch,
+					"ATM_CLONE="+clone, "ATM_REPORT="+r.path, "ATM_PONYTAIL="+cuts)
+				return commandErr
+			})
+			return commandErr
+		}
+		if strings.Contains(line, "no-mistakes") {
+			handed = branch
+			done := make(chan error, 1)
+			go func() { done <- command() }()
+			gateDone, gateErr = followGate(ctx, r, root, clone, branch, done)
+			if gateDone {
+				stop()
+				err = <-done
+			} else {
+				err, gateErr = gateErr, nil
+			}
+		} else {
+			err = command()
+		}
 		ev["commands"] = []cmdResult{{"delivery", line, outcome(err), tail, took}}
+		if gateDone {
+			err = nil
+		}
 		// Once it ended: one whose background process died never did, and its clone goes.
 		return ev, errors.Join(wrap(err, "delivery"), os.WriteFile(clone+".delivered", []byte(branch+" "+base+"\n"),
 			0o644))
 	})
-	r.err = errors.Join(r.err, followHandOff(line, root, clone, handed, r))
-}
-
-// followHandOff keeps a no-mistakes delivery up until the PR merges or closes, or the gate fails.
-// ponytail: the hand-off is a command that names no-mistakes; a wrapper that hides the name is not followed.
-func followHandOff(line, root, clone, branch string, r *verdict) error {
-	if r == nil || r.err != nil || !strings.Contains(line, "no-mistakes") {
-		return nil
+	if handed != "" && !gateDone {
+		_, gateErr = followGate(ctx, r, root, clone, handed, nil)
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	return followGate(ctx, r, root, clone, branch)
+	r.err = errors.Join(r.err, gateErr)
+	if errors.Is(gateErr, errPRClosed) {
+		r.err, r.Reason = gateErr, gateErr.Error()
+	}
 }
 
 // conventional maps a task type to its conventional commit type, which release-please reads.
