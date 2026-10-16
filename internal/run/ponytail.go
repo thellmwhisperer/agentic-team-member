@@ -288,7 +288,7 @@ func restoreFiles(clone, tree, changed string, bad map[string]bool) error {
 	if len(back) == 0 {
 		return nil
 	}
-	_, err := git(clone, append([]string{"checkout", tree, "--"}, back...)...)
+	_, err := git(clone, append([]string{"--literal-pathspecs", "checkout", tree, "--"}, back...)...)
 	return err
 }
 
