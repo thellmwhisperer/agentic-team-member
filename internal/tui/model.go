@@ -320,12 +320,7 @@ func (m *Model) activityRows() []*row {
 }
 
 func gateOrder(step string) int {
-	for i, name := range []string{"review", "test", "document", "lint", "push", "pr", "ci"} {
-		if name == step {
-			return i + 1
-		}
-	}
-	return 0
+	return slices.Index([]string{"review", "test", "document", "lint", "push", "pr", "ci"}, step) + 1
 }
 
 // ensureGate inserts step below Delivery, in gate order, the first time the gate reports it.
