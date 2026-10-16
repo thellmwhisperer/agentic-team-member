@@ -281,12 +281,8 @@ func TestPonytailDiscardsACutThatDoesNotHold(t *testing.T) {
 		{name: "longer", work: "echo extra >> a.txt", report: cut, why: "shorten"},
 		{name: "no findings", work: "echo fixed > a.txt", why: "no finding"},
 		{name: "breaks a check", work: "echo broken > a.txt", report: cut, why: "fails with the fix"},
-		{name: "new file", work: "echo fixed > a.txt; echo c > c.txt", report: cut, why: "c.txt"},
 		{name: "new ignored file", work: "echo fixed > a.txt" + inject, report: cut, why: "adds cache/injected.txt"},
 		{name: "longer with ignored files", work: "echo extra >> a.txt" + inject, report: cut, why: "shorten"},
-		{name: "outside the diff", work: "echo fixed > a.txt; rm b.txt", report: cut, why: "b.txt"},
-		{name: "touches test", work: "echo fixed > a.txt; echo bad > a_test.sh",
-			report: cut, why: "touches the test a_test.sh"},
 		{name: "deletes file", work: "rm a.txt", report: cut, why: "deletes a.txt"},
 		{name: "touches the issue", work: "echo fixed > a.txt", report: strings.Replace(cut, `"issue_sentence": ""`,
 			`"issue_sentence": "token() never returns an expired token"`, 1),
@@ -350,5 +346,87 @@ func TestPonytailDiesWithoutTheRepositoryIdentityBeforeCommitting(t *testing.T) 
 				t.Fatalf("a commit was made: HEAD %s, base %s", head, sha)
 			}
 		})
+	}
+}
+
+// twoCuts is a valid cut of a.txt and one of c.txt that names a sentence of the issue.
+const twoCuts = `{"findings": [` +
+	`{"file": "a.txt", "family": "speculative_feature", "finding": "dropped two lines", "issue_sentence": ""},` +
+	`{"file": "c.txt", "family": "speculative_feature", "finding": "touches the issue", "issue_sentence": "Retry once."}` +
+	`], "summary": "s"}`
+
+func TestPonytailJudgesACutPerFile(t *testing.T) {
+	touched := strings.Replace(cut, `"issue_sentence": ""`, `"issue_sentence": "Retry once."`, 1)
+	longer := "printf 'fixed\\nextra\\nmore\\n" + strings.Repeat("extra\\n", 5) +
+		"' > a.txt; echo x > long_test.sh"
+	cases := []struct {
+		name, work, report, why, seed, body string
+	}{
+		{name: "valid file beside a test", work: "echo fixed > a.txt; echo bad > a_test.sh", report: cut},
+		{name: "valid file beside the issue", work: "echo fixed > a.txt; echo cut > c.txt", report: twoCuts,
+			seed: "c.txt", body: "stay\n"},
+		{name: "valid file beside a new file", work: "echo fixed > a.txt; echo c > c.txt", report: cut},
+		{name: "valid file beside one outside the diff", work: "echo fixed > a.txt; rm b.txt", report: cut},
+		{name: "only file touches the issue", work: "echo fixed > a.txt", report: touched,
+			why: "the cut touches the issue: Retry once."},
+		{name: "remainder does not shorten", work: longer, report: cut, why: "shorten",
+			seed: "long_test.sh", body: strings.Repeat("x\n", 10)},
+		{name: "remainder breaks a proof", work: "echo broken > a.txt; echo bad > a_test.sh", report: cut,
+			why: "fails with the fix"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			root, clone, sha, cfg := unitDone(t, c.work)
+			if c.seed != "" {
+				if err := os.WriteFile(filepath.Join(clone, c.seed), []byte(c.body), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			t.Setenv("FAKE_PONYTAIL_REPORT", c.report)
+			before := state(t, clone)
+			ev, err := agent{Agent: cfg.Agent, dir: t.TempDir()}.ponytail(root, clone, sha,
+				[]proof{unitProof(t, clone, sha)}, fixIssue, cfg)
+			if c.why != "" {
+				reason, _ := ev["reason"].(string)
+				if err != nil || ev["kept"] != false || !strings.Contains(reason, c.why) || state(t, clone) != before {
+					t.Fatalf("want no cut for %q, got %v, %v", c.why, err, ev)
+				}
+				return
+			}
+			if err != nil || ev["kept"] != true {
+				t.Fatalf("want the valid file kept, got %v, %v", err, ev)
+			}
+			keptCut(t, clone, sha)
+		})
+	}
+}
+
+// keptCut checks the ponytail commit is a.txt's cut and its tombstone, and every other file is as the unit left it.
+func keptCut(t *testing.T, clone, sha string) {
+	t.Helper()
+	if gitT(t, clone, "rev-parse", "HEAD~2") != sha {
+		t.Fatalf("want two commits on %s", sha)
+	}
+	if got := gitT(t, clone, "show", "HEAD~1:a.txt"); got != "fixed\nextra\nmore" {
+		t.Fatalf("unit commit a.txt: %q", got)
+	}
+	if got := gitT(t, clone, "show", "HEAD:a.txt"); got != "fixed" {
+		t.Fatalf("cut a.txt: %q", got)
+	}
+	msg := "ponytail: 1 cuts\n\n- a.txt: dropped two lines (speculative_feature)"
+	if got := gitT(t, clone, "log", "-1", "--format=%B"); got != msg {
+		t.Fatalf("commit: %q", got)
+	}
+	diff := gitT(t, clone, "diff", "--name-only", "HEAD~1", "HEAD")
+	if !strings.Contains(diff, "a.txt") {
+		t.Fatalf("cut commit lacks a.txt: %q", diff)
+	}
+	for _, name := range strings.Split(diff, "\n") {
+		if name != "a.txt" && !strings.HasPrefix(name, ".slop/tombstones/") {
+			t.Fatalf("the cut commit touches %s", name)
+		}
+	}
+	if got := gitT(t, clone, "status", "--porcelain"); got != "" {
+		t.Fatalf("dirty clone: %q", got)
 	}
 }

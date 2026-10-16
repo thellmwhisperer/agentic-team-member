@@ -28,8 +28,10 @@ type finding struct {
 // ponytail is the slop detector on the run's work in clone, from base commit sha, for issue i as its last unit
 // is proven, whose units were proven as proofs: an agent that may only cut it. A cut that holds, a shorter diff
 // that passes every unit's proof and every check again, leaves two commits on the units before, the last unit
-// then the cut with a tombstone per finding; a cut rejected by policy or checks is undone, while a commit by
-// the agent or a re-check command fails the run.
+// then the cut with a tombstone per finding. A file a finding names with a missing or non-empty issue sentence,
+// or that the cut deletes, adds, or touches as a test or outside the run's diff, is put back alone; what remains
+// is judged, and a cut that still fails policy or the checks is undone. A commit by the agent or a re-check
+// command fails the run.
 func (a agent) ponytail(root, clone, sha string, proofs []proof, i Issue, c config.Config) (map[string]any,
 	error) {
 	base, err := git(clone, "rev-parse", "HEAD") // the last unit's
@@ -62,7 +64,7 @@ func (a agent) ponytail(root, clone, sha string, proofs []proof, i Issue, c conf
 	if err != nil {
 		return ev, err
 	}
-	why, lines, err := fault(clone, sha, before, after, files, found, c.TestPatterns)
+	why, lines, found, err := judge(clone, sha, before, after, files, found, c.TestPatterns)
 	if err != nil {
 		return ev, err
 	}
@@ -186,28 +188,112 @@ func fault(clone, sha, before, after string, files []string, found []finding, te
 		return "the cut reports no finding", lines, err
 	}
 	for _, f := range found {
-		if f.IssueSentence == nil {
-			return fmt.Sprintf("the cut touches the issue: finding %q lacks issue_sentence", f.Finding), lines, err
-		}
-		if *f.IssueSentence != "" {
-			return "the cut touches the issue: " + *f.IssueSentence, lines, err
+		if why = sentenceFault(f); why != "" {
+			return why, lines, err
 		}
 	}
 	for f := strings.Split(changed, "\x00"); len(f) > 1; f = f[2:] {
-		if f[0] == "D" {
-			return "the cut deletes " + f[1], lines, err
-		}
-		if first([]string{f[1]}, tests, true) != "" {
-			return "the cut touches the test " + f[1], lines, err
-		}
-		if f[0] == "A" {
-			return "the cut adds " + f[1], lines, err
-		}
-		if !slices.Contains(files, f[1]) {
-			return "the cut touches " + f[1] + ", outside the run's diff", lines, err
+		if why = fileFault(f[0], f[1], files, tests); why != "" {
+			return why, lines, err
 		}
 	}
 	return "", lines, err
+}
+
+// judge is fault on the cut from before to after, once each file a finding names with a missing or non-empty
+// issue sentence, or that the cut deletes, adds, or touches as a test or outside files, is back as before.
+// Nothing of the cut left is fault on it as it stands, the same "no cut". kept are the findings of the files
+// that stay.
+func judge(clone, sha, before, after string, files []string, found []finding, tests []string) (why string,
+	lines [2]int, kept []finding, err error) {
+	changed, err := git(clone, "diff", "--name-status", "--no-renames", "-z", before, after)
+	if err != nil {
+		return "", lines, nil, err
+	}
+	bad, live := rejected(changed, files, found, tests)
+	if !live || len(bad) == 0 {
+		why, lines, err = fault(clone, sha, before, after, files, found, tests)
+		return why, lines, found, err
+	}
+	if err = restoreFiles(clone, before, changed, bad); err != nil {
+		return "", lines, nil, err
+	}
+	if after, err = snapshot(clone); err != nil {
+		return "", lines, nil, err
+	}
+	kept = slices.DeleteFunc(slices.Clone(found), func(f finding) bool { return bad[f.File] })
+	why, lines, err = fault(clone, sha, before, after, files, kept, tests)
+	return why, lines, kept, err
+}
+
+// rejected is each file of changed, the cut's name-status, that does not stay, and whether any file of it does.
+func rejected(changed string, files []string, found []finding, tests []string) (bad map[string]bool, live bool) {
+	bad = map[string]bool{}
+	for _, f := range found {
+		if sentenceFault(f) != "" {
+			bad[f.File] = true
+		}
+	}
+	for f := strings.Split(changed, "\x00"); len(f) > 1; f = f[2:] {
+		if fileFault(f[0], f[1], files, tests) != "" {
+			bad[f[1]] = true
+		}
+		live = live || !bad[f[1]]
+	}
+	return bad, live
+}
+
+// sentenceFault is why finding f touches the issue, "" when it does not.
+func sentenceFault(f finding) string {
+	switch {
+	case f.IssueSentence == nil:
+		return fmt.Sprintf("the cut touches the issue: finding %q lacks issue_sentence", f.Finding)
+	case *f.IssueSentence != "":
+		return "the cut touches the issue: " + *f.IssueSentence
+	}
+	return ""
+}
+
+// fileFault is why the cut's change of path, status its name-status, does not hold, "" when it may.
+func fileFault(status, path string, files, tests []string) string {
+	switch {
+	case status == "D":
+		return "the cut deletes " + path
+	case first([]string{path}, tests, true) != "":
+		return "the cut touches the test " + path
+	case status == "A":
+		return "the cut adds " + path
+	case !slices.Contains(files, path):
+		return "the cut touches " + path + ", outside the run's diff"
+	}
+	return ""
+}
+
+// restoreFiles puts each path of changed, the cut's name-status, that bad names back to tree in clone. An
+// added file is removed; any other is checked out of tree.
+func restoreFiles(clone, tree, changed string, bad map[string]bool) error {
+	var back []string
+	for f := strings.Split(changed, "\x00"); len(f) > 1; f = f[2:] {
+		if !bad[f[1]] {
+			continue
+		}
+		if f[0] == "A" {
+			err := os.Remove(filepath.Join(clone, filepath.FromSlash(f[1])))
+			if err != nil && !os.IsNotExist(err) {
+				return err
+			}
+			continue
+		}
+		back = append(back, f[1])
+	}
+	if len(back) == 0 {
+		return nil
+	}
+	if _, err := git(clone, append([]string{"checkout", tree, "--"}, back...)...); err != nil {
+		return err
+	}
+	_, err := git(clone, "reset", "-q")
+	return err
 }
 
 // findings is the ponytail agent's report r, which holds findings and a summary and nothing else, each
