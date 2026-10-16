@@ -117,31 +117,22 @@ func (a agent) argv(clone, skill, final, brief string) (argv []string, stdin str
 // resumeArgv continues the harness's session with prompt, the rejected report sent back once. ok is false when
 // the harness keeps no session ATM can continue.
 func (a agent) resumeArgv(clone, skill, final, session, prompt string) (argv []string, stdin string, ok bool) {
-	if !resumes(a.Harness) || session == "" {
+	argv, stdin = a.argv(clone, skill, final, prompt)
+	flag := []string{"--resume", session}
+	switch {
+	case session == "":
+		return nil, "", false
+	case a.Harness == "claude":
+		return append(argv, flag...), stdin, true
+	case a.Harness == "codex":
+		return codexResume(argv, session), "", true
+	case a.Harness == "pi":
+		flag[0] = "--session"
+	case a.Harness != "cursor":
 		return nil, "", false
 	}
-	argv, stdin = a.argv(clone, skill, final, prompt)
-	switch a.Harness {
-	case "claude":
-		return append(argv, "--resume", session), stdin, true
-	case "codex":
-		return codexResume(argv, session), "", true
-	default:
-		flag := []string{"--resume", session}
-		if a.Harness == "pi" {
-			flag = []string{"--session", session}
-		}
-		last := argv[len(argv)-1]
-		return append(append(slices.Clone(argv[:len(argv)-1]), flag...), last), "", true
-	}
-}
-
-func resumes(harness string) bool {
-	switch harness {
-	case "claude", "codex", "pi", "cursor":
-		return true
-	}
-	return false
+	last := argv[len(argv)-1]
+	return append(append(slices.Clone(argv[:len(argv)-1]), flag...), last), "", true
 }
 
 // codexResume is `codex exec resume`: it takes neither -C nor --sandbox (codex-cli 0.155.1), so the clone is the
@@ -157,9 +148,7 @@ func codexResume(argv []string, session string) []string {
 		}
 		out = append(out, args[i])
 	}
-	out = append(out, "-c", `sandbox_mode="workspace-write"`)
-	out = append(out, session)
-	return append(out, argv[len(argv)-1])
+	return append(out, "-c", `sandbox_mode="workspace-write"`, session, argv[len(argv)-1])
 }
 
 // errSilent cancels an agent that said nothing for agentSilence.
@@ -184,12 +173,6 @@ func (a agent) run(clone, name, skill, brief string, check func(map[string]any) 
 	}
 	final := strings.TrimSuffix(path, ".jsonl") + ".final.md"
 	argv, stdin := a.argv(clone, dir, final, brief)
-	return a.drive(clone, name, skill, dir, path, final, argv, stdin, check, ev)
-}
-
-// drive runs argv and, when the final report fails validation, returns it once in the same session.
-func (a agent) drive(clone, name, skill, skillDir, path, final string, argv []string, stdin string,
-	check func(map[string]any) error, ev map[string]any) (map[string]any, error) {
 	s, exit, cause, err := a.exec(clone, skill, path, argv, stdin, false)
 	invalid, err := a.reported(name, skill, path, final, exit, cause, err, s, false, check, ev)
 	if invalid == nil {
@@ -204,7 +187,8 @@ func (a agent) drive(clone, name, skill, skillDir, path, final string, argv []st
 	if logErr = errors.Join(logErr, f.Close()); logErr != nil {
 		return ev, errors.Join(err, logErr)
 	}
-	argv, stdin, ok := a.resumeArgv(clone, skillDir, final, s.session, rejectMessage(invalid))
+	argv, stdin, ok := a.resumeArgv(clone, dir, final, s.session, "Your final message was rejected: "+
+		invalid.Error()+". Reply with only the JSON object the brief asks for, nothing else.")
 	if !ok {
 		return ev, err
 	}
@@ -216,11 +200,6 @@ func (a agent) drive(clone, name, skill, skillDir, path, final string, argv []st
 	delete(ev, "exit")
 	delete(ev, "tail")
 	return ev, nil
-}
-
-func rejectMessage(err error) string {
-	return "Your final message was rejected: " + err.Error() +
-		". Reply with only the JSON object the brief asks for, nothing else."
 }
 
 // reported reads the run's report into ev. invalid is a validation error, so the caller can return it once;
@@ -669,28 +648,17 @@ func (e event) agentModel(harness string) string {
 
 // noteSession keeps the first session id the harness's stream names, so a rejected report returns to it.
 func (s *stream) noteSession(line []byte) {
-	if s.session != "" {
-		return
-	}
 	var v map[string]any
-	if json.Unmarshal(line, &v) != nil {
+	if s.session != "" || json.Unmarshal(line, &v) != nil {
 		return
 	}
-	s.session = sessionOf(v)
-}
-
-func sessionOf(v map[string]any) string {
-	for _, k := range []string{"session_id", "thread_id"} {
-		if id, ok := v[k].(string); ok && id != "" {
-			return id
-		}
+	s.session, _ = v["session_id"].(string)
+	if s.session == "" {
+		s.session, _ = v["thread_id"].(string)
 	}
-	if v["type"] == "session" {
-		if id, ok := v["id"].(string); ok && id != "" {
-			return id
-		}
+	if s.session == "" && v["type"] == "session" {
+		s.session, _ = v["id"].(string)
 	}
-	return ""
 }
 
 // show tells the screen evs, what the agent says once the stream knows whether it ends with a report.
