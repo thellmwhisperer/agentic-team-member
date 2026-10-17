@@ -8,7 +8,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -16,12 +18,13 @@ import (
 )
 
 // fakeHello is a claude that writes its directory and arguments to $FAKE_HELLO_CALL, then plays $FAKE_HELLO:
-// no-auth exits 2, hang never ends, any other fails with a controlling terminal and answers OK to the brief.
+// no-auth exits 2, hang waits while its owner and directory exist, any other fails with a controlling terminal
+// and answers OK to the brief.
 const fakeHello = `#!/bin/sh
 { pwd; echo "$@"; } > "$FAKE_HELLO_CALL"
 case "$FAKE_HELLO" in
 no-auth) echo 'no auth' >&2; exit 2 ;;
-hang) exec tail -f /dev/null ;;
+hang) ATM_FAKE_HELLO_HANG=1 exec "$ATM_FAKE_TEST_BINARY" -test.run=^TestFakeHelloClaudeHang$ ;;
 esac
 if (exec </dev/tty) 2>/dev/null; then echo 'has a terminal'; exit 3; fi
 grep -q 'Reply with the single word OK and nothing else.' || exit 4
@@ -31,7 +34,33 @@ echo '{"type": "result", "result": "OK"}'
 // helloRepo is a repository whose agent is fakeHello, model m1, playing mode; it returns the repository and
 // where the fake writes its call.
 func helloRepo(t *testing.T, mode string) (dir, call string) {
+	t.Helper()
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ATM_FAKE_TEST_BINARY", exe)
+	t.Setenv("ATM_FAKE_OWNER_PID", strconv.Itoa(os.Getpid()))
 	return helloRepoWith(t, "claude", mode, fakeHello)
+}
+
+// Invoked by fakeHello instead of tail so a killed test cannot leave the hang running.
+func TestFakeHelloClaudeHang(t *testing.T) {
+	if os.Getenv("ATM_FAKE_HELLO_HANG") != "1" {
+		return
+	}
+	owner, err := strconv.Atoi(os.Getenv("ATM_FAKE_OWNER_PID"))
+	if err != nil || owner <= 0 {
+		t.Fatalf("invalid fake claude owner: %v", err)
+	}
+	tick := time.NewTicker(250 * time.Millisecond)
+	defer tick.Stop()
+	for range tick.C {
+		_, err := os.Getwd()
+		if syscall.Kill(owner, 0) == syscall.ESRCH || err != nil {
+			return
+		}
+	}
 }
 
 func helloRepoWith(t *testing.T, harness, mode, fake string) (dir, call string) {
