@@ -63,6 +63,8 @@ func scratchModule(t *testing.T) (dir, covdir, base string) {
 	gitRun(t, dir, "init", "-q")
 	gitRun(t, dir, "config", "user.email", "cover-diff@example.com")
 	gitRun(t, dir, "config", "user.name", "cover-diff")
+	// Windows Git warns on an LF working copy when autocrlf is on. That line is not the check's output.
+	gitRun(t, dir, "config", "core.autocrlf", "false")
 	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/coverdiff\n\ngo 1.27\n")
 	writeFile(t, filepath.Join(dir, "main.go"), `package main
 
