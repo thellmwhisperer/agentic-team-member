@@ -431,7 +431,9 @@ owner or as optional improvements according to the review's drafts.
 
 Repairs use the existing worker harness and `ponytail` skill, one writer at a
 time. The worker receives only the selected original criteria and evidence,
-with instructions to make the minimal change and preserve tests. ATM rejects
+with instructions to make the minimal change, preserve tests, and only edit
+files. If the repair agent moves HEAD, the round fails for that reason before
+ATM checks files matching `test_patterns`. When HEAD is unchanged, ATM rejects
 changes to or deletion of existing files matching `test_patterns` and checks
 that saved proof test files retain their contents. Adding tests does not
 replace the saved proofs. It re-runs every unit's task-type proof and the
