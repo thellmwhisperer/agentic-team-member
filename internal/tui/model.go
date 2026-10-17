@@ -55,8 +55,9 @@ type Model struct {
 	pipelineFocus                 bool
 	pipelineBounds, historyBounds bounds
 	unfold                        bool            // t: every tool call of the Agent box on its own line
-	open                          map[string]bool // a run of tool calls, by its key, clicked open or closed
-	toggles                       []string        // the run each shown row of the Agent box opens or closes on a click
+	unfoldThink                   bool            // h: every thinking message of the Agent box in full
+	open                          map[string]bool // a run of tool calls or thinking, by its key, clicked open or closed
+	toggles                       []string        // what each shown row of the Agent box opens or closes on a click
 }
 
 type bounds struct{ x, y, width, height int }
@@ -189,12 +190,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// key scrolls the focused box, or, on tab, focuses the other, or, on t, folds or unfolds every tool call.
+// key scrolls the focused box, or, on tab, focuses the other, or, on t, folds or unfolds every tool call and,
+// on h, every thinking message.
 func (m *Model) key(k string) {
 	p := m.focused()
 	switch k {
 	case "t":
 		m.unfold, m.open = !m.unfold, nil
+	case "h":
+		m.unfoldThink, m.open = !m.unfoldThink, nil
 	case "tab":
 		if m.agentRuns() {
 			m.pipelineFocus = !m.pipelineFocus
@@ -215,7 +219,7 @@ func (m *Model) key(k string) {
 }
 
 // wheel scrolls the box under the pointer: the ATM box, or the Agent box while it shows. A click on a row of
-// folded tool calls in the Agent box unfolds them, and on the line over unfolded ones folds them.
+// folded tool calls or thinking in the Agent box unfolds it, and on its first row once unfolded folds it again.
 func (m *Model) wheel(msg tea.MouseMsg) {
 	var p *pane
 	if m.pipelineBounds.contains(msg.X, msg.Y) {
@@ -242,12 +246,15 @@ func (m *Model) wheel(msg tea.MouseMsg) {
 	}
 }
 
-// unfolded says whether the run of tool calls by key shows each call on its own line.
+// unfolded says whether the run of tool calls or the thinking message by key shows in full.
 func (m *Model) unfolded(key string) bool {
 	if open, ok := m.open[key]; ok {
 		return open
 	}
-	return m.unfold
+	if strings.HasPrefix(key, "tools:") {
+		return m.unfold
+	}
+	return m.unfoldThink
 }
 
 func (b bounds) contains(x, y int) bool {

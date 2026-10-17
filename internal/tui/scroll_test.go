@@ -380,6 +380,7 @@ func TestHeldWrappedPartClampsToItsMessageWhenWidened(t *testing.T) {
 		feed(m, fmt.Sprintf(`{"step":"agent","thinking":"later %02d"}`, i))
 	}
 	view(m)
+	pressH(m) // the wrapped thinking this test anchors to shows only once unfolded
 	press(m, tea.KeyHome, tea.KeyDown)
 	if line := topAgentLine(m); strings.Contains(line, "WRAP-ANCHOR") {
 		t.Fatalf("the fixture must select a continuation row: %q", line)

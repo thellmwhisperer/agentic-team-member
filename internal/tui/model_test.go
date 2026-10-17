@@ -206,7 +206,7 @@ func TestScreenShowsWhatTheAgentSaysBetweenItsDimmerToolCalls(t *testing.T) {
 	m := screen(120, 40, append(unit[:7:7], `{"step":"agent","says":"I'll run the tests.\nThen fix."}`,
 		`{"step":"agent","id":"t1","tool":"Bash","detail":"go test ./...","result":"running"}`,
 		`{"step":"agent","id":"t1","result":"passed"}`, `{"step":"agent","says":"Green; done."}`)...)
-	if s := view(m); !order(s, "╭─ Agent", "✎ I'll run the tests.", "  · 1 tool: Bash", "✎ Green; done.") {
+	if s := view(m); !order(s, "╭─ Agent", "✎ I'll run the tests.", "▸ · 1 tool: Bash", "✎ Green; done.") {
 		t.Fatalf("agent box:\n%s", s)
 	}
 	if s := m.View(); !strings.Contains(s, paint(dim, "· 1 tool: Bash")) ||
@@ -237,7 +237,7 @@ func TestAgentBoxFoldsToolCallsBetweenWhatTheAgentSaysIntoOneDimLine(t *testing.
 		`{"step":"agent","id":"t4","tool":"Bash","detail":"go build ./...","result":"failed"}`,
 		`{"step":"agent","id":"t5","tool":"Read","detail":"view.go\nmodel.go","result":"running"}`)...)
 	s := view(m)
-	if !order(s, "∴ Plan the fix.", "✎ Writing the red tests first.", "  · 3 tools: Edit, Bash ×2",
+	if !order(s, "∴ Plan the fix.", "✎ Writing the red tests first.", "▸ · 3 tools: Edit, Bash ×2",
 		"✎ Red on behaviour. Now the fix.", "✗ failed Bash go build ./...", "⠋ 1 tool: Read · view.go") ||
 		strings.Contains(s, "✓ passed Bash") || strings.Contains(s, "model.go") {
 		t.Fatalf("agent box:\n%s", s)
