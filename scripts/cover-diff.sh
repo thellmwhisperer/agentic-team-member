@@ -27,14 +27,8 @@ fi
 
 # ponytail: $out word-splits on spaces, so a path with a space would be reported wrong; this
 # repository has none.
-top=$(git rev-parse --show-toplevel)
-phys=$(cd "$top" && pwd -P)
-logical=$phys
-if [ "$(pwd -P)" = "$phys" ]; then
-	logical=$(pwd -L)
-fi
 out=$(git diff -U0 "$base" -- '*.go' ':(exclude)*_test.go' ':(exclude)**/testdata/**' |
-	awk -v mod="$mod/" -v top="$top/" -v phys="$phys/" -v logical="$logical/" '
+	awk -v mod="$mod/" '
 		# Profile blocks: name.go:startLine.startCol,endLine.endCol numStmt count, count > 0 meaning
 		# an end-to-end run executed the block.
 		FNR == NR {
@@ -42,12 +36,6 @@ out=$(git diff -U0 "$base" -- '*.go' ':(exclude)*_test.go' ':(exclude)**/testdat
 				file = substr(f[1], 1, RSTART - 1)
 				if (index(file, mod) == 1)
 					file = substr(file, length(mod) + 1)
-				if (index(file, top) == 1)
-					file = substr(file, length(top) + 1)
-				if (index(file, phys) == 1)
-					file = substr(file, length(phys) + 1)
-				if (index(file, logical) == 1)
-					file = substr(file, length(logical) + 1)
 				split(substr(f[1], RSTART + 1), be, ",")
 				split(be[1], s, ".")
 				split(be[2], e, ".")
