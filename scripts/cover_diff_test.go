@@ -28,7 +28,8 @@ func TestCoverDiffNamesTheUncoveredChangedLines(t *testing.T) {
 		t.Fatal(err)
 	}
 	check := func() string {
-		cmd := exec.Command(script)
+		// Windows will not CreateProcess a .sh path; sh is the contract and is on PATH in CI.
+		cmd := exec.Command("sh", filepath.ToSlash(script))
 		cmd.Dir = dir
 		cmd.Env = append(slices.DeleteFunc(os.Environ(), func(s string) bool {
 			return strings.HasPrefix(s, "GOCOVERDIR=") || strings.HasPrefix(s, "ATM_COVER_BASE=")
@@ -42,7 +43,7 @@ func TestCoverDiffNamesTheUncoveredChangedLines(t *testing.T) {
 		if _, ok := err.(*exec.ExitError); !ok {
 			t.Fatalf("cover-diff.sh did not run: %v", err)
 		}
-		return out.String()
+		return strings.ReplaceAll(out.String(), "\r\n", "\n")
 	}
 	first := check()
 	if want := coverDiffFail + "\nmain.go:16\nmain.go:17\n"; first != want {
@@ -117,7 +118,8 @@ func main() {
 // with argument a and leaves its counters in covdir.
 func coveredRun(t *testing.T, dir, covdir string) {
 	t.Helper()
-	bin := filepath.Join(dir, "bin")
+	// Windows os/exec will not run an extensionless file, even at an absolute path.
+	bin := filepath.Join(dir, "bin.exe")
 	build := exec.Command("go", "build", "-cover", "-coverpkg=./...", "-o", bin, ".")
 	build.Dir = dir
 	if out, err := build.CombinedOutput(); err != nil {

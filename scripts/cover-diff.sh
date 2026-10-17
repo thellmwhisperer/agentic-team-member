@@ -4,10 +4,17 @@
 # them from a real atm command. Blocks and diff only, never the content of a line (decision 7664).
 set -eu
 
+# Go writes a Windows path with backslashes; git and pwd may not. One spelling,
+# so a prefix strip leaves the git path. Not a filter on what a line holds.
+toslash() {
+	printf '%s\n' "$1" | awk '{ gsub(/\r/, ""); gsub(/\\/, "/"); print }'
+}
+
 if [ -z "${GOCOVERDIR:-}" ]; then
 	echo "cover-diff: GOCOVERDIR is not set"
 	exit 1
 fi
+GOCOVERDIR=$(toslash "$GOCOVERDIR")
 base=${ATM_COVER_BASE:-$(git merge-base HEAD origin/main 2>/dev/null || true)}
 if [ -z "$base" ]; then
 	echo "cover-diff: cannot find the base commit"
@@ -15,6 +22,10 @@ if [ -z "$base" ]; then
 	exit 1
 fi
 mod=$(go list -m) || { echo "cover-diff: cannot read the module path"; exit 1; }
+# Module directory as Go spells it: the prefix of a local-import profile key.
+moddir=$(go list -m -f '{{.Dir}}') || { echo "cover-diff: cannot read the module path"; exit 1; }
+moddir=$(toslash "$moddir")
+moddir=${moddir%/}
 
 # The profile lands inside the coverage directory the caller owns, beside the counters it is
 # derived from; go tool covdata reads covmeta/covcounters only, so it does not mind the stray file.
@@ -27,21 +38,27 @@ fi
 
 # ponytail: $out word-splits on spaces, so a path with a space would be reported wrong; this
 # repository has none.
-top=$(git rev-parse --show-toplevel)
+top=$(toslash "$(git rev-parse --show-toplevel)")
 phys=$(cd "$top" && pwd -P)
 logical=$phys
 if [ "$(pwd -P)" = "$phys" ]; then
 	logical=$(pwd -L)
 fi
+phys=$(toslash "$phys")
+logical=$(toslash "$logical")
 out=$(git diff -U0 "$base" -- '*.go' ':(exclude)*_test.go' ':(exclude)**/testdata/**' |
-	awk -v mod="$mod/" -v top="$top/" -v phys="$phys/" -v logical="$logical/" '
+	awk -v mod="$mod/" -v moddir="$moddir/" -v top="$top/" -v phys="$phys/" -v logical="$logical/" '
 		# Profile blocks: name.go:startLine.startCol,endLine.endCol numStmt count, count > 0 meaning
 		# an end-to-end run executed the block.
 		FNR == NR {
 			if (split($0, f, " ") == 3 && f[3] ~ /^[0-9]+$/ && match(f[1], /:[0-9]+\.[0-9]+,/)) {
 				file = substr(f[1], 1, RSTART - 1)
+				gsub(/\r/, "", file)
+				gsub(/\\/, "/", file)
 				if (index(file, mod) == 1)
 					file = substr(file, length(mod) + 1)
+				if (moddir != "/" && index(file, moddir) == 1)
+					file = substr(file, length(moddir) + 1)
 				if (index(file, top) == 1)
 					file = substr(file, length(top) + 1)
 				if (index(file, phys) == 1)
@@ -60,7 +77,12 @@ out=$(git diff -U0 "$base" -- '*.go' ':(exclude)*_test.go' ':(exclude)**/testdat
 		}
 		# Diff: every + line of the new side, files as git names them, line numbers from the hunk.
 		/^diff --git / { file = "" }
-		/^\+\+\+ / { file = substr($0, 7); next }
+		/^\+\+\+ / {
+			file = substr($0, 7)
+			gsub(/\r/, "", file)
+			gsub(/\\/, "/", file)
+			next
+		}
 		/^@@ / {
 			new = ""
 			for (i = 1; i <= NF; i++)
