@@ -59,6 +59,9 @@ var work = map[string]string{"fix": fixWork, "feature": fixWork, "greenfield": f
 // set, receives one line per call. $FAKE_AGENT_STREAM goes to its stdout after its first
 // line, <clone> in it its working directory.
 func fakeAgent(name string) int {
+	if name == "claude" {
+		go watchFakeClaudeOwner()
+	}
 	if script := os.Getenv("REJECTION_SCRIPT"); script != "" {
 		cmd := exec.Command("sh", script)
 		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
@@ -72,6 +75,19 @@ func fakeAgent(name string) int {
 		return 0
 	}
 	return fakeAgentCLI(name)
+}
+
+// The server can outlive the test, so watch the test's PID, never the immediate parent.
+func watchFakeClaudeOwner() {
+	owner, _ := strconv.Atoi(os.Getenv("ATM_FAKE_OWNER_PID"))
+	tick := time.NewTicker(250 * time.Millisecond)
+	defer tick.Stop()
+	for range tick.C {
+		_, err := os.Getwd()
+		if owner > 0 && !pidAlive(owner) || err != nil {
+			os.Exit(0)
+		}
+	}
 }
 
 func fakeAgentCLI(name string) int {

@@ -66,6 +66,8 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	fakes = dir
+	// serve and fake-agent invocations returned above, preserving the owning test's PID.
+	_ = os.Setenv("ATM_FAKE_OWNER_PID", strconv.Itoa(os.Getpid()))
 	code := m.Run()
 	_ = os.RemoveAll(dir)
 	os.Exit(code)
