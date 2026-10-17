@@ -217,7 +217,7 @@ func createdWorkspaceTab(workspace, tabLabel, cwd string) (string, string, error
 	if pane == "" {
 		return "", "", fmt.Errorf("workspace create: no root pane")
 	}
-	if _, err := herdrRun("tab", "label", tab, tabLabel); err != nil {
+	if _, err := herdrRun("tab", "rename", tab, tabLabel); err != nil {
 		return "", "", err
 	}
 	return tab, pane, nil

@@ -132,7 +132,7 @@ func TestFollowTabCreatesMissingWorkspace(t *testing.T) {
 		!strings.Contains(create, "--no-focus|") {
 		t.Fatalf("workspace create: %q", create)
 	}
-	if label := callWith(all, "tab|label|"); label != "tab|label|wN:t1|atm-chore.md|" {
+	if label := callWith(all, "tab|rename|"); label != "tab|rename|wN:t1|atm-chore.md|" {
 		t.Fatalf("the created workspace's root tab is not the run's tab: %q", all)
 	}
 	if pane := callWith(all, "pane|run|"); !strings.Contains(pane, "wN:p1|atm attach chore-1") {
