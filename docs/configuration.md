@@ -112,7 +112,7 @@ your machine's file.
 | Key | Meaning |
 |-----|---------|
 | `install` | Installs dependencies in a fresh clone |
-| `test` | Runs the whole test suite |
+| `test` | Runs the whole test suite. In this repository it is `scripts/test.sh`, which also runs `scripts/cover-diff.sh`: a changed Go line executed by no end-to-end run of the real `atm` binary fails, named with its two ways out, deleting it or writing the test that reaches it |
 | `typecheck` | Typechecks |
 | `lint` | Lints |
 | `test_file` | Runs one test: `{file}` is its path, `{dir}` its directory as `./dir`. When not empty, it must contain `{file}` or `{dir}`. For Go, `{tests}` expands to `^(TestA|TestB)$` for the Go tests defined in the reported file, for `go test -run`. A file with no Go tests fails; if the command reports `no tests to run`, the proof fails and names the reported file. |

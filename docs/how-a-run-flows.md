@@ -256,9 +256,12 @@ including `install`, the proof and the other commands, then restores it even
 if a check fails. This keeps follow-up tests and other `.atm/` artefacts for
 ATM to process after Checks without exposing them to a check command. Checks
 then run `install` again (the agent may have changed dependencies), prove the
-task type, and run `test`, `typecheck` and `lint`, empty ones skipped. The
-first failure stops the run with that command's last 60 lines. A command that
-commits fails the checks too.
+task type, and run `test`, `typecheck` and `lint`, empty ones skipped. In
+this repository `test` ends with `scripts/cover-diff.sh`, which fails naming
+every changed Go line that no end-to-end run of the real `atm` binary executed;
+the way out is deleting the line or writing the end-to-end test that reaches
+it. The first failure stops the run with that command's last 60 lines. A
+command that commits fails the checks too.
 
 ### What each task type proves
 
