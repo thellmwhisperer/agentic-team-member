@@ -58,32 +58,32 @@ func checkAgentBox(t *testing.T, events, want []string, tools int) {
 func TestAgentBoxRendersRunParserEventGoldens(t *testing.T) {
 	checkAgentBox(t, eventGolden(t, "pi-6-2.events.jsonl"), []string{
 		"✎ I'll start by reading the project instructions and the ponytail skill, then look at the analytics package.",
-		"· 1 tool: read",
-		"∴ Exploring the packages directory, particularly the analytics package, to understand existing patterns.",
-		"⠋ 1 tool: bash · ls packages",
+		"▸ · 1 tool: read",
+		"▸ ∴ Exploring the packages directory, particularly the analytics package, to understand existing patterns.",
+		"▸ ⠋ 1 tool: bash · ls packages",
 	}, 2)
 	checkAgentBox(t, eventGolden(t, "claude-261.events.jsonl"), []string{
 		"✎ Writing the red tests first, then the fix in reset.",
-		"· 1 tool: Edit",
+		"▸ · 1 tool: Edit",
 	}, 1)
 }
 
 func TestAgentBoxRendersCursorToolStartOrder(t *testing.T) {
 	checkAgentBox(t, eventGolden(t, "cursor.events.jsonl"), []string{
-		"∴ I'll run the failing command, read hello.txt, and reply DONE.",
+		"▸ ∴ I'll run the failing command, read hello.txt, and reply DONE.",
 		"✎ I'll run the failing cat, then read hello.txt.",
 		"✗ failed shell cat nope.txt · cat: nope.txt: No such file or directory",
-		"· 1 tool: read",
-		"∴ The first command failed as expected.",
+		"▸ · 1 tool: read",
+		"▸ ∴ The first command failed as expected.",
 		"✎ DONE",
 	}, 2)
 }
 
 func TestAgentBoxRendersTheSameStoryForBothHarnesses(t *testing.T) {
 	want := []string{
-		"∴ Exploring the packages directory, particularly the analytics package, to understand existing patterns.",
+		"▸ ∴ Exploring the packages directory, particularly the analytics package, to understand existing patterns.",
 		"✎ Writing the red tests first, then the fix in reset.",
-		"· 1 tool: Edit",
+		"▸ · 1 tool: Edit",
 	}
 	for _, name := range []string{"same-story-claude.events.jsonl", "same-story-pi.events.jsonl"} {
 		checkAgentBox(t, eventGolden(t, name), want, 1)

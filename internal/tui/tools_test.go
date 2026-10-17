@@ -32,7 +32,7 @@ func clickRow(m *Model, y int) {
 func TestTUnfoldsAndFoldsEveryToolCall(t *testing.T) {
 	m := modelWithEvents(240, eventGolden(t, "pi-6-2.events.jsonl"))
 	today := agentLines(m, 240)
-	if !slices.Contains(today, "· 1 tool: read") {
+	if !slices.Contains(today, "▸ · 1 tool: read") {
 		t.Fatalf("folded lines changed: %q", today)
 	}
 	pressT(m)
@@ -62,7 +62,7 @@ func TestUnfoldedCallShowsItsSummaryOrNone(t *testing.T) {
 		`{"id":"c2","tool":"read","detail":"b.go","result":"passed"}`,
 	})
 	pressT(m)
-	want := []string{"· 2 tools: bash, read", "✓ ok bash ls · a.go", "✓ ok read b.go"}
+	want := []string{"▾ · 2 tools: bash, read", "✓ ok bash ls · a.go", "✓ ok read b.go"}
 	if got := agentLines(m, 240); !reflect.DeepEqual(got, want) {
 		t.Fatalf("unfolded lines:\n%q\nwant:\n%q", got, want)
 	}
@@ -133,11 +133,11 @@ func TestCallClickedOpenWhileRunningShowsItsErrorOnceItFails(t *testing.T) {
 
 func TestFooterAnnouncesTWhileTheAgentBoxShows(t *testing.T) {
 	m := screen(160, 40, `{"step":"agent","state":"started"}`)
-	if s := view(m); !strings.Contains(s, "q detach") || !strings.Contains(s, "t tools") {
+	if s := view(m); !strings.Contains(s, "q detach") || !strings.Contains(s, "t show tool use") {
 		t.Fatalf("footer:\n%s", s)
 	}
 	feed(m, `{"step":"agent","state":"passed"}`)
-	if s := view(m); strings.Contains(s, "t tools") {
+	if s := view(m); strings.Contains(s, "tool use") {
 		t.Fatalf("footer announces t without the Agent box:\n%s", s)
 	}
 }

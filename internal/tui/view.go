@@ -31,6 +31,11 @@ func bold(color, s string) string {
 	return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(color)).Render(s)
 }
 
+// fold is the arrow that marks a row a click folds or unfolds, underlined like a link: ▸ folded, ▾ unfolded.
+func fold(open bool) string {
+	return "\x1b[4m" + map[bool]string{true: "▾", false: "▸"}[open] + "\x1b[0m"
+}
+
 var spinner = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
 // states is each state's icon and colour; its word is its name. Running's icon is the spinner.
@@ -137,7 +142,10 @@ func (m *Model) footer() string {
 	}
 	keys := lipgloss.NewStyle().Bold(true).Render("q") + " " + paint(dim, action)
 	if m.agentRuns() {
-		keys += "  " + lipgloss.NewStyle().Bold(true).Render("t") + " " + paint(dim, "tools")
+		keys += "  " + lipgloss.NewStyle().Bold(true).Render("t") + " " +
+			paint(dim, map[bool]string{true: "hide", false: "show"}[m.unfold]+" tool use")
+		keys += "  " + lipgloss.NewStyle().Bold(true).Render("h") + " " +
+			paint(dim, map[bool]string{true: "hide", false: "show"}[m.unfoldThink]+" thinking")
 	}
 	return gap + keys
 }
@@ -495,7 +503,7 @@ func agentTextRows(prefix, text string, width int) []string {
 }
 
 // agentBox is what the agent says and thinks, and the tool calls between two of those, in lines rows ending with
-// its latest. What it says and thinks wraps, its continuation indented under its text.
+// its latest. What it says wraps in full; what it thinks and the tool calls fold to one row until opened.
 func (m *Model) agentBox(width, lines int) string {
 	var out []paneLine
 	var calls []*activity
@@ -505,9 +513,24 @@ func (m *Model) agentBox(width, lines int) string {
 			continue
 		}
 		out, calls = m.toolLines(out, calls), nil
-		prefix := map[bool]string{true: "✎ ", false: "∴ "}[a.says != ""]
-		for _, text := range agentTextRows(prefix, cmp.Or(a.says, a.thinking), width) {
-			out = append(out, paneLine{key: fmt.Sprintf("activity:%p", a), text: text})
+		if a.says != "" {
+			for _, text := range agentTextRows("✎ ", a.says, width) {
+				out = append(out, paneLine{key: fmt.Sprintf("activity:%p", a), text: text})
+			}
+			continue
+		}
+		// Thinking folds like a run of tool calls: one row, its first line, until clicked or h opens it.
+		key := fmt.Sprintf("activity:%p", a)
+		if !m.unfolded(key) {
+			out = append(out, paneLine{key: key, toggle: key, text: fold(false) + " ∴ " + oneLine(a.thinking)})
+			continue
+		}
+		for i, text := range agentTextRows(fold(true)+" ∴ ", a.thinking, width-2) {
+			line := paneLine{key: key, text: text}
+			if i == 0 {
+				line.toggle = key
+			}
+			out = append(out, line)
 		}
 	}
 	out = m.toolLines(out, calls)
@@ -568,14 +591,15 @@ func appendToolGroup(m *Model, out []paneLine, calls []*activity) []paneLine {
 	line := fmt.Sprintf("%d tool%s: %s", n, map[bool]string{true: "s"}[n > 1], strings.Join(parts, ", "))
 	key := fmt.Sprintf("tools:%p", calls[0])
 	unfolded := m.unfolded(key)
+	head := fold(unfolded) + " "
 	if running {
 		if !unfolded && runningDetail != "" {
 			line += " · " + runningDetail
 		}
 		out = append(out, paneLine{key: key, toggle: key,
-			text: "  " + m.icon("running") + " " + paint(dim, line)})
+			text: head + m.icon("running") + " " + paint(dim, line)})
 	} else {
-		out = append(out, paneLine{key: key, toggle: key, text: "  " + paint(dim, "· "+line)})
+		out = append(out, paneLine{key: key, toggle: key, text: head + paint(dim, "· "+line)})
 	}
 	if unfolded {
 		for _, a := range calls {
