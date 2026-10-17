@@ -54,7 +54,7 @@ func gateErrorLine(t *testing.T, status string) string {
 		if !ok {
 			continue
 		}
-		text, err := strconv.Unquote(rest)
+		text, err := strconv.Unquote(strings.TrimSuffix(rest, "\r"))
 		if err != nil {
 			t.Fatalf("error line %q: %v", rest, err)
 		}
