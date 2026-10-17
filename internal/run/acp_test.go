@@ -65,3 +65,32 @@ func TestACPPermissionAnswers(t *testing.T) {
 		})
 	}
 }
+
+// A read-only review's permission gate allows the scratch directory its brief names, and only it: the same
+// single allowance the post-step reach check makes for that review stream.
+func TestACPScratchPermission(t *testing.T) {
+	const scratch = "/runs/12-24/contract-review-scratch"
+	s := stream{clone: "/workspace/clone", scratch: scratch}
+	for _, c := range []struct{ name, toolCall, want string }{
+		{"file under the scratch", `{"rawInput":{"path":"` + scratch + `/golden.md"}}`, "ao"},
+		{"the scratch itself", `{"rawInput":{"path":"` + scratch + `"}}`, "ao"},
+		{"command writing under the scratch",
+			`{"rawInput":{"command":"cp plan.md ` + scratch + `/plan.md"}}`, "ao"},
+		{"path escaping the scratch with ..",
+			`{"rawInput":{"path":"` + scratch + `/../outside.md"}}`, "ro"},
+		{"a directory whose name starts like the scratch",
+			`{"rawInput":{"path":"` + scratch + `2/x.md"}}`, "ro"},
+		{"another run's scratch", `{"rawInput":{"path":"/runs/12-25/contract-review-scratch/x.md"}}`, "ro"},
+		{"command writing elsewhere outside",
+			`{"rawInput":{"command":"cp plan.md /runs/12-24/other/x"}}`, "ro"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			params := `{"sessionId":"s1","toolCall":` + c.toolCall + `,"options":[` +
+				`{"optionId":"ao","kind":"allow_once"},{"optionId":"ro","kind":"reject_once"}]}`
+			got, _ := json.Marshal(s.permit(json.RawMessage(params)))
+			if want := `{"outcome":{"optionId":"` + c.want + `","outcome":"selected"}}`; string(got) != want {
+				t.Fatalf("got %s, want %s", got, want)
+			}
+		})
+	}
+}
