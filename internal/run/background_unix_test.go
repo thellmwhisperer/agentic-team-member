@@ -372,10 +372,75 @@ func killServeProcesses(t *testing.T, top string, pids ...int) {
 	}
 }
 
+// Under GOCOVERDIR (scripts/test.sh) the binary buildATM makes is instrumented: an atm --version run
+// leaves its counters behind, so cover-diff can see which lines an end-to-end run executes. Without
+// it the build stays plain: byte-identical to go build and writing nothing at run time.
+func TestBuildATMInstrumentsOnlyUnderGoCoverDir(t *testing.T) {
+	dir := t.TempDir()
+	counters := filepath.Join(dir, "with-gocoverdir")
+	if err := os.Mkdir(counters, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(dir, "atm")
+	t.Setenv("GOCOVERDIR", counters)
+	version := "cover-check"
+	buildATM(t, bin, version)
+	if out, err := exec.Command(bin, "--version").CombinedOutput(); err != nil {
+		t.Fatalf("atm --version: %v\n%s", err, out)
+	}
+	if files, _ := filepath.Glob(filepath.Join(counters, "covcounters.*")); len(files) == 0 {
+		t.Fatal("atm --version under GOCOVERDIR left no covcounters file: the build is not instrumented")
+	}
+
+	t.Setenv("GOCOVERDIR", "")
+	plain := filepath.Join(dir, "plain")
+	buildATM(t, plain, version)
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("test source path is unavailable")
+	}
+	reference := filepath.Join(dir, "reference")
+	ldflags := fmt.Sprintf("-X github.com/thellmwhisperer/agentic-team-member/internal/buildinfo.Version=%s", version)
+	direct := exec.Command("go", "build", "-ldflags", ldflags, "-o", reference, "./cmd/atm")
+	direct.Dir = filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+	if out, err := direct.CombinedOutput(); err != nil {
+		t.Fatalf("plain go build: %v\n%s", err, out)
+	}
+	plainBytes, err := os.ReadFile(plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	referenceBytes, err := os.ReadFile(reference)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(plainBytes, referenceBytes) {
+		t.Fatal("the build without GOCOVERDIR is not the plain go build binary")
+	}
+	untouched := filepath.Join(dir, "without-gocoverdir")
+	if err := os.Mkdir(untouched, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GOCOVERDIR", untouched)
+	if out, err := exec.Command(plain, "--version").CombinedOutput(); err != nil {
+		t.Fatalf("plain atm --version: %v\n%s", err, out)
+	}
+	if files, _ := filepath.Glob(filepath.Join(untouched, "covcounters.*")); len(files) != 0 {
+		t.Fatal("the build without GOCOVERDIR wrote coverage counters")
+	}
+}
+
 func buildATM(t *testing.T, path, version string) {
 	t.Helper()
 	ldflags := fmt.Sprintf("-X github.com/thellmwhisperer/agentic-team-member/internal/buildinfo.Version=%s", version)
-	cmd := exec.Command("go", "build", "-ldflags", ldflags, "-o", path, "./cmd/atm")
+	args := []string{"build", "-ldflags", ldflags}
+	// Under GOCOVERDIR (scripts/test.sh) the built atm writes coverage counters on exit, so
+	// cover-diff can see which changed lines an end-to-end run executes.
+	if os.Getenv("GOCOVERDIR") != "" {
+		args = append(args, "-cover", "-coverpkg=./...")
+	}
+	args = append(args, "-o", path, "./cmd/atm")
+	cmd := exec.Command("go", args...)
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("test source path is unavailable")
