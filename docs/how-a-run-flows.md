@@ -431,7 +431,13 @@ owner or as optional improvements according to the review's drafts.
 
 Repairs use the existing worker harness and `ponytail` skill, one writer at a
 time. The worker receives only the selected original criteria and evidence,
-with instructions to make the minimal change and preserve tests. ATM rejects
+with instructions to make the minimal change and preserve tests. It must
+leave its work uncommitted and never run `git merge`, `git pull`, `git rebase`,
+`git cherry-pick`, `git reset` or `git commit`. After the worker succeeds,
+ATM first checks that HEAD still equals the pre-repair commit. A moved HEAD
+stops the round with `contract repair round <n>: the repair agent moved HEAD
+from <old> to <new>; it may only edit files`, before reading the protected-test
+diff. With HEAD unchanged, ATM rejects
 changes to or deletion of existing files matching `test_patterns` and checks
 that saved proof test files retain their contents. Adding tests does not
 replace the saved proofs. It re-runs every unit's task-type proof and the
