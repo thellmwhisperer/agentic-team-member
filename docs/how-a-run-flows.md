@@ -87,6 +87,14 @@ failed and is retried, go to stderr. Every line has `time` (RFC 3339, UTC),
 | `closed` | `url` | The PR closed unmerged; the last line, exit 1 |
 | `run_failed` | `step`, `reason` | The run or a gate step failed; the last line, exit 1 |
 
+For a terminal no-mistakes gate failure, including `intent` or `rebase`,
+`run_failed.step` is `delivery`; other failures keep their own step, such as
+`checks`. Its `reason` is the gate failure reason described under
+[Delivery](#delivery). Whether the failure arrives through a status read or
+the run's terminal result, available gate/PR observations and repair commit
+events precede the single terminal line. A known terminal failure survives
+later read errors and ends the stream even if the PR remains open.
+
 From delivery on, polling rounds start at least 10 s apart. Each reads the
 gate with `no-mistakes axi status` in the clone and, when available, the PR
 with `gh`. Commit events come only from that PR read, even while the clone
@@ -474,6 +482,11 @@ delivery command exits nonzero while the gate is active. That command error
 remains recorded; following the gate does not erase it. If the gate ends
 while the command is still running, ATM stops the command and uses the gate
 outcome.
+
+When a gate step fails, the gate status's top-level `error:` line, unquoted,
+supplies the run's reason when present, ahead of any earlier delivery command
+error. The command error remains a separate diagnostic. The report's
+`failed_node` retains the actual failed gate step.
 
 If the gate reports `status: completed`, its `ci` step is `skipped`, and
 `pr_state` is absent, ATM checks the branch's PR with `gh` even while the
