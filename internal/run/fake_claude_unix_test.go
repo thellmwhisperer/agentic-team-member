@@ -51,8 +51,15 @@ func TestHeldFakeClaudeExitsWhenOwnerDies(t *testing.T) {
 		_, _ = os.Stdin.Read(make([]byte, 1)) // the supervisor keeps this pipe open until SIGKILL
 		return
 	}
+	// macOS rejects a unix socket path of 104 bytes or more. Nesting under the runner's
+	// temp directory makes that path too long when it cannot be made relative to the cwd.
+	tmp, err := os.MkdirTemp("/tmp", "atm-owner-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(tmp) })
 	owner := exec.Command(os.Args[0], "-test.run=^TestHeldFakeClaudeExitsWhenOwnerDies$")
-	owner.Env = append(os.Environ(), "ATM_TEST_CLAUDE_OWNER=1", "TMPDIR="+t.TempDir())
+	owner.Env = append(os.Environ(), "ATM_TEST_CLAUDE_OWNER=1", "TMPDIR="+tmp)
 	input, err := owner.StdinPipe()
 	if err != nil {
 		t.Fatal(err)

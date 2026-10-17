@@ -53,11 +53,12 @@ func TestFakeHelloClaudeHang(t *testing.T) {
 	if err != nil || owner <= 0 {
 		t.Fatalf("invalid fake claude owner: %v", err)
 	}
+	wd, wdErr := os.Getwd()
 	tick := time.NewTicker(250 * time.Millisecond)
 	defer tick.Stop()
 	for range tick.C {
-		_, err := os.Getwd()
-		if syscall.Kill(owner, 0) == syscall.ESRCH || err != nil {
+		_, err := os.Stat(wd)
+		if syscall.Kill(owner, 0) == syscall.ESRCH || wdErr != nil || err != nil {
 			return
 		}
 	}
