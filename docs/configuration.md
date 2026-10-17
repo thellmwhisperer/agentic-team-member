@@ -110,7 +110,7 @@ your machine's file.
 | Key | Meaning |
 |-----|---------|
 | `install` | Installs dependencies in a fresh clone |
-| `test` | Runs the whole test suite. In this repository it is `scripts/test.sh`, which also runs `scripts/cover-diff.sh`: a changed Go line executed by no end-to-end run of the real `atm` binary fails, named with its two ways out, deleting it or writing the test that reaches it |
+| `test` | Runs the whole test suite. In this repository it is `scripts/test.sh`, which then runs `scripts/cover-diff.sh`. A changed line inside a coverage block that no end-to-end run of the real `atm` binary executed fails; the check names those lines. Delete them, or write the end-to-end test that reaches them from a real `atm` command. Lines that no coverage block spans, `_test.go` files, files under `testdata/` and deletions do not fail it. It reads the diff and the coverage blocks, not the text of a line |
 | `typecheck` | Typechecks |
 | `lint` | Lints |
 | `test_file` | Runs one test: `{file}` is its path, `{dir}` its directory as `./dir`. When not empty, it must contain `{file}` or `{dir}`. For Go, `{tests}` expands to `^(TestA|TestB)$` for the Go tests defined in the reported file, for `go test -run`. A file with no Go tests fails; if the command reports `no tests to run`, the proof fails and names the reported file. |
