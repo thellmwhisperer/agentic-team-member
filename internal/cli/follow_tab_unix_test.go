@@ -48,7 +48,7 @@ func TestFollowTabDeliveryUsesItsRootPane(t *testing.T) {
 			delivered := filepath.Join(t.TempDir(), "delivery-panes")
 			command := "printf '%s\\n' \"$HERDR_PANE_ID\" >> " + strconvQuote(delivered)
 			dir := followTabRepo(t, followTabATM("\"\"", fmt.Sprintf("%q", command)))
-			calls := followTabFakes(t, 0)
+			calls := followTabFakes(t, 0, "ATM")
 			writeWorkspace(t, "ATM")
 			t.Setenv("HERDR_ENV", "1")
 			t.Setenv("HERDR_PANE_ID", "wA:p1")
@@ -93,7 +93,7 @@ func TestFollowTabLabelUsesParsedIssue(t *testing.T) {
 				filepath.Join(dir, "-chore.md"), []byte("# Chore\nType: chore\nDo it.\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			calls := followTabFakes(t, 0)
+			calls := followTabFakes(t, 0, "ATM")
 			writeWorkspace(t, "ATM")
 			t.Setenv("HERDR_ENV", "1")
 			t.Setenv("HERDR_BIN_PATH", "")
@@ -106,6 +106,75 @@ func TestFollowTabLabelUsesParsedIssue(t *testing.T) {
 				t.Fatalf("tab create = %q, want label atm-%s", create, tc.issue)
 			}
 		})
+	}
+}
+
+// TestFollowTabCreatesMissingWorkspace: herdr lists no workspace with the configured label, so --follow
+// creates one with that label and the run's tab is its root pane's tab, labelled atm-<issue>.
+func TestFollowTabCreatesMissingWorkspace(t *testing.T) {
+	dir := followTabRepo(t, followTabATM("exit 1", "\"\""))
+	calls := followTabFakes(t, 0, "")
+	writeWorkspace(t, "ATM")
+	t.Setenv("HERDR_ENV", "1")
+	t.Setenv("HERDR_BIN_PATH", "")
+	stop := captureStderr(t)
+	out, err := atm(t, "run", "--follow", "chore.md")
+	stderr := stop()
+	if run.ExitCode(err) != 1 || lastEvent(t, out) != "run_failed" {
+		t.Fatalf("follow: %v\n%s\nstderr:\n%s", err, out, stderr)
+	}
+	if stderr != "" {
+		t.Fatalf("creating the workspace warned: %q", stderr)
+	}
+	all := followTabCalls(t, calls)
+	create := callWith(all, "workspace|create|")
+	if !strings.Contains(create, "--label|ATM|") || !strings.Contains(create, "--cwd|"+dir+"|") ||
+		!strings.Contains(create, "--no-focus|") {
+		t.Fatalf("workspace create: %q", create)
+	}
+	if label := callWith(all, "tab|label|"); label != "tab|label|wN:t1|atm-chore.md|" {
+		t.Fatalf("the created workspace's root tab is not the run's tab: %q", all)
+	}
+	if pane := callWith(all, "pane|run|"); !strings.Contains(pane, "wN:p1|atm attach chore-1") {
+		t.Fatalf("the screen did not run in the created workspace's root pane: %q", all)
+	}
+	if close := callWith(all, "tab|close|"); close != "tab|close|wN:t1|" {
+		t.Fatalf("tab close: %q", all)
+	}
+	if strings.Contains(strings.Join(all, "\n"), "tab|create|") {
+		t.Fatalf("a tab was created instead of the root tab relabelled: %q", all)
+	}
+}
+
+// TestFollowTabWorkspaceCreateRefusedLeavesTheRun: herdr refuses workspace creation, so the run starts with the
+// warning naming herdr's error and no tab, as with any other herdr failure.
+func TestFollowTabWorkspaceCreateRefusedLeavesTheRun(t *testing.T) {
+	base := runFollowTab(t, followTabATM("exit 1", "\"\""), "", "1", 0, "chore.md")
+	if base.code != 1 || lastEvent(t, base.out) != "run_failed" {
+		t.Fatalf("baseline exit %d, last %q; stderr:\n%s", base.code, lastEvent(t, base.out), base.err)
+	}
+	followTabRepo(t, followTabATM("exit 1", "\"\""))
+	calls := followTabFakes(t, 0, "")
+	writeWorkspace(t, "ATM")
+	t.Setenv("HERDR_ENV", "1")
+	t.Setenv("HERDR_BIN_PATH", "")
+	t.Setenv("REFUSE_CREATE", "1")
+	stop := captureStderr(t)
+	out, err := atm(t, "run", "--follow", "chore.md")
+	stderr := stop()
+	if run.ExitCode(err) != base.code || !slices.Equal(eventsOf(t, out), eventsOf(t, base.out)) {
+		t.Fatalf("follow changed: %v\n%s\nwant events %v\nstderr:\n%s\nbaseline stderr:\n%s",
+			err, out, eventsOf(t, base.out), stderr, base.err)
+	}
+	if warn := herdrStderr(stderr, base.err); warn == "" || !strings.Contains(warn, "refused") {
+		t.Fatalf("want the warning to name herdr's error, got %q (baseline %q)", stderr, base.err)
+	}
+	got := followTabCalls(t, calls)
+	if callWith(got, "workspace|create|") == "" {
+		t.Fatalf("workspace create was not tried: %q", got)
+	}
+	if strings.Contains(strings.Join(got, "\n"), "tab|close|") {
+		t.Fatalf("a refused create closed a tab: %q", got)
 	}
 }
 
@@ -138,7 +207,6 @@ func TestFollowTabHerdrFailureLeavesTheRun(t *testing.T) {
 		code            int
 	}{
 		{"herdr exits 1", "ATM", 1},
-		{"no workspace has the label", "Other", 0},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			got := runFollowTab(t, atm, c.workspace, "1", c.code, "chore.md")
@@ -198,7 +266,7 @@ func followTabATM(lint, delivery string) string {
 func runFollowTab(t *testing.T, atm, workspace, herdrEnv string, herdrCode int, issue string) followTabRun {
 	t.Helper()
 	dir := followTabRepo(t, atm)
-	calls := followTabFakes(t, herdrCode)
+	calls := followTabFakes(t, herdrCode, "ATM")
 	if workspace != "" {
 		writeWorkspace(t, workspace)
 	}
@@ -244,7 +312,7 @@ func writeWorkspace(t *testing.T, label string) {
 	}
 }
 
-func followTabFakes(t *testing.T, code int) string {
+func followTabFakes(t *testing.T, code int, listed string) string {
 	t.Helper()
 	bin := t.TempDir()
 	calls := filepath.Join(t.TempDir(), "calls")
@@ -253,11 +321,15 @@ func followTabFakes(t *testing.T, code int) string {
 	script := fmt.Sprintf("#!/bin/sh\nprintf '%%s|' \"$@\" >> %s\necho >> %s\n"+
 		"if [ \"$1\" = workspace ] && [ \"$2\" = list ]; then\n"+
 		"  echo '{\"id\":\"cli:workspace:list\",\"result\":{\"type\":\"workspace_list\",\"workspaces\":"+
-		"[{\"workspace_id\":\"wM\",\"label\":\"ATM\",\"number\":1}]}}'\nfi\n"+
+		"[{\"workspace_id\":\"wM\",\"label\":\"%s\",\"number\":1}]}}'\nfi\n"+
 		"if [ \"$1\" = tab ] && [ \"$2\" = create ]; then\n"+
 		"  echo '{\"id\":\"cli:tab:create\",\"result\":{\"type\":\"tab_created\",\"tab\":{\"tab_id\":\"wM:t9\"},"+
-		"\"root_pane\":{\"pane_id\":\"wM:p9\"}}}'\nfi\nexit %d\n",
-		strconvQuote(calls), strconvQuote(calls), code)
+		"\"root_pane\":{\"pane_id\":\"wM:p9\"}}}'\nfi\n"+
+		"if [ \"$1\" = workspace ] && [ \"$2\" = create ]; then\n"+
+		"  if [ -n \"$REFUSE_CREATE\" ]; then echo 'workspace create: refused' >&2; exit 7; fi\n"+
+		"  echo '{\"id\":\"cli:workspace:create\",\"result\":{\"type\":\"workspace_created\","+
+		"\"tab\":{\"tab_id\":\"wN:t1\"},\"root_pane\":{\"pane_id\":\"wN:p1\"}}}'\nfi\nexit %d\n",
+		strconvQuote(calls), strconvQuote(calls), listed, code)
 	writeFake(t, filepath.Join(bin, "herdr"), script)
 	writeFake(t, filepath.Join(bin, "gh"), "#!/bin/sh\nprintf '%s\\n' '"+gh+"'\n")
 	writeFake(t, filepath.Join(bin, "no-mistakes"), "#!/bin/sh\nprintf '%s\\n' '"+status+"'\n")

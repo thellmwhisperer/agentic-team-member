@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"encoding/json"
@@ -167,18 +168,27 @@ func (h *herdr) call(cmd string, args ...string) {
 	_, _ = herdrRun(args...)
 }
 
-// herdrRun runs herdr with args, a second at most, and returns its stdout.
+// herdrRun runs herdr with args, a second at most, and returns its stdout; herdr's own stderr names its error.
 func herdrRun(args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	return exec.CommandContext(ctx, cmp.Or(os.Getenv("HERDR_BIN_PATH"), "herdr"), args...).Output()
+	b, err := exec.CommandContext(ctx, cmp.Or(os.Getenv("HERDR_BIN_PATH"), "herdr"), args...).Output()
+	var exited *exec.ExitError
+	if errors.As(err, &exited) && len(exited.Stderr) > 0 {
+		err = fmt.Errorf("%w: %s", err, bytes.TrimSpace(exited.Stderr))
+	}
+	return b, err
 }
 
 // OpenHerdrTab creates a tab labelled tabLabel in the workspace named workspace, cwd the repository, and returns
 // the tab id tab create returned and its root pane. herdr's --workspace wants that id, not the label: workspace
-// list matches label.
+// list matches label. When no open workspace has the label, herdr creates one and its root pane's tab, relabelled
+// tabLabel, is the run's tab instead.
 func OpenHerdrTab(workspace, tabLabel, cwd string) (string, string, error) {
 	id, err := herdrWorkspaceID(workspace)
+	if errors.Is(err, errNoWorkspace) {
+		return createdWorkspaceTab(workspace, tabLabel, cwd)
+	}
 	if err != nil {
 		return "", "", err
 	}
@@ -193,6 +203,26 @@ func OpenHerdrTab(workspace, tabLabel, cwd string) (string, string, error) {
 	return tab, pane, err
 }
 
+// createdWorkspaceTab creates the workspace named workspace, none being open, cwd the repository, and returns
+// its root pane's tab, relabelled tabLabel, and that pane: the run's tab.
+func createdWorkspaceTab(workspace, tabLabel, cwd string) (string, string, error) {
+	b, err := herdrRun("workspace", "create", "--label", workspace, "--cwd", cwd, "--no-focus")
+	if err != nil {
+		return "", "", err
+	}
+	tab, pane, err := createdTab(b)
+	if err != nil {
+		return "", "", err
+	}
+	if pane == "" {
+		return "", "", fmt.Errorf("workspace create: no root pane")
+	}
+	if _, err := herdrRun("tab", "label", tab, tabLabel); err != nil {
+		return "", "", err
+	}
+	return tab, pane, nil
+}
+
 // RunHerdrPane runs command in herdr pane pane.
 func RunHerdrPane(pane, command string) error {
 	_, err := herdrRun("pane", "run", pane, command)
@@ -204,6 +234,9 @@ func CloseHerdrTab(id string) error {
 	_, err := herdrRun("tab", "close", id)
 	return err
 }
+
+// errNoWorkspace says no open workspace has the label looked up.
+var errNoWorkspace = errors.New("no workspace")
 
 func herdrWorkspaceID(label string) (string, error) {
 	b, err := herdrRun("workspace", "list")
@@ -226,7 +259,7 @@ func herdrWorkspaceID(label string) (string, error) {
 			return w.ID, nil
 		}
 	}
-	return "", fmt.Errorf("no workspace %q", label)
+	return "", errNoWorkspace
 }
 
 func createdTab(b []byte) (tab, pane string, err error) {
