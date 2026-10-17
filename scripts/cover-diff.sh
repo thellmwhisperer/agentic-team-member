@@ -67,6 +67,7 @@ out=$(git diff -U0 "$base" -- '*.go' ':(exclude)*_test.go' ':(exclude)**/testdat
 				if ($i ~ /^\+[0-9][0-9]*(,.*)?$/) {
 					new = substr($i, 2)
 					sub(/,.*/, "", new)
+					new = new + 0
 					break
 				}
 			next
