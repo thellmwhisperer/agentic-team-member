@@ -4,6 +4,7 @@ package run
 
 import (
 	"bytes"
+	"cmp"
 	"fmt"
 	"io"
 	"os"
@@ -76,7 +77,7 @@ func TestRunKillsTheAgentGroup(t *testing.T) {
 func TestRunKeepsTheCauseOfTheAgentsDeath(t *testing.T) {
 	defer func(d time.Duration) { agentSilence = d }(agentSilence)
 	agentSilence = time.Second
-	for _, c := range []struct{ mode, exit, why, tail string }{
+	for _, c := range []struct{ mode, exit, why, tail, atm string }{
 		{mode: "silent", exit: "silent for 1.0 s", why: "the agent said nothing for 1.0 s; ATM stopped it",
 			tail: "fake stderr"},
 		{mode: "fail", exit: "exit code 3", why: "exit code 3", tail: "boom"},
@@ -87,9 +88,9 @@ func TestRunKeepsTheCauseOfTheAgentsDeath(t *testing.T) {
 	}
 }
 
-func assertAgentDeath(t *testing.T, c struct{ mode, exit, why, tail string }) {
+func assertAgentDeath(t *testing.T, c struct{ mode, exit, why, tail, atm string }) {
 	t.Helper()
-	root := repo(t, "https://example.com/owner/repo.git", atmYAML)
+	root := repo(t, "https://example.com/owner/repo.git", cmp.Or(c.atm, atmYAML))
 	pidFile := filepath.Join(t.TempDir(), "pid")
 	t.Setenv("FAKE_AGENT", c.mode)
 	t.Setenv("FAKE_AGENT_PID", pidFile)
@@ -169,4 +170,27 @@ func TestRunCountsBlankAgentLinesAsActivity(t *testing.T) {
 	if !strings.Contains(tail, "\n\n") || strings.Contains(tail, "silent for") {
 		t.Fatalf("blank lines are missing from the tail or were treated as silence: %q", tail)
 	}
+}
+
+// The silence limit of every agent call is the larger of agentSilence and .atm.yaml's check_timeout, so an
+// agent running one of the repository's own checks commands is not stopped while it is inside that limit.
+func TestRunSilenceTakesTheLargerOfItsDefaultAndCheckTimeout(t *testing.T) {
+	defer func(d time.Duration) { agentSilence = d }(agentSilence)
+	agentSilence = time.Second
+	t.Run("an agent quiet for less than check_timeout runs on", func(t *testing.T) {
+		repo(t, "https://example.com/owner/repo.git", atmYAML+"check_timeout: 8s\n")
+		t.Setenv("FAKE_AGENT", "quiet-then-work")
+		var out bytes.Buffer
+		if err := Run("t", []string{issueFile(t, issue)}, &out, io.Discard); err != nil {
+			t.Fatalf("quiet for longer than the silence default but less than check_timeout: %v", err)
+		}
+		if end, _, _ := agentStep(t, &out); end["state"] != "passed" {
+			t.Fatalf("agent step: %v", end)
+		}
+	})
+	t.Run("an agent silent past check_timeout is stopped", func(t *testing.T) {
+		assertAgentDeath(t, struct{ mode, exit, why, tail, atm string }{mode: "silent",
+			exit: "silent for 3.0 s", why: "the agent said nothing for 3.0 s; ATM stopped it",
+			tail: "fake stderr", atm: atmYAML + "check_timeout: 3s\n"})
+	})
 }

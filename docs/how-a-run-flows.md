@@ -508,7 +508,7 @@ reports that outcome as `closed`.
 | Reading a GitHub issue | 60 s |
 | Each checks command (`install`, `test`, `typecheck`, `lint`, a proof) | See [`check_timeout`](configuration.md#atmyaml) |
 | Each agent call, the slop detector's included | See [`agent_timeout`](configuration.md) |
-| An agent that writes nothing on stdout or stderr | 10 min |
+| An agent that writes nothing on stdout or stderr | The larger of 10 min and [`check_timeout`](configuration.md#atmyaml) |
 | The delivery command | none |
 
 Past its limit, or when the background process executing the run gets
