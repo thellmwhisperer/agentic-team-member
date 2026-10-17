@@ -152,10 +152,10 @@ func codexResume(argv []string, session string) []string {
 	return append(out, "-c", `sandbox_mode="workspace-write"`, session, argv[len(argv)-1])
 }
 
-// errSilent cancels an agent that said nothing for agentSilence.
+// errSilent identifies cancellation by the silence timer.
 var errSilent = errors.New("silent")
 
-// agentSilence is how long the agent may write nothing, on stdout or stderr, before ATM stops it.
+// agentSilence is the default silence limit; Run may raise it for the repository's checks.
 var agentSilence = 10 * time.Minute
 
 // run runs the agent on brief in clone with skill and returns its report, which check accepts. A report check
