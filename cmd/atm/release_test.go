@@ -205,7 +205,7 @@ func TestReleaseArchivesAreNamedAfterAtmAndTheTag(t *testing.T) {
 	}
 }
 
-func TestReleaseWorkflowPublishesPrereleaseOnlyAfterAssetsComplete(t *testing.T) {
+func TestReleaseWorkflowPublishesFullReleaseOnlyAfterAssetsComplete(t *testing.T) {
 	job := workflowModel(t).Jobs["finalize"]
 	if !reflect.DeepEqual(needsList(job.Needs), []string{"release-please", "build-and-upload", "checksums"}) {
 		t.Fatalf("finalize needs = %v", job.Needs)
@@ -216,8 +216,8 @@ func TestReleaseWorkflowPublishesPrereleaseOnlyAfterAssetsComplete(t *testing.T)
 	if strings.Join(strings.Fields(job.If), " ") != wantCondition {
 		t.Fatalf("finalize condition = %q, want %q", job.If, wantCondition)
 	}
-	if !hasRunStep(job, "gh release edit \"$TAG\" --draft=false --prerelease=true") {
-		t.Fatal("finalize must run the prerelease publication command")
+	if !hasRunStep(job, "gh release edit \"$TAG\" --draft=false --prerelease=false") {
+		t.Fatal("finalize must publish the release as a full release, not a prerelease")
 	}
 	if hasRunStep(job, "--latest=true") {
 		t.Fatal("finalize must not mark the release latest")
