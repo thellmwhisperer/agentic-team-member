@@ -137,6 +137,13 @@ func (a agent) repairWork(clone, head string, c config.Config, round int, findin
 	if _, err := a.run(clone, "repair-"+strconv.Itoa(round), "ponytail", repairBrief(findings), testFile); err != nil {
 		return err
 	}
+	now, err := git(clone, "rev-parse", "HEAD")
+	if err != nil {
+		return err
+	}
+	if now != head {
+		return fmt.Errorf("the repair agent moved HEAD from %s to %s; it may only edit files", head, now)
+	}
 	changed, err := git(clone, "diff", "--name-status", "--no-renames", "-z", head)
 	for f := strings.Split(changed, "\x00"); err == nil && len(f) > 1; f = f[2:] {
 		if f[0] != "A" && first([]string{f[1]}, c.TestPatterns, true) != "" {
@@ -157,6 +164,8 @@ func repairBrief(findings []repairFinding) string {
 	b.WriteString("# Contract repair\n\n")
 	b.WriteString("Make the minimal change that satisfies each original criterion. ")
 	b.WriteString("Do not edit, delete, or weaken original tests or existing tests. ")
+	b.WriteString("Never run git merge, git pull, git rebase, git cherry-pick, git reset or git commit; " +
+		"leave your work uncommitted in the tree. ")
 	b.WriteString("Adding a test does not replace re-running the protected ones.\n\n")
 	b.WriteString("Use the `ponytail` skill.\n\n## VIOLATIONS\n")
 	for _, f := range findings {
