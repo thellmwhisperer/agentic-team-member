@@ -45,9 +45,19 @@ not by itself invalidate a fulfilled parent. Keep it as an `optional` draft;
 do not modify product to implement it. An unrelated change already in the diff
 is not excused by calling it optional: the scope review still blocks delivery.
 
-Use `ready` only for a prepared issue with a single contract in the diff. That
-readiness alone does not approve mandatory work still pending or override any
-block from the original contract review.
+A parent whose Kind is `fix-batch` declares, as its single contract, a batch of
+small independent fixes in one area: a numbered list of fixes in its Goal, one
+Acceptance line per fix in the same order, and the area's files in its Scope
+surface. Judge each listed fix against its own acceptance line. Do not report
+`split-required` because the batch holds several fixes: that is what it
+declares. Report `split-required` only when the diff changes files outside the
+declared area, fixes something the list does not name, or leaves a listed fix
+without its proof. Readiness still requires the four fields.
+
+Use `ready` only for a prepared issue with a single contract in the diff, a
+declared fix batch counting as one. That readiness alone does not approve
+mandatory work still pending or override any block from the original contract
+review.
 
 ## Local child contracts
 
