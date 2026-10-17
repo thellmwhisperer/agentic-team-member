@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -29,7 +30,9 @@ func TestCoverDiffNamesTheUncoveredChangedLines(t *testing.T) {
 	check := func() string {
 		cmd := exec.Command(script)
 		cmd.Dir = dir
-		cmd.Env = append(os.Environ(), "GOCOVERDIR="+covdir, "ATM_COVER_BASE="+base)
+		cmd.Env = append(slices.DeleteFunc(os.Environ(), func(s string) bool {
+			return strings.HasPrefix(s, "GOCOVERDIR=") || strings.HasPrefix(s, "ATM_COVER_BASE=")
+		}), "GOCOVERDIR="+covdir, "ATM_COVER_BASE="+base)
 		var out bytes.Buffer
 		cmd.Stdout, cmd.Stderr = &out, &out
 		err := cmd.Run()
@@ -121,7 +124,10 @@ func coveredRun(t *testing.T, dir, covdir string) {
 		t.Fatalf("go build -cover: %v\n%s", err, out)
 	}
 	run := exec.Command(bin, "a")
-	run.Dir, run.Env = dir, append(os.Environ(), "GOCOVERDIR="+covdir)
+	run.Dir = dir
+	run.Env = append(slices.DeleteFunc(os.Environ(), func(s string) bool {
+		return strings.HasPrefix(s, "GOCOVERDIR=")
+	}), "GOCOVERDIR="+covdir)
 	if out, err := run.CombinedOutput(); err != nil || string(out) != "a changed\n" {
 		t.Fatalf("bin a = %q, %v; want the a path end to end", out, err)
 	}
