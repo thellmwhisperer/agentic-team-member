@@ -399,7 +399,10 @@ commit after the base must carry the repository's git identity.
 
 Then the agent, with the bundled `ponytail-review` and `task-slicing` skills,
 reviews read only the literal issue and the committed diff from the original
-base to that HEAD. Both skills use the existing harness skill distribution;
+base to that HEAD. Each review call gets its own empty scratch directory
+under the run's directory, outside the clone, named in its brief and set as
+its `TMPDIR`; the files its checks write go there, never into the clone,
+which must not change. Both skills use the existing harness skill distribution;
 proof of loading `ponytail-review` remains required. Its final message
 must be a single JSON object reporting `approved` or `blocked`, with no
 surrounding text; approval requires no findings, and each block quotes the
