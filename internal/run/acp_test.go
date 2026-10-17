@@ -85,12 +85,18 @@ func TestACPScratchPermission(t *testing.T) {
 			`{"rawInput":{"command":"cp plan.md /runs/12-24/other/x"}}`, "ro"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			params := `{"sessionId":"s1","toolCall":` + c.toolCall + `,"options":[` +
-				`{"optionId":"ao","kind":"allow_once"},{"optionId":"ro","kind":"reject_once"}]}`
-			got, _ := json.Marshal(s.permit(json.RawMessage(params)))
-			if want := `{"outcome":{"optionId":"` + c.want + `","outcome":"selected"}}`; string(got) != want {
-				t.Fatalf("got %s, want %s", got, want)
-			}
+			permitAnswer(t, s, c.toolCall,
+				`{"optionId":"ao","kind":"allow_once"},{"optionId":"ro","kind":"reject_once"}`, c.want)
 		})
+	}
+}
+
+// permitAnswer asks one session/request_permission with the given options and checks the option permit selects.
+func permitAnswer(t *testing.T, s stream, toolCall, options, want string) {
+	t.Helper()
+	params := `{"sessionId":"s1","toolCall":` + toolCall + `,"options":[` + options + `]}`
+	got, _ := json.Marshal(s.permit(json.RawMessage(params)))
+	if selected := `{"outcome":{"optionId":"` + want + `","outcome":"selected"}}`; string(got) != selected {
+		t.Fatalf("got %s, want %s", got, selected)
 	}
 }
