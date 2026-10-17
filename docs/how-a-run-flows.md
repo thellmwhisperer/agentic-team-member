@@ -520,6 +520,7 @@ when a node's state or duration changes.
 | `reproofs` | The latest repeated unit proofs and spans, after a kept cut or the latest contract repair attempt; successful delivery uses the approved commit's proofs |
 | `commands` | Every configured command that ran, the clone's `install` included, with its result, last 60 lines, `started_at` and `duration_ms` |
 | `head_sha` | The delivered branch's final commit |
+| `serve` | The version of the `atm serve` process that executed the run, from `buildinfo.String()`, for example `vA (aaa1111) 2026-10-15` |
 
 For gate nodes, `completed` becomes `passed`, and a step awaiting a decision
 becomes `waiting`. `pending`, `skipped` and `failed` keep those results;
@@ -541,6 +542,10 @@ include an `agent` column: `<harness> <model>`, or `<harness> default` when
 the requested model is empty. `.atm/runs.jsonl` retains the requested
 `agent` object for finished runs and after the server restarts. Old history
 without attribution displays `-`; ATM does not infer it from current config.
+
+`atm runs` and `atm axi runs`, including `--json`, show the recorded `serve`
+value. `.atm/runs.jsonl` retains it after the background process exits.
+Runs recorded before this field existed display `-` in these listings.
 
 Gate nodes omit `started_at`, including skipped steps: the current
 `no-mistakes axi status` step table supplies no start times. ATM does not
