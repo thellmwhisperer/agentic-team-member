@@ -33,7 +33,8 @@ func TestRunContractReviewWritesItsChecksUnderItsScratch(t *testing.T) {
 		t.Fatalf("the scratch directory %s is inside the clone %s", scratch, clone)
 	}
 	log, err := os.ReadFile(filepath.Join(runDir, "contract-review.jsonl"))
-	if err != nil || !strings.Contains(string(log), scratch+"/plan.txt") {
+	// The log is JSON lines, so a Windows path's backslashes are escaped there.
+	if err != nil || !strings.Contains(string(log), strings.ReplaceAll(scratch+"/plan.txt", "\\", "\\\\")) {
 		t.Fatalf("want the reviewer's tool call writing under %s in its log, got %v", scratch, err)
 	}
 	for name, want := range map[string]string{"tickets.txt": "tickets", "tmp.txt": "tmp"} {
