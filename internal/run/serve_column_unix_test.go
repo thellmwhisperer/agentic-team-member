@@ -68,10 +68,14 @@ func assertServeReport(t *testing.T, top, label, want string) {
 func assertServeColumn(t *testing.T, bin, top, label, want string) {
 	t.Helper()
 	text := stampedAtm(t, bin, top, "runs")
+	runsJSON := stampedAtm(t, bin, top, "runs", "--json")
 	axi := stampedAtm(t, bin, top, "axi", "runs")
 	raw := stampedAtm(t, bin, top, "axi", "runs", "--json")
 	if !rowEnds(text, label, want) || !rowEnds(text, "old-1", "-") {
 		t.Fatalf("atm runs:\n%s", text)
+	}
+	if !strings.Contains(runsJSON, `"serve":"`+want+`"}`) || !strings.Contains(runsJSON, `"serve":"-"}`) {
+		t.Fatalf("atm runs --json:\n%s", runsJSON)
 	}
 	if !strings.Contains(axi, ",serve}:\n") || !rowEnds(axi, label, want) || !rowEnds(axi, "old-1", `"-"`) {
 		t.Fatalf("atm axi runs:\n%s", axi)
