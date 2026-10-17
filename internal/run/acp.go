@@ -37,7 +37,7 @@ func (s *stream) acp(line []byte) (evs []map[string]any) {
 	if of := u.SessionUpdate + " " + u.MessageID; !chunk || of != s.chunkOf {
 		evs, s.chunkOf = s.chunkEnd(), of
 	}
-	s.reach = cmp.Or(s.reach, outside(u.calls(), s.root, s.clone))
+	s.reach = cmp.Or(s.reach, outside(u.calls(), s.root, s.clone, s.scratch))
 	r := map[string]string{"completed": "passed", "failed": "failed"}[u.Status]
 	switch u.SessionUpdate {
 	case "agent_message_chunk":

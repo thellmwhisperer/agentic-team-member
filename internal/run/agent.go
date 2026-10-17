@@ -52,6 +52,7 @@ const tools = "Read,Edit,Write,Bash,Glob,Grep,Skill"
 type agent struct {
 	config.Agent
 	args, env []string
+	scratch   string // a read-only review's scratch directory, outside the clone: the one path its calls may reach
 	root, dir string
 	watcher   string        // the run's atm watch, which atm run --watcher names
 	follow    bool          // atm run --follow: the launching process watches the run itself
@@ -357,7 +358,8 @@ func (a agent) exec(
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir, cmd.Stdin, cmd.WaitDelay = clone, strings.NewReader(stdin), time.Second
 	cmd.Env = append(slices.DeleteFunc(os.Environ(), func(kv string) bool {
-		return strings.HasPrefix(kv, "CLAUDE_CODE_CHILD_SESSION=") // set, the agent's transcripts are off
+		return strings.HasPrefix(kv, "CLAUDE_CODE_CHILD_SESSION=") || // set, the agent's transcripts are off
+			a.scratch != "" && strings.HasPrefix(kv, "TMPDIR=") // the review's scratch is its TMPDIR
 	}), a.env...)
 	if a.Harness == "claude" { // else a background command outlives its turn, and the run its report
 		cmd.Env = append(cmd.Env, "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1")
@@ -366,7 +368,7 @@ func (a agent) exec(
 		return nil, "", "", err
 	}
 	s := &stream{skill: skill, live: relative(clone, liveIn(clone)), root: a.root, clone: clone,
-		heard: func() { quiet.Reset(silence) }}
+		scratch: a.scratch, heard: func() { quiet.Reset(silence) }}
 	if err := s.talk(cmd, f, a.Harness, stdin); err != nil {
 		return nil, "", "", err
 	}
@@ -465,6 +467,7 @@ type stream struct {
 	model        string   // first model named by this invocation's stream; never the requested model
 	loads        []string // the ids of the agent's calls that load its skill
 	root, clone  string
+	scratch      string // the read-only review's directory outside the clone its calls may write in
 	reach        string
 	used         bool
 	live         func(map[string]any)
@@ -637,7 +640,7 @@ func (s *stream) see(harness string, line []byte) {
 	if harness == "codex" && slices.Contains(s.loads, e.Item.ID) {
 		s.used = true // a codex read proves the skill once its output holds it, whatever the command's exit code
 	}
-	s.reach = cmp.Or(s.reach, outside(e.calls(harness), s.root, s.clone))
+	s.reach = cmp.Or(s.reach, outside(e.calls(harness), s.root, s.clone, s.scratch))
 	s.show(e.activity(harness))
 }
 
@@ -1135,10 +1138,15 @@ var (
 
 // outside is the first of calls that reaches outside clone, as its tool and its first 200 characters: one that
 // names a path under root not under clone, or a shell command that runs curl or wget or names a URL off this
-// machine. A path outside root, the module cache's, passes; root "/" is every absolute path.
-func outside(calls []use, root, clone string) string {
+// machine. A path outside root, the module cache's, passes; root "/" is every absolute path. scratch, when
+// given, is the one directory outside clone those calls may name: a read-only review's.
+func outside(calls []use, root, clone string, scratch ...string) string {
 	if len(calls) == 0 {
 		return ""
+	}
+	allow := ""
+	if len(scratch) > 0 {
+		allow = filepath.ToSlash(scratch[0])
 	}
 	root, clone = filepath.ToSlash(root), filepath.ToSlash(clone)
 	pattern := regexp.QuoteMeta(root) + "(/[^" + sep + "]*)?"
@@ -1151,7 +1159,7 @@ func outside(calls []use, root, clone string) string {
 	}
 	paths := regexp.MustCompile(`"` + quoted + `[^"]*"` + `|'` + quoted + `[^']*'|` + pattern)
 	for _, c := range calls {
-		if reachesPath(c.args, root, clone, paths) || c.command != "" && fetchesAt(c.command, clone) {
+		if reachesPath(c.args, root, clone, allow, paths) || c.command != "" && fetchesAt(c.command, clone) {
 			r := []rune(c.args)
 			return c.tool + " " + string(r[:min(len(r), 200)])
 		}
@@ -1159,7 +1167,7 @@ func outside(calls []use, root, clone string) string {
 	return ""
 }
 
-func reachesPath(args, root, clone string, paths *regexp.Regexp) bool {
+func reachesPath(args, root, clone, scratch string, paths *regexp.Regexp) bool {
 	text := filepath.ToSlash(args)
 	for _, m := range paths.FindAllStringIndex(text, -1) {
 		if root == "" || m[0] > 0 && !strings.ContainsRune(" \t\r\n\"'`;|&()<>,=", rune(text[m[0]-1])) ||
@@ -1171,7 +1179,8 @@ func reachesPath(args, root, clone string, paths *regexp.Regexp) bool {
 			p = p[1 : len(p)-1]
 		}
 		p = path.Clean(p)
-		if p != clone && !strings.HasPrefix(p, clone+"/") {
+		if p != clone && !strings.HasPrefix(p, clone+"/") &&
+			(scratch == "" || p != scratch && !strings.HasPrefix(p, scratch+"/")) {
 			return true
 		}
 	}
