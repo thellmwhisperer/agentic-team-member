@@ -56,6 +56,7 @@ type agent struct {
 	watcher   string        // the run's atm watch, which atm run --watcher names
 	follow    bool          // atm run --follow: the launching process watches the run itself
 	timeout   time.Duration // .atm.yaml's agent_timeout, 0 for agentTimeout
+	silence   time.Duration // the larger of agentSilence and check_timeout; 0 for agentSilence
 }
 
 // flags adds the agent's flags to fs.
@@ -325,7 +326,7 @@ func clonePathRune(r rune) bool {
 // exec runs argv in clone, stdin on its stdin, in its own process group, and returns what its lines said, and
 // how it ended, as ended says; a nil stream when it never got to run. Every line it writes goes to the log at
 // path, in the run's directory, which outlives the clone, and its stderr to <name>.stderr.txt next to it as
-// well. The timeout, agentSilence without a line, SIGINT and SIGTERM kill the group.
+// well. The timeout, the silence limit without a line, SIGINT and SIGTERM kill the group.
 func (a agent) exec(
 	clone, skill, path string, argv []string, stdin string, appendLog bool,
 ) (*stream, string, string, error) {
@@ -350,7 +351,8 @@ func (a agent) exec(
 	defer cancel()
 	ctx, hush := context.WithCancelCause(ctx)
 	defer hush(nil)
-	quiet := time.AfterFunc(agentSilence, func() { hush(errSilent) })
+	silence := cmp.Or(a.silence, agentSilence)
+	quiet := time.AfterFunc(silence, func() { hush(errSilent) })
 	defer quiet.Stop()
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir, cmd.Stdin, cmd.WaitDelay = clone, strings.NewReader(stdin), time.Second
@@ -364,7 +366,7 @@ func (a agent) exec(
 		return nil, "", "", err
 	}
 	s := &stream{skill: skill, live: relative(clone, liveIn(clone)), root: a.root, clone: clone,
-		heard: func() { quiet.Reset(agentSilence) }}
+		heard: func() { quiet.Reset(silence) }}
 	if err := s.talk(cmd, f, a.Harness, stdin); err != nil {
 		return nil, "", "", err
 	}
@@ -374,16 +376,16 @@ func (a agent) exec(
 	if a.timeout != 0 {
 		limitText = a.timeout.String()
 	}
-	exit, cause := ended(ctx, cmd.ProcessState, limitText)
+	exit, cause := ended(ctx, cmd.ProcessState, limitText, silence)
 	return s.acpEnded(exit, cause, err)
 }
 
 // ended is how the agent run under ctx, bounded by limit, ended, its exit, "" when it never ran, and the cause
 // its step fails with, "" when it exited 0.
-func ended(ctx context.Context, p *os.ProcessState, limitText string) (exit, cause string) {
+func ended(ctx context.Context, p *os.ProcessState, limitText string, silence time.Duration) (exit, cause string) {
 	switch {
 	case errors.Is(context.Cause(ctx), errSilent):
-		return "silent for " + Human(agentSilence), "the agent said nothing for " + Human(agentSilence) +
+		return "silent for " + Human(silence), "the agent said nothing for " + Human(silence) +
 			"; ATM stopped it"
 	case errors.Is(ctx.Err(), context.DeadlineExceeded):
 		exit = "timed out after " + limitText
