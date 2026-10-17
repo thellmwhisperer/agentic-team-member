@@ -55,7 +55,11 @@ func (a agent) contractReview(clone, base, head, tombs string, i Issue, rec map[
 	if err != nil {
 		return err
 	}
-	text := reviewBrief(intent(i.Text, tombs), base, head, diff)
+	scratch, err := a.reviewScratch("contract-review")
+	if err != nil {
+		return err
+	}
+	text := reviewBrief(intent(i.Text, tombs), base, head, diff, scratch)
 	dir, err := placeSkill(clone, a.Harness, "task-slicing") // before readonly's snapshot, like ponytail-review
 	if err != nil {
 		return err
@@ -83,6 +87,24 @@ func (a agent) contractReview(clone, base, head, tombs string, i Issue, rec map[
 		}
 		return err
 	})
+}
+
+// reviewScratch empties this review's scratch directory, under the run's directory and so outside the clone,
+// and points the reviewer's TMPDIR and the clone boundary check at it: a fresh one per review call, repair
+// rounds included.
+func (a *agent) reviewScratch(name string) (string, error) {
+	dir := filepath.Join(a.dir, name+"-scratch")
+	if err := os.RemoveAll(dir); err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	a.env = append(slices.DeleteFunc(slices.Clone(a.env), func(kv string) bool {
+		return strings.HasPrefix(kv, "TMPDIR=")
+	}), "TMPDIR="+dir)
+	a.scratch = dir
+	return dir, nil
 }
 
 // readonly runs review, an agent's with the ponytail-review skill, in clone, and adds why it was not read only:
@@ -123,7 +145,11 @@ func (a agent) scopeReview(clone, head string, n int, i Issue, f followUp, s *sc
 	if len(f.Paths) == 0 {
 		return fmt.Errorf("follow-up %s has no proposed paths for unit %d", f.RedTest, n)
 	}
-	text := scopeBrief(i.Text, n, f, s.Paths)
+	scratch, err := a.reviewScratch("scope-review-unit" + strconv.Itoa(n))
+	if err != nil {
+		return err
+	}
+	text := scopeBrief(i.Text, n, f, s.Paths, scratch)
 	return a.readonly(clone, head, "scope reviewer", func() error {
 		ev, err := a.run(clone, "scope-review-unit"+strconv.Itoa(n), "ponytail-review", text,
 			func(r map[string]any) error { return scopeApproved(r, s.Paths, i.Text) })
@@ -181,7 +207,8 @@ func scopeFindings(fs []struct{ Path, Clause, Reason string }, paths []string, i
 }
 
 // scopeBrief is the scope reviewer's brief: issue, verbatim, and the paths follow-up f's unit n would change.
-func scopeBrief(issue string, n int, f followUp, paths []string) string {
+// scratch is the review's own directory outside the clone, where its checks' files go.
+func scopeBrief(issue string, n int, f followUp, paths []string, scratch string) string {
 	list, _ := json.Marshal(paths)
 	return "Read `AGENTS.md` at the clone root if it exists. Where it and this brief disagree, this brief wins.\n\n" +
 		"# Scope review\n\n## GOAL\nATM is about to start unit " + strconv.Itoa(n) + " of this issue on a follow-up. " +
@@ -192,12 +219,18 @@ func scopeBrief(issue string, n int, f followUp, paths []string) string {
 		"this brief wins over its scope: judge the paths against the issue, not code.\n" +
 		"- Read only: edit, create, delete, stage, commit or check out nothing. ATM blocks the unit if the clone " +
 		"or HEAD changes.\n" +
+		"- Write any file a check needs (copies, outputs, temp files) only under `" + scratch +
+		"`; never inside the clone.\n" +
+		"- Inspect with the shell's read commands (cat, grep, git show, go test) or a script file written under `" +
+		scratch + "`; never inline interpreters (heredocs, python -c, node -e): ATM treats them as reaching outside " +
+		"the clone.\n" +
 		"- Block a path outside the issue's declared scope or non-goals, or one it reserves to another owner. The " +
 		"criterion the follow-up quotes does not widen them, however needed the path is.\n" +
 		"- Block a path the issue's scope does not clearly allow: unknown scope fails closed.\n" +
 		"- Each finding names one of the paths, quotes the issue's clause verbatim and says why.\n\n" +
-		"## SCOPE\n- Read, search and run only inside this clone: never the repository around it, `.atm/runs/` or " +
-		"another clone.\n- No network.\n\n## FORBIDDEN\n- `git commit`, `git push`, `git rebase`, any `gh` command.\n\n" +
+		"## SCOPE\n- Read inside this clone; write only under `" + scratch + "`: never the repository around it, " +
+		"`.atm/runs/` of other runs or another clone.\n- No network.\n\n## FORBIDDEN\n- `git commit`, " +
+		"`git push`, `git rebase`, any `gh` command.\n\n" +
 		"## REPORT\nYour final message must be ONLY this JSON object, nothing else:\n" +
 		`{"disposition": "<approved or blocked>", "paths": ` + string(list) + `, "findings": [{"path": "<one of ` +
 		`the paths>", "clause": "<the issue's clause, verbatim>", "reason": "<why>"}], "summary": "<one paragraph>"}` +
@@ -247,7 +280,8 @@ func approved(r map[string]any, base, head string) error {
 }
 
 // reviewBrief is the contract reviewer's brief: issue, the diff from base commit base to HEAD head.
-func reviewBrief(issue, base, head, diff string) string {
+// scratch is the review's own directory outside the clone, where its checks' files go.
+func reviewBrief(issue, base, head, diff, scratch string) string {
 	return "Read `AGENTS.md` at the clone root if it exists. Where it and this brief disagree, this brief wins.\n\n" +
 		"# Contract review\n\n## GOAL\nThe commit below is about to be delivered for this issue. Decide whether it " +
 		"does what the issue asks, and nothing it does not. Review only: change nothing.\n\n## ISSUE\n" + issue +
@@ -265,11 +299,17 @@ func reviewBrief(issue, base, head, diff string) string {
 		"in the run directory; do not write drafts to the product clone or publish or execute children.\n" +
 		"- Read only: edit, create, delete, stage, commit or check out nothing. ATM blocks the delivery if the clone " +
 		"or HEAD changes.\n" +
+		"- Write any file a check needs (copies, outputs, temp files) only under `" + scratch +
+		"`; never inside the clone.\n" +
+		"- Inspect with the shell's read commands (cat, grep, git show, go test) or a script file written under `" +
+		scratch + "`; never inline interpreters (heredocs, python -c, node -e): ATM treats them as reaching outside " +
+		"the clone.\n" +
 		"- Block when the diff breaks a criterion or invariant the issue makes mandatory, or changes what is outside " +
 		"the issue's scope.\n" +
 		"- Each finding quotes the issue's criterion or invariant verbatim and points at its evidence in the diff.\n\n" +
-		"## SCOPE\n- Read, search and run only inside this clone: never the repository around it, `.atm/runs/` or " +
-		"another clone.\n- No network.\n\n## FORBIDDEN\n- `git commit`, `git push`, `git rebase`, any `gh` command.\n\n" +
+		"## SCOPE\n- Read inside this clone; write only under `" + scratch + "`: never the repository around it, " +
+		"`.atm/runs/` of other runs or another clone.\n- No network.\n\n## FORBIDDEN\n- `git commit`, " +
+		"`git push`, `git rebase`, any `gh` command.\n\n" +
 		"## DIFF\n```diff\n" + diff + "\n```\n\n## REPORT\nYour final message must be ONLY this JSON object, " +
 		"nothing else:\n" + `{"disposition": "<approved or blocked>", "base": "` + base + `", "head": "` + head +
 		`", "findings": [{"criterion": "<the issue's criterion or invariant, verbatim>", "evidence": "<file:line ` +

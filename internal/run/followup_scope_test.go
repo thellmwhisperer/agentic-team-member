@@ -46,7 +46,7 @@ func scopeRun(t *testing.T, issue, red, followUp string, env ...string) (root, r
 		t.Setenv(env[0], env[1])
 	}
 	err = Run("t", []string{issueFile(t, issue)}, out, io.Discard)
-	return root, filepath.Join(root, ".atm", "runs", "t"), call, out, err
+	return root, filepath.Join(gitT(t, root, "rev-parse", "--show-toplevel"), ".atm", "runs", "t"), call, out, err
 }
 
 // noSecondWorker checks the run failed naming why and no worker started after unit 1.

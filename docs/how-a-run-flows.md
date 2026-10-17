@@ -186,8 +186,11 @@ path. It checks all arguments for other tools. A call fails the step if it
 names an absolute path
 under the repository root but outside the clone, or if its shell command runs
 `curl` or `wget` or contains an HTTP(S) URL whose host is not `localhost`,
-`127.0.0.1` or `::1`. One narrow exception applies to a leading plain `cat`
-that writes a quoted heredoc of valid Go test source to a literal clone-relative
+`127.0.0.1` or `::1`. A read-only review call may also name its scratch
+directory or a path under it. Naming any other absolute path under the
+repository root but outside the clone still fails the call. One narrow
+exception applies to a leading plain `cat` that writes a quoted heredoc of
+valid Go test source to a literal clone-relative
 `_test.go` file, followed only by a literal `go test` invocation. The heredoc
 must contain a recognized test function using the standard `testing.T` type.
 The exception covers URL text in that fixture only; URLs or fetch commands
@@ -399,7 +402,10 @@ commit after the base must carry the repository's git identity.
 
 Then the agent, with the bundled `ponytail-review` and `task-slicing` skills,
 reviews read only the literal issue and the committed diff from the original
-base to that HEAD. Both skills use the existing harness skill distribution;
+base to that HEAD. Each contract or scope review call gets its own empty
+scratch directory under the run's directory, outside the clone, named in its
+brief and set as its `TMPDIR`; the files its checks write go there, never
+into the clone, which must not change. Both skills use the existing harness skill distribution;
 proof of loading `ponytail-review` remains required. Its final message
 must be a single JSON object reporting `approved` or `blocked`, with no
 surrounding text; approval requires no findings, and each block quotes the

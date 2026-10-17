@@ -85,6 +85,8 @@ and raw-input path value is inside the clone and no command reaches outside.
 Path values are taken whole; relative values resolve against the clone.
 Commands use the [post-step reach checker](how-a-run-flows.md#agent), with
 all absolute paths outside the clone rejected for permission requests.
+A read-only review's permission requests also allow its scratch directory,
+the same single outside-the-clone allowance the post-step checker makes.
 Otherwise ATM selects the first `reject_once`, never an `*_always` option.
 If the required option is absent, ATM returns `cancelled`. Each answer is a
 line in the agent's log. Tool calls remain subject to the post-step check,
@@ -302,7 +304,7 @@ ignores.
 
 | Path | Holds | Kept |
 |------|-------|------|
-| `.atm/runs/<label>/` | `report.json`, the briefs, the agent logs, `follow-ups.json`, `delivery-output.txt`, and `resume/` when the run is resumable | Always |
+| `.atm/runs/<label>/` | `report.json`, the briefs, the agent logs, each review's scratch directory, `follow-ups.json`, `delivery-output.txt`, and `resume/` when the run is resumable | Always |
 | `.atm/clones/atm-run-<timestamp>/` | The run's isolated clone | Removed after the run when no longer needed and cleanup can verify its identity |
 | `.atm/runs.jsonl` | The last state of each retained run, so `atm runs` survives the background process | Every run going and the newest 200 that ended |
 | `.atm/atm.sock`, `.atm/atm.lock`, `.atm/serve.log` | The background process | While it runs; the log stays |

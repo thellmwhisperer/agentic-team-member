@@ -37,7 +37,7 @@ func (s *stream) acp(line []byte) (evs []map[string]any) {
 	if of := u.SessionUpdate + " " + u.MessageID; !chunk || of != s.chunkOf {
 		evs, s.chunkOf = s.chunkEnd(), of
 	}
-	s.reach = cmp.Or(s.reach, outside(u.calls(), s.root, s.clone))
+	s.reach = cmp.Or(s.reach, outside(u.calls(), s.root, s.clone, s.scratch))
 	r := map[string]string{"completed": "passed", "failed": "failed"}[u.Status]
 	switch u.SessionUpdate {
 	case "agent_message_chunk":
@@ -186,14 +186,14 @@ func jsonLine(m map[string]any) []byte {
 }
 
 // permit answers a permission request (rule 7): its first allow_once option when the tool call is inside the
-// clone, else its first reject_once, never an always one.
+// clone or its review's scratch, else its first reject_once, never an always one.
 func (s *stream) permit(params json.RawMessage) map[string]any {
 	var p struct {
 		ToolCall acpUpdate
 		Options  []struct{ OptionID, Kind string }
 	}
 	_ = json.Unmarshal(params, &p)
-	kind := map[bool]string{true: "allow_once", false: "reject_once"}[p.ToolCall.inside(s.clone)]
+	kind := map[bool]string{true: "allow_once", false: "reject_once"}[p.ToolCall.inside(s.clone, s.scratch)]
 	for _, o := range p.Options {
 		if o.Kind == kind {
 			return map[string]any{"outcome": map[string]any{"outcome": "selected", "optionId": o.OptionID}}
@@ -202,12 +202,17 @@ func (s *stream) permit(params json.RawMessage) map[string]any {
 	return map[string]any{"outcome": map[string]any{"outcome": "cancelled"}}
 }
 
-// inside says whether every path u names, each whole, a relative one the clone's, is inside clone, and none of
-// its commands reaches outside it, as the check after each step reads them, with every absolute path its root.
-func (u acpUpdate) inside(clone string) bool {
+// inside says whether every path u names, each whole, a relative one the clone's, is inside clone or under
+// scratch, and none of its commands reaches outside either, as the check after each step reads them, with
+// every absolute path its root.
+func (u acpUpdate) inside(clone, scratch string) bool {
 	for _, p := range u.paths() {
 		if !filepath.IsAbs(p) {
 			p = filepath.Join(clone, p)
+		}
+		p = filepath.Clean(p)
+		if scratch != "" && (p == scratch || strings.HasPrefix(p, scratch+string(filepath.Separator))) {
+			continue
 		}
 		rel, err := filepath.Rel(clone, p)
 		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
@@ -218,7 +223,7 @@ func (u acpUpdate) inside(clone string) bool {
 	for _, c := range u.commands() {
 		cs = append(cs, use{u.Kind, c, c})
 	}
-	return outside(cs, "/", clone) == ""
+	return outside(cs, "/", clone, scratch) == ""
 }
 
 // paths is u's locations and every value of a rawInput key naming a path, as path, file_path or cwd.

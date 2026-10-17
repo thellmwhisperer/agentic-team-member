@@ -55,7 +55,9 @@ var work = map[string]string{"fix": fixWork, "feature": fixWork, "greenfield": f
 // $FAKE_REVIEW_WORK and $FAKE_REVIEW_REPORT, or an approval, {base} and {head} in it its brief's; its call goes
 // to $FAKE_AGENT_CALL.review. A brief headed "# Contract repair" plays $FAKE_REPAIR, $FAKE_REPAIR_WORK
 // and $FAKE_REPAIR_REPORT, or the worker's report; its call goes to $FAKE_AGENT_CALL.repairN. Review reports
-// and repair work may be sequenced as FAKE_REVIEW_REPORT_N and FAKE_REPAIR_WORK_N. $FAKE_AGENT_ORDER, when
+// and repair work may be sequenced as FAKE_REVIEW_REPORT_N and FAKE_REPAIR_WORK_N. With FAKE_REVIEW_SCRATCH
+// set, the contract and scope reviewers also write into the scratch directory their brief names, by a tool
+// call naming its absolute path and through $TMPDIR. $FAKE_AGENT_ORDER, when
 // set, receives one line per call. $FAKE_AGENT_STREAM goes to its stdout after its first
 // line, <clone> in it its working directory.
 func fakeAgent(name string) int {
@@ -98,7 +100,7 @@ func fakeAgentCLI(name string) int {
 		return 0
 	}
 	args := os.Args[1:]
-	_, call, skill, todo, text := fakeAgentTask(name, args, &mode)
+	stdin, call, skill, todo, text := fakeAgentTask(name, args, &mode)
 	if flag := codexResumeRejected(name, args); flag != "" {
 		fmt.Fprintf(os.Stderr, "unexpected argument '%s'\n", flag)
 		return 2
@@ -114,6 +116,7 @@ func fakeAgentCLI(name string) int {
 		return exit
 	}
 	fakeAgentSkill(name, args, skill, mode)
+	scratchCall(name, map[bool]string{true: string(stdin), false: args[len(args)-1]}[name == "claude"])
 	if mode == "tail-sequence" {
 		for i := 1; i <= 22; i++ {
 			line := fmt.Sprintf("line-%02d", i)
@@ -193,8 +196,27 @@ func fakeAgentKind(brief, typ string, mode *string) (skill, call, todo, text, ki
 		todo = os.Getenv("FAKE_PONYTAIL_WORK")
 		text = cmp.Or(os.Getenv("FAKE_PONYTAIL_REPORT"), `{"findings": [], "summary": "Lean already."}`)
 	}
+	if s := briefScratch(brief); s != "" && os.Getenv("FAKE_REVIEW_SCRATCH") != "" &&
+		(kind == "review" || kind == "scope") {
+		todo = cmp.Or(todo, "true") + `; echo tickets > "` + s + `/tickets.txt"; echo tmp > "$TMPDIR/tmp.txt"`
+	}
 	saveKind(fakeKind{skill, call, todo, text, kind, *mode})
 	return skill, call, todo, text, kind
+}
+
+// briefScratch is the scratch directory a review brief names after "only under `", "" when it names none.
+func briefScratch(brief string) string {
+	_, s, _ := strings.Cut(brief, "only under `")
+	s, _, _ = strings.Cut(s, "`")
+	return s
+}
+
+// scratchCall emits the reviewer's tool call that writes into the scratch directory its brief names, as the
+// line the clone boundary check reads; nothing when the brief names none or no review runs with a scratch.
+func scratchCall(name, brief string) {
+	if s := briefScratch(brief); s != "" && os.Getenv("FAKE_REVIEW_SCRATCH") != "" {
+		fmt.Print(bashEvent(name, `echo plan > "`+s+`/plan.txt"`, ""))
+	}
 }
 
 // fakeKind is the brief's fake, kept outside the clone so a returned report replays a review, not a new worker.
