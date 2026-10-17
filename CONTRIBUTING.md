@@ -57,8 +57,10 @@ Either way:
 4. Keep the diff as small as the change allows. No scaffolding for later, no
    speculative hardening, no helpers nobody calls. The repository's slopslint
    ceilings only go down.
-5. `scripts/test.sh` and `scripts/lint.sh` must pass locally. They run
-   `go test -timeout 30m ./...` and `golangci-lint run` plus slopslint, respectively.
+5. `scripts/test.sh` and `scripts/lint.sh` must pass locally. `scripts/test.sh`
+   runs `go test -timeout 30m ./...` and then the changed-line check under
+   [`test`](docs/configuration.md#atmyaml). `scripts/lint.sh` runs
+   `golangci-lint run` plus slopslint.
 6. PR titles use a conventional-commit subject (`fix:`, `feat:`, `docs:`,
    `chore:`, `refactor:`, `test:`). The body says why and links the issue.
 

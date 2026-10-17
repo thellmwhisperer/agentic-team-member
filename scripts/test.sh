@@ -1,6 +1,5 @@
 #!/bin/sh
-# Run ATM's Go tests, then check that every changed Go line ran under an end-to-end run of the
-# real atm binary (scripts/cover-diff.sh). The counters stay in GOCOVERDIR after the run.
+# Run ATM's Go tests, then scripts/cover-diff.sh. Counters stay in GOCOVERDIR after the run.
 set -eu
 cd "$(dirname "$0")/.."
 GOCOVERDIR=$(mktemp -d)

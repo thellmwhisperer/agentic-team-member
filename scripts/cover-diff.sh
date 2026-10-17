@@ -1,6 +1,6 @@
 #!/bin/sh
-# Fail the test when a changed Go line is executed by no end-to-end run of the real atm binary:
-# name the lines, and the way out is deleting them or writing the end-to-end test that reaches
+# Fail when a changed Go line inside a coverage block is not executed by any end-to-end run of
+# the real atm binary: name the lines. Delete them, or write the end-to-end test that reaches
 # them from a real atm command. Blocks and diff only, never the content of a line (decision 7664).
 set -eu
 
