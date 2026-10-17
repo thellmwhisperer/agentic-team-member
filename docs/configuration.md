@@ -304,7 +304,7 @@ ignores.
 
 | Path | Holds | Kept |
 |------|-------|------|
-| `.atm/runs/<label>/` | `report.json`, the briefs, the agent logs, `follow-ups.json`, `delivery-output.txt`, and `resume/` when the run is resumable | Always |
+| `.atm/runs/<label>/` | `report.json`, the briefs, the agent logs, each review's scratch directory, `follow-ups.json`, `delivery-output.txt`, and `resume/` when the run is resumable | Always |
 | `.atm/clones/atm-run-<timestamp>/` | The run's isolated clone | Removed after the run when no longer needed and cleanup can verify its identity |
 | `.atm/runs.jsonl` | The last state of each retained run, so `atm runs` survives the background process | Every run going and the newest 200 that ended |
 | `.atm/atm.sock`, `.atm/atm.lock`, `.atm/serve.log` | The background process | While it runs; the log stays |
