@@ -128,12 +128,12 @@ jobs:
       needs.checksums.result == 'success' &&
       needs.release-please.outputs.release_created == 'true'
     steps:
-      - name: Publish draft release as prerelease
+      - name: Publish the draft release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           TAG: ${{ needs.release-please.outputs.tag_name }}
-        run: gh release edit "$TAG" --draft=false --prerelease=true
+        run: gh release edit "$TAG" --draft=false --prerelease=false
 
   # The real artefact: the release just published, installed by install.sh, must answer its own tag.
   answers:
