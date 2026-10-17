@@ -78,13 +78,15 @@ func fakeAgent(name string) int {
 }
 
 // The server can outlive the test, so watch the test's PID, never the immediate parent.
+// Stat the directory it started in: macOS getcwd still succeeds after that directory is removed.
 func watchFakeClaudeOwner() {
 	owner, _ := strconv.Atoi(os.Getenv("ATM_FAKE_OWNER_PID"))
+	wd, wdErr := os.Getwd()
 	tick := time.NewTicker(250 * time.Millisecond)
 	defer tick.Stop()
 	for range tick.C {
-		_, err := os.Getwd()
-		if owner > 0 && !pidAlive(owner) || err != nil {
+		_, err := os.Stat(wd)
+		if owner > 0 && !pidAlive(owner) || wdErr != nil || err != nil {
 			os.Exit(0)
 		}
 	}
