@@ -614,22 +614,28 @@ the Findings box with a failure or the slop detector's cuts, and the Log box.
 The Agent box renders the agent's Markdown prose within the panel width as
 `✎` lines; non-empty thinking appears as `∴` lines. By default, consecutive
 successful or running tool calls are folded into one dim line below them,
-with tool names and repeat counts. A running group has a spinner and its
-active tool's detail; a failed tool keeps its own row, including the first
-line of its error when available. The box omits empty thinking, user messages,
-skill text, full tool output and the JSON report at the end of the agent's
-final message. Its `N tools` note counts tool calls only.
+with tool names and repeat counts, and each thinking message folds to one
+row with its first line, cut to the panel width, until it is unfolded to its
+full text. A running group has a spinner and its active tool's detail; a
+failed tool keeps its own row, including the first line of its error when
+available. Every row a click folds or unfolds starts with `▸` folded and
+`▾` unfolded, the arrow alone underlined like a link. The box omits empty
+thinking, user messages, skill text, full tool output and the JSON report
+at the end of the agent's final message. Its `N tools` note counts tool
+calls only.
 
 In both `atm run` and `atm attach`, press `t` to unfold all tool groups and
-press it again to fold them. Each press clears individual group choices.
-Click a group's `N tools` header to toggle just that group; clicking an
+press it again to fold them, and `h` to do the same for every thinking
+message. Each press clears individual choices. Click a group's `N tools`
+header, or a thinking message's row, to toggle just that one; clicking an
 individual call does nothing. The header remains visible when unfolded.
 Each unfolded call occupies one row: a state icon and word (`running`, `ok`
 or `failed`), the tool name, the first line of its detail, and, after ` · `,
 the first line of its result. Rows are cut to the panel width, with terminal
 controls filtered out. Result summaries are read for pi, Claude, Codex,
 OpenCode and Cursor. If the result is absent or its first line is blank,
-the separator and summary are omitted. The footer shows `t tools` beside
+the separator and summary are omitted. The footer shows `t show tool use`
+or `t hide tool use`, and `h show thinking` or `h hide thinking`, beside
 `q detach` while the Agent box is visible. Fold choices are not saved across
 attaches.
 
