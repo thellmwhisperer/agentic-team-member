@@ -157,7 +157,7 @@ Run repository commands from inside the repository they work on.
 | `atm run --watcher <id> [flags] <issue>` | Starts a run bound to a live watcher. On a terminal it keeps the completed screen open until q or Ctrl+C, then exits with the run's code; off one it prints the run's label and returns. See [the watcher](how-a-run-flows.md#the-watcher) and [resuming a failed run](#resuming-a-failed-run) |
 | `atm status [--json]` | Each run going; text shows label, step, duration, agent and issue, or `nothing runs` |
 | `atm attach [run]` | The run's screen, the last one going by default; completed screens stay until q or Ctrl+C |
-| `atm runs [--json]` | Retained runs; text shows label, `running`, `passed` or `failed at <step>`, duration, agent, watcher, issue and report |
+| `atm runs [--json]` | Retained runs; text shows label, `running`, `passed` or `failed at <step>`, duration, agent, watcher, issue, report when present, and `serve` last |
 | `atm axi run [--json] [flags] <issue>` | Waits for the run to end, prints its outcome and exits with its code |
 | `atm axi status [--json]`, `atm axi runs [--json]` | The runs going, or retained runs, as a table |
 | `atm axi plan [--json] [--follow] <plan.json>` | Which tickets of a plan can launch now; see [following a plan](#following-a-plan) |
@@ -168,11 +168,11 @@ going. `atm axi` is for programs: it prints TOON, or JSON with `--json`;
 `outcome`, `run`, `failed_node`, `reason`, `report` (empty when the run failed
 before its first step) and `next_step`. The `axi status` and `axi runs` tables
 have `run`, `issue`, `step`, `duration` and `agent` for `status`, and `run`,
-`issue`, `outcome`, `failed_node`, `duration`, `report` and `agent` for `runs`.
+`issue`, `outcome`, `failed_node`, `duration`, `report`, `agent` and `serve` for `runs`.
 `atm status --json` and `atm runs --json` use the same JSON format as their
 `axi` forms: a `runs` array of objects, empty when no runs match. The
-[report reference](how-a-run-flows.md#the-report) defines the `agent` label
-and how requested settings differ from the observed model.
+[report reference](how-a-run-flows.md#the-report) defines the `agent` label,
+how requested settings differ from the observed model, and the `serve` value.
 
 The exit codes are in the [README](../README.md#run-it).
 
