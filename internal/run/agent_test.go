@@ -201,7 +201,7 @@ func saveKind(k fakeKind) {
 }
 
 func continuedKind(brief string) (fakeKind, bool) {
-	if !strings.HasPrefix(strings.TrimSpace(brief), "Your final message was rejected:") {
+	if !strings.Contains(brief, "Your final message was rejected:") { // after the last message when no session resumes
 		return fakeKind{}, false
 	}
 	var k fakeKind
