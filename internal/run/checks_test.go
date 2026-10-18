@@ -45,7 +45,7 @@ func TestChecksRestoresItsStash(t *testing.T) {
 	c := checksStashConfig(t, root)
 	done := make(chan error, 1)
 	go func() {
-		_, err := checks(dir, runDir, sha, "chore", "", c)
+		_, err := checks(dir, runDir, sha, "chore", "", false, c)
 		done <- err
 	}()
 	defer func() {
@@ -811,7 +811,7 @@ const (
 	initial = "init|" + atmID + "\n"
 	based   = "base|" + atmID + "\n" + initial
 	placed  = ".claude/skills/ponytail-review/SKILL.md\n.claude/skills/ponytail/SKILL.md\n"
-	uncut = unit1 + based + placed + ".atm.yaml\n.gitignore\na.txt\na_test.sh\nfixed\nextra\nmore\n"
+	uncut   = unit1 + based + placed + ".atm.yaml\n.gitignore\na.txt\na_test.sh\nfixed\nextra\nmore\n"
 )
 
 // commitFiles commits files, each path's content or, when it is "atm", the ATM repository's file at atm, on

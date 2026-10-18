@@ -31,7 +31,7 @@ import (
 // install, the type's proof, test, e2e, typecheck and lint pass, and HEAD has not
 // moved still. Install runs again before the proof: the agent may have changed dependencies. Each proof and
 // command is a row of the screen. Its result holds the proof's red and green trials.
-func checks(clone, runDir, sha, typ, test string, c config.Config) (result map[string]any, err error) {
+func checks(clone, runDir, sha, typ, test string, missingReport bool, c config.Config) (result map[string]any, err error) {
 	live := liveIn(clone)
 	var red, green try
 	var proofSpan span
@@ -70,13 +70,27 @@ func checks(clone, runDir, sha, typ, test string, c config.Config) (result map[s
 	if err != nil {
 		return result, err
 	}
-	proofSpan, err = row(live, proofs[typ], func() (err error) {
-		red, green, err = prove(clone, typ, filepath.ToSlash(test), c)
-		return err
-	})
-	result["red"], result["green"], result["proof_span"] = red, green, proofSpan
-	if err != nil {
-		return result, err
+	if !missingReport {
+		proofSpan, err = row(live, proofs[typ], func() (err error) {
+			red, green, err = prove(clone, typ, filepath.ToSlash(test), c)
+			return err
+		})
+		result["red"], result["green"], result["proof_span"] = red, green, proofSpan
+		if err != nil {
+			return result, err
+		}
+	} else {
+		if _, err = git(clone, "add", "-A"); err != nil {
+			return result, err
+		}
+		changed, _, changeErr := changes(clone, typ, "")
+		if changeErr == nil {
+			changeErr = shrunk(clone, changed, c.TestPatterns)
+		}
+		_, resetErr := git(clone, "reset", "-q")
+		if err = errors.Join(changeErr, resetErr); err != nil {
+			return result, err
+		}
 	}
 	for _, cmd := range [][2]string{{"test", c.Test}, {"e2e", c.E2E}, {"typecheck", c.Typecheck}, {"lint", c.Lint}} {
 		if err := run(cmd[0], cmd[1], coverFor(cover, cmd[0])...); err != nil {

@@ -151,7 +151,7 @@ func unitProof(t *testing.T, clone, base string) proof {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return proof{base, "a_test.sh", "fix", string(content)}
+	return proof{base, "a_test.sh", "fix", string(content), false}
 }
 
 var fixIssue = Issue{Title: "Retry on timeout", Body: "Type: fix\nRetry once.", Type: "fix"}

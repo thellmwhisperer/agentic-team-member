@@ -109,25 +109,8 @@ error or return it as a rejected report.
 
 ### Rejected reports
 
-When final-report parsing or validation fails, ATM sends the following
-message once to the same `claude`, `codex`, `pi` or `cursor` session, using
-the exact validation error:
-
-```text
-Your final message was rejected: <the exact validation error>. Reply with only the JSON object the brief asks for, nothing else.
-```
-
-This applies to the worker, slop detector and scope reviewer. Pi keeps its session for this continuation. If
-ATM has no session ID, or the harness is OpenCode or Hermes, the report
-is not returned. A report that passes validation the
-first time is never returned. If the second report validates, the step uses
-it; otherwise the step fails with the second error, but for the worker's:
-its unit goes on to Checks with an empty `test_file`, and its Agent node in
-`report.json` says `"report": "missing"`. The report requirements
-and parsing rules stay the same, and ATM does not repair the rejected report.
-
 The agent's `.jsonl` log records a `report_rejected` event with the exact
-error in `error`, even if continuation is unavailable or fails. Both
+error in `error`. Both
 attempts' output stays in that log, and both attempts' stderr stays in its
 companion `.stderr.txt` file. Process failures, timeouts and forbidden tool
 calls fail without returning the report.

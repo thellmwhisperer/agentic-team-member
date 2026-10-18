@@ -615,12 +615,20 @@ func writeOutsideCases() []reachCase {
 			why + "bash echo x > /tmp/atm-reach.txt"},
 		{"opencode bash write", "opencode", bashEvent("opencode", "echo x > /tmp/atm-reach.txt", ""),
 			why + "bash echo x > /tmp/atm-reach.txt"},
+		shell("cp target directory", "cp -t /tmp a.txt"),
+		shell("perl in place", "perl -pi -e 's/a/b/' /tmp/atm-reach.txt"),
+		shell("environment command", "env LANG=C cp a.txt /tmp/atm-reach.txt"),
+		shell("login shell command", `sh -lc "echo x > /tmp/atm-reach.txt"`),
+		shell("device shared memory", "echo x > /dev/shm/atm-reach.txt"),
 		{"claude writes outside its clone", "claude", claudeEvent("Write",
 			`{"file_path":"{root}/.atm/runs/6-2/report.json","content":"{}"}`),
 			why + "Write {root}/.atm/runs/6-2/report.json"},
 		{"claude edit destination outside its clone", "claude", claudeEvent("Edit",
 			`{"file_path":"{root}/.atm/runs/6-2/report.json","old_string":"x","new_string":"y"}`),
 			why + "Edit {root}/.atm/runs/6-2/report.json"},
+		{"claude writes outside with spaces", "claude", claudeEvent("Write",
+			`{"file_path":"{root}/a file.txt","content":"{}"}`),
+			why + "Write {root}/a file.txt"},
 		{"codex file change outside clone", "codex", codexEvent(
 			`"type":"file_change","changes":[{"path":"{root}/.atm/runs/6-2/report.json","kind":"update"}],"status":"completed"`),
 			why + "file_change {root}/.atm/runs/6-2/report.json"},
@@ -645,6 +653,10 @@ func staysInsideCases() []reachCase {
 		shell("a URL in a command", "curl -s https://example.com"),
 		shell("git with a remote URL", "git ls-remote https://www.example.com/repo.git"),
 		shell("stderr to /dev/null", "go test ./... 2>/dev/null"),
+		shell("sed address is not a destination", "sed -i '' '1s@/tmp/old@new@' a.txt"),
+		shell("touch reference is a read", "touch -r /etc/hosts a.txt"),
+		{"write inside clone with spaces", "claude", claudeEvent("Write",
+			`{"file_path":"<clone>/a file.txt","content":"{}"}`), ""},
 		{"claude reads another run", "claude", claudeEvent("Read", `{"file_path":"{root}/.atm/runs/6-2/worker.jsonl"}`), ""},
 		{"codex MCP reads another run", "codex", codexEvent(`"type":"mcp_tool_call","server":"filesystem",` +
 			`"tool":"read_file","arguments":{"path":"{root}/.atm/runs/6-2/worker.jsonl"}`), ""},
@@ -657,6 +669,27 @@ func staysInsideCases() []reachCase {
 		{"pi edit text naming the repository", "pi", `{"type":"tool_execution_start","toolCallId":"c1",` +
 			`"toolName":"edit","args":{"path":"a.ts","edits":[{"oldText":"x","newText":"// see {root}/.atm/runs"}]}}` +
 			"\n", ""},
+	}
+}
+
+func TestNativeWritesKeepPathsWithSpaces(t *testing.T) {
+	clone := "/workspace/clone with spaces"
+	inside := clone + "/a file.txt"
+	outsidePath := "/workspace/other clone/a file.txt"
+	for _, path := range []string{inside, outsidePath} {
+		input, err := json.Marshal(map[string]string{"file_path": path, "content": "hello"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		calls := []use{toolUse("Write", input),
+			{tool: "file_change", args: path, paths: []string{path}},
+			{tool: "edit", args: path, paths: []string{path}}}
+		for _, call := range calls {
+			got := outside([]use{call}, clone) != ""
+			if got != (path == outsidePath) {
+				t.Fatalf("%s path %q rejected = %v", call.tool, path, got)
+			}
+		}
 	}
 }
 

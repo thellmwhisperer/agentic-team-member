@@ -38,7 +38,7 @@ func TestRejectedReportIsReturnedOnce(t *testing.T) {
 		{name: "returned", first: "not json", second: validWorker},
 		{name: "twice", first: "not json", second: `{"summary":"s"}`},
 	}
-	for _, harness := range []string{"claude", "codex", "pi", "cursor"} {
+	for _, harness := range []string{"claude", "codex", "pi", "cursor", "opencode"} {
 		for _, c := range cases {
 			t.Run(harness+" "+c.name, func(t *testing.T) {
 				assertReturnedReport(t, harness, c.name, c.first, c.second, c.wantErr)
@@ -105,19 +105,20 @@ func assertMissingReport(t *testing.T, err error, out *bytes.Buffer, workers, wa
 	units, _ := rep["units"].([]any)
 	unit, _ := units[0].(map[string]any)
 	if end["state"] != "passed" || end["report"] != "missing" || n["report"] != "missing" || n["result"] != "passed" ||
-		unit["test_file"] != "" || rep["failed_node"] != "checks" || err == nil || workers != want {
+		unit["test_file"] != "" || rep["failed_node"] != "" || err != nil || workers != want ||
+		reportNode(t, rep, "checks")["result"] != "passed" {
 		t.Fatalf("want a missing report to reach Checks: workers %d, err %v, end %v, report %v", workers, err, end, rep)
 	}
 }
 
-func TestMissingReportWithoutAReturnReachesChecks(t *testing.T) {
+func TestMissingReportWithoutSessionReachesChecks(t *testing.T) {
 	repo(t, "https://example.com/owner/repo.git", atmYAML)
 	order := filepath.Join(t.TempDir(), "order")
 	t.Setenv("FAKE_AGENT_ORDER", order)
 	t.Setenv("FAKE_AGENT", "no-report")
 	var out bytes.Buffer
 	err := Run("t", []string{"--harness", "opencode", issueFile(t, issue)}, &out, io.Discard)
-	assertMissingReport(t, err, &out, workerCalls(t, order), 1)
+	assertMissingReport(t, err, &out, workerCalls(t, order), 2)
 }
 
 func assertOneReturn(t *testing.T, harness string, err error, out *bytes.Buffer, workers int, sent string,
@@ -131,7 +132,7 @@ func assertOneReturn(t *testing.T, harness string, err error, out *bytes.Buffer,
 	end, _, _ := agentStep(t, out)
 	report, _ := end["report"].(map[string]any)
 	if end["state"] != "passed" || end["rejected"] != noJSON || report["test_file"] != "a_test.sh" ||
-		workers != 2 || sent != msg || !slices.Contains(args, "sess-1") {
+		workers != 2 || !strings.HasSuffix(sent, msg) || harness != "opencode" && !slices.Contains(args, "sess-1") {
 		t.Fatalf("return: workers %d, sent %q, args %v, end %v", workers, sent, args, end)
 	}
 	assertResumeArgv(t, harness, args)

@@ -30,7 +30,7 @@ func TestChecksE2ERow(t *testing.T) {
 	if err := before(top); err != nil {
 		t.Fatal(err)
 	}
-	ev, err := checks(top, t.TempDir(), gitT(t, top, "rev-parse", "HEAD"), "chore", "", c)
+	ev, err := checks(top, t.TempDir(), gitT(t, top, "rev-parse", "HEAD"), "chore", "", false, c)
 	cmds, _ := ev["commands"].([]cmdResult)
 	if err == nil || len(cmds) != 2 || cmds[0].Name != "test" || cmds[0].Result != "passed" ||
 		cmds[1].Name != "e2e" || cmds[1].Result != "failed" || cmds[1].Tail != "uncovered.go:42" {

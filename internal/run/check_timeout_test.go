@@ -51,7 +51,7 @@ func TestChecksUseConfiguredTimeout(t *testing.T) {
 				}
 			}
 			start := time.Now()
-			_, err = checks(root, t.TempDir(), sha, typ, test, c)
+			_, err = checks(root, t.TempDir(), sha, typ, test, false, c)
 			if !errors.Is(err, errTimeout) || !strings.Contains(err.Error(), "timed out after "+Human(2*time.Second)) {
 				t.Fatalf("want configured timeout, got %v", err)
 			}

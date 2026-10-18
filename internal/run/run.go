@@ -139,7 +139,10 @@ func parseArgs(args []string) (ordered []string, base, resume *string, a *agent,
 }
 
 // proof is how a unit was proven: on its base commit, with its test's content and task type.
-type proof struct{ base, test, typ, testContent string }
+type proof struct {
+	base, test, typ, testContent string
+	missing                      bool
+}
 
 // units runs the units of the run in clone dir, from base commit sha, for issue i under config c: the first on
 // brief text, each next one, up to maxUnits, on the first follow-up on the issue the one before proved. It
@@ -249,7 +252,7 @@ func checkUnit(
 	if children, err := unitBounds(dir, head, f, n, spent, ev); err != nil {
 		return failed(err, children...)
 	}
-	result, err := checks(dir, runDir, head, typ, test, c)
+	result, err := checks(dir, runDir, head, typ, test, report == nil && test == "", c)
 	for key, value := range result {
 		ev[key] = value
 	}
@@ -260,13 +263,13 @@ func checkUnit(
 		return failed(err)
 	}
 	var testContent []byte
-	if typ == "fix" || typ == "feature" || typ == "greenfield" || typ == "tests" {
+	if test != "" && (typ == "fix" || typ == "feature" || typ == "greenfield" || typ == "tests") {
 		testContent, err = os.ReadFile(filepath.Join(dir, test))
 		if err != nil {
 			return failed(err)
 		}
 	}
-	p := proof{head, test, typ, string(testContent)}
+	p := proof{head, test, typ, string(testContent), report == nil && test == ""}
 	in, out, followUpEvent, err := followUps(dir, report, body, c.TestFile)
 	ev["follow_ups"] = followUpEvent
 	return p, in, out, ev, err
