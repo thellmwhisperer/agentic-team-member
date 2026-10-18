@@ -69,7 +69,7 @@ every check ran again before it was kept.
 | Clone and contract | code | a failed clone or install, an incomplete configuration |
 | Write the fix | **model** | nothing: it decides nothing |
 | Red / green | code | a test that passes without the fix or fails with it |
-| The project's configured `install`, `test`, `typecheck` and `lint` commands | code | any failure |
+| The project's configured `install`, `test`, `e2e`, `typecheck` and `lint` commands | code | any failure |
 | Follow-ups | code and **model** | See [Follow-ups](docs/how-a-run-flows.md#follow-ups) for verification and scope approval |
 | Slop detector (code quality gate, not code review) | **model**, may only cut | See [Slop detector](docs/how-a-run-flows.md#slop-detector) for file rejection and validation of the remaining cut |
 | Delivery and code review gate | **model**, then your command | See [Delivery](docs/how-a-run-flows.md#delivery) for the review that must approve before the command runs |
@@ -104,10 +104,10 @@ atm run --watcher w7k2 280
 Use the ID printed by `atm watch` in place of `w7k2`; a run can also take an
 issue file, such as `plans/retry.md`.
 
-`.atm.yaml` declares the repository's `install`, `test`, `typecheck` and
-`lint` commands, how to run one test, which files are tests and docs, and the
-`delivery` command; `~/.config/atm/config.yaml` picks your agent, model and
-effort. Both are in [Configuration](docs/configuration.md).
+`.atm.yaml` declares the repository's `install`, `test`, optional `e2e`,
+`typecheck` and `lint` commands, how to run one test, which files are tests
+and docs, and the `delivery` command; `~/.config/atm/config.yaml` picks your
+agent, model and effort. Both are in [Configuration](docs/configuration.md).
 
 | Command | Does |
 |---------|------|
@@ -116,7 +116,7 @@ effort. Both are in [Configuration](docs/configuration.md).
 | `atm skill`, `atm skill install` | See [ATM's driving skill](docs/configuration.md#skill) |
 | `atm watch [--adopt <run>]` | Watches the runs bound to it until killed, one line per event; see [The watcher](docs/how-a-run-flows.md#the-watcher) |
 | `atm run --watcher <id> [flags] <issue>` | Runs an issue: a GitHub number or a file with a `Type:` line. Without a live watcher it does not start |
-| `atm run --resume <run>` | Runs a failed run's issue again from its agent's work, at its checks |
+| `atm run --resume <run>` | Runs a failed run's issue again from its agent's work; see [Resuming a failed run](docs/configuration.md#resuming-a-failed-run) |
 | `atm status` | The runs going |
 | `atm attach [run]` | A run's [screen and tool-call controls](docs/how-a-run-flows.md#the-screen); completed screens stay until q or Ctrl+C |
 | `atm runs` | Every retained run, its watcher and its report |

@@ -27,7 +27,7 @@ here.
 
 ATM is a harness: it starts a coding agent CLI as a subprocess inside a clone
 of your repository, then runs your repository's own install, test, lint and
-typecheck commands.
+typecheck commands, and e2e when that key is non-empty.
 
 The agent is not sandboxed by ATM. Claude Code, OpenCode and pi run with the
 rights of the user who started ATM. Claude Code loads the target repository's
@@ -42,7 +42,7 @@ Reports in this area are in scope:
   [Agent](docs/how-a-run-flows.md#agent). A way around these checks is a
   vulnerability.
 - Command execution: ATM runs the target repository's `install`, `test`,
-  `typecheck`, `lint`, `test_file` and `delivery` lines from `.atm.yaml` with
+  `e2e` (when non-empty), `typecheck`, `lint`, `test_file` and `delivery` lines from `.atm.yaml` with
   `sh -c`. Running an unconfigured command or allowing a crafted report to
   escape the clone is in scope.
 - Delivery: ATM commits on a branch and runs the configured `delivery`
