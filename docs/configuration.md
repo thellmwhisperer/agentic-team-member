@@ -282,7 +282,8 @@ clone before Checks. The prompt is:
 > Checks failed at e2e: these changed lines are not executed by any end-to-end run of the real binary. Delete them, or write the end-to-end test that reaches them from a real command. Do not touch anything else.
 
 The saved `e2e` output follows it. The turn uses the Agent step's tools,
-guards and time limits, preserves its ponytail proof, and must not commit.
+guards and time limits, keeps the saved report and ponytail proof, and must
+not commit. A missing or invalid worker report does not fail the turn.
 Its event is `agent turn after e2e`, with harness and duration; `--follow`
 prints the start once before Checks. Checks starts again at `install`.
 A second `e2e` red fails the run without another turn.
