@@ -33,7 +33,7 @@ A failed step stops the run; the steps after it are not run.
 | Issue | Reads the issue file or GitHub issue and its `Type:` | The issue cannot be read, or has no valid type |
 | Clone | Resolves `--base-ref` to a commit, clones the repository there into `.atm/clones/`, runs `install` | The ref, the clone or `install` fails |
 | Contract | Writes `brief.md`, the agent's contract | The brief cannot be written |
-| Agent | Runs the coding agent in the clone on the brief | It fails to complete successfully, times out or reaches outside its clone. A missing or invalid report does not fail it: see [Rejected reports](#rejected-reports) |
+| Agent | Runs the coding agent in the clone on the brief | It fails to complete successfully, times out or writes outside its clone. A missing or invalid report does not fail it: see [Rejected reports](#rejected-reports) |
 | Checks | Prepares the clone, then install, the proof, test, optional e2e, typecheck and lint; see [Checks](#checks) | Cleanup, proof or a command fails, anything committed, or a [follow-up limit or mandatory gap](#follow-ups) blocks the run |
 | Slop detector | Lets a model cut the diff; keeps the cut only if every check still passes | Its agent fails, fails [report validation](#rejected-reports), or anything commits |
 | Delivery | Commits the work on a branch and runs the `delivery` command | The branch or the command fails. Skipped when `delivery` is empty |
@@ -108,6 +108,25 @@ usual report checks then apply. ATM does not retry a model
 error or return it as a rejected report.
 
 ### Rejected reports
+
+When final-report parsing or validation fails, ATM asks once more, with the
+exact validation error:
+
+```text
+Your final message was rejected: <the exact validation error>. Reply with only the JSON object the brief asks for, nothing else.
+```
+
+For `claude`, `codex`, `pi` and `cursor` with a session ID, it goes to the
+same session. Otherwise ATM runs the agent again on its last message followed
+by that text. If the second report validates, the step uses it.
+
+If the worker's second report still fails, the Agent step passes and records
+`"report": "missing"`. The unit goes to Checks with no test file: `fix`,
+`hotfix`, `feature`, `greenfield` and `tests` skip their proof, but the unit
+must have changed something, no test file the base has may get shorter or go,
+and a `tests` unit may change only test and doc files. The other types prove
+as usual. The slop detector and scope reviewer fail with the second error
+instead.
 
 The agent's `.jsonl` log records a `report_rejected` event with the exact
 error in `error`. Both
@@ -336,7 +355,7 @@ it is on disk before delivery reads it.
 |-------|-------|
 | `failed_node`, `reason` | The step that failed, if any, and the reason for failure |
 | `agent` | The effective requested `harness`, `model`, `effort` and ordered `harness_args`, after global config, `.atm.yaml` and flags. Unset model and effort stay `""`; no extra arguments is `[]` |
-| `nodes` | Each step's `result` (`passed`, `failed`, `running`, `skipped` or `not run`), `started_at` (UTC, RFC 3339 with milliseconds) when its start is known, and `duration_ms` when it ends; the agent node also has `exit` and `tail` when the agent ran but its step failed. Checks includes an `e2e` row in `rows` when that command ran, passed or failed, with `name`, `result`, `started_at` and `duration_ms`. Delivery has `rows`, each with `name`, `result` (`running`, `passed` or `failed`), `started_at` and `duration_ms`, for each part that has started. |
+| `nodes` | Each step's `result` (`passed`, `failed`, `running`, `skipped` or `not run`), `started_at` (UTC, RFC 3339 with milliseconds) when its start is known, and `duration_ms` when it ends; the agent node also has `exit` and `tail` when the agent ran but its step failed, and `"report": "missing"` when the worker's report never came ([Rejected reports](#rejected-reports)). Checks includes an `e2e` row in `rows` when that command ran, passed or failed, with `name`, `result`, `started_at` and `duration_ms`. Delivery has `rows`, each with `name`, `result` (`running`, `passed` or `failed`), `started_at` and `duration_ms`, for each part that has started. |
 | `type` | The task type |
 | `units` | Each unit's number, base commit, test file, type, result, red/green proof row span, and red and green trials: command, exit code, last 60 lines, `started_at` and `duration_ms` |
 | `reproofs` | The latest repeated unit proofs and spans, after a kept cut |
