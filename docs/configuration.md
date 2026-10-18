@@ -104,7 +104,7 @@ error.
 ## `.atm.yaml`
 
 The repository declares every command a run needs. ATM detects nothing and
-defaults nothing per language. Every key in the table below is required: an
+defaults nothing per language. Every key in the table below except `e2e` is required: an
 empty value is a deliberate "none", a missing key fails with
 `config incomplete`. `harness`, `model` and `effort` may go here too, over
 your machine's file.
@@ -112,7 +112,8 @@ your machine's file.
 | Key | Meaning |
 |-----|---------|
 | `install` | Installs dependencies in a fresh clone |
-| `test` | Runs the whole test suite. In this repository it is `scripts/test.sh`, which then runs `scripts/cover-diff.sh`. A changed line inside a coverage block that no end-to-end run of the real `atm` binary executed fails; the check names those lines. Delete them, or write the end-to-end test that reaches them from a real `atm` command. Lines that no coverage block spans, `_test.go` files, files under `testdata/` and deletions do not fail it. It reads the diff and the coverage blocks, not the text of a line |
+| `test` | Runs the whole test suite. In this repository it is `scripts/test.sh`, which runs `go test -timeout 30m ./...` |
+| `e2e` | Optional command after `test` and before `typecheck`; absent or empty means no row. In this repository it is `scripts/cover-diff.sh`. A changed line inside a coverage block that no end-to-end run of the real `atm` binary executed fails; the check names those lines. Delete them, or write the end-to-end test that reaches them from a real `atm` command. Lines that no coverage block spans, `_test.go` files, files under `testdata/` and deletions do not fail it. It reads the diff and the coverage blocks, not the text of a line |
 | `typecheck` | Typechecks |
 | `lint` | Lints |
 | `test_file` | Runs one test: `{file}` is its path, `{dir}` its directory as `./dir`. When not empty, it must contain `{file}` or `{dir}`. For Go, `{tests}` expands to `^(TestA|TestB)$` for the Go tests defined in the reported file, for `go test -run`. A file with no Go tests fails; if the command reports `no tests to run`, the proof fails and names the reported file. |
@@ -148,7 +149,12 @@ real-atm test reaches this function?" without running anything:
 A function at 0.0 % has no end-to-end run reaching it: write the test that
 does. Any other percentage names a file whose tests already reach it.
 
-Optional: `check_timeout`, a positive Go duration such as `20m`, limits each checks command (install, test, typecheck, lint and red/green); absent means `10m`, and empty, null, invalid or non-positive values fail configuration.
+When `e2e` is non-empty, ATM supplies one fresh `GOCOVERDIR` directory for
+the whole Checks step, including `test` and `e2e`. `scripts/test.sh` does
+not create it. With no counters, `scripts/cover-diff.sh` fails in the `e2e`
+row with its no-coverage-data diagnostic. Counters remain in the run directory.
+
+Optional: `check_timeout`, a positive Go duration such as `20m`, limits each checks command (install, test, e2e, typecheck, lint and red/green); absent means `10m`, and empty, null, invalid or non-positive values fail configuration.
 
 Also optional: `agent_timeout`, the limit for each agent call, including
 the slop detector, as a positive Go duration such as `45m` or `1h`. Without it,
@@ -253,7 +259,8 @@ A run that fails at the checks, the slop detector or the delivery keeps its
 agent's work in `.atm/runs/<label>/resume/`: `resume.json` (the issue argument
 and original issue text, the base commit, the failed unit's number, its agent
 report, the follow-up it chained with its scope review, pending follow-ups,
-earlier proofs and `gross_lines` accumulated before that unit) and
+earlier proofs, `gross_lines` accumulated before that unit, the failed row,
+its `e2e` output, and the agent's session, settings and skill proof) and
 `work.bundle` (the commits of the units before it, then the failed unit's
 uncommitted work, new and binary files included, ignored files left
 out). Its `report.json` says `"resumable": true` and names the unit in
@@ -267,10 +274,24 @@ budget and the dependency evidence kept when a mandatory gap blocks the run.
 label. It uses the saved original issue for briefs, scope review and final
 contract review; it never re-reads the live issue. It reads `.atm.yaml` again,
 so a fixed config counts, clones the saved base commit and puts the work back.
-The failed unit's agent does not run again: its Agent row reads
-`resumed from <label>`, also as
-`resumed_from` on its unit in `report.json`, and the run goes on from that
-unit's checks as any run does. The other flags apply as usual, `--base-ref`
+Its Agent row reads `resumed from <label>`, also as `resumed_from` on its unit
+in `report.json`. If the failed row was `e2e` and the saved harness can resume
+the saved session, ATM gives that agent exactly one turn in the restored
+clone before Checks. The prompt is:
+
+> Checks failed at e2e: these changed lines are not executed by any end-to-end run of the real binary. Delete them, or write the end-to-end test that reaches them from a real command. Do not touch anything else.
+
+The saved `e2e` output follows it. The turn uses the Agent step's tools,
+guards and time limits, preserves its ponytail proof, and must not commit.
+Its event is `agent turn after e2e`, with harness and duration; `--follow`
+prints the start once before Checks. Checks starts again at `install`.
+A second `e2e` red fails the run without another turn.
+
+Other failures, older bundles without the session fields, missing session
+ids and harnesses without session resume go straight to Checks. The screen
+and `--follow` say `resume: no agent turn (<reason>)`, for example
+`resume: no agent turn (failed row is test)`. No fresh session substitutes
+for a saved session. The other flags apply as usual, `--base-ref`
 aside: the resumed run keeps the base ref of the one it resumes. A run that
 does not exist, is not resumable, or whose base commit the repository no longer
 has fails before cloning, saying which. Missing or blank saved original issue

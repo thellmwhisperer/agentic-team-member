@@ -217,6 +217,9 @@ func (a agent) reported(name, skill, path, final, exit, cause string, runErr err
 	}
 	s.finish()
 	ev["agent_model"] = s.model
+	if s.session != "" {
+		ev["session_id"] = s.session
+	}
 	if proved { // the first run already proved the skill; a continued session need not load it again
 		s.used = true
 	}
@@ -245,6 +248,7 @@ func (a agent) reported(name, skill, path, final, exit, cause string, runErr err
 	case !s.used:
 		return nil, fail(fmt.Errorf("%s; agent left no proof it used the %s skill; log: %s", exit, skill, path))
 	}
+	ev["skill_proved"] = true
 	report, err := finalReport(name, s.final, check)
 	ev["report"] = report
 	if err != nil {

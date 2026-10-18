@@ -581,12 +581,16 @@ func (w *screen) watch(ev []byte) {
 func (r *bgRun) event(line string) string {
 	var ev struct {
 		Step, State, Error string
+		Message            string
 		Agent              *AgentSettings
 		DurationMS         *int64 `json:"duration_ms"`
 		ResumedFrom        string `json:"resumed_from"`
 	}
 	if json.Unmarshal([]byte(line), &ev) != nil {
 		return line
+	}
+	if ev.Message != "" {
+		return ev.Message
 	}
 	r.Step = ev.Step
 	if ev.Agent != nil {

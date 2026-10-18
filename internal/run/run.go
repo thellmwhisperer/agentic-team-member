@@ -170,13 +170,11 @@ func (a agent) units(r *verdict, root, dir, sha, text string, i Issue, c config.
 			var err error
 			var ev map[string]any
 			if from != nil {
-				resumed, ev = from.run, map[string]any{"report": from.Report, "resumed_from": from.run}
-				if err = before(dir); err == nil { // the work it puts back leaves the ignored files out
-					head, err = putBack(root, dir, *from)
-				}
+				resumed = from.run
+				head, ev, err = a.resumeUnit(r, root, dir, *from, &keep)
 				from = nil
 			} else {
-				head, unit, text, ev, err = a.runUnit(root, dir, head, text, unit, f, n, i, c)
+				head, unit, text, ev, err = a.runUnit(root, dir, head, text, unit, f, n, i, c, &keep)
 			}
 			if ev == nil {
 				return nil, err
@@ -294,7 +292,7 @@ func unitBounds(dir, head string, f *followUp, n, spent int, ev map[string]any) 
 }
 
 func (a agent) runUnit(
-	root, dir, head, text string, unit Issue, f *followUp, n int, i Issue, c config.Config,
+	root, dir, head, text string, unit Issue, f *followUp, n int, i Issue, c config.Config, keep *resumePoint,
 ) (string, Issue, string, map[string]any, error) {
 	name := "worker"
 	if f != nil {
@@ -311,6 +309,7 @@ func (a agent) runUnit(
 		}
 	}
 	ev, err := a.run(dir, name, "ponytail", text, testFile)
+	keep.worker(a, ev)
 	return head, unit, text, ev, err
 }
 

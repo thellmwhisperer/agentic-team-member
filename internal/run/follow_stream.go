@@ -28,10 +28,13 @@ func StartFollowing(ctx context.Context, root string, args []string, w io.Writer
 	switch {
 	case err != nil:
 		return err
-	case *resume != "":
-		return errors.New("--follow does not resume: follow the run again with atm watch --adopt <run>")
 	case a.watcher != "":
 		return errors.New("--follow makes this process the run's watcher: drop --watcher")
+	}
+	if *resume != "" {
+		if _, err := resumeFrom(root, *resume); err != nil {
+			return fmt.Errorf("%w; follow an existing run with atm watch --adopt <run>", err)
+		}
 	}
 	id, l, err := newLease(root)
 	if err != nil {
@@ -154,15 +157,23 @@ func (s *observer) diag(err error) { fmt.Fprintln(os.Stderr, "atm:", s.o.Run+":"
 
 // frame takes a frame of the run's screen: each node's start is a step, delivery's its delivery.
 func (s *observer) frame(f Frame) {
-	var ev struct{ Step, State, Clone, Branch string }
+	var ev struct{ Step, State, Clone, Branch, Message, Harness string }
 	if f.Line == nil || json.Unmarshal(f.Event, &ev) != nil { // a node's start or end has a line
 		return
 	}
 	s.clone, s.branch = cmp.Or(ev.Clone, s.clone), cmp.Or(ev.Branch, s.branch)
+	if ev.Message != "" {
+		s.say("step", map[string]any{"step": "resume", "message": ev.Message})
+		return
+	}
 	if ev.State != "started" {
 		return
 	}
-	s.say("step", map[string]any{"step": ev.Step})
+	fields := map[string]any{"step": ev.Step}
+	if ev.Harness != "" {
+		fields["harness"] = ev.Harness
+	}
+	s.say("step", fields)
 	if ev.Step == "delivery" {
 		s.delivering = true
 		s.say("delivery", map[string]any{"clone": s.clone})

@@ -180,6 +180,13 @@ func (r *verdict) step(name string, fn func() (map[string]any, error)) {
 	}
 	cmds, _ := ev["commands"].([]cmdResult)
 	r.Commands = append(r.Commands, cmds...)
+	if name == "checks" {
+		for _, cmd := range cmds {
+			if cmd.Name == "e2e" {
+				n.Rows = append(n.Rows, partResult{Name: cmd.Name, Result: cmd.Result, span: cmd.span})
+			}
+		}
+	}
 	n.Exit, _ = ev["exit"].(string)
 	if model, ok := ev["agent_model"].(string); ok {
 		n.AgentModel = &model
