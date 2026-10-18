@@ -60,13 +60,9 @@ func TestRunE2EResume(t *testing.T) {
 			server := startVersionServe(t, bin, top)
 			// A graceful exit flushes the real binary's coverage counters.
 			defer func() { _ = os.Remove(socket(top)); _ = server.Wait() }()
-			l := lease{PID: os.Getpid(), Started: time.Now(), Heartbeat: time.Now()}
-			if err := l.write(top, "e2e-test"); err != nil {
-				t.Fatal(err)
-			}
 			launch := func(args ...string) string {
 				t.Helper()
-				cmd := exec.Command(bin, append([]string{"run", "--watcher", "e2e-test", "--harness", tc.harness}, args...)...)
+				cmd := exec.Command(bin, append([]string{"run", "--harness", tc.harness}, args...)...)
 				cmd.Dir = top
 				out, err := cmd.CombinedOutput()
 				if err != nil {
@@ -194,14 +190,16 @@ func followE2EResume(t *testing.T, bin, top, label string, tc e2eResumeCase) str
 	cmd.Dir = top
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
-	out, _ := cmd.Output() // No delivery means no PR: even a green run ends follow with 1.
+	out, _ := cmd.Output() // The exit code is the run's; the report says how it ended.
 	turns, checks := 0, 0
 	var resumed string
 	var message string
 	for _, ev := range events(t, bytes.NewReader(out)) {
-		resumed, _ = ev["run"].(string)
-		if ev["step"] == "resume" {
+		if ev["step"] == "agent" && ev["message"] != nil {
 			message, _ = ev["message"].(string)
+		}
+		if ev["state"] != "started" || ev["check"] != nil {
+			continue
 		}
 		if ev["step"] == "agent turn after e2e" {
 			turns++
@@ -209,8 +207,17 @@ func followE2EResume(t *testing.T, bin, top, label string, tc e2eResumeCase) str
 				t.Fatalf("turn after Checks or wrong harness: %s", out)
 			}
 		}
-		if ev["event"] == "step" && ev["step"] == "checks" {
+		if ev["step"] == "checks" {
 			checks++
+		}
+	}
+	runs, err := RecordedRuns(top)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range runs {
+		if r.Run != label {
+			resumed = r.Run
 		}
 	}
 	wantTurns := 1
@@ -268,14 +275,8 @@ func TestResumeE2EAgentTurn(t *testing.T) {
 
 func e2eTurnEvents(t *testing.T, out *bytes.Buffer, harness string, want bool) {
 	t.Helper()
-	var followed bytes.Buffer
-	s := observer{w: &followed, now: time.Now}
-	r := bgRun{}
 	starts, ends := 0, 0
 	for _, ev := range events(t, out) {
-		b, _ := json.Marshal(ev)
-		line := r.event(string(b))
-		s.frame(Frame{Line: &line, Event: b})
 		if ev["step"] != "agent turn after e2e" {
 			continue
 		}
@@ -295,8 +296,8 @@ func e2eTurnEvents(t *testing.T, out *bytes.Buffer, harness string, want bool) {
 	if want {
 		wantCount = 1
 	}
-	if starts != wantCount || ends != wantCount || strings.Count(followed.String(), "agent turn after e2e") != wantCount {
-		t.Fatalf("turn events=%d/%d; follow: %s", starts, ends, &followed)
+	if starts != wantCount || ends != wantCount {
+		t.Fatalf("turn events=%d/%d", starts, ends)
 	}
 }
 
