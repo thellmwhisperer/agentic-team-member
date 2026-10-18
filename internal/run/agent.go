@@ -934,9 +934,7 @@ func (e event) calls(harness string) (cs []use) {
 			if len(input) == 0 {
 				input = b.Arguments
 			}
-			paths := append(strs(b.Input, writesFile(b.Name)), strs(b.Arguments, writesFile(b.Name))...)
-			cs = append(cs, use{tool: b.Name, args: strings.Join(paths, " "), command: shellCommand(b.Name, input),
-				paths: paths})
+			cs = append(cs, toolUse(b.Name, input))
 		}
 	}
 	return cs
