@@ -279,7 +279,7 @@ func createdTab(b []byte) (tab, pane string, err error) {
 	return resp.Result.Tab.ID, resp.Result.Pane.ID, nil
 }
 
-// step is the label of the node that runs, and of its proof or command that runs, if one does; "" when none.
+// step is the label of the node that runs, and of the row under it that runs, if one does; "" when none.
 func (m *Model) step() string {
 	s, wait := "", ""
 	for _, r := range m.activityRows() {

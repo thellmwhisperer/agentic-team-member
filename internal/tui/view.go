@@ -195,7 +195,7 @@ func spread(left, right string, width int) string {
 }
 
 // atm is the ATM box, height rows at most: the issue and the run's state, then a row for each node and for
-// each proof and command of the checks, a connector between nodes when the terminal is tall enough, the rows
+// each Checks or Delivery part, a connector between nodes when the terminal is tall enough, the rows
 // from its reading position.
 func (m *Model) atm(width, height int) string {
 	inner := width - 4
