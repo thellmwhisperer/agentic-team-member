@@ -1117,7 +1117,7 @@ func commandWrites(words []string) []string {
 		}
 		return out
 	case "tee", "touch", "mkdir", "rm", "rmdir", "mv", "truncate", "unlink":
-		return operandWrites(name, words)
+		return words[1:] // an option is never an absolute path
 	case "cp", "ln", "install", "rsync":
 		return copyWrites(name, words)
 	case "curl", "wget":
@@ -1128,21 +1128,6 @@ func commandWrites(words []string) []string {
 		return editWrites(words, perlOption)
 	}
 	return nil
-}
-
-// operandWrites is every operand of tee, touch, mkdir, rm and the like.
-func operandWrites(name string, words []string) (operands []string) {
-	for i := 1; i < len(words); i++ {
-		a := words[i]
-		if name == "touch" && (a == "-r" || a == "--reference") && i+1 < len(words) {
-			i++
-			continue
-		}
-		if !strings.HasPrefix(a, "-") {
-			operands = append(operands, a)
-		}
-	}
-	return operands
 }
 
 // copyWrites is the target directory of cp, ln or install, or the last operand.

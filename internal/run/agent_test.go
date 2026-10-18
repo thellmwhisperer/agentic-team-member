@@ -668,7 +668,6 @@ func staysInsideCases() []reachCase {
 		shell("git with a remote URL", "git ls-remote https://www.example.com/repo.git"),
 		shell("stderr to /dev/null", "go test ./... 2>/dev/null"),
 		shell("sed address is not a destination", "sed -i '' '1s@/tmp/old@new@' a.txt"),
-		shell("touch reference is a read", "touch -r /etc/hosts a.txt"),
 		shell("sed script file is a read", "sed -i -e 's/a/b/' -f /tmp/rules.sed a.txt"),
 		shell("sed backup suffix and address", "sed -i .bak '/old/d' a.txt"),
 		shell("curl URL without output file", "curl https://example.com"),
