@@ -158,7 +158,7 @@ func (r *reader) get(n int) Issue {
 
 func (r *reader) open(n int) bool { return r.get(n).State != "CLOSED" }
 
-// going is whether n is open and its last run running, or passed: its gate or PR is still there. A closed issue is
+// going is whether n is open and its last run running, or passed: delivered, the issue still open. A closed issue is
 // never going, since a run whose client was killed never records its end.
 func (r *reader) going(n int) bool {
 	l := r.last[strconv.Itoa(n)]
