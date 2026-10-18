@@ -73,10 +73,10 @@ func (s *stream) chunkEnd() []map[string]any {
 func (u acpUpdate) calls() []use {
 	cs := []use{toolUse(u.Kind, u.RawInput)}
 	for _, l := range u.Locations {
-		cs = append(cs, use{tool: u.Kind, args: l.Path, paths: []string{l.Path}})
+		cs = append(cs, use{tool: u.Kind, paths: []string{l.Path}})
 	}
 	for _, c := range u.commands() {
-		cs = append(cs, use{tool: u.Kind, args: c, command: c})
+		cs = append(cs, use{tool: u.Kind, command: c})
 	}
 	return cs
 }
@@ -212,7 +212,7 @@ func (u acpUpdate) inside(clone, scratch string) bool {
 	}
 	var cs []use
 	for _, c := range u.commands() {
-		cs = append(cs, use{tool: u.Kind, args: c, command: c})
+		cs = append(cs, use{tool: u.Kind, command: c})
 	}
 	return outside(cs, clone, scratch) == ""
 }

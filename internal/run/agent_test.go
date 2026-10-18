@@ -698,8 +698,8 @@ func TestNativeWritesKeepPathsWithSpaces(t *testing.T) {
 			t.Fatal(err)
 		}
 		calls := []use{toolUse("Write", input),
-			{tool: "file_change", args: path, paths: []string{path}},
-			{tool: "edit", args: path, paths: []string{path}}}
+			{tool: "file_change", paths: []string{path}},
+			{tool: "edit", paths: []string{path}}}
 		for _, call := range calls {
 			got := outside([]use{call}, clone) != ""
 			if got != (path == outsidePath) {
@@ -715,7 +715,7 @@ func TestShellWritesKeepEscapedClonePath(t *testing.T) {
 		`echo x > /workspace/clone\ with\ spaces/a\ file.txt`,
 		`touch /workspace/clone\ with\ spaces/a\ file.txt`,
 	} {
-		if got := outside([]use{{tool: "shell", args: command, command: command}}, clone); got != "" {
+		if got := outside([]use{{tool: "shell", command: command}}, clone); got != "" {
 			t.Fatalf("local write %q was rejected: %s", command, got)
 		}
 	}

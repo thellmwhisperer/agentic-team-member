@@ -901,15 +901,14 @@ func detail(input json.RawMessage) string {
 	return ""
 }
 
-// use is one of the agent's tool calls: its tool, every string of its arguments, and its shell command.
+// use is one of the agent's tool calls: its tool, its shell command and every string of its arguments.
 type use struct {
-	tool, args, command string
-	paths               []string
+	tool, command string
+	paths         []string
 }
 
 func toolUse(tool string, input json.RawMessage) use {
-	paths := strs(input, writesFile(tool))
-	return use{tool: tool, args: strings.Join(paths, " "), command: shellCommand(tool, input), paths: paths}
+	return use{tool: tool, command: shellCommand(tool, input), paths: strs(input, writesFile(tool))}
 }
 
 // calls is e's tool calls: claude's tool_use and pi's toolCall blocks, pi's tool executions, codex's commands
@@ -949,7 +948,7 @@ func codexCalls(item struct {
 }) []use {
 	switch item.Type {
 	case "command_execution":
-		return []use{{tool: "shell", args: item.Command, command: item.Command}}
+		return []use{{tool: "shell", command: item.Command}}
 	case "mcp_tool_call":
 		return []use{toolUse(item.Tool, item.Arguments)}
 	case "file_change":
@@ -957,7 +956,7 @@ func codexCalls(item struct {
 		for _, change := range item.Changes {
 			paths = append(paths, change.Path)
 		}
-		return []use{{tool: "file_change", args: strings.Join(paths, " "), paths: paths}}
+		return []use{{tool: "file_change", paths: paths}}
 	default:
 		return nil
 	}
@@ -1029,7 +1028,7 @@ func outside(calls []use, clone string, scratch ...string) string {
 		}
 		for _, d := range dests {
 			if escapes(d, allowed) {
-				r := []rune(c.args)
+				r := []rune(cmp.Or(c.command, strings.Join(c.paths, " ")))
 				return c.tool + " " + string(r[:min(len(r), 200)])
 			}
 		}
