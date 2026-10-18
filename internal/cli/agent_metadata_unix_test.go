@@ -10,10 +10,10 @@ import (
 )
 
 func TestAgentMetadataCLILiveAndFinished(t *testing.T) {
-	dir := setupConcurrentRunRepo(t)
+	setupConcurrentRunRepo(t)
 	ready, release := setupBarrierAgent(t)
-	w := watcher(t, dir, "metadata", 0)
-	label, err := atm(t, "run", "--watcher", w, "--model", "m1", "retry.md")
+
+	label, err := atm(t, "run", "--model", "m1", "retry.md")
 	if err != nil {
 		t.Fatal(err)
 	}

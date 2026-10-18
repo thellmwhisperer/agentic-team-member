@@ -16,10 +16,9 @@ it.
    [the issue requirements](configuration.md#the-issue), with evidence and a
    `## Red test` section naming the test that fails today.
    The agent gets exactly this text; a vague issue gives a vague run.
-2. **An ATM run.** Start `atm watch` in the launching session and pass its ID
-   with `atm run --watcher <id> <number>`. Fill `.atm.yaml` once with the
+2. **An ATM run.** Start `atm run <number> --follow` in the launching session. Fill `.atm.yaml` once with the
    repository commands, file patterns and the no-mistakes delivery line; see
-   [the watcher](how-a-run-flows.md#the-watcher) and [Configuration](configuration.md).
+   [following one run](how-a-run-flows.md#following-one-run) and [Configuration](configuration.md).
 3. **The checks.** A failed check stops the run: the report says which check
    failed and why, and the issue gets a better contract or the code a better
    check. The final [report](how-a-run-flows.md#the-report) also covers the

@@ -85,25 +85,6 @@ func TestReleaseRemovesReadOnlyCloneContent(t *testing.T) {
 	}
 }
 
-// A clone another process still leases stays whole, read-only content and all.
-func TestReleaseKeepsALeasedReadOnlyClone(t *testing.T) {
-	clone := filepath.Join(t.TempDir(), "atm-run-20261001-120000")
-	keep := readOnlyClone(t, clone)
-	write(t, clone+".lock", "")
-	lease, err := os.OpenFile(clone+".lock", os.O_RDWR, 0o600)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = lease.Close() }()
-	if err := lockCloneShared(lease); err != nil {
-		t.Fatal(err)
-	}
-	if err := release(clone, ""); err != nil {
-		t.Fatal(err)
-	}
-	exist(t, keep, filepath.Join(clone, "cache", "old.txt"), clone+".lock")
-}
-
 // A file removal cannot unlink, an immutable one, is an error: what remains of the clone and its sidecars stay.
 func TestReleaseKeepsSidecarsWhenContentCannotGo(t *testing.T) {
 	chflags, err := exec.LookPath("chflags")

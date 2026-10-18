@@ -2,7 +2,6 @@ package run
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -35,17 +34,6 @@ func TestMain(m *testing.M) {
 		}
 		os.Exit(0)
 	}
-	if len(os.Args) > 1 && os.Args[1] == "watch" { // atm watch, for a test to kill
-		root, err := git("", "rev-parse", "--show-toplevel")
-		if err == nil {
-			err = Watch(context.Background(), root, "", os.Stdout)
-		}
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-	if strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe") == "no-mistakes" { // before gh: a test fakes both
-		fakeNoMistakes()
-	}
 	if out, ok := os.LookupEnv("FAKE_GH_OUT"); ok {
 		_ = os.WriteFile(os.Getenv("FAKE_GH_ARGS"), []byte(strings.Join(os.Args[1:], " ")), 0o600)
 		fmt.Print(out)
@@ -71,65 +59,6 @@ func TestMain(m *testing.M) {
 	code := m.Run()
 	_ = os.RemoveAll(dir)
 	os.Exit(code)
-}
-
-func fakeNoMistakes() {
-	switch strings.Join(os.Args[1:], " ") {
-	case "axi run":
-		os.Exit(0)
-	case "axi status":
-	default:
-		os.Exit(2)
-	}
-	countPath := os.Getenv("ATM_STATUS_COUNT")
-	b, _ := os.ReadFile(countPath)
-	n, _ := strconv.Atoi(string(b))
-	n++
-	aside := countPath + ".tmp" // rename, not WriteFile: a kill mid-write must not truncate the count
-	if os.WriteFile(aside, []byte(strconv.Itoa(n)), 0o600) == nil {
-		_ = os.Rename(aside, countPath)
-	}
-	if live := os.Getenv("ATM_STATUS_LIVE"); live != "" {
-		switch n {
-		case 1:
-			b, _ = os.ReadFile(live)
-		case 2:
-			os.Exit(1)
-		default:
-			path := os.Getenv("ATM_STATUS_WAITING")
-			if _, err := os.Stat(os.Getenv("ATM_STATUS_RELEASE")); err == nil {
-				path = os.Getenv("ATM_STATUS_MERGED")
-			}
-			b, _ = os.ReadFile(path)
-		}
-		_, _ = os.Stdout.Write(b)
-		os.Exit(0)
-	}
-	if n == 1 {
-		os.Exit(1)
-	}
-	os.Exit(0)
-}
-
-func installFakeNoMistakes(t *testing.T) {
-	t.Helper()
-	dir := t.TempDir()
-	exe, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	b, err := os.ReadFile(exe)
-	if err != nil {
-		t.Fatal(err)
-	}
-	name := "no-mistakes"
-	if runtime.GOOS == "windows" {
-		name += ".exe"
-	}
-	if err := os.WriteFile(filepath.Join(dir, name), b, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
 // linkFakes links this test binary under each agent CLI's name in a new directory.

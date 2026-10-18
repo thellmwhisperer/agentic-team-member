@@ -963,9 +963,6 @@ func teeRun(ctx context.Context, t terminal, w io.Writer, dir, line string, capt
 		return "", "", err
 	}
 	defer closeGroup()
-	if err := inheritCloneLease(cmd, dir); err != nil {
-		return "", "", err
-	}
 	ran := false
 	if t != nil {
 		ran, err = t.run(cmd)

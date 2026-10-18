@@ -104,7 +104,7 @@ func TestAgentMetadataHistoryLiveAndReloaded(t *testing.T) {
 	root := gitT(t, repo(t, t.TempDir(), atmYAML), "rev-parse", "--show-toplevel")
 	stop := background(t, root)
 	wait, release := holdFakeAgents(t, 1)
-	o, err := startWithWatcher(t, root, []string{"--harness", "claude", "--model", "m1", "--effort", "high",
+	o, err := Start(root, []string{"--harness", "claude", "--model", "m1", "--effort", "high",
 		"--harness-arg", "--x", issueFile(t, issue)})
 	if err != nil {
 		t.Fatal(err)

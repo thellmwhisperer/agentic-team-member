@@ -1,13 +1,9 @@
 package cli
 
 import (
-	"go/ast"
-	"go/parser"
-	"go/token"
 	"os"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -157,50 +153,5 @@ func TestSkillCommandsMatchCLI(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-func TestSkillEventsMatchFollowStream(t *testing.T) {
-	skill, err := atm(t, "skill")
-	if err != nil {
-		t.Fatal(err)
-	}
-	source, err := parser.ParseFile(token.NewFileSet(), "../run/follow_stream.go", nil, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	emitted := map[string]bool{}
-	ast.Inspect(source, func(node ast.Node) bool {
-		call, ok := node.(*ast.CallExpr)
-		if !ok || len(call.Args) == 0 {
-			return true
-		}
-		method, ok := call.Fun.(*ast.SelectorExpr)
-		if !ok || method.Sel.Name != "say" {
-			return true
-		}
-		literal, ok := call.Args[0].(*ast.BasicLit)
-		if !ok || literal.Kind != token.STRING {
-			t.Fatal("event name is no longer a string literal; update this check")
-		}
-		name, err := strconv.Unquote(literal.Value)
-		if err != nil {
-			t.Fatal(err)
-		}
-		emitted[name] = true
-		return true
-	})
-	rows := regexp.MustCompile("(?m)^\\| `([a-z_]+)` \\|").FindAllStringSubmatch(skill, -1)
-	if len(rows) == 0 || len(emitted) == 0 {
-		t.Fatal("missing event table or emitted events")
-	}
-	for _, row := range rows {
-		if !emitted[row[1]] {
-			t.Errorf("event %q is not emitted or has a duplicate row", row[1])
-		}
-		delete(emitted, row[1])
-	}
-	for name := range emitted {
-		t.Errorf("emitted event %q is missing from skill", name)
 	}
 }

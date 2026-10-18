@@ -40,7 +40,7 @@ func TestHeldFakeClaudeExitsWhenOwnerDies(t *testing.T) {
 	if os.Getenv("ATM_TEST_CLAUDE_OWNER") == "1" {
 		root := repo(t, "git@github.com:owner/repo.git", atmYAML)
 		wait, _ := holdFakeAgents(t, 1)
-		if _, err := startWithWatcher(t, root, []string{issueFile(t, issue)}); err != nil {
+		if _, err := Start(root, []string{issueFile(t, issue)}); err != nil {
 			log, _ := os.ReadFile(filepath.Join(root, ".atm", "serve.log"))
 			t.Fatalf("start: %v\n%s", err, log)
 		}

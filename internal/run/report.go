@@ -28,7 +28,6 @@ type verdict struct {
 	Reproofs   []unitResult   `json:"reproofs"`
 	Commands   []cmdResult    `json:"commands"`
 	HeadSHA    string         `json:"head_sha,omitempty"` // the delivered branch's
-	Watcher    string         `json:"watcher,omitempty"`  // the atm watch the run was bound to
 	Serve      string         `json:"serve,omitempty"`    // buildinfo.String() of the serve that wrote it
 	path       string
 	out        io.Writer // the log: each node's start and end, one JSON object a line
@@ -224,8 +223,8 @@ func (r *verdict) emit(name string, ev map[string]any) {
 	_ = r.write() // the run's last write says whether report.json is on disk
 }
 
-// watcher is a log a screen watches: it takes the live events inside a node too, which the log leaves out.
-type watcher interface{ watch(ev []byte) }
+// eventSink is a log a screen reads: it takes the live events inside a node too, which the log leaves out.
+type eventSink interface{ watch(ev []byte) }
 
 // live hands ev, an event inside the node that runs, to the screen that watches the log, if one does.
 func (r *verdict) live(ev map[string]any) {
@@ -249,7 +248,7 @@ func (r *verdict) live(ev map[string]any) {
 		}
 		_ = r.write()
 	}
-	if w, ok := r.out.(watcher); ok {
+	if w, ok := r.out.(eventSink); ok {
 		ev["ts"], ev["step"] = time.Now().UTC().Format(time.RFC3339Nano), r.at
 		b, _ := json.Marshal(ev)
 		w.watch(b)
@@ -303,23 +302,6 @@ func (r *verdict) write() error {
 		err = os.WriteFile(r.path, append(b, '\n'), 0o644)
 	}
 	return err
-}
-
-func setReportWatcher(path, id string) error {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
-	var r verdict
-	if err = json.Unmarshal(b, &r); err != nil {
-		return err
-	}
-	r.Watcher = id
-	b, err = json.MarshalIndent(r, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(path, append(b, '\n'), 0o644)
 }
 
 // finish writes report.json a last time and the summary to summary, and gives err, the run's, its exit code.

@@ -15,7 +15,6 @@ func TestChecksRestoresIgnoredBytesBeforeInstall(t *testing.T) {
 			commitBase(t, root, ".gitignore", "dep/\n")
 			runDir := checksStashRunDir(t, root)
 			dir, sha := checksStashClone(t, root)
-			t.Cleanup(func() { closeCloneLease(dir) })
 			write := func(name string, data []byte) {
 				t.Helper()
 				if err := os.WriteFile(filepath.Join(dir, name), data, 0o600); err != nil {
