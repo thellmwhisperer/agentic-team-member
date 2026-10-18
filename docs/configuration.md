@@ -137,6 +137,17 @@ The `delivery` line hands the branch to
 [no-mistakes](https://github.com/kunchenguid/no-mistakes). Without `--yes` it
 only reports: whoever launched the run answers each finding.
 
+The `Go` workflow of this repository keeps, for every push to `main`, the
+end-to-end coverage profile of that commit as the artifact `cover-main-<sha>`
+of the run (`cover-main.profile`, `cover-main.func.txt`). To answer "which
+real-atm test reaches this function?" without running anything:
+
+    gh run download --name cover-main-<sha> -R thellmwhisperer/agentic-team-member
+    grep 'internal/run/<file>.go' cover-main.func.txt
+
+A function at 0.0 % has no end-to-end run reaching it: write the test that
+does. Any other percentage names a file whose tests already reach it.
+
 Optional: `check_timeout`, a positive Go duration such as `20m`, limits each checks command (install, test, typecheck, lint and red/green); absent means `10m`, and empty, null, invalid or non-positive values fail configuration.
 
 Also optional: `agent_timeout`, the limit for each agent call, including

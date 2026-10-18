@@ -58,7 +58,13 @@ jobs:
 
       - name: Test
         if: matrix.shard == 'all'
-        run: make test
+        run: |
+          if [ "${{ github.event_name }}" = "push" ] && [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
+            GOCOVERDIR="$(mktemp -d "${RUNNER_TEMP}/atm-cover.XXXXXX")"
+            echo "GOCOVERDIR=$GOCOVERDIR" >> "$GITHUB_ENV"
+            echo "cover-main: GOCOVERDIR=$GOCOVERDIR"
+          fi
+          make test
 
       - name: Test (Windows shard)
         if: matrix.shard != 'all'
@@ -74,6 +80,22 @@ jobs:
       - name: Lint
         if: matrix.shard == 'all' || matrix.shard == 0
         run: make lint
+
+      - name: Keep the end-to-end coverage profile
+        if: github.event_name == 'push' && matrix.os == 'ubuntu-latest' && matrix.shard == 'all'
+        run: |
+          go tool covdata textfmt -i="$GOCOVERDIR" -o cover-main.profile
+          go tool covdata func -i="$GOCOVERDIR" > cover-main.func.txt
+
+      - name: Upload the end-to-end coverage profile
+        if: github.event_name == 'push' && matrix.os == 'ubuntu-latest' && matrix.shard == 'all'
+        uses: actions/upload-artifact@v4
+        with:
+          name: cover-main-${{ github.sha }}
+          path: |
+            cover-main.profile
+            cover-main.func.txt
+          retention-days: 90
 
   summary:
     name: Go checks
