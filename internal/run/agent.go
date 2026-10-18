@@ -27,6 +27,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/thellmwhisperer/agentic-team-member/internal/config"
+	"mvdan.cc/sh/v3/expand"
 	"mvdan.cc/sh/v3/syntax"
 )
 
@@ -1285,65 +1286,23 @@ func scriptWords(w []string, sed bool) int {
 	return 0
 }
 
-// wordText is word as far as it is literal, a leading $HOME as ~.
+// wordText is word as the shell reads it, ~ and $HOME as the home directory and any other parameter or command
+// left as $.
 func wordText(word *syntax.Word) string {
-	if word == nil {
-		return ""
-	}
-	parts := word.Parts
-	double := false
-	if len(parts) > 0 {
-		if q, ok := parts[0].(*syntax.DblQuoted); ok && len(parts) == 1 {
-			parts = q.Parts
-			double = true
-		}
-	}
-	if len(parts) > 0 {
-		if p, ok := parts[0].(*syntax.ParamExp); ok && p.Param != nil && p.Param.Value == "HOME" {
-			text, _ := literalWord(&syntax.Word{Parts: parts[1:]}, double)
-			return "~" + text
-		}
-	}
-	text, _ := literalWord(&syntax.Word{Parts: parts}, double)
-	if len(word.Parts) == 1 && strings.HasPrefix(text, "~/") {
-		switch word.Parts[0].(type) {
-		case *syntax.SglQuoted, *syntax.DblQuoted:
-			return "./" + text
-		}
-	}
-	return text
+	fields, _ := expand.Fields(&shellWords, word)
+	return strings.Join(fields, " ")
 }
 
-func literalWord(word *syntax.Word, double bool) (string, bool) {
-	var text strings.Builder
-	var walk func([]syntax.WordPart, bool) bool
-	walk = func(parts []syntax.WordPart, double bool) bool {
-		for _, part := range parts {
-			switch part := part.(type) {
-			case *syntax.Lit:
-				for i := 0; i < len(part.Value); i++ {
-					if part.Value[i] == '\\' && i+1 < len(part.Value) &&
-						(!double || strings.ContainsRune("$`\\\"\n", rune(part.Value[i+1]))) {
-						i++
-						if part.Value[i] != '\n' {
-							text.WriteByte(part.Value[i])
-						}
-						continue
-					}
-					text.WriteByte(part.Value[i])
-				}
-			case *syntax.SglQuoted:
-				text.WriteString(part.Value)
-			case *syntax.DblQuoted:
-				if !walk(part.Parts, true) {
-					return false
-				}
-			default:
-				return false
-			}
+var shellWords = expand.Config{
+	Env: expand.FuncEnviron(func(name string) string {
+		switch name {
+		case "HOME":
+			home, _ := os.UserHomeDir()
+			return home
+		case "IFS":
+			return ""
 		}
-		return true
-	}
-	literal := walk(word.Parts, double)
-	return text.String(), literal
+		return "$"
+	}),
+	CmdSubst: func(w io.Writer, _ *syntax.CmdSubst) error { _, err := io.WriteString(w, "$"); return err },
 }

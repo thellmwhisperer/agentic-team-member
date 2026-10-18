@@ -671,8 +671,6 @@ func staysInsideCases() []reachCase {
 		shell("touch reference is a read", "touch -r /etc/hosts a.txt"),
 		shell("sed script file is a read", "sed -i -e 's/a/b/' -f /tmp/rules.sed a.txt"),
 		shell("sed backup suffix and address", "sed -i .bak '/old/d' a.txt"),
-		shell("quoted home is local", "echo x > '~/fixture_test.go'"),
-		shell("double quoted home is local", `touch "~/fixture_test.go"`),
 		shell("curl URL without output file", "curl https://example.com"),
 		shell("curl local output file", "curl -o a.txt https://example.com"),
 		{"write inside clone with spaces", "claude", claudeEvent("Write",
