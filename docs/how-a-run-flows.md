@@ -33,7 +33,7 @@ A failed step stops the run; the steps after it are not run.
 | Issue | Reads the issue file or GitHub issue and its `Type:` | The issue cannot be read, or has no valid type |
 | Clone | Resolves `--base-ref` to a commit, clones the repository there into `.atm/clones/`, runs `install` | The ref, the clone or `install` fails |
 | Contract | Writes `brief.md`, the agent's contract | The brief cannot be written |
-| Agent | Runs the coding agent in the clone on the brief | It fails to complete successfully, times out, reaches outside its clone, or fails [report validation](#rejected-reports) |
+| Agent | Runs the coding agent in the clone on the brief | It fails to complete successfully, times out or reaches outside its clone. A missing or invalid report does not fail it: see [Rejected reports](#rejected-reports) |
 | Checks | Prepares the clone, then install, the proof, test, optional e2e, typecheck and lint; see [Checks](#checks) | Cleanup, proof or a command fails, anything committed, or a [follow-up limit or mandatory gap](#follow-ups) blocks the run |
 | Slop detector | Lets a model cut the diff; keeps the cut only if every check still passes | Its agent fails, fails [report validation](#rejected-reports), or anything commits |
 | Delivery | Commits the work on a branch and runs the `delivery` command | The branch or the command fails. Skipped when `delivery` is empty |
@@ -119,9 +119,11 @@ Your final message was rejected: <the exact validation error>. Reply with only t
 
 This applies to the worker, slop detector and scope reviewer. Pi keeps its session for this continuation. If
 ATM has no session ID, or the harness is OpenCode or Hermes, the report
-failure ends the step without a return. A report that passes validation the
+is not returned. A report that passes validation the
 first time is never returned. If the second report validates, the step uses
-it; otherwise the step fails with the second error. The report requirements
+it; otherwise the step fails with the second error, but for the worker's:
+its unit goes on to Checks with an empty `test_file`, and its Agent node in
+`report.json` says `"report": "missing"`. The report requirements
 and parsing rules stay the same, and ATM does not repair the rejected report.
 
 The agent's `.jsonl` log records a `report_rejected` event with the exact

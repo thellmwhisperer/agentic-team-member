@@ -178,6 +178,7 @@ func (a agent) units(r *verdict, root, dir, sha, text string, i Issue, c config.
 			}
 			ev["unit"] = n
 			report, _ = ev["report"].(map[string]any)
+			r.node("agent").Report, _ = ev["report"].(string)
 			test, _ = report["test_file"].(string)
 			if f != nil {
 				test = f.RedTest
@@ -306,6 +307,12 @@ func (a agent) runUnit(
 		}
 	}
 	ev, err := a.run(dir, name, "ponytail", text, testFile)
+	// A diff never goes for its report's format: without one, the unit goes to Checks with no test file.
+	if errors.As(err, &reportError{}) {
+		ev["report"], err = "missing", nil
+		delete(ev, "exit")
+		delete(ev, "tail")
+	}
 	keep.worker(a, ev)
 	return head, unit, text, ev, err
 }
