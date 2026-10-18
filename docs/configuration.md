@@ -85,7 +85,7 @@ Any other request from the agent gets `-32601 method not found`.
 and skills outside the brief.
 
 Permission requests get the first `allow_once` option when every location
-and raw-input path value is inside the clone and no command reaches outside.
+and raw-input path value is inside the clone and no command writes outside.
 Path values are taken whole; relative values resolve against the clone.
 Commands use the [post-step reach checker](how-a-run-flows.md#agent).
 A read-only review's permission requests also allow its scratch directory,
