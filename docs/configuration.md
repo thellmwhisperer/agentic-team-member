@@ -289,7 +289,7 @@ The saved `e2e` output follows it. The turn uses the Agent step's tools,
 guards and time limits, keeps the saved report and ponytail proof, and must
 not commit. A missing or invalid worker report does not fail the turn.
 Its event is `agent turn after e2e`, with harness and duration; `--follow`
-prints the start once before Checks. Checks starts again at `install`.
+prints its start and its result before Checks. Checks starts again at `install`.
 A second `e2e` red fails the run without another turn.
 
 Other failures, older bundles without the session fields, missing session
