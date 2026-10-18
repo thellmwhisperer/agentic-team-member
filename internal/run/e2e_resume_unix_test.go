@@ -101,7 +101,10 @@ type e2eResumeCase struct{ name, harness, repair, row, skip string }
 
 func e2eFixture(t *testing.T, tc e2eResumeCase) (top, call, order, path string) {
 	t.Helper()
-	top = repo(t, "local", tc.config())
+	// The real binary binds its serve at git's toplevel. t.TempDir can be another spelling
+	// of that directory (Darwin's /var); Attach must use the same spelling or the socket path
+	// does not fit sun_path.
+	top = gitT(t, repo(t, "local", tc.config()), "rev-parse", "--show-toplevel")
 	call, order = filepath.Join(t.TempDir(), "call"), filepath.Join(t.TempDir(), "order")
 	t.Setenv("FAKE_AGENT_CALL", call)
 	t.Setenv("FAKE_AGENT_ORDER", order)
@@ -326,44 +329,61 @@ func TestResumeE2ESafeguards(t *testing.T) {
 		{"old_bundle", "", "true", "e2e:"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			top := repo(t, "local", atmYAML+"e2e: 'test -f reached || { echo uncovered.go:42; exit 1; }'\n")
-			order := filepath.Join(t.TempDir(), "order")
-			t.Setenv("FAKE_AGENT_ORDER", order)
-			if tc.name != "missing_session" {
-				t.Setenv("FAKE_AGENT_STREAM", `{"session_id":"sess-1"}`+"\n")
-			}
-			if err := Run("failed", []string{issueFile(t, issue)}, io.Discard, io.Discard); err == nil {
-				t.Fatal("want first e2e red")
-			}
-			if tc.name == "old_bundle" {
-				removeE2EResumeFields(t, top)
-			}
-			t.Setenv("FAKE_AGENT", tc.mode)
-			t.Setenv("FAKE_AGENT_WORK", tc.work)
-			var out bytes.Buffer
-			err := Run("resumed", []string{"--resume", "failed"}, &out, io.Discard)
-			if tc.why == "" && err != nil || tc.why != "" && (err == nil || !strings.Contains(err.Error(), tc.why)) {
-				t.Fatalf("resume: %v; want %q", err, tc.why)
-			}
-			wantCalls := 2
-			if tc.name == "missing_session" || tc.name == "old_bundle" {
-				wantCalls = 1
-				if !strings.Contains(out.String(), "resume: no agent turn (") {
-					t.Fatalf("missing skip reason: %s", &out)
-				}
-			}
-			if calls := workerCalls(t, order); calls != wantCalls {
-				t.Fatalf("worker calls=%d, want %d", calls, wantCalls)
-			}
-			if tc.name == "invalid_report" {
-				resumed := e2eReport(t, top, "resumed")
-				if resumed.node("agent").Result != "passed" || resumed.node("checks").Result != "failed" ||
-					resumed.FailedNode != "checks" || len(resumed.Units) != 1 || resumed.Units[0].TestFile != "a_test.sh" ||
-					strings.Contains(err.Error(), "no JSON object") || strings.Contains(err.Error(), "agent left no report") {
-					t.Fatalf("turn without worker JSON did not reach Checks with the saved report: %v; %+v", err, resumed)
-				}
-			}
+			resumeE2ESafeguard(t, tc.name, tc.mode, tc.work, tc.why)
 		})
+	}
+}
+
+func resumeE2ESafeguard(t *testing.T, name, mode, work, why string) {
+	t.Helper()
+	top := repo(t, "local", atmYAML+"e2e: 'test -f reached || { echo uncovered.go:42; exit 1; }'\n")
+	order := filepath.Join(t.TempDir(), "order")
+	t.Setenv("FAKE_AGENT_ORDER", order)
+	if name != "missing_session" {
+		t.Setenv("FAKE_AGENT_STREAM", `{"session_id":"sess-1"}`+"\n")
+	}
+	if err := Run("failed", []string{issueFile(t, issue)}, io.Discard, io.Discard); err == nil {
+		t.Fatal("want first e2e red")
+	}
+	if name == "old_bundle" {
+		removeE2EResumeFields(t, top)
+	}
+	t.Setenv("FAKE_AGENT", mode)
+	t.Setenv("FAKE_AGENT_WORK", work)
+	var out bytes.Buffer
+	err := Run("resumed", []string{"--resume", "failed"}, &out, io.Discard)
+	if resumeReasonMismatch(err, why) {
+		t.Fatalf("resume: %v; want %q", err, why)
+	}
+	wantCalls := 2
+	if skippedE2ETurn(name) {
+		wantCalls = 1
+		if !strings.Contains(out.String(), "resume: no agent turn (") {
+			t.Fatalf("missing skip reason: %s", &out)
+		}
+	}
+	if calls := workerCalls(t, order); calls != wantCalls {
+		t.Fatalf("worker calls=%d, want %d", calls, wantCalls)
+	}
+	if name == "invalid_report" {
+		assertSavedReportReachedChecks(t, err, e2eReport(t, top, "resumed"))
+	}
+}
+
+func resumeReasonMismatch(err error, why string) bool {
+	return why == "" && err != nil || why != "" && (err == nil || !strings.Contains(err.Error(), why))
+}
+
+func skippedE2ETurn(name string) bool {
+	return name == "missing_session" || name == "old_bundle"
+}
+
+func assertSavedReportReachedChecks(t *testing.T, err error, resumed *verdict) {
+	t.Helper()
+	if resumed.node("agent").Result != "passed" || resumed.node("checks").Result != "failed" ||
+		resumed.FailedNode != "checks" || len(resumed.Units) != 1 || resumed.Units[0].TestFile != "a_test.sh" ||
+		strings.Contains(err.Error(), "no JSON object") || strings.Contains(err.Error(), "agent left no report") {
+		t.Fatalf("turn without worker JSON did not reach Checks with the saved report: %v; %+v", err, resumed)
 	}
 }
 

@@ -198,7 +198,8 @@ func (a agent) afterE2E(r *verdict, clone string, p resumePoint) (map[string]any
 		if _, err = placeSkill(clone, a.Harness, "ponytail"); err == nil {
 			stream, exit, cause, runErr := a.exec(clone, "ponytail", path, argv, stdin, false)
 			var invalid error
-			invalid, err = a.reported("worker", "ponytail", path, final, exit, cause, runErr, stream, p.SkillProved, testFile, ev)
+			invalid, err = a.reported("worker", "ponytail", path, final, exit, cause, runErr, stream,
+				p.SkillProved, testFile, ev)
 			ev["report"] = p.Report
 			if invalid != nil {
 				delete(ev, "exit")
