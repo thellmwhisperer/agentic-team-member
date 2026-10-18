@@ -39,7 +39,7 @@ var work = map[string]string{"fix": fixWork, "feature": fixWork, "greenfield": f
 // git, uses it, does $FAKE_AGENT_WORK or else the work of the brief's task type, and reports what that work
 // left in .atm/fake-report.json, or else fakeReport; fail
 // writes boom to stderr and exits 3; silent writes its pid to $FAKE_AGENT_PID and says nothing more;
-// quiet-then-work says nothing for 3 s, then works as the default fake does; killed
+// killed
 // SIGKILLs itself; no-report, no-test-file, no-skill, skill-error and wrong-skill each break the run one way; hang
 // starts a grandchild, whose pid goes to $FAKE_AGENT_PID, and never ends; hang-session does the same with the
 // grandchild in its own session; hang-orphan starts it in its own session through a child that exits at once,
@@ -118,13 +118,6 @@ func fakeAgentCLI(name string) int {
 			time.Sleep(20 * time.Millisecond)
 		}
 		return 3
-	}
-	if mode == "blank-lines" {
-		for range 6 {
-			fmt.Println()
-			time.Sleep(250 * time.Millisecond)
-		}
-		text = "Done, nothing to report."
 	}
 	if err := exec.Command("sh", "-c", todo).Run(); err != nil {
 		return 1
@@ -273,9 +266,6 @@ func fakeAgentMode(mode string) (int, bool) {
 		_ = os.WriteFile(os.Getenv("FAKE_AGENT_PID"), []byte(strconv.Itoa(os.Getpid())), 0o600)
 		time.Sleep(time.Hour)
 		return 0, true
-	case "quiet-then-work":
-		time.Sleep(3 * time.Second)
-		return 0, false
 	case "killed":
 		self, _ := os.FindProcess(os.Getpid())
 		_ = self.Kill()

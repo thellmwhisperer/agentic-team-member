@@ -75,11 +75,7 @@ func TestRunKillsTheAgentGroup(t *testing.T) {
 }
 
 func TestRunKeepsTheCauseOfTheAgentsDeath(t *testing.T) {
-	defer func(d time.Duration) { agentSilence = d }(agentSilence)
-	agentSilence = time.Second
 	for _, c := range []struct{ mode, exit, why, tail, atm string }{
-		{mode: "silent", exit: "silent for 1.0 s", why: "the agent said nothing for 1.0 s; ATM stopped it",
-			tail: "fake stderr"},
 		{mode: "fail", exit: "exit code 3", why: "exit code 3", tail: "boom"},
 		{mode: "empty-fail", exit: "exit code 3", why: "exit code 3"},
 		{mode: "killed", exit: "signal killed", why: "signal killed", tail: "fake stderr"},
@@ -113,11 +109,6 @@ func assertAgentDeath(t *testing.T, c struct{ mode, exit, why, tail, atm string 
 		t.Fatalf("report.json omitted empty tail: %v", n)
 	}
 	assertAgentStderr(t, c.mode, log)
-	if c.mode == "silent" {
-		b, _ := os.ReadFile(pidFile)
-		pid, _ := strconv.Atoi(string(b))
-		until(t, "the silent agent is dead", func() bool { return pid > 0 && !alive(pid) })
-	}
 }
 
 func assertAgentStderr(t *testing.T, mode, log string) {
@@ -130,8 +121,6 @@ func assertAgentStderr(t *testing.T, mode, log string) {
 }
 
 func TestRunKeepsTheLastTwentyLinesInCombinedOrder(t *testing.T) {
-	defer func(d time.Duration) { agentSilence = d }(agentSilence)
-	agentSilence = time.Second
 	root := repo(t, "https://example.com/owner/repo.git", atmYAML)
 	t.Setenv("FAKE_AGENT", "tail-sequence")
 	var out bytes.Buffer
@@ -153,44 +142,4 @@ func TestRunKeepsTheLastTwentyLinesInCombinedOrder(t *testing.T) {
 			t.Fatalf("non-agent node %q has a tail", name)
 		}
 	}
-}
-
-func TestRunCountsBlankAgentLinesAsActivity(t *testing.T) {
-	defer func(d time.Duration) { agentSilence = d }(agentSilence)
-	agentSilence = time.Second
-	root := repo(t, "https://example.com/owner/repo.git", atmYAML)
-	t.Setenv("FAKE_AGENT", "blank-lines")
-	var out bytes.Buffer
-	err := Run("t", []string{issueFile(t, issue)}, &out, io.Discard)
-	if err == nil || !strings.HasPrefix(err.Error(), "exit code 0; agent left no report") {
-		t.Fatalf("blank lines should prevent the silence stop: %v", err)
-	}
-	rep := readReport(t, filepath.Join(root, ".atm", "runs", "t", "report.json"))
-	tail, _ := reportNode(t, rep, "agent")["tail"].(string)
-	if !strings.Contains(tail, "\n\n") || strings.Contains(tail, "silent for") {
-		t.Fatalf("blank lines are missing from the tail or were treated as silence: %q", tail)
-	}
-}
-
-// The silence limit of every agent call is the larger of agentSilence and .atm.yaml's check_timeout, so an
-// agent running one of the repository's own checks commands is not stopped while it is inside that limit.
-func TestRunSilenceTakesTheLargerOfItsDefaultAndCheckTimeout(t *testing.T) {
-	defer func(d time.Duration) { agentSilence = d }(agentSilence)
-	agentSilence = time.Second
-	t.Run("an agent quiet for less than check_timeout runs on", func(t *testing.T) {
-		repo(t, "https://example.com/owner/repo.git", atmYAML+"check_timeout: 8s\n")
-		t.Setenv("FAKE_AGENT", "quiet-then-work")
-		var out bytes.Buffer
-		if err := Run("t", []string{issueFile(t, issue)}, &out, io.Discard); err != nil {
-			t.Fatalf("quiet for longer than the silence default but less than check_timeout: %v", err)
-		}
-		if end, _, _ := agentStep(t, &out); end["state"] != "passed" {
-			t.Fatalf("agent step: %v", end)
-		}
-	})
-	t.Run("an agent silent past check_timeout is stopped", func(t *testing.T) {
-		assertAgentDeath(t, struct{ mode, exit, why, tail, atm string }{mode: "silent",
-			exit: "silent for 3.0 s", why: "the agent said nothing for 3.0 s; ATM stopped it",
-			tail: "fake stderr", atm: atmYAML + "check_timeout: 3s\n"})
-	})
 }

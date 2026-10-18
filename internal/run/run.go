@@ -55,8 +55,7 @@ func Run(label string, args []string, out, summary io.Writer) (err error) {
 	if err != nil {
 		return err
 	}
-	a.Agent, a.root, a.dir, a.timeout, a.silence = c.Agent, root, runDir(root, label), time.Duration(c.AgentTimeout),
-		max(agentSilence, time.Duration(c.CheckTimeout))
+	a.Agent, a.root, a.dir, a.timeout = c.Agent, root, runDir(root, label), time.Duration(c.AgentTimeout)
 	r := a.verdict(out)
 	defer func() { r.resumable(a.dir); err = r.finish(err, summary) }()
 	var i Issue

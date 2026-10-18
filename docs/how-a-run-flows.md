@@ -33,7 +33,7 @@ A failed step stops the run; the steps after it are not run.
 | Issue | Reads the issue file or GitHub issue and its `Type:` | The issue cannot be read, or has no valid type |
 | Clone | Resolves `--base-ref` to a commit, clones the repository there into `.atm/clones/`, runs `install` | The ref, the clone or `install` fails |
 | Contract | Writes `brief.md`, the agent's contract | The brief cannot be written |
-| Agent | Runs the coding agent in the clone on the brief | It fails to complete successfully, times out, says nothing for 10 min, reaches outside its clone, does not prove use of the `ponytail` skill, or fails [report validation](#rejected-reports) |
+| Agent | Runs the coding agent in the clone on the brief | It fails to complete successfully, times out, reaches outside its clone, does not prove use of the `ponytail` skill, or fails [report validation](#rejected-reports) |
 | Checks | Prepares the clone, then install, the proof, test, optional e2e, typecheck and lint; see [Checks](#checks) | Cleanup, proof or a command fails, anything committed, or a [follow-up limit or mandatory gap](#follow-ups) blocks the run |
 | Slop detector | Lets a model cut the diff; keeps the cut only if every check still passes | Its agent fails, fails [report validation](#rejected-reports), or anything commits |
 | Delivery | Commits the work on a branch and runs the `delivery` command | The branch or the command fails. Skipped when `delivery` is empty |
@@ -352,7 +352,6 @@ and any further monitoring belong to that command or its launcher.
 | Reading a GitHub issue | 60 s |
 | Each checks command (`install`, `test`, `e2e`, `typecheck`, `lint`, a proof) | See [`check_timeout`](configuration.md#atmyaml) |
 | Each agent call, the slop detector's included | See [`agent_timeout`](configuration.md) |
-| An agent that writes nothing on stdout or stderr | The larger of 10 min and [`check_timeout`](configuration.md#atmyaml) |
 | The delivery command | none |
 
 Past its limit, or when the background process executing the run gets
