@@ -26,15 +26,13 @@ func TestDeliveryRunsOnTheAttachedTerminal(t *testing.T) {
 	in := make(chan Input, 1)
 	var raw bytes.Buffer
 	var after []string // the node events after the first raw output
+	var commandEnds int
 	end, err := Follow(top, o.Run, &[2]int{100, 30}, in, func(f Frame) {
 		if f.Raw != nil && raw.Len() == 0 {
 			in <- Input{Keys: []byte("hi\r")}
 		}
 		raw.Write(f.Raw)
-		var ev struct{ Step, State string }
-		if raw.Len() > 0 && json.Unmarshal(f.Event, &ev) == nil && ev.State != "" {
-			after = append(after, ev.Step+" "+ev.State)
-		}
+		recordTerminalEnd(f, raw.Len(), &after, &commandEnds)
 	})
 	if err != nil || end.Outcome != "passed" {
 		t.Fatalf("Follow = %+v, %v\n%s", end, err, raw.String())
@@ -47,7 +45,22 @@ func TestDeliveryRunsOnTheAttachedTerminal(t *testing.T) {
 	if len(after) != 1 || after[0] != "delivery passed" {
 		t.Fatalf("node events after the terminal output: %v", after)
 	}
+	if commandEnds != 1 || strings.Count(raw.String(), "got-hi") != 1 {
+		t.Fatalf("want one command end and one output: ends=%d, raw=%q", commandEnds, raw.String())
+	}
 	t.Run("off a terminal", func(t *testing.T) { offATerminal(t, top) })
+}
+
+func recordTerminalEnd(f Frame, bytes int, after *[]string, commandEnds *int) {
+	var ev struct{ Step, State, Check string }
+	if bytes > 0 && json.Unmarshal(f.Event, &ev) == nil && ev.State != "" {
+		if ev.Check == "command" && ev.State == "passed" {
+			*commandEnds++
+		}
+		if ev.Check == "" { // Sub-row states do not replace the parent node's end.
+			*after = append(*after, ev.Step+" "+ev.State)
+		}
+	}
 }
 
 func offATerminal(t *testing.T, top string) {

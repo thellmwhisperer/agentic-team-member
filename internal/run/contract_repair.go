@@ -62,7 +62,12 @@ func (a agent) repairBlocked(clone, base, tombs string, i Issue, root string, hi
 			break
 		}
 		last = findings
-		next, attempt, stop := a.oneRepair(clone, root, textOf(rec, "head"), i, history, c, round, findings)
+		var next string
+		var attempt repairAttempt
+		_, stop := row(liveIn(clone), "repair "+strconv.Itoa(round), func() (err error) {
+			next, attempt, err = a.oneRepair(clone, root, textOf(rec, "head"), i, history, c, round, findings)
+			return err
+		})
 		ev.Attempts = append(ev.Attempts, attempt)
 		if stop != nil {
 			err = stop
@@ -70,7 +75,10 @@ func (a agent) repairBlocked(clone, base, tombs string, i Issue, root string, hi
 			break
 		}
 		ev.Heads = append(ev.Heads, next)
-		rec, err = a.reviewed(clone, base, next, tombs, i)
+		_, err = row(liveIn(clone), "review "+strconv.Itoa(round+1), func() (err error) {
+			rec, err = a.reviewed(clone, base, next, tombs, i)
+			return err
+		})
 		_, stray, _ = selectable(err, rec, i.Text)
 		ev.keep(stray, optionalDrafts(rec))
 	}

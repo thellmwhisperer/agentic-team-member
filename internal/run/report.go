@@ -53,6 +53,13 @@ type node struct {
 	NetLines      *[2]int        `json:"net_lines,omitempty"`
 	Findings      any            `json:"findings,omitempty"`
 	RejectedFiles []rejectedFile `json:"rejected_files,omitzero"`
+	Rows          []partResult   `json:"rows,omitempty"`
+}
+
+type partResult struct {
+	Name   string `json:"name"`
+	Result string `json:"result"`
+	span
 }
 
 type rejectedFile struct {
@@ -215,6 +222,26 @@ type watcher interface{ watch(ev []byte) }
 
 // live hands ev, an event inside the node that runs, to the screen that watches the log, if one does.
 func (r *verdict) live(ev map[string]any) {
+	if name, _ := ev["check"].(string); r.at == "delivery" && name != "" {
+		switch name {
+		case "commit", "review", "repair 1", "review 2", "repair 2", "review 3", "command":
+		default:
+			return // A repair's checks belong to its repair row, not more Delivery rows.
+		}
+		n := r.node("delivery")
+		if ev["state"] == "started" {
+			n.Rows = append(n.Rows, partResult{Name: name, Result: "running",
+				span: span{StartedAt: time.Now().UTC().Format("2006-01-02T15:04:05.000Z07:00")}})
+		} else {
+			for j := range n.Rows {
+				if n.Rows[j].Name == name {
+					n.Rows[j].Result, _ = ev["state"].(string)
+					n.Rows[j].DurationMS, _ = ev["duration_ms"].(int64)
+				}
+			}
+		}
+		_ = r.write()
+	}
 	if w, ok := r.out.(watcher); ok {
 		ev["ts"], ev["step"] = time.Now().UTC().Format(time.RFC3339Nano), r.at
 		b, _ := json.Marshal(ev)
