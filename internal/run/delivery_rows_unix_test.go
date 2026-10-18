@@ -42,7 +42,10 @@ func TestDeliveryRowsThroughRealBinaryAndColdAttach(t *testing.T) {
 	bin := builtATM(t)
 	blocked := repairBlocked(t, "Retry once on a timeout.", "a.txt:1 never retries", nil)
 	repairEnv(t, []string{blocked, slicingJSON(t, slicingReport())}, []string{repairGrow})
-	top := repo(t, t.TempDir(), atmSet(repairATM(), "delivery", "echo delivery-output-once"))
+	// The real binary's serve binds at git's toplevel. t.TempDir can be another spelling of that
+	// directory (Darwin's /var, or any symlink); short() then cannot dial the socket.
+	top := gitT(t, repo(t, t.TempDir(), atmSet(repairATM(), "delivery", "echo delivery-output-once")),
+		"rev-parse", "--show-toplevel")
 	t.Setenv("FAKE_AGENT_CALL", filepath.Join(t.TempDir(), "call.json"))
 	now := time.Now()
 	if err := (lease{os.Getpid(), now, now}).write(top, "live"); err != nil {
