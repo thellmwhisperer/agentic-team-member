@@ -138,6 +138,11 @@ func parseArgs(args []string) (ordered []string, base, resume *string, a *agent,
 	return ordered, base, resume, a, err
 }
 
+// testedType says whether a task of type typ is proven with a test: a fix, feature, greenfield or tests task.
+func testedType(typ string) bool {
+	return typ == "fix" || typ == "feature" || typ == "greenfield" || typ == "tests"
+}
+
 // proof is how a unit was proven: on its base commit, with its test's content and task type.
 type proof struct {
 	base, test, typ, testContent string
@@ -263,7 +268,7 @@ func checkUnit(
 		return failed(err)
 	}
 	var testContent []byte
-	if test != "" && (typ == "fix" || typ == "feature" || typ == "greenfield" || typ == "tests") {
+	if test != "" && testedType(typ) {
 		testContent, err = os.ReadFile(filepath.Join(dir, test))
 		if err != nil {
 			return failed(err)

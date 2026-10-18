@@ -117,7 +117,7 @@ func restoreCut(clone, tree, why string, rejectedFiles []rejectedFile) ([]reject
 // the commands of those checks.
 func reprove(runDir, clone, base string, history []proof, c config.Config) (string, []unitResult, []cmdResult, error) {
 	for n, p := range history {
-		if p.missing || p.typ != "fix" && p.typ != "feature" && p.typ != "greenfield" && p.typ != "tests" {
+		if p.missing || !testedType(p.typ) {
 			continue
 		}
 		content, err := os.ReadFile(filepath.Join(clone, p.test))

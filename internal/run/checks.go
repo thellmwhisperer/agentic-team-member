@@ -26,12 +26,35 @@ import (
 	"github.com/thellmwhisperer/agentic-team-member/internal/config"
 )
 
+// unproven checks a unit with no report, so no test file, in clone for a task of type typ: it changed something,
+// a tests task changed only tests or docs, and no test shrank.
+func unproven(clone, typ string, c config.Config) error {
+	if _, err := git(clone, "add", "-A"); err != nil {
+		return err
+	}
+	changed, _, changeErr := changes(clone, typ, "")
+	if changeErr == nil && len(changed) == 0 {
+		changeErr = errors.New("no change to prove")
+	}
+	if changeErr == nil && typ == "tests" {
+		if p := first(changed, slices.Concat(c.TestPatterns, c.DocsPatterns), false); p != "" {
+			changeErr = fmt.Errorf("a tests task changed the source %s", p)
+		}
+	}
+	if changeErr == nil {
+		changeErr = shrunk(clone, changed, c.TestPatterns)
+	}
+	_, resetErr := git(clone, "reset", "-q")
+	return errors.Join(changeErr, resetErr)
+}
+
 // checks is the verdict on the agent's work in clone, at base commit sha, for a task of type typ whose report
 // names test: HEAD has not moved, the ignored files the agent made are gone, as delivery leaves them out, then
 // install, the type's proof, test, e2e, typecheck and lint pass, and HEAD has not
 // moved still. Install runs again before the proof: the agent may have changed dependencies. Each proof and
 // command is a row of the screen. Its result holds the proof's red and green trials.
-func checks(clone, runDir, sha, typ, test string, missingReport bool, c config.Config) (result map[string]any, err error) {
+func checks(clone, runDir, sha, typ, test string, missingReport bool,
+	c config.Config) (result map[string]any, err error) {
 	live := liveIn(clone)
 	var red, green try
 	var proofSpan span
@@ -76,29 +99,11 @@ func checks(clone, runDir, sha, typ, test string, missingReport bool, c config.C
 			return err
 		})
 		result["red"], result["green"], result["proof_span"] = red, green, proofSpan
-		if err != nil {
-			return result, err
-		}
 	} else {
-		if _, err = git(clone, "add", "-A"); err != nil {
-			return result, err
-		}
-		changed, _, changeErr := changes(clone, typ, "")
-		if changeErr == nil && len(changed) == 0 {
-			changeErr = errors.New("no change to prove")
-		}
-		if changeErr == nil && typ == "tests" {
-			if p := first(changed, slices.Concat(c.TestPatterns, c.DocsPatterns), false); p != "" {
-				changeErr = fmt.Errorf("a tests task changed the source %s", p)
-			}
-		}
-		if changeErr == nil {
-			changeErr = shrunk(clone, changed, c.TestPatterns)
-		}
-		_, resetErr := git(clone, "reset", "-q")
-		if err = errors.Join(changeErr, resetErr); err != nil {
-			return result, err
-		}
+		err = unproven(clone, typ, c)
+	}
+	if err != nil {
+		return result, err
 	}
 	for _, cmd := range [][2]string{{"test", c.Test}, {"e2e", c.E2E}, {"typecheck", c.Typecheck}, {"lint", c.Lint}} {
 		if err := run(cmd[0], cmd[1], coverFor(cover, cmd[0])...); err != nil {
