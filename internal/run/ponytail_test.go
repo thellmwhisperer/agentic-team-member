@@ -49,7 +49,10 @@ func TestRunPonytailFollowsTheChecks(t *testing.T) {
 			for _, want := range []string{"### Retry on timeout\n\nType: fix\nRetry once.", "-broken\n+fixed",
 				"`ponytail-review`", "`speculative_feature`", "no new files", "`git commit`",
 				"Never cut code that does what a sentence of the issue asks", `"issue_sentence"`,
-				"## SCOPE\n" + reachScope + "\n" + netScope} {
+				"## SCOPE\n" + reachScope + "\n" + netScope,
+				"- Writing or changing files through shell commands (heredocs, `cat >`, `sed -i`, `python -c` and the like). Use your edit and write tools.",
+				"- A URL inside any shell command. ATM ends the run on it, even with no network access. A URL may appear only in files written with your edit tools.",
+				"- Running a command in the background, or ending your turn while one runs. Run every command in the foreground. Your turn ends only with the report."} {
 				if !strings.Contains(brief, want) {
 					t.Errorf("brief-ponytail.md lacks %q:\n%s", want, b)
 				}
