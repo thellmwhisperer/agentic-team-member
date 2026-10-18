@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// Run 343-48's contract reviewer read its skill with `cat AGENTS.md <skill>/SKILL.md <other>/SKILL.md`: the clone
+// Run 343-48's reviewer read its skill with `cat AGENTS.md <skill>/SKILL.md <other>/SKILL.md`: the clone
 // had no AGENTS.md, so cat exited 1 with the whole SKILL.md in its output. A codex command that names the
 // skill's SKILL.md proves the skill once its output holds the skill's `name: <skill>` line, whatever its exit
 // code; one whose output lacks that line proves nothing, even when it exits 0.

@@ -24,12 +24,6 @@ type obj = map[string]any
 const fakeReport = "Done.\n{\"draft\": true}\n" + `{"test_file": "a_test.sh", "changed_files": ["a.txt"], ` +
 	`"summary": "s", "commands_run": [], "follow_ups": [{"title": "t", "red_test": "b_test.sh"}]}`
 
-const fakeSlicing = `{"disposition":"ready","reason":"One fulfilled contract","fields":{` +
-	`"non_goals":{"status":"present","reason":"Explicit exclusions"},` +
-	`"invariants":{"status":"present","reason":"Explicit invariants"},` +
-	`"acceptance":{"status":"present","reason":"Runnable check supplied"},` +
-	`"split_triggers":{"status":"present","reason":"Explicit triggers"}},"mandatory_pending":[],"drafts":[]}`
-
 // fixTest writes a test that a.txt, which repo's base commit has broken, is fixed and broken no longer.
 const fixTest = "; echo 'grep -q fixed a.txt && ! grep -q broken a.txt' > a_test.sh"
 
@@ -51,13 +45,9 @@ var work = map[string]string{"fix": fixWork, "feature": fixWork, "greenfield": f
 // grandchild in its own session; hang-orphan starts it in its own session through a child that exits at once,
 // so init adopts it. The ponytail pass plays the same with the ponytail-review skill,
 // $FAKE_PONYTAIL as its mode, $FAKE_PONYTAIL_WORK as its work and $FAKE_PONYTAIL_REPORT, or no findings, as
-// its report; its call goes to $FAKE_AGENT_CALL.ponytail. The contract review plays the same with $FAKE_REVIEW,
-// $FAKE_REVIEW_WORK and $FAKE_REVIEW_REPORT, or an approval, {base} and {head} in it its brief's; its call goes
-// to $FAKE_AGENT_CALL.review. A brief headed "# Contract repair" plays $FAKE_REPAIR, $FAKE_REPAIR_WORK
-// and $FAKE_REPAIR_REPORT, or the worker's report; its call goes to $FAKE_AGENT_CALL.repairN. Review reports
-// and repair work may be sequenced as FAKE_REVIEW_REPORT_N and FAKE_REPAIR_WORK_N. With FAKE_REVIEW_SCRATCH
-// set, the contract and scope reviewers also write into the scratch directory their brief names, by a tool
-// call naming its absolute path and through $TMPDIR. $FAKE_AGENT_ORDER, when
+// its report; its call goes to $FAKE_AGENT_CALL.ponytail. With FAKE_REVIEW_SCRATCH set, the scope reviewer
+// also writes into the scratch directory its brief names, by a tool call naming its absolute path and through
+// $TMPDIR. $FAKE_AGENT_ORDER, when
 // set, receives one line per call. $FAKE_AGENT_STREAM goes to its stdout after its first
 // line, <clone> in it its working directory.
 func fakeAgent(name string) int {
@@ -181,23 +171,13 @@ func fakeAgentKind(brief, typ string, mode *string) (skill, call, todo, text, ki
 		*mode = os.Getenv("FAKE_SCOPE")
 		skill, call, todo = "ponytail-review", ".scope", os.Getenv("FAKE_SCOPE_WORK")
 		text, kind = fakeScope(brief, *mode), "scope"
-	case strings.Contains(brief, "# Contract repair"):
-		skill, call, todo, text, kind = fakeRepair(mode)
-	case strings.Contains(brief, "# Contract review"):
-		*mode = os.Getenv("FAKE_REVIEW")
-		n := bump("review")
-		skill, call, kind = "ponytail-review", ".review", "review"
-		todo = cmp.Or(os.Getenv("FAKE_REVIEW_WORK_"+strconv.Itoa(n)), os.Getenv("FAKE_REVIEW_WORK"))
-		text = substituteBrief(brief, cmp.Or(os.Getenv("FAKE_REVIEW_REPORT_"+strconv.Itoa(n)),
-			os.Getenv("FAKE_REVIEW_REPORT"), defaultReview))
 	case strings.Contains(brief, "`ponytail-review`"):
 		*mode = os.Getenv("FAKE_PONYTAIL")
 		skill, call, kind = "ponytail-review", ".ponytail", "ponytail"
 		todo = os.Getenv("FAKE_PONYTAIL_WORK")
 		text = cmp.Or(os.Getenv("FAKE_PONYTAIL_REPORT"), `{"findings": [], "summary": "Lean already."}`)
 	}
-	if s := briefScratch(brief); s != "" && os.Getenv("FAKE_REVIEW_SCRATCH") != "" &&
-		(kind == "review" || kind == "scope") {
+	if s := briefScratch(brief); s != "" && os.Getenv("FAKE_REVIEW_SCRATCH") != "" && kind == "scope" {
 		todo = cmp.Or(todo, "true") + `; echo tickets > "` + s + `/tickets.txt"; echo tmp > "$TMPDIR/tmp.txt"`
 	}
 	saveKind(fakeKind{skill, call, todo, text, kind, *mode})
@@ -242,40 +222,6 @@ func continuedKind(brief string) (fakeKind, bool) {
 func kindPath() string {
 	wd, _ := os.Getwd()
 	return filepath.Join(os.TempDir(), "atm-fake-"+strings.NewReplacer("/", "_", "\\", "_").Replace(wd))
-}
-
-const defaultReview = `{"disposition": "approved", "base": "{base}", "head": "{head}", "findings": [], ` +
-	`"summary": "s", "task_slicing":` + fakeSlicing + `}`
-
-func substituteBrief(brief, raw string) string {
-	field := func(key string) string {
-		_, v, _ := strings.Cut(brief, "\n- "+key+": ")
-		v, _, _ = strings.Cut(v, "\n")
-		return v
-	}
-	return strings.NewReplacer("{base}", field("Base"), "{head}", field("HEAD")).Replace(raw)
-}
-
-func fakeRepair(mode *string) (skill, call, todo, text, kind string) {
-	*mode = os.Getenv("FAKE_REPAIR")
-	n := bump("repair")
-	return "ponytail", ".repair" + strconv.Itoa(n),
-		cmp.Or(os.Getenv("FAKE_REPAIR_WORK_"+strconv.Itoa(n)), os.Getenv("FAKE_REPAIR_WORK")),
-		cmp.Or(os.Getenv("FAKE_REPAIR_REPORT_"+strconv.Itoa(n)), os.Getenv("FAKE_REPAIR_REPORT"), fakeReport),
-		"repair"
-}
-
-func bump(kind string) int {
-	base := os.Getenv("FAKE_AGENT_CALL")
-	if base == "" {
-		return 1
-	}
-	path := base + "." + kind + ".n"
-	b, _ := os.ReadFile(path)
-	n, _ := strconv.Atoi(strings.TrimSpace(string(b)))
-	n++
-	_ = os.WriteFile(path, []byte(strconv.Itoa(n)), 0o600)
-	return n
 }
 
 func recordOrder(kind string) {

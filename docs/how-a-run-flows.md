@@ -1,8 +1,8 @@
 # How a run flows
 
 This page is what `atm run` does with an issue, step by step, and what makes
-each step fail. Models write the fix, cut the diff and review the commit
-against the issue before delivery; code enforces the step results. What you
+each step fail. Models write the fix and cut the diff; code enforces the step
+results. What you
 set before a run is in [Configuration](configuration.md).
 
 <picture>
@@ -36,7 +36,7 @@ A failed step stops the run; the steps after it are not run.
 | Agent | Runs the coding agent in the clone on the brief | It fails to complete successfully, times out, says nothing for 10 min, reaches outside its clone, does not prove use of the `ponytail` skill, or fails [report validation](#rejected-reports) |
 | Checks | Prepares the clone, then install, the proof, test, optional e2e, typecheck and lint; see [Checks](#checks) | Cleanup, proof or a command fails, anything committed, or a [follow-up limit or mandatory gap](#follow-ups) blocks the run |
 | Slop detector | Lets a model cut the diff; keeps the cut only if every check still passes | Its agent fails, fails [report validation](#rejected-reports), or anything commits |
-| Delivery | Commits the work on a branch, has the agent review the commit against the issue, and runs the `delivery` command | The branch, the review or the command fails. Skipped when `delivery` is empty |
+| Delivery | Commits the work on a branch and runs the `delivery` command | The branch or the command fails. Skipped when `delivery` is empty |
 
 Agent and Checks run again for each chained follow-up, at most three units in
 one run; see [Follow-ups](#follow-ups). For the configured delivery command, see [Delivery](#delivery).
@@ -74,7 +74,7 @@ For Hermes's ACP invocation and completion rules, see
 | `cursor` | `cursor-agent -p --output-format stream-json --trust --force --workspace <clone>`, then `--model <model>` when set and any `--harness-arg`s | as its last argument |
 
 For `claude`, ATM sets `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` for every
-agent call, including the slop detector and contract reviewer. It overrides
+agent call, including the slop detector. It overrides
 an inherited value or one passed with `--env`, so their turns wait for running
 commands to finish.
 
@@ -117,8 +117,8 @@ result text even if the process exits zero.
 For pi, an assistant `message_end` with `stopReason: "error"` and a nonempty
 `errorMessage` fails the step with `<exit>; pi: <errorMessage>; log: <path>`,
 preserving the provider's message verbatim, even with exit code zero. This
-applies to every pi agent step, including the worker, slop detector and
-contract reviewer, before skill-proof or report validation. A forbidden tool
+applies to every pi agent step, including the worker and slop detector,
+before skill-proof or report validation. A forbidden tool
 call still takes precedence. A later assistant `message_end` with
 `stopReason: "stop"`, `"length"` or `"toolUse"` clears the model error; the
 usual skill-proof and report checks then apply. ATM does not retry a model
@@ -134,8 +134,7 @@ the exact validation error:
 Your final message was rejected: <the exact validation error>. Reply with only the JSON object the brief asks for, nothing else.
 ```
 
-This applies to the worker, slop detector, contract reviewer, scope reviewer
-and contract repair worker. Pi keeps its session for this continuation. If
+This applies to the worker, slop detector and scope reviewer. Pi keeps its session for this continuation. If
 ATM has no session ID, or the harness is OpenCode or Hermes, the report
 failure ends the step without a return. A report that passes validation the
 first time is never returned. If the second report validates, the step uses
@@ -229,8 +228,8 @@ whitespace, list markers and a line's final punctuation are normalized.
 Other follow-ups go to `follow-ups.json` in the run's directory with their
 tests. Each accepted follow-up there has `"verified": true`.
 
-Before that next unit starts, a read-only reviewer, run like the
-[contract review](#delivery), compares the follow-up's `paths` plus its
+Before that next unit starts, a read-only reviewer compares the follow-up's
+`paths` plus its
 red test with the issue as the run first read it: its declared scope, non-goals
 and paths it reserves to another owner. Quoting a criterion widens none of
 them. The CoS must declare ownership reservations in the issue; ATM does not
@@ -248,7 +247,10 @@ fails. Any unplanned path fails the unit and saves a blocking child draft as
 for the budget below, with `cause` naming the unplanned and approved paths.
 The same comparison runs on resume; a saved approval must match the current
 proposal. See [resuming a failed run](configuration.md#resuming-a-failed-run)
-for the saved original issue and review evidence.
+for the saved original issue and review evidence. Each scope review call gets
+its own empty scratch directory under the run's directory, outside the clone,
+named in its brief and set as its `TMPDIR`; the files its checks write go there,
+never into the clone, which must not change.
 
 The run allows at most three units. Units after the first share a fixed
 200-line gross diff budget: additions plus deletions measured for each unit
@@ -323,73 +325,7 @@ When `delivery` is set, the clone goes on a new branch
 the next unit commit, and the clone's `origin` becomes the repository's. Every
 commit after the base must carry the repository's git identity.
 
-Then the agent, with the bundled `ponytail-review` and `task-slicing` skills,
-reviews read only the literal issue and the committed diff from the original
-base to that HEAD. Each contract or scope review call gets its own empty
-scratch directory under the run's directory, outside the clone, named in its
-brief and set as its `TMPDIR`; the files its checks write go there, never
-into the clone, which must not change. Both skills use the existing harness skill distribution;
-proof of loading `ponytail-review` remains required. Its final message
-must be a single JSON object reporting `approved` or `blocked`, with no
-surrounding text; approval requires no findings, and each block quotes the
-issue's criterion and its evidence in the diff.
-
-The same report must include `task_slicing`: a disposition, reason, results
-for all four [issue readiness fields](configuration.md#the-issue), pending
-mandatory requirements and local child drafts. ATM validates the report's
-fields, types and dispositions; it does not infer readiness from Markdown.
-`unready` and `split-required` block delivery without starting a repair round.
-Delivery requires both the original approval and a valid `ready` result with
-no mandatory work pending. Recording a mandatory requirement in a draft or
-an existing follow-up does not satisfy it.
-
-`contract-review.json` in the run's directory keeps the issue, base, HEAD,
-report and reason, including drafts outside the product branch. A split
-requires a draft with its cause, parent dependency and all ten
-[child contract fields](../internal/run/task-slicing/SKILL.md#local-child-contracts).
-An optional improvement outside the goal can remain a local draft without
-blocking fulfilled work; an unrelated change already in the diff still
-blocks. ATM neither publishes nor executes these drafts, and they do not use
-the worker's [follow-up format](#follow-ups).
-
-A valid `blocked` review of a `ready` issue can start a contract repair when
-a finding quotes a criterion or invariant from the original issue. ATM
-matches the quote against that issue with whitespace normalized. Findings
-without a matching quote never go to the repair worker; they remain for the
-owner or as optional improvements according to the review's drafts.
-
-Repairs use the existing worker harness and `ponytail` skill, one writer at a
-time. The worker receives only the selected original criteria and evidence,
-with instructions to make the minimal change, preserve tests, and only edit
-files. If the repair agent moves HEAD, the round fails for that reason before
-ATM checks files matching `test_patterns`. When HEAD is unchanged, ATM rejects
-changes to or deletion of existing files matching `test_patterns` and checks
-that saved proof test files retain their contents. Adding tests does not
-replace the saved proofs. It re-runs every unit's task-type proof and the
-configured checks through the existing checks machinery; `docs`, `chore` and
-`refactor` retain their own checks without requiring a proof test file.
-Failure stops delivery. A successful changed tree is committed using the
-repository's Git identity, then both review skills review the current commit
-again. Any repair invalidates the earlier approval. The slop detector's
-cut-only policy does not apply to contract repairs, which may add lines.
-
-There are at most two repair rounds total per run in this phase, even when
-successive findings cite different criteria. There is no third attempt or
-configuration to raise the limit. A report that still fails
-[report validation](#rejected-reports), including one naming another base or
-HEAD, a failed reviewer, or a reviewer that changes the clone or HEAD blocks
-delivery without starting a repair. With no `delivery` command,
-neither review, repair nor the command runs.
-
-The `repair` record in `contract-review.json` keeps the round count, reviewed
-commits and each attempt's starting commit, resulting commit when successful,
-criteria, result, repeated proofs and commands. Optional drafts and unmatched
-findings accumulate across rounds. A failed repair or a block remaining after
-repair also records the cause and a continuation draft for the owner. These
-records remain outside the product branch.
-
-Delivery requires fresh approval of the current commit and a clean working
-tree. Once approved, the command runs once with `sh -c` in the clone, without
+The command runs once with `sh -c` in the clone, without
 a time limit, with these variables:
 
 | Variable | Value |
@@ -437,7 +373,7 @@ it is on disk before delivery reads it.
 | `nodes` | Each step's `result` (`passed`, `failed`, `running`, `skipped` or `not run`), `started_at` (UTC, RFC 3339 with milliseconds) when its start is known, and `duration_ms` when it ends; the agent node also has `exit` and `tail` when the agent ran but its step failed. Checks includes an `e2e` row in `rows` when that command ran, passed or failed, with `name`, `result`, `started_at` and `duration_ms`. Delivery has `rows`, each with `name`, `result` (`running`, `passed` or `failed`), `started_at` and `duration_ms`, for each part that has started. |
 | `type` | The task type |
 | `units` | Each unit's number, base commit, test file, type, result, red/green proof row span, and red and green trials: command, exit code, last 60 lines, `started_at` and `duration_ms` |
-| `reproofs` | The latest repeated unit proofs and spans, after a kept cut or the latest contract repair attempt; successful delivery uses the approved commit's proofs |
+| `reproofs` | The latest repeated unit proofs and spans, after a kept cut |
 | `commands` | Every configured command that ran, the clone's `install` included, with its result, last 60 lines, `started_at` and `duration_ms` |
 | `head_sha` | The delivered branch's final commit |
 | `serve` | The version of the `atm serve` process that executed the run, from `buildinfo.String()`, for example `vA (aaa1111) 2026-10-15` |
@@ -510,11 +446,10 @@ the ATM box, a row per step with its icon (`○`
 pending, a spinner running, `⏸` waiting, `✓` passed, `✗` failed, `–` skipped), duration and
 note, and beside it, from 100 columns, the Agent box while an agent works,
 the Findings box with a failure or the slop detector's cuts, and the Log box.
-Like Checks, Delivery shows a sub-row per part that runs: `commit`, `review`,
-then `repair 1`, `review 2`, `repair 2` and `review 3` only for rounds that
-happen, and `command` only when the command starts. Each has its own live
-state and elapsed time. Completed runs restore these rows from `report.json`
-when attached, including failed reviews followed by a successful repair. The
+Like Checks, Delivery shows a sub-row per part that runs: `commit`, and
+`command` only when the command starts. Each has its own live state and
+elapsed time. Completed runs restore these rows from `report.json` when
+attached. The
 command row carries state and time only and does not repeat the command's
 output. The Delivery row becomes passed or failed when the command exits.
 An empty delivery command

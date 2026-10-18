@@ -17,7 +17,6 @@ func TestPiModelErrorReportsProviderMessage(t *testing.T) {
 	for _, step := range []struct{ name, skill string }{
 		{"worker", "ponytail"},
 		{"ponytail", "ponytail-review"},
-		{"contract-review", "ponytail-review"},
 	} {
 		for _, tc := range []struct {
 			name, messages, want string

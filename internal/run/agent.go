@@ -33,11 +33,10 @@ import (
 	"mvdan.cc/sh/v3/syntax"
 )
 
-// skills are the ponytail skills (github.com/DietrichGebert/ponytail, MIT) and task-slicing:
-// the implementing agent loads ponytail, the slop detector ponytail-review, and the contract reviewer both
-// ponytail-review and task-slicing.
+// skills are the ponytail skills (github.com/DietrichGebert/ponytail, MIT): the implementing agent loads
+// ponytail, the slop detector and the scope reviewer ponytail-review.
 //
-//go:embed ponytail/SKILL.md ponytail-review/SKILL.md task-slicing/SKILL.md
+//go:embed ponytail/SKILL.md ponytail-review/SKILL.md
 var skills embed.FS
 
 // skillDirs is where each harness finds a project skill; pi finds it where --skill points, under .atm/.
@@ -258,7 +257,7 @@ func (a agent) reported(name, skill, path, final, exit, cause string, runErr err
 
 // strict is the review each agent run, by its name without its unit number, whose final message must be a
 // single JSON object, nothing around it.
-var strict = map[string]string{"contract-review": "contract review", "scope-review-unit": "scope review"}
+var strict = map[string]string{"scope-review-unit": "scope review"}
 
 // finalReport is the report in the agent's final message, which check accepts.
 func finalReport(name, final string, check func(map[string]any) error) (map[string]any, error) {
