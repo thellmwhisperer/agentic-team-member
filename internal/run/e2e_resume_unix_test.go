@@ -330,7 +330,6 @@ func TestResumeE2ESafeguards(t *testing.T) {
 	for _, tc := range []struct{ name, mode, work, why string }{
 		{"commit", "", "git add a.txt; git commit -qm forbidden", "made commits"},
 		{"invalid_report", "no-report", "true", "e2e:"},
-		{"saved_skill_proof", "skill-error", "touch reached", ""},
 		{"missing_session", "", "true", "e2e:"},
 		{"old_bundle", "", "true", "e2e:"},
 	} {
@@ -401,7 +400,7 @@ func removeE2EResumeFields(t *testing.T, top string) {
 	if err != nil || json.Unmarshal(b, &saved) != nil {
 		t.Fatal("cannot read resume bundle", err)
 	}
-	for _, key := range []string{"session_id", "failed_row", "e2e_output", "skill_proved",
+	for _, key := range []string{"session_id", "failed_row", "e2e_output",
 		"agent", "harness_args", "env"} {
 		delete(saved, key)
 	}

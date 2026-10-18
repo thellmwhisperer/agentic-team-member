@@ -33,7 +33,7 @@ A failed step stops the run; the steps after it are not run.
 | Issue | Reads the issue file or GitHub issue and its `Type:` | The issue cannot be read, or has no valid type |
 | Clone | Resolves `--base-ref` to a commit, clones the repository there into `.atm/clones/`, runs `install` | The ref, the clone or `install` fails |
 | Contract | Writes `brief.md`, the agent's contract | The brief cannot be written |
-| Agent | Runs the coding agent in the clone on the brief | It fails to complete successfully, times out, reaches outside its clone, does not prove use of the `ponytail` skill, or fails [report validation](#rejected-reports) |
+| Agent | Runs the coding agent in the clone on the brief | It fails to complete successfully, times out, reaches outside its clone, or fails [report validation](#rejected-reports) |
 | Checks | Prepares the clone, then install, the proof, test, optional e2e, typecheck and lint; see [Checks](#checks) | Cleanup, proof or a command fails, anything committed, or a [follow-up limit or mandatory gap](#follow-ups) blocks the run |
 | Slop detector | Lets a model cut the diff; keeps the cut only if every check still passes | Its agent fails, fails [report validation](#rejected-reports), or anything commits |
 | Delivery | Commits the work on a branch and runs the `delivery` command | The branch or the command fails. Skipped when `delivery` is empty |
@@ -78,16 +78,9 @@ agent call, including the slop detector. It overrides
 an inherited value or one passed with `--env`, so their turns wait for running
 commands to finish.
 
-For native agents, ATM writes the bundled `ponytail` skill into the clone, outside git, and the
-agent's log must show it loaded under that exact name. For Codex, a
-`command_execution` naming the skill's `SKILL.md` proves use only when its
-`aggregated_output` contains an exact `name: <skill>` line, even if the command
-exits nonzero. A trailing `\r` is ignored, so CRLF output counts. Naming the
-path without that output line proves nothing, even with exit code zero.
-Other native agents still require a successful load. For Cursor,
-ATM installs it at `.cursor/skills/<skill>/SKILL.md` outside git; a successful
-`read` or direct `cat` of that file proves use. Hermes's skill delivery and
-proof are described in [Hermes](configuration.md#hermes). Every line the agent writes
+For native agents, ATM writes the bundled `ponytail` skill into the clone, outside git; for Cursor at
+`.cursor/skills/<skill>/SKILL.md`. Hermes's skill delivery is described in
+[Hermes](configuration.md#hermes). Every line the agent writes
 goes to `worker.jsonl`, and its stderr to `worker.stderr.txt` too, as it is
 written. Its report is the last JSON
 object of its final message and must name `test_file`: ATM never guesses
@@ -118,10 +111,10 @@ For pi, an assistant `message_end` with `stopReason: "error"` and a nonempty
 `errorMessage` fails the step with `<exit>; pi: <errorMessage>; log: <path>`,
 preserving the provider's message verbatim, even with exit code zero. This
 applies to every pi agent step, including the worker and slop detector,
-before skill-proof or report validation. A forbidden tool
+before report validation. A forbidden tool
 call still takes precedence. A later assistant `message_end` with
 `stopReason: "stop"`, `"length"` or `"toolUse"` clears the model error; the
-usual skill-proof and report checks then apply. ATM does not retry a model
+usual report checks then apply. ATM does not retry a model
 error or return it as a rejected report.
 
 ### Rejected reports
@@ -144,8 +137,8 @@ and parsing rules stay the same, and ATM does not repair the rejected report.
 The agent's `.jsonl` log records a `report_rejected` event with the exact
 error in `error`, even if continuation is unavailable or fails. Both
 attempts' output stays in that log, and both attempts' stderr stays in its
-companion `.stderr.txt` file. Process failures, timeouts, forbidden tool
-calls and missing skill proof fail without returning the report.
+companion `.stderr.txt` file. Process failures, timeouts and forbidden tool
+calls fail without returning the report.
 
 ## Checks
 
@@ -294,8 +287,7 @@ A chained unit, a `feature`, is a `feat`.
 ## Slop detector
 
 Once every unit passed, the same agent gets `brief-ponytail.md`, the issue and
-the run's diff, with the bundled `ponytail-review` skill, proven loaded the
-same way. It may only cut: delete, shrink, or swap in the standard library or
+the run's diff, with the bundled `ponytail-review` skill. It may only cut: delete, shrink, or swap in the standard library or
 an existing helper, in the diff's files, keeping every test. The required
 report format is in the [ponytail brief](../internal/run/brief-ponytail.md.tmpl).
 

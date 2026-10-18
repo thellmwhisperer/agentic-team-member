@@ -40,7 +40,7 @@ var work = map[string]string{"fix": fixWork, "feature": fixWork, "greenfield": f
 // left in .atm/fake-report.json, or else fakeReport; fail
 // writes boom to stderr and exits 3; silent writes its pid to $FAKE_AGENT_PID and says nothing more;
 // killed
-// SIGKILLs itself; no-report, no-test-file, no-skill, skill-error and wrong-skill each break the run one way; hang
+// SIGKILLs itself; no-report and no-test-file each break the run one way; hang
 // starts a grandchild, whose pid goes to $FAKE_AGENT_PID, and never ends; hang-session does the same with the
 // grandchild in its own session; hang-orphan starts it in its own session through a child that exits at once,
 // so init adopts it. The ponytail pass plays the same with the ponytail-review skill,
@@ -105,7 +105,7 @@ func fakeAgentCLI(name string) int {
 	if exit, done := fakeAgentMode(mode); done {
 		return exit
 	}
-	fakeAgentSkill(name, args, skill, mode)
+	fakeAgentSkill(name, args, skill)
 	scratchCall(name, map[bool]string{true: string(stdin), false: args[len(args)-1]}[name == "claude"])
 	if mode == "tail-sequence" {
 		for i := 1; i <= 22; i++ {
@@ -315,25 +315,18 @@ func fakeOrphanAgent() (int, bool) {
 	return 0, false
 }
 
-// fakeAgentSkill loads skill, its result an error in mode skill-error, and loads another skill whose name has
-// skill's as a prefix instead in mode wrong-skill.
-func fakeAgentSkill(name string, args []string, skill, mode string) {
+// fakeAgentSkill loads skill.
+func fakeAgentSkill(name string, args []string, skill string) {
 	dir := map[string]string{"claude": ".claude/skills/" + skill, "codex": ".agents/skills/" + skill,
 		"opencode": ".opencode/skills/" + skill, "pi": after(args, "--skill"),
 		"cursor-agent": ".cursor/skills/" + skill}[name]
 	path := dir + "/SKILL.md"
 	b, _ := os.ReadFile(path)
 	b = bytes.ReplaceAll(b, []byte("\r\n"), []byte("\n"))
-	if !bytes.Contains(b, []byte("name: "+skill+"\n")) || mode == "no-skill" ||
-		exec.Command("git", "check-ignore", "-q", path).Run() != nil {
+	if !bytes.Contains(b, []byte("name: "+skill+"\n")) || exec.Command("git", "check-ignore", "-q", path).Run() != nil {
 		return
 	}
-	if mode == "wrong-skill" {
-		skill, path = skill+"x", dir+"x/SKILL.md"
-	}
-	failed := mode == "skill-error"
-	exit := map[bool]int{true: 1}[failed]
-	output := map[bool]string{true: "name: " + skill + "\n"}[!failed] // a codex read proves only what it prints
+	failed, exit, output := false, 0, "name: "+skill+"\n"
 	for _, ev := range map[string][]obj{
 		"claude": {{"type": "assistant", "message": obj{"content": []obj{{"type": "tool_use", "id": "s1", "name": "Skill",
 			"input": obj{"skill": skill}}}}},
@@ -802,22 +795,7 @@ func TestRunDiesWhenTheAgentFails(t *testing.T) {
 		{harness: "pi", mode: "no-report", why: "exit code 0; agent left no report"},
 		{harness: "codex", mode: "no-report", why: "exit code 0; agent left no report"},
 		{harness: "opencode", mode: "no-test-file", why: "test_file"},
-		{harness: "claude", mode: "no-skill", why: "ponytail"},
-		{harness: "codex", mode: "no-skill", why: "ponytail"},
-		{harness: "opencode", mode: "no-skill", why: "ponytail"},
-		{harness: "pi", mode: "no-skill", why: "ponytail"},
-		{harness: "claude", mode: "skill-error", why: "ponytail"},
-		{harness: "codex", mode: "skill-error", why: "ponytail"},
-		{harness: "opencode", mode: "skill-error", why: "ponytail"},
-		{harness: "pi", mode: "skill-error", why: "ponytail"},
-		{harness: "claude", mode: "wrong-skill", why: "ponytail"},
-		{harness: "codex", mode: "wrong-skill", why: "ponytail"},
-		{harness: "opencode", mode: "wrong-skill", why: "ponytail"},
-		{harness: "pi", mode: "wrong-skill", why: "ponytail"},
 		{harness: "claude", why: "KEY=VALUE", args: []string{"--env", "NOVALUE"}},
-		{harness: "cursor", mode: "no-skill", why: "agent left no proof it used the ponytail skill"},
-		{harness: "cursor", mode: "skill-error", why: "ponytail"},
-		{harness: "cursor", mode: "wrong-skill", why: "ponytail"},
 	}
 	for _, c := range cases {
 		t.Run(c.harness+" "+c.mode+c.why, func(t *testing.T) {

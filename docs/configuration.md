@@ -63,8 +63,7 @@ process is `exec atm attach <run>` exits with the run.
 ### Cursor
 
 `atm doctor` checks `cursor-agent` on PATH, not the editor's `cursor`
-command. See [Agent](how-a-run-flows.md#agent) for the command ATM runs and
-how it checks skill use.
+command. See [Agent](how-a-run-flows.md#agent) for the command ATM runs.
 
 Cursor has no effort flag. Leave `effort` unset in every configuration layer
 and put it in a parameterized model, for example `model: 'grok[effort=high]'`.
@@ -97,9 +96,8 @@ If the required option is absent, ATM returns `cancelled`. Each answer is a
 line in the agent's log. Tool calls remain subject to the post-step check,
 including calls made without asking permission.
 
-The ponytail skill goes in the brief's text; the agent's report proves it
-with `"skill": "ponytail"`. The slop detector receives `ponytail-review` the
-same way and must report `"skill": "ponytail-review"`.
+The ponytail skill goes in the brief's text. The slop detector receives
+`ponytail-review` the same way.
 Hermes takes its model and effort from its own config: a non-empty effective
 `model` or `effort` after merging the layers fails before cloning with
 `hermes takes model and effort from its own config; unset them in .atm.yaml`.
@@ -264,7 +262,7 @@ agent's work in `.atm/runs/<label>/resume/`: `resume.json` (the issue argument
 and original issue text, the base commit, the failed unit's number, its agent
 report, the follow-up it chained with its scope review, pending follow-ups,
 earlier proofs, `gross_lines` accumulated before that unit, the failed row,
-its `e2e` output, and the agent's session, settings and skill proof) and
+its `e2e` output, and the agent's session and settings) and
 `work.bundle` (the commits of the units before it, then the failed unit's
 uncommitted work, new and binary files included, ignored files left
 out). Its `report.json` says `"resumable": true` and names the unit in
@@ -286,7 +284,7 @@ clone before Checks. The prompt is:
 > Checks failed at e2e: these changed lines are not executed by any end-to-end run of the real binary. Delete them, or write the end-to-end test that reaches them from a real command. Do not touch anything else.
 
 The saved `e2e` output follows it. The turn uses the Agent step's tools,
-guards and time limits, keeps the saved report and ponytail proof, and must
+guards and time limits, keeps the saved report, and must
 not commit. A missing or invalid worker report does not fail the turn.
 Its event is `agent turn after e2e`, with harness and duration; `--follow`
 prints its start and its result before Checks. Checks starts again at `install`.
