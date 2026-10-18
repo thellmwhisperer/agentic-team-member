@@ -729,9 +729,6 @@ func TestRunDiesWhenTheAgentFails(t *testing.T) {
 		args               []string
 	}{
 		{harness: "claude", mode: "fail", why: "exit code 3"},
-		{harness: "pi", mode: "no-report", why: "exit code 0; agent left no report"},
-		{harness: "codex", mode: "no-report", why: "exit code 0; agent left no report"},
-		{harness: "opencode", mode: "no-test-file", why: "test_file"},
 		{harness: "claude", why: "KEY=VALUE", args: []string{"--env", "NOVALUE"}},
 	}
 	for _, c := range cases {

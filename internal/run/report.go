@@ -53,6 +53,7 @@ type node struct {
 	Findings      any            `json:"findings,omitempty"`
 	RejectedFiles []rejectedFile `json:"rejected_files,omitzero"`
 	Rows          []partResult   `json:"rows,omitempty"`
+	Report        string         `json:"report,omitempty"` // missing when the agent's report never came
 }
 
 type partResult struct {

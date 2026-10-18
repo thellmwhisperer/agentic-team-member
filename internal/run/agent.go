@@ -149,8 +149,8 @@ func codexResume(argv []string, session string) []string {
 
 // run runs the agent on brief in clone with skill and returns its report, which check accepts. A report check
 // rejects is sent back once, in the same session, with that error; the step passes with the new report, and ev
-// records the rejection. A second rejection fails as the first did. Once it ran, a failure puts in ev how it
-// ended, its exit, and the last lines it wrote, its tail.
+// records the rejection. A second rejection fails as the first did, as a reportError. Once it ran, a failure
+// puts in ev how it ended, its exit, and the last lines it wrote, its tail.
 func (a agent) run(clone, name, skill, brief string, check func(map[string]any) error) (map[string]any, error) {
 	path := filepath.Join(a.dir, name+".jsonl")
 	ev := map[string]any{"log": path}
@@ -180,10 +180,13 @@ func (a agent) run(clone, name, skill, brief string, check func(map[string]any) 
 	argv, stdin, ok := a.resumeArgv(clone, dir, final, s.session, "Your final message was rejected: "+
 		invalid.Error()+". Reply with only the JSON object the brief asks for, nothing else.")
 	if !ok {
-		return ev, err
+		return ev, reportError{err}
 	}
 	s, exit, cause, err = a.exec(clone, path, argv, stdin, true)
-	_, err = a.reported(name, path, final, exit, cause, err, s, check, ev)
+	invalid, err = a.reported(name, path, final, exit, cause, err, s, check, ev)
+	if invalid != nil {
+		return ev, reportError{err}
+	}
 	if err != nil {
 		return ev, err
 	}
@@ -191,6 +194,11 @@ func (a agent) run(clone, name, skill, brief string, check func(map[string]any) 
 	delete(ev, "tail")
 	return ev, nil
 }
+
+// reportError is why an agent step failed when the agent ended cleanly but left its report missing or invalid.
+type reportError struct{ error }
+
+func (e reportError) Unwrap() error { return e.error }
 
 // reported reads the run's report into ev. invalid is a validation error, so the caller can return it once;
 // fatal is why the step fails, that error wrapped as today when the report is what failed.

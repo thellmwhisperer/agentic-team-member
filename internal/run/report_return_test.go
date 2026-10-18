@@ -36,7 +36,7 @@ func TestRejectedReportIsReturnedOnce(t *testing.T) {
 	}{
 		{name: "valid"},
 		{name: "returned", first: "not json", second: validWorker},
-		{name: "twice", first: "not json", second: `{"summary":"s"}`, wantErr: "agent report has no test_file"},
+		{name: "twice", first: "not json", second: `{"summary":"s"}`},
 	}
 	for _, harness := range []string{"claude", "codex", "pi", "cursor"} {
 		for _, c := range cases {
@@ -72,7 +72,7 @@ func assertReturnedReport(t *testing.T, harness, name, first, second, wantErr st
 	case "valid":
 		assertValidReport(t, harness, err, &out, workers, sent, agentCall(t, call).Args)
 	case "twice":
-		assertSecondError(t, err, wantErr, workers)
+		assertMissingReport(t, err, &out, workers, 2)
 	default:
 		assertOneReturn(t, harness, err, &out, workers, sent, agentCall(t, call).Args)
 	}
@@ -94,12 +94,30 @@ func assertValidReport(t *testing.T, harness string, err error, out *bytes.Buffe
 	}
 }
 
-func assertSecondError(t *testing.T, err error, wantErr string, workers int) {
+// assertMissingReport: a report still missing after its return does not end the run at its agent: the unit
+// goes to Checks with no test file, and report.json says report: missing.
+func assertMissingReport(t *testing.T, err error, out *bytes.Buffer, workers, want int) {
 	t.Helper()
-	if err == nil || !strings.Contains(err.Error(), wantErr) || strings.Contains(err.Error(), "no JSON object") ||
-		workers != 2 {
-		t.Fatalf("want the second error after one return, workers %d, got %v", workers, err)
+	end, _, _ := agentStep(t, out)
+	root := gitT(t, ".", "rev-parse", "--show-toplevel")
+	rep := readReport(t, filepath.Join(root, ".atm", "runs", "t", "report.json"))
+	n := reportNode(t, rep, "agent")
+	units, _ := rep["units"].([]any)
+	unit, _ := units[0].(map[string]any)
+	if end["state"] != "passed" || end["report"] != "missing" || n["report"] != "missing" || n["result"] != "passed" ||
+		unit["test_file"] != "" || rep["failed_node"] != "checks" || err == nil || workers != want {
+		t.Fatalf("want a missing report to reach Checks: workers %d, err %v, end %v, report %v", workers, err, end, rep)
 	}
+}
+
+func TestMissingReportWithoutAReturnReachesChecks(t *testing.T) {
+	repo(t, "https://example.com/owner/repo.git", atmYAML)
+	order := filepath.Join(t.TempDir(), "order")
+	t.Setenv("FAKE_AGENT_ORDER", order)
+	t.Setenv("FAKE_AGENT", "no-report")
+	var out bytes.Buffer
+	err := Run("t", []string{"--harness", "opencode", issueFile(t, issue)}, &out, io.Discard)
+	assertMissingReport(t, err, &out, workerCalls(t, order), 1)
 }
 
 func assertOneReturn(t *testing.T, harness string, err error, out *bytes.Buffer, workers int, sent string,
