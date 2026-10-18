@@ -150,7 +150,7 @@ func TestRemoveKeepsADirectoryThatReplacedTheSelectedClone(t *testing.T) {
 // takes its path. A is kept, B is untouched.
 func TestReleaseDecidesOnTheSelectedClone(t *testing.T) {
 	root := repo(t, "https://example.com/owner/repo.git", atmYAML)
-	a := oldClone(t, root, false, true, true)
+	a := oldClone(t, root, true, true)
 	b := filepath.Join(t.TempDir(), "b")
 	gitT(t, root, "clone", "-q", root, b)
 	gitT(t, b, "checkout", "-q", "-b", "atm/fix")
@@ -192,7 +192,7 @@ exec "$ATM_TEST_GIT" "$@"
 // A delivered clone whose branch is merged goes, with its sidecars, from the system temp directory.
 func TestReleaseRemovesAMergedClone(t *testing.T) {
 	root := repo(t, "https://example.com/owner/repo.git", atmYAML)
-	a := oldClone(t, root, false, true, false)
+	a := oldClone(t, root, true, false)
 	write(t, a+".pid", "1")
 	if err := release(a, ""); err != nil {
 		t.Fatal(err)
@@ -218,7 +218,7 @@ func TestReleaseKeepsCloneWhenHelperCannotStart(t *testing.T) {
 		return
 	}
 	root := repo(t, "https://example.com/owner/repo.git", atmYAML)
-	a := oldClone(t, root, false, true, false)
+	a := oldClone(t, root, true, false)
 	fakeGH(t, "CLOSED", false)
 	exe, err := os.Executable()
 	if err != nil {
@@ -248,7 +248,7 @@ func TestReleaseKeepsCloneWhenHelperCannotStart(t *testing.T) {
 
 func TestReleaseKeepsCloneWhenBranchQueryFails(t *testing.T) {
 	root := repo(t, "https://example.com/owner/repo.git", atmYAML)
-	a := oldClone(t, root, false, true, true)
+	a := oldClone(t, root, true, true)
 	fakeGitScript(t, `#!/bin/sh
 if [ "$1" = branch ]; then
 	printf '  atm/fix\n'

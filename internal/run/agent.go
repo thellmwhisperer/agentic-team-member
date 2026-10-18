@@ -54,7 +54,6 @@ type agent struct {
 	args, env []string
 	scratch   string // a read-only review's scratch directory, outside the clone: the one path its calls may reach
 	root, dir string
-	watcher   string        // the run's atm watch, which atm run --watcher names
 	follow    bool          // atm run --follow: the launching process watches the run itself
 	timeout   time.Duration // .atm.yaml's agent_timeout, 0 for agentTimeout
 	silence   time.Duration // the larger of agentSilence and check_timeout; 0 for agentSilence
@@ -367,9 +366,6 @@ func (a agent) exec(
 	}), a.env...)
 	if a.Harness == "claude" { // else a background command outlives its turn, and the run its report
 		cmd.Env = append(cmd.Env, "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1")
-	}
-	if err := inheritCloneLease(cmd, clone); err != nil {
-		return nil, "", "", err
 	}
 	s := &stream{skill: skill, live: relative(clone, liveIn(clone)), root: a.root, clone: clone,
 		scratch: a.scratch, heard: func() { quiet.Reset(silence) }}

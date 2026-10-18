@@ -27,7 +27,7 @@ func root() *cobra.Command {
 	c := &cobra.Command{Use: "atm", Short: "ATM fixes an issue in the repository it runs in",
 		Version: buildinfo.String(), SilenceErrors: true, SilenceUsage: true}
 	c.SetVersionTemplate("atm {{.Version}}\n")
-	c.AddCommand(runCmd(), watchCmd(), attachCmd(), listCmd(true), listCmd(false), axiCmd(), initCmd(), doctorCmd(),
+	c.AddCommand(runCmd(), attachCmd(), listCmd(true), listCmd(false), axiCmd(), initCmd(), doctorCmd(),
 		serveCmd(), updateCmd(), skillCmd())
 	return c
 }

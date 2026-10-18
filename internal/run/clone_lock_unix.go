@@ -7,14 +7,11 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"syscall"
 )
-
-func lockCloneShared(f *os.File) error { return syscall.Flock(int(f.Fd()), syscall.LOCK_SH) }
 
 // openCloneLock opens the lock at path, <parent>/<name>.lock, and selects the clone <parent>/<name> with it.
 func openCloneLock(path string) (*os.File, error) {
@@ -109,11 +106,6 @@ func tryLockCloneExclusive(f *os.File) (bool, error) {
 		return false, nil
 	}
 	return err == nil, err
-}
-
-func inheritCloneFile(cmd *exec.Cmd, f *os.File) error {
-	cmd.ExtraFiles = append(cmd.ExtraFiles, f)
-	return nil
 }
 
 func removeCloneDir(dir string) (bool, error) {

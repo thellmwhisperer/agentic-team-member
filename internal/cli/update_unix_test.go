@@ -168,10 +168,10 @@ func TestUpdateRefusesADevBuild(t *testing.T) {
 }
 
 func TestUpdateRefusesWhileARunGoes(t *testing.T) {
-	dir := setupConcurrentRunRepo(t)
-	watcher(t, dir, "w", 0)
+	setupConcurrentRunRepo(t)
+
 	_, release := setupBarrierAgent(t)
-	if out := atmIn(t, 0, "run", "--watcher", "w", "retry.md"); out != "retry-1\n" {
+	if out := atmIn(t, 0, "run", "retry.md"); out != "retry-1\n" {
 		t.Fatalf("atm run: %q", out)
 	}
 	target := filepath.Join(t.TempDir(), "atm")

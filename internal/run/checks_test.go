@@ -26,7 +26,7 @@ func atmSet(atm, key, value string) string {
 	return regexp.MustCompile(`(?m)^`+key+`:.*$`).ReplaceAllLiteralString(atm, key+": '"+value+"'")
 }
 
-func TestChecksStashSurvivesCloneSweep(t *testing.T) {
+func TestChecksRestoresItsStash(t *testing.T) {
 	root := repo(t, "https://example.com/owner/repo.git", atmYAML)
 	runDir := checksStashRunDir(t, root)
 	dir, sha := checksStashClone(t, root)
@@ -54,7 +54,6 @@ func TestChecksStashSurvivesCloneSweep(t *testing.T) {
 		}
 	}()
 	hidden := waitForChecksStashHidden(t, dir)
-	sweep(filepath.Join(root, ".atm", "clones"), "")
 	_, stashErr := os.Stat(filepath.Join(runDir, "checks-atm"))
 	if err := os.WriteFile(ready, nil, 0o600); err != nil {
 		t.Fatal(err)
@@ -64,7 +63,7 @@ func TestChecksStashSurvivesCloneSweep(t *testing.T) {
 		t.Fatal("Checks did not hide .atm")
 	}
 	if stashErr != nil {
-		t.Fatalf("sweep removed the Checks stash: %v", stashErr)
+		t.Fatalf("Checks stash missing: %v", stashErr)
 	}
 	if checksErr != nil {
 		t.Fatal(checksErr)

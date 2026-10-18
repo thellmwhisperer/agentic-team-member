@@ -92,17 +92,16 @@ cd /path/to/your/repo
 atm init     # writes .atm.yaml: fill in its commands and file patterns
 ```
 
-In the CoS session, start `atm watch` under its streaming monitor, which wakes
-the session for each output line. Keep it running there. After it prints
-`watching as w7k2`, start a separate command in that session:
+Run the repository checks, then start an issue:
 
 ```bash
 atm doctor
-atm run --watcher w7k2 280
+atm run 280 --follow
 ```
 
-Use the ID printed by `atm watch` in place of `w7k2`; a run can also take an
-issue file, such as `plans/retry.md`.
+`--follow` prints the run's events as JSON lines until it ends. Omit the flag
+for the terminal screen. A run can also take an issue file, such as
+`plans/retry.md`.
 
 `.atm.yaml` declares the repository's `install`, `test`, optional `e2e`,
 `typecheck` and `lint` commands, how to run one test, which files are tests
@@ -112,27 +111,26 @@ agent, model and effort. Both are in [Configuration](docs/configuration.md).
 | Command | Does |
 |---------|------|
 | `atm init` | Writes a commented `.atm.yaml` and ignores `.atm/` |
-| `atm doctor` | Checks that a run can start, a live watcher included |
+| `atm doctor` | Checks that a run can start |
 | `atm skill`, `atm skill install` | See [ATM's driving skill](docs/configuration.md#skill) |
-| `atm watch [--adopt <run>]` | Watches the runs bound to it until killed, one line per event; see [The watcher](docs/how-a-run-flows.md#the-watcher) |
-| `atm run --watcher <id> [flags] <issue>` | Runs an issue: a GitHub number or a file with a `Type:` line. Without a live watcher it does not start |
+| `atm run [flags] <issue>` | Runs an issue: a GitHub number or a file with a `Type:` line |
 | `atm run --resume <run>` | Runs a failed run's issue again from its agent's work; see [Resuming a failed run](docs/configuration.md#resuming-a-failed-run) |
 | `atm status` | The runs going |
 | `atm attach [run]` | A run's [screen and tool-call controls](docs/how-a-run-flows.md#the-screen); it quits when the run ends, or on q or Ctrl+C |
-| `atm runs` | Every retained run, its watcher and its report |
+| `atm runs` | Every retained run and its report |
 | `atm axi run`, `atm axi status`, `atm axi runs` | The same for programs, in TOON or JSON |
 | `atm axi plan <plan.json>` | Shows which plan tickets can launch; see [Following a plan](docs/configuration.md#following-a-plan) |
 
 A run goes on in the background: leaving its screen or closing the terminal
 does not stop it.
 
-For `atm run` without `--follow` and `atm axi run`; for `--follow` exit codes, see [Following one run](docs/how-a-run-flows.md#following-one-run):
+For `atm run`, including `--follow`, and `atm axi run`:
 
 | Exit | Meaning |
 |------|---------|
-| `0` | Every unit passed, Delivery passed or was skipped, and any observed no-mistakes gate reached merge; see [Delivery](docs/how-a-run-flows.md#delivery) |
+| `0` | Every unit passed and Delivery passed or was skipped; see [Delivery](docs/how-a-run-flows.md#delivery) |
 | `1` | A unit failed; nothing is delivered |
-| `2` | No live watcher; [serve build check](docs/how-a-run-flows.md#the-screen), configuration, issue, clone or contract failed; or a no-mistakes gate failed or its PR closed unmerged |
+| `2` | [serve build check](docs/how-a-run-flows.md#the-screen), configuration, issue, clone or contract failed |
 | `4` | Every unit passed, but Delivery failed, including its contract review |
 
 ## Read more

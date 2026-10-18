@@ -26,7 +26,7 @@ import (
 var githubURL = regexp.MustCompile(`^(?:[a-z][a-z0-9+.-]*://)?(?:[^/@]+@)?github\.com[:/]([^/]+/[^/]+?)(\.git)?/?$`)
 
 // Usage is atm run's command line.
-const Usage = "usage: atm run (--watcher id | --follow) [--base-ref r] [--harness h] [--model m] [--effort e] " +
+const Usage = "usage: atm run [--follow] [--base-ref r] [--harness h] [--model m] [--effort e] " +
 	"[--harness-arg a]... [--env KEY=VALUE]... <issue.md | issue number | --resume run>"
 
 // Run is atm run with args, its flags and the issue: a file, or an issue number of origin's repository.
@@ -62,7 +62,7 @@ func Run(label string, args []string, out, summary io.Writer) (err error) {
 	var i Issue
 	r.step("issue", func() (map[string]any, error) {
 		i, err = theIssue(from, args[len(args)-1], repo)
-		r.Type, r.Watcher = i.Type, a.watcher
+		r.Type = i.Type
 		ev := map[string]any{"title": i.Title, "type": i.Type}
 		if i.Number != 0 {
 			ev["number"] = i.Number
@@ -108,7 +108,6 @@ func theIssue(from *resumePoint, arg, repo string) (Issue, error) {
 
 func leave(r *verdict, dir, repo string) error {
 	if errors.Is(r.err, errUnmet) {
-		closeCloneLease(dir)
 		return nil
 	}
 	return release(dir, repo)
@@ -121,8 +120,7 @@ func parseArgs(args []string) (ordered []string, base, resume *string, a *agent,
 	base = fs.String("base-ref", "main", "the ref the run starts from, resolved in the repository")
 	resume = fs.String("resume", "", "a run that failed after its agent: its issue again, from its agent's work")
 	a = &agent{}
-	fs.StringVar(&a.watcher, "watcher", "", "the atm watch the run is bound to")
-	fs.BoolVar(&a.follow, "follow", false, "be the run's watcher and print its events as JSON until it ends")
+	fs.BoolVar(&a.follow, "follow", false, "print the run's events as JSON until it ends")
 	a.flags(fs)
 	// flag stops at the first argument that is not one: the issue, after which the flags go on.
 	for err = fs.Parse(args); err == nil && fs.NArg() > 0; err = fs.Parse(fs.Args()[1:]) {
@@ -596,9 +594,6 @@ func commandCtx(parent context.Context, stdin io.Reader, lockDir, dir, name stri
 	cmd := exec.CommandContext(ctx, name, args...)
 	var stderr bytes.Buffer
 	cmd.Dir, cmd.Stdin, cmd.Stderr, cmd.WaitDelay = dir, stdin, &stderr, time.Second
-	if err := inheritCloneLease(cmd, lockDir); err != nil {
-		return "", err
-	}
 	out, err := cmd.Output()
 	if ctx.Err() != nil && parent.Err() == nil {
 		err = fmt.Errorf("timed out after %s", Human(timeout))

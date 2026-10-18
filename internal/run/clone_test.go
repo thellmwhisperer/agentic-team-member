@@ -42,19 +42,6 @@ func clones(t *testing.T, root string) []string {
 	return names
 }
 
-func startTestCloneLease(dir string) error {
-	f, err := os.OpenFile(dir+".lock", os.O_RDWR, 0o600)
-	if err != nil {
-		return err
-	}
-	if err := lockCloneShared(f); err != nil {
-		_ = f.Close()
-		return err
-	}
-	cloneLeases.Store(dir, f)
-	return nil
-}
-
 func TestRunClonesBaseDetachedAndInstalls(t *testing.T) {
 	for _, c := range []struct {
 		name string
@@ -142,8 +129,8 @@ func TestClaimSuffixesRunsInTheSameSecond(t *testing.T) {
 	}
 }
 
-// oldClone is an earlier run's clone, optionally still held by a live process.
-func oldClone(t *testing.T, root string, live, delivered, ahead bool) string {
+// oldClone is an earlier run's clone.
+func oldClone(t *testing.T, root string, delivered, ahead bool) string {
 	t.Helper()
 	old := filepath.Join(root, ".atm", "clones", "atm-run-20261001-120000")
 	if delivered {
@@ -158,68 +145,5 @@ func oldClone(t *testing.T, root string, live, delivered, ahead bool) string {
 	} else if err := os.MkdirAll(old, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if live {
-		if err := os.WriteFile(old+".lock", nil, 0o600); err != nil {
-			t.Fatal(err)
-		}
-		if err := startTestCloneLease(old); err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { closeCloneLease(old) })
-	}
 	return old
-}
-
-func TestRunSweepsClonesNoRunNeeds(t *testing.T) {
-	cases := []struct {
-		name      string
-		live      bool   // the clone's run still runs
-		delivered bool   // the clone delivered branch atm/fix
-		ahead     bool   // atm/fix has a commit main lacks
-		pr        string // the PR's state on GitHub; empty is no GitHub
-		kept      bool
-	}{
-		{name: "run died", kept: false},
-		{name: "run alive", live: true, kept: true},
-		{name: "delivered and merged", delivered: true, kept: false},
-		{name: "delivered and not merged, no GitHub", delivered: true, ahead: true, kept: true},
-		{name: "delivered, PR open", delivered: true, ahead: true, pr: "OPEN", kept: true},
-		{name: "delivered, PR closed", delivered: true, ahead: true, pr: "CLOSED", kept: false},
-		{name: "delivered, PR merged", delivered: true, ahead: true, pr: "MERGED", kept: false},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			origin := "https://example.com/owner/repo.git"
-			if c.pr != "" {
-				origin = "https://github.com/owner/repo"
-			}
-			root := repo(t, origin, atmYAML)
-			var args string
-			if c.pr != "" {
-				args = fakeGH(t, c.pr, false)
-			}
-			old := oldClone(t, root, c.live, c.delivered, c.ahead)
-			var out bytes.Buffer
-			if err := Run("t", []string{issueFile(t, issue)}, &out, io.Discard); err != nil {
-				t.Fatal(err)
-			}
-			_, err := os.Stat(old)
-			if kept := err == nil; kept != c.kept {
-				t.Fatalf("kept = %v, want %v; left %v", kept, c.kept, clones(t, root))
-			}
-			if left := clones(t, root); !c.kept && len(left) != 0 {
-				t.Fatalf("a removed clone left files: %v", left)
-			}
-			if c.pr != "" {
-				if got, _ := os.ReadFile(args); string(got) != "pr view atm/fix --repo owner/repo --json state --jq .state" {
-					t.Fatalf("gh args: %q", got)
-				}
-			}
-			if c.live {
-				if err := release(old, ""); err != nil {
-					t.Fatal(err)
-				}
-			}
-		})
-	}
 }

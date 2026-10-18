@@ -21,10 +21,8 @@ import (
 func runCmd() *cobra.Command {
 	c := &cobra.Command{Use: "run", Short: "Fix an issue: " + run.Usage,
 		Long: "Without --follow, on a terminal the screen shows until the run ends or q or Ctrl+C.\n" +
-			"With --follow instead of --watcher, atm is the run's watcher and prints its events as JSON lines until " +
-			"it ends: exit 0 on merge, 1 on closure or run failure (also on interruption or no delivery), " +
-			"2 on launch failure. --follow cannot be combined with --resume; " +
-			"use atm watch --adopt <run> to reattach.", DisableFlagParsing: true,
+			"With --follow, print each run event as JSON until the run ends. Exit with the run's code.",
+		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			root, err := toplevel()
 			if err != nil {
@@ -46,7 +44,7 @@ func runCmd() *cobra.Command {
 			return attach(root, o.Run, cmd.OutOrStdout())
 		}}
 	// Publish the skill's flag in cobra too; run still owns argument parsing.
-	c.Flags().Bool("follow", false, "be the run's watcher and print its events as JSON until it ends")
+	c.Flags().Bool("follow", false, "print the run's events as JSON until it ends")
 	return c
 }
 
@@ -130,10 +128,7 @@ func listCmd(going bool) *cobra.Command {
 				how += " at " + o.FailedNode
 			}
 			n++
-			report, watcher := "", ""
-			if !going {
-				watcher = o.Watcher + "\t"
-			}
+			report := ""
 			if !going && o.Report != "" {
 				report = "\t" + o.Report
 			}
@@ -142,7 +137,7 @@ func listCmd(going bool) *cobra.Command {
 				serve = "\t" + o.ServeLabel()
 			}
 			_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s%s%s\n",
-				o.Run, how, o.Duration(), o.AgentLabel(), watcher+o.Issue, report, serve)
+				o.Run, how, o.Duration(), o.AgentLabel(), o.Issue, report, serve)
 		}
 		if n == 0 {
 			_, _ = fmt.Fprintln(w, map[bool]string{true: "nothing runs", false: "no run yet"}[going])

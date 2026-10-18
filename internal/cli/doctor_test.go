@@ -47,11 +47,11 @@ func lines(t *testing.T, out string) []string {
 
 func TestDoctorPassesWhenEveryCheckPasses(t *testing.T) {
 	for _, c := range []struct{ origin, want string }{
-		{"https://github.com/o/r.git", "ok git|ok claude|ok gh|ok .atm.yaml|ok watcher|skill"},
-		{"https://example.com/o/r.git", "ok git|ok claude|ok .atm.yaml|ok watcher|skill"},
+		{"https://github.com/o/r.git", "ok git|ok claude|ok gh|ok .atm.yaml|skill"},
+		{"https://example.com/o/r.git", "ok git|ok claude|ok .atm.yaml|skill"},
 	} {
 		t.Run(c.origin, func(t *testing.T) {
-			watcher(t, repo(t, c.origin), "w", 0)
+			repo(t, c.origin)
 			onPath(t, "claude", "gh")
 			if out, err := atm(t, "init"); err != nil {
 				t.Fatalf("atm init: %v\n%s", err, out)
@@ -92,8 +92,8 @@ func TestDoctorRunsEveryCheckAndFailsWhenAnyFails(t *testing.T) {
 		doctorRepoWithConfig(t, "test: go test ./...\n")
 		out, err := atm(t, "doctor")
 		ls := lines(t, out)
-		if len(ls) != 6 || !strings.HasPrefix(ls[3], "fail .atm.yaml") || !strings.Contains(ls[3], "lint") {
-			t.Fatalf("want 6 checks, .atm.yaml failing on lint, got\n%s", out)
+		if len(ls) != 5 || !strings.HasPrefix(ls[3], "fail .atm.yaml") || !strings.Contains(ls[3], "lint") {
+			t.Fatalf("want 5 checks, .atm.yaml failing on lint, got\n%s", out)
 		}
 		if run.ExitCode(err) == 0 {
 			t.Fatal("want a non-zero exit")
@@ -103,8 +103,8 @@ func TestDoctorRunsEveryCheckAndFailsWhenAnyFails(t *testing.T) {
 		doctorRepoWithConfig(t, "install: ''\ninstall: ''\n")
 		out, err := atm(t, "doctor")
 		ls := lines(t, out)
-		if len(ls) != 6 || !strings.HasPrefix(ls[3], "fail .atm.yaml") {
-			t.Fatalf("want six one-line checks and .atm.yaml failing, got\n%s", out)
+		if len(ls) != 5 || !strings.HasPrefix(ls[3], "fail .atm.yaml") {
+			t.Fatalf("want five one-line checks and .atm.yaml failing, got\n%s", out)
 		}
 		if run.ExitCode(err) == 0 {
 			t.Fatal("want a non-zero exit")
@@ -114,7 +114,7 @@ func TestDoctorRunsEveryCheckAndFailsWhenAnyFails(t *testing.T) {
 
 func TestDoctorChecksCursorAgentForCursor(t *testing.T) {
 	dir := repo(t, "https://example.com/o/r.git")
-	watcher(t, dir, "w", 0)
+
 	onPath(t, "claude", "cursor-agent")
 	if out, err := atm(t, "init"); err != nil {
 		t.Fatalf("atm init: %v\n%s", err, out)
@@ -136,7 +136,7 @@ func TestDoctorChecksCursorAgentForCursor(t *testing.T) {
 func doctorRepoWithConfig(t *testing.T, config string) string {
 	t.Helper()
 	dir := repo(t, "https://github.com/o/r.git")
-	watcher(t, dir, "w", 0)
+
 	onPath(t, "claude", "gh")
 	if err := os.WriteFile(filepath.Join(dir, ".atm.yaml"), []byte(config), 0o600); err != nil {
 		t.Fatal(err)

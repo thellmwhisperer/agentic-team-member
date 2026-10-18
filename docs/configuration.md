@@ -37,7 +37,7 @@ a `.atm.yaml` key there still fails.
 | Built-in defaults | the binary | `harness: claude` |
 | Your machine | `~/.config/atm/config.yaml` | `harness`, `model`, `effort` |
 | The repository | `.atm.yaml` at its root | keys in [`.atm.yaml`](#atmyaml) below |
-| One run | `atm run` flags | `--watcher`, [`--follow`](how-a-run-flows.md#following-one-run), `--base-ref`, `--harness`, `--model`, `--effort`, `--harness-arg`, `--env`, `--resume` |
+| One run | `atm run` flags | [`--follow`](how-a-run-flows.md#following-one-run), `--base-ref`, `--harness`, `--model`, `--effort`, `--harness-arg`, `--env`, `--resume` |
 
 ## `~/.config/atm/config.yaml`
 
@@ -175,13 +175,12 @@ Run repository commands from inside the repository they work on.
 | Command | Does |
 |---------|------|
 | `atm init` | Writes a commented `.atm.yaml` with every required key empty and no `e2e` key, unless `.atm.yaml` is already there, and adds `/.atm/` to `.gitignore` unless it is there. Run twice, it changes nothing |
-| `atm doctor [--agent]` | Checks git, the configured agent CLI on `PATH`, `gh` when `origin` is on GitHub, `.atm.yaml`, and whether an `atm watch` lease is alive. One `ok` or `fail` line per prerequisite; every check runs, and any prerequisite failure exits non-zero. It also reports the advisory [skill status](#skill). Its last line says `run atm doctor --agent to say hello to <harness>`: it makes no model call. With `--agent` it says hello instead, see [saying hello to the agent](#saying-hello-to-the-agent) |
+| `atm doctor [--agent]` | Checks git, the configured agent CLI on `PATH`, `gh` when `origin` is on GitHub, `.atm.yaml`. One `ok` or `fail` line per prerequisite; every check runs, and any prerequisite failure exits non-zero. It also reports the advisory [skill status](#skill). Its last line says `run atm doctor --agent to say hello to <harness>`: it makes no model call. With `--agent` it says hello instead, see [saying hello to the agent](#saying-hello-to-the-agent) |
 | `atm skill`, `atm skill install [--dir <path>] [--force]` | See [Skill](#skill) |
-| `atm watch [--adopt <run>]` | Watches runs bound to it until killed; see [the watcher](how-a-run-flows.md#the-watcher) |
-| `atm run --watcher <id> [flags] <issue>` | Starts a run bound to a live watcher. On a terminal it shows the run's screen until the run ends or q or Ctrl+C, then exits with the run's code; off one it prints the run's label and returns. See [the watcher](how-a-run-flows.md#the-watcher) and [resuming a failed run](#resuming-a-failed-run) |
+| `atm run [flags] <issue>` | Starts a run. On a terminal it shows the run's screen until the run ends or q or Ctrl+C, then exits with the run's code; off one it prints the run's label and returns. See [resuming a failed run](#resuming-a-failed-run) |
 | `atm status [--json]` | Each run going; text shows label, step, duration, agent and issue, or `nothing runs` |
 | `atm attach [run]` | The run's screen, the last one going by default; it quits when the run ends, or on q or Ctrl+C |
-| `atm runs [--json]` | Retained runs; text shows label, `running`, `passed` or `failed at <step>`, duration, agent, watcher, issue, report when present, and `serve` last |
+| `atm runs [--json]` | Retained runs; text shows label, `running`, `passed` or `failed at <step>`, duration, agent, issue, report when present, and `serve` last |
 | `atm axi run [--json] [flags] <issue>` | Waits for the run to end, prints its outcome and exits with its code |
 | `atm axi status [--json]`, `atm axi runs [--json]` | The runs going, or retained runs, as a table |
 | `atm axi plan [--json] [--follow] <plan.json>` | Which tickets of a plan can launch now; see [following a plan](#following-a-plan) |
@@ -227,7 +226,7 @@ model call. The plan is JSON:
 
 A ticket counts while its issue is open and not in `excluded`. It is going
 when its issue is open and its last run in `.atm/runs.jsonl` is `running` or
-`passed` (a gate or a PR not merged yet). A closed issue never blocks a
+`passed` (delivery completed, but the issue is still open). A closed issue never blocks a
 conflicting ticket, even if its last run still says `running`.
 It is ready when it has no `hold`,
 every dependency is closed (`depends_on` and each `#N` under the issue's
@@ -306,7 +305,7 @@ missing`, including for older runs that did not save it.
 
 ## The issue
 
-`atm run --watcher <id> 300` reads issue 300 with `gh issue view` from the repository
+`atm run 300` reads issue 300 with `gh issue view` from the repository
 `origin` names. `atm run plans/retry.md` reads a file: its first line is the
 title (leading `#` characters dropped), the rest the body.
 
@@ -349,11 +348,13 @@ ignores.
 
 A run's label is `<issue name>-<n>`, `n` counting the repository's runs; it is
 what `atm runs` shows. A run that delivered leaves `<clone>.delivered` with its
-branch and base. Each new run first tries to remove the clones of runs that are gone,
-except a delivered one whose branch is not merged into its base and whose PR
-`gh` does not report closed or merged. A clone a live process still uses is
-left in place. On Unix, cleanup also keeps a clone if it cannot verify that
-the locked clone is still the one at its original directory name. Cleanup
+branch and base. At its end, a run removes its own clone unless it kept
+resumable work or delivered a branch that is not merged and whose PR is
+still open or unknown. ATM does not sweep other runs' clones: abandoned
+clones and retained delivered clones remain for the owner to clean up.
+The cleanup lock is held only during removal; agents and delivery commands
+inherit no ownership of the clone. On Unix, cleanup keeps a clone if its
+original directory name now refers to a different directory. Cleanup
 rejects symlinks in the clone's parent path, including an inherited `TMPDIR`
 alias; on macOS, the system `/var` to `/private/var` alias is accepted when
 its ownership and permissions can be verified.

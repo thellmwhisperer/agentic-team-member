@@ -1,15 +1,13 @@
 ---
 name: atm
-description: Launch ATM runs, act on their streamed events, judge no-mistakes findings against the issue, and follow delivery through merge.
+description: Launch ATM runs, read their JSON events, and inspect their reports and delivery output.
 ---
 
 # Drive ATM
 
-Before the first run, run `atm doctor` in the project. Check `.atm.yaml`
-declares the project's checks and delivery command, and that `no-mistakes`
-is reachable on PATH. Resolve failing prerequisites except `fail watcher`
-when no watcher is alive: the followed launch below creates its own watcher,
-so that failure alone does not block it.
+Before the first run, run `atm doctor` in the project. Check that `.atm.yaml`
+declares the project's checks and delivery command. Resolve failing
+prerequisites before starting a run.
 
 Launch each ready issue with your harness's background-process facility:
 
@@ -17,32 +15,20 @@ Launch each ready issue with your harness's background-process facility:
 atm run <issue> --follow
 ```
 
-Keep one background process per run and consume its stdout as JSON lines.
-Keep the process alive through delivery and merge. Every line carries
-`time`, `run`, `issue` and `event`; act on each line for that run:
+Consume stdout as JSON lines until the process ends. Each line is a run
+event with `step` and `ts`. A step starts with `state: started` and ends with
+`state: passed` or `state: failed`; failures include `error`. Live events
+inside a step carry check results, agent activity or command `output`.
+The clone step's result includes `clone` and `sha`; delivery includes `branch`.
+Keep the run's report and delivery output for review.
 
-| Event | Meaning | Action |
-|-------|---------|--------|
-| `step` | A step starts; `step` names it. | Track progress and keep following. |
-| `delivery` | Delivery starts; `clone` gives its directory. | Keep the clone path for gate decisions. |
-| `gate_waiting` | The gate waits; `step`, `clone` and `findings` identify the decision. | Read each finding and the issue; respond to no-mistakes from that clone. |
-| `pr_opened` | `url` identifies the PR. | Read its diff and track its checks. |
-| `gate_fixing_ci` | `commit` names a CI repair by `sha` and `subject`. | Read the full commit and judge it against the issue before merge. |
-| `ci_green` | The PR's checks pass. | Verify every gate commit has been read and the issue's acceptance criteria still hold before merge. |
-| `stalled` | No new event; `minutes` measures the silence. | Inspect the run and gate for a pending decision or failure. |
-| `merged` | The PR merged; the process exits 0. | Record completion and launch the next ready issue. |
-| `closed` | The PR closed without merging; the process exits 1. | Investigate the closure before scheduling dependent issues. |
-| `run_failed` | The run or gate failed; `step` and `reason` explain it. | Read the failure, resolve its cause, and reconsider readiness. |
+ATM executes the configured delivery command without parsing its output or
+tracking its reviews, pull requests or merges. The launcher owns decisions
+and monitoring beyond the run, using the delivery tool's own interface.
+A successful run means that its checks and configured delivery completed;
+it does not imply that a pull request merged.
 
-For a gate decision, inspect `no-mistakes axi status` from the reported clone.
-Judge each finding against the issue's scope, acceptance criteria and
-invariants. Accept required fixes; explain why an irrelevant finding does
-not apply. Use no-mistakes' decision commands from that same clone, with the
-finding's ID and your reason. Do not approve findings without reading them.
-Read every gate commit's full diff before allowing merge, including repairs
-made after the initial review.
-
-Also inspect stderr and the process exit: launch failure exits 2 without an
-event; interruption or delivery without a PR can exit 1 without a final
-event. Interruption stops following, not the run. Reattach observation with
-`atm watch --adopt <run>` before continuing supervision.
+Inspect stderr and the process exit as well as events. Exit 0 means success,
+1 means an agent or checks failure, 4 means delivery failed, and 2 means
+another failure, including launch. Interruption exits 1 and stops following
+without stopping the run. Use `atm attach <run>` to see the run again.

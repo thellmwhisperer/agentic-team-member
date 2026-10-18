@@ -9,26 +9,22 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 )
 
-// clone sweeps root/.atm/clones, then claims a clone there of root at base's commit, detached, with install
+// clone claims a directory under root/.atm/clones at base's commit, detached, with install
 // run in it, whose result it returns when it ran. It returns the clone even when a later step fails, so the
 // caller can release it.
 //
-// Next to each clone, <clone>.lock guards cleanup while the run or an inheriting process holds it.
-// <clone>.delivered holds "<branch> <base>": what tells a later run whether the clone is still needed.
-
-var cloneLeases sync.Map
+// Next to each clone, <clone>.lock serializes cleanup. No child process inherits it.
+// <clone>.delivered holds "<branch> <base>": what tells cleanup whether the clone is still needed.
 
 func clone(root, base, install, repo string, live func(map[string]any)) (dir, sha string, ran []cmdResult, err error) {
 	if sha, err = git(root, "rev-parse", "--verify", base+"^{commit}"); err != nil {
 		return "", "", nil, fmt.Errorf("base ref %q: %w", base, err)
 	}
 	clones := filepath.Join(root, ".atm", "clones")
-	sweep(clones, repo)
 	if dir, err = claim(clones, time.Now()); err != nil {
 		return "", sha, nil, err
 	}
@@ -100,11 +96,6 @@ func claim(root string, now time.Time) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		if err = lockCloneShared(f); err != nil {
-			_ = f.Close()
-			_ = os.Remove(dir + ".lock")
-			return "", err
-		}
 		if err = os.Mkdir(dir, 0o755); err != nil {
 			_ = f.Close()
 			_ = os.Remove(dir + ".lock")
@@ -113,28 +104,8 @@ func claim(root string, now time.Time) (string, error) {
 			}
 			return "", err
 		}
-		cloneLeases.Store(dir, f)
+		_ = f.Close()
 		return dir, nil
-	}
-}
-
-// sweep tries to remove clones whose runs are gone, leaving any it cannot select or safely remove.
-func sweep(clones, repo string) {
-	entries, _ := os.ReadDir(clones) // none yet: nothing to sweep
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		dir := filepath.Join(clones, e.Name())
-		lock, locked, err := tryCloneExclusive(dir)
-		if err != nil || !locked {
-			continue
-		}
-		if kept(dir, repo, lock) {
-			_ = closeClone(lock)
-			continue
-		}
-		_ = remove(dir, lock)
 	}
 }
 
@@ -143,7 +114,6 @@ func release(dir, repo string) error {
 	if dir == "" {
 		return nil
 	}
-	closeCloneLease(dir)
 	lock, locked, err := tryCloneExclusive(dir)
 	if err != nil || !locked {
 		return err
