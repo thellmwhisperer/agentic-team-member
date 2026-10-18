@@ -13,8 +13,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/thellmwhisperer/agentic-team-member/internal/buildinfo"
 )
 
 // A uses the unchanged Serve implementation and has its launcher check removed.
@@ -26,12 +24,11 @@ func TestLauncherRejectsAnUnpatchedServeOfAnotherVersion(t *testing.T) {
 	buildVersionATM(t, b, "B", false)
 	for _, missing := range []bool{false, true} {
 		t.Run(fmt.Sprintf("missing-log-%t", missing), func(t *testing.T) {
-			top, _ := liveLease(t)
+			top := atmRepo(t)
 			wait, release := holdFakeAgents(t, 1)
 			old := startVersionServe(t, a, top)
-			watcher := "live"
 			path := issueFile(t, issue)
-			if out, err := versionLaunch(a, top, watcher, path); err != nil {
+			if out, err := versionLaunch(a, top, path); err != nil {
 				t.Fatalf("legacy launch: %s, %v", out, err)
 			}
 			wait()
@@ -46,7 +43,7 @@ func TestLauncherRejectsAnUnpatchedServeOfAnotherVersion(t *testing.T) {
 				writeFixture(t, filepath.Join(top, ".atm", "serve.log"),
 					"atm serve pid: 0\natm serve version: B (B) test-date\n")
 			}
-			out, err := versionLaunch(link, top, watcher, path)
+			out, err := versionLaunch(link, top, path)
 			want := "serve " + version + " is older than atm B (B) test-date"
 			if err == nil || !strings.Contains(string(out), want) {
 				t.Errorf("new launcher = %q, %v; want %q", out, err, want)
@@ -61,7 +58,7 @@ func TestLauncherRejectsAnUnpatchedServeOfAnotherVersion(t *testing.T) {
 			_ = old.Wait()
 			waitForDeadServer(t, top)
 			startVersionServe(t, b, top)
-			if out, err := versionLaunch(link, top, watcher, path); err != nil || string(out) != "issue-2\n" {
+			if out, err := versionLaunch(link, top, path); err != nil || string(out) != "issue-2\n" {
 				t.Fatalf("matching replacement launch: %s, %v", out, err)
 			}
 			checkVersionRun(t, top, "issue-2")
@@ -78,15 +75,6 @@ func checkVersionRun(t *testing.T, top, label string) {
 	if end, err := Attach(top, label, &bytes.Buffer{}); err != nil || end.Outcome != "passed" {
 		t.Fatalf("run %q was interrupted: %+v, %v", label, end, err)
 	}
-}
-
-func stampServeFixture(t *testing.T, top, version string) {
-	t.Helper()
-	v, c, d := buildinfo.Version, buildinfo.Commit, buildinfo.Date
-	t.Cleanup(func() { buildinfo.Version, buildinfo.Commit, buildinfo.Date = v, c, d })
-	buildinfo.Version, buildinfo.Commit, buildinfo.Date = version, version, "test-date"
-	writeFixture(t, filepath.Join(top, ".atm", "serve.log"), fmt.Sprintf(
-		"atm serve pid: %d\natm serve version: %s\n", os.Getpid(), buildinfo.String()))
 }
 
 func buildVersionATM(t *testing.T, bin, version string, base bool) {
@@ -164,10 +152,10 @@ func startVersionServe(t *testing.T, bin, top string) *exec.Cmd {
 	return cmd
 }
 
-func versionLaunch(bin, top, watcher, path string) ([]byte, error) {
+func versionLaunch(bin, top, path string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, bin, "run", "--watcher", watcher, path)
+	cmd := exec.CommandContext(ctx, bin, "run", path)
 	cmd.Dir = top
 	return cmd.CombinedOutput()
 }

@@ -38,7 +38,6 @@ type Outcome struct {
 	Issue      string         `json:"issue"`
 	Step       string         `json:"step"` // the last node it started
 	Agent      *AgentSettings `json:"agent,omitempty"`
-	Watcher    string         `json:"watcher,omitempty"` // the atm watch it is bound to
 	Started    time.Time      `json:"started"`
 	Ended      time.Time      `json:"ended"`
 	Serve      string         `json:"serve,omitempty"` // buildinfo.String() of the serve that executed it
@@ -78,11 +77,10 @@ func (o Outcome) Err() error {
 }
 
 type request struct {
-	Cmd     string   `json:"cmd"` // run, attach, runs or adopt
-	Args    []string `json:"args,omitempty"`
-	Run     string   `json:"run,omitempty"`
-	Watcher string   `json:"watcher,omitempty"` // the one that adopts Run
-	Size    *[2]int  `json:"size,omitempty"`    // the columns and rows of the terminal that attaches, if one does
+	Cmd  string   `json:"cmd"` // run, attach or runs
+	Args []string `json:"args,omitempty"`
+	Run  string   `json:"run,omitempty"`
+	Size *[2]int  `json:"size,omitempty"` // the columns and rows of the terminal that attaches, if one does
 }
 
 // Frame is a piece of a run's screen.
@@ -188,7 +186,6 @@ type bgRun struct {
 	ttys   int
 	size   [2]int
 	pty    *os.File
-	gone   bool // its watcher is, and its screen says so
 }
 
 // add puts f on r's screen. Under the server's lock.
@@ -253,7 +250,6 @@ func (s *server) shouldExit(c net.Conn, sock string, moved func() bool) bool {
 	}
 	if c == nil && s.busy() > 0 {
 		s.save() // runs.jsonl's time is when its runs last ran, should this process die before they end
-		s.unwatched()
 	}
 	if c == nil {
 		return s.handoff && s.busy() == 0 && s.handlers == 0
@@ -287,21 +283,6 @@ func changed() func() bool {
 		now, e := os.Stat(exe)
 		return err == nil && (e != nil || !os.SameFile(was, now) || now.Size() != was.Size() ||
 			!now.ModTime().Equal(was.ModTime()))
-	}
-}
-
-// unwatched tells each running run whose watcher died so, on its screen and in this process's log, once. Under
-// the server's lock.
-func (s *server) unwatched() {
-	for _, r := range s.runs {
-		if r.Ended.IsZero() && r.Watcher != "" && !r.gone && !Watching(s.root, r.Watcher) {
-			r.gone = true
-			line := "WATCHER GONE at " + time.Now().Format(time.TimeOnly) + ": no one is watching this run"
-			ev, _ := json.Marshal(map[string]any{"step": r.Step, "output": line,
-				"ts": time.Now().UTC().Format(time.RFC3339Nano)}) // the Log box's line
-			r.add(Frame{Line: &line, Event: ev})
-			fmt.Fprintln(os.Stderr, r.Run+": "+line)
-		}
 	}
 }
 
@@ -343,19 +324,6 @@ func (s *server) handle(c net.Conn) {
 		_ = enc.Encode(reply{Runs: runs})
 	case "attach":
 		s.attach(req, dec, enc)
-	case "adopt":
-		r := s.find(req.Run)
-		if r == nil {
-			_ = enc.Encode(reply{Error: "no run " + req.Run})
-			return
-		}
-		s.Lock()
-		s.unwatched()
-		r.Watcher, r.gone = req.Watcher, false
-		s.save()
-		o := r.Outcome
-		s.Unlock()
-		_ = enc.Encode(reply{Run: &o})
 	default:
 		_ = enc.Encode(reply{Error: "unknown request " + strconv.Quote(req.Cmd)})
 	}
@@ -396,9 +364,6 @@ func (s *server) start(args []string) (Outcome, error) {
 	r := &bgRun{more: make(chan struct{}),
 		Outcome: Outcome{Outcome: "running", Issue: issue, Started: time.Now(), Serve: buildinfo.String(),
 			Run: cmp.Or(strings.Trim(name, "-"), "run") + "-" + strconv.Itoa(n+1)}}
-	if _, _, _, a, err := parseArgs(args); err == nil {
-		r.Watcher = a.watcher
-	}
 	r.Report = filepath.Join(runDir(s.root, r.Run), "report.json")
 	if err := os.MkdirAll(filepath.Dir(r.Report), 0o755); err != nil {
 		return Outcome{}, err
@@ -422,12 +387,6 @@ func (s *server) run(r *bgRun, args []string) {
 	s.Lock()
 	defer s.Unlock()
 	o := &r.Outcome
-	s.unwatched()
-	if o.Report != "" && o.Step != "" {
-		if err := setReportWatcher(o.Report, r.Watcher); err != nil {
-			fmt.Fprintln(os.Stderr, "atm serve:", err)
-		}
-	}
 	o.Outcome, o.Ended, s.last = outcome(err), time.Now(), time.Now()
 	if err != nil {
 		o.Reason, _, _ = strings.Cut(err.Error(), "\n")
@@ -694,10 +653,7 @@ func Start(root string, args []string) (Outcome, error) {
 }
 
 func start(root string, args []string) (Outcome, error) {
-	args, _, resume, a, err := parseArgs(args)
-	if err == nil && !Watching(root, a.watcher) {
-		err = errNoWatcher
-	}
+	args, _, resume, _, err := parseArgs(args)
 	if err == nil && *resume != "" {
 		var p resumePoint
 		if p, err = resumeFrom(root, *resume); err == nil {
