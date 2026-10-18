@@ -266,7 +266,7 @@ commits fails the checks too.
 
 Resuming an `e2e` red gives the agent one turn in its saved session before
 Checks starts again at `install`. The turn receives the failed output and
-the two ways out above, with the Agent step's limits and guards. A second
+the two ways out above, with the Agent step's time limits. A second
 red stops the run. Other failures and sessions that cannot resume go straight
 to Checks with `resume: no agent turn (<reason>)`; see
 [Resuming a failed run](configuration.md#resuming-a-failed-run).

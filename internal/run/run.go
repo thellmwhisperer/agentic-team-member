@@ -32,7 +32,7 @@ const Usage = "usage: atm run (--watcher id | --follow) [--base-ref r] [--harnes
 // Run is atm run with args, its flags and the issue: a file, or an issue number of origin's repository.
 // Its report, briefs and logs go to .atm/runs/<label>/ (runDir): each node's start and end go to out, one JSON
 // object a line, and to report.json there; the summary goes to summary. ExitCode turns its error into atm's
-// exit code. With --resume, it picks up the work a failed run kept, from its failed unit's checks.
+// exit code. With --resume, it picks up the work a failed run kept.
 func Run(label string, args []string, out, summary io.Writer) (err error) {
 	args, base, resume, a, err := parseArgs(args)
 	if err != nil {
