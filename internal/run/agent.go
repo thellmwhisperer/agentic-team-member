@@ -1067,8 +1067,8 @@ func escapes(p string, allowed []string) bool {
 	return true
 }
 
-// shellWrites is what command writes to, as far as its words are literal: each output redirection's target, and
-// the paths a command that writes them names.
+// shellWrites is what command writes to: each output redirection's target, and the paths a command that writes
+// them names.
 func shellWrites(command string) (out []string) {
 	file, err := syntax.NewParser().Parse(strings.NewReader(command), "")
 	if err != nil {
@@ -1082,40 +1082,33 @@ func shellWrites(command string) (out []string) {
 				out = append(out, wordText(n.Word))
 			}
 		case *syntax.CallExpr:
-			out = append(out, callWrites(n)...)
+			var words []string
+			for _, a := range n.Args {
+				words = append(words, wordText(a))
+			}
+			out = append(out, commandWrites(words)...)
 		}
 		return true
 	})
 	return out
 }
 
-// callWrites is the paths call writes: every operand of tee, touch, mkdir, rm, rmdir, mv and the like, the last
-// of cp, ln, install and rsync, sed's and perl's files when in place, and what sh -c's command writes.
-func callWrites(call *syntax.CallExpr) []string {
-	var words []string
-	for _, a := range call.Args {
-		words = append(words, wordText(a))
-	}
-	return commandWrites(words)
-}
-
-func commandWrites(words []string) []string {
+// commandWrites is the paths a command's words write: every operand of tee, touch, mkdir, rm and the like, the last
+// of cp, ln, install and rsync, curl's and wget's output, sed's and perl's files when in place, and what a command
+// it runs writes.
+func commandWrites(words []string) (out []string) {
 	if len(words) == 0 {
 		return nil
 	}
 	switch path.Base(words[0]) {
-	case "command", "exec", "env": // what the command it runs, past its options and assignments, writes
-		var out []string
+	case "command", "exec", "env": // past their options and assignments
 		for i := 1; i < len(words); i++ {
 			out = append(out, commandWrites(words[i:])...)
 		}
-		return out
-	case "sh", "bash", "zsh": // what the command -c gives writes
-		var out []string
+	case "sh", "bash", "zsh": // -c's command
 		for _, w := range words[1:] {
 			out = append(out, shellWrites(w)...)
 		}
-		return out
 	case "tee", "touch", "mkdir", "rm", "rmdir", "mv", "truncate", "unlink":
 		return words[1:] // an option is never an absolute path
 	case "cp", "ln", "install": // the last word, or the -t directory
@@ -1127,7 +1120,7 @@ func commandWrites(words []string) []string {
 	case "sed", "perl":
 		return editWrites(words)
 	}
-	return nil
+	return out
 }
 
 // flagged is the values words give any of flags, as the next word or attached.
