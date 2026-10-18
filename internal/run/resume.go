@@ -166,7 +166,11 @@ func (a agent) resumeUnit(r *verdict, root, clone string, p resumePoint,
 
 // afterE2E uses the saved worker's session once; old bundles keep the original resume behaviour.
 func (a agent) afterE2E(r *verdict, clone string, p resumePoint) (map[string]any, error) {
-	ev := map[string]any{"report": p.Report, "session_id": p.Session}
+	var savedReport any = p.Report
+	if p.Report == nil {
+		savedReport = "missing"
+	}
+	ev := map[string]any{"report": savedReport, "session_id": p.Session}
 	path := filepath.Join(a.dir, "agent-after-e2e.jsonl")
 	final := filepath.Join(a.dir, "agent-after-e2e.final.md")
 	prompt := "Checks failed at e2e: these changed lines are not executed by any end-to-end run of the real binary. " +
@@ -197,7 +201,7 @@ func (a agent) afterE2E(r *verdict, clone string, p resumePoint) (map[string]any
 			stream, exit, cause, runErr := a.exec(clone, path, argv, stdin, false)
 			var invalid error
 			invalid, err = a.reported("worker", path, final, exit, cause, runErr, stream, testFile, ev)
-			ev["report"] = p.Report
+			ev["report"] = savedReport
 			if invalid != nil {
 				delete(ev, "exit")
 				delete(ev, "tail")

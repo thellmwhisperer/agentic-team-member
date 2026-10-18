@@ -70,7 +70,7 @@ func checks(clone, runDir, sha, typ, test string, missingReport bool, c config.C
 	if err != nil {
 		return result, err
 	}
-	if !missingReport {
+	if !missingReport || typ == "refactor" || typ == "docs" || typ == "chore" {
 		proofSpan, err = row(live, proofs[typ], func() (err error) {
 			red, green, err = prove(clone, typ, filepath.ToSlash(test), c)
 			return err
@@ -84,6 +84,11 @@ func checks(clone, runDir, sha, typ, test string, missingReport bool, c config.C
 			return result, err
 		}
 		changed, _, changeErr := changes(clone, typ, "")
+		if changeErr == nil && typ == "tests" {
+			if p := first(changed, slices.Concat(c.TestPatterns, c.DocsPatterns), false); p != "" {
+				changeErr = fmt.Errorf("a tests task changed the source %s", p)
+			}
+		}
 		if changeErr == nil {
 			changeErr = shrunk(clone, changed, c.TestPatterns)
 		}
