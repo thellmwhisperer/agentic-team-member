@@ -84,6 +84,9 @@ func checks(clone, runDir, sha, typ, test string, missingReport bool, c config.C
 			return result, err
 		}
 		changed, _, changeErr := changes(clone, typ, "")
+		if changeErr == nil && len(changed) == 0 {
+			changeErr = errors.New("no change to prove")
+		}
 		if changeErr == nil && typ == "tests" {
 			if p := first(changed, slices.Concat(c.TestPatterns, c.DocsPatterns), false); p != "" {
 				changeErr = fmt.Errorf("a tests task changed the source %s", p)
