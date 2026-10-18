@@ -1,6 +1,7 @@
 package run
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -8,6 +9,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/thellmwhisperer/agentic-team-member/internal/config"
 )
 
 // resumePoint is what a run that fails after its agent keeps in resume/, in its directory, for atm run
@@ -25,8 +28,15 @@ type resumePoint struct {
 	Pending  []followUp     `json:"pending"`
 	Proofs   [][4]string    `json:"proofs"` // each unit's before: its base, test, type and test content
 	// Gross is the lines, added plus deleted, of the units after the first, before Unit.
-	Gross int    `json:"gross_lines"`
-	run   string // the run that kept it
+	Gross       int          `json:"gross_lines"`
+	run         string       // the run that kept it
+	FailedRow   string       `json:"failed_row,omitempty"`
+	E2EOutput   string       `json:"e2e_output,omitempty"`
+	Session     string       `json:"session_id,omitempty"`
+	SkillProved bool         `json:"skill_proved,omitempty"`
+	Agent       config.Agent `json:"agent,omitempty"`
+	Args        []string     `json:"harness_args,omitempty"`
+	Env         []string     `json:"env,omitempty"`
 }
 
 // keepWork writes p and the work in clone, on HEAD, to resume/ in the run's directory dir. The work leaves the
@@ -112,10 +122,87 @@ func (r *verdict) keep(dir, clone string, p resumePoint, n int, report map[strin
 // run's directory dir, which it removes otherwise.
 func (r *verdict) resumable(dir string) {
 	if r.saved != 0 && slices.Contains([]string{"checks", "ponytail", "delivery"}, r.FailedNode) {
-		r.Resumable, r.ResumableUnit = true, r.saved
+		path := filepath.Join(dir, "resume", "resume.json")
+		b, err := os.ReadFile(path)
+		var p resumePoint
+		r.Resumable = err == nil && json.Unmarshal(b, &p) == nil
+		if r.Resumable {
+			for _, cmd := range r.Commands {
+				if r.FailedNode == "checks" && cmd.Result == "failed" {
+					p.FailedRow = cmd.Name
+					if cmd.Name == "e2e" {
+						p.E2EOutput = cmd.Tail
+					}
+				}
+			}
+			b, _ = json.MarshalIndent(p, "", "  ")
+			r.Resumable = os.WriteFile(path, append(b, '\n'), 0o644) == nil
+		}
+		if r.Resumable {
+			r.ResumableUnit = r.saved
+		}
 		return
 	}
 	_ = os.RemoveAll(filepath.Join(dir, "resume"))
+}
+
+func (p *resumePoint) worker(a agent, ev map[string]any) {
+	p.Agent, p.Args, p.Env = a.Agent, a.args, a.env
+	p.Session, _ = ev["session_id"].(string)
+	p.SkillProved, _ = ev["skill_proved"].(bool)
+}
+
+func (a agent) resumeUnit(r *verdict, root, clone string, p resumePoint,
+	keep *resumePoint) (head string, ev map[string]any, err error) {
+	if err = before(clone); err == nil { // the work it puts back leaves the ignored files out
+		head, err = putBack(root, clone, p)
+	}
+	if err == nil {
+		a.Agent, a.args, a.env = p.Agent, p.Args, p.Env
+		ev, err = a.afterE2E(r, clone, p)
+		ev["resumed_from"] = p.run
+		keep.worker(a, ev)
+	}
+	return head, ev, err
+}
+
+// afterE2E uses the saved worker's session once; old bundles keep the original resume behaviour.
+func (a agent) afterE2E(r *verdict, clone string, p resumePoint) (map[string]any, error) {
+	ev := map[string]any{"report": p.Report, "session_id": p.Session, "skill_proved": p.SkillProved}
+	path := filepath.Join(a.dir, "agent-after-e2e.jsonl")
+	final := filepath.Join(a.dir, "agent-after-e2e.final.md")
+	prompt := "Checks failed at e2e: these changed lines are not executed by any end-to-end run of the real binary. " +
+		"Delete them, or write the end-to-end test that reaches them from a real command. " +
+		"Do not touch anything else.\n" + p.E2EOutput
+	argv, stdin, ok := a.resumeArgv(clone, filepath.Join(clone, skillDirs[a.Harness], "ponytail"),
+		final, p.Session, prompt)
+	reason := ""
+	switch {
+	case p.FailedRow != "e2e":
+		reason = "failed row is " + cmp.Or(p.FailedRow, "unknown")
+	case p.Session == "":
+		reason = "no saved session id"
+	case !ok:
+		reason = "harness " + a.Harness + " cannot resume"
+	}
+	if reason != "" {
+		message := "resume: no agent turn (" + reason + ")"
+		r.emit("agent", map[string]any{"message": message, "output": message})
+		return ev, nil
+	}
+	const turn = "agent turn after e2e"
+	// The screen logs this event inside Agent; it is not a new pipeline step.
+	r.emit(turn, map[string]any{"state": "started", "harness": a.Harness, "output": turn})
+	var err error
+	s := timed(func() {
+		if _, err = placeSkill(clone, a.Harness, "ponytail"); err == nil {
+			stream, exit, cause, runErr := a.exec(clone, "ponytail", path, argv, stdin, false)
+			_, err = a.reported("worker", "ponytail", path, final, exit, cause, runErr, stream, p.SkillProved, testFile, ev)
+		}
+	})
+	r.emit(turn, map[string]any{"state": outcome(err), "harness": a.Harness,
+		"started_at": s.StartedAt, "duration_ms": s.DurationMS})
+	return ev, err
 }
 
 // putBack puts the work run p kept in clone, at p's base: the units' commits, then the failed unit's work,

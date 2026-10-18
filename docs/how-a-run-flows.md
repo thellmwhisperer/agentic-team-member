@@ -65,8 +65,9 @@ lease file behind, but its dead PID makes the watcher no longer alive.
 If the lease cannot be created, no run starts.
 
 `--follow` with `--watcher` fails before launch, since the follow process is
-the run's watcher. `--follow` with `--resume` fails too: follow a resumed or
-running run with `atm watch --adopt <run>`. A launch failure prints its reason
+the run's watcher. `--follow --resume <run>` starts and follows a new run from
+that failed run's saved work. To follow an existing run, use
+`atm watch --adopt <run>`. A launch failure prints its reason
 on stderr and exits 2, with no event.
 
 Its stdout carries only JSON lines, one per event, also on a terminal; it shows
@@ -76,7 +77,7 @@ failed and is retried, go to stderr. Every line has `time` (RFC 3339, UTC),
 
 | `event` | Fields | When |
 |---------|--------|------|
-| `step` | `step` | A step starts |
+| `step` | `step`; `harness` for `agent turn after e2e`; `message` for a skipped resume turn | A step starts, or resume explains why it sends no agent turn |
 | `delivery` | `clone` | Delivery starts, right after its `step` |
 | `gate_waiting` | `step`, `clone`, `findings` (`id`, `severity`, `file`, `description` each) | The gate waits at a step for approval or a decision, once per new wait |
 | `pr_opened` | `url` | The PR is first seen |
@@ -120,7 +121,7 @@ a delivery command that has started a gate: see [Delivery](#delivery).
 | Clone | Resolves `--base-ref` to a commit, clones the repository there into `.atm/clones/`, runs `install` | The ref, the clone or `install` fails |
 | Contract | Writes `brief.md`, the agent's contract | The brief cannot be written |
 | Agent | Runs the coding agent in the clone on the brief | It fails to complete successfully, times out, says nothing for 10 min, reaches outside its clone, does not prove use of the `ponytail` skill, or fails [report validation](#rejected-reports) |
-| Checks | Prepares the clone and runs the proof and configured commands; see [Checks](#checks) | Cleanup, proof or a command fails, anything committed, or a [follow-up limit or mandatory gap](#follow-ups) blocks the run |
+| Checks | Prepares the clone, then install, the proof, test, optional e2e, typecheck and lint; see [Checks](#checks) | Cleanup, proof or a command fails, anything committed, or a [follow-up limit or mandatory gap](#follow-ups) blocks the run |
 | Slop detector | Lets a model cut the diff; keeps the cut only if every check still passes | Its agent fails, fails [report validation](#rejected-reports), or anything commits |
 | Delivery | Commits the work on a branch, has the agent review the commit against the issue, and runs the `delivery` command | The branch, the review or the command fails. Skipped when `delivery` is empty |
 
@@ -256,11 +257,19 @@ including `install`, the proof and the other commands, then restores it even
 if a check fails. This keeps follow-up tests and other `.atm/` artefacts for
 ATM to process after Checks without exposing them to a check command. Checks
 then run `install` again (the agent may have changed dependencies), prove the
-task type, and run `test`, `typecheck` and `lint`, empty ones skipped. In
-this repository `test` ends with `scripts/cover-diff.sh`. Which lines fail,
-and the ways out, are under [`test`](configuration.md#atmyaml). The first
+task type, and run `test`, `e2e`, `typecheck` and `lint`, empty ones skipped. In
+this repository `e2e` runs `scripts/cover-diff.sh` on the counters `test`
+wrote in ATM's fresh `GOCOVERDIR`. Which lines fail,
+and the ways out, are under [`e2e`](configuration.md#atmyaml). The first
 failure stops the run with that command's last 60 lines. A command that
 commits fails the checks too.
+
+Resuming an `e2e` red gives the agent one turn in its saved session before
+Checks starts again at `install`. The turn receives the failed output and
+the two ways out above, with the Agent step's limits and guards. A second
+red stops the run. Other failures and sessions that cannot resume go straight
+to Checks with `resume: no agent turn (<reason>)`; see
+[Resuming a failed run](configuration.md#resuming-a-failed-run).
 
 ### What each task type proves
 
@@ -516,7 +525,7 @@ reports that outcome as `closed`.
 | What | Limit |
 |------|-------|
 | Reading a GitHub issue | 60 s |
-| Each checks command (`install`, `test`, `typecheck`, `lint`, a proof) | See [`check_timeout`](configuration.md#atmyaml) |
+| Each checks command (`install`, `test`, `e2e`, `typecheck`, `lint`, a proof) | See [`check_timeout`](configuration.md#atmyaml) |
 | Each agent call, the slop detector's included | See [`agent_timeout`](configuration.md) |
 | An agent that writes nothing on stdout or stderr | The larger of 10 min and [`check_timeout`](configuration.md#atmyaml) |
 | The delivery command | none |
@@ -537,7 +546,7 @@ when a node's state or duration changes.
 |-------|-------|
 | `failed_node`, `reason` | The step that failed, if any, and the reason for failure or PR closure |
 | `agent` | The effective requested `harness`, `model`, `effort` and ordered `harness_args`, after global config, `.atm.yaml` and flags. Unset model and effort stay `""`; no extra arguments is `[]` |
-| `nodes` | Each step's `result` (`passed`, `failed`, `running`, `waiting`, `pending`, `skipped` or `not run`), `started_at` (UTC, RFC 3339 with milliseconds) when its start is known, and `duration_ms` when it ends; the agent node also has `exit` and `tail` when the agent ran but its step failed. Delivery has `rows`, each with `name`, `result` (`running`, `passed` or `failed`), `started_at` and `duration_ms`, for each part that has started. Once seen, the [Delivery gate nodes](#delivery) are included with the state and duration from `no-mistakes axi status` |
+| `nodes` | Each step's `result` (`passed`, `failed`, `running`, `waiting`, `pending`, `skipped` or `not run`), `started_at` (UTC, RFC 3339 with milliseconds) when its start is known, and `duration_ms` when it ends; the agent node also has `exit` and `tail` when the agent ran but its step failed. Checks includes its completed `e2e` row in `rows`. Delivery has `rows`, each with `name`, `result` (`running`, `passed` or `failed`), `started_at` and `duration_ms`, for each part that has started. Once seen, the [Delivery gate nodes](#delivery) are included with the state and duration from `no-mistakes axi status` |
 | `type` | The task type |
 | `units` | Each unit's number, base commit, test file, type, result, red/green proof row span, and red and green trials: command, exit code, last 60 lines, `started_at` and `duration_ms` |
 | `reproofs` | The latest repeated unit proofs and spans, after a kept cut or the latest contract repair attempt; successful delivery uses the approved commit's proofs |

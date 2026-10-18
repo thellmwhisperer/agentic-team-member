@@ -30,6 +30,7 @@ type Config struct {
 	Agent        `yaml:",inline"`
 	Install      string       `yaml:"install"`
 	Test         string       `yaml:"test"`
+	E2E          string       `yaml:"e2e"`
 	Typecheck    string       `yaml:"typecheck"`
 	Lint         string       `yaml:"lint"`
 	TestFile     string       `yaml:"test_file"` // runs one test: {file} or {dir}; {tests} selects Go tests in that file
