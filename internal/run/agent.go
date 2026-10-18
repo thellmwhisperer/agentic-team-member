@@ -1103,7 +1103,7 @@ func commandWrites(words []string) []string {
 	if len(words) == 0 {
 		return nil
 	}
-	switch name := path.Base(words[0]); name {
+	switch path.Base(words[0]) {
 	case "command", "exec", "env": // what the command it runs, past its options and assignments, writes
 		var out []string
 		for i := 1; i < len(words); i++ {
@@ -1118,10 +1118,12 @@ func commandWrites(words []string) []string {
 		return out
 	case "tee", "touch", "mkdir", "rm", "rmdir", "mv", "truncate", "unlink":
 		return words[1:] // an option is never an absolute path
-	case "cp", "ln", "install", "rsync":
-		return copyWrites(name, words)
+	case "cp", "ln", "install": // the last word, or the -t directory
+		return append(flagged(words, "-t", "--target-directory"), words[len(words)-1])
+	case "rsync":
+		return words[len(words)-1:]
 	case "curl", "wget":
-		return downloadWrites(name, words)
+		return flagged(words, "-o", "-O")
 	case "sed":
 		return editWrites(words, sedOption)
 	case "perl":
@@ -1130,48 +1132,18 @@ func commandWrites(words []string) []string {
 	return nil
 }
 
-// copyWrites is the target directory of cp, ln or install, or the last operand.
-func copyWrites(name string, words []string) []string {
-	var operands []string
-	var target string
-	targets := name != "rsync"
-	for i := 1; i < len(words); i++ {
-		a := words[i]
-		switch {
-		case targets && (a == "-t" || a == "--target-directory") && i+1 < len(words):
-			target = words[i+1]
-			i++
-		case targets && strings.HasPrefix(a, "--target-directory="):
-			target = strings.TrimPrefix(a, "--target-directory=")
-		case targets && strings.HasPrefix(a, "-t") && len(a) > 2:
-			target = a[2:]
-		case !strings.HasPrefix(a, "-"):
-			operands = append(operands, a)
+// flagged is the values words give any of flags, as the next word or attached.
+func flagged(words []string, flags ...string) (values []string) {
+	for i, w := range words {
+		for _, f := range flags {
+			if v, ok := strings.CutPrefix(w, f); ok && v != "" {
+				values = append(values, strings.TrimPrefix(v, "="))
+			} else if ok && i+1 < len(words) {
+				values = append(values, words[i+1])
+			}
 		}
 	}
-	if target != "" {
-		return []string{target}
-	}
-	return operands[max(0, len(operands)-1):]
-}
-
-// downloadWrites is the file curl -o or wget -O writes.
-func downloadWrites(name string, words []string) []string {
-	flag := "-o"
-	if name == "wget" {
-		flag = "-O"
-	}
-	var target string
-	for i := 1; i+1 < len(words); i++ {
-		if words[i] == flag {
-			target = words[i+1]
-			i++
-		}
-	}
-	if target != "" {
-		return []string{target}
-	}
-	return nil
+	return values
 }
 
 // editWrites is the files sed or perl edits in place, past its script, option saying what each word is.
