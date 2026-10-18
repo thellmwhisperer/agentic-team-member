@@ -73,6 +73,37 @@ func TestChecksRestoresItsStash(t *testing.T) {
 	}
 }
 
+func TestMissingReportKeepsAvailableProofs(t *testing.T) {
+	for _, tc := range []struct {
+		name, typ, file, content, suite, want string
+	}{
+		{"refactor test restriction", "refactor", "a_test.sh", "echo changed\n", "", "a refactor changed the test"},
+		{"refactor base suite", "refactor", "a.txt", "changed\n", "false", "the suite fails on the base"},
+		{"tests source restriction", "tests", "a.txt", "changed\n", "", "a tests task changed the source"},
+		{"docs restriction", "docs", "a.txt", "changed\n", "", "a docs task changed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := repo(t, "https://example.com/owner/repo.git", atmYAML)
+			dir, sha := checksStashClone(t, root)
+			t.Cleanup(func() { _ = release(dir, "") })
+			if err := before(dir); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, tc.file), []byte(tc.content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			c := checksStashConfig(t, root)
+			if tc.suite != "" {
+				c.Test = tc.suite
+			}
+			_, err := checks(dir, checksStashRunDir(t, root), sha, tc.typ, "", true, c)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("missing report bypassed %s: %v", tc.name, err)
+			}
+		})
+	}
+}
+
 func checksStashRunDir(t *testing.T, root string) string {
 	t.Helper()
 	runDir := filepath.Join(root, ".atm", "runs", "t")

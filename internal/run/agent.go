@@ -1103,17 +1103,31 @@ func commandWrites(words []string) []string {
 	}
 	name := path.Base(words[0])
 	if name == "env" {
-		for i, word := range words[1:] {
+		for i := 1; i < len(words); i++ {
+			word := words[i]
+			if word == "-u" || word == "--unset" || word == "-C" || word == "--chdir" {
+				i++
+				continue
+			}
 			if strings.Contains(word, "=") || strings.HasPrefix(word, "-") {
 				continue
 			}
-			return commandWrites(words[i+1:])
+			return commandWrites(words[i:])
 		}
 		return nil
 	}
 	if name == "sh" || name == "bash" || name == "zsh" {
-		if len(words) > 2 && strings.HasPrefix(words[1], "-") && strings.Contains(words[1], "c") {
-			return shellWrites(words[2])
+		for i := 1; i < len(words); i++ {
+			if words[i] == "-c" || strings.HasPrefix(words[i], "-") && !strings.HasPrefix(words[i], "--") &&
+				strings.Contains(words[i][1:], "c") {
+				if i+1 < len(words) {
+					return shellWrites(words[i+1])
+				}
+				break
+			}
+			if !strings.HasPrefix(words[i], "-") {
+				break
+			}
 		}
 		return nil
 	}
@@ -1136,10 +1150,36 @@ func commandWrites(words []string) []string {
 			target = strings.TrimPrefix(a, "--target-directory=")
 			continue
 		}
+		if name == "cp" && strings.HasPrefix(a, "-t") && len(a) > 2 {
+			target = a[2:]
+			continue
+		}
 		if (name == "sed" || name == "perl") && (a == "-e" || a == "--expression") && i+1 < len(words) {
 			i++
 			script = true
 			continue
+		}
+		if name == "sed" && (a == "-f" || a == "--file") && i+1 < len(words) {
+			i++
+			script = true
+			continue
+		}
+		if name == "sed" && (strings.HasPrefix(a, "-f") && len(a) > 2 || strings.HasPrefix(a, "--file=")) {
+			script = true
+			continue
+		}
+		if name == "sed" || name == "perl" {
+			if strings.HasPrefix(a, "-e") && len(a) > 2 || strings.HasPrefix(a, "--expression=") {
+				script = true
+				continue
+			}
+			if name == "perl" && strings.HasPrefix(a, "-") && !strings.HasPrefix(a, "--") &&
+				strings.HasSuffix(a, "e") && i+1 < len(words) {
+				inPlace = inPlace || strings.Contains(a, "i")
+				i++
+				script = true
+				continue
+			}
 		}
 		if name == "sed" && a == "-i" && i+1 < len(words) && words[i+1] == "" {
 			i++
@@ -1178,33 +1218,45 @@ func wordText(word *syntax.Word) string {
 		return ""
 	}
 	parts := word.Parts
+	double := false
 	if len(parts) > 0 {
 		if q, ok := parts[0].(*syntax.DblQuoted); ok && len(parts) == 1 {
 			parts = q.Parts
+			double = true
 		}
 	}
 	if len(parts) > 0 {
 		if p, ok := parts[0].(*syntax.ParamExp); ok && p.Param != nil && p.Param.Value == "HOME" {
-			text, _ := literalWord(&syntax.Word{Parts: parts[1:]})
+			text, _ := literalWord(&syntax.Word{Parts: parts[1:]}, double)
 			return "~" + text
 		}
 	}
-	text, _ := literalWord(&syntax.Word{Parts: parts})
+	text, _ := literalWord(&syntax.Word{Parts: parts}, double)
 	return text
 }
 
-func literalWord(word *syntax.Word) (string, bool) {
+func literalWord(word *syntax.Word, double bool) (string, bool) {
 	var text strings.Builder
-	var walk func([]syntax.WordPart) bool
-	walk = func(parts []syntax.WordPart) bool {
+	var walk func([]syntax.WordPart, bool) bool
+	walk = func(parts []syntax.WordPart, double bool) bool {
 		for _, part := range parts {
 			switch part := part.(type) {
 			case *syntax.Lit:
-				text.WriteString(part.Value)
+				for i := 0; i < len(part.Value); i++ {
+					if part.Value[i] == '\\' && i+1 < len(part.Value) &&
+						(!double || strings.ContainsRune("$`\\\"\n", rune(part.Value[i+1]))) {
+						i++
+						if part.Value[i] != '\n' {
+							text.WriteByte(part.Value[i])
+						}
+						continue
+					}
+					text.WriteByte(part.Value[i])
+				}
 			case *syntax.SglQuoted:
 				text.WriteString(part.Value)
 			case *syntax.DblQuoted:
-				if !walk(part.Parts) {
+				if !walk(part.Parts, true) {
 					return false
 				}
 			default:
@@ -1213,6 +1265,6 @@ func literalWord(word *syntax.Word) (string, bool) {
 		}
 		return true
 	}
-	literal := walk(word.Parts)
+	literal := walk(word.Parts, double)
 	return text.String(), literal
 }

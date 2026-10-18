@@ -121,6 +121,26 @@ func TestMissingReportWithoutSessionReachesChecks(t *testing.T) {
 	assertMissingReport(t, err, &out, workerCalls(t, order), 2)
 }
 
+func TestResumeKeepsMissingReport(t *testing.T) {
+	root := repo(t, "https://example.com/owner/repo.git", atmSet(atmYAML, "test", "false"))
+	t.Setenv("FAKE_AGENT", "no-report")
+	if err := Run("first", []string{"--harness", "opencode", issueFile(t, issue)}, io.Discard, io.Discard); err == nil {
+		t.Fatal("want configured test failure after the missing report")
+	}
+	first := readReport(t, filepath.Join(root, ".atm", "runs", "first", "report.json"))
+	if first["resumable"] != true || reportNode(t, first, "agent")["report"] != "missing" {
+		t.Fatalf("missing report was not saved for resume: %v", first)
+	}
+	if err := Run("resumed", []string{"--resume", "first"}, io.Discard, io.Discard); err == nil {
+		t.Fatal("want configured test failure after resume")
+	}
+	resumed := readReport(t, filepath.Join(root, ".atm", "runs", "resumed", "report.json"))
+	if reportNode(t, resumed, "agent")["report"] != "missing" ||
+		reportNode(t, resumed, "checks")["result"] != "failed" {
+		t.Fatalf("resume lost missing report: %v", resumed)
+	}
+}
+
 func assertOneReturn(t *testing.T, harness string, err error, out *bytes.Buffer, workers int, sent string,
 	args []string) {
 	t.Helper()

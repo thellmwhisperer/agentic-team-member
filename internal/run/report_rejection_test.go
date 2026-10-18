@@ -155,7 +155,7 @@ esac
 	t.Setenv("REJECTION_SCRIPT", filepath.Join(bin, "claude"))
 }
 
-func TestReportReturnRequiresNativeSession(t *testing.T) {
+func TestReportReturnWithoutNativeSession(t *testing.T) {
 	for _, harness := range []string{"claude", "codex", "pi", "cursor"} {
 		for _, stream := range []string{
 			"", `{"sessionId":"wrong"}`, `{"msg":{"session_id":"wrong"}}`,
@@ -165,8 +165,8 @@ func TestReportReturnRequiresNativeSession(t *testing.T) {
 				root, order := nativeReportSession(t, stream)
 				a := agent{Agent: config.Agent{Harness: harness}, root: root, dir: t.TempDir()}
 				ev, err := a.run(root, "worker", "ponytail", "brief", testFile)
-				if err == nil || !strings.Contains(err.Error(), noJSON) || ev["rejected"] != noJSON || workerCalls(t, order) != 1 {
-					t.Fatalf("must fail without returning to an unknown session: %v, %v", ev, err)
+				if err != nil || ev["rejected"] != noJSON || workerCalls(t, order) != 2 {
+					t.Fatalf("must retry without an unknown session: %v, %v", ev, err)
 				}
 			})
 		}

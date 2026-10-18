@@ -618,7 +618,13 @@ func writeOutsideCases() []reachCase {
 		shell("cp target directory", "cp -t /tmp a.txt"),
 		shell("perl in place", "perl -pi -e 's/a/b/' /tmp/atm-reach.txt"),
 		shell("environment command", "env LANG=C cp a.txt /tmp/atm-reach.txt"),
+		shell("environment unset command", "env -u DEBUG cp a.txt /tmp/atm-reach.txt"),
 		shell("login shell command", `sh -lc "echo x > /tmp/atm-reach.txt"`),
+		shell("separate shell flags", `sh -l -c "echo x > /tmp/atm-reach.txt"`),
+		shell("attached cp target", "cp -t/tmp a.txt"),
+		shell("attached sed expression", "sed -i -es/a/b/ /tmp/atm-reach.txt"),
+		shell("attached perl expression", "perl -pi -es/a/b/ /tmp/atm-reach.txt"),
+		shell("escaped outside redirect", `echo x > /tmp/atm\ reach.txt`),
 		shell("device shared memory", "echo x > /dev/shm/atm-reach.txt"),
 		{"claude writes outside its clone", "claude", claudeEvent("Write",
 			`{"file_path":"{root}/.atm/runs/6-2/report.json","content":"{}"}`),
@@ -655,6 +661,7 @@ func staysInsideCases() []reachCase {
 		shell("stderr to /dev/null", "go test ./... 2>/dev/null"),
 		shell("sed address is not a destination", "sed -i '' '1s@/tmp/old@new@' a.txt"),
 		shell("touch reference is a read", "touch -r /etc/hosts a.txt"),
+		shell("sed script file is a read", "sed -i -e 's/a/b/' -f /tmp/rules.sed a.txt"),
 		{"write inside clone with spaces", "claude", claudeEvent("Write",
 			`{"file_path":"<clone>/a file.txt","content":"{}"}`), ""},
 		{"claude reads another run", "claude", claudeEvent("Read", `{"file_path":"{root}/.atm/runs/6-2/worker.jsonl"}`), ""},
@@ -689,6 +696,18 @@ func TestNativeWritesKeepPathsWithSpaces(t *testing.T) {
 			if got != (path == outsidePath) {
 				t.Fatalf("%s path %q rejected = %v", call.tool, path, got)
 			}
+		}
+	}
+}
+
+func TestShellWritesKeepEscapedClonePath(t *testing.T) {
+	clone := "/workspace/clone with spaces"
+	for _, command := range []string{
+		`echo x > /workspace/clone\ with\ spaces/a\ file.txt`,
+		`touch /workspace/clone\ with\ spaces/a\ file.txt`,
+	} {
+		if got := outside([]use{{tool: "shell", args: command, command: command}}, clone); got != "" {
+			t.Fatalf("local write %q was rejected: %s", command, got)
 		}
 	}
 }
