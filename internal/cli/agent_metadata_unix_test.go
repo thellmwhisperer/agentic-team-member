@@ -7,7 +7,20 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
+
+func waitForAgents(t *testing.T, ready string, count int) {
+	t.Helper()
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		entries, err := os.ReadDir(ready)
+		if err == nil && len(entries) >= count {
+			return
+		}
+	}
+	entries, _ := os.ReadDir(ready)
+	t.Fatalf("only %d fake agents reached the barrier, want %d", len(entries), count)
+}
 
 func TestAgentMetadataCLILiveAndFinished(t *testing.T) {
 	setupConcurrentRunRepo(t)
