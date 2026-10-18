@@ -149,8 +149,8 @@ real-atm test reaches this function?" without running anything:
 A function at 0.0 % has no end-to-end run reaching it: write the test that
 does. Any other percentage names a file whose tests already reach it.
 
-When `e2e` is non-empty, ATM supplies one fresh `GOCOVERDIR` directory for
-the whole Checks step, including `test` and `e2e`. `scripts/test.sh` does
+When `e2e` is non-empty, ATM supplies one fresh `GOCOVERDIR` directory per
+Checks and exports it to `test` and `e2e` only. `scripts/test.sh` does
 not create it. With no counters, `scripts/cover-diff.sh` fails in the `e2e`
 row with its no-coverage-data diagnostic. Counters remain in the run directory.
 

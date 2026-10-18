@@ -128,8 +128,9 @@ func (tc e2eResumeCase) config() string {
 	cfg += "e2e: 'test -f \"$GOCOVERDIR/test-ran\" && test -f reached || { echo uncovered.go:42; exit 1; }'\n"
 	cfg = atmSet(cfg, "test", `sh a_test.sh && test -d "$GOCOVERDIR" && `+
 		`test ! -f "$GOCOVERDIR/test-ran" && touch "$GOCOVERDIR/test-ran"`)
-	if tc.name == "refactor" { // The proof also runs test, in the same Checks coverage directory.
-		cfg = atmSet(cfg, "test", `sh a_test.sh && test -d "$GOCOVERDIR" && touch "$GOCOVERDIR/test-ran"`)
+	if tc.name == "refactor" {
+		cfg = atmSet(cfg, "test", `sh a_test.sh && if [ -n "$GOCOVERDIR" ]; then test -d "$GOCOVERDIR" && `+
+			`test ! -f "$GOCOVERDIR/test-ran" && touch "$GOCOVERDIR/test-ran"; fi`)
 	}
 	if tc.row == "test" {
 		cfg = atmSet(cfg, "test", "echo test-red; exit 1")
@@ -319,7 +320,7 @@ func TestE2EFixtureProofTypes(t *testing.T) {
 func TestResumeE2ESafeguards(t *testing.T) {
 	for _, tc := range []struct{ name, mode, work, why string }{
 		{"commit", "", "git add a.txt; git commit -qm forbidden", "made commits"},
-		{"invalid_report", "no-report", "true", "no JSON object"},
+		{"invalid_report", "no-report", "true", "e2e:"},
 		{"saved_skill_proof", "skill-error", "touch reached", ""},
 		{"missing_session", "", "true", "e2e:"},
 		{"old_bundle", "", "true", "e2e:"},
@@ -353,6 +354,14 @@ func TestResumeE2ESafeguards(t *testing.T) {
 			}
 			if calls := workerCalls(t, order); calls != wantCalls {
 				t.Fatalf("worker calls=%d, want %d", calls, wantCalls)
+			}
+			if tc.name == "invalid_report" {
+				resumed := e2eReport(t, top, "resumed")
+				if resumed.node("agent").Result != "passed" || resumed.node("checks").Result != "failed" ||
+					resumed.FailedNode != "checks" || len(resumed.Units) != 1 || resumed.Units[0].TestFile != "a_test.sh" ||
+					strings.Contains(err.Error(), "no JSON object") || strings.Contains(err.Error(), "agent left no report") {
+					t.Fatalf("turn without worker JSON did not reach Checks with the saved report: %v; %+v", err, resumed)
+				}
 			}
 		})
 	}

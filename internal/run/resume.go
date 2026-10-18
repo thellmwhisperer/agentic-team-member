@@ -197,7 +197,14 @@ func (a agent) afterE2E(r *verdict, clone string, p resumePoint) (map[string]any
 	s := timed(func() {
 		if _, err = placeSkill(clone, a.Harness, "ponytail"); err == nil {
 			stream, exit, cause, runErr := a.exec(clone, "ponytail", path, argv, stdin, false)
-			_, err = a.reported("worker", "ponytail", path, final, exit, cause, runErr, stream, p.SkillProved, testFile, ev)
+			var invalid error
+			invalid, err = a.reported("worker", "ponytail", path, final, exit, cause, runErr, stream, p.SkillProved, testFile, ev)
+			ev["report"] = p.Report
+			if invalid != nil {
+				delete(ev, "exit")
+				delete(ev, "tail")
+				err = nil
+			}
 		}
 	})
 	r.emit(turn, map[string]any{"state": outcome(err), "harness": a.Harness,

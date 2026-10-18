@@ -37,15 +37,17 @@ func checks(clone, runDir, sha, typ, test string, c config.Config) (result map[s
 	var proofSpan span
 	result = map[string]any{"red": red, "green": green, "proof_span": proofSpan}
 	var (
-		env      []string
-		counters string
-		ran      []cmdResult
+		cover []string
+		ran   []cmdResult
 	)
 	if c.E2E != "" {
-		counters, err = os.MkdirTemp(runDir, "coverage-")
-		env = []string{"GOCOVERDIR=" + counters}
+		counters, mkErr := os.MkdirTemp(runDir, "coverage-")
+		err = mkErr
+		if err == nil {
+			cover = []string{"GOCOVERDIR=" + counters}
+		}
 	}
-	run := func(name, line string) error {
+	run := func(name, line string, env ...string) error {
 		if line == "" {
 			return nil
 		}
@@ -78,7 +80,7 @@ func checks(clone, runDir, sha, typ, test string, c config.Config) (result map[s
 		return result, err
 	}
 	proofSpan, err = row(live, proofs[typ], func() (err error) {
-		red, green, err = prove(clone, typ, filepath.ToSlash(test), c, env...)
+		red, green, err = prove(clone, typ, filepath.ToSlash(test), c)
 		return err
 	})
 	result["red"], result["green"], result["proof_span"] = red, green, proofSpan
@@ -86,7 +88,11 @@ func checks(clone, runDir, sha, typ, test string, c config.Config) (result map[s
 		return result, err
 	}
 	for _, cmd := range [][2]string{{"test", c.Test}, {"e2e", c.E2E}, {"typecheck", c.Typecheck}, {"lint", c.Lint}} {
-		if err := run(cmd[0], cmd[1]); err != nil {
+		var extra []string
+		if cmd[0] == "test" || cmd[0] == "e2e" {
+			extra = cover
+		}
+		if err := run(cmd[0], cmd[1], extra...); err != nil {
 			return result, err
 		}
 	}
@@ -409,7 +415,7 @@ func row(live func(map[string]any), name string, fn func() error) (s span, err e
 
 // prove runs the proof of task type typ on the agent's work in clone, all of it staged meanwhile, and returns its
 // trials: red without the work, green with it, each zero when not run.
-func prove(clone, typ, test string, c config.Config, env ...string) (red, green try, err error) {
+func prove(clone, typ, test string, c config.Config) (red, green try, err error) {
 	limit := cmp.Or(time.Duration(c.CheckTimeout), timeout)
 	if _, err := git(clone, "add", "-A"); err != nil {
 		return red, green, err
@@ -433,16 +439,16 @@ func prove(clone, typ, test string, c config.Config, env ...string) (red, green 
 	}()
 	switch typ {
 	case "fix", "feature", "greenfield":
-		red, green, err := redGreen(clone, tree, aside, test, c.TestFile, limit, env...)
+		red, green, err := redGreen(clone, tree, aside, test, c.TestFile, limit)
 		if err == nil && typ == "fix" {
-			err = onBase(clone, tree, aside, test, c.TestFile, limit, env...)
+			err = onBase(clone, tree, aside, test, c.TestFile, limit)
 		}
 		return red, green, err
 	case "refactor":
 		if p := first(changed, c.TestPatterns, true); p != "" {
 			return red, green, fmt.Errorf("a refactor changed the test %s", p)
 		}
-		base, _, err := trial(clone, tree, changed, c.Test, "", "", false, nil, limit, env...)
+		base, _, err := trial(clone, tree, changed, c.Test, "", "", false, nil, limit)
 		return base, green, errors.Join(err, wrap(base.err, "the suite fails on the base"))
 	case "tests":
 		if p := first(changed, slices.Concat(c.TestPatterns, c.DocsPatterns), false); p != "" {
@@ -453,7 +459,7 @@ func prove(clone, typ, test string, c config.Config, env ...string) (red, green 
 			return red, green, err
 		}
 		base, after, err := trial(clone, tree, aside, line, line, test,
-			strings.Contains(c.TestFile, "{tests}"), nil, limit, env...)
+			strings.Contains(c.TestFile, "{tests}"), nil, limit)
 		return base, after, errors.Join(err, wrap(base.err, test+" fails on the base"),
 			wrap(after.err, test+" fails after the change"))
 	case "docs":
@@ -595,8 +601,7 @@ func vitestLoadFailure(lines []string) bool {
 
 // redGreen sets aside, in clone, the paths aside, runs test alone with tmpl, which must fail, brings the
 // agent's work, tree, back and runs test again, which must pass.
-func redGreen(clone, tree string, aside []string, test, tmpl string, limit time.Duration,
-	env ...string) (red, green try, err error) {
+func redGreen(clone, tree string, aside []string, test, tmpl string, limit time.Duration) (red, green try, err error) {
 	line, err := testLine(clone, tmpl, test)
 	if err != nil {
 		var parseErr goTestParseError
@@ -610,7 +615,7 @@ func redGreen(clone, tree string, aside []string, test, tmpl string, limit time.
 			return fmt.Errorf("red did not run: parse/compile error: %s fails before any test runs", test)
 		}
 		return nil
-	}, limit, env...)
+	}, limit)
 	switch {
 	case err != nil:
 		return red, green, err
@@ -625,7 +630,7 @@ func redGreen(clone, tree string, aside []string, test, tmpl string, limit time.
 // the base lines it replaces, then the added lines alone. A test that passes on both depends on nothing the
 // base had. ponytail: added lines that cannot run alone, as in a compiled language, fail the second and let
 // such a test pass.
-func onBase(clone, tree string, aside []string, test, tmpl string, limit time.Duration, env ...string) error {
+func onBase(clone, tree string, aside []string, test, tmpl string, limit time.Duration) error {
 	line, err := testLine(clone, tmpl, test)
 	if err != nil {
 		return err
@@ -665,7 +670,7 @@ func onBase(clone, tree string, aside []string, test, tmpl string, limit time.Du
 				return err
 			}
 		}
-		if red, _, err := trial(clone, tree, nil, line, "", "", false, nil, limit, env...); err != nil || red.err != nil {
+		if red, _, err := trial(clone, tree, nil, line, "", "", false, nil, limit); err != nil || red.err != nil {
 			return err
 		}
 	}
@@ -678,7 +683,7 @@ func onBase(clone, tree string, aside []string, test, tmpl string, limit time.Du
 // longer tree, is err: the verdict is void. After each run, every file git ignores is back as keep left them,
 // changed or deleted ones too, so the green cannot pass on what the red left there.
 func trial(clone, tree string, aside []string, base, after, test string, usesTests bool,
-	checkRed func(try) error, limit time.Duration, env ...string) (red, green try, err error) {
+	checkRed func(try) error, limit time.Duration) (red, green try, err error) {
 	defer func() { err = errors.Join(err, reset(clone)) }()
 	if len(aside) > 0 {
 		args := append([]string{"--literal-pathspecs", "restore", "--source=HEAD", "--staged", "--worktree", "--"},
@@ -687,7 +692,7 @@ func trial(clone, tree string, aside []string, base, after, test string, usesTes
 			return red, green, err
 		}
 	}
-	red = attemptWithTimeout(clone, base, limit, env...)
+	red = attemptWithTimeout(clone, base, limit)
 	classifyTestRun(&red, test, usesTests)
 	if checkRed != nil {
 		if err := checkRed(red); err != nil {
@@ -701,7 +706,7 @@ func trial(clone, tree string, aside []string, base, after, test string, usesTes
 		return red, green, red.err
 	}
 	if after != "" {
-		green = attemptWithTimeout(clone, after, limit, env...)
+		green = attemptWithTimeout(clone, after, limit)
 		if err := trialTimeout(red, green, true); err != nil {
 			return red, green, err
 		}
@@ -755,10 +760,10 @@ func attempt(clone, line string) try {
 	return attemptWithTimeout(clone, line, timeout)
 }
 
-func attemptWithTimeout(clone, line string, limit time.Duration, env ...string) try {
+func attemptWithTimeout(clone, line string, limit time.Duration) try {
 	var tail, output string
 	var err error
-	s := timed(func() { tail, output, err = shOutput(clone, line, limit, env...) })
+	s := timed(func() { tail, output, err = shOutput(clone, line, limit) })
 	t := try{Command: line, Tail: tail, span: s, err: err, output: output}
 	var exit *exec.ExitError
 	if errors.As(err, &exit) {
