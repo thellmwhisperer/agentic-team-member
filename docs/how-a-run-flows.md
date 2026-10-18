@@ -687,44 +687,9 @@ as soon as they are observed, with the states and durations saved in
 nodes, including skipped results.
 On Windows, the delivery command runs without ATM's attached terminal, so its
 output appears as lines.
-After a terminal run completes, the ATM screen stays open until `q` or
-Ctrl+C; off-terminal output still returns when the run ends.
-
-In a herdr pane (`HERDR_ENV=1` and
-`HERDR_PANE_ID` set), the screen also shows the run in herdr's Agents section
-as `atm`, with the run's label as its session: `working` with the issue, then
-with each step it reaches (`#7 Agent · unit 2`, `#7 Checks · red/green`). Until
-the issue title is available, `working` uses the run label. Once gate nodes
-are observed, they determine activity: `working` while a gate node runs,
-`blocked` while one waits for a decision and none runs. A still-running
-Delivery parent does not hide that wait. The run stays listed throughout
-[gate observation](#delivery) while its screen remains attached. On completion,
-it reports
-`idle` with `#7 passed` or `#7 failed at <step>` when the run ends. The failure
-label names the failed node even if ATM never observed it running: Test
-running followed by Document failed reports `#7 failed at Document`. An issue
-file goes by the run's label instead of `#7`. Leaving the screen, by the run's
-end or by `q`, takes `atm` out of the section. ATM runs `$HERDR_BIN_PATH` or
-`herdr`, a second at most per call; a failing or missing `herdr` changes
-nothing. The coding agent keeps its own herdr reporting, if it has any.
-
-With `HERDR_ENV=1` and `herdr_workspace` set (the workspace's label; empty
-opens none), `atm run --follow` owns the run's tab. It resolves the label
-with `herdr workspace list`; when no open workspace has it, it creates one
-with `herdr workspace create --label <label> --cwd <repo> --no-focus`, and
-that workspace's root pane's tab, relabelled `atm-<issue>`, is the run's
-tab. Otherwise it creates a tab in the workspace labelled `atm-<issue>`,
-`--no-focus`, with the repository as cwd. Either way it runs
-`atm attach <run>` in the tab's root pane. The delivery split happens there.
-When `--follow` prints its last line (`merged`, `closed` or `run_failed`),
-ATM closes that tab with `herdr tab close` on the id `tab create` or
-`workspace create` returned, gate pane included, and only then exits. It
-never closes a tab it did not create, and never closes one on a non-terminal
-line. Killing the follow before that line leaves the tab; the run reports
-`WATCHER GONE`. A missing `herdr`, a failed `workspace create`, `tab create`
-or `tab close`, prints one line on stderr, herdr's own error included, and
-changes nothing else. Without `--follow`, or with the key empty or `HERDR_ENV`
-unset, no tab is opened or closed.
+When the run ends, the ATM screen quits and leaves its last view on the
+terminal; `q` or Ctrl+C closes it before. Off-terminal output also returns
+when the run ends.
 
 Off a terminal, or with `NO_COLOR` or `TERM=dumb`, the screen is plain lines:
 one per step start and end, then the delivery's output and the summary. Every

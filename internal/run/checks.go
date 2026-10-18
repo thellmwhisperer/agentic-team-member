@@ -956,9 +956,6 @@ func teeRun(ctx context.Context, t terminal, w io.Writer, dir, line string, capt
 	live := liveIn(dir)
 	log := &lineWriter{fn: func(l string) { live(map[string]any{"output": l}) }}
 	cmd.Dir, cmd.Env, cmd.WaitDelay = dir, append(os.Environ(), env...), time.Second
-	if screen, ok := t.(*screen); ok && screen.r.pane != "" {
-		cmd.Env = append(cmd.Env, "HERDR_PANE_ID="+screen.r.pane)
-	}
 	cmd.Stdout = io.MultiWriter(&out, w, log)
 	cmd.Stderr = cmd.Stdout
 	attach, closeGroup, err := ownGroup(cmd)

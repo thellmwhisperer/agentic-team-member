@@ -118,7 +118,7 @@ agent, model and effort. Both are in [Configuration](docs/configuration.md).
 | `atm run --watcher <id> [flags] <issue>` | Runs an issue: a GitHub number or a file with a `Type:` line. Without a live watcher it does not start |
 | `atm run --resume <run>` | Runs a failed run's issue again from its agent's work; see [Resuming a failed run](docs/configuration.md#resuming-a-failed-run) |
 | `atm status` | The runs going |
-| `atm attach [run]` | A run's [screen and tool-call controls](docs/how-a-run-flows.md#the-screen); completed screens stay until q or Ctrl+C |
+| `atm attach [run]` | A run's [screen and tool-call controls](docs/how-a-run-flows.md#the-screen); it quits when the run ends, or on q or Ctrl+C |
 | `atm runs` | Every retained run, its watcher and its report |
 | `atm axi run`, `atm axi status`, `atm axi runs` | The same for programs, in TOON or JSON |
 | `atm axi plan <plan.json>` | Shows which plan tickets can launch; see [Following a plan](docs/configuration.md#following-a-plan) |

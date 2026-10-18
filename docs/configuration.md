@@ -28,32 +28,37 @@ This advisory line does not change the exit status of the prerequisite checks.
 ## Layers
 
 Each layer overrides shared keys from the one before. A key not supported
-in its file fails the run.
+in its file fails the run, except in `~/.config/atm/config.yaml`: there an
+unknown key is ignored and named once on stderr (`config: ignored key <key>`);
+a `.atm.yaml` key there still fails.
 
 | Layer | Where | Sets |
 |-------|-------|------|
 | Built-in defaults | the binary | `harness: claude` |
-| Your machine | `~/.config/atm/config.yaml` | `harness`, `model`, `effort`, `herdr_workspace` |
+| Your machine | `~/.config/atm/config.yaml` | `harness`, `model`, `effort` |
 | The repository | `.atm.yaml` at its root | keys in [`.atm.yaml`](#atmyaml) below |
 | One run | `atm run` flags | `--watcher`, [`--follow`](how-a-run-flows.md#following-one-run), `--base-ref`, `--harness`, `--model`, `--effort`, `--harness-arg`, `--env`, `--resume` |
 
 ## `~/.config/atm/config.yaml`
 
-Optional. It selects your agent and the herdr workspace for run tabs.
+Optional. It selects your agent.
 
 | Key | Meaning |
 |-----|---------|
 | `harness` | The coding agent CLI: `claude`, `codex`, `opencode`, `pi`, `cursor` or `hermes` (local models go through `pi`). Any other fails the run |
 | `model` | Its model; empty is the CLI's default |
 | `effort` | Its effort; empty is the CLI's default |
-| `herdr_workspace` | Machine-only; not accepted in `.atm.yaml` or as a run flag. Label of the herdr workspace [`atm run --follow`](how-a-run-flows.md#the-screen) opens the run's tab in, when `HERDR_ENV=1`. Empty, the default, opens none. ATM resolves the label to an id with `herdr workspace list` |
 
 ```yaml
 harness: claude
 model: claude-opus-5-5
 effort: high
-herdr_workspace: ATM
 ```
+
+ATM opens no terminal tab or split and reports to no terminal multiplexer: a
+tab per run, a split for the delivery and agent reporting are the launcher's
+job, outside ATM. The screen quits when its run ends, so a pane whose root
+process is `exec atm attach <run>` exits with the run.
 
 ### Cursor
 
@@ -173,9 +178,9 @@ Run repository commands from inside the repository they work on.
 | `atm doctor [--agent]` | Checks git, the configured agent CLI on `PATH`, `gh` when `origin` is on GitHub, `.atm.yaml`, and whether an `atm watch` lease is alive. One `ok` or `fail` line per prerequisite; every check runs, and any prerequisite failure exits non-zero. It also reports the advisory [skill status](#skill). Its last line says `run atm doctor --agent to say hello to <harness>`: it makes no model call. With `--agent` it says hello instead, see [saying hello to the agent](#saying-hello-to-the-agent) |
 | `atm skill`, `atm skill install [--dir <path>] [--force]` | See [Skill](#skill) |
 | `atm watch [--adopt <run>]` | Watches runs bound to it until killed; see [the watcher](how-a-run-flows.md#the-watcher) |
-| `atm run --watcher <id> [flags] <issue>` | Starts a run bound to a live watcher. On a terminal it keeps the completed screen open until q or Ctrl+C, then exits with the run's code; off one it prints the run's label and returns. See [the watcher](how-a-run-flows.md#the-watcher) and [resuming a failed run](#resuming-a-failed-run) |
+| `atm run --watcher <id> [flags] <issue>` | Starts a run bound to a live watcher. On a terminal it shows the run's screen until the run ends or q or Ctrl+C, then exits with the run's code; off one it prints the run's label and returns. See [the watcher](how-a-run-flows.md#the-watcher) and [resuming a failed run](#resuming-a-failed-run) |
 | `atm status [--json]` | Each run going; text shows label, step, duration, agent and issue, or `nothing runs` |
-| `atm attach [run]` | The run's screen, the last one going by default; completed screens stay until q or Ctrl+C |
+| `atm attach [run]` | The run's screen, the last one going by default; it quits when the run ends, or on q or Ctrl+C |
 | `atm runs [--json]` | Retained runs; text shows label, `running`, `passed` or `failed at <step>`, duration, agent, watcher, issue, report when present, and `serve` last |
 | `atm axi run [--json] [flags] <issue>` | Waits for the run to end, prints its outcome and exits with its code |
 | `atm axi status [--json]`, `atm axi runs [--json]` | The runs going, or retained runs, as a table |

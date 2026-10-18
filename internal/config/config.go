@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -82,22 +83,27 @@ var ACP = map[string]struct {
 var required = []string{"install", "test", "typecheck", "lint", "test_file", "test_patterns", "docs_patterns",
 	"delivery"}
 
-// machine is ~/.config/atm/config.yaml: the agent, and the herdr workspace a follow opens a tab in.
+// machine is ~/.config/atm/config.yaml: the agent. Other keys land in Unknown.
 type machine struct {
 	Harness, Model, Effort string
-	HerdrWorkspace         string `yaml:"herdr_workspace"`
+	Unknown                map[string]any `yaml:",inline"`
 }
 
-// HerdrWorkspace is home's herdr_workspace, empty when unset. A missing file is empty, not an error.
-func HerdrWorkspace(home string) (string, error) {
-	m, err := readMachine(home)
-	return m.HerdrWorkspace, err
-}
-
+// readMachine reads home's config.yaml. A project key there is an error; any other key it does not know is
+// ignored, named once on stderr, so a retired key never breaks a machine.
 func readMachine(home string) (machine, error) {
 	m := machine{Harness: "claude"}
-	_, err := decode(filepath.Join(home, ".config", "atm", "config.yaml"), &m)
-	return m, err
+	path := filepath.Join(home, ".config", "atm", "config.yaml")
+	if _, err := decode(path, &m); err != nil {
+		return m, err
+	}
+	for _, k := range slices.Sorted(maps.Keys(m.Unknown)) {
+		if slices.Contains(required, k) || k == "agent_timeout" || k == "check_timeout" {
+			return m, fmt.Errorf("%s: %s is a project key: put it in .atm.yaml", path, k)
+		}
+		fmt.Fprintln(os.Stderr, "config: ignored key", k)
+	}
+	return m, nil
 }
 
 // Load is the defaults, overridden by home's .config/atm/config.yaml, root's .atm.yaml and the non-empty

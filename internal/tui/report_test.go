@@ -43,8 +43,11 @@ func TestCompletedScreenRestoresSavedNodesWithoutFrames(t *testing.T) {
 	path := savedReport(t, completedReport)
 	m := New("297-65", 69, 39)
 	_, cmd := m.Update(ended{run.Outcome{Outcome: "passed", Ended: time.Now(), Report: path}, nil})
-	if cmd != nil {
-		t.Fatal("completed view quit without user input")
+	if cmd == nil {
+		t.Fatal("completed view stayed open after the run ended")
+	}
+	if _, ok := cmd().(tea.QuitMsg); !ok {
+		t.Fatal("the run's end did not quit the completed view")
 	}
 	want := []time.Duration{395, 4274, 0, 1318621, 385916, 285402, 8135}
 	for i, r := range m.rows {
@@ -221,16 +224,20 @@ func TestCompletedScreenRejectsImpossibleAndDuplicateNodes(t *testing.T) {
 	}
 }
 
-func TestCompletedScreenClosesOnlyOnQOrControlC(t *testing.T) {
+func TestCompletedScreenClosesWhenTheRunEndsAndOnQOrControlC(t *testing.T) {
 	for _, key := range []tea.KeyMsg{{Type: tea.KeyRunes, Runes: []rune{'q'}}, {Type: tea.KeyCtrlC}} {
 		m := New("done-1", 80, 40)
-		if _, cmd := m.Update(ended{run.Outcome{Outcome: "passed", Ended: time.Now()}, nil}); cmd != nil {
-			t.Fatal("completed screen quit automatically")
+		_, cmd := m.Update(ended{run.Outcome{Outcome: "passed", Ended: time.Now()}, nil})
+		if cmd == nil {
+			t.Fatal("completed screen stayed open after the run ended")
+		}
+		if _, ok := cmd().(tea.QuitMsg); !ok {
+			t.Fatal("the run's end did not quit")
 		}
 		if _, cmd := m.Update(tick(time.Now())); cmd != nil {
 			t.Fatal("completed screen kept scheduling animation")
 		}
-		_, cmd := m.Update(key)
+		_, cmd = m.Update(key)
 		if cmd == nil || m.detached {
 			t.Fatal("closing completed screen must quit without reporting a still-running task")
 		}
