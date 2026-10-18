@@ -1076,7 +1076,7 @@ func shellWrites(command string) (out []string) {
 		switch n := node.(type) {
 		case *syntax.Redirect:
 			switch n.Op {
-			case syntax.RdrOut, syntax.AppOut, syntax.ClbOut, syntax.RdrInOut, syntax.RdrAll, syntax.AppAll:
+			case syntax.RdrOut, syntax.AppOut, syntax.ClbOut, syntax.RdrInOut, syntax.RdrAll, syntax.AppAll, syntax.DplOut:
 				out = append(out, wordText(n.Word))
 			}
 		case *syntax.CallExpr:
@@ -1102,6 +1102,9 @@ func commandWrites(words []string) []string {
 		return nil
 	}
 	name := path.Base(words[0])
+	if name == "command" || name == "exec" {
+		return commandWrites(words[1:])
+	}
 	if name == "env" {
 		for i := 1; i < len(words); i++ {
 			word := words[i]
@@ -1118,6 +1121,10 @@ func commandWrites(words []string) []string {
 	}
 	if name == "sh" || name == "bash" || name == "zsh" {
 		for i := 1; i < len(words); i++ {
+			if words[i] == "-o" && i+1 < len(words) {
+				i++
+				continue
+			}
 			if words[i] == "-c" || strings.HasPrefix(words[i], "-") && !strings.HasPrefix(words[i], "--") &&
 				strings.Contains(words[i][1:], "c") {
 				if i+1 < len(words) {
@@ -1141,17 +1148,22 @@ func commandWrites(words []string) []string {
 			i++
 			continue
 		}
-		if name == "cp" && (a == "-t" || a == "--target-directory") && i+1 < len(words) {
+		if (name == "cp" || name == "ln" || name == "install") && (a == "-t" || a == "--target-directory") && i+1 < len(words) {
 			target = words[i+1]
 			i++
 			continue
 		}
-		if name == "cp" && strings.HasPrefix(a, "--target-directory=") {
+		if (name == "cp" || name == "ln" || name == "install") && strings.HasPrefix(a, "--target-directory=") {
 			target = strings.TrimPrefix(a, "--target-directory=")
 			continue
 		}
-		if name == "cp" && strings.HasPrefix(a, "-t") && len(a) > 2 {
+		if (name == "cp" || name == "ln" || name == "install") && strings.HasPrefix(a, "-t") && len(a) > 2 {
 			target = a[2:]
+			continue
+		}
+		if (name == "curl" && a == "-o" || name == "wget" && a == "-O") && i+1 < len(words) {
+			target = words[i+1]
+			i++
 			continue
 		}
 		if (name == "sed" || name == "perl") && (a == "-e" || a == "--expression") && i+1 < len(words) {
@@ -1181,7 +1193,7 @@ func commandWrites(words []string) []string {
 				continue
 			}
 		}
-		if name == "sed" && a == "-i" && i+1 < len(words) && words[i+1] == "" {
+		if name == "sed" && a == "-i" && i+1 < len(words) && (words[i+1] == "" || words[i+1] == ".bak") {
 			i++
 			inPlace = true
 			continue
@@ -1201,6 +1213,10 @@ func commandWrites(words []string) []string {
 			return []string{target}
 		}
 		return operands[max(0, len(operands)-1):]
+	case "curl", "wget":
+		if target != "" {
+			return []string{target}
+		}
 	case "sed", "perl":
 		if inPlace {
 			if !script && len(operands) > 0 {
@@ -1232,6 +1248,12 @@ func wordText(word *syntax.Word) string {
 		}
 	}
 	text, _ := literalWord(&syntax.Word{Parts: parts}, double)
+	if len(word.Parts) == 1 && strings.HasPrefix(text, "~/") {
+		switch word.Parts[0].(type) {
+		case *syntax.SglQuoted, *syntax.DblQuoted:
+			return "./" + text
+		}
+	}
 	return text
 }
 
