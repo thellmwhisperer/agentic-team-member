@@ -1104,12 +1104,18 @@ func commandWrites(words []string) []string {
 		return nil
 	}
 	switch name := path.Base(words[0]); name {
-	case "command", "exec":
-		return commandWrites(words[1:])
-	case "env":
-		return envWrites(words)
-	case "sh", "bash", "zsh":
-		return shWrites(words)
+	case "command", "exec", "env": // what the command it runs, past its options and assignments, writes
+		var out []string
+		for i := 1; i < len(words); i++ {
+			out = append(out, commandWrites(words[i:])...)
+		}
+		return out
+	case "sh", "bash", "zsh": // what the command -c gives writes
+		var out []string
+		for _, w := range words[1:] {
+			out = append(out, shellWrites(w)...)
+		}
+		return out
 	case "tee", "touch", "mkdir", "rm", "rmdir", "mv", "truncate", "unlink":
 		return operandWrites(name, words)
 	case "cp", "ln", "install", "rsync":
@@ -1120,43 +1126,6 @@ func commandWrites(words []string) []string {
 		return editWrites(words, sedOption)
 	case "perl":
 		return editWrites(words, perlOption)
-	}
-	return nil
-}
-
-// envWrites is what the command env runs writes.
-func envWrites(words []string) []string {
-	for i := 1; i < len(words); i++ {
-		word := words[i]
-		if word == "-u" || word == "--unset" || word == "-C" || word == "--chdir" {
-			i++
-			continue
-		}
-		if strings.Contains(word, "=") || strings.HasPrefix(word, "-") {
-			continue
-		}
-		return commandWrites(words[i:])
-	}
-	return nil
-}
-
-// shWrites is what sh -c's command writes.
-func shWrites(words []string) []string {
-	for i := 1; i < len(words); i++ {
-		if words[i] == "-o" && i+1 < len(words) {
-			i++
-			continue
-		}
-		if words[i] == "-c" || strings.HasPrefix(words[i], "-") && !strings.HasPrefix(words[i], "--") &&
-			strings.Contains(words[i][1:], "c") {
-			if i+1 < len(words) {
-				return shellWrites(words[i+1])
-			}
-			break
-		}
-		if !strings.HasPrefix(words[i], "-") {
-			break
-		}
 	}
 	return nil
 }
