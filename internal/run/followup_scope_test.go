@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -360,5 +361,35 @@ func assertUnplannedCheckEvidence(t *testing.T, root, label string) {
 		!strings.Contains(left[0].Diff, "+extra") || left[0].RedTest != "c1_test.sh" ||
 		left[0].Dependency != report.Units[len(report.Units)-1].Base {
 		t.Fatalf("%s: want discrepancy, diff and dependency persisted, got %s, %v", label, b, err)
+	}
+}
+
+// TestFollowUpScopeBriefNamesItsScratch: the scope reviewer gets a scratch directory its brief names and
+// its TMPDIR points at, and its checks may write there.
+func TestFollowUpScopeBriefNamesItsScratch(t *testing.T) {
+	_, runDir, call, _, err := scopeRun(t, androidIssue, "c1_test.sh",
+		scopeFollowUp("c1_test.sh", "The android card opens the route.", `["a.txt"]`),
+		"FAKE_REVIEW_SCRATCH", "1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := agentCall(t, call+".scope")
+	dirs, _ := filepath.Glob(filepath.Join(runDir, "scope-review-unit*-scratch"))
+	if len(dirs) != 1 {
+		t.Fatalf("want one scope scratch directory under %s, got %v", runDir, dirs)
+	}
+	scratch := dirs[0]
+	if !strings.Contains(scope.Stdin, "`"+scratch+"`") ||
+		!strings.Contains(scope.Stdin, "never inline interpreters") {
+		t.Fatalf("want the scope brief to name the scratch %s and forbid inline interpreters, got:\n%s",
+			scratch, scope.Stdin)
+	}
+	if !slices.Contains(scope.Env, "TMPDIR="+scratch) {
+		t.Fatalf("want the scope reviewer's TMPDIR at %s, got %v", scratch, scope.Env)
+	}
+	for _, name := range []string{"tickets.txt", "tmp.txt"} {
+		if _, e := os.Stat(filepath.Join(scratch, name)); e != nil {
+			t.Fatalf("want %s under the scope scratch directory: %v", name, e)
+		}
 	}
 }

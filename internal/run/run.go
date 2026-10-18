@@ -93,7 +93,7 @@ func Run(label string, args []string, out, summary io.Writer) (err error) {
 		r.Reproofs, _ = ev["reproofs"].([]unitResult)
 		return ev, err
 	})
-	a.deliver(r, root, dir, sha, *base, c.Delivery, i, proofs, c, summary)
+	deliver(r, root, dir, sha, *base, c.Delivery, i, summary)
 	return r.err
 }
 
@@ -315,14 +315,12 @@ func (a agent) runUnit(
 var nonSlug = regexp.MustCompile(`[^a-z0-9]+`)
 
 // deliver puts the run's work in clone, at base commit sha, on branch atm/<slug>-<timestamp> (onBranch),
-// has the agent review that commit against issue i (reviewContract), rewrites report.json with its SHA and, once
-// approved, runs the delivery command line in clone, its output on screen and in delivery-output.txt next to
-// report.json. ATM never pushes: that is line's business.
+// rewrites report.json with its SHA and runs the delivery command line in clone, its output on screen and in
+// delivery-output.txt next to report.json. ATM never pushes: that is line's business.
 // line has no ceiling: it lasts as long as what it hands the work to. SIGINT and SIGTERM cancel its
 // process group on Unix or process tree on Windows. Its exit status is the delivery result.
 // ponytail: line gets the clone after the slop detector.
-func (a agent) deliver(r *verdict, root, clone, sha, base, line string, i Issue, history []proof,
-	c config.Config, screen io.Writer) {
+func deliver(r *verdict, root, clone, sha, base, line string, i Issue, screen io.Writer) {
 	if line == "" {
 		if r.err == nil {
 			r.node("delivery").Result = "skipped"
@@ -332,7 +330,7 @@ func (a agent) deliver(r *verdict, root, clone, sha, base, line string, i Issue,
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	r.step("delivery", func() (map[string]any, error) {
-		branch, cuts, tombs, err := a.prepareDelivery(r, root, clone, sha, i, history, c)
+		branch, cuts, tombs, err := prepareDelivery(r, root, clone, sha, i)
 		ev := map[string]any{"branch": branch}
 		if err != nil {
 			return ev, err
@@ -371,8 +369,7 @@ func (a agent) deliver(r *verdict, root, clone, sha, base, line string, i Issue,
 	})
 }
 
-func (a agent) prepareDelivery(r *verdict, root, clone, sha string, i Issue, history []proof,
-	c config.Config) (branch, cuts, tombs string, err error) {
+func prepareDelivery(r *verdict, root, clone, sha string, i Issue) (branch, cuts, tombs string, err error) {
 	s := nonSlug.ReplaceAllString(strings.ToLower(i.Title), "-")
 	branch = "atm/" + cmp.Or(strings.Trim(s[:min(len(s), 40)], "-"), "run") + "-" +
 		strings.TrimPrefix(filepath.Base(clone), "atm-run-") // the clone's timestamp, as unique
@@ -386,14 +383,6 @@ func (a agent) prepareDelivery(r *verdict, root, clone, sha string, i Issue, his
 		}
 		return err
 	})
-	if err == nil {
-		var repairs repairEvidence
-		r.HeadSHA, repairs, err = a.reviewedDelivery(clone, sha, r.HeadSHA, tombs, i, root, history, c)
-		for _, attempt := range repairs.Attempts {
-			r.Reproofs = attempt.Reproofs
-			r.Commands = append(r.Commands, attempt.Commands...)
-		}
-	}
 	if err == nil {
 		err = r.write()
 	}

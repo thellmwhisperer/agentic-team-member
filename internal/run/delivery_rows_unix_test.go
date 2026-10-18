@@ -40,18 +40,16 @@ func TestDeliveryCommandOutputIsNotDuplicatedOnTerminal(t *testing.T) {
 
 func TestDeliveryRowsThroughRealBinaryAndColdAttach(t *testing.T) {
 	bin := builtATM(t)
-	blocked := repairBlocked(t, "Retry once on a timeout.", "a.txt:1 never retries", nil)
-	repairEnv(t, []string{blocked, slicingJSON(t, slicingReport())}, []string{repairGrow})
 	// The real binary's serve binds at git's toplevel. t.TempDir can be another spelling of that
 	// directory (Darwin's /var, or any symlink); short() then cannot dial the socket.
-	top := gitT(t, repo(t, t.TempDir(), atmSet(repairATM(), "delivery", "echo delivery-output-once")),
+	top := gitT(t, repo(t, t.TempDir(), atmSet(atmYAML, "delivery", "echo delivery-output-once")),
 		"rev-parse", "--show-toplevel")
 	t.Setenv("FAKE_AGENT_CALL", filepath.Join(t.TempDir(), "call.json"))
 	if err := os.MkdirAll(filepath.Join(top, ".atm"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	server := startVersionServe(t, bin, top)
-	out, err := versionLaunch(bin, top, issueFile(t, reviewIssue))
+	out, err := versionLaunch(bin, top, issueFile(t, issue))
 	if err != nil {
 		t.Fatalf("atm run: %v\n%s", err, out)
 	}
@@ -65,11 +63,7 @@ func TestDeliveryRowsThroughRealBinaryAndColdAttach(t *testing.T) {
 	server = startVersionServe(t, bin, top)
 	shown := coldDeliveryAttach(t, bin, top, label)
 	for _, name := range deliveryParts {
-		mark := "✓ "
-		if name == "review" {
-			mark = "✗ "
-		}
-		if !strings.Contains(shown, mark+name+"  ") {
+		if !strings.Contains(shown, "✓ "+name+"  ") {
 			t.Errorf("atm attach lost %s:\n%s", name, shown)
 		}
 	}

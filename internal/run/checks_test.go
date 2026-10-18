@@ -811,8 +811,7 @@ const (
 	unit1   = "fix: Retry on timeout|" + atmID + "\n"
 	initial = "init|" + atmID + "\n"
 	based   = "base|" + atmID + "\n" + initial
-	placed  = ".claude/skills/ponytail-review/SKILL.md\n.claude/skills/ponytail/SKILL.md\n" +
-		".claude/skills/task-slicing/SKILL.md\n"
+	placed  = ".claude/skills/ponytail-review/SKILL.md\n.claude/skills/ponytail/SKILL.md\n"
 	uncut = unit1 + based + placed + ".atm.yaml\n.gitignore\na.txt\na_test.sh\nfixed\nextra\nmore\n"
 )
 

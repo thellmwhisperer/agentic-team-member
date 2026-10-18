@@ -13,7 +13,7 @@ import (
 )
 
 func TestReportRejectionPersistsAcrossConsumers(t *testing.T) {
-	for _, name := range []string{"worker", "ponytail", "contract-review", "scope-review-unit2", "repair-1"} {
+	for _, name := range []string{"worker", "ponytail", "scope-review-unit2"} {
 		for _, outcome := range []string{"valid", "returned", "invalid twice", "process failure"} {
 			t.Run(name+"/"+outcome, func(t *testing.T) {
 				root := repo(t, "https://example.com/owner/repo.git", "")
@@ -24,9 +24,6 @@ func TestReportRejectionPersistsAcrossConsumers(t *testing.T) {
 				switch name {
 				case "ponytail":
 					valid = `{"findings":[],"summary":"s"}`
-				case "contract-review":
-					valid = strings.NewReplacer("{base}", head, "{head}", head).Replace(defaultReview)
-					wantError = "agent left no report: invalid contract review: want a single JSON object"
 				case "scope-review-unit2":
 					valid = `{"disposition":"approved","paths":["a.txt"],"findings":[],"summary":"s"}`
 					wantError = "agent left no report: invalid scope review: want a single JSON object"
@@ -57,13 +54,9 @@ func runRejectionConsumer(t *testing.T, a agent, root, head, name, outcome, want
 	t.Helper()
 	var err error
 	switch name {
-	case "contract-review":
-		err = a.contractReview(root, head, head, "", Issue{Text: reviewIssue}, obj{})
 	case "scope-review-unit2":
-		err = a.scopeReview(root, head, 2, Issue{Text: reviewIssue}, followUp{Paths: []string{"a.txt"}},
+		err = a.scopeReview(root, head, 2, Issue{Text: issue}, followUp{Paths: []string{"a.txt"}},
 			&scopeReview{Paths: []string{"a.txt"}})
-	case "repair-1":
-		err = a.repairWork(root, head, config.Config{}, 1, nil)
 	case "ponytail":
 		_, err = a.run(root, name, "ponytail-review", "brief", func(r obj) error {
 			_, err := findings(r, nil)

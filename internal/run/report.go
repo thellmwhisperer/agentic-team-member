@@ -206,9 +206,9 @@ type eventSink interface{ watch(ev []byte) }
 func (r *verdict) live(ev map[string]any) {
 	if name, _ := ev["check"].(string); r.at == "delivery" && name != "" {
 		switch name {
-		case "commit", "review", "repair 1", "review 2", "repair 2", "review 3", "command":
+		case "commit", "command":
 		default:
-			return // A repair's checks belong to its repair row, not more Delivery rows.
+			return
 		}
 		n := r.node("delivery")
 		if ev["state"] == "started" {

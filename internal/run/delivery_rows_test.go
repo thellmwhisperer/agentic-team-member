@@ -8,17 +8,15 @@ import (
 	"testing"
 )
 
-var deliveryParts = []string{"commit", "review", "repair 1", "review 2", "command"}
+var deliveryParts = []string{"commit", "command"}
 
 func deliveryRowsRun(t *testing.T) (*watched, obj, string) {
 	t.Helper()
-	blocked := repairBlocked(t, "Retry once on a timeout.", "a.txt:1 never retries", nil)
-	repairEnv(t, []string{blocked, slicingJSON(t, slicingReport())}, []string{repairGrow})
-	root := repo(t, t.TempDir(), atmSet(repairATM(), "delivery", "echo delivery-output-once"))
+	root := repo(t, t.TempDir(), atmSet(atmYAML, "delivery", "echo delivery-output-once"))
 	t.Setenv("FAKE_AGENT_CALL", filepath.Join(t.TempDir(), "call.json"))
 	var w watched
 	var terminal bytes.Buffer
-	if err := Run("t", []string{issueFile(t, reviewIssue)}, &w, &terminal); err != nil {
+	if err := Run("t", []string{issueFile(t, issue)}, &w, &terminal); err != nil {
 		t.Fatal(err)
 	}
 	return &w, readReport(t, filepath.Join(root, ".atm", "runs", "t", "report.json")), terminal.String()
@@ -28,11 +26,7 @@ func TestDeliveryEmitsARowPerPart(t *testing.T) {
 	w, _, _ := deliveryRowsRun(t)
 	var got, want [][2]string
 	for _, name := range deliveryParts {
-		result := "passed"
-		if name == "review" {
-			result = "failed"
-		}
-		want = append(want, [2]string{name, "started"}, [2]string{name, result})
+		want = append(want, [2]string{name, "started"}, [2]string{name, "passed"})
 	}
 	for _, ev := range w.live {
 		name, _ := ev["check"].(string)
@@ -68,13 +62,9 @@ func assertDeliveryRows(t *testing.T, report obj) {
 		r := value.(map[string]any)
 		name, _ := r["name"].(string)
 		names = append(names, name)
-		result := "passed"
-		if name == "review" {
-			result = "failed"
-		}
 		ms, ok := r["duration_ms"].(float64)
-		if r["result"] != result || !ok || ms < 0 {
-			t.Errorf("saved row = %v, want %s and a duration", r, result)
+		if r["result"] != "passed" || !ok || ms < 0 {
+			t.Errorf("saved row = %v, want passed and a duration", r)
 		}
 	}
 	if !reflect.DeepEqual(names, deliveryParts) {
@@ -112,48 +102,6 @@ func TestDeliveryCommandOutputIsNotDuplicated(t *testing.T) {
 	}
 	if outputs != 1 {
 		t.Fatalf("plain screen output events = %d, want 1", outputs)
-	}
-}
-
-func TestDeliveryRowsKeepBothRepairRoundsAndFailureReason(t *testing.T) {
-	for _, approves := range []bool{true, false} {
-		t.Run(map[bool]string{true: "approved", false: "blocked"}[approves], func(t *testing.T) {
-			blocked := repairBlocked(t, "Retry once on a timeout.", "a.txt:1 never retries", nil)
-			last := blocked
-			if approves {
-				last = slicingJSON(t, slicingReport())
-			}
-			repairEnv(t, []string{blocked, blocked, last}, []string{repairGrow, repairGrow + "; echo retry >> a.txt"})
-			dir, _, _, _, err := reviewRun(t, repairATM())
-			if (err == nil) != approves {
-				t.Fatalf("approved=%t, delivery error=%v", approves, err)
-			}
-			report := readReport(t, filepath.Join(dir, "report.json"))
-			rows, _ := reportNode(t, report, "delivery")["rows"].([]any)
-			want := []string{"commit", "review", "repair 1", "review 2", "repair 2", "review 3"}
-			if approves {
-				want = append(want, "command")
-			}
-			var names []string
-			for _, value := range rows {
-				r := value.(map[string]any)
-				name := r["name"].(string)
-				names = append(names, name)
-				result := "passed"
-				if name == "review" || name == "review 2" || name == "review 3" && !approves {
-					result = "failed"
-				}
-				if r["result"] != result {
-					t.Errorf("row %s = %v, want %s", name, r["result"], result)
-				}
-			}
-			if !reflect.DeepEqual(names, want) {
-				t.Fatalf("rows = %v, want %v", names, want)
-			}
-			if !approves && (report["failed_node"] != "delivery" || report["reason"] != err.Error()) {
-				t.Fatalf("delivery reason changed: %v, error %v", report, err)
-			}
-		})
 	}
 }
 

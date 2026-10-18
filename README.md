@@ -131,7 +131,7 @@ For `atm run`, including `--follow`, and `atm axi run`:
 | `0` | Every unit passed and Delivery passed or was skipped; see [Delivery](docs/how-a-run-flows.md#delivery) |
 | `1` | A unit failed; nothing is delivered |
 | `2` | [serve build check](docs/how-a-run-flows.md#the-screen), configuration, issue, clone or contract failed |
-| `4` | Every unit passed, but Delivery failed, including its contract review |
+| `4` | Every unit passed, but Delivery failed |
 
 ## Read more
 

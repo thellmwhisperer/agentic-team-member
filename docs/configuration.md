@@ -275,8 +275,8 @@ The [follow-up rules](how-a-run-flows.md#follow-ups) describe the cumulative
 budget and the dependency evidence kept when a mandatory gap blocks the run.
 
 `atm run --resume <label>` starts a new run of the same issue under its own
-label. It uses the saved original issue for briefs, scope review and final
-contract review; it never re-reads the live issue. It reads `.atm.yaml` again,
+label. It uses the saved original issue for briefs and scope review; it never
+re-reads the live issue. It reads `.atm.yaml` again,
 so a fixed config counts, clones the saved base commit and puts the work back.
 Its Agent row reads `resumed from <label>`, also as `resumed_from` on its unit
 in `report.json`. If the failed row was `e2e` and the saved harness can resume
@@ -313,12 +313,6 @@ Either way the body declares its task type on a case-sensitive `Type:` line,
 lowercase: `fix` (or `hotfix`), `feature`, `greenfield`, `refactor`, `tests`,
 `docs` or `chore`. The type picks the proof the checks ask for; see
 [How a run flows](how-a-run-flows.md#what-each-task-type-proves).
-
-For [delivery](how-a-run-flows.md#delivery), the issue must also supply
-Non-goals, Invariants, executable Acceptance and Split triggers. The reviewer
-judges their meaning: prose is valid, but empty Markdown headings are not.
-Acceptance must specify a runnable check and its expected result. Split
-triggers identify discoveries that require separating work or replanning.
 
 ```markdown
 # Retry the upload on a timeout

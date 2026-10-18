@@ -11,7 +11,7 @@ import (
 )
 
 func TestScreenShowsDeliveryRows(t *testing.T) {
-	names := []string{"commit", "review", "repair 1", "review 2", "command"}
+	names := []string{"commit", "command"}
 	m := screen(60, 50, `{"step":"delivery","state":"started",`+ts+`}`)
 	m.now = time.Date(2026, 10, 7, 5, 0, 2, 0, time.UTC)
 	var rows []map[string]any
@@ -20,13 +20,9 @@ func TestScreenShowsDeliveryRows(t *testing.T) {
 		if r := m.checkRow("delivery", name); r.state != "running" || !strings.Contains(view(m), name+"  2.0 s") {
 			t.Fatalf("%s not live: %+v\n%s", name, r, view(m))
 		}
-		result := "passed"
-		if name == "review" {
-			result = "failed"
-		}
 		m.apply(run.Frame{Event: fmt.Appendf(nil,
-			`{"step":"delivery","check":%q,"state":%q,"duration_ms":1100}`, name, result)})
-		rows = append(rows, map[string]any{"name": name, "result": result, "duration_ms": 1100})
+			`{"step":"delivery","check":%q,"state":"passed","duration_ms":1100}`, name)})
+		rows = append(rows, map[string]any{"name": name, "result": "passed", "duration_ms": 1100})
 	}
 	m.apply(run.Frame{Event: []byte(`{"step":"delivery","state":"passed","duration_ms":5500}`)})
 	b, err := json.Marshal(map[string]any{"nodes": []any{map[string]any{
@@ -37,8 +33,7 @@ func TestScreenShowsDeliveryRows(t *testing.T) {
 	attached := New("finished", 60, 50)
 	attached.end(run.Outcome{Outcome: "passed", Report: savedReport(t, string(b))}, nil)
 	for _, model := range []*Model{m, attached} {
-		if s := view(model); !order(s, "✓ Delivery  5.5 s", "✓ commit  1.1 s", "✗ review  1.1 s",
-			"✓ repair 1  1.1 s", "✓ review 2  1.1 s", "✓ command  1.1 s") {
+		if s := view(model); !order(s, "✓ Delivery  5.5 s", "✓ commit  1.1 s", "✓ command  1.1 s") {
 			t.Fatalf("delivery rows missing from screen:\n%s", s)
 		}
 	}

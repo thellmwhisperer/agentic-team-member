@@ -12,7 +12,7 @@ incident:
   evidence:
     - family: speculative_hardening
       example: "Deleted the loop in scopeReview that rejected a proposed path not passing filepath.IsLocal. Nothing replaces it: the reviewer judges every path against the issue, and unplanned() only authorizes changed paths matching an approved one, so a non-local path can never authorize anything."
-      artifact: "internal/run/contract_review.go"
+      artifact: "internal/run/scope_review.go"
 match:
   family: speculative_hardening
-  artifact: "internal/run/contract_review.go"
+  artifact: "internal/run/scope_review.go"
