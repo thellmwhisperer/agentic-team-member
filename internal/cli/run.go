@@ -17,10 +17,10 @@ import (
 )
 
 // runCmd hands the run to the repository's background process, so closing the terminal leaves it going.
-// Without --follow, a terminal keeps the completed screen open until the user closes it.
+// Without --follow, a terminal shows the run's screen until the run ends or the user closes it.
 func runCmd() *cobra.Command {
 	c := &cobra.Command{Use: "run", Short: "Fix an issue: " + run.Usage,
-		Long: "Without --follow, on a terminal the completed screen stays open until q or Ctrl+C.\n" +
+		Long: "Without --follow, on a terminal the screen shows until the run ends or q or Ctrl+C.\n" +
 			"With --follow instead of --watcher, atm is the run's watcher and prints its events as JSON lines until " +
 			"it ends: exit 0 on merge, 1 on closure or run failure (also on interruption or no delivery), " +
 			"2 on launch failure. --follow cannot be combined with --resume; " +
@@ -33,10 +33,7 @@ func runCmd() *cobra.Command {
 			if run.Follows(args) {
 				ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 				defer stop()
-				out := newFollowOut(root, cmd.OutOrStdout())
-				err := run.StartFollowing(ctx, root, args, out, out.open)
-				out.close()
-				return err
+				return run.StartFollowing(ctx, root, args, cmd.OutOrStdout())
 			}
 			o, err := run.Start(root, args)
 			if err != nil {
@@ -46,7 +43,7 @@ func runCmd() *cobra.Command {
 				_, err = fmt.Fprintln(cmd.OutOrStdout(), o.Run)
 				return err
 			}
-			return attach(root, o.Run, "startup", cmd.OutOrStdout())
+			return attach(root, o.Run, cmd.OutOrStdout())
 		}}
 	// Publish the skill's flag in cobra too; run still owns argument parsing.
 	c.Flags().Bool("follow", false, "be the run's watcher and print its events as JSON until it ends")
@@ -64,18 +61,18 @@ func screen(w io.Writer) (*os.File, bool) {
 	return f, ok && terminal(f) && os.Getenv("NO_COLOR") == "" && os.Getenv("TERM") != "dumb"
 }
 
-// attach shows run label's screen on w until the user closes it and returns how it ended.
-// Leaving leaves it going. herdr sees the screen start from start, startup or resume.
-func attach(root, label, start string, w io.Writer) error {
+// attach shows run label's screen on w until the run ends or the user closes it and returns how it ended.
+// Leaving leaves it going.
+func attach(root, label string, w io.Writer) error {
 	f, ok := screen(w)
 	if !ok {
-		o, err := tui.Attach(root, label, start, w)
+		o, err := tui.Attach(root, label, w)
 		if err != nil {
 			return err
 		}
 		return o.Err()
 	}
-	o, detached, err := tui.Show(root, label, start, os.Stdin, f)
+	o, detached, err := tui.Show(root, label, os.Stdin, f)
 	switch {
 	case err != nil:
 		return err
@@ -89,7 +86,7 @@ func attach(root, label, start string, w io.Writer) error {
 func attachCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "attach [run]",
-		Short: "Show a run's screen; completed screens stay until q or Ctrl+C",
+		Short: "Show a run's screen until it ends or q or Ctrl+C",
 		Long:  "The last running run is selected by default. Leaving a live screen leaves the run going.",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -97,7 +94,7 @@ func attachCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return attach(root, append(args, "")[0], "resume", cmd.OutOrStdout())
+			return attach(root, append(args, "")[0], cmd.OutOrStdout())
 		}}
 }
 

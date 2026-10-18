@@ -23,8 +23,8 @@ func Follows(args []string) bool {
 // background process of the repository at root run args bound to it, and streams that run on w until it ends,
 // then drops the lease. Its error is nil on merge, exit code 1 when the run did not merge, else that no run started.
 // Ending ctx leaves the run going.
-func StartFollowing(ctx context.Context, root string, args []string, w io.Writer, open func(string) string) error {
-	ordered, _, resume, a, err := parseArgs(args)
+func StartFollowing(ctx context.Context, root string, args []string, w io.Writer) error {
+	_, _, resume, a, err := parseArgs(args)
 	switch {
 	case err != nil:
 		return err
@@ -57,8 +57,7 @@ func StartFollowing(ctx context.Context, root string, args []string, w io.Writer
 		}
 	}()
 	defer func() { close(stopBeating); <-beating; _ = os.Remove(leasePath(root, id)) }()
-	pane := open(ordered[len(ordered)-1])
-	o, err := start(root, append([]string{"--watcher", id}, args...), pane)
+	o, err := start(root, append([]string{"--watcher", id}, args...))
 	if err != nil {
 		return err
 	}

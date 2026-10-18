@@ -297,6 +297,16 @@ func (m *Model) running() bool {
 	return false
 }
 
+// waits says whether a gate step is waiting for a decision.
+func (m *Model) waits() bool {
+	for _, r := range m.activityRows() {
+		if r.state == "waiting" {
+			return true
+		}
+	}
+	return false
+}
+
 // agentRuns says whether the agent of a unit, or of the slop detector, runs.
 func (m *Model) agentRuns() bool {
 	for _, step := range []string{"agent", "ponytail"} {

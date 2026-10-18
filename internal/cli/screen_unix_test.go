@@ -56,9 +56,9 @@ func onTerminal(t *testing.T, args ...string) (string, int) {
 	case err = <-done: // plain output or failure before opening the screen
 	case <-completed:
 		select {
-		case err = <-done:
-			t.Error("completed native pipeline exited before q")
-		case <-time.After(150 * time.Millisecond):
+		case err = <-done: // the run ended: its screen quit without q
+		case <-time.After(5 * time.Second):
+			t.Error("completed native pipeline did not exit when the run ended")
 			if _, writeErr := p.Write([]byte("q")); writeErr != nil {
 				t.Fatal(writeErr)
 			}

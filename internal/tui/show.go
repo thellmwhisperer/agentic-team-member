@@ -17,10 +17,9 @@ import (
 var follow = run.Follow // tests follow a run of their own
 
 // Show shows the screen of run label, of the repository at root, on the terminal in and out until the user
-// closes it, keeping completed results visible; detached when the user left it going. While delivery runs on
-// the terminal, the terminal is the command's: no-mistakes, attached by it, shows its own screen there. In a
-// herdr pane, the run shows in herdr's Agents section while the screen does, from start, startup or resume.
-func Show(root, label, start string, in, out *os.File) (o run.Outcome, detached bool, err error) {
+// closes it or the run ends; detached when the user left it going. While delivery runs on the terminal, the
+// terminal is the command's: no-mistakes, attached by it, shows its own screen there.
+func Show(root, label string, in, out *os.File) (o run.Outcome, detached bool, err error) {
 	label, err = resolve(root, label)
 	if err != nil {
 		return o, false, err
@@ -40,7 +39,7 @@ func Show(root, label, start string, in, out *os.File) (o run.Outcome, detached 
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		o, err := followWithHerdr(root, label, start, &[2]int{w, h}, keys, d.frame, follow)
+		o, err := follow(root, label, &[2]int{w, h}, keys, d.frame)
 		d.giveBack()
 		p.Send(ended{o, err})
 	}()
@@ -52,6 +51,43 @@ func Show(root, label, start string, in, out *os.File) (o run.Outcome, detached 
 	}
 	_, _ = fmt.Fprintln(out, m.View()) // the alternate screen is gone: the last one stays
 	return m.outcome, m.detached, m.err
+}
+
+// Attach shows run label's plain lines on w until it ends.
+func Attach(root, label string, w io.Writer) (run.Outcome, error) {
+	label, err := resolve(root, label)
+	if err != nil {
+		return run.Outcome{}, err
+	}
+	if label == "" {
+		return run.Outcome{}, errors.New("no run yet")
+	}
+	return run.Follow(root, label, nil, nil, func(f run.Frame) {
+		if f.Line != nil {
+			_, _ = fmt.Fprintln(w, *f.Line)
+		}
+		_, _ = w.Write(f.Raw)
+	})
+}
+
+// resolve chooses the run that an empty-label attach will follow, once.
+func resolve(root, label string) (string, error) {
+	if label != "" {
+		return label, nil
+	}
+	runs, err := run.Runs(root)
+	if err != nil {
+		return "", err
+	}
+	for i := len(runs) - 1; i >= 0; i-- {
+		if runs[i].Ended.IsZero() {
+			return runs[i].Run, nil
+		}
+	}
+	if len(runs) > 0 {
+		return runs[len(runs)-1].Run, nil
+	}
+	return "", nil
 }
 
 // delivery is the delivery command's turn at the terminal: from its first output to its end, the screen

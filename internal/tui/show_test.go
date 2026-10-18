@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"io"
 	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -89,14 +88,6 @@ const exitAltScreen = "\x1b[?1049l"
 // mouseOn and mouseOff turn the terminal's mouse reports on and off.
 const mouseOn, mouseOff = "\x1b[?1002h", "\x1b[?1002l"
 
-func writeHerdrLog(t *testing.T, bin string) {
-	t.Helper()
-	script := "#!/bin/sh\nprintf '%s|' \"$@\" >> \"$HERDR_LOG\"; echo >> \"$HERDR_LOG\"\n"
-	if err := os.WriteFile(bin, []byte(script), 0o700); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func waitShowToOpen(t *testing.T, shown *shown) {
 	t.Helper()
 	if !shown.until(0, func(v string) bool { return strings.Contains(v, "\x1b[?1049h") }) {
@@ -109,52 +100,8 @@ func waitShowReturn(t *testing.T, done <-chan struct{}) {
 	select {
 	case <-done:
 	case <-time.After(3 * time.Second):
-		t.Fatal("Show did not return after q")
+		t.Fatal("Show did not return")
 	}
-}
-
-func assertHerdrReleased(t *testing.T, calls string) {
-	t.Helper()
-	b, err := os.ReadFile(calls)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(b), "pane|release-agent|wX:p1|--source|atm|--agent|atm|") {
-		t.Fatalf("Show returned before releasing herdr: %q", b)
-	}
-}
-
-func TestShowReleasesHerdrBeforeReturningFromQ(t *testing.T) {
-	master, tty := testTerminal(t, 120, 40)
-	dir := t.TempDir()
-	calls, bin := filepath.Join(dir, "calls"), filepath.Join(dir, "herdr")
-	writeHerdrLog(t, bin)
-	t.Setenv("HERDR_ENV", "1")
-	t.Setenv("HERDR_PANE_ID", "wX:p1")
-	t.Setenv("HERDR_BIN_PATH", bin)
-	t.Setenv("HERDR_LOG", calls)
-	old := follow
-	follow = func(_, _ string, _ *[2]int, in <-chan run.Input, _ func(run.Frame)) (run.Outcome, error) {
-		for range in {
-		}
-		return run.Outcome{}, nil
-	}
-	defer func() { follow = old }()
-	s, read := readTerminal(master)
-	done := make(chan struct{})
-	go func() {
-		_, _, _ = Show("", "issue-1", "startup", tty, tty)
-		close(done)
-	}()
-	waitShowToOpen(t, s)
-	if _, err := master.Write([]byte("q")); err != nil {
-		t.Fatal(err)
-	}
-	waitShowReturn(t, done)
-	_ = tty.Close()
-	_ = master.Close()
-	<-read
-	assertHerdrReleased(t, calls)
 }
 
 // A delivery that writes nothing leaves ATM's screen live on the terminal; from its first output to its end,
@@ -190,7 +137,7 @@ func TestDeliveryGetsTheTerminalFromItsFirstOutput(t *testing.T) {
 				}
 				_, _ = p.Write([]byte("q"))
 			}()
-			o, _, err := Show("", "issue-1", "startup", tty, tty)
+			o, _, err := Show("", "issue-1", tty, tty)
 			<-closed
 			_ = tty.Close()
 			<-read
@@ -258,8 +205,7 @@ func deliveryRun(t *testing.T, s *shown, keys io.Writer, silent bool) func(strin
 	}
 }
 
-func TestShowColdCompletedRunStaysUntilClosed(t *testing.T) {
-	t.Setenv("HERDR_ENV", "")
+func TestShowColdCompletedRunQuitsLeavingItsScreen(t *testing.T) {
 	t.Setenv("TERM", "xterm-256color")
 	master, tty := testTerminal(t, 69, 39)
 	path := savedReport(t, completedReport)
@@ -273,34 +219,29 @@ func TestShowColdCompletedRunStaysUntilClosed(t *testing.T) {
 	var o run.Outcome
 	var detached bool
 	var showErr error
-	go func() { o, detached, showErr = Show("", "297-65", "resume", tty, tty); close(done) }()
-	assertColdCompletedScreen(t, s, done)
-	if _, err := master.Write([]byte("q")); err != nil {
-		t.Fatal(err)
-	}
-	waitShowReturn(t, done)
+	go func() { o, detached, showErr = Show("", "297-65", tty, tty); close(done) }()
+	waitShowReturn(t, done) // the run had ended: no q needed
 	if showErr != nil || detached || o.Outcome != "passed" {
 		t.Fatalf("completed close: %+v detached=%v err=%v", o, detached, showErr)
 	}
 	_ = tty.Close()
 	_ = master.Close()
 	<-read
+	assertColdCompletedScreen(t, s)
 }
 
-func assertColdCompletedScreen(t *testing.T, s *shown, done <-chan struct{}) {
+// assertColdCompletedScreen says the screen opened and, once it quit, left the completed run's results on the
+// terminal.
+func assertColdCompletedScreen(t *testing.T, s *shown) {
 	t.Helper()
 	waitShowToOpen(t, s)
-	if !s.until(0, func(v string) bool { return strings.Contains(ansi.Strip(v), "q close") }) {
-		t.Fatal("cold completed pipeline was not rendered")
+	v := s.since(0)
+	i := strings.LastIndex(v, exitAltScreen)
+	if i < 0 {
+		t.Fatalf("the screen never gave the terminal back: %q", v)
 	}
-	select {
-	case <-done:
-		t.Fatal("completed view returned before q")
-	case <-time.After(150 * time.Millisecond):
-	}
-	before := s.since(0)
-	if strings.Contains(before, exitAltScreen) || !strings.Contains(ansi.Strip(before), "21 min 58 s") {
-		t.Fatalf("completed view lost its native screen/results: %q", before)
+	if left := ansi.Strip(v[i:]); !strings.Contains(left, "q close") || !strings.Contains(left, "21 min 58 s") {
+		t.Fatalf("completed view lost its results once it quit: %q", left)
 	}
 }
 

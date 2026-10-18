@@ -1,6 +1,7 @@
 package config
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -85,6 +86,28 @@ func TestLoadRejectsUnknownKeysAndProjectKeysInGlobalFile(t *testing.T) {
 	write(t, filepath.Join(home, ".config", "atm", "config.yaml"), "test: pytest\n")
 	if _, err := Load(root, home, Agent{}); err == nil || !strings.Contains(err.Error(), "test") {
 		t.Fatalf("project key in global file: got %v", err)
+	}
+}
+
+func TestConfigIgnoresAnUnknownMachineKeyNamingItOnce(t *testing.T) {
+	root, home := t.TempDir(), t.TempDir()
+	write(t, filepath.Join(root, ".atm.yaml"), complete)
+	write(t, filepath.Join(home, ".config", "atm", "config.yaml"), "harness: codex\nretired_key: ATM\n")
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stderr := os.Stderr
+	os.Stderr = w
+	c, err := Load(root, home, Agent{})
+	os.Stderr = stderr
+	_ = w.Close()
+	b, _ := io.ReadAll(r)
+	if err != nil || c.Harness != "codex" {
+		t.Fatalf("config with an unknown key: %+v, %v", c.Agent, err)
+	}
+	if string(b) != "config: ignored key retired_key\n" {
+		t.Fatalf("stderr %q, want the ignored key named once", b)
 	}
 }
 

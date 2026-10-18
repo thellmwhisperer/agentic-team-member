@@ -5,7 +5,6 @@ package tui
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -25,11 +24,6 @@ func TestGateJumpNamesTheFailedNodeAndOmitsUnknownStarts(t *testing.T) {
 	}
 	writeGateSnaps(t, snaps)
 	t.Setenv("ATM_GATE_DIR", snaps)
-	calls := filepath.Join(bin, "herdr-log")
-	t.Setenv("HERDR_ENV", "1")
-	t.Setenv("HERDR_PANE_ID", "wX:p1")
-	t.Setenv("HERDR_LOG", calls)
-	t.Setenv("HERDR_BIN_PATH", filepath.Join(bin, "herdr"))
 
 	issue := filepath.Join(bin, "issue.md")
 	if err := os.WriteFile(issue, []byte("# Chore\nType: chore\nDo it.\n"), 0o600); err != nil {
@@ -49,19 +43,6 @@ func TestGateJumpNamesTheFailedNodeAndOmitsUnknownStarts(t *testing.T) {
 	events := gateEvents(t, &out)
 	checkGateJump(t, events)
 	report := readGateReport(t, filepath.Join(root, ".atm", "runs", "t", "report.json"))
-	h := openHerdr("t", "startup")
-	for _, ev := range events {
-		h.frame(run.Frame{Event: ev})
-	}
-	h.end(run.Outcome{Outcome: "failed", FailedNode: fmt.Sprint(report["failed_node"]), Ended: time.Now()}, nil)
-	b, err := os.ReadFile(calls)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(b), "idle") || !strings.Contains(string(b), "failed at Document") ||
-		strings.Contains(string(b), "failed at Test") {
-		t.Fatalf("herdr named the wrong node:\n%s", b)
-	}
 	checkGateStarts(t, report)
 }
 
@@ -211,7 +192,7 @@ EOF
 func writeGateFakes(t *testing.T, bin string) {
 	t.Helper()
 	for _, pair := range [][2]string{
-		{"gate-herdr.sh", "herdr"}, {"gate-nm.sh", "no-mistakes"}, {"gate-codex.sh", "codex"},
+		{"gate-nm.sh", "no-mistakes"}, {"gate-codex.sh", "codex"},
 	} {
 		b, err := os.ReadFile(filepath.Join("testdata", pair[0]))
 		if err != nil {

@@ -183,9 +183,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.apply(msg)
 	case ended:
 		m.end(msg.o, msg.err)
-		if msg.o.Ended.IsZero() { // an attach error, not a completed run to keep on screen
-			return m, tea.Quit
-		}
+		return m, tea.Quit // the run ended, or attach failed: Show leaves the last screen on the terminal
 	}
 	return m, nil
 }
