@@ -1124,10 +1124,8 @@ func commandWrites(words []string) []string {
 		return words[len(words)-1:]
 	case "curl", "wget":
 		return flagged(words, "-o", "-O")
-	case "sed":
-		return editWrites(words, sedOption)
-	case "perl":
-		return editWrites(words, perlOption)
+	case "sed", "perl":
+		return editWrites(words)
 	}
 	return nil
 }
@@ -1146,18 +1144,25 @@ func flagged(words []string, flags ...string) (values []string) {
 	return values
 }
 
-// editWrites is the files sed or perl edits in place, past its script, option saying what each word is.
-func editWrites(words []string, option func([]string) (n int, script, inPlace bool)) []string {
+// editWrites is the files sed or perl edits in place: its operands past the script, which -e or -f gives or else the
+// first operand is.
+func editWrites(words []string) []string {
 	var operands []string
 	inPlace, script := false, false
-	for i := 1; i < len(words); {
-		n, s, edits := option(words[i:])
-		if n == 0 {
-			operands = append(operands, words[i])
-			n = 1
+	for i := 1; i < len(words); i++ {
+		w := words[i]
+		switch {
+		case w == "-e" || w == "-f" || w == "--expression" || w == "--file":
+			script = true
+			i++
+		case strings.HasPrefix(w, "-e") || strings.HasPrefix(w, "-f") || strings.HasPrefix(w, "--expression=") ||
+			strings.HasPrefix(w, "--file="):
+			script = true
+		case strings.HasPrefix(w, "-"):
+			inPlace = inPlace || strings.HasPrefix(w, "--in-place") || !strings.HasPrefix(w, "--") && strings.Contains(w, "i")
+		case w != "": // not BSD sed's empty -i suffix
+			operands = append(operands, w)
 		}
-		script, inPlace = script || s, inPlace || edits
-		i += n
 	}
 	if !inPlace {
 		return nil
@@ -1166,50 +1171,6 @@ func editWrites(words []string, option func([]string) (n int, script, inPlace bo
 		operands = operands[1:]
 	}
 	return operands
-}
-
-// sedOption is what w[0], a word of sed's, is: the words it takes, 0 for an operand, whether it gives the
-// script and whether it edits in place.
-func sedOption(w []string) (n int, script, inPlace bool) {
-	a := w[0]
-	switch {
-	case scriptWords(w, true) > 0:
-		return scriptWords(w, true), true, false
-	case a == "-i" && len(w) > 1 && (w[1] == "" || w[1] == ".bak"):
-		return 2, false, true
-	case strings.HasPrefix(a, "-"):
-		return 1, false, strings.HasPrefix(a, "-i") || strings.HasPrefix(a, "--in-place")
-	}
-	return 0, false, false
-}
-
-// perlOption is sedOption for perl.
-func perlOption(w []string) (n int, script, inPlace bool) {
-	a := w[0]
-	short := strings.HasPrefix(a, "-") && !strings.HasPrefix(a, "--")
-	switch {
-	case scriptWords(w, false) > 0:
-		return scriptWords(w, false), true, false
-	case short && strings.HasSuffix(a, "e") && len(w) > 1:
-		return 2, true, strings.Contains(a, "i")
-	case strings.HasPrefix(a, "-"):
-		return 1, false, strings.HasPrefix(a, "--in-place") || short && strings.Contains(a, "i")
-	}
-	return 0, false, false
-}
-
-// scriptWords is how many words of w, from the first, give sed's script, or perl's when not sed: 0 when none.
-func scriptWords(w []string, sed bool) int {
-	a := w[0]
-	switch {
-	case (a == "-e" || a == "--expression" || sed && (a == "-f" || a == "--file")) && len(w) > 1:
-		return 2
-	case len(a) > 2 && (strings.HasPrefix(a, "-e") || sed && strings.HasPrefix(a, "-f")):
-		return 1
-	case strings.HasPrefix(a, "--expression=") || sed && strings.HasPrefix(a, "--file="):
-		return 1
-	}
-	return 0
 }
 
 // wordText is word as the shell reads it, ~ and $HOME as the home directory and any other parameter or command
