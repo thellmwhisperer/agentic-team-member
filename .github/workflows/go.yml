@@ -61,6 +61,7 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "push" ] && [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
             GOCOVERDIR="$(mktemp -d "${RUNNER_TEMP}/atm-cover.XXXXXX")"
+            export GOCOVERDIR
             echo "GOCOVERDIR=$GOCOVERDIR" >> "$GITHUB_ENV"
             echo "cover-main: GOCOVERDIR=$GOCOVERDIR"
           fi
