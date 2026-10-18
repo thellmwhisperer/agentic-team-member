@@ -36,17 +36,8 @@ func checks(clone, runDir, sha, typ, test string, c config.Config) (result map[s
 	var red, green try
 	var proofSpan span
 	result = map[string]any{"red": red, "green": green, "proof_span": proofSpan}
-	var (
-		cover []string
-		ran   []cmdResult
-	)
-	if c.E2E != "" {
-		counters, mkErr := os.MkdirTemp(runDir, "coverage-")
-		err = mkErr
-		if err == nil {
-			cover = []string{"GOCOVERDIR=" + counters}
-		}
-	}
+	cover, err := coverageEnv(runDir, c.E2E)
+	var ran []cmdResult
 	run := func(name, line string, env ...string) error {
 		if line == "" {
 			return nil
@@ -88,16 +79,32 @@ func checks(clone, runDir, sha, typ, test string, c config.Config) (result map[s
 		return result, err
 	}
 	for _, cmd := range [][2]string{{"test", c.Test}, {"e2e", c.E2E}, {"typecheck", c.Typecheck}, {"lint", c.Lint}} {
-		var extra []string
-		if cmd[0] == "test" || cmd[0] == "e2e" {
-			extra = cover
-		}
-		if err := run(cmd[0], cmd[1], extra...); err != nil {
+		if err := run(cmd[0], cmd[1], coverFor(cover, cmd[0])...); err != nil {
 			return result, err
 		}
 	}
 	result["commands"] = ran
 	return result, moved(clone, sha, "the commands")
+}
+
+// coverageEnv is one fresh GOCOVERDIR for a Checks that declares e2e.
+// coverFor gives it to test and e2e only: proof, install, typecheck and lint must not write those counters.
+func coverageEnv(runDir, e2e string) ([]string, error) {
+	if e2e == "" {
+		return nil, nil
+	}
+	dir, err := os.MkdirTemp(runDir, "coverage-")
+	if err != nil {
+		return nil, err
+	}
+	return []string{"GOCOVERDIR=" + dir}, nil
+}
+
+func coverFor(cover []string, name string) []string {
+	if name == "test" || name == "e2e" {
+		return cover
+	}
+	return nil
 }
 
 func hideATM(clone, runDir string) (func() error, error) {
