@@ -356,8 +356,8 @@ func (a agent) deliver(r *verdict, root, clone, sha, base, line string, i Issue,
 		t, _ := screen.(terminal)
 		var tail string
 		var took span
-		// Delivery owns the attached terminal. Its node event is the screen row; emitting
-		// a nested check event here would arrive after the terminal output and duplicate it.
+		// Delivery owns the attached terminal. Its row carries state and time only:
+		// emitting the command's output in a nested check event would duplicate it.
 		command := func() error {
 			var commandErr error
 			took, commandErr = row(func(map[string]any) {}, "delivery", func() error {
@@ -368,12 +368,15 @@ func (a agent) deliver(r *verdict, root, clone, sha, base, line string, i Issue,
 			})
 			return commandErr
 		}
+		r.live(map[string]any{"check": "command", "state": "started"})
 		if strings.Contains(line, "no-mistakes") {
 			handed = branch
 			gateDone, err, gateErr = r.deliverToGate(ctx, stop, root, clone, branch, command)
 		} else {
 			err = command()
 		}
+		// The command goroutine has joined: report writes stay with the gate observer.
+		r.live(map[string]any{"check": "command", "state": outcome(err), "duration_ms": took.DurationMS})
 		ev["commands"] = []cmdResult{{"delivery", line, outcome(err), tail, took}}
 		if gateDone {
 			err = nil
@@ -419,13 +422,16 @@ func (a agent) prepareDelivery(r *verdict, root, clone, sha string, i Issue, his
 	s := nonSlug.ReplaceAllString(strings.ToLower(i.Title), "-")
 	branch = "atm/" + cmp.Or(strings.Trim(s[:min(len(s), 40)], "-"), "run") + "-" +
 		strings.TrimPrefix(filepath.Base(clone), "atm-run-") // the clone's timestamp, as unique
-	cuts, tombs, err = onBranch(root, clone, sha, branch, i)
-	if err == nil {
-		err = foreign(root, clone, sha)
-	}
-	if err == nil {
-		r.HeadSHA, err = git(clone, "rev-parse", "HEAD")
-	}
+	_, err = row(r.live, "commit", func() error {
+		cuts, tombs, err = onBranch(root, clone, sha, branch, i)
+		if err == nil {
+			err = foreign(root, clone, sha)
+		}
+		if err == nil {
+			r.HeadSHA, err = git(clone, "rev-parse", "HEAD")
+		}
+		return err
+	})
 	if err == nil {
 		var repairs repairEvidence
 		r.HeadSHA, repairs, err = a.reviewedDelivery(clone, sha, r.HeadSHA, tombs, i, root, history, c)

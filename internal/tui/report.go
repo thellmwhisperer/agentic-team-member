@@ -10,6 +10,13 @@ import (
 
 const maxDurationMS = int64(^uint64(0)>>1) / int64(time.Millisecond)
 
+type savedNode struct {
+	Name       string      `json:"name"`
+	Result     string      `json:"result"`
+	DurationMS *int64      `json:"duration_ms"`
+	Rows       []savedNode `json:"rows"`
+}
+
 // restoreReport recovers node results after the daemon lost its in-memory frames. The report has only
 // the last Agent/Checks timings, not every unit's events, so it must not invent per-unit rows or tool counts.
 func (m *Model) restoreReport(path string, outcome run.Outcome) {
@@ -21,11 +28,7 @@ func (m *Model) restoreReport(path string, outcome run.Outcome) {
 		return
 	}
 	var report struct {
-		Nodes []struct {
-			Name       string `json:"name"`
-			Result     string `json:"result"`
-			DurationMS *int64 `json:"duration_ms"`
-		}
+		Nodes []savedNode
 	}
 	b, err := os.ReadFile(path)
 	if err == nil {
@@ -52,6 +55,20 @@ func (m *Model) restoreReport(path string, outcome run.Outcome) {
 			(n.Result == "passed" || n.Result == "failed") {
 			r.took, r.hasDuration = time.Duration(*n.DurationMS)*time.Millisecond, true
 		}
+		m.restoreRows(n)
+	}
+}
+
+func (m *Model) restoreRows(n savedNode) {
+	for _, part := range n.Rows {
+		child := m.checkRow(n.Name, part.Name)
+		child.state = "unknown"
+		if part.Result == "passed" || part.Result == "failed" {
+			child.state = part.Result
+			if part.DurationMS != nil && *part.DurationMS >= 0 && *part.DurationMS <= maxDurationMS {
+				child.took, child.hasDuration = time.Duration(*part.DurationMS)*time.Millisecond, true
+			}
+		}
 	}
 }
 
@@ -61,11 +78,7 @@ func clearDuplicate(r *row, duplicate bool) {
 	}
 }
 
-func validSavedNode(n struct {
-	Name       string `json:"name"`
-	Result     string `json:"result"`
-	DurationMS *int64 `json:"duration_ms"`
-}, outcome run.Outcome) bool {
+func validSavedNode(n savedNode, outcome run.Outcome) bool {
 	switch n.Result {
 	case "passed", "failed", "skipped", "not run":
 		return consistentResult(n.Name, n.Result, outcome)

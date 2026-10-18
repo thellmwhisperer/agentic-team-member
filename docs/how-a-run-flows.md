@@ -537,7 +537,7 @@ when a node's state or duration changes.
 |-------|-------|
 | `failed_node`, `reason` | The step that failed, if any, and the reason for failure or PR closure |
 | `agent` | The effective requested `harness`, `model`, `effort` and ordered `harness_args`, after global config, `.atm.yaml` and flags. Unset model and effort stay `""`; no extra arguments is `[]` |
-| `nodes` | Each step's `result` (`passed`, `failed`, `running`, `waiting`, `pending`, `skipped` or `not run`), `started_at` (UTC, RFC 3339 with milliseconds) when its start is known, and `duration_ms` when it ends; the agent node also has `exit` and `tail` when the agent ran but its step failed. Once seen, the [Delivery gate nodes](#delivery) are included with the state and duration from `no-mistakes axi status` |
+| `nodes` | Each step's `result` (`passed`, `failed`, `running`, `waiting`, `pending`, `skipped` or `not run`), `started_at` (UTC, RFC 3339 with milliseconds) when its start is known, and `duration_ms` when it ends; the agent node also has `exit` and `tail` when the agent ran but its step failed. Delivery has `rows`, each with `name`, `result`, `started_at` and `duration_ms`, for the parts that ran. Once seen, the [Delivery gate nodes](#delivery) are included with the state and duration from `no-mistakes axi status` |
 | `type` | The task type |
 | `units` | Each unit's number, base commit, test file, type, result, red/green proof row span, and red and green trials: command, exit code, last 60 lines, `started_at` and `duration_ms` |
 | `reproofs` | The latest repeated unit proofs and spans, after a kept cut or the latest contract repair attempt; successful delivery uses the approved commit's proofs |
@@ -621,6 +621,14 @@ the ATM box, a row per step with its icon (`○`
 pending, a spinner running, `⏸` waiting, `✓` passed, `✗` failed, `–` skipped), duration and
 note, and beside it, from 100 columns, the Agent box while an agent works,
 the Findings box with a failure or the slop detector's cuts, and the Log box.
+Like Checks, Delivery shows a sub-row per part: `commit`, `review`, then
+`repair 1`, `review 2`, `repair 2`, `review 3` only when those rounds happen,
+and `command`. Each has its own live state and elapsed time. Completed runs
+restore these rows from `report.json` when attached, including failed reviews
+followed by a successful repair. The command row carries state and time only;
+its output still goes to the attached terminal once. Delivery ends when the
+command exits, even if the gate's Review node is still waiting. An empty
+delivery command shows `Delivery skipped` without sub-rows.
 The Agent box renders the agent's Markdown prose within the panel width as
 `✎` lines; non-empty thinking appears as `∴` lines. By default, consecutive
 successful or running tool calls are folded into one dim line below them,

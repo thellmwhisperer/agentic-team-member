@@ -21,7 +21,11 @@ import (
 // base, head, report and reason go to contract-review.json in the run's directory.
 func (a agent) reviewedDelivery(clone, base, head, tombs string, i Issue, root string, history []proof,
 	c config.Config) (string, repairEvidence, error) {
-	rec, err := a.reviewed(clone, base, head, tombs, i)
+	var rec map[string]any
+	_, err := row(liveIn(clone), "review", func() (err error) {
+		rec, err = a.reviewed(clone, base, head, tombs, i)
+		return err
+	})
 	rec, repairs, err := a.repairBlocked(clone, base, tombs, i, root, history, c, rec, err)
 	if err = writeReview(a.dir, rec, err); err != nil {
 		return head, repairs, err
