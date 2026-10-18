@@ -934,7 +934,8 @@ func (e event) calls(harness string) (cs []use) {
 				input = b.Arguments
 			}
 			paths := append(strs(b.Input, writesFile(b.Name)), strs(b.Arguments, writesFile(b.Name))...)
-			cs = append(cs, use{tool: b.Name, args: strings.Join(paths, " "), command: shellCommand(b.Name, input), paths: paths})
+			cs = append(cs, use{tool: b.Name, args: strings.Join(paths, " "), command: shellCommand(b.Name, input),
+				paths: paths})
 		}
 	}
 	return cs
@@ -1101,131 +1102,187 @@ func commandWrites(words []string) []string {
 	if len(words) == 0 {
 		return nil
 	}
-	name := path.Base(words[0])
-	if name == "command" || name == "exec" {
+	switch name := path.Base(words[0]); name {
+	case "command", "exec":
 		return commandWrites(words[1:])
+	case "env":
+		return envWrites(words)
+	case "sh", "bash", "zsh":
+		return shWrites(words)
+	case "tee", "touch", "mkdir", "rm", "rmdir", "mv", "truncate", "unlink":
+		return operandWrites(name, words)
+	case "cp", "ln", "install", "rsync":
+		return copyWrites(name, words)
+	case "curl", "wget":
+		return downloadWrites(name, words)
+	case "sed":
+		return editWrites(words, sedOption)
+	case "perl":
+		return editWrites(words, perlOption)
 	}
-	if name == "env" {
-		for i := 1; i < len(words); i++ {
-			word := words[i]
-			if word == "-u" || word == "--unset" || word == "-C" || word == "--chdir" {
-				i++
-				continue
-			}
-			if strings.Contains(word, "=") || strings.HasPrefix(word, "-") {
-				continue
-			}
-			return commandWrites(words[i:])
+	return nil
+}
+
+// envWrites is what the command env runs writes.
+func envWrites(words []string) []string {
+	for i := 1; i < len(words); i++ {
+		word := words[i]
+		if word == "-u" || word == "--unset" || word == "-C" || word == "--chdir" {
+			i++
+			continue
 		}
-		return nil
-	}
-	if name == "sh" || name == "bash" || name == "zsh" {
-		for i := 1; i < len(words); i++ {
-			if words[i] == "-o" && i+1 < len(words) {
-				i++
-				continue
-			}
-			if words[i] == "-c" || strings.HasPrefix(words[i], "-") && !strings.HasPrefix(words[i], "--") &&
-				strings.Contains(words[i][1:], "c") {
-				if i+1 < len(words) {
-					return shellWrites(words[i+1])
-				}
-				break
-			}
-			if !strings.HasPrefix(words[i], "-") {
-				break
-			}
+		if strings.Contains(word, "=") || strings.HasPrefix(word, "-") {
+			continue
 		}
-		return nil
+		return commandWrites(words[i:])
 	}
-	var operands []string
-	inPlace := false
-	var target string
-	var script bool
+	return nil
+}
+
+// shWrites is what sh -c's command writes.
+func shWrites(words []string) []string {
+	for i := 1; i < len(words); i++ {
+		if words[i] == "-o" && i+1 < len(words) {
+			i++
+			continue
+		}
+		if words[i] == "-c" || strings.HasPrefix(words[i], "-") && !strings.HasPrefix(words[i], "--") &&
+			strings.Contains(words[i][1:], "c") {
+			if i+1 < len(words) {
+				return shellWrites(words[i+1])
+			}
+			break
+		}
+		if !strings.HasPrefix(words[i], "-") {
+			break
+		}
+	}
+	return nil
+}
+
+// operandWrites is every operand of tee, touch, mkdir, rm and the like.
+func operandWrites(name string, words []string) (operands []string) {
 	for i := 1; i < len(words); i++ {
 		a := words[i]
 		if name == "touch" && (a == "-r" || a == "--reference") && i+1 < len(words) {
 			i++
 			continue
 		}
-		if (name == "cp" || name == "ln" || name == "install") && (a == "-t" || a == "--target-directory") && i+1 < len(words) {
-			target = words[i+1]
-			i++
-			continue
+		if !strings.HasPrefix(a, "-") {
+			operands = append(operands, a)
 		}
-		if (name == "cp" || name == "ln" || name == "install") && strings.HasPrefix(a, "--target-directory=") {
-			target = strings.TrimPrefix(a, "--target-directory=")
-			continue
-		}
-		if (name == "cp" || name == "ln" || name == "install") && strings.HasPrefix(a, "-t") && len(a) > 2 {
-			target = a[2:]
-			continue
-		}
-		if (name == "curl" && a == "-o" || name == "wget" && a == "-O") && i+1 < len(words) {
-			target = words[i+1]
-			i++
-			continue
-		}
-		if (name == "sed" || name == "perl") && (a == "-e" || a == "--expression") && i+1 < len(words) {
-			i++
-			script = true
-			continue
-		}
-		if name == "sed" && (a == "-f" || a == "--file") && i+1 < len(words) {
-			i++
-			script = true
-			continue
-		}
-		if name == "sed" && (strings.HasPrefix(a, "-f") && len(a) > 2 || strings.HasPrefix(a, "--file=")) {
-			script = true
-			continue
-		}
-		if name == "sed" || name == "perl" {
-			if strings.HasPrefix(a, "-e") && len(a) > 2 || strings.HasPrefix(a, "--expression=") {
-				script = true
-				continue
-			}
-			if name == "perl" && strings.HasPrefix(a, "-") && !strings.HasPrefix(a, "--") &&
-				strings.HasSuffix(a, "e") && i+1 < len(words) {
-				inPlace = inPlace || strings.Contains(a, "i")
-				i++
-				script = true
-				continue
-			}
-		}
-		if name == "sed" && a == "-i" && i+1 < len(words) && (words[i+1] == "" || words[i+1] == ".bak") {
-			i++
-			inPlace = true
-			continue
-		}
-		if strings.HasPrefix(a, "-") {
-			inPlace = inPlace || strings.HasPrefix(a, "-i") || strings.HasPrefix(a, "--in-place") ||
-				name == "perl" && !strings.HasPrefix(a, "--") && strings.Contains(a, "i")
-			continue
-		}
-		operands = append(operands, a)
 	}
-	switch name {
-	case "tee", "touch", "mkdir", "rm", "rmdir", "mv", "truncate", "unlink":
-		return operands
-	case "cp", "ln", "install", "rsync":
-		if target != "" {
-			return []string{target}
+	return operands
+}
+
+// copyWrites is the target directory of cp, ln or install, or the last operand.
+func copyWrites(name string, words []string) []string {
+	var operands []string
+	var target string
+	targets := name != "rsync"
+	for i := 1; i < len(words); i++ {
+		a := words[i]
+		switch {
+		case targets && (a == "-t" || a == "--target-directory") && i+1 < len(words):
+			target = words[i+1]
+			i++
+		case targets && strings.HasPrefix(a, "--target-directory="):
+			target = strings.TrimPrefix(a, "--target-directory=")
+		case targets && strings.HasPrefix(a, "-t") && len(a) > 2:
+			target = a[2:]
+		case !strings.HasPrefix(a, "-"):
+			operands = append(operands, a)
 		}
-		return operands[max(0, len(operands)-1):]
-	case "curl", "wget":
-		if target != "" {
-			return []string{target}
+	}
+	if target != "" {
+		return []string{target}
+	}
+	return operands[max(0, len(operands)-1):]
+}
+
+// downloadWrites is the file curl -o or wget -O writes.
+func downloadWrites(name string, words []string) []string {
+	flag := "-o"
+	if name == "wget" {
+		flag = "-O"
+	}
+	var target string
+	for i := 1; i+1 < len(words); i++ {
+		if words[i] == flag {
+			target = words[i+1]
+			i++
 		}
-	case "sed", "perl":
-		if inPlace {
-			if !script && len(operands) > 0 {
-				operands = operands[1:]
-			}
-			return operands
-		}
+	}
+	if target != "" {
+		return []string{target}
 	}
 	return nil
+}
+
+// editWrites is the files sed or perl edits in place, past its script, option saying what each word is.
+func editWrites(words []string, option func([]string) (n int, script, inPlace bool)) []string {
+	var operands []string
+	inPlace, script := false, false
+	for i := 1; i < len(words); {
+		n, s, edits := option(words[i:])
+		if n == 0 {
+			operands = append(operands, words[i])
+			n = 1
+		}
+		script, inPlace = script || s, inPlace || edits
+		i += n
+	}
+	if !inPlace {
+		return nil
+	}
+	if !script && len(operands) > 0 {
+		operands = operands[1:]
+	}
+	return operands
+}
+
+// sedOption is what w[0], a word of sed's, is: the words it takes, 0 for an operand, whether it gives the
+// script and whether it edits in place.
+func sedOption(w []string) (n int, script, inPlace bool) {
+	a := w[0]
+	switch {
+	case scriptWords(w, true) > 0:
+		return scriptWords(w, true), true, false
+	case a == "-i" && len(w) > 1 && (w[1] == "" || w[1] == ".bak"):
+		return 2, false, true
+	case strings.HasPrefix(a, "-"):
+		return 1, false, strings.HasPrefix(a, "-i") || strings.HasPrefix(a, "--in-place")
+	}
+	return 0, false, false
+}
+
+// perlOption is sedOption for perl.
+func perlOption(w []string) (n int, script, inPlace bool) {
+	a := w[0]
+	short := strings.HasPrefix(a, "-") && !strings.HasPrefix(a, "--")
+	switch {
+	case scriptWords(w, false) > 0:
+		return scriptWords(w, false), true, false
+	case short && strings.HasSuffix(a, "e") && len(w) > 1:
+		return 2, true, strings.Contains(a, "i")
+	case strings.HasPrefix(a, "-"):
+		return 1, false, strings.HasPrefix(a, "--in-place") || short && strings.Contains(a, "i")
+	}
+	return 0, false, false
+}
+
+// scriptWords is how many words of w, from the first, give sed's script, or perl's when not sed: 0 when none.
+func scriptWords(w []string, sed bool) int {
+	a := w[0]
+	switch {
+	case (a == "-e" || a == "--expression" || sed && (a == "-f" || a == "--file")) && len(w) > 1:
+		return 2
+	case len(a) > 2 && (strings.HasPrefix(a, "-e") || sed && strings.HasPrefix(a, "-f")):
+		return 1
+	case strings.HasPrefix(a, "--expression=") || sed && strings.HasPrefix(a, "--file="):
+		return 1
+	}
+	return 0
 }
 
 // wordText is word as far as it is literal, a leading $HOME as ~.
