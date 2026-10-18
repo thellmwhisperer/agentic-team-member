@@ -27,10 +27,9 @@ func TestPiModelErrorReportsProviderMessage(t *testing.T) {
 			{"error after success", completed + "\n" + failed, "pi: " + providerError, true},
 			{"recovered", failed + "\n" + completed, "", true},
 			{"normal", completed, "", true},
-			{"missing skill", completed, "agent left no proof", false},
 		} {
 			t.Run(step.name+"/"+tc.name, func(t *testing.T) {
-				s := &stream{skill: step.skill, live: func(map[string]any) {}}
+				s := &stream{live: func(map[string]any) {}}
 				if tc.proof {
 					s.see("pi", []byte(fmt.Sprintf(`{"type":"tool_execution_start","toolCallId":"s1","toolName":"read",`+
 						`"args":{"path":".atm/skills/%s/SKILL.md"}}`, step.skill)))
@@ -42,8 +41,7 @@ func TestPiModelErrorReportsProviderMessage(t *testing.T) {
 				s.see("pi", []byte(`{"type":"agent_settled"}`))
 				a := agent{Agent: config.Agent{Harness: "pi"}}
 				ev := map[string]any{}
-				invalid, err := a.reported(step.name, step.skill, "pi.jsonl", "", "exit code 0", "", nil,
-					s, false, testFile, ev)
+				invalid, err := a.reported(step.name, "pi.jsonl", "", "exit code 0", "", nil, s, testFile, ev)
 				if tc.want == "" {
 					if err != nil || invalid != nil || ev["report"] == nil {
 						t.Fatalf("want successful report, got %v, %v, %v", ev, invalid, err)

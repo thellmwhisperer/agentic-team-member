@@ -86,28 +86,6 @@ func TestCursorReachNormalization(t *testing.T) {
 	})
 }
 
-func TestCursorShellSkillProof(t *testing.T) {
-	for _, failed := range []bool{false, true} {
-		t.Run(map[bool]string{false: "success", true: "failure"}[failed], func(t *testing.T) {
-			repo(t, "https://example.com/owner/repo.git", atmYAML)
-			t.Setenv("FAKE_AGENT", "no-skill")
-			args := obj{"command": "cat .cursor/skills/ponytail/SKILL.md"}
-			outcome := obj{map[bool]string{false: "success", true: "failure"}[failed]: obj{}}
-			t.Setenv("FAKE_AGENT_STREAM", cursorCall("shell", "started", "s2", args, nil)+
-				cursorCall("shell", "completed", "s2", args, outcome))
-			var out bytes.Buffer
-			err := Run("t", []string{"--harness", "cursor", issueFile(t, issue)}, &out, io.Discard)
-			if failed {
-				if err == nil || !strings.Contains(err.Error(), "agent left no proof it used the ponytail skill") {
-					t.Fatalf("got %v", err)
-				}
-			} else if err != nil {
-				t.Fatal(err)
-			}
-		})
-	}
-}
-
 func TestCursorEffortRejectedBeforeClone(t *testing.T) {
 	root := repo(t, "https://example.com/owner/repo.git", atmYAML)
 	var out bytes.Buffer

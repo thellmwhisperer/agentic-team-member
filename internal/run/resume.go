@@ -28,15 +28,14 @@ type resumePoint struct {
 	Pending  []followUp     `json:"pending"`
 	Proofs   [][4]string    `json:"proofs"` // each unit's before: its base, test, type and test content
 	// Gross is the lines, added plus deleted, of the units after the first, before Unit.
-	Gross       int          `json:"gross_lines"`
-	run         string       // the run that kept it
-	FailedRow   string       `json:"failed_row,omitempty"`
-	E2EOutput   string       `json:"e2e_output,omitempty"`
-	Session     string       `json:"session_id,omitempty"`
-	SkillProved bool         `json:"skill_proved,omitempty"`
-	Agent       config.Agent `json:"agent,omitempty"`
-	Args        []string     `json:"harness_args,omitempty"`
-	Env         []string     `json:"env,omitempty"`
+	Gross     int          `json:"gross_lines"`
+	run       string       // the run that kept it
+	FailedRow string       `json:"failed_row,omitempty"`
+	E2EOutput string       `json:"e2e_output,omitempty"`
+	Session   string       `json:"session_id,omitempty"`
+	Agent     config.Agent `json:"agent,omitempty"`
+	Args      []string     `json:"harness_args,omitempty"`
+	Env       []string     `json:"env,omitempty"`
 }
 
 // keepWork writes p and the work in clone, on HEAD, to resume/ in the run's directory dir. The work leaves the
@@ -149,7 +148,6 @@ func (r *verdict) resumable(dir string) {
 func (p *resumePoint) worker(a agent, ev map[string]any) {
 	p.Agent, p.Args, p.Env = a.Agent, a.args, a.env
 	p.Session, _ = ev["session_id"].(string)
-	p.SkillProved, _ = ev["skill_proved"].(bool)
 }
 
 func (a agent) resumeUnit(r *verdict, root, clone string, p resumePoint,
@@ -168,7 +166,7 @@ func (a agent) resumeUnit(r *verdict, root, clone string, p resumePoint,
 
 // afterE2E uses the saved worker's session once; old bundles keep the original resume behaviour.
 func (a agent) afterE2E(r *verdict, clone string, p resumePoint) (map[string]any, error) {
-	ev := map[string]any{"report": p.Report, "session_id": p.Session, "skill_proved": p.SkillProved}
+	ev := map[string]any{"report": p.Report, "session_id": p.Session}
 	path := filepath.Join(a.dir, "agent-after-e2e.jsonl")
 	final := filepath.Join(a.dir, "agent-after-e2e.final.md")
 	prompt := "Checks failed at e2e: these changed lines are not executed by any end-to-end run of the real binary. " +
@@ -196,10 +194,9 @@ func (a agent) afterE2E(r *verdict, clone string, p resumePoint) (map[string]any
 	var err error
 	s := timed(func() {
 		if _, err = placeSkill(clone, a.Harness, "ponytail"); err == nil {
-			stream, exit, cause, runErr := a.exec(clone, "ponytail", path, argv, stdin, false)
+			stream, exit, cause, runErr := a.exec(clone, path, argv, stdin, false)
 			var invalid error
-			invalid, err = a.reported("worker", "ponytail", path, final, exit, cause, runErr, stream,
-				p.SkillProved, testFile, ev)
+			invalid, err = a.reported("worker", path, final, exit, cause, runErr, stream, testFile, ev)
 			ev["report"] = p.Report
 			if invalid != nil {
 				delete(ev, "exit")

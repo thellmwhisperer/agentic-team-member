@@ -45,7 +45,7 @@ func sessionUpdate(update string) string {
 // $FAKE_ACP says. It answers initialize and session/new, does the brief's work, replays $FAKE_ACP_STREAM, sends
 // $FAKE_ACP_REQUEST and keeps ATM's reply, says its report and replies $FAKE_ACP_STOP, end_turn by default. How
 // it was called goes to $FAKE_ACP_CALL. $FAKE_ACP_FAIL, method:message, answers that call with an error; silent
-// says nothing on stdout, die writes boom to stderr and exits 3, no-skill leaves skill out of its report.
+// says nothing on stdout, die writes boom to stderr and exits 3.
 func init() {
 	if filepath.Base(os.Args[0]) == "hermes" {
 		os.Exit(fakeHermes())
@@ -76,7 +76,7 @@ func fakeHermes() int {
 	}
 	prompt := f.read()
 	_, text := promptText(prompt["params"])
-	report, review := fakeHermesWork(text, mode)
+	report, review := fakeHermesWork(text)
 	if review {
 		f.save += ".ponytail"
 	}
@@ -123,19 +123,15 @@ func (f fakeACP) answer(m obj, result obj) bool {
 }
 
 // fakeHermesWork does the work of the brief whose text is prompt, none for the ponytail pass, and returns its
-// report, without its closing brace, with the skill the prompt holds unless mode is no-skill, and whether it was
-// the ponytail pass.
-func fakeHermesWork(prompt, mode string) (string, bool) {
-	skill, report := "ponytail", `{"test_file": "a_test.sh", "changed_files": ["a.txt"], "summary": "s", `+
+// report, without its closing brace, and whether it was the ponytail pass.
+func fakeHermesWork(prompt string) (string, bool) {
+	report := `{"test_file": "a_test.sh", "changed_files": ["a.txt"], "summary": "s", ` +
 		`"commands_run": [], "follow_ups": []`
 	review := strings.Contains(prompt, "`ponytail-review`")
 	if review {
-		skill, report = "ponytail-review", `{"findings": [], "summary": "Lean already."`
+		report = `{"findings": [], "summary": "Lean already."`
 	} else if exec.Command("sh", "-c", fixWork).Run() != nil {
 		report = "no work"
-	}
-	if strings.Contains(prompt, "name: "+skill+"\n") && mode != "no-skill" {
-		report += `, "skill": "` + skill + `"`
 	}
 	return report, review
 }
@@ -335,16 +331,6 @@ func TestHermesTakesNoModelOrEffort(t *testing.T) {
 				t.Fatalf("clone ran: %s", w)
 			}
 		})
-	}
-}
-
-func TestHermesProvesItsSkillInItsReport(t *testing.T) {
-	w, _, _, err := hermesRun(t, map[string]string{"FAKE_ACP": "no-skill"})
-	if err == nil || !strings.Contains(err.Error(), "agent left no proof it used the ponytail skill") {
-		t.Fatalf("got %v", err)
-	}
-	if end, _, _ := agentStep(t, &w.Buffer); end["state"] != "failed" {
-		t.Fatalf("end event: %v", end)
 	}
 }
 

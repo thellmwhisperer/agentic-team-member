@@ -161,13 +161,13 @@ func (a agent) run(clone, name, skill, brief string, check func(map[string]any) 
 	if err != nil {
 		return ev, err
 	}
-	if _, acp := config.ACP[a.Harness]; acp { // no skill directory: the brief has the skill, the report its proof
-		brief, check = withSkill(brief, skill), withoutSkill(check)
+	if _, acp := config.ACP[a.Harness]; acp { // no skill directory: the brief has the skill
+		brief = withSkill(brief, skill)
 	}
 	final := strings.TrimSuffix(path, ".jsonl") + ".final.md"
 	argv, stdin := a.argv(clone, dir, final, brief)
-	s, exit, cause, err := a.exec(clone, skill, path, argv, stdin, false)
-	invalid, err := a.reported(name, skill, path, final, exit, cause, err, s, false, check, ev)
+	s, exit, cause, err := a.exec(clone, path, argv, stdin, false)
+	invalid, err := a.reported(name, path, final, exit, cause, err, s, check, ev)
 	if invalid == nil {
 		return ev, err
 	}
@@ -185,8 +185,8 @@ func (a agent) run(clone, name, skill, brief string, check func(map[string]any) 
 	if !ok {
 		return ev, err
 	}
-	s, exit, cause, err = a.exec(clone, skill, path, argv, stdin, true)
-	_, err = a.reported(name, skill, path, final, exit, cause, err, s, true, check, ev)
+	s, exit, cause, err = a.exec(clone, path, argv, stdin, true)
+	_, err = a.reported(name, path, final, exit, cause, err, s, check, ev)
 	if err != nil {
 		return ev, err
 	}
@@ -197,7 +197,7 @@ func (a agent) run(clone, name, skill, brief string, check func(map[string]any) 
 
 // reported reads the run's report into ev. invalid is a validation error, so the caller can return it once;
 // fatal is why the step fails, that error wrapped as today when the report is what failed.
-func (a agent) reported(name, skill, path, final, exit, cause string, runErr error, s *stream, proved bool,
+func (a agent) reported(name, path, final, exit, cause string, runErr error, s *stream,
 	check func(map[string]any) error, ev map[string]any) (invalid, fatal error) {
 	if s == nil {
 		return nil, runErr
@@ -210,9 +210,6 @@ func (a agent) reported(name, skill, path, final, exit, cause string, runErr err
 	ev["agent_model"] = s.model
 	if s.session != "" {
 		ev["session_id"] = s.session
-	}
-	if proved { // the first run already proved the skill; a continued session need not load it again
-		s.used = true
 	}
 	fail := func(err error) error {
 		if exit != "" {
@@ -236,10 +233,7 @@ func (a agent) reported(name, skill, path, final, exit, cause string, runErr err
 		return nil, fail(fmt.Errorf("agent: %w; log: %s", runErr, path))
 	case s.failure != "":
 		return nil, fail(fmt.Errorf("%s; log: %s", exit, path))
-	case !s.used:
-		return nil, fail(fmt.Errorf("%s; agent left no proof it used the %s skill; log: %s", exit, skill, path))
 	}
-	ev["skill_proved"] = true
 	report, err := finalReport(name, s.final, check)
 	ev["report"] = report
 	if err != nil {
@@ -324,7 +318,7 @@ func clonePathRune(r rune) bool {
 // path, in the run's directory, which outlives the clone, and its stderr to <name>.stderr.txt next to it as
 // well. The timeout, SIGINT and SIGTERM kill the group.
 func (a agent) exec(
-	clone, skill, path string, argv []string, stdin string, appendLog bool,
+	clone, path string, argv []string, stdin string, appendLog bool,
 ) (*stream, string, string, error) {
 	flags := os.O_CREATE | os.O_WRONLY | os.O_TRUNC
 	if appendLog {
@@ -354,7 +348,7 @@ func (a agent) exec(
 	if a.Harness == "claude" { // else a background command outlives its turn, and the run its report
 		cmd.Env = append(cmd.Env, "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1")
 	}
-	s := &stream{skill: skill, live: relative(clone, liveIn(clone)), root: a.root, clone: clone,
+	s := &stream{live: relative(clone, liveIn(clone)), root: a.root, clone: clone,
 		scratch: a.scratch}
 	if err := s.talk(cmd, f, a.Harness, stdin); err != nil {
 		return nil, "", "", err
@@ -443,17 +437,15 @@ func exclude(clone, pattern string) error {
 	return errors.Join(err, f.Close())
 }
 
-// stream is what the agent's lines said: its final message, whether it used its skill, and its first
-// prohibited path or network call. Live gets what each line tells the screen.
+// stream is what the agent's lines said: its final message and its first prohibited path or network call.
+// Live gets what each line tells the screen.
 type stream struct {
-	final, skill string
-	model        string   // first model named by this invocation's stream; never the requested model
-	loads        []string // the ids of the agent's calls that load its skill
-	root, clone  string
-	scratch      string // the read-only review's directory outside the clone its calls may write in
-	reach        string
-	used         bool
-	live         func(map[string]any)
+	final       string
+	model       string // first model named by this invocation's stream; never the requested model
+	root, clone string
+	scratch     string // the read-only review's directory outside the clone its calls may write in
+	reach       string
+	live        func(map[string]any)
 	pending      string
 	thought      string   // cursor's thinking deltas until completed
 	failure      string   // cursor's error result or pi's unrecovered model error, even when the process exits 0
@@ -617,10 +609,6 @@ func (s *stream) see(harness string, line []byte) {
 	if s.pending != "" {
 		s.flush(e.Type == "result" && (harness == "claude" && ends || harness == "cursor"))
 	}
-	s.loads = append(s.loads, e.skillLoads(harness, s.skill, s.clone)...)
-	if harness == "codex" && slices.Contains(s.loads, e.Item.ID) {
-		s.used = true // a codex read proves the skill once its output holds it, whatever the command's exit code
-	}
 	s.reach = cmp.Or(s.reach, outside(e.calls(harness), s.root, s.clone, s.scratch))
 	s.show(e.activity(harness))
 }
@@ -663,8 +651,6 @@ func (s *stream) noteSession(line []byte) {
 // show tells the screen evs, what the agent says once the stream knows whether it ends with a report.
 func (s *stream) show(evs []map[string]any) {
 	for _, ev := range evs {
-		id, _ := ev["id"].(string)
-		s.used = s.used || ev["result"] == "passed" && slices.Contains(s.loads, id)
 		if says, ok := ev["says"].(string); ok {
 			if s.pending != "" {
 				s.flush(false)
@@ -703,10 +689,6 @@ func (s *stream) cursorState(e *event) {
 func (s *stream) finish() {
 	s.show(s.chunkEnd())
 	s.flush(true)
-	if s.prompt != "" { // an ACP agent's report proves its skill
-		r, _ := lastObject(s.final)
-		s.used = r["skill"] == s.skill
-	}
 }
 
 func (s *stream) flush(report bool) {
@@ -723,102 +705,6 @@ func (s *stream) flush(report bool) {
 	if text != "" {
 		s.live(map[string]any{"says": text})
 	}
-}
-
-// skillLoads is the ids of e's calls that load skill, by its exact name: a Skill tool call for claude, a read
-// of its SKILL.md for pi and codex, a skill call for opencode, a read or cat of its SKILL.md for cursor. A load
-// proves the agent used skill once its result is not an error, except codex's, which proves it whatever its
-// exit code once its output holds the skill's name line.
-func (e event) skillLoads(harness, skill, clone string) []string {
-	read := func(path string) bool { return strings.Contains(filepath.ToSlash(path), "/"+skill+"/SKILL.md") }
-	switch {
-	case harness == "claude":
-		return e.skillCalls(skill)
-	case harness == "codex" && e.Item.Type == "command_execution" && read(e.Item.Command) &&
-		namesSkill(e.Item.AggregatedOutput, skill):
-		return []string{e.Item.ID}
-	case harness == "opencode" && e.Type == "tool_use" && e.Part.Tool == "skill" &&
-		names(e.Part.State.Input, "name", skill):
-		return []string{e.Part.CallID}
-	case harness == "pi" && e.Type == "tool_execution_start" && e.ToolName == "read" && read(detail(e.Args)):
-		return []string{e.ToolCallID}
-	case harness == "cursor":
-		return e.cursorSkillLoads(skill, clone)
-	}
-	return nil
-}
-
-func (e event) cursorSkillLoads(skill, clone string) []string {
-	if e.Type != "tool_call" || e.Subtype != "started" {
-		return nil
-	}
-	kind, args, _, _ := e.cursorTool()
-	var input struct{ Path, Command string }
-	_ = json.Unmarshal(args, &input)
-	target := filepath.Join(clone, skillDirs["cursor"], skill, "SKILL.md")
-	exact := func(path string) bool {
-		if !filepath.IsAbs(path) {
-			path = filepath.Join(clone, path)
-		}
-		return filepath.Clean(path) == target
-	}
-	if kind == "read" && exact(input.Path) || kind == "shell" && cursorCatReads(input.Command, exact) {
-		return []string{e.CallID}
-	}
-	return nil
-}
-
-// cursorCatReads proves only a direct literal cat of the installed skill, not arbitrary shell execution.
-func cursorCatReads(command string, exact func(string) bool) bool {
-	file, err := syntax.NewParser().Parse(strings.NewReader(command), "")
-	if err != nil || len(file.Stmts) != 1 {
-		return false
-	}
-	stmt := file.Stmts[0]
-	call, ok := stmt.Cmd.(*syntax.CallExpr)
-	if !ok || stmt.Negated || stmt.Background || len(stmt.Redirs) != 0 || len(call.Assigns) != 0 {
-		return false
-	}
-	var words []string
-	for _, arg := range call.Args {
-		word, literal := literalWord(arg)
-		if !literal {
-			return false
-		}
-		words = append(words, word)
-	}
-	if len(words) == 3 && words[1] == "--" {
-		words = append(words[:1], words[2])
-	}
-	return len(words) == 2 && (words[0] == "cat" || words[0] == "/bin/cat") && exact(words[1])
-}
-
-// namesSkill says whether output holds skill's SKILL.md name line, so the command that printed it read the
-// skill in. A line is matched with any trailing \r trimmed, so CRLF output counts.
-func namesSkill(output, skill string) bool {
-	for _, line := range strings.Split(output, "\n") {
-		if strings.TrimSuffix(line, "\r") == "name: "+skill {
-			return true
-		}
-	}
-	return false
-}
-
-// skillCalls is the ids of claude's Skill tool calls in e that load skill.
-func (e event) skillCalls(skill string) (ids []string) {
-	for _, b := range e.Message.Content {
-		if b.Type == "tool_use" && b.Name == "Skill" && names(b.Input, "skill", skill) {
-			ids = append(ids, b.ID)
-		}
-	}
-	return ids
-}
-
-// names says whether a tool call's input has name as its key.
-func names(input json.RawMessage, key, name string) bool {
-	var in map[string]any
-	_ = json.Unmarshal(input, &in)
-	return in[key] == name
 }
 
 // final is the final message e ends, if it ends one; codex's is in its -o file instead.

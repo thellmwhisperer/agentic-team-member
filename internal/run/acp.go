@@ -171,14 +171,6 @@ func (s *stream) acpEnded(exit, cause string, err error) (*stream, string, strin
 	return s, exit, cause, err
 }
 
-// withoutSkill is check of a report without the skill an ACP agent's carries.
-func withoutSkill(check func(map[string]any) error) func(map[string]any) error {
-	return func(r map[string]any) error {
-		delete(r, "skill")
-		return check(r)
-	}
-}
-
 func jsonLine(m map[string]any) []byte {
 	m["jsonrpc"] = "2.0"
 	b, _ := json.Marshal(m)
@@ -247,9 +239,8 @@ func (u acpUpdate) paths() (ps []string) {
 	return ps
 }
 
-// withSkill is brief with skill in it, for an ACP agent, which has no skill directory: its report proves it.
+// withSkill is brief with skill in it, for an ACP agent, which has no skill directory.
 func withSkill(brief, skill string) string {
 	b, _ := skills.ReadFile(skill + "/SKILL.md")
-	return brief + "\n## SKILL `" + skill + "`\nYour report carries \"skill\": \"" + skill + "\". The skill:\n\n" +
-		string(b)
+	return brief + "\n## SKILL `" + skill + "`\n" + string(b)
 }

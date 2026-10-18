@@ -779,7 +779,6 @@ var auditCases = []struct {
 		base: map[string]string{"source.txt": "broken\n"},
 		work: chainedSource, report: strings.Replace(cut, "a.txt", "source.txt", 1),
 		ponytail: "printf 'broken\\nsecond\\n' > source.txt", why: "regression_test.sh"},
-	{name: "failed skill load", mode: "skill-error", why: "no proof it used the ponytail skill", node: "agent"},
 	{name: "runs real tools in the clone", work: realToolsWork(), delivered: unit1 + based + placed +
 		".atm.yaml\n.gitignore\n.slop/ceilings.yml\n.slop/config.yml\n.slop/tombstones/README.md\n" +
 		"a.txt\na_test.sh\ngo.mod\ninternal/probe1/probe.go\ninternal/probe2/probe.go\nmain.go\nscripts/lint.sh\n" +
