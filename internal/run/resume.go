@@ -283,7 +283,7 @@ func resuming(root, label string, base *string) (*resumePoint, string, error) {
 // proofs is p's proofs as the units' proofs.
 func (p resumePoint) proofs() (ps []proof) {
 	for _, q := range p.Proofs {
-		ps = append(ps, proof{q[0], q[1], q[2], q[3]})
+		ps = append(ps, proof{q[0], q[1], q[2], q[3], false})
 	}
 	return ps
 }

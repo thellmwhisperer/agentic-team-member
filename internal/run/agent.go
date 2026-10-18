@@ -177,10 +177,11 @@ func (a agent) run(clone, name, skill, brief string, check func(map[string]any) 
 	if logErr = errors.Join(logErr, f.Close()); logErr != nil {
 		return ev, errors.Join(err, logErr)
 	}
-	argv, stdin, ok := a.resumeArgv(clone, dir, final, s.session, "Your final message was rejected: "+
-		invalid.Error()+". Reply with only the JSON object the brief asks for, nothing else.")
+	prompt := "Your final message was rejected: " + invalid.Error() +
+		". Reply with only the JSON object the brief asks for, nothing else."
+	argv, stdin, ok := a.resumeArgv(clone, dir, final, s.session, prompt)
 	if !ok {
-		return ev, reportError{err}
+		argv, stdin = a.argv(clone, dir, final, s.final+"\n"+prompt)
 	}
 	s, exit, cause, err = a.exec(clone, path, argv, stdin, true)
 	invalid, err = a.reported(name, path, final, exit, cause, err, s, check, ev)
@@ -900,7 +901,15 @@ func detail(input json.RawMessage) string {
 }
 
 // use is one of the agent's tool calls: its tool, every string of its arguments, and its shell command.
-type use struct{ tool, args, command string }
+type use struct {
+	tool, args, command string
+	paths               []string
+}
+
+func toolUse(tool string, input json.RawMessage) use {
+	paths := strs(input, writesFile(tool))
+	return use{tool: tool, args: strings.Join(paths, " "), command: shellCommand(tool, input), paths: paths}
+}
 
 // calls is e's tool calls: claude's tool_use and pi's toolCall blocks, pi's tool executions, codex's commands
 // and opencode's tool uses.
@@ -908,15 +917,13 @@ func (e event) calls(harness string) (cs []use) {
 	switch {
 	case harness == "cursor" && e.Type == "tool_call":
 		kind, args, _, _ := e.cursorTool()
-		return []use{{kind, strs(args, writesFile(kind)), shellCommand(kind, args)}}
+		return []use{toolUse(kind, args)}
 	case harness == "codex":
 		return codexCalls(e.Item)
 	case harness == "opencode" && e.Type == "tool_use":
-		args := strs(e.Part.State.Input, writesFile(e.Part.Tool))
-		return []use{{e.Part.Tool, args, shellCommand(e.Part.Tool, e.Part.State.Input)}}
+		return []use{toolUse(e.Part.Tool, e.Part.State.Input)}
 	case harness == "pi" && e.Type == "tool_execution_start":
-		args := strs(e.Args, writesFile(e.ToolName))
-		return []use{{e.ToolName, args, shellCommand(e.ToolName, e.Args)}}
+		return []use{toolUse(e.ToolName, e.Args)}
 	case e.Type != "assistant" && e.Type != "message_end": // not a pi message_update's partial arguments
 		return nil
 	}
@@ -926,8 +933,8 @@ func (e event) calls(harness string) (cs []use) {
 			if len(input) == 0 {
 				input = b.Arguments
 			}
-			args := strs(b.Input, writesFile(b.Name)) + strs(b.Arguments, writesFile(b.Name))
-			cs = append(cs, use{b.Name, args, shellCommand(b.Name, input)})
+			paths := append(strs(b.Input, writesFile(b.Name)), strs(b.Arguments, writesFile(b.Name))...)
+			cs = append(cs, use{tool: b.Name, args: strings.Join(paths, " "), command: shellCommand(b.Name, input), paths: paths})
 		}
 	}
 	return cs
@@ -942,15 +949,15 @@ func codexCalls(item struct {
 }) []use {
 	switch item.Type {
 	case "command_execution":
-		return []use{{"shell", item.Command, item.Command}}
+		return []use{{tool: "shell", args: item.Command, command: item.Command}}
 	case "mcp_tool_call":
-		return []use{{item.Tool, strs(item.Arguments, writesFile(item.Tool)), ""}}
+		return []use{toolUse(item.Tool, item.Arguments)}
 	case "file_change":
 		paths := make([]string, 0, len(item.Changes))
 		for _, change := range item.Changes {
 			paths = append(paths, change.Path)
 		}
-		return []use{{"file_change", strings.Join(paths, " "), ""}}
+		return []use{{tool: "file_change", args: strings.Join(paths, " "), paths: paths}}
 	default:
 		return nil
 	}
@@ -977,7 +984,7 @@ func writesFile(tool string) bool {
 }
 
 // strs is every string in a tool call's input, by key, joined by spaces.
-func strs(input json.RawMessage, write bool) string {
+func strs(input json.RawMessage, write bool) []string {
 	written := map[string]bool{"content": true, "old_string": true, "new_string": true, "oldString": true,
 		"newString": true, "oldText": true, "newText": true, "fileText": true}
 	var walk func(any) []string
@@ -1000,7 +1007,7 @@ func strs(input json.RawMessage, write bool) string {
 	}
 	var in any
 	_ = json.Unmarshal(input, &in)
-	return strings.Join(walk(in), " ")
+	return walk(in)
 }
 
 // outside is the first of calls that writes outside clone, as its tool and its first 200 characters: a write or
@@ -1018,7 +1025,7 @@ func outside(calls []use, clone string, scratch ...string) string {
 		case c.command != "":
 			dests = shellWrites(c.command)
 		case writesFile(c.tool) || c.tool == "file_change" || c.tool == "delete" || c.tool == "move":
-			dests = strings.Fields(c.args)
+			dests = c.paths
 		}
 		for _, d := range dests {
 			if escapes(d, allowed) {
@@ -1047,7 +1054,7 @@ func escapes(p string, allowed []string) bool {
 		return false
 	}
 	p = path.Clean(p)
-	if strings.HasPrefix(p, "/dev/") {
+	if p == "/dev/null" || p == "/dev/stdout" || p == "/dev/stderr" {
 		return false
 	}
 	for _, a := range allowed {
@@ -1087,30 +1094,79 @@ func callWrites(call *syntax.CallExpr) []string {
 	for _, a := range call.Args {
 		words = append(words, wordText(a))
 	}
+	return commandWrites(words)
+}
+
+func commandWrites(words []string) []string {
 	if len(words) == 0 {
+		return nil
+	}
+	name := path.Base(words[0])
+	if name == "env" {
+		for i, word := range words[1:] {
+			if strings.Contains(word, "=") || strings.HasPrefix(word, "-") {
+				continue
+			}
+			return commandWrites(words[i+1:])
+		}
+		return nil
+	}
+	if name == "sh" || name == "bash" || name == "zsh" {
+		if len(words) > 2 && strings.HasPrefix(words[1], "-") && strings.Contains(words[1], "c") {
+			return shellWrites(words[2])
+		}
 		return nil
 	}
 	var operands []string
 	inPlace := false
-	for _, a := range words[1:] {
+	var target string
+	var script bool
+	for i := 1; i < len(words); i++ {
+		a := words[i]
+		if name == "touch" && (a == "-r" || a == "--reference") && i+1 < len(words) {
+			i++
+			continue
+		}
+		if name == "cp" && (a == "-t" || a == "--target-directory") && i+1 < len(words) {
+			target = words[i+1]
+			i++
+			continue
+		}
+		if name == "cp" && strings.HasPrefix(a, "--target-directory=") {
+			target = strings.TrimPrefix(a, "--target-directory=")
+			continue
+		}
+		if (name == "sed" || name == "perl") && (a == "-e" || a == "--expression") && i+1 < len(words) {
+			i++
+			script = true
+			continue
+		}
+		if name == "sed" && a == "-i" && i+1 < len(words) && words[i+1] == "" {
+			i++
+			inPlace = true
+			continue
+		}
 		if strings.HasPrefix(a, "-") {
-			inPlace = inPlace || strings.HasPrefix(a, "-i") || strings.HasPrefix(a, "--in-place")
+			inPlace = inPlace || strings.HasPrefix(a, "-i") || strings.HasPrefix(a, "--in-place") ||
+				name == "perl" && !strings.HasPrefix(a, "--") && strings.Contains(a, "i")
 			continue
 		}
 		operands = append(operands, a)
 	}
-	switch path.Base(words[0]) {
+	switch name {
 	case "tee", "touch", "mkdir", "rm", "rmdir", "mv", "truncate", "unlink":
 		return operands
 	case "cp", "ln", "install", "rsync":
+		if target != "" {
+			return []string{target}
+		}
 		return operands[max(0, len(operands)-1):]
 	case "sed", "perl":
 		if inPlace {
+			if !script && len(operands) > 0 {
+				operands = operands[1:]
+			}
 			return operands
-		}
-	case "sh", "bash", "zsh":
-		if len(words) > 2 && words[1] == "-c" {
-			return shellWrites(words[2])
 		}
 	}
 	return nil

@@ -119,6 +119,6 @@ func unmadeChecks(t *testing.T, old, work, kept string, proof bool) (dir string,
 	if proof {
 		typ, test = "fix", "a_test.sh"
 	}
-	_, err = checks(dir, runDir, sha, typ, test, c)
+	_, err = checks(dir, runDir, sha, typ, test, false, c)
 	return dir, err
 }
