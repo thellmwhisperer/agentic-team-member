@@ -437,8 +437,6 @@ func (s *server) run(r *bgRun, args []string) {
 	}
 	again := ", then run it again: atm run " + o.Issue
 	switch {
-	case o.Outcome == "passed" && gateStepName(o.Step):
-		o.NextStep = "nothing: the PR merged"
 	case o.Outcome == "passed" && o.Step == "delivery":
 		o.NextStep = "review the branch the delivery command got"
 	case o.Outcome == "passed":

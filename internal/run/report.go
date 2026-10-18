@@ -132,30 +132,6 @@ func (r *verdict) node(name string) *node {
 	panic("no node " + name)
 }
 
-func (r *verdict) ensureNode(name string) *node {
-	for _, n := range r.Nodes {
-		if n.Name == name {
-			return n
-		}
-	}
-	n := &node{Name: name, Result: "not run"}
-	r.Nodes = append(r.Nodes, n)
-	return n
-}
-
-func (r *verdict) gateNode(name, result string, ms int64, why string) {
-	n := r.ensureNode(name)
-	if n.Result == result && n.DurationMS == ms {
-		return
-	}
-	n.Result, n.DurationMS = result, ms
-	ev := map[string]any{"state": result, "duration_ms": ms}
-	if why != "" {
-		ev["error"] = why
-	}
-	r.emit(name, ev)
-}
-
 // step writes name's start event, runs fn, and writes its end event with fn's fields, its error if any, and
 // its duration; fn's "commands" go to the report. After a failed node, it does nothing: name is not run.
 func (r *verdict) step(name string, fn func() (map[string]any, error)) {

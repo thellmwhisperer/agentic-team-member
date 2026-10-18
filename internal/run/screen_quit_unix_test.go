@@ -3,7 +3,8 @@
 package run
 
 import (
-	"fmt"
+	"encoding/json"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,26 +15,27 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// The real binary: atm run on a terminal shows the run's screen, a gate waiting for a decision as waiting, and
+// The real binary: atm run on a terminal shows the run's screen and
 // quits by itself when the run ends, leaving its last view; atm attach off one, with no run named, follows the run
 // going in plain lines.
 func TestRealRunScreenQuitsWhenTheRunEnds(t *testing.T) {
-	parked, completed := recorded(t, "atm_watch_status_parked.txt"), recorded(t, "atm_watch_status_completed.txt")
-	bin, top, gh, nm := followRepo(t, atmSet(atmYAML, "delivery", "no-mistakes axi run"))
-	writeFixture(t, nm, parked)
+	bin := builtATM(t)
+	root := repo(t, "https://example.com/o/r.git", atmSet(atmYAML, "delivery", "echo delivered"))
+	top := gitT(t, root, "rev-parse", "--show-toplevel")
+	stopServing(t, top)
+	wait, release := holdFakeAgents(t, 1)
 	t.Setenv("TERM", "xterm-256color")
 	t.Setenv("NO_COLOR", "")
-	f := startFollow(t, bin, top, true, "run", "--watcher", realWatcher(t, bin, top), issueFile(t, issue))
+	f := startFollow(t, bin, top, true, "run", issueFile(t, issue))
 	var shown strings.Builder
-	untilShown(t, f, &shown, "⏸ Review")
+	untilShown(t, f, &shown, "Agent")
+	wait()
 	attach, plain := plainAttach(bin, top)
 	if err := attach.Start(); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = attach.Process.Kill(); _ = attach.Wait() })
-	writeFixture(t, gh, `{"url":"`+recordedPR+`","state":"MERGED","commits":[{"oid":"`+fmt.Sprintf("%040d", 1)+
-		`","messageHeadline":"no-mistakes(ci): Fix lint"}]}`)
-	writeFixture(t, nm, completed)
+	release()
 	quit := make(chan struct{})
 	go func() {
 		defer close(quit)
@@ -61,17 +63,6 @@ func TestRealRunScreenQuitsWhenTheRunEnds(t *testing.T) {
 	if err := again.Run(); err != nil || !strings.Contains(out.String(), "delivery") {
 		t.Fatalf("atm attach after the run ended: %v\n%s", err, out)
 	}
-}
-
-// realWatcher starts the real atm watch on top and returns its id.
-func realWatcher(t *testing.T, bin, top string) string {
-	t.Helper()
-	w := startFollow(t, bin, top, false, "watch")
-	id, ok := strings.CutPrefix(<-w.lines, "watching as ")
-	if !ok {
-		t.Fatalf("atm watch did not name its id; stderr:\n%s", w.errors())
-	}
-	return id
 }
 
 // untilShown reads f's terminal into shown until it shows want, two minutes at most.
@@ -144,5 +135,49 @@ func TestRealDoctorReadsTheMachineConfig(t *testing.T) {
 			!strings.Contains(stderr.String(), c.stderr) {
 			t.Fatalf("config %q: stdout\n%s\nstderr\n%s", c.config, stdout.String(), stderr.String())
 		}
+	}
+}
+
+// An older server can replay steps that the current binary no longer renders.
+func TestRealAttachIgnoresUnknownSteps(t *testing.T) {
+	bin := builtATM(t)
+	top := atmRepo(t)
+	listener, err := net.Listen("unix", short(socket(top)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = listener.Close() }()
+	done := make(chan error, 1)
+	go func() {
+		c, err := listener.Accept()
+		if err != nil {
+			done <- err
+			return
+		}
+		defer func() { _ = c.Close() }()
+		var req request
+		if err := json.NewDecoder(c).Decode(&req); err != nil {
+			done <- err
+			return
+		}
+		enc := json.NewEncoder(c)
+		for _, event := range []string{
+			`{"step":"delivery","state":"passed"}`,
+			`{"step":"external-stage","state":"started"}`,
+			`{"step":"external-stage","check":"external-check","state":"failed"}`,
+		} {
+			if err := enc.Encode(reply{Frame: Frame{Event: json.RawMessage(event)}}); err != nil {
+				done <- err
+				return
+			}
+		}
+		done <- enc.Encode(reply{Run: &Outcome{Run: "old-run", Outcome: "passed", Ended: time.Now()}})
+	}()
+	shown := coldDeliveryAttach(t, bin, top, "old-run")
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(shown, "✓ Delivery") || strings.Contains(shown, "external-") {
+		t.Fatalf("unknown steps changed the screen:\n%s", shown)
 	}
 }

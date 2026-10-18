@@ -319,8 +319,7 @@ var nonSlug = regexp.MustCompile(`[^a-z0-9]+`)
 // approved, runs the delivery command line in clone, its output on screen and in delivery-output.txt next to
 // report.json. ATM never pushes: that is line's business.
 // line has no ceiling: it lasts as long as what it hands the work to. SIGINT and SIGTERM cancel its
-// process group on Unix or process tree on Windows. A no-mistakes hand-off does not end the run: it follows
-// that gate until the PR merges or closes, or a step fails.
+// process group on Unix or process tree on Windows. Its exit status is the delivery result.
 // ponytail: line gets the clone after the slop detector.
 func (a agent) deliver(r *verdict, root, clone, sha, base, line string, i Issue, history []proof,
 	c config.Config, screen io.Writer) {
@@ -330,9 +329,6 @@ func (a agent) deliver(r *verdict, root, clone, sha, base, line string, i Issue,
 		}
 		return
 	}
-	var handed string
-	var gateDone bool
-	var gateErr error
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	r.step("delivery", func() (map[string]any, error) {
@@ -366,52 +362,13 @@ func (a agent) deliver(r *verdict, root, clone, sha, base, line string, i Issue,
 			return commandErr
 		}
 		r.live(map[string]any{"check": "command", "state": "started"})
-		if strings.Contains(line, "no-mistakes") {
-			handed = branch
-			gateDone, err, gateErr = r.deliverToGate(ctx, stop, root, clone, branch, command)
-		} else {
-			err = command()
-		}
-		// The command goroutine has joined: report writes stay with the gate observer.
+		err = command()
 		r.live(map[string]any{"check": "command", "state": outcome(err), "duration_ms": took.DurationMS})
 		ev["commands"] = []cmdResult{{"delivery", line, outcome(err), tail, took}}
-		if gateDone {
-			err = nil
-		}
-		// Once it ended: one whose background process died never did, and its clone goes.
+		// Record the delivered branch before deciding whether this run can remove its clone.
 		return ev, errors.Join(wrap(err, "delivery"), os.WriteFile(clone+".delivered", []byte(branch+" "+base+"\n"),
 			0o644))
 	})
-	if handed != "" && !gateDone {
-		_, gateErr = followGate(ctx, r, root, clone, handed, nil)
-	}
-	r.keepGateReason(gateErr)
-}
-
-// keepGateReason makes a gate failure the run's reason, ahead of a delivery command error, which stays joined.
-func (r *verdict) keepGateReason(gateErr error) {
-	if gateErr != nil && r.Reason == gateErr.Error() {
-		r.err = errors.Join(gateErr, r.err)
-		return
-	}
-	r.err = errors.Join(r.err, gateErr)
-	if errors.Is(gateErr, errPRClosed) {
-		r.err, r.Reason = gateErr, gateErr.Error()
-	}
-}
-
-func (r *verdict) deliverToGate(ctx context.Context, stop context.CancelFunc, root, clone, branch string,
-	command func() error) (gateDone bool, commandErr, gateErr error) {
-	done := make(chan error, 1)
-	go func() { done <- command() }()
-	gateDone, gateErr = followGate(ctx, r, root, clone, branch, done)
-	if gateDone {
-		stop()
-		commandErr = <-done
-	} else {
-		commandErr, gateErr = gateErr, nil
-	}
-	return gateDone, commandErr, gateErr
 }
 
 func (a agent) prepareDelivery(r *verdict, root, clone, sha string, i Issue, history []proof,

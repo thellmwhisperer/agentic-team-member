@@ -40,7 +40,6 @@ func (m *Model) restoreReport(path string, outcome run.Outcome) {
 	}
 	seen := make(map[string]bool, len(report.Nodes))
 	for _, n := range report.Nodes {
-		m.ensureGate(n.Name)
 		r := m.current(n.Name)
 		if r == nil || seen[n.Name] {
 			clearDuplicate(r, seen[n.Name])
@@ -97,9 +96,6 @@ func consistentResult(name, result string, outcome run.Outcome) bool {
 	case "failed":
 		return outcome.Outcome == "failed" && outcome.FailedNode == name
 	case "skipped":
-		if gateLabels[name] != "" {
-			return outcome.Outcome == "passed" || outcome.Outcome == "failed"
-		}
 		return name == "delivery" && (outcome.Outcome == "passed" || outcome.Outcome == "failed" && outcome.FailedNode == "")
 	case "not run":
 		return outcome.Outcome == "failed"
