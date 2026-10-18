@@ -61,11 +61,11 @@ func TestCursorReachNormalization(t *testing.T) {
 	const why = "the agent reached outside its clone: "
 	runReachCases(t, []reachCase{
 		{"cursor shell remote", "cursor", cursorCall("shell", "started", "c1",
-			obj{"command": "curl https://example.com"}, nil), why + "shell curl https://example.com"},
+			obj{"command": "curl https://example.com"}, nil), ""},
 		{"cursor shell multiline", "cursor", cursorCall("shell", "started", "c1",
-			obj{"command": "echo ready\ncurl https://example.com"}, nil), why + "shell echo ready\ncurl https://example.com"},
+			obj{"command": "echo ready\ntouch /tmp/atm-reach.txt"}, nil), why + "shell echo ready\ntouch /tmp/atm-reach.txt"},
 		{"cursor read outside", "cursor", cursorCall("read", "started", "c1",
-			obj{"path": "{root}/.atm/runs/old/worker.jsonl"}, nil), why + "read {root}/.atm/runs/old/worker.jsonl"},
+			obj{"path": "{root}/.atm/runs/old/worker.jsonl"}, nil), ""},
 		{"cursor write outside", "cursor", cursorCall("write", "started", "c1",
 			obj{"path": "{root}/out.txt", "content": "safe"}, nil), why + "write {root}/out.txt"},
 		{"cursor write fileText inside started", "cursor", cursorCall("write", "started", "c1",

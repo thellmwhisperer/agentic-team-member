@@ -143,9 +143,6 @@ func scopeBrief(issue string, n int, f followUp, paths []string, scratch string)
 		"or HEAD changes.\n" +
 		"- Write any file a check needs (copies, outputs, temp files) only under `" + scratch +
 		"`; never inside the clone.\n" +
-		"- Inspect with the shell's read commands (cat, grep, git show, go test) or a script file written under `" +
-		scratch + "`; never inline interpreters (heredocs, python -c, node -e): ATM treats them as reaching outside " +
-		"the clone.\n" +
 		"- Block a path outside the issue's declared scope or non-goals, or one it reserves to another owner. The " +
 		"criterion the follow-up quotes does not widen them, however needed the path is.\n" +
 		"- Block a path the issue's scope does not clearly allow: unknown scope fails closed.\n" +

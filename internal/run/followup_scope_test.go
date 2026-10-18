@@ -379,10 +379,8 @@ func TestFollowUpScopeBriefNamesItsScratch(t *testing.T) {
 		t.Fatalf("want one scope scratch directory under %s, got %v", runDir, dirs)
 	}
 	scratch := dirs[0]
-	if !strings.Contains(scope.Stdin, "`"+scratch+"`") ||
-		!strings.Contains(scope.Stdin, "never inline interpreters") {
-		t.Fatalf("want the scope brief to name the scratch %s and forbid inline interpreters, got:\n%s",
-			scratch, scope.Stdin)
+	if !strings.Contains(scope.Stdin, "`"+scratch+"`") {
+		t.Fatalf("want the scope brief to name the scratch %s, got:\n%s", scratch, scope.Stdin)
 	}
 	if !slices.Contains(scope.Env, "TMPDIR="+scratch) {
 		t.Fatalf("want the scope reviewer's TMPDIR at %s, got %v", scratch, scope.Env)

@@ -37,7 +37,7 @@ func (s *stream) acp(line []byte) (evs []map[string]any) {
 	if of := u.SessionUpdate + " " + u.MessageID; !chunk || of != s.chunkOf {
 		evs, s.chunkOf = s.chunkEnd(), of
 	}
-	s.reach = cmp.Or(s.reach, outside(u.calls(), s.root, s.clone, s.scratch))
+	s.reach = cmp.Or(s.reach, outside(u.calls(), s.clone, s.scratch))
 	r := map[string]string{"completed": "passed", "failed": "failed"}[u.Status]
 	switch u.SessionUpdate {
 	case "agent_message_chunk":
@@ -195,8 +195,7 @@ func (s *stream) permit(params json.RawMessage) map[string]any {
 }
 
 // inside says whether every path u names, each whole, a relative one the clone's, is inside clone or under
-// scratch, and none of its commands reaches outside either, as the check after each step reads them, with
-// every absolute path its root.
+// scratch, and none of its commands writes outside either, as the check after each step reads them.
 func (u acpUpdate) inside(clone, scratch string) bool {
 	for _, p := range u.paths() {
 		if !filepath.IsAbs(p) {
@@ -215,7 +214,7 @@ func (u acpUpdate) inside(clone, scratch string) bool {
 	for _, c := range u.commands() {
 		cs = append(cs, use{u.Kind, c, c})
 	}
-	return outside(cs, "/", clone, scratch) == ""
+	return outside(cs, clone, scratch) == ""
 }
 
 // paths is u's locations and every value of a rawInput key naming a path, as path, file_path or cwd.
