@@ -16,7 +16,7 @@ func TestACPQuotedPathPermissionAndReach(t *testing.T) {
 		} {
 			for _, representation := range []string{"rawInput", "content"} {
 				t.Run(quote+c.path+representation, func(t *testing.T) {
-					command := "cat " + quote + c.path + quote
+					command := "touch " + quote + c.path + quote
 					call := map[string]any{"kind": "execute", "sessionUpdate": "tool_call"}
 					if representation == "rawInput" {
 						call["rawInput"] = map[string]any{"command": command}
@@ -24,7 +24,7 @@ func TestACPQuotedPathPermissionAndReach(t *testing.T) {
 						call["content"] = []any{map[string]any{"type": "content", "content": map[string]any{
 							"type": "text", "text": "$ " + command}}}
 					}
-					s := stream{root: "/workspace", clone: "/workspace/clone"}
+					s := stream{clone: "/workspace/clone"}
 					request := jsonLine(map[string]any{"id": 4, "method": "session/request_permission",
 						"params": map[string]any{"toolCall": call, "options": []any{
 							map[string]any{"optionId": "always", "kind": "allow_always"},

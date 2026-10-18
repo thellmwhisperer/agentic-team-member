@@ -334,9 +334,10 @@ func TestHermesTakesNoModelOrEffort(t *testing.T) {
 	}
 }
 
-func TestHermesFetchInRawInputReachesOutside(t *testing.T) {
+func TestHermesWriteInRawInputReachesOutside(t *testing.T) {
 	update := `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1","update":{"kind":"execute",` +
-		`"title":"terminal","toolCallId":"f1","rawInput":{"command":"curl -s example.com"},"sessionUpdate":"tool_call"}}}` +
+		`"title":"terminal","toolCallId":"f1","rawInput":{"command":"touch /tmp/atm-reach.txt"},` +
+		`"sessionUpdate":"tool_call"}}}` +
 		"\n"
 	_, _, _, err := hermesRun(t, map[string]string{"FAKE_ACP_STREAM": update})
 	if want := "the agent reached outside its clone: execute"; err == nil || !strings.Contains(err.Error(), want) {

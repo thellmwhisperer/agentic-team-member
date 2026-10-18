@@ -39,14 +39,14 @@ func TestHermesFixtureTellsTheBox(t *testing.T) {
 func TestACPPermissionAnswers(t *testing.T) {
 	for _, c := range []struct{ name, clone, toolCall, want string }{
 		{"command reading outside", "/workspace/clone",
-			`{"rawInput":{"command":"/workspace/clone/bin/reader /etc/hosts"}}`, "ro"},
-		{"command with an outside git dir", "/workspace/clone",
-			`{"rawInput":{"command":"git --git-dir=/outside/.git config --get x"}}`, "ro"},
+			`{"rawInput":{"command":"/workspace/clone/bin/reader /etc/hosts"}}`, "ao"},
+		{"command writing outside", "/workspace/clone",
+			`{"rawInput":{"command":"/workspace/clone/bin/reader > /etc/hosts"}}`, "ro"},
 		{"path in a clone with a space", "/workspace/my clone", `{"rawInput":{"path":"/workspace/my clone/a.txt"}}`, "ao"},
 		{"relative path inside", "/workspace/clone", `{"locations":[{"path":"src/a.txt"}]}`, "ao"},
 		{"relative path outside", "/workspace/clone", `{"rawInput":{"file_path":"../other/a.txt"}}`, "ro"},
 		{"content-only fetch", "/workspace/clone",
-			`{"content":[{"type":"content","content":{"type":"text","text":"$ curl -s example.com"}}]}`, "ro"},
+			`{"content":[{"type":"content","content":{"type":"text","text":"$ curl -s example.com"}}]}`, "ao"},
 		{"outside path with the clone as its prefix", "/workspace/clone",
 			`{"rawInput":{"path":"/workspace/clone two/a.txt"}}`, "ro"},
 		{"command inside", "/workspace/clone",

@@ -85,23 +85,13 @@ goes to `worker.jsonl`, and its stderr to `worker.stderr.txt` too, as it is
 written. Its report is the last JSON
 object of its final message and must name `test_file`: ATM never guesses
 which test proves the fix. ATM checks each logged tool call for every
-harness. For write and edit tools (`write`, `edit`, `write_file` and
-`edit_file`), it ignores written content (`content`, `fileText` and old/new
-text fields), while checking the remaining arguments, including the destination
-path. It checks all arguments for other tools. A call fails the step if it
-names an absolute path
-under the repository root but outside the clone, or if its shell command runs
-`curl` or `wget` or contains an HTTP(S) URL whose host is not `localhost`,
-`127.0.0.1` or `::1`. A read-only review call may also name its scratch
-directory or a path under it. Naming any other absolute path under the
-repository root but outside the clone still fails the call. One narrow
-exception applies to a leading plain `cat` that writes a quoted heredoc of
-valid Go test source to a literal clone-relative
-`_test.go` file, followed only by a literal `go test` invocation. The heredoc
-must contain a recognized test function using the standard `testing.T` type.
-The exception covers URL text in that fixture only; URLs or fetch commands
-elsewhere in the shell command still fail. The error names the first offending
-call. Missing or invalid reports follow [Rejected reports](#rejected-reports).
+harness. A call fails the step only when it writes outside the clone with an
+absolute path not under it, such as `/tmp`, the repository around the clone or
+`$HOME`: a write or edit tool's destination, or a shell command's output
+redirection or the paths `tee`, `cp`, `mv`, `sed -i` and the like write. A
+read-only review may also write under its scratch directory. Reading outside
+the clone, writing inside it by any means, and URLs pass. The error names the
+first offending call. Missing or invalid reports follow [Rejected reports](#rejected-reports).
 For native agents, any non-zero exit
 also fails; Hermes uses the completion rules linked above.
 For Cursor, a stream result with `is_error: true` fails the step with its

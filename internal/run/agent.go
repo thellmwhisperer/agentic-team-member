@@ -9,9 +9,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"go/ast"
-	goparser "go/parser"
-	"go/token"
 	"io"
 	"maps"
 	"os"
@@ -348,7 +345,7 @@ func (a agent) exec(
 	if a.Harness == "claude" { // else a background command outlives its turn, and the run its report
 		cmd.Env = append(cmd.Env, "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1")
 	}
-	s := &stream{live: relative(clone, liveIn(clone)), root: a.root, clone: clone,
+	s := &stream{live: relative(clone, liveIn(clone)), clone: clone,
 		scratch: a.scratch}
 	if err := s.talk(cmd, f, a.Harness, stdin); err != nil {
 		return nil, "", "", err
@@ -437,20 +434,20 @@ func exclude(clone, pattern string) error {
 	return errors.Join(err, f.Close())
 }
 
-// stream is what the agent's lines said: its final message and its first prohibited path or network call.
+// stream is what the agent's lines said: its final message and its first write outside its clone.
 // Live gets what each line tells the screen.
 type stream struct {
-	final       string
-	model       string // first model named by this invocation's stream; never the requested model
-	root, clone string
-	scratch     string // the read-only review's directory outside the clone its calls may write in
-	reach       string
-	live        func(map[string]any)
-	pending      string
-	thought      string   // cursor's thinking deltas until completed
-	failure      string   // cursor's error result or pi's unrecovered model error, even when the process exits 0
-	tail         []string // the last 20 lines the agent wrote
-	session      string   // the harness session, so a rejected report is returned to it
+	final   string
+	model   string // first model named by this invocation's stream; never the requested model
+	clone   string
+	scratch string // the read-only review's directory outside the clone its calls may write in
+	reach   string
+	live    func(map[string]any)
+	pending string
+	thought string   // cursor's thinking deltas until completed
+	failure string   // cursor's error result or pi's unrecovered model error, even when the process exits 0
+	tail    []string // the last 20 lines the agent wrote
+	session string   // the harness session, so a rejected report is returned to it
 	// An ACP agent's: its prompt, its stdin until its prompt's reply, the reply's stopReason or the failed call,
 	// and the chunks of one thought or message so far.
 	prompt, stop   string
@@ -609,7 +606,7 @@ func (s *stream) see(harness string, line []byte) {
 	if s.pending != "" {
 		s.flush(e.Type == "result" && (harness == "claude" && ends || harness == "cursor"))
 	}
-	s.reach = cmp.Or(s.reach, outside(e.calls(harness), s.root, s.clone, s.scratch))
+	s.reach = cmp.Or(s.reach, outside(e.calls(harness), s.clone, s.scratch))
 	s.show(e.activity(harness))
 }
 
@@ -998,344 +995,138 @@ func strs(input json.RawMessage, write bool) string {
 	return strings.Join(walk(in), " ")
 }
 
-var (
-	link = regexp.MustCompile("https?://[^\\s\"'`;|&)]+")
-	sep  = "\\s\"'`;|&()<>,="
-)
-
-// outside is the first of calls that reaches outside clone, as its tool and its first 200 characters: one that
-// names a path under root not under clone, or a shell command that runs curl or wget or names a URL off this
-// machine. A path outside root, the module cache's, passes; root "/" is every absolute path. scratch, when
-// given, is the one directory outside clone those calls may name: a read-only review's.
-func outside(calls []use, root, clone string, scratch ...string) string {
-	if len(calls) == 0 {
-		return ""
+// outside is the first of calls that writes outside clone, as its tool and its first 200 characters: a write or
+// edit tool, or a shell command, whose destination is an absolute path not under clone. Reading outside, and
+// writing inside by any means, pass. scratch, when given, is the one directory outside clone those calls may
+// write in: a read-only review's.
+func outside(calls []use, clone string, scratch ...string) string {
+	allowed := []string{filepath.ToSlash(clone)}
+	if len(scratch) > 0 && scratch[0] != "" {
+		allowed = append(allowed, filepath.ToSlash(scratch[0]))
 	}
-	allow := ""
-	if len(scratch) > 0 {
-		allow = filepath.ToSlash(scratch[0])
-	}
-	root, clone = filepath.ToSlash(root), filepath.ToSlash(clone)
-	pattern := regexp.QuoteMeta(root) + "(/[^" + sep + "]*)?"
-	if root == "/" {
-		pattern = "/[^" + sep + "]*"
-	}
-	quoted := regexp.QuoteMeta(root)
-	if root != "/" {
-		quoted += "/"
-	}
-	paths := regexp.MustCompile(`"` + quoted + `[^"]*"` + `|'` + quoted + `[^']*'|` + pattern)
 	for _, c := range calls {
-		if reachesPath(c.args, root, clone, allow, paths) || c.command != "" && fetchesAt(c.command, clone) {
-			r := []rune(c.args)
-			return c.tool + " " + string(r[:min(len(r), 200)])
+		var dests []string
+		switch {
+		case c.command != "":
+			dests = shellWrites(c.command)
+		case writesFile(c.tool) || c.tool == "file_change" || c.tool == "delete" || c.tool == "move":
+			dests = strings.Fields(c.args)
+		}
+		for _, d := range dests {
+			if escapes(d, allowed) {
+				r := []rune(c.args)
+				return c.tool + " " + string(r[:min(len(r), 200)])
+			}
 		}
 	}
 	return ""
 }
 
-func reachesPath(args, root, clone, scratch string, paths *regexp.Regexp) bool {
-	text := filepath.ToSlash(args)
-	for _, m := range paths.FindAllStringIndex(text, -1) {
-		if root == "" || m[0] > 0 && !strings.ContainsRune(" \t\r\n\"'`;|&()<>,=", rune(text[m[0]-1])) ||
-			m[1] < len(text) && !strings.ContainsRune(" \t\r\n\"'`;|&()<>,=/", rune(text[m[1]])) {
-			continue
-		}
-		p := text[m[0]:m[1]]
-		if p[0] == '\'' || p[0] == '"' {
-			p = p[1 : len(p)-1]
-		}
-		p = path.Clean(p)
-		if p != clone && !strings.HasPrefix(p, clone+"/") &&
-			(scratch == "" || p != scratch && !strings.HasPrefix(p, scratch+"/")) {
+var windowsAbs = regexp.MustCompile(`^[A-Za-z]:/`)
+
+// escapes says whether p, a destination, is an absolute path, ~ or $HOME included, under none of allowed and
+// not a device such as /dev/null.
+func escapes(p string, allowed []string) bool {
+	p = filepath.ToSlash(p)
+	if p == "~" || strings.HasPrefix(p, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
 			return true
 		}
+		p = filepath.ToSlash(home) + p[1:]
 	}
-	return false
-}
-
-// fetches says whether a shell command runs curl or wget or names a URL off this machine.
-func fetches(command string) bool {
-	return fetchesAt(command, "")
-}
-
-func fetchesAt(command, clone string) bool {
-	file, err := syntax.NewParser().Parse(strings.NewReader(command), "")
-	if err != nil {
-		if badURL(command) {
-			return true
-		}
-		fields := strings.Fields(command)
-		if len(fields) == 0 {
-			return false
-		}
-		word := strings.Trim(fields[0], "\"'`;|&()")
-		return word == "curl" || word == "wget"
-	}
-	checked := []byte(command)
-	if len(file.Stmts) > 0 {
-		maskQuotedGoTestData(checked, file.Stmts, clone)
-	}
-	if badURL(string(checked)) {
-		return true
-	}
-	return containsFetchCall(file)
-}
-
-func containsFetchCall(file *syntax.File) bool {
-	unsafe := false
-	syntax.Walk(file, func(node syntax.Node) bool {
-		if call, ok := node.(*syntax.CallExpr); ok && fetchCall(call) {
-			unsafe = true
-		}
-		return !unsafe
-	})
-	return unsafe
-}
-
-func maskQuotedGoTestData(checked []byte, stmts []*syntax.Stmt, clone string) {
-	if len(stmts) == 0 {
-		return
-	}
-	data, output, appended := quotedGoTestData(stmts[0])
-	if data == nil || !goTestContinuation(stmts[1:]) {
-		return
-	}
-	body := bytes.ReplaceAll([]byte(data.Lit()), []byte("\r\n"), []byte("\n"))
-	start := int(data.Pos().Offset())
-	if start < 0 || start > len(checked) {
-		return
-	}
-	end := start + len(body)
-	for extra := 0; extra <= bytes.Count(body, []byte("\n")) && end+extra <= len(checked); extra++ {
-		end = start + len(body) + extra
-		if bytes.Equal(bytes.ReplaceAll(checked[start:end], []byte("\r\n"), []byte("\n")), body) {
-			break
-		}
-	}
-	if end < start || end > len(checked) ||
-		!bytes.Equal(bytes.ReplaceAll(checked[start:end], []byte("\r\n"), []byte("\n")), body) ||
-		!goTestSource(body, appended && existingTestingImport(clone, output)) {
-		return
-	}
-	clear(checked[start:end])
-}
-
-func quotedGoTestData(stmt *syntax.Stmt) (*syntax.Word, string, bool) {
-	if stmt == nil || stmt.Negated || stmt.Background || stmt.Coprocess || len(stmt.Redirs) != 2 {
-		return nil, "", false
-	}
-	call, ok := stmt.Cmd.(*syntax.CallExpr)
-	if !ok || len(call.Args) != 1 || call.Args[0].Lit() != "cat" || len(call.Assigns) != 0 {
-		return nil, "", false
-	}
-	var data *syntax.Word
-	output := ""
-	appended := false
-	data, output, appended = classifyGoTestRedirs(stmt.Redirs)
-	if data != nil && output != "" {
-		return data, output, appended
-	}
-	return nil, "", false
-}
-
-func classifyGoTestRedirs(redirs []*syntax.Redirect) (*syntax.Word, string, bool) {
-	var data *syntax.Word
-	output := ""
-	appended := false
-	for _, redir := range redirs {
-		if redir.N != nil {
-			return nil, "", false
-		}
-		switch redir.Op {
-		case syntax.Hdoc:
-			_, literal := literalWord(redir.Word)
-			if literal && redir.Word.Lit() == "" {
-				data = redir.Hdoc
-			}
-		case syntax.RdrOut, syntax.AppOut:
-			if literalGoTestOutput(redir.Word) {
-				output, _ = literalWord(redir.Word)
-				appended = redir.Op == syntax.AppOut
-			}
-		}
-	}
-	return data, output, appended
-}
-
-func literalGoTestOutput(word *syntax.Word) bool {
-	name, literal := literalShellWord(word)
-	clean := path.Clean(name)
-	return literal && name != "" && !path.IsAbs(name) && !filepath.IsAbs(name) &&
-		clean != ".." && !strings.HasPrefix(clean, "../") && strings.HasSuffix(clean, "_test.go")
-}
-
-func literalShellWord(word *syntax.Word) (string, bool) {
-	name, literal := literalWord(word)
-	if !literal {
-		return "", false
-	}
-	for _, part := range word.Parts {
-		switch part := part.(type) {
-		case *syntax.Lit:
-			if strings.ContainsAny(part.Value, "*?[{}~") {
-				return "", false
-			}
-		case *syntax.BraceExp, *syntax.ExtGlob:
-			return "", false
-		}
-	}
-	return name, true
-}
-
-func goTestSource(src []byte, existingTestingImport bool) bool {
-	f, err := goparser.ParseFile(token.NewFileSet(), "fixture_test.go", src, goparser.ParseComments)
-	if err != nil {
-		f, err = goparser.ParseFile(token.NewFileSet(), "fixture_test.go", append([]byte("package run\n"), src...),
-			goparser.ParseComments)
-	}
-	if err != nil || f.Name == nil {
+	if !path.IsAbs(p) && !windowsAbs.MatchString(p) {
 		return false
 	}
-	testingImported := existingTestingImport
-	for _, imp := range f.Imports {
-		if testingImport(imp) {
-			testingImported = true
-			break
-		}
-	}
-	if !testingImported {
+	p = path.Clean(p)
+	if strings.HasPrefix(p, "/dev/") {
 		return false
 	}
-	test := false
-	for _, decl := range f.Decls {
-		if fn, ok := decl.(*ast.FuncDecl); ok && goTestFunc(fn) {
-			test = true
-		}
-	}
-	return test
-}
-
-func existingTestingImport(clone, output string) bool {
-	if clone == "" {
-		return false
-	}
-	src, err := os.ReadFile(filepath.Join(clone, filepath.FromSlash(output)))
-	if err != nil {
-		return false
-	}
-	f, err := goparser.ParseFile(token.NewFileSet(), output, src, 0)
-	if err != nil {
-		return false
-	}
-	for _, imp := range f.Imports {
-		if testingImport(imp) {
-			return true
-		}
-	}
-	return false
-}
-
-func testingImport(imp *ast.ImportSpec) bool {
-	importPath, err := strconv.Unquote(imp.Path.Value)
-	return err == nil && imp.Name == nil && importPath == "testing"
-}
-
-func goTestFunc(fn *ast.FuncDecl) bool {
-	if fn.Recv != nil || fn.Type.TypeParams != nil || fn.Type.Results != nil && len(fn.Type.Results.List) != 0 ||
-		fn.Type.Params == nil || len(fn.Type.Params.List) != 1 || len(fn.Type.Params.List[0].Names) > 1 {
-		return false
-	}
-	name := fn.Name.Name
-	if !strings.HasPrefix(name, "Test") {
-		return false
-	}
-	if len(name) > len("Test") {
-		r, _ := utf8.DecodeRuneInString(name[len("Test"):])
-		if unicode.IsLower(r) {
-			return false
-		}
-	}
-	param, ok := fn.Type.Params.List[0].Type.(*ast.StarExpr)
-	if !ok {
-		return false
-	}
-	typ, ok := param.X.(*ast.SelectorExpr)
-	if !ok || typ.Sel.Name != "T" {
-		return false
-	}
-	packageName, ok := typ.X.(*ast.Ident)
-	return ok && packageName.Name == "testing"
-}
-
-func goTestContinuation(stmts []*syntax.Stmt) bool {
-	if len(stmts) == 0 {
-		return true
-	}
-	if len(stmts) != 1 {
-		return false
-	}
-	stmt := stmts[0]
-	if call, ok := stmt.Cmd.(*syntax.CallExpr); ok {
-		return literalGoTestCall(stmt, call, false)
-	}
-	pipe, ok := stmt.Cmd.(*syntax.BinaryCmd)
-	return ok && pipe.Op == syntax.Pipe && !stmt.Negated && !stmt.Background && !stmt.Coprocess &&
-		len(stmt.Redirs) == 0 && literalGoTestCall(pipe.X, callOf(pipe.X), true) && literalTail(pipe.Y)
-}
-
-func callOf(stmt *syntax.Stmt) *syntax.CallExpr {
-	if stmt == nil {
-		return nil
-	}
-	call, _ := stmt.Cmd.(*syntax.CallExpr)
-	return call
-}
-
-func literalGoTestCall(stmt *syntax.Stmt, call *syntax.CallExpr, stderrToStdout bool) bool {
-	if !literalGoTestCallShape(stmt, call) {
-		return false
-	}
-	if !goTestRedirsMatch(stmt.Redirs, stderrToStdout) {
-		return false
-	}
-	for i, arg := range call.Args {
-		word, literal := literalShellWord(arg)
-		if !literal || (i == 0 && word != "go") || (i == 1 && word != "test") {
+	for _, a := range allowed {
+		if p == a || strings.HasPrefix(p, a+"/") {
 			return false
 		}
 	}
 	return true
 }
 
-func goTestRedirsMatch(redirs []*syntax.Redirect, stderrToStdout bool) bool {
-	if !stderrToStdout {
-		return len(redirs) == 0
+// shellWrites is what command writes to, as far as its words are literal: each output redirection's target, and
+// the paths a command that writes them names.
+func shellWrites(command string) (out []string) {
+	file, err := syntax.NewParser().Parse(strings.NewReader(command), "")
+	if err != nil {
+		return nil
 	}
-	if len(redirs) != 1 {
-		return false
-	}
-	redir := redirs[0]
-	target, literal := literalShellWord(redir.Word)
-	return redir.Op == syntax.DplOut && redir.N != nil && redir.N.Value == "2" && literal && target == "1"
+	syntax.Walk(file, func(node syntax.Node) bool {
+		switch n := node.(type) {
+		case *syntax.Redirect:
+			switch n.Op {
+			case syntax.RdrOut, syntax.AppOut, syntax.ClbOut, syntax.RdrInOut, syntax.RdrAll, syntax.AppAll:
+				out = append(out, wordText(n.Word))
+			}
+		case *syntax.CallExpr:
+			out = append(out, callWrites(n)...)
+		}
+		return true
+	})
+	return out
 }
 
-func literalGoTestCallShape(stmt *syntax.Stmt, call *syntax.CallExpr) bool {
-	return stmt != nil && call != nil && !stmt.Negated && !stmt.Background && !stmt.Coprocess &&
-		len(call.Assigns) == 0 && len(call.Args) >= 2
+// callWrites is the paths call writes: every operand of tee, touch, mkdir, rm, rmdir, mv and the like, the last
+// of cp, ln, install and rsync, sed's and perl's files when in place, and what sh -c's command writes.
+func callWrites(call *syntax.CallExpr) []string {
+	var words []string
+	for _, a := range call.Args {
+		words = append(words, wordText(a))
+	}
+	if len(words) == 0 {
+		return nil
+	}
+	var operands []string
+	inPlace := false
+	for _, a := range words[1:] {
+		if strings.HasPrefix(a, "-") {
+			inPlace = inPlace || strings.HasPrefix(a, "-i") || strings.HasPrefix(a, "--in-place")
+			continue
+		}
+		operands = append(operands, a)
+	}
+	switch path.Base(words[0]) {
+	case "tee", "touch", "mkdir", "rm", "rmdir", "mv", "truncate", "unlink":
+		return operands
+	case "cp", "ln", "install", "rsync":
+		return operands[max(0, len(operands)-1):]
+	case "sed", "perl":
+		if inPlace {
+			return operands
+		}
+	case "sh", "bash", "zsh":
+		if len(words) > 2 && words[1] == "-c" {
+			return shellWrites(words[2])
+		}
+	}
+	return nil
 }
 
-func literalTail(stmt *syntax.Stmt) bool {
-	if stmt == nil || stmt.Negated || stmt.Background || stmt.Coprocess || len(stmt.Redirs) != 0 {
-		return false
+// wordText is word as far as it is literal, a leading $HOME as ~.
+func wordText(word *syntax.Word) string {
+	if word == nil {
+		return ""
 	}
-	call := callOf(stmt)
-	if call == nil || len(call.Assigns) != 0 || len(call.Args) != 2 {
-		return false
+	parts := word.Parts
+	if len(parts) > 0 {
+		if q, ok := parts[0].(*syntax.DblQuoted); ok && len(parts) == 1 {
+			parts = q.Parts
+		}
 	}
-	name, nameLiteral := literalShellWord(call.Args[0])
-	count, countLiteral := literalShellWord(call.Args[1])
-	return nameLiteral && countLiteral && name == "tail" && count == "-20"
+	if len(parts) > 0 {
+		if p, ok := parts[0].(*syntax.ParamExp); ok && p.Param != nil && p.Param.Value == "HOME" {
+			text, _ := literalWord(&syntax.Word{Parts: parts[1:]})
+			return "~" + text
+		}
+	}
+	text, _ := literalWord(&syntax.Word{Parts: parts})
+	return text
 }
 
 func literalWord(word *syntax.Word) (string, bool) {
@@ -1360,70 +1151,4 @@ func literalWord(word *syntax.Word) (string, bool) {
 	}
 	literal := walk(word.Parts)
 	return text.String(), literal
-}
-
-func badURL(word string) bool {
-	for _, l := range link.FindAllString(word, -1) {
-		scheme := strings.Index(l, "://")
-		if scheme < 0 {
-			return true
-		}
-		authority := l[scheme+3:]
-		if end := strings.IndexAny(authority, "/?#"); end >= 0 {
-			authority = authority[:end]
-		}
-		if user := strings.LastIndexByte(authority, '@'); user >= 0 {
-			authority = authority[user+1:]
-		}
-		host := authority
-		if strings.HasPrefix(host, "[") {
-			end := strings.IndexByte(host, ']')
-			if end < 0 || host[end+1:] != "" && !strings.HasPrefix(host[end+1:], ":") {
-				return true
-			}
-			host = host[1:end]
-		} else if end := strings.IndexByte(host, ':'); end >= 0 {
-			host = host[:end]
-		}
-		if !slices.Contains([]string{"localhost", "127.0.0.1", "::1"}, strings.ToLower(host)) {
-			return true
-		}
-	}
-	return false
-}
-
-func fetchCall(call *syntax.CallExpr) bool {
-	args := call.Args
-	for i := 0; i < len(args); {
-		word, literal := literalWord(args[i])
-		if !literal {
-			return false
-		}
-		switch word {
-		case "env":
-			i++
-			for i < len(args) {
-				if !strings.Contains(literalFragments(args[i]), "=") {
-					break
-				}
-				i++
-			}
-		case "sudo", "command", "exec":
-			i++
-		case "sh", "bash":
-			if i+2 < len(args) {
-				flag, flagLiteral := literalWord(args[i+1])
-				return flagLiteral && flag == "-c" && fetches(literalFragments(args[i+2]))
-			}
-			return false
-		default:
-			return word == "curl" || word == "wget"
-		}
-	}
-	return false
-}
-
-func literalFragments(word *syntax.Word) string {
-	text, _ := literalWord(word)
-	return text
 }

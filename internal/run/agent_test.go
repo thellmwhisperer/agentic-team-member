@@ -550,7 +550,13 @@ func logLines(t *testing.T, path string) []string {
 type reachCase struct{ name, harness, stream, why string }
 
 func bashEvent(harness, command, description string) string {
-	q := func(s string) string { b, _ := json.Marshal(s); return string(b) }
+	q := func(s string) string { // unescaped, so <clone> reaches the fake agent as it is
+		var b bytes.Buffer
+		enc := json.NewEncoder(&b)
+		enc.SetEscapeHTML(false)
+		_ = enc.Encode(s)
+		return strings.TrimSpace(b.String())
+	}
 	switch harness {
 	case "pi":
 		desc := ""
@@ -575,41 +581,8 @@ func bashEvent(harness, command, description string) string {
 }
 
 func TestRunDiesWhenTheAgentReachesOutsideItsClone(t *testing.T) {
-	for _, cases := range [][]reachCase{piReachCases(), shellReachCases(), codexReachCases(), otherReachCases()} {
+	for _, cases := range [][]reachCase{writeOutsideCases(), staysInsideCases()} {
 		runReachCases(t, cases)
-	}
-}
-
-func TestRunRejectsSavedShellPayloadAcrossEvents(t *testing.T) {
-	repo(t, "https://example.com/owner/repo.git", atmYAML)
-	write := "cat > payload.sh <<'EOF'\n#!/bin/sh\ncurl https://example.com\nEOF\n"
-	stream := bashEvent("claude", write, "") + bashEvent("claude", "sh payload.sh", "")
-	t.Setenv("FAKE_AGENT_STREAM", stream)
-	var out bytes.Buffer
-	err := Run("t", []string{"--harness", "claude", issueFile(t, issue)}, &out, io.Discard)
-	want := "the agent reached outside its clone: Bash " + write
-	if err == nil || !strings.Contains(err.Error(), want) {
-		t.Fatalf("want the writer rejected before its later shell use, got %v", err)
-	}
-}
-
-func piReachCases() []reachCase {
-	curl := `curl -sL -m 30 https://www.example.com/assets/index.js -o "$TMPDIR/x.js"`
-	const why = "the agent reached outside its clone: "
-	return []reachCase{
-		{"pi curl", "pi", bashEvent("pi", curl, ""), why + "bash " + curl},
-		{"pi wrapped curl", "pi", bashEvent("pi", `env curl ""`, ""),
-			why + `bash env curl ""`},
-		{"pi command with description", "pi", bashEvent("pi", `echo ready; curl "$URL"`, "Check what's happening"),
-			why + `bash echo ready; curl "$URL"`},
-		{"pi description url ignored", "pi",
-			bashEvent("pi", "pnpm dev --url http://localhost:5173", "https://example.com"), ""},
-		{"local variable port", "claude", bashEvent("claude", "pnpm dev --url http://localhost:$PORT", ""), ""},
-		{"local userinfo", "claude", bashEvent("claude", "pnpm dev --url http://user@localhost:3000", ""), ""},
-		{"local ipv6", "claude", bashEvent("claude", "pnpm dev --url http://[::1]:8080", ""), ""},
-		{"userinfo cannot hide remote host", "claude",
-			bashEvent("claude", "git ls-remote https://localhost:80@www.example.com/repo.git", ""),
-			why + "Bash git ls-remote https://localhost:80@www.example.com/repo.git"},
 	}
 }
 
@@ -619,114 +592,78 @@ func claudeEvent(tool, input string) string {
 		q(tool) + `,"input":` + input + `}]}}` + "\n"
 }
 
-func shellReachCases() []reachCase {
-	claude := claudeEvent
-	q := func(s string) string { b, _ := json.Marshal(s); return string(b) }
+func codexEvent(item string) string {
+	return `{"type":"item.completed","item":{"id":"c1",` + item + `}}` + "\n"
+}
+
+// writeOutsideCases each write outside the clone with an absolute path: the one thing that ends the run.
+func writeOutsideCases() []reachCase {
 	const why = "the agent reached outside its clone: "
+	shell := func(name, command string) reachCase {
+		return reachCase{name, "claude", bashEvent("claude", command, ""), why + "Bash " + command}
+	}
 	return []reachCase{
-		{"env curl", "claude", claude("Bash", `{"command":`+q(`env curl "$PROD_URL"`)+`}`),
-			why + `Bash env curl "$PROD_URL"`},
-		{"wrapped curl", "claude", claude("Bash", `{"command":`+q(`env FOO=bar sudo command exec curl -s a`)+`}`),
-			why + "Bash env FOO=bar sudo command exec curl -s a"},
-		{"newline curl", "claude", claude("Bash", `{"command":`+q("printf ok\ncurl \"$URL\"")+`}`),
-			why + "Bash printf ok\ncurl \"$URL\""},
-		{"command separated from description", "claude",
-			bashEvent("claude", `echo ready; curl "$URL"`, "Check what's happening"),
-			why + `Bash echo ready; curl "$URL"`},
-		{"assigned curl", "claude", claude("Bash", `{"command":`+q(`FOO=bar curl "$URL"`)+`}`),
-			why + `Bash FOO=bar curl "$URL"`},
-		{"chained curl", "claude", claude("Bash", `{"command":"x && curl -s a"}`),
-			why + "Bash x && curl -s a"},
-		{"semicolon curl", "claude", claude("Bash", `{"command":"x; curl -s a"}`),
-			why + "Bash x; curl -s a"},
-		{"or curl", "claude", claude("Bash", `{"command":"x || curl -s a"}`),
-			why + "Bash x || curl -s a"},
-		{"pipe curl", "claude", claude("Bash", `{"command":"x | curl -s a"}`),
-			why + "Bash x | curl -s a"},
-		{"substitution curl", "claude", claude("Bash", `{"command":`+q(`echo $(curl -s a)`)+`}`),
-			why + `Bash echo $(curl -s a)`},
-		{"curl argument after substitution", "claude", claude("Bash", `{"command":`+q(`echo $(date) curl`)+`}`), ""},
-		{"curl argument after backticks", "claude", claude("Bash", `{"command":`+q("echo `date` curl")+`}`), ""},
-		{"backtick curl", "claude", claude("Bash", `{"command":`+q("echo `curl -s a`")+`}`),
-			why + "Bash echo `curl -s a`"},
-		{"shell wrapped wget", "claude", claude("Bash", `{"command":`+q(`sh -c "wget b"`)+`}`),
-			why + `Bash sh -c "wget b"`},
-		{"expanded url", "claude", claude("Bash", `{"command":`+q(`node -e "fetch('https://example.com/$ASSET')"`)+`}`),
-			why + `Bash node -e "fetch('https://example.com/$ASSET')"`},
-		{"expanded nested curl", "claude", claude("Bash", `{"command":`+q(`sh -c "curl https://example.com/$ASSET"`)+`}`),
-			why + `Bash sh -c "curl https://example.com/$ASSET"`},
-		{"claude reads another run", "claude", claude("Read", `{"file_path":"{root}/.atm/runs/6-2/worker.jsonl"}`),
-			why + "Read {root}/.atm/runs/6-2/worker.jsonl"},
-		{"codex MCP reads another run", "codex", codexEvent(codexReadArguments()),
-			why + "read_file {root}/.atm/runs/6-2/worker.jsonl"},
-		{"codex file change inside clone", "codex", codexEvent(
-			`"type":"file_change","changes":[{"path":"<clone>/a.txt","kind":"update"}],"status":"completed"`), ""},
+		shell("redirect to /tmp", "echo x > /tmp/atm-reach.txt"),
+		shell("append to the repository", "echo x >> {root}/a.txt"),
+		shell("tee to /tmp", "go test ./... | tee /tmp/atm-reach.txt"),
+		shell("cp into the repository", "cp a.txt {root}/a.txt"),
+		shell("sed in place in the repository", "sed -i '' 's/a/b/' {root}/a.txt"),
+		shell("touch under home", "touch ~/atm-reach.txt"),
+		shell("redirect under $HOME", `echo x > "$HOME/atm-reach.txt"`),
+		shell("nested shell write", `sh -c "echo x > /tmp/atm-reach.txt"`),
+		{"pi bash write", "pi", bashEvent("pi", "echo x > /tmp/atm-reach.txt", ""),
+			why + "bash echo x > /tmp/atm-reach.txt"},
+		{"opencode bash write", "opencode", bashEvent("opencode", "echo x > /tmp/atm-reach.txt", ""),
+			why + "bash echo x > /tmp/atm-reach.txt"},
+		{"claude writes outside its clone", "claude", claudeEvent("Write",
+			`{"file_path":"{root}/.atm/runs/6-2/report.json","content":"{}"}`),
+			why + "Write {root}/.atm/runs/6-2/report.json"},
+		{"claude edit destination outside its clone", "claude", claudeEvent("Edit",
+			`{"file_path":"{root}/.atm/runs/6-2/report.json","old_string":"x","new_string":"y"}`),
+			why + "Edit {root}/.atm/runs/6-2/report.json"},
 		{"codex file change outside clone", "codex", codexEvent(
 			`"type":"file_change","changes":[{"path":"{root}/.atm/runs/6-2/report.json","kind":"update"}],"status":"completed"`),
 			why + "file_change {root}/.atm/runs/6-2/report.json"},
 	}
 }
 
-func codexReachCases() []reachCase {
-	const why = "the agent reached outside its clone: "
-	return []reachCase{
-		{"codex lists another clone", "codex", `{"type":"item.started","item":{"id":"c1","type":"command_execution",` +
-			`"command":"ls {root}/.atm/clones/other"}}` + "\n", why + "shell ls {root}/.atm/clones/other"},
+// staysInsideCases read outside, write inside by any means, or name URLs: none ends the run.
+func staysInsideCases() []reachCase {
+	shell := func(name, command string) reachCase {
+		return reachCase{name, "claude", bashEvent("claude", command, ""), ""}
 	}
-}
-
-func otherReachCases() []reachCase {
-	const why = "the agent reached outside its clone: "
-	return append(moreReachCases(claudeEvent, why), []reachCase{{
-		"opencode fetches", "opencode", `{"type":"tool_use","part":{"callID":"c1","tool":"bash","state":` +
-			`{"status":"completed","input":{"command":"node -e \"fetch('https://example.com')\""}}}}` + "\n",
-		why + `bash node -e "fetch('https://example.com')"`},
-	}...)
-}
-
-func codexEvent(item string) string {
-	return `{"type":"item.completed","item":{"id":"c1",` + item + `}}` + "\n"
-}
-
-func codexReadArguments() string {
-	return `"type":"mcp_tool_call","server":"filesystem","tool":"read_file",` +
-		`"arguments":{"path":"{root}/.atm/runs/6-2/worker.jsonl"}`
-}
-
-func moreReachCases(claude func(string, string) string, why string) []reachCase {
 	return []reachCase{
-		{"opencode command with description", "opencode",
-			bashEvent("opencode", `echo ready; curl "$URL"`, "Check what's happening"), why + `bash echo ready; curl "$URL"`},
-		{"opencode description url ignored", "opencode",
-			bashEvent("opencode", "pnpm dev --url http://localhost:5173", "https://example.com"), ""},
-		{"inside", "claude", insideStream(claude), ""},
+		shell("heredoc into a test inside the clone",
+			"cat > internal/x_test.go <<'EOF'\npackage x\n\n// https://example.com/repo.git\nEOF\ngo test ./internal/..."),
+		shell("sed in place inside the clone", "sed -i '' 's/a/b/' a.txt"),
+		shell("cd to the clone's absolute path", "cd <clone> && go test ./..."),
+		shell("write through the clone's absolute path", "echo x > <clone>/a.txt"),
+		shell("cat a file outside", "cat {root}/README.md"),
+		shell("cp from outside", "cp {root}/.atm.yaml copy.yaml"),
+		shell("list another clone", "ls {root}/.atm/clones/other"),
+		shell("search outside", "rg retry {root}"),
+		shell("a URL in a command", "curl -s https://example.com"),
+		shell("git with a remote URL", "git ls-remote https://www.example.com/repo.git"),
+		shell("stderr to /dev/null", "go test ./... 2>/dev/null"),
+		{"claude reads another run", "claude", claudeEvent("Read", `{"file_path":"{root}/.atm/runs/6-2/worker.jsonl"}`), ""},
+		{"codex MCP reads another run", "codex", codexEvent(`"type":"mcp_tool_call","server":"filesystem",` +
+			`"tool":"read_file","arguments":{"path":"{root}/.atm/runs/6-2/worker.jsonl"}`), ""},
+		{"codex file change inside clone", "codex", codexEvent(
+			`"type":"file_change","changes":[{"path":"<clone>/a.txt","kind":"update"}],"status":"completed"`), ""},
+		{"inside", "claude", insideStream(claudeEvent), ""},
 		{"pi writes a follow-up test with relative imports", "pi", `{"type":"tool_execution_start","toolCallId":"c1",` +
 			`"toolName":"write","args":{"path":".atm/follow-ups/1/packages/p/src/a/web/form.test.tsx","content":` +
 			`"import { rule } from '../../card/rules';\nimport { cfg } from '../../../../w/src/config';\n"}}` + "\n", ""},
 		{"pi edit text naming the repository", "pi", `{"type":"tool_execution_start","toolCallId":"c1",` +
 			`"toolName":"edit","args":{"path":"a.ts","edits":[{"oldText":"x","newText":"// see {root}/.atm/runs"}]}}` +
 			"\n", ""},
-		{"claude read content still checks reach", "claude", claude("Read",
-			`{"file_path":"src/a.ts","content":"{root}/.atm/runs/6-2/worker.jsonl"}`),
-			why + "Read {root}/.atm/runs/6-2/worker.jsonl src/a.ts"},
-		{"claude writes outside its clone", "claude", claude("Write",
-			`{"file_path":"{root}/.atm/runs/6-2/report.json","content":"{}"}`),
-			why + "Write {root}/.atm/runs/6-2/report.json"},
-		{"claude edit destination outside its clone", "claude", claude("Edit",
-			`{"file_path":"{root}/.atm/runs/6-2/report.json","old_string":"x","new_string":"y"}`),
-			why + "Edit {root}/.atm/runs/6-2/report.json"},
 	}
 }
 
 func insideStream(claude func(string, string) string) string {
-	return claude("Read", `{"file_path":"{clone}/AGENTS.md"}`) +
-		claude("Bash", `{"command":"rg curl ."}`) +
-		claude("Bash", `{"command":"rg wget ."}`) +
+	return claude("Read", `{"file_path":"<clone>/AGENTS.md"}`) +
 		claude("Bash", `{"command":"pnpm dev --url http://localhost:5173","description":"https://example.com"}`) +
-		claude("Bash", `{"command":"pnpm add zod && pnpm dev --url http://localhost:5173"}`) +
-		claude("Bash", `{"command":"pnpm dev --url http://localhost:5173; echo ready"}`) +
 		claude("Read", `{"file_path":"{home}/go/pkg/mod/golang.org/x/mod@v0.20.0/go.mod"}`) +
-		claude("Read", `{"file_path":"/archive{root}/file"}`) +
 		claude("Write", `{"file_path":"src/a.test.ts","content":"import { b } from '../../b';\n"}`) +
 		claude("Edit", `{"file_path":"src/a.ts","old_string":"x","new_string":"import { c } from '../../c';"}`)
 }
@@ -766,11 +703,11 @@ func TestRunReportsReachBeforeAgentFailure(t *testing.T) {
 	const prefix = `{"type":"assistant","message":{"role":"assistant","content":[` +
 		`{"type":"tool_use","id":"c1","name":"Bash","input":{"command":`
 	stream := prefix +
-		q("curl https://example.com") + `}}]}}` + "\n"
+		q("echo x > /tmp/atm-reach.txt") + `}}]}}` + "\n"
 	t.Setenv("FAKE_AGENT_STREAM", stream)
 	var out bytes.Buffer
 	err := Run("t", []string{"--harness", "claude", issueFile(t, issue)}, &out, io.Discard)
-	want := "exit code 3; the agent reached outside its clone: Bash curl https://example.com"
+	want := "exit code 3; the agent reached outside its clone: Bash echo x > /tmp/atm-reach.txt"
 	if err == nil || !strings.Contains(err.Error(), want) {
 		t.Fatalf("want reach failure to take precedence, got %v", err)
 	}
