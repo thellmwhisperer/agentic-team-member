@@ -1,5 +1,4 @@
-// Package tui is a run's screen on a terminal: no-mistakes' screen, built to its internal/tui/DESIGN.md, with
-// a row for each node of ATM's graph. ATM and no-mistakes run one after the other on the same branch.
+// Package tui is a run's screen on a terminal, with a row for each node of ATM's graph.
 package tui
 
 import (
@@ -30,7 +29,7 @@ type activity struct {
 	id, tool, detail, result, summary, thinking, says string
 }
 
-// finding is a row of the Findings box, as no-mistakes has them: a severity, error or warning, a reference and
+// finding is a row of the Findings box, with a severity, error or warning, a reference and
 // a description.
 type finding struct {
 	severity, ref, text string
@@ -282,75 +281,28 @@ func (m *Model) apply(f run.Frame) {
 	}
 	at, _ := time.Parse(time.RFC3339Nano, e.TS)
 	switch {
-	case e.Check != "":
-		r := m.checkRow(e.Step, e.Check)
-		r.state, r.took, r.start, r.hasDuration = e.State, time.Duration(e.DurationMS)*time.Millisecond, at, true
-		if e.State == "started" {
-			r.state = "running"
-		}
 	case e.ID != "" || e.Tool != "":
 		m.tool(e)
 	case e.Thinking != "" || e.Says != "":
 		m.agent = append(m.agent, &activity{thinking: e.Thinking, says: e.Says})
 	case e.Output != nil:
 		m.output = append(m.output[max(0, len(m.output)-199):], ansi.Strip(*e.Output))
+	case m.current(e.Step) == nil:
+		return
+	case e.Check != "":
+		r := m.checkRow(e.Step, e.Check)
+		r.state, r.took, r.start, r.hasDuration = e.State, time.Duration(e.DurationMS)*time.Millisecond, at, true
+		if e.State == "started" {
+			r.state = "running"
+		}
 	case e.State == "started":
-		m.ensureGate(e.Step)
 		m.started(e.Step, at)
 	case e.State != "":
-		m.ensureGate(e.Step)
 		m.ended(e)
 	}
-	switch {
-	case m.running():
+	if m.running() {
 		m.state = "running"
-	case m.waits():
-		m.state = "waiting"
 	}
-}
-
-// gateLabels are the no-mistakes steps shown below Delivery.
-var gateLabels = map[string]string{
-	"review": "Review", "test": "Test", "document": "Document", "lint": "Lint",
-	"push": "Push", "pr": "PR", "ci": "CI",
-}
-
-func (m *Model) activityRows() []*row {
-	for i, r := range m.rows {
-		if !r.check && gateLabels[r.step] != "" {
-			return m.rows[i:]
-		}
-	}
-	return m.rows
-}
-
-func gateOrder(step string) int {
-	return slices.Index([]string{"review", "test", "document", "lint", "push", "pr", "ci"}, step) + 1
-}
-
-// ensureGate inserts step below Delivery, in gate order, the first time the gate reports it.
-func (m *Model) ensureGate(step string) {
-	if m.current(step) != nil || gateLabels[step] == "" {
-		return
-	}
-	r := &row{step: step, label: gateLabels[step], state: "pending"}
-	at := len(m.rows)
-	for i, row := range m.rows {
-		if !row.check && row.step == "delivery" {
-			at = i + 1
-		}
-	}
-	for at < len(m.rows) && m.rows[at].check {
-		at++
-	}
-	for at < len(m.rows) && gateBefore(m.rows[at], step) {
-		at++
-	}
-	m.rows = slices.Insert(m.rows, at, r)
-}
-
-func gateBefore(r *row, step string) bool {
-	return !r.check && gateOrder(r.step) > 0 && gateOrder(r.step) < gateOrder(step)
 }
 
 // current is the last row of node step.

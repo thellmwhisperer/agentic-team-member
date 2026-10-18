@@ -51,7 +51,7 @@ func (m *Model) icon(state string) string {
 	return paint(s[1], s[0])
 }
 
-// severities is each finding severity's icon and colour, as no-mistakes has them.
+// severities is each finding severity's icon and colour, shown on the screen.
 var severities = map[string][2]string{"error": {"E", red}, "warning": {"W", yellow}}
 
 // Layout, as DESIGN.md has it: two columns from 100 columns, the left a third between 38 and 48; connectors
@@ -289,18 +289,8 @@ func (m *Model) right(width, height int) string {
 }
 
 func (m *Model) running() bool {
-	for _, r := range m.activityRows() {
+	for _, r := range m.rows {
 		if !r.check && r.state == "running" {
-			return true
-		}
-	}
-	return false
-}
-
-// waits says whether a gate step is waiting for a decision.
-func (m *Model) waits() bool {
-	for _, r := range m.activityRows() {
-		if r.state == "waiting" {
 			return true
 		}
 	}
@@ -643,7 +633,7 @@ func oneLine(s string) string {
 	return displayText(ansi.Strip(line))
 }
 
-// findingsBox is the findings as no-mistakes has them: a severity icon, a reference, the description below.
+// findingsBox is the findings shown on the screen: a severity icon, a reference, the description below.
 func (m *Model) findingsBox(width int) string {
 	counts := map[string]int{}
 	var out []string

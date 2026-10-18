@@ -47,12 +47,11 @@ func TestDeliveryRowsThroughRealBinaryAndColdAttach(t *testing.T) {
 	top := gitT(t, repo(t, t.TempDir(), atmSet(repairATM(), "delivery", "echo delivery-output-once")),
 		"rev-parse", "--show-toplevel")
 	t.Setenv("FAKE_AGENT_CALL", filepath.Join(t.TempDir(), "call.json"))
-	now := time.Now()
-	if err := (lease{os.Getpid(), now, now}).write(top, "live"); err != nil {
+	if err := os.MkdirAll(filepath.Join(top, ".atm"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	server := startVersionServe(t, bin, top)
-	out, err := versionLaunch(bin, top, "live", issueFile(t, reviewIssue))
+	out, err := versionLaunch(bin, top, issueFile(t, reviewIssue))
 	if err != nil {
 		t.Fatalf("atm run: %v\n%s", err, out)
 	}

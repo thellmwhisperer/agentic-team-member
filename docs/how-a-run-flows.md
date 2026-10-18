@@ -10,110 +10,23 @@ set before a run is in [Configuration](configuration.md).
   <img alt="For fix and hotfix tasks, ATM sets aside changes to files already in the base while keeping the test and new files: the test must fail. ATM restores the changes and runs the test again: it must pass. A test that passes without the fix or fails with it fails the run." src="assets/red-green-light.svg" width="900">
 </picture>
 
-## The watcher
+## Following one run
 
-No watcher, no run. For a watcher owned by the launch process, see
-[Following one run](#following-one-run). With `--watcher`, the session starts `atm watch` first,
-under its harness's streaming monitor (any tool that wakes the session on each
-output line), and passes the id from its first line, `watching as <id>`, to
-`atm run --watcher <id>`. It never exits on an event, so there is nothing to
-re-arm.
+`atm run <issue> --follow` starts the run and prints one JSON object per run
+event on standard output until the run ends. The flag goes before or after
+the issue and works on a pipe or a terminal. It also works with `--resume`.
+The events are the run's own step starts, results and live activity, with
+`step` and `ts`, plus fields specific to each event. Delivery output appears
+as `output` events without interpreting the command's text.
 
-`atm run` without `--watcher` or [`--follow`](#following-one-run), or naming a
-watcher that is not alive, fails before cloning with exit code 2:
-`no watcher: start atm watch in the session that launches this run and pass --watcher <id>`.
-A watcher is alive while its lease, `.atm/watch/<id>.json`, names a process
-that runs and a heartbeat it rewrites every 10 s is under 30 s old.
-`report.json` and `atm runs` record the run's watcher, and `atm doctor` says
-whether one is alive.
-
-`atm watch` prints one line per event of each run bound to it, the time and
-the run first, until it is killed:
-
-| Line | When |
-|------|------|
-| `started`, then each step's name | The run, then each step, starts; `delivery` is the last |
-| `gate waiting: <step>` | The no-mistakes gate waits on a decision, once per new wait |
-| `still waiting 20m: <step>` | Every 10 minutes the same wait goes on |
-| `gate fixing CI`, `pr <url>`, `ci green`, `merged` | The gate fixes CI, opens the PR, CI passes, the PR merges |
-| `gate failed: <step>` | A gate step fails |
-| `finished: passed`, `finished: failed at <step>` | The run ends |
-
-From delivery on it reads the gate with `no-mistakes axi status` in the run's
-clone every 10 s, after the run ends too, until the PR merges or the gate
-fails. If Delivery fails before its command runs and no gate was seen, it stops
-checking gate status and prints `finished: failed at Delivery`. If the command
-ran, it keeps retrying transient status errors because a gate may have started.
-
-When a watcher dies, each running run bound to it shows
-`WATCHER GONE at <time>: no one is watching this run` once, on its screen and
-in `.atm/serve.log`. `atm watch --adopt <run>` binds the run to a new watcher,
-which prints its current state first, as `adopted: running at <step>`.
-
-### Following one run
-
-`atm run <issue> --follow` launches the run and watches it in one process, so
-no separate `atm watch` is needed. `--follow` goes before or after the issue,
-like any flag; a value-taking flag's value is that flag's, so
-`--model --follow` is a model, not `--follow`. Before the run starts, the
-process writes its own lease, `.atm/watch/<id>.json` with its PID, and binds
-the run to it. It rewrites the lease every 10 s during launch and observation,
-then removes it on normal exit or handled cancellation. If SIGINT or SIGTERM
-arrives during launch, the process keeps refreshing the lease until launch
-returns, then stops observation and removes the lease. SIGKILL leaves the
-lease file behind, but its dead PID makes the watcher no longer alive.
-If the lease cannot be created, no run starts.
-
-`--follow` with `--watcher` fails before launch, since the follow process is
-the run's watcher. `--follow --resume <run>` starts and follows a new run from
-that failed run's saved work. To follow an existing run, use
-`atm watch --adopt <run>`. A launch failure prints its reason
-on stderr and exits 2, with no event.
-
-Its stdout carries only JSON lines, one per event, also on a terminal; it shows
-no screen and no run label. Diagnostics, such as a gate or `gh` read that
-failed and is retried, go to stderr. Every line has `time` (RFC 3339, UTC),
-`run`, `issue` and `event`, and these fields:
-
-| `event` | Fields | When |
-|---------|--------|------|
-| `step` | `step`; `harness` for `agent turn after e2e`; `message` for a skipped resume turn | A step starts, or resume explains why it sends no agent turn |
-| `delivery` | `clone` | Delivery starts, right after its `step` |
-| `gate_waiting` | `step`, `clone`, `findings` (`id`, `severity`, `file`, `description` each) | The gate waits at a step for approval or a decision, once per new wait |
-| `pr_opened` | `url` | The PR is first seen |
-| `gate_fixing_ci` | `commit` (`sha`, `subject`, `step`) | Each PR commit whose subject starts with `no-mistakes(`, once per full `sha`, in PR order; `step` is the word inside the parentheses |
-| `ci_green` | `url` | CI turns green |
-| `stalled` | `minutes` | Each 60 minutes without another event; `minutes` counts since the last event other than `stalled`, so continued silence reports 60, 120, 180, ... |
-| `merged` | `url` | The PR merged; the last line, exit 0 |
-| `closed` | `url` | The PR closed unmerged; the last line, exit 1 |
-| `run_failed` | `step`, `reason` | The run or a gate step failed; the last line, exit 1 |
-
-For a terminal no-mistakes gate failure, including `intent` or `rebase`,
-`run_failed.step` is `delivery`; other failures keep their own step, such as
-`checks`. Its `reason` is the gate failure reason described under
-[Delivery](#delivery). Whether the failure arrives through a status read or
-the run's terminal result, available gate/PR observations and repair commit
-events precede the single terminal line. A known terminal failure survives
-later read errors and ends the stream even if the PR remains open.
-
-From delivery on, polling rounds start at least 10 s apart. Each reads the
-gate with `no-mistakes axi status` in the clone and, when available, the PR
-with `gh`. Commit events come only from that PR read, even while the clone
-is available.
-If the clone is gone, it finds the PR by its known URL or the delivery's branch.
-An observed gate failure takes precedence over a PR result in the same round.
-The terminal events and exit codes are listed above. It also exits 1, with no
-final event, when the run delivers nothing or when it is interrupted.
-
-A CoS launches it as a background command under its streaming monitor, which
-wakes the session on each line, and reads the result from the exit code.
-Killing or interrupting the process stops only the following: the run goes on,
-shows `WATCHER GONE` as above, and `atm watch --adopt <run>` takes it over.
+The command exits with the run's code: 0 for success, 1 for agent or checks
+failure, 4 for delivery failure, and 2 for other failures. Launch errors go
+to standard error. Interrupting the stream exits 1 and leaves the run going;
+`atm attach <run>` shows it again. No monitoring process or heartbeat is required.
 
 ## The steps
 
-A failed step stops the run; the steps after it are not run. The exception is
-a delivery command that has started a gate: see [Delivery](#delivery).
+A failed step stops the run; the steps after it are not run.
 
 | Step | Does | Fails the run when |
 |------|------|--------------------|
@@ -126,8 +39,7 @@ a delivery command that has started a gate: see [Delivery](#delivery).
 | Delivery | Commits the work on a branch, has the agent review the commit against the issue, and runs the `delivery` command | The branch, the review or the command fails. Skipped when `delivery` is empty |
 
 Agent and Checks run again for each chained follow-up, at most three units in
-one run; see [Follow-ups](#follow-ups). For the gate nodes that follow
-Delivery, see [Delivery](#delivery).
+one run; see [Follow-ups](#follow-ups). For the configured delivery command, see [Delivery](#delivery).
 
 ## Issue, clone and contract
 
@@ -491,34 +403,11 @@ a time limit, with these variables:
 | `ATM_REPORT` | The path of `report.json` |
 | `ATM_PONYTAIL` | The kept cut's findings, one a line, or empty |
 
-With no-mistakes, the line is `no-mistakes axi run --intent "$ATM_INTENT"`.
-Its output goes to the screen and to `delivery-output.txt`. ATM never pushes
-or opens a pull request: that is the command's business. When the configured
-line contains `no-mistakes`, ATM starts reading `no-mistakes axi status` in
-the clone as soon as the command starts, then every 10 s. It keeps following
-the gate until the PR is merged or closed, or a gate step fails, even if the
-delivery command exits nonzero while the gate is active. That command error
-remains recorded; following the gate does not erase it. If the gate ends
-while the command is still running, ATM stops the command and uses the gate
-outcome.
-
-When a gate step fails, the gate status's top-level `error:` line, unquoted,
-supplies the run's reason when present, ahead of any earlier delivery command
-error. The command error remains a separate diagnostic. The report's
-`failed_node` retains the actual failed gate step.
-
-If the gate reports `status: completed`, its `ci` step is `skipped`, and
-`pr_state` is absent, ATM checks the branch's PR with `gh` even while the
-clone remains. An open PR keeps the run following; a merged PR passes the
-run and Delivery, leaving the CI node `skipped`. A closed, unmerged PR fails
-as described below. When `pr_state` is present, the gate's result remains
-authoritative. ATM does not skip CI or remove the clone to end the run.
-
-Review, test, document, lint, push, PR and CI are nodes of the same run,
-below Delivery. A closed, unmerged PR preserves the gate's recorded node
-results and records `PR closed` as the run's reason; it does not turn a
-completed PR node into a failed step. The [`--follow` stream](#following-one-run)
-reports that outcome as `closed`.
+The command's output goes to the screen and to `delivery-output.txt`.
+ATM executes the configured command without recognizing its name or parsing
+its output. Exit zero passes Delivery; a nonzero exit fails Delivery. The
+run ends when the command ends. Publishing, review decisions, PR tracking
+and any further monitoring belong to that command or its launcher.
 
 ## Time limits
 
@@ -539,24 +428,19 @@ For cancellation of `atm run --follow`, see [Following one run](#following-one-r
 ## The report
 
 `.atm/runs/<label>/report.json` is rewritten at every step's start and end, so
-it is on disk before delivery reads it. Gate observations also rewrite it
-when a node's state or duration changes.
+it is on disk before delivery reads it.
 
 | Field | Holds |
 |-------|-------|
-| `failed_node`, `reason` | The step that failed, if any, and the reason for failure or PR closure |
+| `failed_node`, `reason` | The step that failed, if any, and the reason for failure |
 | `agent` | The effective requested `harness`, `model`, `effort` and ordered `harness_args`, after global config, `.atm.yaml` and flags. Unset model and effort stay `""`; no extra arguments is `[]` |
-| `nodes` | Each step's `result` (`passed`, `failed`, `running`, `waiting`, `pending`, `skipped` or `not run`), `started_at` (UTC, RFC 3339 with milliseconds) when its start is known, and `duration_ms` when it ends; the agent node also has `exit` and `tail` when the agent ran but its step failed. Checks includes an `e2e` row in `rows` when that command ran, passed or failed, with `name`, `result`, `started_at` and `duration_ms`. Delivery has `rows`, each with `name`, `result` (`running`, `passed` or `failed`), `started_at` and `duration_ms`, for each part that has started. Once seen, the [Delivery gate nodes](#delivery) are included with the state and duration from `no-mistakes axi status` |
+| `nodes` | Each step's `result` (`passed`, `failed`, `running`, `waiting`, `pending`, `skipped` or `not run`), `started_at` (UTC, RFC 3339 with milliseconds) when its start is known, and `duration_ms` when it ends; the agent node also has `exit` and `tail` when the agent ran but its step failed. Checks includes an `e2e` row in `rows` when that command ran, passed or failed, with `name`, `result`, `started_at` and `duration_ms`. Delivery has `rows`, each with `name`, `result` (`running`, `passed` or `failed`), `started_at` and `duration_ms`, for each part that has started. |
 | `type` | The task type |
 | `units` | Each unit's number, base commit, test file, type, result, red/green proof row span, and red and green trials: command, exit code, last 60 lines, `started_at` and `duration_ms` |
 | `reproofs` | The latest repeated unit proofs and spans, after a kept cut or the latest contract repair attempt; successful delivery uses the approved commit's proofs |
 | `commands` | Every configured command that ran, the clone's `install` included, with its result, last 60 lines, `started_at` and `duration_ms` |
 | `head_sha` | The delivered branch's final commit |
 | `serve` | The version of the `atm serve` process that executed the run, from `buildinfo.String()`, for example `vA (aaa1111) 2026-10-15` |
-
-For gate nodes, `completed` becomes `passed`, and a step awaiting a decision
-becomes `waiting`. `pending`, `skipped` and `failed` keep those results;
-other active states become `running`.
 
 The Agent and `ponytail` nodes also have `agent_model`: the first model named
 by that invocation's stream, or `""` when none is named. Claude and Cursor
@@ -578,10 +462,6 @@ without attribution displays `-`; ATM does not infer it from current config.
 `atm runs` and `atm axi runs`, including `--json`, show the recorded `serve`
 value. `.atm/runs.jsonl` retains it after the background process exits.
 Runs recorded before this field existed display `-` in these listings.
-
-Gate nodes omit `started_at`, including skipped steps: the current
-`no-mistakes axi status` step table supplies no start times. ATM does not
-substitute the time it observed a step.
 
 The `ponytail` node also records `kept` (`true` or `false`) once ATM decides
 whether to keep the cut, and `reason`: the exact rejection reason from the
@@ -636,8 +516,8 @@ happen, and `command` only when the command starts. Each has its own live
 state and elapsed time. Completed runs restore these rows from `report.json`
 when attached, including failed reviews followed by a successful repair. The
 command row carries state and time only and does not repeat the command's
-output. The Delivery row becomes passed or failed when the command exits,
-even if the gate's Review node is still waiting. An empty delivery command
+output. The Delivery row becomes passed or failed when the command exits.
+An empty delivery command
 shows `Delivery skipped` without sub-rows.
 The Agent box renders the agent's Markdown prose within the panel width as
 `✎` lines; non-empty thinking appears as `∴` lines. By default, consecutive
@@ -679,12 +559,9 @@ the ATM box takes at most two thirds of the space left after the footer and
 panel gap.
 On Unix, ATM keeps its screen live while the delivery command is silent. From
 the command's first output until it ends, ATM gives it the attached terminal
-and its keys, so no-mistakes shows its own screen there; ATM's screen comes
-back when the command ends. That split stays: no-mistakes' screen is where its
-decisions are made. ATM's screen shows the [Delivery gate nodes](#delivery)
-as soon as they are observed, with the states and durations saved in
-[the report](#the-report). Reattaching to a completed run restores those
-nodes, including skipped results.
+and its keys. The delivery command can draw its own screen and receive
+input there. ATM's screen comes back when the command ends, showing the
+Delivery result and duration.
 On Windows, the delivery command runs without ATM's attached terminal, so its
 output appears as lines.
 When the run ends, the ATM screen quits and leaves its last view on the
