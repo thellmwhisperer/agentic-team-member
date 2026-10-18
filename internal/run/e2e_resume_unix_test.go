@@ -191,26 +191,8 @@ func followE2EResume(t *testing.T, bin, top, label string, tc e2eResumeCase) str
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, _ := cmd.Output() // The exit code is the run's; the report says how it ended.
-	turns, checks := 0, 0
+	turns, checks, message := followE2EEvents(t, out, tc.harness)
 	var resumed string
-	var message string
-	for _, ev := range events(t, bytes.NewReader(out)) {
-		if ev["step"] == "agent" && ev["message"] != nil {
-			message, _ = ev["message"].(string)
-		}
-		if ev["state"] != "started" || ev["check"] != nil {
-			continue
-		}
-		if ev["step"] == "agent turn after e2e" {
-			turns++
-			if checks != 0 || ev["harness"] != tc.harness {
-				t.Fatalf("turn after Checks or wrong harness: %s", out)
-			}
-		}
-		if ev["step"] == "checks" {
-			checks++
-		}
-	}
 	runs, err := RecordedRuns(top)
 	if err != nil {
 		t.Fatal(err)
@@ -231,6 +213,29 @@ func followE2EResume(t *testing.T, bin, top, label string, tc e2eResumeCase) str
 		t.Fatalf("follow resume: %s; stderr: %s", out, &stderr)
 	}
 	return resumed
+}
+
+// followE2EEvents counts the turn and Checks starts in --follow's output, and keeps the agent step's message.
+func followE2EEvents(t *testing.T, out []byte, harness string) (turns, checks int, message string) {
+	t.Helper()
+	for _, ev := range events(t, bytes.NewReader(out)) {
+		if ev["step"] == "agent" && ev["message"] != nil {
+			message, _ = ev["message"].(string)
+		}
+		if ev["state"] != "started" || ev["check"] != nil {
+			continue
+		}
+		if ev["step"] == "agent turn after e2e" {
+			turns++
+			if checks != 0 || ev["harness"] != harness {
+				t.Fatalf("turn after Checks or wrong harness: %s", out)
+			}
+		}
+		if ev["step"] == "checks" {
+			checks++
+		}
+	}
+	return turns, checks, message
 }
 
 func TestResumeE2EAgentTurn(t *testing.T) {

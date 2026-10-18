@@ -24,7 +24,7 @@ type followed struct {
 	stderr string
 }
 
-// startFollow starts the real binary with stdout on a pipe or a terminal.
+// startFollow starts the real binary with stdout on a pipe or a terminal, stdin and stdout.
 func startFollow(t *testing.T, bin, top string, tty bool, args ...string) *followed {
 	t.Helper()
 	f := &followed{t: t, cmd: exec.Command(bin, args...), lines: make(chan string, 1000),
@@ -47,7 +47,7 @@ func startFollow(t *testing.T, bin, top string, tty bool, args ...string) *follo
 		if err := pty.Setsize(tt, &pty.Winsize{Rows: 24, Cols: 100}); err != nil {
 			t.Fatal(err)
 		}
-		f.cmd.Stdout, out = tt, p
+		f.cmd.Stdin, f.cmd.Stdout, out = tt, tt, p
 	} else {
 		r, err := f.cmd.StdoutPipe()
 		if err != nil {

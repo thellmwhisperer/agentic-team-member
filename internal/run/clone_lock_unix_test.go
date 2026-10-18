@@ -11,6 +11,25 @@ import (
 	"testing"
 )
 
+// oldClone is an earlier run's clone.
+func oldClone(t *testing.T, root string, delivered, ahead bool) string {
+	t.Helper()
+	old := filepath.Join(root, ".atm", "clones", "atm-run-20261001-120000")
+	if delivered {
+		gitT(t, root, "clone", "-q", root, old)
+		gitT(t, old, "checkout", "-q", "-b", "atm/fix")
+		if ahead {
+			gitT(t, old, "commit", "-q", "--allow-empty", "-m", "fix")
+		}
+		if err := os.WriteFile(old+".delivered", []byte("atm/fix main\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	} else if err := os.MkdirAll(old, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return old
+}
+
 // fileState is a file's bytes and mode, to tell it was not touched.
 type fileState struct {
 	b    string
