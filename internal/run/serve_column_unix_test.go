@@ -17,13 +17,13 @@ func TestServeNamesItsVersionOnTheRunAndInRuns(t *testing.T) {
 	const want = "vA (aaa1111) 2026-10-15"
 	bin := filepath.Join(t.TempDir(), "atm")
 	buildStampedATM(t, bin)
-	top, _ := liveLease(t)
+	top := atmRepo(t)
 	writeFixture(t, filepath.Join(top, ".atm", "runs.jsonl"),
 		`{"outcome":"passed","run":"old-1","issue":"old.md","report":"old-report.json",`+
 			`"started":"2026-10-01T00:00:00Z","ended":"2026-10-01T00:01:00Z"}`+"\n")
 	wait, release := holdFakeAgents(t, 1)
 	startVersionServe(t, bin, top)
-	out, err := versionLaunch(bin, top, "live", issueFile(t, issue))
+	out, err := versionLaunch(bin, top, issueFile(t, issue))
 	if err != nil {
 		t.Fatalf("launch: %s, %v", out, err)
 	}
