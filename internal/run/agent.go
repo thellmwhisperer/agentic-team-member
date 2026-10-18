@@ -55,7 +55,6 @@ type agent struct {
 	root, dir string
 	follow    bool          // atm run --follow: the launching process watches the run itself
 	timeout   time.Duration // .atm.yaml's agent_timeout, 0 for agentTimeout
-	silence   time.Duration // the larger of agentSilence and check_timeout; 0 for agentSilence
 }
 
 // flags adds the agent's flags to fs.
@@ -150,12 +149,6 @@ func codexResume(argv []string, session string) []string {
 	}
 	return append(out, "-c", `sandbox_mode="workspace-write"`, session, argv[len(argv)-1])
 }
-
-// errSilent identifies cancellation by the silence timer.
-var errSilent = errors.New("silent")
-
-// agentSilence is the default silence limit; Run may raise it for the repository's checks.
-var agentSilence = 10 * time.Minute
 
 // run runs the agent on brief in clone with skill and returns its report, which check accepts. A report check
 // rejects is sent back once, in the same session, with that error; the step passes with the new report, and ev
@@ -329,7 +322,7 @@ func clonePathRune(r rune) bool {
 // exec runs argv in clone, stdin on its stdin, in its own process group, and returns what its lines said, and
 // how it ended, as ended says; a nil stream when it never got to run. Every line it writes goes to the log at
 // path, in the run's directory, which outlives the clone, and its stderr to <name>.stderr.txt next to it as
-// well. The timeout, the silence limit without a line, SIGINT and SIGTERM kill the group.
+// well. The timeout, SIGINT and SIGTERM kill the group.
 func (a agent) exec(
 	clone, skill, path string, argv []string, stdin string, appendLog bool,
 ) (*stream, string, string, error) {
@@ -352,11 +345,6 @@ func (a agent) exec(
 	limit := cmp.Or(a.timeout, agentTimeout)
 	ctx, cancel := context.WithTimeout(ctx, limit)
 	defer cancel()
-	ctx, hush := context.WithCancelCause(ctx)
-	defer hush(nil)
-	silence := cmp.Or(a.silence, agentSilence)
-	quiet := time.AfterFunc(silence, func() { hush(errSilent) })
-	defer quiet.Stop()
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir, cmd.Stdin, cmd.WaitDelay = clone, strings.NewReader(stdin), time.Second
 	cmd.Env = append(slices.DeleteFunc(os.Environ(), func(kv string) bool {
@@ -367,27 +355,23 @@ func (a agent) exec(
 		cmd.Env = append(cmd.Env, "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1")
 	}
 	s := &stream{skill: skill, live: relative(clone, liveIn(clone)), root: a.root, clone: clone,
-		scratch: a.scratch, heard: func() { quiet.Reset(silence) }}
+		scratch: a.scratch}
 	if err := s.talk(cmd, f, a.Harness, stdin); err != nil {
 		return nil, "", "", err
 	}
 	err = s.read(cmd, f, stderr, a.Harness)
-	quiet.Stop()
 	limitText := Human(limit)
 	if a.timeout != 0 {
 		limitText = a.timeout.String()
 	}
-	exit, cause := ended(ctx, cmd.ProcessState, limitText, silence)
+	exit, cause := ended(ctx, cmd.ProcessState, limitText)
 	return s.acpEnded(exit, cause, err)
 }
 
 // ended is how the agent run under ctx, bounded by limit, ended, its exit, "" when it never ran, and the cause
 // its step fails with, "" when it exited 0.
-func ended(ctx context.Context, p *os.ProcessState, limitText string, silence time.Duration) (exit, cause string) {
+func ended(ctx context.Context, p *os.ProcessState, limitText string) (exit, cause string) {
 	switch {
-	case errors.Is(context.Cause(ctx), errSilent):
-		return "silent for " + Human(silence), "the agent said nothing for " + Human(silence) +
-			"; ATM stopped it"
 	case errors.Is(ctx.Err(), context.DeadlineExceeded):
 		exit = "timed out after " + limitText
 	case ctx.Err() != nil:
@@ -474,7 +458,6 @@ type stream struct {
 	thought      string   // cursor's thinking deltas until completed
 	failure      string   // cursor's error result or pi's unrecovered model error, even when the process exits 0
 	tail         []string // the last 20 lines the agent wrote
-	heard        func()   // each line calls it
 	session      string   // the harness session, so a rejected report is returned to it
 	// An ACP agent's: its prompt, its stdin until its prompt's reply, the reply's stopReason or the failed call,
 	// and the chunks of one thought or message so far.
@@ -497,7 +480,6 @@ func (s *stream) read(cmd *exec.Cmd, log, stderr io.Writer, harness string) erro
 		line = string(bytes.TrimSpace([]byte(line)))
 		mu.Lock()
 		defer mu.Unlock()
-		s.heard()
 		s.tail = append(s.tail, line)
 		s.tail = s.tail[max(0, len(s.tail)-20):]
 		b := []byte(line)

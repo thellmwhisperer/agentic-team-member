@@ -17,7 +17,6 @@ import (
 	"strings"
 	"syscall"
 	"testing"
-	"time"
 )
 
 // hermesTranscript is the agent's side of a recorded hermes --ignore-rules acp run of 13 Oct, after its replies to
@@ -360,10 +359,7 @@ func TestHermesFetchInRawInputReachesOutside(t *testing.T) {
 }
 
 func TestHermesDeathKeepsItsCauseAndTouchesNoOtherRun(t *testing.T) {
-	defer func(d time.Duration) { agentSilence = d }(agentSilence)
-	agentSilence = time.Second
 	for _, c := range []struct{ mode, exit, why, tail string }{
-		{"silent", "silent for 1.0 s", "the agent said nothing for 1.0 s; ATM stopped it", "hermes stderr"},
 		{"die", "exit code 3", "exit code 3", "boom"},
 	} {
 		t.Run(c.mode, func(t *testing.T) {
