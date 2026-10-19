@@ -29,7 +29,7 @@ const (
 var fakes string
 
 func TestMain(m *testing.M) {
-	if strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe") == "gh" {
+	if filepath.Base(os.Args[0]) == "gh" {
 		os.Exit(fakeGH(os.Args[1:]))
 	}
 	dir, err := os.MkdirTemp("", "atm-fake-gh-")
@@ -55,11 +55,7 @@ func copyAsGH(dir string) error {
 	if err != nil {
 		return err
 	}
-	name := "gh"
-	if filepath.Ext(exe) == ".exe" {
-		name += ".exe"
-	}
-	return os.WriteFile(filepath.Join(dir, name), b, 0o755)
+	return os.WriteFile(filepath.Join(dir, "gh"), b, 0o755)
 }
 
 func after(args []string, flag string) string {

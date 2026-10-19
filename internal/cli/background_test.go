@@ -10,7 +10,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -25,7 +24,7 @@ import (
 // TestMain doubles as atm serve, the background process atm starts as this binary. The held fake codex exits
 // with the test that owns it: the server can outlive the test, so it watches the test's PID, never its parent.
 func TestMain(m *testing.M) {
-	if strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe") == "codex" && os.Getenv("FAKE_AGENT") == "fail" {
+	if filepath.Base(os.Args[0]) == "codex" && os.Getenv("FAKE_AGENT") == "fail" {
 		ready := os.Getenv("FAKE_AGENT_BARRIER_READY")
 		if ready != "" {
 			_ = os.WriteFile(filepath.Join(ready, strconv.Itoa(os.Getpid())), nil, 0o600)
@@ -213,23 +212,23 @@ func setupConcurrentRunRepo(t *testing.T) string {
 	return dir
 }
 
-func setupBarrierAgent(t *testing.T) (string, string) {
+// codexOnPath puts this test binary first on PATH as codex.
+func codexOnPath(t *testing.T) {
 	t.Helper()
 	bin := t.TempDir()
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
-	agentName := "codex"
-	if runtime.GOOS == "windows" {
-		agentName += ".exe"
-	}
-	if err := os.Symlink(exe, filepath.Join(bin, agentName)); err != nil {
-		if err := os.Link(exe, filepath.Join(bin, agentName)); err != nil {
-			t.Fatal(err)
-		}
+	if err := os.Symlink(exe, filepath.Join(bin, "codex")); err != nil {
+		t.Fatal(err)
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+func setupBarrierAgent(t *testing.T) (string, string) {
+	t.Helper()
+	codexOnPath(t)
 	barrier := t.TempDir()
 	ready, release := filepath.Join(barrier, "ready"), filepath.Join(barrier, "release")
 	if err := os.Mkdir(ready, 0o700); err != nil {

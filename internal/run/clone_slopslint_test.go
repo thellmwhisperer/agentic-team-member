@@ -3,7 +3,6 @@ package run
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 )
 
@@ -74,7 +73,7 @@ func cachedSourceMode(t *testing.T, path string, mode os.FileMode) os.FileMode {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if runtime.GOOS != "windows" && info.Mode() != mode {
+	if info.Mode() != mode {
 		t.Errorf("source %s: mode %v, want %v", path, info.Mode(), mode)
 	}
 	return info.Mode()

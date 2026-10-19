@@ -1,8 +1,8 @@
 #!/bin/sh
 # Run ATM's Go tests. ATM supplies GOCOVERDIR for the subsequent e2e row.
 # internal/run holds nearly all the time and its tests call t.Setenv, so they cannot use t.Parallel: they
-# are split by name over ATM_TEST_SHARDS go test processes, the way the Windows CI splits them, beside
-# one go test command for all other packages. ATM_TEST_SHARDS=1 runs the whole suite in one process.
+# are split by name over ATM_TEST_SHARDS go test processes, beside one go test command for all other
+# packages. ATM_TEST_SHARDS=1 runs the whole suite in one process.
 set -eu
 cd "$(dirname "$0")/.."
 shards=${ATM_TEST_SHARDS:-8}

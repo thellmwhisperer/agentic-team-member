@@ -94,7 +94,6 @@ func unmadeChecks(t *testing.T, old, work, kept string, proof bool) (dir string,
 	dir, sha := checksStashClone(t, root)
 	ext := t.TempDir()
 	t.Setenv("EXT", ext)
-	t.Setenv("ATM_TEST_GOOS", runtime.GOOS)
 	t.Cleanup(func() {
 		_ = exec.Command("chmod", "-R", "u+w", root, ext).Run()
 		if err := release(dir, ""); err != nil {
@@ -113,7 +112,7 @@ func unmadeChecks(t *testing.T, old, work, kept string, proof bool) (dir string,
 	run(work)
 	c := checksStashConfig(t, root)
 	c.Install = "set -x; is() { printf '%s\\n' \"$2\" | cmp - \"$1\"; }; " +
-		`ro() { test "$ATM_TEST_GOOS" = windows || test -n "$(find "$1" -prune -perm 555)"; }; ` +
+		`ro() { test -n "$(find "$1" -prune -perm 555)"; }; ` +
 		kept + " && touch installed"
 	typ, test := "chore", ""
 	if proof {

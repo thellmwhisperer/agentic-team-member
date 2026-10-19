@@ -31,15 +31,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Windows splits internal/run in 3 parallel shards (#398): run serially it is over the 30-minute limit.
-        # Shard 0 runs every other package and the lint; measured in PR 412, every shard under 17 minutes.
-        include:
-          - { os: ubuntu-latest, shard: all }
-          - { os: macos-latest, shard: all }
-          - { os: windows-latest, shard: 0 }
-          - { os: windows-latest, shard: 1 }
-          - { os: windows-latest, shard: 2 }
-          - { os: windows-latest, shard: 3 }
+        os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -52,12 +44,7 @@ jobs:
       - name: Install golangci-lint
         run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.5.0
 
-      - name: Install make on Windows
-        if: runner.os == 'Windows'
-        run: choco install make --no-progress
-
       - name: Test
-        if: matrix.shard == 'all'
         run: |
           if [ "${{ github.event_name }}" = "push" ] && [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
             GOCOVERDIR="$(mktemp -d "${RUNNER_TEMP}/atm-cover.XXXXXX")"
@@ -67,29 +54,17 @@ jobs:
           fi
           make test
 
-      - name: Test (Windows shard)
-        if: matrix.shard != 'all'
-        shell: bash
-        run: |
-          if [ "${{ matrix.shard }}" = 0 ]; then
-            go test -timeout 30m $(go list ./... | grep -v '/internal/run$')
-          else
-            names=$(go test -list . ./internal/run | grep '^Test' | awk "NR % 3 == ${{ matrix.shard }} % 3" | paste -sd '|' -)
-            go test -timeout 30m -run "^(${names})\$" ./internal/run
-          fi
-
       - name: Lint
-        if: matrix.shard == 'all' || matrix.shard == 0
         run: make lint
 
       - name: Keep the end-to-end coverage profile
-        if: github.event_name == 'push' && matrix.os == 'ubuntu-latest' && matrix.shard == 'all'
+        if: github.event_name == 'push' && matrix.os == 'ubuntu-latest'
         run: |
           go tool covdata textfmt -i="$GOCOVERDIR" -o cover-main.profile
           go tool covdata func -i="$GOCOVERDIR" > cover-main.func.txt
 
       - name: Upload the end-to-end coverage profile
-        if: github.event_name == 'push' && matrix.os == 'ubuntu-latest' && matrix.shard == 'all'
+        if: github.event_name == 'push' && matrix.os == 'ubuntu-latest'
         uses: actions/upload-artifact@v4
         with:
           name: cover-main-${{ github.sha }}

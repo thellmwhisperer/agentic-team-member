@@ -769,9 +769,6 @@ func realToolsWork() string {
 	switch runtime.GOOS {
 	case "darwin", "linux":
 		tools = "sh scripts/lint.sh && " + tools
-	case "windows":
-		binary += ".exe"
-		tools = "mkdir -p .tmp && go build -o " + binary + " . && " + binary
 	default:
 		tools = "mkdir -p .tmp && " + tools
 	}
@@ -915,8 +912,7 @@ func assertAuditCase(t *testing.T, c struct {
 	if c.node == "" {
 		want = head + "\n" + want
 	}
-	// Git checkouts use CRLF on Windows, but delivery asserts file contents rather than line endings.
-	if d, _ := os.ReadFile(got); strings.ReplaceAll(string(d), "\r\n", "\n") != want {
+	if d, _ := os.ReadFile(got); string(d) != want {
 		t.Fatalf("delivery got\n%s\nwant\n%s", d, want)
 	}
 }
