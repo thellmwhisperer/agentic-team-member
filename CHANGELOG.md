@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.2](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.1.1...v1.1.2) (2026-10-19)
+
+
+### Bug Fixes
+
+* held fakes of codex, pi, cursor and opencode exit when their test binary is killed ([06a3d18](https://github.com/thellmwhisperer/agentic-team-member/commit/06a3d18f521127399609b3b03e35e1ea54a2ed39))
+
 ## [1.1.1](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.1.0...v1.1.1) (2026-10-19)
 
 
