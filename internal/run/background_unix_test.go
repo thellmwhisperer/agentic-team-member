@@ -14,6 +14,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -228,23 +229,62 @@ func TestBuildATMInstrumentsOnlyUnderGoCoverDir(t *testing.T) {
 	}
 }
 
+// atms holds each atm sharedATM built in this process, by version and whether it is instrumented.
+var atms sync.Map
+
+type atmBuild struct {
+	once sync.Once
+	path string
+	err  error
+}
+
+// buildATM puts at path the atm of version, built once per process.
 func buildATM(t *testing.T, path, version string) {
 	t.Helper()
+	b, err := os.ReadFile(sharedATM(t, version))
+	if err == nil {
+		err = os.WriteFile(path, b, 0o755)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// sharedATM is the atm of version this process built, building it on the first call; tests run it, never change it.
+func sharedATM(t *testing.T, version string) string {
+	t.Helper()
+	cover := os.Getenv("GOCOVERDIR") != ""
+	v, _ := atms.LoadOrStore(fmt.Sprint(version, cover), new(atmBuild))
+	b := v.(*atmBuild)
+	b.once.Do(func() {
+		b.path = filepath.Join(fakes, "builds", fmt.Sprint(version, cover), "atm") // off PATH, removed with fakes
+		if b.err = os.MkdirAll(filepath.Dir(b.path), 0o755); b.err == nil {
+			b.err = compileATM(b.path, version, cover)
+		}
+	})
+	if b.err != nil {
+		t.Fatalf("build atm %s: %v", version, b.err)
+	}
+	return b.path
+}
+
+func compileATM(path, version string, cover bool) error {
 	ldflags := fmt.Sprintf("-X github.com/thellmwhisperer/agentic-team-member/internal/buildinfo.Version=%s", version)
 	args := []string{"build", "-ldflags", ldflags}
 	// Under GOCOVERDIR (scripts/test.sh) the built atm writes coverage counters on exit, so
 	// cover-diff can see which changed lines an end-to-end run executes.
-	if os.Getenv("GOCOVERDIR") != "" {
+	if cover {
 		args = append(args, "-cover", "-coverpkg=./...")
 	}
 	args = append(args, "-o", path, "./cmd/atm")
 	cmd := exec.Command("go", args...)
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {
-		t.Fatal("test source path is unavailable")
+		return fmt.Errorf("test source path is unavailable")
 	}
 	cmd.Dir = filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
 	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("build atm %s: %v\n%s", version, err, out)
+		return fmt.Errorf("%v\n%s", err, out)
 	}
+	return nil
 }

@@ -8,11 +8,10 @@ import (
 	"testing"
 )
 
+// builtATM is the real atm every real-binary test shares, built once per process.
 func builtATM(t *testing.T) string {
 	t.Helper()
-	bin := filepath.Join(t.TempDir(), "atm")
-	buildATM(t, bin, "follow-test")
-	return bin
+	return sharedATM(t, "follow-test")
 }
 
 func stopServing(t *testing.T, top string) {
