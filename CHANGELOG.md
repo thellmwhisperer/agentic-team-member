@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.1.0](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.0.0...v1.1.0) (2026-10-19)
+
+
+### Features
+
+* Checks: an e2e row after test runs cover-diff, and resume after an e2e red gives the agent one turn before Checks ([d58450f](https://github.com/thellmwhisperer/agentic-team-member/commit/d58450fe6fb61439327b09cf1f46b40a0c49ae18))
+* Checks: every changed line must be executed by an end-to-end run of the real atm binary, or test fails naming the lines ([3d63321](https://github.com/thellmwhisperer/agentic-team-member/commit/3d633216294c09645334577383fe2e9006a1cdfc))
+* every push to main keeps the end-to-end coverage profile as the cover-main-&lt;sha&gt; artifact ([7668c46](https://github.com/thellmwhisperer/agentic-team-member/commit/7668c46a0f4c29f2bde19818afffe537c94b06e8))
+* The Delivery row opens like Checks: one sub-row per part (commit, review, repair, command) with its state and time ([eb5e743](https://github.com/thellmwhisperer/agentic-team-member/commit/eb5e743a4b9fb496edac03132ae42b5415a938a4))
+
 ## 1.0.0 (2026-10-17)
 
 
