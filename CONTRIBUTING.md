@@ -70,6 +70,8 @@ Either way:
 
 ## CI
 
+ATM runs on Linux and macOS, and on Windows through WSL.
+
 | Workflow | Runs on | Filtered jobs | Does |
 |---|---|---|---|
 | `go.yml` | every PR to `main`, push to `main` | Test/lint: paths classified by [`scripts/changed-areas.sh`](scripts/changed-areas.sh) | `make test` and `make lint` on ubuntu and macos |
