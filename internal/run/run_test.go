@@ -8,20 +8,18 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 )
 
-// fakes holds this test binary under each agent CLI's name, first on PATH in every repo test.
+// fakes holds the fake agent under each agent CLI's name, first on PATH in every repo test.
 var fakes string
 
-// TestMain doubles as fake command-line tools and agents under their executable names.
+// TestMain doubles as fake command-line tools under their executable names, and builds the fake agent.
 func TestMain(m *testing.M) {
-	switch name := filepath.Base(os.Args[0]); name {
-	case "claude", "codex", "opencode", "pi", "cursor-agent":
-		os.Exit(fakeAgent(name))
-	}
 	if len(os.Args) > 1 && os.Args[1] == "serve" { // the background process connect starts, as atm serve
 		root, err := git("", "rev-parse", "--show-toplevel")
 		if err == nil {
@@ -41,28 +39,52 @@ func TestMain(m *testing.M) {
 		}
 		os.Exit(0)
 	}
+	if runtime.GOOS == "darwin" {
+		directGit()
+	}
 	dir, err := linkFakes()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "fake agents:", err)
 		os.Exit(1)
 	}
 	fakes = dir
-	// serve and fake-agent invocations returned above, preserving the owning test's PID.
+	// serve and gh invocations returned above; the fake agents inherit this as their owning test's PID.
 	_ = os.Setenv("ATM_FAKE_OWNER_PID", strconv.Itoa(os.Getpid()))
 	code := m.Run()
 	_ = os.RemoveAll(dir)
+	if repoTemplate.dir != "" {
+		_ = os.RemoveAll(repoTemplate.dir)
+	}
 	os.Exit(code)
 }
 
-// linkFakes links this test binary under each agent CLI's name in a new directory.
-func linkFakes() (string, error) {
-	exe, err := os.Executable()
-	if err != nil {
-		return "", err
+// directGit puts first on PATH the git that macOS's /usr/bin/git, an xcrun shim, runs: the shim costs about 8 ms
+// on each of the hundred git calls of a run. Other installations keep their PATH.
+func directGit() {
+	path, err := exec.LookPath("git")
+	if err != nil || path != "/usr/bin/git" {
+		return
 	}
+	out, err := exec.Command("git", "--exec-path").Output()
+	core := strings.TrimSpace(string(out))
+	if _, statErr := os.Stat(filepath.Join(core, "git")); err != nil || statErr != nil {
+		return
+	}
+	_ = os.Setenv("PATH", core+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+// linkFakes builds testdata/fakeagent once, into a new directory, and links it there under each agent CLI's name.
+func linkFakes() (string, error) {
 	dir, err := os.MkdirTemp("", "atm-fakes-")
 	if err != nil {
 		return "", err
+	}
+	exe := filepath.Join(dir, "fakeagent")
+	build := exec.Command("go", "build", "-o", exe, "./testdata/fakeagent")
+	_, file, _, _ := runtime.Caller(0)
+	build.Dir = filepath.Dir(file) // a child test process may start in a test's repository
+	if out, err := build.CombinedOutput(); err != nil {
+		return dir, fmt.Errorf("build: %v\n%s", err, out)
 	}
 	for _, name := range []string{"claude", "codex", "opencode", "pi", "cursor-agent"} {
 		if err := os.Symlink(exe, filepath.Join(dir, name)); err != nil {
@@ -119,15 +141,14 @@ func repo(t *testing.T, origin, atm string) string {
 	t.Setenv("GIT_COMMITTER_NAME", "atm")
 	t.Setenv("GIT_COMMITTER_EMAIL", "atm@example.com")
 	t.Setenv("PATH", fakes+string(os.PathListSeparator)+os.Getenv("PATH"))
-	gitT(t, dir, "init", "-q", "-b", "main")
-	for name, text := range map[string]string{"a.txt": "broken\n", "a_test.sh": "test -f a.txt\n"} {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(text), 0o600); err != nil {
-			t.Fatal(err)
-		}
+	repoTemplate.once.Do(func() { repoTemplate.dir, repoTemplate.err = initRepo() })
+	if repoTemplate.err != nil {
+		t.Fatal(repoTemplate.err)
 	}
-	for _, args := range [][]string{{"remote", "add", "origin", origin}, {"add", "."}, {"commit", "-q", "-m", "init"}} {
-		gitT(t, dir, args...)
+	if err := os.CopyFS(dir, os.DirFS(repoTemplate.dir)); err != nil {
+		t.Fatal(err)
 	}
+	gitT(t, dir, "remote", "add", "origin", origin)
 	if atm != "" {
 		if err := os.WriteFile(filepath.Join(dir, ".atm.yaml"), []byte(atm), 0o600); err != nil {
 			t.Fatal(err)
@@ -135,6 +156,35 @@ func repo(t *testing.T, origin, atm string) string {
 	}
 	t.Chdir(dir)
 	return dir
+}
+
+// repoTemplate is repo's base, built once per test process: each repo copies it.
+var repoTemplate struct {
+	once sync.Once
+	dir  string
+	err  error
+}
+
+// initRepo is a new git repository with one commit on main, where a.txt is broken and a_test.sh passes.
+func initRepo() (string, error) {
+	dir, err := os.MkdirTemp("", "atm-repo-")
+	if err != nil {
+		return "", err
+	}
+	for name, text := range map[string]string{"a.txt": "broken\n", "a_test.sh": "test -f a.txt\n"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(text), 0o600); err != nil {
+			return "", err
+		}
+	}
+	for _, args := range [][]string{{"init", "-q", "-b", "main"}, {"add", "."}, {"commit", "-q", "-m", "init"}} {
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=atm", "GIT_AUTHOR_EMAIL=atm@example.com",
+			"GIT_COMMITTER_NAME=atm", "GIT_COMMITTER_EMAIL=atm@example.com")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return "", fmt.Errorf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	return dir, nil
 }
 
 // gitT runs git in dir and returns its trimmed output, failing the test when git fails.
@@ -291,5 +341,53 @@ func TestRunDiesOnIncompleteConfigBeforeReadingIssue(t *testing.T) {
 	}
 	if out.Len() != 0 {
 		t.Fatalf("no step should start: %s", out.String())
+	}
+}
+
+// Every agent CLI on PATH is one fake agent this process built, not this test binary run again.
+func TestFakeAgentBuiltOnce(t *testing.T) {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	self, err := os.Stat(exe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var first os.FileInfo
+	for _, name := range []string{"claude", "codex", "opencode", "pi", "cursor-agent"} {
+		fi, err := os.Stat(filepath.Join(fakes, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if os.SameFile(fi, self) {
+			t.Fatalf("%s is the test binary", name)
+		}
+		if first == nil {
+			first = fi
+		} else if !os.SameFile(fi, first) {
+			t.Fatalf("%s is not the binary %s is", name, first.Name())
+		}
+	}
+}
+
+// repo copies one base commit, built once per process, whatever the clock says when each test asks for it.
+func TestRepoTemplate(t *testing.T) {
+	var heads []string
+	for _, c := range []struct{ date, origin string }{{"2001-01-01T00:00:00Z", "https://example.com/a.git"},
+		{"2002-02-02T00:00:00Z", "https://example.com/b.git"}} {
+		t.Setenv("GIT_AUTHOR_DATE", c.date)
+		t.Setenv("GIT_COMMITTER_DATE", c.date)
+		dir := repo(t, c.origin, "")
+		if got := gitT(t, dir, "remote", "get-url", "origin"); got != c.origin {
+			t.Fatalf("origin %q, want %q", got, c.origin)
+		}
+		if got := gitT(t, dir, "status", "--porcelain"); got != "" {
+			t.Fatalf("a new repo is not clean: %q", got)
+		}
+		heads = append(heads, gitT(t, dir, "rev-parse", "HEAD"))
+	}
+	if heads[0] != heads[1] {
+		t.Fatalf("each repo made its own base commit: %v", heads)
 	}
 }
