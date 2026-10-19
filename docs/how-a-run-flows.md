@@ -339,6 +339,8 @@ and any further monitoring belong to that command or its launcher.
 
 ## Time limits
 
+ATM runs on Linux and macOS, and on Windows through WSL.
+
 | What | Limit |
 |------|-------|
 | Reading a GitHub issue | 60 s |
@@ -483,8 +485,9 @@ them again. Folding or unfolding preserves the reading position; a call
 hidden by folding anchors to its group header. Stacked under 100 columns,
 the ATM box takes at most two thirds of the space left after the footer and
 panel gap.
-On Unix, ATM keeps its screen live while the delivery command is silent. From
-the command's first output until it ends, ATM gives it the attached terminal
+On Linux and macOS, and on Windows through WSL, ATM keeps its screen live
+while the delivery command is silent. From the command's first output until
+it ends, ATM gives it the attached terminal
 and its keys. The delivery command can draw its own screen and receive
 input there. ATM's screen comes back when the command ends, showing the
 Delivery result and duration.
