@@ -62,5 +62,7 @@ same kind.
 These are proposals, not decisions:
 
 - Keep the work when an agent dies mid-run, not only when it ends well.
-- A preflight of about six checks before any token is spent.
+- A preflight before any token is spent, with four checks: the configuration
+  comes from `main`, `main` is green, the worker kit is present, and the gate
+  is running.
 - Which skills and hooks make up the worker kit, and how they reach the clone.
