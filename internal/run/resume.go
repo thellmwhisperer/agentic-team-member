@@ -175,7 +175,10 @@ func (a agent) afterE2E(r *verdict, clone string, p resumePoint) (map[string]any
 	final := filepath.Join(a.dir, "agent-after-e2e.final.md")
 	prompt := "Checks failed at e2e: these changed lines are not executed by any end-to-end run of the real binary. " +
 		"Delete them, or write the end-to-end test that reaches them from a real command. " +
-		"Do not touch anything else.\n" + p.E2EOutput
+		"Do not touch anything else.\n" + p.E2EOutput +
+		"\nYour scratch directory for this turn is `" + filepath.Join(a.dir, "worker-scratch") +
+		"`, your `$TMPDIR`: use it for logs, outputs and files you set aside, instead of any previous scratch " +
+		"or the system temp directory."
 	argv, stdin, ok := a.resumeArgv(clone, filepath.Join(clone, skillDirs[a.Harness], "ponytail"),
 		final, p.Session, prompt)
 	reason := ""
@@ -197,7 +200,10 @@ func (a agent) afterE2E(r *verdict, clone string, p resumePoint) (map[string]any
 	r.emit(turn, map[string]any{"state": "started", "harness": a.Harness, "output": turn})
 	var err error
 	s := timed(func() {
-		if _, err = placeSkill(clone, a.Harness, "ponytail"); err == nil {
+		if _, err = a.reviewScratch("worker"); err == nil {
+			_, err = placeSkill(clone, a.Harness, "ponytail")
+		}
+		if err == nil {
 			stream, exit, cause, runErr := a.exec(clone, path, argv, stdin, false)
 			var invalid error
 			invalid, err = a.reported("worker", path, final, exit, cause, runErr, stream, testFile, ev)

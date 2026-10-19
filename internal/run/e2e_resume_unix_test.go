@@ -54,6 +54,7 @@ func TestRunE2EResume(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			top, call, order, path := e2eFixture(t, tc)
+			t.Setenv("FAKE_WORKER_TMPDIR", "1")
 			if err := os.MkdirAll(filepath.Join(top, ".atm"), 0o755); err != nil {
 				t.Fatal(err)
 			}
@@ -87,7 +88,7 @@ func TestRunE2EResume(t *testing.T) {
 				t.Fatal(err)
 			}
 			r = e2eReport(t, top, label)
-			assertE2ETurn(t, tc, call, order, screen.String())
+			assertE2ETurn(t, tc, call, order, screen.String(), filepath.Join(runDir(top, label), "worker-scratch"))
 			assertE2EResult(t, tc, r, end)
 		})
 	}
@@ -141,7 +142,7 @@ func (tc e2eResumeCase) config() string {
 	return cfg
 }
 
-func assertE2ETurn(t *testing.T, tc e2eResumeCase, call, order, screen string) {
+func assertE2ETurn(t *testing.T, tc e2eResumeCase, call, order, screen, scratch string) {
 	t.Helper()
 	wantCalls := 2
 	if tc.skip != "" {
@@ -153,9 +154,18 @@ func assertE2ETurn(t *testing.T, tc e2eResumeCase, call, order, screen string) {
 		got := agentCall(t, call)
 		want := "Checks failed at e2e: these changed lines are not executed by any end-to-end run of the real binary. " +
 			"Delete them, or write the end-to-end test that reaches them from a real command. " +
-			"Do not touch anything else.\nuncovered.go:42"
+			"Do not touch anything else.\nuncovered.go:42" +
+			"\nYour scratch directory for this turn is `" + scratch +
+			"`, your `$TMPDIR`: use it for logs, outputs and files you set aside, instead of any previous scratch " +
+			"or the system temp directory."
 		if sentPrompt(tc.harness, got) != want || !slices.Contains(got.Args, "sess-1") {
 			t.Fatalf("resume turn: %+v", got)
+		}
+		if !slices.Contains(got.Env, "TMPDIR="+scratch) {
+			t.Fatalf("resumed worker did not receive its scratch: %v", got.Env)
+		}
+		if _, err := os.Stat(filepath.Join(scratch, "test.log")); err != nil {
+			t.Fatalf("resumed worker did not write its scratch log: %v", err)
 		}
 		if !strings.Contains(screen, "agent turn after e2e") {
 			t.Fatalf("missing turn event: %s", screen)
@@ -279,6 +289,46 @@ func TestResumeE2EAgentTurn(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestAgentScratchResume(t *testing.T) {
+	for _, harness := range []string{"claude", "codex", "pi", "cursor"} {
+		t.Run(harness, func(t *testing.T) {
+			top, call, _, path := e2eFixture(t, e2eResumeCase{name: "red_again", harness: harness, repair: "true", row: "e2e"})
+			t.Setenv("FAKE_WORKER_TMPDIR", "1")
+			originalTmp := t.TempDir()
+			for n, label := range []string{"failed", "resumed", "repaired"} {
+				args := []string{"--harness", harness, "--env", "TMPDIR=" + originalTmp, path}
+				if n > 0 {
+					args = []string{"--resume", []string{"failed", "resumed"}[n-1]}
+				}
+				if n == 2 {
+					t.Setenv("FAKE_AGENT_WORK", "touch reached")
+				}
+				err := Run(label, args, io.Discard, io.Discard)
+				if n < 2 && (err == nil || !strings.Contains(err.Error(), "e2e:")) || n == 2 && err != nil {
+					t.Fatalf("%s: %v", label, err)
+				}
+				worker := agentCall(t, call)
+				scratch := filepath.Join(runDir(top, label), "worker-scratch")
+				if !slices.Contains(worker.Env, "TMPDIR="+scratch) ||
+					!strings.Contains(sentPrompt(harness, worker), "`"+scratch+"`") {
+					t.Fatalf("%s: scratch missing from worker environment or prompt: %+v", label, worker)
+				}
+				if _, err := os.Stat(filepath.Join(scratch, "test.log")); err != nil {
+					t.Fatalf("%s: scratch log missing: %v", label, err)
+				}
+				if n < 2 {
+					b, err := os.ReadFile(filepath.Join(runDir(top, label), "resume", "resume.json"))
+					var saved resumePoint
+					if err != nil || json.Unmarshal(b, &saved) != nil ||
+						!slices.Equal(saved.Env, []string{"TMPDIR=" + originalTmp}) {
+						t.Fatalf("%s: original environment not preserved: %s; %v", label, b, err)
+					}
+				}
+			}
+		})
 	}
 }
 

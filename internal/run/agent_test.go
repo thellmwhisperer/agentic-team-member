@@ -109,7 +109,7 @@ func fakeAgentCLI(name string) int {
 	fakeAgentSkill(name, args, skill)
 	scratchCall(name, map[bool]string{true: string(stdin), false: args[len(args)-1]}[name == "claude"])
 	if skill == "ponytail" && os.Getenv("FAKE_WORKER_TMPDIR") != "" { // the worker logs to its $TMPDIR
-		log := filepath.ToSlash(filepath.Join(os.TempDir(), "test.log"))
+		log := filepath.ToSlash(filepath.Join(os.Getenv("TMPDIR"), "test.log"))
 		fmt.Print(bashEvent(name, `echo log > "`+log+`"`, ""))
 		todo += `; echo log > "` + log + `"`
 	}
