@@ -128,8 +128,10 @@ func (tc e2eResumeCase) config() string {
 	cfg = atmSet(cfg, "test", `sh a_test.sh && test -d "$GOCOVERDIR" && `+
 		`test ! -f "$GOCOVERDIR/test-ran" && touch "$GOCOVERDIR/test-ran"`)
 	if tc.name == "refactor" {
-		cfg = atmSet(cfg, "test", `sh a_test.sh && if [ -n "$GOCOVERDIR" ]; then test -d "$GOCOVERDIR" && `+
-			`test ! -f "$GOCOVERDIR/test-ran" && touch "$GOCOVERDIR/test-ran"; fi`)
+		// The refactor proof runs test on the base with the caller's GOCOVERDIR, which a go test under
+		// coverage sets and every run of the case shares; only Checks' own one holds the marker.
+		cfg = atmSet(cfg, "test", `sh a_test.sh && case "$GOCOVERDIR" in */.atm/runs/*/coverage-*) `+
+			`test -d "$GOCOVERDIR" && test ! -f "$GOCOVERDIR/test-ran" && touch "$GOCOVERDIR/test-ran";; esac`)
 	}
 	if tc.row == "test" {
 		cfg = atmSet(cfg, "test", "echo test-red; exit 1")
