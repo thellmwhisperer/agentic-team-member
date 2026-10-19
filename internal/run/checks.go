@@ -736,13 +736,13 @@ func trial(clone, tree string, aside []string, base, after, test string, usesTes
 	if err := restoreTrialTree(clone, tree); err != nil {
 		return red, green, err
 	}
-	if err := trialTimeout(red, green, false); err != nil {
+	if errors.Is(red.err, errTimeout) {
 		return red, green, red.err
 	}
 	if after != "" {
 		green = attemptWithTimeout(clone, after, limit)
-		if err := trialTimeout(red, green, true); err != nil {
-			return red, green, err
+		if errors.Is(green.err, errTimeout) {
+			return red, green, green.err
 		}
 		classifyTestRun(&green, test, usesTests)
 	}
@@ -759,16 +759,6 @@ func classifyTestRun(result *try, test string, usesTests bool) {
 	if usesTests && strings.Contains(result.Tail, "no tests to run") {
 		result.err = fmt.Errorf("the test line ran no test of %s: check its build tags against test_file", test)
 	}
-}
-
-func trialTimeout(red, green try, checkGreen bool) error {
-	if checkGreen && errors.Is(green.err, errTimeout) {
-		return green.err
-	}
-	if !checkGreen && errors.Is(red.err, errTimeout) {
-		return red.err
-	}
-	return nil
 }
 
 func restoreTrialTree(clone, tree string) error {
