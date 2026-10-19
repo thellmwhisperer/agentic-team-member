@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -21,14 +22,20 @@ import (
 	"github.com/thellmwhisperer/agentic-team-member/internal/run"
 )
 
-// TestMain doubles as atm serve, the background process atm starts as this binary.
+// TestMain doubles as atm serve, the background process atm starts as this binary. The held fake codex exits
+// with the test that owns it: the server can outlive the test, so it watches the test's PID, never its parent.
 func TestMain(m *testing.M) {
 	if strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe") == "codex" && os.Getenv("FAKE_AGENT") == "fail" {
 		ready := os.Getenv("FAKE_AGENT_BARRIER_READY")
 		if ready != "" {
 			_ = os.WriteFile(filepath.Join(ready, strconv.Itoa(os.Getpid())), nil, 0o600)
+			owner, _ := strconv.Atoi(os.Getenv("ATM_FAKE_OWNER_PID"))
 			for {
 				if _, err := os.Stat(os.Getenv("FAKE_AGENT_BARRIER_RELEASE")); err == nil {
+					os.Exit(1)
+				}
+				if p, err := os.FindProcess(owner); owner > 0 &&
+					(err != nil || errors.Is(p.Signal(syscall.Signal(0)), os.ErrProcessDone)) {
 					os.Exit(1)
 				}
 				time.Sleep(10 * time.Millisecond)
@@ -38,6 +45,7 @@ func TestMain(m *testing.M) {
 	if len(os.Args) > 1 && os.Args[1] == "serve" {
 		Execute()
 	}
+	_ = os.Setenv("ATM_FAKE_OWNER_PID", strconv.Itoa(os.Getpid()))
 	os.Exit(m.Run())
 }
 
