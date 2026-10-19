@@ -339,7 +339,7 @@ func markdownText(source []byte, root ast.Node) (string, bool) {
 			for _, index := range n.Value.Indices() {
 				value.Write(source[index.Start:index.Stop])
 			}
-			out.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(yellow)).Render(displayText(value.String())))
+			out.WriteString(paint(yellow, displayText(value.String())))
 			return
 		case *ast.RawHTML:
 			out.WriteString(displayText(n.Value.Value(source)))
