@@ -360,21 +360,14 @@ func deliver(r *verdict, root, clone, sha, base, line string, i Issue, screen io
 		}
 		t, _ := screen.(terminal)
 		var tail string
-		var took span
 		// Delivery owns the attached terminal. Its row carries state and time only:
 		// emitting the command's output in a nested check event would duplicate it.
-		command := func() error {
-			var commandErr error
-			took, commandErr = row(func(map[string]any) {}, "delivery", func() error {
-				tail, commandErr = tee(ctx, t, io.MultiWriter(f, screen), clone, line, "ATM_TITLE="+i.Title, "ATM_ISSUE="+issue,
-					"ATM_ISSUE_TEXT="+i.Text, "ATM_INTENT="+intent(i.Text, tombs), "ATM_BRANCH="+branch,
-					"ATM_CLONE="+clone, "ATM_REPORT="+r.path, "ATM_PONYTAIL="+cuts)
-				return commandErr
-			})
-			return commandErr
-		}
 		r.live(map[string]any{"check": "command", "state": "started"})
-		err = command()
+		took := timed(func() {
+			tail, err = tee(ctx, t, io.MultiWriter(f, screen), clone, line, "ATM_TITLE="+i.Title, "ATM_ISSUE="+issue,
+				"ATM_ISSUE_TEXT="+i.Text, "ATM_INTENT="+intent(i.Text, tombs), "ATM_BRANCH="+branch,
+				"ATM_CLONE="+clone, "ATM_REPORT="+r.path, "ATM_PONYTAIL="+cuts)
+		})
 		r.live(map[string]any{"check": "command", "state": outcome(err), "duration_ms": took.DurationMS})
 		ev["commands"] = []cmdResult{{"delivery", line, outcome(err), tail, took}}
 		// Record the delivered branch before deciding whether this run can remove its clone.
