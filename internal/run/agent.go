@@ -249,19 +249,15 @@ func (a agent) reported(name, path, final, exit, cause string, runErr error, s *
 	return nil, nil
 }
 
-// strict is the review each agent run, by its name without its unit number, whose final message must be a
-// single JSON object, nothing around it.
-var strict = map[string]string{"scope-review-unit": "scope review"}
-
-// finalReport is the report in the agent's final message, which check accepts.
+// finalReport is the report in the agent's final message, which check accepts. A scope review's, whatever its
+// unit number, must be a single JSON object, nothing around it.
 func finalReport(name, final string, check func(map[string]any) error) (map[string]any, error) {
-	review, ok := strict[strings.TrimRight(name, "0123456789")]
-	if !ok {
+	if strings.TrimRight(name, "0123456789") != "scope-review-unit" {
 		return report(final, check)
 	}
 	var r map[string]any
 	if json.Unmarshal([]byte(final), &r) != nil {
-		return nil, fmt.Errorf("agent left no report: invalid %s: want a single JSON object", review)
+		return nil, errors.New("agent left no report: invalid scope review: want a single JSON object")
 	}
 	return r, check(r)
 }
