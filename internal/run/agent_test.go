@@ -52,9 +52,7 @@ var work = map[string]string{"fix": fixWork, "feature": fixWork, "greenfield": f
 // set, receives one line per call. $FAKE_AGENT_STREAM goes to its stdout after its first
 // line, <clone> in it its working directory.
 func fakeAgent(name string) int {
-	if name == "claude" {
-		go watchFakeClaudeOwner()
-	}
+	go watchFakeAgentOwner()
 	if script := os.Getenv("REJECTION_SCRIPT"); script != "" {
 		cmd := exec.Command("sh", script)
 		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
@@ -72,7 +70,7 @@ func fakeAgent(name string) int {
 
 // The server can outlive the test, so watch the test's PID, never the immediate parent.
 // Stat the directory it started in: macOS getcwd still succeeds after that directory is removed.
-func watchFakeClaudeOwner() {
+func watchFakeAgentOwner() {
 	owner, _ := strconv.Atoi(os.Getenv("ATM_FAKE_OWNER_PID"))
 	wd, wdErr := os.Getwd()
 	tick := time.NewTicker(250 * time.Millisecond)
