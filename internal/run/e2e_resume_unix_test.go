@@ -97,6 +97,7 @@ type e2eResumeCase struct{ name, harness, repair, row, skip string }
 
 func e2eFixture(t *testing.T, tc e2eResumeCase) (top, call, order, path string) {
 	t.Helper()
+	t.Setenv("ATM_TEST_INHERITED_GOCOVERDIR", os.Getenv("GOCOVERDIR"))
 	// The real binary binds its serve at git's toplevel. t.TempDir can be another spelling
 	// of that directory (Darwin's /var); Attach must use the same spelling or the socket path
 	// does not fit sun_path.
@@ -130,8 +131,8 @@ func (tc e2eResumeCase) config() string {
 	if tc.name == "refactor" {
 		// The refactor proof runs test on the base with the caller's GOCOVERDIR, which a go test under
 		// coverage sets and every run of the case shares; only Checks' own one holds the marker.
-		cfg = atmSet(cfg, "test", `sh a_test.sh && case "$GOCOVERDIR" in */.atm/runs/*/coverage-*) `+
-			`test -d "$GOCOVERDIR" && test ! -f "$GOCOVERDIR/test-ran" && touch "$GOCOVERDIR/test-ran";; esac`)
+		cfg = atmSet(cfg, "test", `sh a_test.sh && if [ -n "$GOCOVERDIR" ] && [ "$GOCOVERDIR" != "$ATM_TEST_INHERITED_GOCOVERDIR" ]; then `+
+			`test -d "$GOCOVERDIR" && test ! -f "$GOCOVERDIR/test-ran" && touch "$GOCOVERDIR/test-ran"; fi`)
 	}
 	if tc.row == "test" {
 		cfg = atmSet(cfg, "test", "echo test-red; exit 1")
