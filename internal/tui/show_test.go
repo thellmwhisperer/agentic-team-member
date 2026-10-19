@@ -224,10 +224,10 @@ func TestShowColdCompletedRunQuitsLeavingItsScreen(t *testing.T) {
 	if showErr != nil || detached || o.Outcome != "passed" {
 		t.Fatalf("completed close: %+v detached=%v err=%v", o, detached, showErr)
 	}
+	assertColdCompletedScreen(t, s)
 	_ = tty.Close()
 	_ = master.Close()
 	<-read
-	assertColdCompletedScreen(t, s)
 }
 
 // assertColdCompletedScreen says the screen opened and, once it quit, left the completed run's results on the
@@ -235,11 +235,14 @@ func TestShowColdCompletedRunQuitsLeavingItsScreen(t *testing.T) {
 func assertColdCompletedScreen(t *testing.T, s *shown) {
 	t.Helper()
 	waitShowToOpen(t, s)
+	if !s.until(0, func(v string) bool {
+		i := strings.LastIndex(v, exitAltScreen)
+		return i >= 0 && strings.Contains(ansi.Strip(v[i:]), "q close")
+	}) {
+		t.Fatalf("completed view did not finish drawing: %q", s.since(0))
+	}
 	v := s.since(0)
 	i := strings.LastIndex(v, exitAltScreen)
-	if i < 0 {
-		t.Fatalf("the screen never gave the terminal back: %q", v)
-	}
 	if left := ansi.Strip(v[i:]); !strings.Contains(left, "q close") || !strings.Contains(left, "21 min 58 s") {
 		t.Fatalf("completed view lost its results once it quit: %q", left)
 	}
