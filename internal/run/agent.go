@@ -533,16 +533,8 @@ type event struct {
 	ToolCallID string `json:"toolCallId"`
 	IsError    bool   `json:"isError"`
 	Args       json.RawMessage
-	Item       struct { // codex
-		ID, Type, Command, Text, Status, Tool string
-		Arguments                             json.RawMessage `json:"arguments"`
-		Changes                               []struct {
-			Path string
-		} `json:"changes"`
-		ExitCode         *int   `json:"exit_code"`
-		AggregatedOutput string `json:"aggregated_output"`
-	}
-	Part struct { // opencode
+	Item       codexItem
+	Part       struct { // opencode
 		CallID     string `json:"callID"`
 		Tool, Text string
 		State      struct {
@@ -939,13 +931,16 @@ func (e event) calls(harness string) (cs []use) {
 	return cs
 }
 
-func codexCalls(item struct {
+// codexItem is a codex event's item.
+type codexItem struct {
 	ID, Type, Command, Text, Status, Tool string
 	Arguments                             json.RawMessage         `json:"arguments"`
 	Changes                               []struct{ Path string } `json:"changes"`
 	ExitCode                              *int                    `json:"exit_code"`
 	AggregatedOutput                      string                  `json:"aggregated_output"`
-}) []use {
+}
+
+func codexCalls(item codexItem) []use {
 	switch item.Type {
 	case "command_execution":
 		return []use{{tool: "shell", command: item.Command}}
