@@ -283,7 +283,6 @@ func (m *Model) right(width, height int) string {
 	if log {
 		logLines := min(len(m.output), max(1, height-lipgloss.Height(top)-boxBorderRows))
 		boxes = append(boxes, m.logBox(width, logLines))
-		return strings.Join(boxes, "\n")
 	}
 	return strings.Join(boxes, "\n")
 }
