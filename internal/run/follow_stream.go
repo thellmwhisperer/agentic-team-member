@@ -15,7 +15,7 @@ func Follows(args []string) bool {
 // StartFollowing starts a run and copies its events as JSON lines until it ends.
 // Closing the stream leaves the run going. No terminal or external monitor is needed.
 func StartFollowing(ctx context.Context, root string, args []string, w io.Writer) error {
-	o, err := start(root, args)
+	o, err := Start(root, args)
 	if err != nil {
 		return err
 	}

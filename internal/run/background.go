@@ -649,10 +649,6 @@ func (s *server) save() {
 // Start checks args, atm run's command line, and has the background process of the repository at root run it.
 // It returns the run, just started. A run that resumes another takes that one's issue.
 func Start(root string, args []string) (Outcome, error) {
-	return start(root, args)
-}
-
-func start(root string, args []string) (Outcome, error) {
 	args, _, resume, _, err := parseArgs(args)
 	if err == nil && *resume != "" {
 		var p resumePoint
