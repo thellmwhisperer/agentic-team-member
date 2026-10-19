@@ -4,7 +4,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -16,9 +15,6 @@ func onPath(t *testing.T, names ...string) {
 	t.Helper()
 	dir := t.TempDir()
 	for _, name := range names {
-		if runtime.GOOS == "windows" {
-			name += ".exe"
-		}
 		if err := os.WriteFile(filepath.Join(dir, name), nil, 0o755); err != nil {
 			t.Fatal(err)
 		}

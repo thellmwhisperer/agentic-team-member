@@ -78,6 +78,8 @@ Step by step: [How a run flows](docs/how-a-run-flows.md).
 
 ## Install
 
+ATM runs on Linux and macOS, and on Windows through WSL.
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/thellmwhisperer/agentic-team-member/main/install.sh | sh
 ```

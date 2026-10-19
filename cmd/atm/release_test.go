@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -157,7 +156,7 @@ func TestReleaseWorkflowBuildStartsOnlyWhenReleaseIsCreated(t *testing.T) {
 	for _, target := range job.Strategy.Matrix.Include {
 		gotTargets[target.GOOS+"/"+target.GOARCH] = true
 	}
-	wantTargets := []string{"darwin/amd64", "darwin/arm64", "linux/amd64", "linux/arm64", "windows/amd64", "windows/arm64"}
+	wantTargets := []string{"darwin/amd64", "darwin/arm64", "linux/amd64", "linux/arm64"}
 	if len(gotTargets) != len(wantTargets) {
 		t.Fatalf("build matrix = %v, want %v", gotTargets, wantTargets)
 	}
@@ -189,7 +188,6 @@ func TestReleaseWorkflowBuildStartsOnlyWhenReleaseIsCreated(t *testing.T) {
 func TestReleaseArchivesAreNamedAfterAtmAndTheTag(t *testing.T) {
 	workflow := workflowModel(t)
 	if !hasRunStep(workflow.Jobs["build-and-upload"],
-		"ARCHIVE=\"dist/atm-${TAG}-${GOOS}-${GOARCH}.zip\"",
 		"ARCHIVE=\"dist/atm-${TAG}-${GOOS}-${GOARCH}.tar.gz\"") {
 		t.Fatal("build-and-upload must run commands that name tagged atm archives")
 	}
@@ -262,11 +260,7 @@ func TestVersionFlagPrintsBuildVersion(t *testing.T) {
 		{"", "atm dev "},
 		{"-X github.com/thellmwhisperer/agentic-team-member/internal/buildinfo.Version=v1.2.3", "atm v1.2.3 "},
 	} {
-		name := "atm"
-		if runtime.GOOS == "windows" {
-			name += ".exe"
-		}
-		bin := filepath.Join(t.TempDir(), name)
+		bin := filepath.Join(t.TempDir(), "atm")
 		build := exec.Command("go", "build", "-buildvcs=false", "-ldflags", tc.ldflags, "-o", bin, ".")
 		if out, err := build.CombinedOutput(); err != nil {
 			t.Fatalf("go build: %v\n%s", err, out)

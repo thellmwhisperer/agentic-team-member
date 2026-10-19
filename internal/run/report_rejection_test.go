@@ -151,7 +151,6 @@ esac
 	if err := os.WriteFile(filepath.Join(bin, "claude"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// The native fake invokes sh explicitly: Windows cannot execute this script via PATH.
 	t.Setenv("REJECTION_SCRIPT", filepath.Join(bin, "claude"))
 }
 

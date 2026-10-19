@@ -348,8 +348,8 @@ and any further monitoring belong to that command or its launcher.
 
 Past its limit, or when the background process executing the run gets
 Ctrl-C or SIGTERM, a process is killed with
-every process it started, on Unix and Windows, including those that started a
-session or process group of their own and, on Unix, those already orphaned.
+every process it started, including those that started a session or process
+group of their own and those already orphaned.
 For cancellation of `atm run --follow`, see [Following one run](#following-one-run).
 
 ## The report
@@ -488,8 +488,6 @@ the command's first output until it ends, ATM gives it the attached terminal
 and its keys. The delivery command can draw its own screen and receive
 input there. ATM's screen comes back when the command ends, showing the
 Delivery result and duration.
-On Windows, the delivery command runs without ATM's attached terminal, so its
-output appears as lines.
 When the run ends, the ATM screen quits and leaves its last view on the
 terminal; `q` or Ctrl+C closes it before. Off-terminal output also returns
 when the run ends.

@@ -28,7 +28,6 @@ func TestCoverDiffNamesTheUncoveredChangedLines(t *testing.T) {
 		t.Fatal(err)
 	}
 	check := func() string {
-		// Windows will not CreateProcess a .sh path; sh is the contract and is on PATH in CI.
 		cmd := exec.Command("sh", filepath.ToSlash(script))
 		cmd.Dir = dir
 		cmd.Env = append(slices.DeleteFunc(os.Environ(), func(s string) bool {
@@ -63,7 +62,7 @@ func scratchModule(t *testing.T) (dir, covdir, base string) {
 	gitRun(t, dir, "init", "-q")
 	gitRun(t, dir, "config", "user.email", "cover-diff@example.com")
 	gitRun(t, dir, "config", "user.name", "cover-diff")
-	// Windows Git warns on an LF working copy when autocrlf is on. That line is not the check's output.
+	// A global core.autocrlf would warn on the LF working copy. That line is not the check's output.
 	gitRun(t, dir, "config", "core.autocrlf", "false")
 	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/coverdiff\n\ngo 1.27\n")
 	writeFile(t, filepath.Join(dir, "main.go"), `package main
@@ -120,8 +119,7 @@ func main() {
 // with argument a and leaves its counters in covdir.
 func coveredRun(t *testing.T, dir, covdir string) {
 	t.Helper()
-	// Windows os/exec will not run an extensionless file, even at an absolute path.
-	bin := filepath.Join(dir, "bin.exe")
+	bin := filepath.Join(dir, "bin")
 	build := exec.Command("go", "build", "-cover", "-coverpkg=./...", "-o", bin, ".")
 	build.Dir = dir
 	if out, err := build.CombinedOutput(); err != nil {

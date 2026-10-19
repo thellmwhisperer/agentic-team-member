@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -19,7 +18,7 @@ var fakes string
 
 // TestMain doubles as fake command-line tools and agents under their executable names.
 func TestMain(m *testing.M) {
-	switch name := strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe"); name {
+	switch name := filepath.Base(os.Args[0]); name {
 	case "claude", "codex", "opencode", "pi", "cursor-agent":
 		os.Exit(fakeAgent(name))
 	}
@@ -41,12 +40,6 @@ func TestMain(m *testing.M) {
 			os.Exit(1)
 		}
 		os.Exit(0)
-	}
-	if runtime.GOOS == "windows" {
-		if err := nativeWindowsTestTools(); err != nil {
-			fmt.Fprintln(os.Stderr, "native test tools:", err)
-			os.Exit(1)
-		}
 	}
 	dir, err := linkFakes()
 	if err != nil {
@@ -72,14 +65,8 @@ func linkFakes() (string, error) {
 		return "", err
 	}
 	for _, name := range []string{"claude", "codex", "opencode", "pi", "cursor-agent"} {
-		if runtime.GOOS == "windows" {
-			name += ".exe"
-		}
-		link := filepath.Join(dir, name)
-		if os.Symlink(exe, link) != nil { // Windows without symlink rights: a hard link keeps argv[0]
-			if err := os.Link(exe, link); err != nil {
-				return dir, err
-			}
+		if err := os.Symlink(exe, filepath.Join(dir, name)); err != nil {
+			return dir, err
 		}
 	}
 	return dir, nil
@@ -97,11 +84,7 @@ func fakeGH(t *testing.T, out string, fail bool) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	name := "gh"
-	if runtime.GOOS == "windows" {
-		name += ".exe"
-	}
-	if err := os.WriteFile(filepath.Join(dir, name), b, 0o755); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "gh"), b, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))

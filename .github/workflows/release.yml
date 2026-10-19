@@ -45,10 +45,6 @@ jobs:
             goarch: amd64
           - goos: linux
             goarch: arm64
-          - goos: windows
-            goarch: amd64
-          - goos: windows
-            goarch: arm64
     steps:
       - uses: actions/checkout@v6
         with:
@@ -68,20 +64,11 @@ jobs:
           mkdir -p dist
           DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           COMMIT="$(git rev-parse --short=7 HEAD)"
-          BIN="atm"
-          if [ "$GOOS" = "windows" ]; then
-            BIN="atm.exe"
-          fi
           CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" \
             go build -ldflags "-X github.com/thellmwhisperer/agentic-team-member/internal/buildinfo.Version=${TAG} -X github.com/thellmwhisperer/agentic-team-member/internal/buildinfo.Commit=${COMMIT} -X github.com/thellmwhisperer/agentic-team-member/internal/buildinfo.Date=${DATE}" \
-            -o "dist/${BIN}" ./cmd/atm
-          if [ "$GOOS" = "windows" ]; then
-            ARCHIVE="dist/atm-${TAG}-${GOOS}-${GOARCH}.zip"
-            zip -qj "$ARCHIVE" "dist/$BIN"
-          else
-            ARCHIVE="dist/atm-${TAG}-${GOOS}-${GOARCH}.tar.gz"
-            tar -C dist -czf "$ARCHIVE" "$BIN"
-          fi
+            -o dist/atm ./cmd/atm
+          ARCHIVE="dist/atm-${TAG}-${GOOS}-${GOARCH}.tar.gz"
+          tar -C dist -czf "$ARCHIVE" atm
           echo "ARCHIVE=$ARCHIVE" >> "$GITHUB_ENV"
 
       - name: Upload release asset

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -15,7 +14,7 @@ import (
 // init is a fake codex, this test binary under that name, when FAKE_AGENT is resume: the implementing agent
 // writes done.txt and a line to FAKE_AGENT_CALLS, and the slop detector cuts nothing.
 func init() {
-	if strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe") != "codex" || os.Getenv("FAKE_AGENT") != "resume" {
+	if filepath.Base(os.Args[0]) != "codex" || os.Getenv("FAKE_AGENT") != "resume" {
 		return
 	}
 	args := os.Args[1:]
@@ -47,21 +46,7 @@ func init() {
 func resumeRepo(t *testing.T, install, test string) (dir, calls string) {
 	t.Helper()
 	dir = setupConcurrentRunRepo(t)
-	bin := t.TempDir()
-	exe, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	codex := filepath.Join(bin, "codex")
-	if runtime.GOOS == "windows" {
-		codex += ".exe"
-	}
-	if err := os.Symlink(exe, codex); err != nil {
-		if err := os.Link(exe, codex); err != nil {
-			t.Fatal(err)
-		}
-	}
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	codexOnPath(t)
 	t.Setenv("FAKE_AGENT", "resume")
 	calls = filepath.Join(t.TempDir(), "calls")
 	t.Setenv("FAKE_AGENT_CALLS", calls)
