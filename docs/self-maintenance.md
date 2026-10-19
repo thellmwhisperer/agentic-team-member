@@ -23,7 +23,8 @@ it.
    failed and why, and the issue gets a better contract or the code a better
    check. The final [report](how-a-run-flows.md#the-report) also covers the
    [delivery gate](how-a-run-flows.md#delivery).
-4. **The gate.** The green branch goes to `no-mistakes axi run` without `--yes`.
+4. **The gate.** The green branch goes through the
+   [configured delivery line](configuration.md#atmyaml).
    Review, test, lint and document run as fenced model steps. The reviewer
    only reports (`auto_fix.review: 0`); whoever launched the run answers each
    finding, fixing real defects and dismissing guesses.
