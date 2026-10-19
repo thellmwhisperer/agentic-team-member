@@ -49,7 +49,7 @@ const tools = "Read,Edit,Write,Bash,Glob,Grep,Skill"
 type agent struct {
 	config.Agent
 	args, env []string
-	scratch   string // a read-only review's scratch directory, outside the clone: the one path its calls may reach
+	scratch   string // the call's scratch directory, outside the clone: the one path its calls may reach
 	root, dir string
 	follow    bool          // atm run --follow: the launching process watches the run itself
 	timeout   time.Duration // .atm.yaml's agent_timeout, 0 for agentTimeout

@@ -314,7 +314,12 @@ func (a agent) runUnit(
 			return head, unit, text, nil, err
 		}
 	}
-	ev, err := a.run(dir, name, "ponytail", text, testFile)
+	w := a // its scratch stays out of what keep saves
+	ev := map[string]any{}
+	_, err := w.reviewScratch("worker") // the one writeBrief names, fresh for each unit
+	if err == nil {
+		ev, err = w.run(dir, name, "ponytail", text, testFile)
+	}
 	// A diff never goes for its report's format: without one, the unit goes to Checks with no test file.
 	if errors.As(err, &reportError{}) {
 		ev["report"], err = "missing", nil
@@ -499,8 +504,9 @@ func GitHubRepo() string {
 }
 
 // writeBrief writes at path the brief for issue i under config c, whose unit makes follow-up next pass, if any.
+// Its scratch is the worker's, next to path, in the run's directory.
 func writeBrief(path string, i Issue, c config.Config, next *followUp) (string, map[string]any, error) {
-	b, err := brief(i, c, next)
+	b, err := brief(i, c, next, filepath.Join(filepath.Dir(path), "worker-scratch"))
 	if err == nil {
 		err = os.MkdirAll(filepath.Dir(path), 0o755)
 	}
