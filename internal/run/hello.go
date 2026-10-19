@@ -46,7 +46,7 @@ func Hello(c config.Agent, limit time.Duration) (time.Duration, error) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir, cmd.Stdin, cmd.WaitDelay = dir, strings.NewReader(stdin), time.Second
-	cmd.Env = agentEnv(nil)
+	cmd.Env = agentEnv()
 	var log bytes.Buffer
 	s := stream{live: func(map[string]any) {}}
 	start := time.Now()
@@ -62,11 +62,11 @@ func Hello(c config.Agent, limit time.Duration) (time.Duration, error) {
 	return helloResult(ctx, err, &log, s.final, took, limit)
 }
 
-// agentEnv is the agent's environment: atm's, but CLAUDE_CODE_CHILD_SESSION, then env.
-func agentEnv(env []string) []string {
-	return append(slices.DeleteFunc(os.Environ(), func(kv string) bool {
+// agentEnv is the agent's environment: atm's, but CLAUDE_CODE_CHILD_SESSION.
+func agentEnv() []string {
+	return slices.DeleteFunc(os.Environ(), func(kv string) bool {
 		return strings.HasPrefix(kv, "CLAUDE_CODE_CHILD_SESSION=")
-	}), env...)
+	})
 }
 
 func helloResult(
