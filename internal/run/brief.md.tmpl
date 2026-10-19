@@ -10,8 +10,9 @@ Task type: {{.Type}}. The issue, verbatim:
 {{.Body}}
 
 ## SCOPE
-- Edit only files inside this clone, your working directory.
-- Read, search and run only inside this clone: never the repository around it, `.atm/runs/` or another clone.
+- Edit project files only inside this clone, your working directory.
+- Read, search and run only inside this clone; you may also read and write your scratch directory below.
+  Never access the repository around it, the rest of `.atm/runs/` or another clone.
 - No network, except the project's package manager installing a dependency.
 - Your scratch directory, outside the clone, is `{{.Scratch}}`, your `$TMPDIR`: logs, outputs and files you set
   aside go there, never in the system temp directory.

@@ -178,7 +178,7 @@ func jsonLine(m map[string]any) []byte {
 }
 
 // permit answers a permission request (rule 7): its first allow_once option when the tool call is inside the
-// clone or its review's scratch, else its first reject_once, never an always one.
+// clone or this call's scratch, else its first reject_once, never an always one.
 func (s *stream) permit(params json.RawMessage) map[string]any {
 	var p struct {
 		ToolCall acpUpdate

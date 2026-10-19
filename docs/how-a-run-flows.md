@@ -33,7 +33,7 @@ A failed step stops the run; the steps after it are not run.
 | Issue | Reads the issue file or GitHub issue and its `Type:` | The issue cannot be read, or has no valid type |
 | Clone | Resolves `--base-ref` to a commit, clones the repository there into `.atm/clones/`, runs `install` | The ref, the clone or `install` fails |
 | Contract | Writes `brief.md`, the agent's contract | The brief cannot be written |
-| Agent | Runs the coding agent in the clone on the brief | It fails to complete successfully, times out or writes outside its clone. A missing or invalid report does not fail it: see [Rejected reports](#rejected-reports) |
+| Agent | Runs the coding agent in the clone on the brief | It fails to complete successfully, times out or writes outside its clone and scratch directory. A missing or invalid report does not fail it: see [Rejected reports](#rejected-reports) |
 | Checks | Prepares the clone, then install, the proof, test, optional e2e, typecheck and lint; see [Checks](#checks) | Cleanup, proof or a command fails, anything committed, or a [follow-up limit or mandatory gap](#follow-ups) blocks the run |
 | Slop detector | Lets a model cut the diff; keeps the cut only if every check still passes | Its agent fails, fails [report validation](#rejected-reports), or anything commits |
 | Delivery | Commits the work on a branch and runs the `delivery` command | The branch or the command fails. Skipped when `delivery` is empty |
@@ -55,9 +55,10 @@ The contract, `brief.md` in the run's
 directory, tells the agent to read `AGENTS.md` if there is one, then gives the
 issue, the acceptance criteria of its task type, the commands from
 `.atm.yaml`, the style, what is forbidden and the JSON report it must end
-with. It limits reading, searching and running to the clone, forbids network
-access except package-manager dependency installation, and forbids access to
-the surrounding repository, `.atm/runs/` and other clones.
+with. It limits reading, searching and running to the clone, with access to
+the worker's scratch directory for files set aside. It forbids network access
+except package-manager dependency installation, and forbids access to the
+surrounding repository, the rest of `.atm/runs/` and other clones.
 
 ## Agent
 
@@ -85,13 +86,18 @@ goes to `worker.jsonl`, and its stderr to `worker.stderr.txt` too, as it is
 written. Its report is the last JSON
 object of its final message and must name `test_file`: ATM never guesses
 which test proves the fix. ATM checks each logged tool call for every
-harness. A call fails the step only when it writes outside the clone with an
-absolute path not under it, such as `/tmp`, the repository around the clone or
-`$HOME`: a write or edit tool's destination, or a shell command's output
+harness. A call fails the step only when it writes outside the clone and its
+scratch directory with an absolute path, such as `/tmp`, the repository around
+the clone or `$HOME`: a write or edit tool's destination, or a shell command's output
 redirection or the paths `tee`, `cp`, `mv`, `sed -i` and the like write. A
-read-only review may also write under its scratch directory. Reading outside
-the clone, writing inside it by any means, and URLs pass. The error names the
-first offending call. Missing or invalid reports follow [Rejected reports](#rejected-reports).
+worker call gets an empty scratch directory under the run's directory, outside
+the clone, named in its brief and set as its `TMPDIR`. Logs, outputs and files
+the worker sets aside go there, including on an agent turn after an e2e failure
+in a resumed run. The system temp directory remains outside the allowance.
+A read-only review may also write under its own scratch directory. Reading
+outside the clone, writing inside it by any means, and URLs pass. The error
+names the first offending call. Missing or invalid reports follow
+[Rejected reports](#rejected-reports).
 For native agents, any non-zero exit
 also fails; Hermes uses the completion rules linked above.
 For Cursor, a stream result with `is_error: true` fails the step with its
