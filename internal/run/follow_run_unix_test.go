@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -184,6 +185,12 @@ func TestRunFollowReportsLostServer(t *testing.T) {
 	f.exit(2)
 	if !strings.Contains(f.errors(), "background process") {
 		t.Fatalf("lost server: %s", f.errors())
+	}
+	// The released fake outlives its killed server: let it end before cleanup removes the clone it works in.
+	held, _ := os.ReadDir(os.Getenv("FAKE_AGENT_BARRIER_READY"))
+	for _, e := range held {
+		pid, _ := strconv.Atoi(e.Name())
+		until(t, "the released fake agent to end", func() bool { return !alive(pid) })
 	}
 }
 
