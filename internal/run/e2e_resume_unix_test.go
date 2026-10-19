@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -39,7 +40,7 @@ func TestChecksE2ERow(t *testing.T) {
 }
 
 func TestRunE2EResume(t *testing.T) {
-	bin := builtATM(t)
+	builtATM(t) // before repo moves HOME, where go build would fill a module cache
 	for _, tc := range []e2eResumeCase{
 		{"green", "claude", "touch reached", "e2e", ""},
 		{"codex", "codex", "touch reached", "e2e", ""},
@@ -54,13 +55,15 @@ func TestRunE2EResume(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			top, call, order, path := e2eFixture(t, tc)
+			bin := filepath.Join(t.TempDir(), "atm") // its own file, for endServe to change
+			buildATM(t, bin, "follow-test")
 			t.Setenv("FAKE_WORKER_TMPDIR", "1")
 			if err := os.MkdirAll(filepath.Join(top, ".atm"), 0o755); err != nil {
 				t.Fatal(err)
 			}
 			server := startVersionServe(t, bin, top)
 			// A graceful exit flushes the real binary's coverage counters.
-			defer func() { _ = os.Remove(socket(top)); _ = server.Wait() }()
+			defer endServe(bin, top, server)
 			launch := func(args ...string) string {
 				t.Helper()
 				cmd := exec.Command(bin, append([]string{"run", "--harness", tc.harness}, args...)...)
@@ -92,6 +95,23 @@ func TestRunE2EResume(t *testing.T) {
 			assertE2EResult(t, tc, r, end)
 		})
 	}
+}
+
+// endServe ends server, the real serve of bin at top, gracefully and at once: once its file changed, the next
+// connection makes it exit, where a removed socket waits for its next tick, 5 s.
+func endServe(bin, top string, server *exec.Cmd) {
+	later := time.Now().Add(time.Hour)
+	err := os.Chtimes(bin, later, later)
+	var c net.Conn
+	if err == nil {
+		c, err = net.Dial("unix", short(socket(top)))
+	}
+	if err == nil {
+		_ = c.Close()
+	} else {
+		_ = os.Remove(socket(top))
+	}
+	_ = server.Wait()
 }
 
 type e2eResumeCase struct{ name, harness, repair, row, skip string }
