@@ -45,7 +45,8 @@ var work = map[string]string{"fix": fixWork, "feature": fixWork, "greenfield": f
 // grandchild in its own session; hang-orphan starts it in its own session through a child that exits at once,
 // so init adopts it. The ponytail pass plays the same with the ponytail-review skill,
 // $FAKE_PONYTAIL as its mode, $FAKE_PONYTAIL_WORK as its work and $FAKE_PONYTAIL_REPORT, or no findings, as
-// its report; its call goes to $FAKE_AGENT_CALL.ponytail. With FAKE_REVIEW_SCRATCH set, the scope reviewer
+// its report; its call goes to $FAKE_AGENT_CALL.ponytail. With FAKE_WORKER_TMPDIR set, the worker writes
+// test.log under its $TMPDIR, by a tool call naming its absolute path. With FAKE_REVIEW_SCRATCH set, the scope reviewer
 // also writes into the scratch directory its brief names, by a tool call naming its absolute path and through
 // $TMPDIR. $FAKE_AGENT_ORDER, when
 // set, receives one line per call. $FAKE_AGENT_STREAM goes to its stdout after its first
@@ -107,6 +108,11 @@ func fakeAgentCLI(name string) int {
 	}
 	fakeAgentSkill(name, args, skill)
 	scratchCall(name, map[bool]string{true: string(stdin), false: args[len(args)-1]}[name == "claude"])
+	if skill == "ponytail" && os.Getenv("FAKE_WORKER_TMPDIR") != "" { // the worker logs to its $TMPDIR
+		log := filepath.ToSlash(filepath.Join(os.TempDir(), "test.log"))
+		fmt.Print(bashEvent(name, `echo log > "`+log+`"`, ""))
+		todo += `; echo log > "` + log + `"`
+	}
 	if mode == "tail-sequence" {
 		for i := 1; i <= 22; i++ {
 			line := fmt.Sprintf("line-%02d", i)
