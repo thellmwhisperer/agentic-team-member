@@ -530,32 +530,19 @@ var agentTimeout = 30 * time.Minute
 // command runs name in dir, "" for the working directory, and returns its trimmed stdout; a failure or a
 // timeout carries stderr.
 func command(dir, name string, args ...string) (string, error) {
-	return commandFor(dir, dir, name, args...)
-}
-
-func commandFor(lockDir, dir, name string, args ...string) (string, error) {
-	out, err := commandForRaw(lockDir, dir, name, args...)
+	out, err := commandIn(nil, dir, name, args...)
 	return strings.TrimSpace(out), err
 }
 
-func commandForRaw(lockDir, dir, name string, args ...string) (string, error) {
-	return commandIn(nil, lockDir, dir, name, args...)
-}
-
-// commandIn is commandForRaw with stdin, nil for none.
-func commandIn(stdin io.Reader, lockDir, dir, name string, args ...string) (string, error) {
-	return commandCtx(context.Background(), stdin, lockDir, dir, name, args...)
-}
-
-// commandCtx is commandIn until parent ends.
-func commandCtx(parent context.Context, stdin io.Reader, lockDir, dir, name string, args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(parent, timeout)
+// commandIn is command with stdin, nil for none, and its stdout as it came.
+func commandIn(stdin io.Reader, dir, name string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, name, args...)
 	var stderr bytes.Buffer
 	cmd.Dir, cmd.Stdin, cmd.Stderr, cmd.WaitDelay = dir, stdin, &stderr, time.Second
 	out, err := cmd.Output()
-	if ctx.Err() != nil && parent.Err() == nil {
+	if ctx.Err() != nil {
 		err = fmt.Errorf("timed out after %s", Human(timeout))
 	}
 	if err != nil {
@@ -569,5 +556,5 @@ func git(dir string, args ...string) (string, error) {
 }
 
 func gitRaw(dir string, args ...string) (string, error) {
-	return commandForRaw(dir, dir, "git", args...)
+	return commandIn(nil, dir, "git", args...)
 }

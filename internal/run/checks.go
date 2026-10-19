@@ -220,12 +220,12 @@ func putBackIgnored(clone string) error {
 	if err != nil || changed == "" {
 		return err
 	}
-	ignored, err := commandIn(strings.NewReader(changed), clone, clone, "git", "check-ignore", "-z", "--stdin")
+	ignored, err := commandIn(strings.NewReader(changed), clone, "git", "check-ignore", "-z", "--stdin")
 	if exit := (*exec.ExitError)(nil); errors.As(err, &exit) && exit.ExitCode() == 1 {
 		return nil // none is ignored
 	}
 	if err == nil {
-		_, err = commandIn(strings.NewReader(ignored), clone, clone, "git", "--literal-pathspecs",
+		_, err = commandIn(strings.NewReader(ignored), clone, "git", "--literal-pathspecs",
 			"--git-dir=.git/atm-files", "--work-tree=.", "checkout", "refs/atm-before",
 			"--pathspec-from-file=-", "--pathspec-file-nul")
 	}
@@ -267,7 +267,7 @@ func putBackNested(clone string) error {
 		}
 	}
 	if err == nil {
-		_, err = commandIn(strings.NewReader(changed), clone, clone, "git", "--literal-pathspecs",
+		_, err = commandIn(strings.NewReader(changed), clone, "git", "--literal-pathspecs",
 			"--git-dir=.git/atm-nested", "--work-tree=.", "checkout", "refs/atm-before",
 			"--pathspec-from-file=-", "--pathspec-file-nul")
 	}

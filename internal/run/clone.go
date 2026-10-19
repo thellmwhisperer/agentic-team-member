@@ -33,7 +33,7 @@ func clone(root, base, install, repo string, live func(map[string]any)) (dir, sh
 		{"-C", dir, "fetch", "-q", root, sha},
 		{"-C", dir, "checkout", "-q", "--detach", sha},
 	} {
-		if _, err = commandFor(dir, "", "git", args...); err != nil {
+		if _, err = command("", "git", args...); err != nil {
 			return dir, sha, nil, err
 		}
 	}
