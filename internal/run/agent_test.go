@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"cmp"
 	"encoding/json"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -21,18 +20,6 @@ const fixTest = "; echo 'grep -q fixed a.txt && ! grep -q broken a.txt' > a_test
 
 // fixWork fixes a.txt and tests it.
 const fixWork = "echo fixed > a.txt" + fixTest
-
-func emit(ev obj) {
-	b, _ := json.Marshal(ev)
-	fmt.Println(string(b))
-}
-
-func after(args []string, flag string) string {
-	if i := slices.Index(args, flag); i >= 0 && i+1 < len(args) {
-		return args[i+1]
-	}
-	return ""
-}
 
 // agentStep is the agent step's end event, after checking the clone step passed, and the clone and log paths.
 func agentStep(t *testing.T, out *bytes.Buffer) (end obj, clone, log string) {

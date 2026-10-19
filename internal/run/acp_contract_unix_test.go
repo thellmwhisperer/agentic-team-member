@@ -381,3 +381,9 @@ func TestHermesDeathKeepsItsCauseAndTouchesNoOtherRun(t *testing.T) {
 		})
 	}
 }
+
+// emit writes ev to stdout as one JSON line.
+func emit(ev obj) {
+	b, _ := json.Marshal(ev)
+	fmt.Println(string(b))
+}
