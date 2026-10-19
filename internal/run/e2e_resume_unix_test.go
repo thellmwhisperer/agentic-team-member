@@ -320,15 +320,20 @@ func TestAgentScratchResume(t *testing.T) {
 					t.Fatalf("%s: scratch log missing: %v", label, err)
 				}
 				if n < 2 {
-					b, err := os.ReadFile(filepath.Join(runDir(top, label), "resume", "resume.json"))
-					var saved resumePoint
-					if err != nil || json.Unmarshal(b, &saved) != nil ||
-						!slices.Equal(saved.Env, []string{"TMPDIR=" + originalTmp}) {
-						t.Fatalf("%s: original environment not preserved: %s; %v", label, b, err)
-					}
+					checkOriginalScratchEnv(t, top, label, originalTmp)
 				}
 			}
 		})
+	}
+}
+
+func checkOriginalScratchEnv(t *testing.T, top, label, originalTmp string) {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(runDir(top, label), "resume", "resume.json"))
+	var saved resumePoint
+	if err != nil || json.Unmarshal(b, &saved) != nil ||
+		!slices.Equal(saved.Env, []string{"TMPDIR=" + originalTmp}) {
+		t.Fatalf("%s: original environment not preserved: %s; %v", label, b, err)
 	}
 }
 
