@@ -62,12 +62,7 @@ func Attach(root, label string, w io.Writer) (run.Outcome, error) {
 	if label == "" {
 		return run.Outcome{}, errors.New("no run yet")
 	}
-	return run.Follow(root, label, nil, nil, func(f run.Frame) {
-		if f.Line != nil {
-			_, _ = fmt.Fprintln(w, *f.Line)
-		}
-		_, _ = w.Write(f.Raw)
-	})
+	return run.Attach(root, label, w)
 }
 
 // resolve chooses the run that an empty-label attach will follow, once.
