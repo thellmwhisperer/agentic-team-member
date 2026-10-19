@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// builtATM is the real atm every real-binary test shares, built once per process.
+// builtATM returns the shared follow-test atm build for this process.
 func builtATM(t *testing.T) string {
 	t.Helper()
 	return sharedATM(t, "follow-test")

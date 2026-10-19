@@ -171,7 +171,7 @@ func killServeProcesses(t *testing.T, top string, pids ...int) {
 	}
 }
 
-// Under GOCOVERDIR (scripts/test.sh) the binary buildATM makes is instrumented: an atm --version run
+// With GOCOVERDIR set, the binary buildATM makes is instrumented: an atm --version run
 // leaves its counters behind, so cover-diff can see which lines an end-to-end run executes. Without
 // it the build stays plain: byte-identical to go build and writing nothing at run time.
 func TestBuildATMInstrumentsOnlyUnderGoCoverDir(t *testing.T) {
@@ -238,7 +238,7 @@ type atmBuild struct {
 	err  error
 }
 
-// buildATM puts at path the atm of version, built once per process.
+// buildATM copies the cached atm build for version and coverage mode to path.
 func buildATM(t *testing.T, path, version string) {
 	t.Helper()
 	b, err := os.ReadFile(sharedATM(t, version))
@@ -271,7 +271,7 @@ func sharedATM(t *testing.T, version string) string {
 func compileATM(path, version string, cover bool) error {
 	ldflags := fmt.Sprintf("-X github.com/thellmwhisperer/agentic-team-member/internal/buildinfo.Version=%s", version)
 	args := []string{"build", "-ldflags", ldflags}
-	// Under GOCOVERDIR (scripts/test.sh) the built atm writes coverage counters on exit, so
+	// With GOCOVERDIR set, the built atm writes coverage counters on exit, so
 	// cover-diff can see which changed lines an end-to-end run executes.
 	if cover {
 		args = append(args, "-cover", "-coverpkg=./...")
