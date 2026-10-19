@@ -942,15 +942,14 @@ var errTimeout = errors.New("timed out")
 // sh runs line with sh -c in dir, env added to its environment, in its own process group, killed past timeout.
 // tail is the last 60 lines of its output, which its error carries too.
 func sh(dir, line string, env ...string) (tail string, err error) {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-	return tee(ctx, nil, io.Discard, dir, line, env...)
+	tail, _, err = shOutput(dir, line, timeout, env...)
+	return tail, err
 }
 
 func shOutput(dir, line string, limit time.Duration, env ...string) (tail, output string, err error) {
 	ctx, cancel := context.WithTimeout(context.Background(), limit)
 	defer cancel()
-	return teeRun(ctx, nil, io.Discard, dir, line, true, limit, env...)
+	return teeRun(ctx, nil, io.Discard, dir, line, limit, env...)
 }
 
 // terminal is the run's screen when a terminal can be attached to it: run runs cmd on the attached one, if
@@ -962,12 +961,12 @@ type terminal interface {
 // tee is sh killed when ctx ends rather than past timeout, its output copied to w as it comes and, a line at a
 // time, to the screen of the run in dir. It runs on t's terminal when one is attached.
 func tee(ctx context.Context, t terminal, w io.Writer, dir, line string, env ...string) (tail string, err error) {
-	tail, _, err = teeRun(ctx, t, w, dir, line, false, timeout, env...)
+	tail, _, err = teeRun(ctx, t, w, dir, line, timeout, env...)
 	return tail, err
 }
 
-func teeRun(ctx context.Context, t terminal, w io.Writer, dir, line string, capture bool,
-	limit time.Duration, env ...string) (tail, output string, err error) {
+func teeRun(ctx context.Context, t terminal, w io.Writer, dir, line string, limit time.Duration,
+	env ...string) (tail, output string, err error) {
 	cmd := exec.CommandContext(ctx, "sh", "-c", line)
 	var out bytes.Buffer
 	live := liveIn(dir)
@@ -1005,8 +1004,5 @@ func teeRun(ctx context.Context, t terminal, w io.Writer, dir, line string, capt
 	if tail = strings.Join(lines[max(0, len(lines)-60):], "\n"); err != nil && tail != "" {
 		err = fmt.Errorf("%w\n%s", err, tail)
 	}
-	if capture {
-		output = out.String()
-	}
-	return tail, output, err
+	return tail, out.String(), err
 }
