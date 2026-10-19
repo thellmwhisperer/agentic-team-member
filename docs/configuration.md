@@ -114,7 +114,7 @@ your machine's file.
 | Key | Meaning |
 |-----|---------|
 | `install` | Installs dependencies in a fresh clone |
-| `test` | Runs the whole test suite. In this repository it is `scripts/test.sh`, which runs `go test -timeout 30m` with the tests of `internal/run` split by name over `ATM_TEST_SHARDS` processes (default 8) beside one process for every other package; `ATM_TEST_SHARDS=1` runs `go test -timeout 30m ./...` |
+| `test` | Runs the whole test suite. In this repository it is `scripts/test.sh`; see [contribution checks](../CONTRIBUTING.md#making-a-change) for its execution modes |
 | `e2e` | Optional command after `test` and before `typecheck`; absent or empty means no row. In this repository it is `scripts/cover-diff.sh`. A changed line inside a coverage block that no end-to-end run of the real `atm` binary executed fails; the check names those lines. Delete them, or write the end-to-end test that reaches them from a real `atm` command. Lines that no coverage block spans, `_test.go` files, files under `testdata/` and deletions do not fail it. It reads the diff and the coverage blocks, not the text of a line |
 | `typecheck` | Typechecks |
 | `lint` | Lints |
