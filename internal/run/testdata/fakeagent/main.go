@@ -19,6 +19,7 @@ import (
 )
 
 func main() {
+	ownSession()
 	os.Exit(fakeAgent(filepath.Base(os.Args[0])))
 }
 

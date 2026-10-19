@@ -14,12 +14,6 @@ import (
 	"time"
 )
 
-func init() {
-	if os.Getenv("FAKE_AGENT_SETSID") != "" {
-		_, _ = syscall.Setsid()
-	}
-}
-
 func TestRunKillsAChildHoldingTheAgentsStdout(t *testing.T) {
 	for _, tc := range []struct{ name, env, mode, why string }{
 		{name: "in the agent's group"},
