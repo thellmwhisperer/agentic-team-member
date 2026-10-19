@@ -14,8 +14,6 @@ import (
 	"time"
 )
 
-// init puts the fake agent in a session of its own when $FAKE_AGENT_SETSID is set, before it plays its mode:
-// macOS has no setsid command.
 func init() {
 	if os.Getenv("FAKE_AGENT_SETSID") != "" {
 		_, _ = syscall.Setsid()
