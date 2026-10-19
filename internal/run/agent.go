@@ -49,7 +49,7 @@ const tools = "Read,Edit,Write,Bash,Glob,Grep,Skill"
 type agent struct {
 	config.Agent
 	args, env []string
-	scratch   string // the call's scratch directory, outside the clone: the one path its calls may reach
+	scratch   string // the call's scratch directory: the one path outside the clone its calls may write to
 	root, dir string
 	follow    bool          // atm run --follow: the launching process watches the run itself
 	timeout   time.Duration // .atm.yaml's agent_timeout, 0 for agentTimeout
@@ -346,7 +346,7 @@ func (a agent) exec(
 	cmd.Dir, cmd.Stdin, cmd.WaitDelay = clone, strings.NewReader(stdin), time.Second
 	cmd.Env = append(slices.DeleteFunc(os.Environ(), func(kv string) bool {
 		return strings.HasPrefix(kv, "CLAUDE_CODE_CHILD_SESSION=") || // set, the agent's transcripts are off
-			a.scratch != "" && strings.HasPrefix(kv, "TMPDIR=") // the review's scratch is its TMPDIR
+			a.scratch != "" && strings.HasPrefix(kv, "TMPDIR=") // this call's scratch is its TMPDIR
 	}), a.env...)
 	if a.Harness == "claude" { // else a background command outlives its turn, and the run its report
 		cmd.Env = append(cmd.Env, "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1")
@@ -446,7 +446,7 @@ type stream struct {
 	final   string
 	model   string // first model named by this invocation's stream; never the requested model
 	clone   string
-	scratch string // the read-only review's directory outside the clone its calls may write in
+	scratch string // this call's directory outside the clone its calls may write in
 	reach   string
 	live    func(map[string]any)
 	pending string
@@ -1003,7 +1003,7 @@ func strs(input json.RawMessage, write bool) []string {
 // outside is the first of calls that writes outside clone, as its tool and its first 200 characters: a write or
 // edit tool, or a shell command, whose destination is an absolute path not under clone. Reading outside, and
 // writing inside by any means, pass. scratch, when given, is the one directory outside clone those calls may
-// write in: a read-only review's.
+// write in: a review's or worker's.
 func outside(calls []use, clone string, scratch ...string) string {
 	allowed := []string{filepath.ToSlash(clone)}
 	if len(scratch) > 0 && scratch[0] != "" {
