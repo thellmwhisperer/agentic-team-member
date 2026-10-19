@@ -1139,15 +1139,15 @@ func flagged(words []string, flags ...string) (values []string) {
 func editWrites(words []string) []string {
 	var operands []string
 	inPlace, script := false, false
+	scriptFlags := []string{"-e", "-f", "--expression", "--file"}
 	for i := 1; i < len(words); i++ {
 		w := words[i]
 		switch {
-		case w == "-e" || w == "-f" || w == "--expression" || w == "--file":
+		case slices.ContainsFunc(scriptFlags, func(f string) bool { return strings.HasPrefix(w, f) }):
 			script = true
-			i++
-		case strings.HasPrefix(w, "-e") || strings.HasPrefix(w, "-f") || strings.HasPrefix(w, "--expression=") ||
-			strings.HasPrefix(w, "--file="):
-			script = true
+			if slices.Contains(scriptFlags, w) { // the script is the next word
+				i++
+			}
 		case strings.HasPrefix(w, "-"):
 			inPlace = inPlace || strings.HasPrefix(w, "--in-place") || !strings.HasPrefix(w, "--") && strings.Contains(w, "i")
 		case w != "": // not BSD sed's empty -i suffix
