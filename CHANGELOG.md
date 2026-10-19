@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.1](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.1.0...v1.1.1) (2026-10-19)
+
+
+### Bug Fixes
+
+* The implementing agent gets its own scratch directory, as the scope review does ([12a970b](https://github.com/thellmwhisperer/agentic-team-member/commit/12a970b3f58467f8979ab27d673404243d5b7eef))
+
 ## [1.1.0](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.0.0...v1.1.0) (2026-10-19)
 
 
