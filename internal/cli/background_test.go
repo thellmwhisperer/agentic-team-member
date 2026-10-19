@@ -45,7 +45,9 @@ func TestMain(m *testing.M) {
 	if len(os.Args) > 1 && os.Args[1] == "serve" {
 		Execute()
 	}
-	_ = os.Setenv("ATM_FAKE_OWNER_PID", strconv.Itoa(os.Getpid()))
+	if os.Getenv("ATM_FAKE_HELLO_HANG") != "1" {
+		_ = os.Setenv("ATM_FAKE_OWNER_PID", strconv.Itoa(os.Getpid()))
+	}
 	os.Exit(m.Run())
 }
 
