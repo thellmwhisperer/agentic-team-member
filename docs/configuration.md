@@ -133,12 +133,13 @@ lint: golangci-lint run
 test_file: go test -run {tests} {dir}
 test_patterns: ["**/*_test.go"]
 docs_patterns: ["**/*.md", "docs/**"]
-delivery: 'no-mistakes axi run --intent "$ATM_INTENT"'
+delivery: 'no-mistakes init && no-mistakes axi run --intent "$ATM_INTENT"'
 ```
 
 The `delivery` line hands the branch to
-[no-mistakes](https://github.com/kunchenguid/no-mistakes). Without `--yes` it
-only reports: whoever launched the run answers each finding.
+[no-mistakes](https://github.com/kunchenguid/no-mistakes). Each run's clone is
+new, so the line sets up its gate with `no-mistakes init` first. Without
+`--yes` it only reports: whoever launched the run answers each finding.
 
 The `Go` workflow of this repository keeps, for every push to `main`, the
 end-to-end coverage profile of that commit as the artifact `cover-main-<sha>`
