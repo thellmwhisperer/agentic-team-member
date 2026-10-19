@@ -147,9 +147,7 @@ func (r *verdict) step(name string, fn func() (map[string]any, error)) {
 	start := time.Now()
 	n.StartedAt = start.UTC().Format("2006-01-02T15:04:05.000Z07:00")
 	r.emit(name, map[string]any{"state": "started"})
-	var ev map[string]any
-	var err error
-	ev, err = fn()
+	ev, err := fn()
 	n.DurationMS = time.Since(start).Milliseconds()
 	if ev == nil {
 		ev = map[string]any{}
