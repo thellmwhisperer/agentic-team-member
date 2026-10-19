@@ -7,3 +7,7 @@ test_file: go test -timeout 30m -run {tests} {dir}
 test_patterns: ["**/*_test.go", "tests/**"]
 docs_patterns: ["**/*.md", "docs/**"]
 delivery: 'no-mistakes axi run --intent "$ATM_INTENT"'
+# Each agent call may run this long: the full suites of this repository take 13 min and the worker runs them twice.
+agent_timeout: 60m
+# Each checks command may run this long: scripts/test.sh alone takes 13 min; the default is 10m.
+check_timeout: 20m
