@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.0](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.2.3...v1.3.0) (2026-10-20)
+
+
+### Features
+
+* The output event names the command that printed the line (child A of [#480](https://github.com/thellmwhisperer/agentic-team-member/issues/480)) ([2891833](https://github.com/thellmwhisperer/agentic-team-member/commit/28918339f33c40e8fd290946060bc481c34c4671))
+
 ## [1.2.3](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.2.2...v1.2.3) (2026-10-20)
 
 
