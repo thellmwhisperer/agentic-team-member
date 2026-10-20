@@ -25,7 +25,7 @@ it.
    [delivery gate](how-a-run-flows.md#delivery).
 4. **The gate.** The green branch goes through the
    [configured delivery line](configuration.md#atmyaml).
-   Review, test, lint and document run as fenced model steps. The reviewer
+   Review, targeted test, lint and document run as fenced model steps. The reviewer
    only reports (`auto_fix.review: 0`); whoever launched the run answers each
    finding, fixing real defects and dismissing guesses.
 5. **The merge.** `auto-merge.yml` arms `gh pr merge --auto --rebase` after
@@ -39,9 +39,10 @@ it.
 |-----------|-------|--------------|
 | `go.yml` | GitHub Actions | Change-filtered tests and lint, summarised in the required **Go checks**; see [CI](../CONTRIBUTING.md#ci) |
 | `auto-merge.yml` + `scripts/arm-auto-merge.sh` | GitHub Actions | Manages `review-required` and `review-completed`, honours `pr-discarded`, and arms auto-merge with `AUTO_MERGE_TOKEN`, a fine-grained token for this repository only. The workflow token is never used: merges made with it start no workflow and close no issue |
-| `scripts/test.sh`, `scripts/lint.sh` | local and the gate | Contribution checks; see [Contributing](../CONTRIBUTING.md) |
+| `scripts/test.sh` | local and ATM's Checks | Contribution tests; see [Contributing](../CONTRIBUTING.md#making-a-change) |
+| `scripts/lint.sh` | local, ATM's Checks and the gate | Contribution lint; see [Contributing](../CONTRIBUTING.md#making-a-change) |
 | `.githooks/pre-commit` | local, after `git config core.hooksPath .githooks` | The same slopslint check |
-| `.no-mistakes.yaml` | no-mistakes | Runs the contribution checks, tells the reviewer that only a defect against the issue's criteria or the checks is a finding, and allows one re-run of a CI check GitHub cancelled without a verdict |
+| `.no-mistakes.yaml` | no-mistakes | Configures lint and targeted review tests without a full-suite test command, tells the reviewer that only a defect against the issue's criteria or the checks is a finding, and allows one re-run of a CI check GitHub cancelled without a verdict |
 | `.slop/config.yml`, `.slop/ceilings.yml` | slopslint | Two duplication scopes, production and tests, under ceilings that may go down and never up |
 | `.slop/tombstones/` | slopslint | One record per slop incident, with its family and evidence |
 

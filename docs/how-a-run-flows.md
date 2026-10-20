@@ -53,12 +53,14 @@ contents are copied. If the cache is absent, cloning proceeds without creating
 
 The contract, `brief.md` in the run's
 directory, tells the agent to read `AGENTS.md` if there is one, then gives the
-issue, the acceptance criteria of its task type, the commands from
-`.atm.yaml`, the style, what is forbidden and the JSON report it must end
-with. It limits reading, searching and running to the clone, with access to
-the worker's scratch directory for files set aside. It forbids network access
-except package-manager dependency installation, and forbids access to the
-surrounding repository, the rest of `.atm/runs/` and other clones.
+issue, the acceptance criteria of its task type, and VERIFY: the red test
+through `test_file`, the tests of each changed package, then the configured
+`typecheck` and `lint`. The configured `test` suite runs later in Checks.
+The contract also gives the style, what is forbidden and the JSON report it
+must end with. It limits reading, searching and running to the clone, with
+access to the worker's scratch directory for files set aside. It forbids
+network access except package-manager dependency installation, and forbids
+access to the surrounding repository, the rest of `.atm/runs/` and other clones.
 
 ## Agent
 
