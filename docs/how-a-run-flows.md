@@ -150,9 +150,9 @@ by that text. If the second report validates, the step uses it.
 If the worker's second report still fails, the Agent step passes and records
 `"report": "missing"`. The unit goes to Checks with no test file: `fix`,
 `hotfix`, `feature`, `greenfield` and `tests` skip their proof, but the unit
-must have changed something, no test file the base has may get shorter or go,
-and a `tests` unit may change only test and doc files. The other types prove
-as usual. The slop detector fails with the second error instead.
+must have changed something, and a `tests` unit may change only test and doc
+files. The other types prove as usual. The slop detector fails with the second
+error instead.
 
 The agent's `.jsonl` log records a `report_rejected` event with the exact
 error in `error`. Both
@@ -215,11 +215,6 @@ changes. A changed tracked file voids the verdict, and a test that hangs fails
 it. Known limit of the `fix` proof: where added lines cannot run alone, as in
 a compiled language that needs the base's declarations, that trial fails and
 the test passes it.
-
-Every type then fails, naming the old path, when a test file the base has is
-deleted or has fewer lines. A shorter file with the same line count is allowed.
-If Git detects a rename, ATM checks the staged file at its new path, so moving
-an unchanged or longer test is allowed.
 
 ## Unit commit
 

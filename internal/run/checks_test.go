@@ -362,23 +362,20 @@ var proofCases = []struct {
 	{name: "docs that touch code", typ: "docs", work: "echo doc > README.md; echo fixed > a.txt", why: "a.txt"},
 	{name: "chore", typ: "chore"},
 	{name: "fix that deletes a test", typ: "fix", atm: atmSet(atmYAML, "test", suite),
-		work: "echo fixed > a.txt; rm a_test.sh" + reportTest("regression_test.sh"), why: shrunkTest},
-	{name: "feature that shortens a test", typ: "feature", why: shrunkTest,
+		work: "echo fixed > a.txt; rm a_test.sh" + reportTest("regression_test.sh")},
+	{name: "feature that shortens a test", typ: "feature",
 		work: "echo fixed > a.txt; : > a_test.sh" + reportTest("b_test.sh")},
-	{name: "tests that shorten a test", typ: "tests", why: shrunkTest,
+	{name: "tests that shorten a test", typ: "tests",
 		work: ": > a_test.sh; echo 'grep -q broken a.txt' > b_test.sh; " + reportJSON("b_test.sh")},
-	{name: "chore that deletes a test", typ: "chore", atm: atmSet(atmYAML, "test", "true"), work: "rm a_test.sh",
-		why: shrunkTest},
+	{name: "chore that deletes a test", typ: "chore", atm: atmSet(atmYAML, "test", "true"), work: "rm a_test.sh"},
 	{name: "fix that adds a line to a test", typ: "fix",
 		work: "echo fixed > a.txt; echo '! grep -q broken a.txt' >> a_test.sh"},
 	{name: "fix that shortens a string in a test", typ: "fix", hooks: hooks,
 		work: fixWork + "; sed 's/\"atm unit 1: three\"/\"fix: three\"/' hooks_test.sh > h; mv h hooks_test.sh"},
 	{name: "fix that removes a trailing blank test line", typ: "fix", hooks: hooks + "\n",
-		work: fixWork + "; sed '$d' hooks_test.sh > h; mv h hooks_test.sh",
-		why:  "the base's test hooks_test.sh is gone or shorter"},
+		work: fixWork + "; sed '$d' hooks_test.sh > h; mv h hooks_test.sh"},
 	{name: "chore that moves a test", typ: "chore", hooks: hooks, work: moveHooks("")},
-	{name: "chore that moves a test and drops a function", typ: "chore", hooks: hooks, work: moveHooks("/two/d"),
-		why: "the base's test hooks_test.sh is gone or shorter"},
+	{name: "chore that moves a test and drops a function", typ: "chore", hooks: hooks, work: moveHooks("/two/d")},
 }
 
 // executedBinary is a program that runs but whose code signature, like slopslint's, does not match a page it
@@ -460,9 +457,6 @@ func recordedRunner(output string) string {
 func recordedRunnerWhenFixed(output string) string {
 	return "if grep -q fixed a.txt; then exit 0; fi\n" + recordedRunner(output)
 }
-
-// shrunkTest names the failure of work that deletes or shortens a_test.sh, a test on the base.
-const shrunkTest = "the base's test a_test.sh is gone or shorter"
 
 // hooks is a test on the base, as a Go test file would be: a package line, then its functions.
 const hooks = "# package cli\none() { true; }\ntwo() { true; }\n" +
@@ -790,7 +784,8 @@ var auditCases = []struct {
 	{name: "a declared command commits during checks",
 		atm: atmSet(atmYAML, "lint", "git commit --allow-empty -qm lint"), why: "the commands made commits", node: "checks"},
 	{name: "deletes an existing test", atm: atmSet(atmYAML, "test", suite),
-		work: "echo fixed > a.txt; rm a_test.sh" + reportTest("regression_test.sh"), why: shrunkTest, node: "checks"},
+		work:      "echo fixed > a.txt; rm a_test.sh" + reportTest("regression_test.sh"),
+		delivered: unit1 + initial + ".atm/fake-report.json\n" + placed + ".atm.yaml\na.txt\nregression_test.sh\nfixed\n"},
 	{name: "red on a new symbol in an old file", base: map[string]string{"lib.sh": lib},
 		work: "echo '" + helper + "' >> lib.sh" + testThrough("helper"), why: "depends on nothing the base had",
 		node: "checks"},
