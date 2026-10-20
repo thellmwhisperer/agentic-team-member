@@ -16,8 +16,10 @@ set before a run is in [Configuration](configuration.md).
 event on standard output until the run ends. The flag goes before or after
 the issue and works on a pipe or a terminal. It also works with `--resume`.
 The events are the run's own step starts, results and live activity, with
-`step` and `ts`, plus fields specific to each event. Delivery output appears
-as `output` events without interpreting the command's text.
+`step` and `ts`, plus fields specific to each event. Output from a clone or
+Checks command has `check` naming its row, such as `install`, `red/green`,
+`test`, `typecheck` or `lint`. Delivery output has `check: "delivery"`. Both
+appear as `output` events without interpreting the command's text.
 
 The command exits with the run's code: 0 for success, 1 for agent or checks
 failure, 4 for delivery failure, and 2 for other failures. Launch errors go
