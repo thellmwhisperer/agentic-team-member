@@ -149,7 +149,7 @@ func repo(t *testing.T, origin, atm string) string {
 		t.Fatal(err)
 	}
 	gitT(t, dir, "remote", "add", "origin", origin)
-	gitT(t, dir, "symbolic-ref", "refs/remotes/origin/main", "refs/heads/main")
+	localFetch(t, dir, origin, dir)
 	if atm != "" {
 		if err := os.WriteFile(filepath.Join(dir, ".atm.yaml"), []byte(atm), 0o600); err != nil {
 			t.Fatal(err)
@@ -158,6 +158,7 @@ func repo(t *testing.T, origin, atm string) string {
 		gitT(t, dir, "add", ".atm.yaml")
 		gitT(t, dir, "commit", "-q", "--amend", "--no-edit")
 	}
+	gitT(t, dir, "update-ref", "refs/remotes/origin/main", "main")
 	t.Chdir(dir)
 	return dir
 }
@@ -409,4 +410,33 @@ func Run(label string, args []string, out, summary io.Writer) error {
 		return err
 	}
 	return runAt(label, *base, args, out, summary)
+}
+
+func localFetch(t *testing.T, root, origin, source string) {
+	t.Helper()
+	gitT(t, root, "config", "atm.test-origin", origin)
+	gitT(t, root, "config", "atm.test-fetch", source)
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	quoted := "'" + strings.ReplaceAll(realGit, "'", "'\"'\"'") + "'"
+	script := `#!/bin/sh
+real=` + quoted + `
+if [ "$1" = fetch ] && [ "$2" = -q ] && [ "$3" = origin ]; then
+    origin=$("$real" config --get remote.origin.url)
+    mapped=$("$real" config --get atm.test-origin)
+    if [ "$origin" = "$mapped" ]; then
+        source=$("$real" config --get atm.test-fetch)
+        shift 3
+        exec "$real" fetch -q "$source" "$@"
+    fi
+fi
+exec "$real" "$@"
+`
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "git"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }

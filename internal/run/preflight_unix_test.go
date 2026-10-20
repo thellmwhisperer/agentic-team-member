@@ -23,7 +23,8 @@ func TestPreflight(t *testing.T) {
 		"base green": preflightBaseGreen, "worker files": preflightWorkerFiles, "delivery": preflightDelivery,
 		"help lists the checks": preflightHelpLists, "resume": preflightResume,
 		"fetched base": preflightFetchedBase, "clone relative resources": preflightRelativeResources,
-		"pi resources": preflightPiResources, "shell word": preflightShellWord} {
+		"pi resources": preflightPiResources, "shell word": preflightShellWord,
+		"fetch fails": preflightFetchFails, "resume resource base": preflightResumeResources} {
 		t.Run(name, func(t *testing.T) { check(t, bin) })
 	}
 }
@@ -261,26 +262,33 @@ func preflightFinished(t *testing.T, bin, root string, args ...string) Outcome {
 }
 
 func preflightFetchedBase(t *testing.T, bin string) {
-	for _, name := range []string{"config", "CI", "clone and background config", "resume"} {
+	for _, name := range []string{"config", "CI", "clone and background config", "custom branch", "resume"} {
 		t.Run(name, func(t *testing.T) {
 			root := repo(t, "local", atmYAML)
 			old := gitT(t, root, "rev-parse", "main")
 			remote := filepath.Join(t.TempDir(), "remote")
 			gitT(t, root, "clone", "-q", root, remote)
 			gitT(t, root, "remote", "set-url", "origin", remote)
-			gitT(t, root, "symbolic-ref", "--delete", "refs/remotes/origin/main")
+			if got := gitT(t, root, "rev-parse", "origin/main"); got != old {
+				t.Fatalf("initial remote head %s, want %s", got, old)
+			}
 			config := atmYAML
 			switch name {
 			case "config":
 				config = strings.Replace(atmYAML, "delivery: \"\"\n", "", 1)
-			case "clone and background config", "resume":
+			case "clone and background config", "custom branch", "resume":
 				config = atmSet(atmYAML, "install", "git rev-parse HEAD > "+filepath.Join(root, "observed-head")+"; exit 37")
 			}
 			writeConfig(t, remote, config)
 			gitT(t, remote, "add", ".atm.yaml")
 			gitT(t, remote, "commit", "-q", "--allow-empty", "-m", "remote base")
 			latest := gitT(t, remote, "rev-parse", "main")
-			gitT(t, root, "fetch", "-q", "origin")
+			if name == "custom branch" {
+				gitT(t, remote, "branch", "release", latest)
+			}
+			if got := gitT(t, root, "rev-parse", "origin/main"); got != old {
+				t.Fatalf("fixture fetched %s before launch", got)
+			}
 			path := issueFile(t, issue)
 			switch name {
 			case "config":
@@ -288,6 +296,7 @@ func preflightFetchedBase(t *testing.T, bin string) {
 				assertStopped(t, root, out, code, "config", latest+":.atm.yaml lacks delivery")
 			case "CI":
 				gitT(t, root, "remote", "set-url", "origin", "git@github.com:owner/repo.git")
+				localFetch(t, root, "git@github.com:owner/repo.git", remote)
 				log := fakeGH(t, `[{"workflowName":"Go","conclusion":"failure"}]`, false)
 				out, code := preflightLaunch(t, bin, root, path)
 				assertStopped(t, root, out, code, "base green", latest)
@@ -297,6 +306,9 @@ func preflightFetchedBase(t *testing.T, bin string) {
 				}
 			default:
 				args := []string{path}
+				if name == "custom branch" {
+					args = append([]string{"--base-ref", "release"}, args...)
+				}
 				want := latest
 				if name == "resume" {
 					want = old
@@ -398,4 +410,93 @@ func preflightShellWord(t *testing.T, bin string) {
 			t.Fatalf("delivery executed during preflight: %v", err)
 		}
 	})
+}
+
+func preflightFetchFails(t *testing.T, bin string) {
+	for _, resume := range []bool{false, true} {
+		t.Run(fmt.Sprintf("resume=%t", resume), func(t *testing.T) {
+			root := repo(t, "local", atmYAML)
+			gitT(t, root, "remote", "set-url", "origin", filepath.Join(t.TempDir(), "missing-remote"))
+			args := []string{issueFile(t, issue)}
+			if resume {
+				keepResumable(t, filepath.Join(root, ".atm", "runs", "failed-1"), resumePoint{
+					Issue: "7", BaseRef: "main", Base: gitT(t, root, "rev-parse", "main"), Unit: 1,
+					Original: &Issue{Title: "Retry on timeout", Type: "fix", Text: issue}})
+				args = []string{"--resume", "failed-1"}
+			}
+			out, code := preflightLaunch(t, bin, root, args...)
+			if !resume {
+				assertStopped(t, root, out, code, "config", "git fetch")
+			}
+			entries, _ := os.ReadDir(filepath.Join(root, ".atm", "runs"))
+			_, cloned := os.Stat(filepath.Join(root, ".atm", "clones"))
+			_, served := os.Stat(filepath.Join(root, ".atm", "serve.log"))
+			wantRuns := 0
+			if resume {
+				wantRuns = 1
+			}
+			if code != 2 || !strings.Contains(out, "preflight: config: git fetch") || len(entries) != wantRuns || cloned == nil || served == nil {
+				t.Fatalf("fetch failure should stop launch: exit %d, runs %d, %s", code, len(entries), out)
+			}
+		})
+	}
+}
+
+func preflightResumeResources(t *testing.T, bin string) {
+	for _, flag := range []string{"--settings", "--skill"} {
+		for _, equals := range []bool{false, true} {
+			for _, saved := range []bool{false, true} {
+				for _, present := range []bool{false, true} {
+					t.Run(fmt.Sprintf("%s/equals=%t/saved=%t/present=%t", flag, equals, saved, present), func(t *testing.T) {
+						root := repo(t, "local", atmSet(atmYAML, "delivery", "no-such-delivery"))
+						resource := filepath.Join(root, "worker.json")
+						if present {
+							if err := os.WriteFile(resource, []byte("{}"), 0o600); err != nil {
+								t.Fatal(err)
+							}
+							gitT(t, root, "add", "worker.json")
+							gitT(t, root, "commit", "-q", "-m", "saved resource")
+						}
+						base := gitT(t, root, "rev-parse", "main")
+						if present {
+							gitT(t, root, "rm", "-q", "worker.json")
+						} else {
+							if err := os.WriteFile(resource, []byte("{}"), 0o600); err != nil {
+								t.Fatal(err)
+							}
+							gitT(t, root, "add", "worker.json")
+						}
+						gitT(t, root, "commit", "-q", "-m", "change current resource")
+						resourceArgs := []string{flag, "worker.json"}
+						if equals {
+							resourceArgs = []string{flag + "=worker.json"}
+						}
+						p := resumePoint{Issue: "7", BaseRef: "main", Base: base, Unit: 1,
+							Original: &Issue{Title: "Retry on timeout", Type: "fix", Text: issue}}
+						args := []string{"--resume", "failed-1"}
+						if saved {
+							p.Args = resourceArgs
+						} else {
+							for _, arg := range resourceArgs {
+								args = append(args, "--harness-arg", arg)
+							}
+						}
+						runs := filepath.Join(root, ".atm", "runs")
+						keepResumable(t, filepath.Join(runs, "failed-1"), p)
+						out, code := preflightLaunch(t, bin, root, args...)
+						want := "preflight: worker files: " + flag + ":"
+						if present {
+							want = "preflight: delivery:"
+						}
+						entries, _ := os.ReadDir(runs)
+						_, cloned := os.Stat(filepath.Join(root, ".atm", "clones"))
+						_, served := os.Stat(filepath.Join(root, ".atm", "serve.log"))
+						if code != 2 || !strings.Contains(out, want) || len(entries) != 1 || cloned == nil || served == nil {
+							t.Fatalf("resource must match saved base %s: exit %d, %s", base, code, out)
+						}
+					})
+				}
+			}
+		}
+	}
 }

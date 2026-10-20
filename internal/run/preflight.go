@@ -1,6 +1,7 @@
 package run
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -18,7 +19,7 @@ with no clone, no run directory and no agent:
   config        .atm.yaml as the base ref has it, which the run uses; a working tree's that differs gets a warning
   base green    the latest completed CI run of each workflow on the base ref's head passed, as GitHub says;
                 skipped when origin is not on GitHub
-  worker files  each file a --harness-arg flag names, as --settings or --skill, exists in the base tree or is an absolute readable file
+  worker files  each file a --harness-arg flag names, as --settings or --skill, exists in the base tree (saved base on resume) or is an absolute readable file
   delivery      the first word of delivery is a command sh finds: on PATH, or sh's own, as if or cd`
 
 // fileFlags are the harness flags whose value is a file the agent reads. A value that starts with { is inline JSON.
@@ -26,7 +27,7 @@ var fileFlags = []string{"--settings", "--skill"}
 
 // preflight checks, in the repository at root, what a run from base ref ref stands on, its agent a with the
 // harness arguments args: the first check that fails is the error, which names it.
-func preflight(root, ref string, a agent, args []string) (string, error) {
+func preflight(root, ref, workerBase string, a agent, args []string) (string, error) {
 	var c config.Config
 	var sha string
 	for _, check := range []struct {
@@ -35,6 +36,9 @@ func preflight(root, ref string, a agent, args []string) (string, error) {
 	}{
 		{"config", func() error {
 			home, err := os.UserHomeDir()
+			if err == nil {
+				_, err = git(root, "fetch", "-q", "origin", "+refs/heads/"+ref+":refs/remotes/origin/"+ref)
+			}
 			if err == nil {
 				sha, err = git(root, "rev-parse", "--verify", "refs/remotes/origin/"+ref+"^{commit}")
 			}
@@ -49,7 +53,7 @@ func preflight(root, ref string, a agent, args []string) (string, error) {
 			return err
 		}},
 		{"base green", func() error { return baseGreen(sha) }},
-		{"worker files", func() error { return workerFiles(root, sha, args) }},
+		{"worker files", func() error { return workerFiles(root, cmp.Or(workerBase, sha), args) }},
 		{"delivery", func() error { // sh runs it: its first word is a command sh finds, on PATH or its own
 			word := strings.TrimLeftFunc(c.Delivery, unicode.IsSpace)
 			var quote rune
