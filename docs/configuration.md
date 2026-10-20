@@ -134,13 +134,13 @@ lint: golangci-lint run
 test_file: go test -count=1 -run {tests} {dir}
 test_patterns: ["**/*_test.go"]
 docs_patterns: ["**/*.md", "docs/**"]
-delivery: 'no-mistakes init && no-mistakes axi run --intent "$ATM_INTENT"'
+delivery: ''
 ```
 
-The `delivery` line hands the branch to
-[no-mistakes](https://github.com/kunchenguid/no-mistakes). Each run's clone is
-new, so the line sets up its gate with `no-mistakes init` first. Without
-`--yes` it only reports: whoever launched the run answers each finding.
+Set `delivery` to the shell command that handles the branch, or leave it empty
+to skip delivery. This repository's [configured command](../.atm.yaml) hands
+the branch to [no-mistakes](https://github.com/kunchenguid/no-mistakes); see
+[the gate](self-maintenance.md#the-loop) for its completion and recovery rules.
 
 The `Go` workflow of this repository keeps, for every push to `main`, the
 end-to-end coverage profile of that commit as the artifact `cover-main-<sha>`
@@ -336,7 +336,7 @@ ignores.
 
 | Path | Holds | Kept |
 |------|-------|------|
-| `.atm/runs/<label>/` | `report.json`, the briefs, the agent logs, the worker's scratch directory, each review's scratch directory, `follow-ups.json`, `delivery-output.txt`, and `resume/` when the run is resumable | Always |
+| `.atm/runs/<label>/` | `report.json`, the briefs, the agent logs, the worker's scratch directory, each review's scratch directory, `follow-ups.json`, `delivery-output.txt`, this repository's gate files (`delivery.nonce`, `delivery.out` and `delivery.run` when bound), and `resume/` when the run is resumable | Always |
 | `.atm/clones/atm-run-<timestamp>/` | The run's isolated clone | Removed after the run when no longer needed and cleanup can verify its identity |
 | `.atm/runs.jsonl` | The last state of each retained run, so `atm runs` survives the background process | Every run going and the newest 200 that ended |
 | `.atm/atm.sock`, `.atm/atm.lock`, `.atm/serve.log` | The background process | While it runs; the log stays |
