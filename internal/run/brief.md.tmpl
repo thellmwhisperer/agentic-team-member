@@ -59,7 +59,8 @@ Task type: {{.Type}}. The issue, verbatim:
 3. Then every command in VERIFY passes.
 
 ## VERIFY
-- Test: {{cmd .Test}}
+- Test: the red test, through {{cmd .TestFile}}, and the tests of each package you changed; not the whole
+  suite, which ATM runs after you.
 - Typecheck: {{cmd .Typecheck}}
 - Lint: {{cmd .Lint}}
 
