@@ -118,7 +118,7 @@ your machine's file.
 | `e2e` | Optional command after `test` and before `typecheck`; absent or empty means no row. In this repository it is `scripts/cover-diff.sh`. A changed line inside a coverage block that no end-to-end run of the real `atm` binary executed fails; the check names those lines. Delete them, or write the end-to-end test that reaches them from a real `atm` command. Lines that no coverage block spans, `_test.go` files, files under `testdata/` and deletions do not fail it. It reads the diff and the coverage blocks, not the text of a line |
 | `typecheck` | Typechecks |
 | `lint` | Lints |
-| `test_file` | Runs a follow-up test: `{file}` is its path, `{dir}` its directory as `./dir`. When not empty, it must contain `{file}` or `{dir}`. For Go, `{tests}` expands to `^(TestA|TestB)$` for the Go tests defined in the reported file, for `go test -run`. A file with no Go tests fails. This command does not run the worker's reported test separately from the configured suite. |
+| `test_file` | Legacy configuration key, required but not executed. An empty value is allowed; a non-empty value must contain `{file}` or `{dir}`. Tests run through the configured `test` suite. |
 | `test_patterns` | Globs of the test files |
 | `docs_patterns` | Globs of the documentation files |
 | `delivery` | Shell line that takes the run's branch from its clone, for example to a PR. Empty skips delivery |

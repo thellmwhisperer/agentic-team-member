@@ -6,9 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"go/ast"
-	"go/parser"
-	"go/token"
 	"io"
 	"io/fs"
 	"os"
@@ -19,8 +16,6 @@ import (
 	"slices"
 	"strings"
 	"time"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/thellmwhisperer/agentic-team-member/internal/config"
 )
@@ -466,53 +461,6 @@ func store(clone, name string) error {
 		err = os.WriteFile(filepath.Join(info, "attributes"), []byte("* -text\n"), 0o600)
 	}
 	return err
-}
-
-// testLine is test_file, tmpl, for test, a path in clone. {tests} is ^(TestA|TestB)$, the Go tests test defines.
-func testLine(clone, tmpl, test string) (string, error) {
-	switch {
-	case tmpl == "":
-		return "", errors.New("test_file is empty in .atm.yaml: follow-ups need a test command")
-	case test == "" || !filepath.IsLocal(test):
-		return "", fmt.Errorf("the report's test_file %q is not a path in the clone", test)
-	}
-	var tests []string
-	if strings.Contains(tmpl, "{tests}") {
-		f, parseErr := parser.ParseFile(token.NewFileSet(), filepath.Join(clone, filepath.FromSlash(test)), nil, 0)
-		if f == nil {
-			return "", parseErr
-		}
-		for _, decl := range f.Decls {
-			fn, ok := decl.(*ast.FuncDecl)
-			if !ok || fn.Recv != nil || !isGoTest(fn) {
-				continue
-			}
-			tests = append(tests, fn.Name.Name)
-		}
-		if len(tests) == 0 {
-			if parseErr == nil {
-				return "", fmt.Errorf("the report's test file %s defines no Go tests", test)
-			}
-			tests = []string{"."}
-		}
-	}
-	quote := func(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
-	return strings.NewReplacer("{file}", quote(test), "{dir}", quote("./"+path.Dir(test)),
-		"{tests}", quote("^("+strings.Join(tests, "|")+")$")).Replace(tmpl), nil
-}
-
-func isGoTest(fn *ast.FuncDecl) bool {
-	name := fn.Name.Name
-	if name == "TestMain" || !strings.HasPrefix(name, "Test") {
-		return false
-	}
-	if suffix := strings.TrimPrefix(name, "Test"); suffix != "" {
-		r, _ := utf8.DecodeRuneInString(suffix)
-		if unicode.IsLower(r) {
-			return false
-		}
-	}
-	return true
 }
 
 // first is the first path that matches one of globs, when want, or matches none, when not; "" when none is.
