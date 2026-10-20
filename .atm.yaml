@@ -6,6 +6,17 @@ lint: scripts/lint.sh
 test_file: go test -timeout 30m -run {tests} {dir}
 test_patterns: ["**/*_test.go", "tests/**"]
 docs_patterns: ["**/*.md", "docs/**"]
-delivery: 'no-mistakes init && no-mistakes axi run --intent "$ATM_INTENT"'
+# axi run reattaches while its output ends with the bounded-hold lines: an elapsed wait is not the gate's result.
+delivery: |
+  no-mistakes init || exit
+  o=$(mktemp) || exit
+  while
+    { no-mistakes axi run --intent "$ATM_INTENT" 2>&1; echo $? > "$o.rc"; } | tee "$o" >&2
+    rc=$(cat "$o.rc")
+    [ "$rc" = 1 ] && grep . "$o" | tail -n 2 | tr '\n' ' ' |
+      grep -q '^error: wait of [^ ]* elapsed while driving the run help\[3\]: This bounded hold ended;'
+  do :; done
+  rm -f "$o" "$o.rc"
+  exit "$rc"
 agent_timeout: 60m
 check_timeout: 20m
