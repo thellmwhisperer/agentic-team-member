@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.1](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.2.0...v1.2.1) (2026-10-20)
+
+
+### Bug Fixes
+
+* Runs in one atm serve race on wordText's shared shell config ([2dfa462](https://github.com/thellmwhisperer/agentic-team-member/commit/2dfa462fb8bedd75896aa15a49d96b8a4ed6ea2d))
+
 ## [1.2.0](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.1.3...v1.2.0) (2026-10-20)
 
 
