@@ -5,6 +5,7 @@ package run
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,9 +22,8 @@ func TestRunWithoutTypesOrRedGreen(t *testing.T) {
 			runWithoutType(t, typ)
 		})
 	}
-	for _, history := range []string{"intact"} {
-		t.Run("suite failure and legacy resume/"+history, func(t *testing.T) { resumeWithoutType(t, history) })
-	}
+	t.Run("suite failure and legacy resume", resumeWithoutType)
+	t.Run("suite rejects ponytail cut", suiteRejectsPonytailCut)
 	for _, kind := range []string{"absolute", "parent", "symlink"} {
 		t.Run("external test_file/"+kind, func(t *testing.T) {
 			externalReportedTest(t, kind)
@@ -86,7 +86,7 @@ func runWithoutType(t *testing.T, typ string) {
 	}
 }
 
-func resumeWithoutType(t *testing.T, history string) {
+func resumeWithoutType(t *testing.T) {
 	t.Helper()
 	trace, ready := filepath.Join(t.TempDir(), "commands"), filepath.Join(t.TempDir(), "ready")
 	t.Setenv("ATM_TEST_TRACE", trace)
@@ -112,18 +112,24 @@ func resumeWithoutType(t *testing.T, history string) {
 		t.Fatalf("failed suite delivered or ran proof: %q, %v", b, err)
 	}
 	saved := filepath.Join(filepath.Dir(runs[0].Report), "resume", "resume.json")
-	want, reason := legacyResume(t, saved, history)
+	var legacy map[string]any
+	b, err = os.ReadFile(saved)
+	if err != nil || json.Unmarshal(b, &legacy) != nil {
+		t.Fatalf("saved run: %s, %v", b, err)
+	}
+	legacy["original"].(map[string]any)["Type"] = "fix"
+	legacy["proofs"] = [][4]string{{legacy["base"].(string), "a_test.sh", "unknown",
+		"grep -q fixed a.txt && ! grep -q broken a.txt\n"}}
+	b, _ = json.Marshal(legacy)
+	writeFixture(t, saved, string(b))
 	writeFixture(t, ready, "ready")
 	out, err = exec.Command(bin, "run", "--follow", "--resume", runs[0].Run).CombinedOutput()
 	if err != nil {
 		t.Fatalf("legacy resume: %v, %s", err, out)
 	}
 	b, err = os.ReadFile(trace)
-	if err != nil || string(b) != want {
+	if err != nil || string(b) != "test\ntest\ntest\ndelivery\n" {
 		t.Fatalf("resume ran type proof: %q, %v", b, err)
-	}
-	if reason != "" && !bytes.Contains(out, []byte(reason)) {
-		t.Fatalf("history guard not enforced: %s", out)
 	}
 	if bytes.Contains(out, []byte(`"red":`)) || bytes.Contains(out, []byte(`"green":`)) {
 		t.Fatalf("legacy trial restored: %s", out)
@@ -204,28 +210,33 @@ func serveUntyped(t *testing.T, bin, top string) {
 	t.Cleanup(func() { endServe(bin, top, server) })
 }
 
-func legacyResume(t *testing.T, saved, history string) (string, string) {
-	t.Helper()
-	var legacy map[string]any
-	b, err := os.ReadFile(saved)
-	if err != nil || json.Unmarshal(b, &legacy) != nil {
-		t.Fatalf("saved run: %s, %v", b, err)
+func suiteRejectsPonytailCut(t *testing.T) {
+	got := filepath.Join(t.TempDir(), "delivered")
+	t.Setenv("ATM_TEST_OUT", got)
+	cfg := atmSet(atmSet(atmYAML, "test", suite), "delivery",
+		`{ git log --format=%s; cat source.txt; } > "$ATM_TEST_OUT"`)
+	top, bin := untypedRepo(t, cfg)
+	commitFiles(t, top, "", map[string]string{"source.txt": "broken\n"})
+	t.Setenv("FAKE_AGENT_WORK", sourceWork)
+	t.Setenv("FAKE_PONYTAIL_WORK", "echo broken > source.txt")
+	t.Setenv("FAKE_PONYTAIL_REPORT", strings.Replace(cut, "a.txt", "source.txt", 1))
+	serveUntyped(t, bin, top)
+	out, err := exec.Command(bin, "run", "--follow", issueFile(t, followUpIssue)).CombinedOutput()
+	if err != nil {
+		t.Fatalf("cut rejection failed: %v\n%s", err, out)
 	}
-	legacy["original"].(map[string]any)["Type"] = "fix"
-	test, content := "a_test.sh", "grep -q fixed a.txt && ! grep -q broken a.txt\n"
-	want, reason := "test\ntest\ntest\ndelivery\n", ""
-	switch history {
-	case "changed":
-		content, want, reason = "old test content", "test\ntest\ndelivery\n", "changed since it was recorded"
-	case "outside":
-		test = filepath.Join(t.TempDir(), "outside_test.sh")
-		writeFixture(t, test, "external sentinel\n")
-		want, reason = "test\ntest\ndelivery\n", "test_file"
+	runs, err := RecordedRuns(top)
+	if err != nil || len(runs) != 1 {
+		t.Fatalf("runs: %v, %v; output: %s", runs, err, out)
 	}
-	legacy["proofs"] = [][4]string{{legacy["base"].(string), test, "unknown", content}}
-	b, _ = json.Marshal(legacy)
-	writeFixture(t, saved, string(b))
-	return want, reason
+	p := reportNode(t, readReport(t, runs[0].Report), "ponytail")
+	if p["kept"] != false || !strings.Contains(fmt.Sprint(p["reason"]), "test:") {
+		t.Fatalf("suite did not reject the cut: %v", p)
+	}
+	b, err := os.ReadFile(got)
+	if err != nil || string(b) != "chore: Retry on timeout\nbase\ninit\nfixed\nextra\nmore\n" {
+		t.Fatalf("delivery did not restore the single unit: %q, %v", b, err)
+	}
 }
 
 func emptyUntypedWork(t *testing.T) {

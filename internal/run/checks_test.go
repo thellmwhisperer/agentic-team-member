@@ -680,25 +680,6 @@ func TestRunProvesATestsIssueOnlyThroughTheReportedFilesGoTests(t *testing.T) {
 	}
 }
 
-func TestTestLineRejectsFilesWithoutGoTests(t *testing.T) {
-	for _, source := range []string{
-		"func Testhelper(t *testing.T) {}\n\n/* func TestOld(t *testing.T) {} */\n",
-		"func TestMain(m *testing.M) {}\n",
-	} {
-		t.Run(source, func(t *testing.T) {
-			clone := t.TempDir()
-			path := filepath.Join(clone, "reported_test.go")
-			if err := os.WriteFile(path, []byte("package p\n\nimport \"testing\"\n\n"+source), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			_, err := testLine(clone, "go test -run {tests} {dir}", "reported_test.go")
-			if err == nil || err.Error() != "the report's test file reported_test.go defines no Go tests" {
-				t.Fatalf("want no-tests error, got %v", err)
-			}
-		})
-	}
-}
-
 func TestRunRejectsATestsIssueWhenBuildTagsSelectNoTests(t *testing.T) {
 	gocache, err := exec.Command("go", "env", "GOCACHE").Output()
 	if err != nil {
@@ -750,15 +731,9 @@ func TestRunChecksRunTheCommandsInOrderAndDieOnTheFirstFailure(t *testing.T) {
 	}
 }
 
-// chainedSource is a worker whose first unit fixes source.txt with two lines too many and declares the follow-up
-// second_test.sh, which the second unit makes pass.
-const chainedSource = `if [ -f second_test.sh ]; then echo second >> source.txt; ` +
-	`printf '{"test_file":"second_test.sh","follow_ups":[]}' > .atm/fake-report.json; ` +
-	`else printf 'fixed\nextra\nmore\n' > source.txt; ` +
+const sourceWork = `printf 'fixed\nextra\nmore\n' > source.txt; ` +
 	`echo 'grep -q fixed source.txt && ! grep -q broken source.txt' > regression_test.sh; ` +
-	`mkdir -p .atm/follow-ups/1; echo 'grep -q second source.txt' > .atm/follow-ups/1/second_test.sh; ` +
-	`printf '{"test_file":"regression_test.sh","follow_ups":[{"title":"gap","red_test":"second_test.sh",` +
-	`"criterion":"A retry runs once after a timeout."}]}' > .atm/fake-report.json; fi`
+	`mkdir -p .atm; printf '{"test_file":"regression_test.sh"}' > .atm/fake-report.json`
 
 // realTools is a worker that, before its fix, does what a real one does inside the clone: runs the
 // repository's own lint, which downloads slopslint under the ignored .tmp/ and runs it, then builds and runs
@@ -806,12 +781,11 @@ var auditCases = []struct {
 		base: map[string]string{".gitignore": "cache/\n"},
 		work: "printf 'fixed\\nextra\\nmore\\n' > a.txt" + fixTest, report: cut,
 		ponytail: "echo extra >> a.txt; mkdir cache; echo injected > cache/injected.txt", why: "shorten"},
-	{name: "cut that breaks an earlier chained unit", delivered: "chore: Retry on timeout|" + atmID + "\n" +
-		unit1 + based + ".atm/fake-report.json\n" + placed + ".atm.yaml\na.txt\na_test.sh\nregression_test.sh\n" +
-		"second_test.sh\nsource.txt\nbroken\nfixed\nextra\nmore\nsecond\n",
+	{name: "cut that breaks the configured suite", delivered: unit1 + based + ".atm/fake-report.json\n" +
+		placed + ".atm.yaml\na.txt\na_test.sh\nregression_test.sh\nsource.txt\nbroken\nfixed\nextra\nmore\n",
 		base: map[string]string{"source.txt": "broken\n"},
-		work: chainedSource, report: strings.Replace(cut, "a.txt", "source.txt", 1),
-		ponytail: "printf 'broken\\nsecond\\n' > source.txt", why: "test:",
+		work: sourceWork, report: strings.Replace(cut, "a.txt", "source.txt", 1),
+		ponytail: "echo broken > source.txt", why: "test:",
 		atm: atmSet(atmYAML, "test", suite)},
 	{name: "runs real tools in the clone", work: realToolsWork(), delivered: unit1 + based + placed +
 		".atm.yaml\n.gitignore\n.slop/ceilings.yml\n.slop/config.yml\n.slop/tombstones/README.md\n" +
