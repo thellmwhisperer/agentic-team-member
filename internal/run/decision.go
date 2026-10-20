@@ -125,6 +125,7 @@ func (a agent) checkDecision(r *verdict) string {
 }
 
 func (a agent) fixCheck(r *verdict, dir, text string, keep *resumePoint) (report map[string]any) {
+	a.Agent, a.args, a.env = keep.Agent, keep.Args, keep.Env
 	r.step("agent", func() (map[string]any, error) {
 		ev, err := a.afterCheck(dir, text, keep.Session, r.Decisions[len(r.Decisions)-1].Finding, len(r.Decisions))
 		report, _ = ev["report"].(map[string]any)
@@ -132,14 +133,4 @@ func (a agent) fixCheck(r *verdict, dir, text string, keep *resumePoint) (report
 		return ev, err
 	})
 	return report
-}
-
-// waiting keeps an idle server alive while the launcher still owes an answer.
-func (s *server) waiting() bool {
-	for _, r := range s.runs {
-		if r.answer != nil {
-			return true
-		}
-	}
-	return false
 }

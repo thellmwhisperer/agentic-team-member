@@ -247,8 +247,7 @@ func (s *server) shouldExit(c net.Conn, sock string, moved func() bool) bool {
 	_, gone := os.Stat(sock)
 	s.Lock()
 	defer s.Unlock()
-	waiting := s.waiting()
-	if moved() || c == nil && s.busy() == 0 && (gone != nil || !waiting && time.Since(s.last) > idle) {
+	if moved() || c == nil && s.busy() == 0 && (gone != nil || time.Since(s.last) > idle) {
 		s.handoff = true
 	}
 	if c == nil && s.busy() > 0 {
@@ -292,7 +291,7 @@ func changed() func() bool {
 // busy is how many runs go.
 func (s *server) busy() (n int) {
 	for _, r := range s.runs {
-		if r.Ended.IsZero() {
+		if r.Ended.IsZero() || r.answer != nil {
 			n++
 		}
 	}
