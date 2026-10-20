@@ -63,6 +63,9 @@ case "$level" in
   Low|Medium) ;;
   *)
     if ! has 'label risk-reviewed'; then
+      if printf '%s\n' "$changes" | grep -qx 'branch release-please--branches--main'; then
+        hold "$1" "risk high: waiting for risk-reviewed"
+      fi
       echo "risk high: waiting for risk-reviewed"
       exit 0
     fi

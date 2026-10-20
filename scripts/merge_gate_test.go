@@ -311,6 +311,33 @@ func TestArmArmsAReleasePleasePR(t *testing.T) {
 	if r.err != nil || strings.Contains(r.calls, "pr merge") || !strings.Contains(r.out, "risk high") {
 		t.Fatalf("release branch changing go.mod: out = %q, calls = %q, %v; want risk-reviewed", r.out, r.calls, r.err)
 	}
+	release.autoMerge = true
+	for _, event := range []string{"opened", "reopened", "ready_for_review", "labeled", "synchronize"} {
+		r = release.run(t, arm+" "+event)
+		if r.err != nil || !strings.Contains(r.calls, disarm) || strings.Contains(r.calls, "--auto ") ||
+			strings.Contains(r.calls, "pr edit") || !strings.Contains(r.out, "risk high") {
+			t.Fatalf("%s: release lost exemption: calls = %q, out = %q, %v; want disabled auto-merge without label changes", event, r.calls, r.out, r.err)
+		}
+	}
+	release.labels = []string{"risk-reviewed"}
+	r = release.run(t, arm+" synchronize")
+	if r.err != nil || !strings.Contains(r.calls, armed) || strings.Contains(r.calls, disarm) {
+		t.Fatalf("release with risk clearance: calls = %q, %v; want armed", r.calls, r.err)
+	}
+	release.labels = nil
+	for _, level := range []string{"Low", "Medium"} {
+		release.body = "## Risk Assessment\n" + level + "\n"
+		r = release.run(t, arm+" synchronize")
+		if r.err != nil || !strings.Contains(r.calls, armed) || strings.Contains(r.calls, disarm) {
+			t.Fatalf("%s risk release changing go.mod: calls = %q, %v; want armed", level, r.calls, r.err)
+		}
+	}
+	release.branch = "feat/unit"
+	release.body = high
+	r = release.run(t, arm+" synchronize")
+	if r.err != nil || strings.Contains(r.calls, "pr merge") || !strings.Contains(r.out, "risk high") {
+		t.Fatalf("ordinary high risk PR: calls = %q, out = %q, %v; want existing waiting behavior", r.calls, r.out, r.err)
+	}
 }
 
 func TestArmNeverArmsADiscardedPR(t *testing.T) {
