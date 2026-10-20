@@ -94,6 +94,8 @@ cd /path/to/your/repo
 atm init     # writes .atm.yaml: fill in its commands and file patterns
 ```
 
+Commit and push `.atm.yaml` before `atm run`; see [Configuration](docs/configuration.md#layers).
+
 Run the repository checks, then start an issue:
 
 ```bash
@@ -113,7 +115,7 @@ agent, model and effort. Both are in [Configuration](docs/configuration.md).
 | Command | Does |
 |---------|------|
 | `atm init` | Writes a commented `.atm.yaml` and ignores `.atm/` |
-| `atm doctor` | Checks that a run can start |
+| `atm doctor` | Checks local prerequisites; see [preflight](docs/how-a-run-flows.md#before-the-run) for launch checks |
 | `atm skill`, `atm skill install` | See [ATM's driving skill](docs/configuration.md#skill) |
 | `atm run [flags] <issue>` | Runs an issue: a GitHub number or a file with a `Type:` line |
 | `atm run --resume <run>` | Runs a failed run's issue again from its agent's work; see [Resuming a failed run](docs/configuration.md#resuming-a-failed-run) |
@@ -132,7 +134,7 @@ For `atm run`, including `--follow`, and `atm axi run`:
 |------|---------|
 | `0` | Every unit passed and Delivery passed or was skipped; see [Delivery](docs/how-a-run-flows.md#delivery) |
 | `1` | A unit failed; nothing is delivered |
-| `2` | [serve build check](docs/how-a-run-flows.md#the-screen), configuration, issue, clone or contract failed |
+| `2` | [preflight](docs/how-a-run-flows.md#before-the-run), [serve build check](docs/how-a-run-flows.md#the-screen), issue, clone or contract failed |
 | `4` | Every unit passed, but Delivery failed |
 
 ## Read more

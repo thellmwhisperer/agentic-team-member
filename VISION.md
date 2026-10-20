@@ -52,17 +52,9 @@ same kind.
 - A worker starts with a curated kit of skills and hooks, chosen for the task.
 - A worker has a time limit, as the gate's steps do.
 
-## Before a run
-
-- `main` must be green, checked with one call to the latest CI run of `main`.
-  With `main` red, no run starts.
-
 ## Open
 
 These are proposals, not decisions:
 
 - Keep the work when an agent dies mid-run, not only when it ends well.
-- A preflight before any token is spent, with four checks: the configuration
-  comes from `main`, `main` is green, the worker kit is present, and the gate
-  is running.
 - Which skills and hooks make up the worker kit, and how they reach the clone.
