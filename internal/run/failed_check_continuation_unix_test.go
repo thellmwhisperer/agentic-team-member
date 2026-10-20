@@ -1,0 +1,191 @@
+//go:build unix
+
+package run
+
+import (
+	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/charmbracelet/x/ansi"
+)
+
+func TestRunAsksOnAFailedCheckOnTerminal(t *testing.T) {
+	builtATM(t)
+	top := gitT(t, repo(t, "local", atmSet(atmYAML, "lint", "echo failed-check-finding; exit 1")),
+		"rev-parse", "--show-toplevel")
+	t.Setenv("TERM", "xterm-256color")
+	t.Setenv("NO_COLOR", "")
+	bin := decisionServer(t, top)
+	for _, args := range [][]string{{"run", issueFile(t, issue)}, {"attach", "issue-1"}} {
+		shown := decisionTerminal(t, startFollow(t, bin, top, true, args...), 1)
+		for _, want := range []string{"Decision", "failed-check-finding", "Answer: atm answer issue-1", "approve|fix|stop"} {
+			if !strings.Contains(shown, want) {
+				t.Fatalf("%s omitted %q:\n%s", args[0], want, shown)
+			}
+		}
+	}
+	cmd := exec.Command(bin, "answer", "issue-1", "stop")
+	cmd.Dir = top
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("stop: %v %s", err, out)
+	}
+	shown := decisionTerminal(t, startFollow(t, bin, top, true, "attach", "issue-1"), 1)
+	if strings.Contains(shown, "Decision") || strings.Contains(shown, "approve|fix|stop") {
+		t.Fatalf("answered question still asks for an answer:\n%s", shown)
+	}
+}
+
+func decisionTerminal(t *testing.T, f *followed, code int) string {
+	t.Helper()
+	var shown strings.Builder
+	timer := time.NewTimer(30 * time.Second)
+	defer timer.Stop()
+	for {
+		select {
+		case line, open := <-f.lines:
+			if !open {
+				_ = f.cmd.Wait()
+				if f.cmd.ProcessState.ExitCode() != code {
+					t.Fatalf("terminal exit = %d, want %d: %s", f.cmd.ProcessState.ExitCode(), code, f.errors())
+				}
+				_, final, ok := strings.Cut(shown.String(), "\x1b[?1049l")
+				if !ok {
+					t.Fatalf("terminal did not restore its screen:\n%s", shown.String())
+				}
+				return ansi.Strip(final)
+			}
+			shown.WriteString(line + "\n")
+		case <-timer.C:
+			t.Fatalf("terminal did not finish:\n%s", shown.String())
+		}
+	}
+}
+
+func TestRunAsksOnAFailedCheckApprovalKeepsValidCut(t *testing.T) {
+	builtATM(t)
+	delivered, lintOK := filepath.Join(t.TempDir(), "delivered"), filepath.Join(t.TempDir(), "lint-ok")
+	t.Setenv("ATM_TEST_LINT_OK", lintOK)
+	cfg := atmSet(atmSet(atmYAML, "lint", `test -f "$ATM_TEST_LINT_OK" || { touch "$ATM_TEST_LINT_OK"; echo failed-check-finding; exit 1; }`),
+		"delivery", "cat a.txt > "+delivered)
+	top := gitT(t, repo(t, "local", cfg), "rev-parse", "--show-toplevel")
+	t.Setenv("FAKE_AGENT_WORK", "printf 'fixed\\nextra\\nmore\\n' > a.txt"+fixTest)
+	t.Setenv("FAKE_PONYTAIL_WORK", "echo fixed > a.txt")
+	t.Setenv("FAKE_PONYTAIL_REPORT", cut)
+	bin := decisionServer(t, top)
+	f := startFollow(t, bin, top, false, "run", "--follow", issueFile(t, issue))
+	_, label := failedCheckQuestion(t, f, top)
+	f.exit(1)
+	cmd := exec.Command(bin, "answer", label, "approve")
+	cmd.Dir = top
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("approve: %v %s", err, out)
+	}
+	startFollow(t, bin, top, false, "attach", label).exit(0)
+	rep := e2eReport(t, top, label)
+	if len(rep.Decisions) != 1 || rep.Decisions[0].Answer != "approve" ||
+		rep.node("ponytail").Kept == nil || !*rep.node("ponytail").Kept {
+		t.Fatalf("approved check rejected the unchanged test: %+v; %+v", rep.Decisions, rep.node("ponytail"))
+	}
+	if data, err := os.ReadFile(delivered); err != nil || string(data) != "fixed\n" {
+		t.Fatalf("valid cut was not delivered: %q, %v", data, err)
+	}
+}
+
+func TestRunAsksOnAFailedCheckFixWithoutReport(t *testing.T) {
+	builtATM(t)
+	for _, report := range []string{"Done without JSON.", `{"summary":"missing test_file"}`} {
+		for _, repair := range []bool{false, true} {
+			t.Run(report+map[bool]string{false: "/still failing", true: "/repaired"}[repair], func(t *testing.T) {
+				delivery := filepath.Join(t.TempDir(), "delivered")
+				cfg := atmSet(atmSet(atmYAML, "lint", "test -f repaired || { echo failed-check-finding; exit 1; }"),
+					"delivery", "pwd > "+delivery)
+				top := gitT(t, repo(t, "local", cfg), "rev-parse", "--show-toplevel")
+				order := filepath.Join(t.TempDir(), "order")
+				t.Setenv("FAKE_AGENT_ORDER", order)
+				t.Setenv("FAKE_REPORT_1", validWorker)
+				t.Setenv("FAKE_REPORT_2", report)
+				work := reportWork + "\nif test -f first-turn; then echo kept > fix-work.txt; "
+				if repair {
+					work += "touch repaired; "
+				}
+				t.Setenv("FAKE_AGENT_WORK", work+"else touch first-turn; fi")
+				bin := decisionServer(t, top)
+				f := startFollow(t, bin, top, false, "run", "--follow", issueFile(t, issue))
+				clone, label := failedCheckQuestion(t, f, top)
+				f.exit(1)
+				cmd := exec.Command(bin, "answer", label, "fix")
+				cmd.Dir = top
+				if out, err := cmd.CombinedOutput(); err != nil {
+					t.Fatalf("fix: %v %s", err, out)
+				}
+				startFollow(t, bin, top, false, "attach", label).exit(map[bool]int{false: 1, true: 0}[repair])
+				if calls := workerCalls(t, order); calls != 2 {
+					t.Fatalf("want initial worker and one fix turn, got %d", calls)
+				}
+				rep := e2eReport(t, top, label)
+				if rep.node("agent").Result != "passed" || rep.node("agent").Exit != "" ||
+					rep.node("agent").Tail != nil {
+					t.Fatalf("missing report failed the agent: %+v", rep.node("agent"))
+				}
+				if repair {
+					assertCheckAnswer(t, top, label, clone, delivery, "fix")
+					return
+				}
+				if !rep.Resumable || len(rep.Decisions) != 2 || rep.Decisions[1].Answer != "" ||
+					!strings.Contains(rep.Decisions[1].Finding, "failed-check-finding") {
+					t.Fatalf("missing report lost the question or saved work: %+v", rep)
+				}
+				if data, err := os.ReadFile(filepath.Join(clone, "fix-work.txt")); err != nil || string(data) != "kept\n" {
+					t.Fatalf("missing report lost fix work: %q, %v", data, err)
+				}
+				cmd = exec.Command(bin, "answer", label, "stop")
+				cmd.Dir = top
+				if out, err := cmd.CombinedOutput(); err != nil {
+					t.Fatalf("stop: %v %s", err, out)
+				}
+				startFollow(t, bin, top, false, "attach", label).exit(1)
+			})
+		}
+	}
+}
+
+func TestRunAsksOnAFailedCheckCleanupAfterAssertion(t *testing.T) {
+	if marker := os.Getenv("ATM_DECISION_CLEANUP_TEST"); marker != "" {
+		builtATM(t)
+		top := gitT(t, repo(t, "local", atmSet(atmYAML, "lint", "echo failed-check-finding; exit 1")),
+			"rev-parse", "--show-toplevel")
+		bin := decisionServer(t, top)
+		writeFixture(t, marker, top)
+		f := startFollow(t, bin, top, false, "run", "--follow", issueFile(t, issue))
+		_, label := failedCheckQuestion(t, f, top)
+		f.exit(1)
+		assertCheckWaiting(t, top, label)
+		t.Fatal("intentional assertion failure with pending question")
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(t.TempDir(), "server-root")
+	t.Cleanup(func() {
+		if data, err := os.ReadFile(marker); err == nil {
+			top := string(data)
+			if _, err := os.Stat(filepath.Join(top, ".atm", "serve.log")); err == nil {
+				killServeProcesses(t, top)
+			}
+		}
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, exe, "-test.run=^TestRunAsksOnAFailedCheckCleanupAfterAssertion$", "-test.count=1")
+	cmd.Env = append(os.Environ(), "ATM_DECISION_CLEANUP_TEST="+marker)
+	out, err := cmd.CombinedOutput()
+	if ctx.Err() != nil || err == nil || !strings.Contains(string(out), "intentional assertion failure with pending question") {
+		t.Fatalf("pending-question assertion did not fail cleanly: %v, %v\n%s", ctx.Err(), err, out)
+	}
+}

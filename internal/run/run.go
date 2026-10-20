@@ -225,8 +225,10 @@ func checkUnit(runDir, dir, head, test, typ string, report map[string]any, c con
 		ev[key] = value
 	}
 	var testContent []byte
-	if err == nil && test != "" && testedType(typ) {
-		testContent, err = os.ReadFile(filepath.Join(dir, test))
+	if test != "" && testedType(typ) {
+		var readErr error
+		testContent, readErr = os.ReadFile(filepath.Join(dir, test))
+		err = errors.Join(err, readErr)
 	}
 	return proof{head, test, typ, string(testContent), missing}, ev, err
 }

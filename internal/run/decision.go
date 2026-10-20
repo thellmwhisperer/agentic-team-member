@@ -105,7 +105,13 @@ func (a agent) afterCheck(clone, text, session, finding string, attempt int) (ma
 		var stream *stream
 		var exit, cause string
 		stream, exit, cause, err = a.exec(clone, path, argv, stdin, false)
-		_, err = a.reported(name, path, final, exit, cause, err, stream, testFile, ev)
+		var invalid error
+		invalid, err = a.reported(name, path, final, exit, cause, err, stream, testFile, ev)
+		if invalid != nil {
+			ev["report"], err = "missing", nil
+			delete(ev, "exit")
+			delete(ev, "tail")
+		}
 	}
 	return ev, err
 }
