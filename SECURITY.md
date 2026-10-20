@@ -36,14 +36,14 @@ only on issues and repositories you would let that agent work on unattended.
 
 Reports in this area are in scope:
 
-- ATM's own path handling: the reported `test_file` must be a local path,
-  and a unit fails if its agent moved HEAD. ATM's logged tool-call boundary is described in
-  [Agent](docs/how-a-run-flows.md#agent). A way around these checks is a
-  vulnerability.
+- ATM's own path handling: a non-empty reported `test_file` must resolve
+  inside the clone, and a unit fails if its agent moved HEAD. ATM's logged
+  tool-call boundary is described in [Agent](docs/how-a-run-flows.md#agent).
+  A way around these checks is a vulnerability.
 - Command execution: ATM runs the target repository's `install`, `test`,
-  `e2e` (when non-empty), `typecheck`, `lint`, `test_file` and `delivery` lines from `.atm.yaml` with
-  `sh -c`. Running an unconfigured command or allowing a crafted report to
-  escape the clone is in scope.
+  `e2e` (when non-empty), `typecheck`, `lint` and `delivery` lines from
+  `.atm.yaml` with `sh -c`. Running an unconfigured command or allowing a
+  crafted report to escape the clone is in scope.
 - Delivery: ATM commits on a branch and runs the configured `delivery`
   command. It never pushes or opens a PR itself. Anything that makes ATM do
   either without that command is in scope.

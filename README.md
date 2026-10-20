@@ -106,8 +106,8 @@ Checks answer. Omit the flag for the terminal screen. A run can also take an iss
 `plans/retry.md`.
 
 `.atm.yaml` declares the repository's `install`, `test`, optional `e2e`,
-`typecheck` and `lint` commands, how to run one test, which files are tests
-and docs, and the `delivery` command; `~/.config/atm/config.yaml` picks your
+`typecheck` and `lint` commands, which files are tests and docs, and the
+`delivery` command; `~/.config/atm/config.yaml` picks your
 agent, model and effort. Both are in [Configuration](docs/configuration.md).
 
 | Command | Does |

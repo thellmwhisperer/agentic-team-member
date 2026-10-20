@@ -34,7 +34,7 @@ type Config struct {
 	E2E          string       `yaml:"e2e"`
 	Typecheck    string       `yaml:"typecheck"`
 	Lint         string       `yaml:"lint"`
-	TestFile     string       `yaml:"test_file"` // runs one test: {file} or {dir}; {tests} selects Go tests in that file
+	TestFile     string       `yaml:"test_file"` // legacy required key, validated but not executed
 	TestPatterns []string     `yaml:"test_patterns"`
 	DocsPatterns []string     `yaml:"docs_patterns"`
 	Delivery     string       `yaml:"delivery"`

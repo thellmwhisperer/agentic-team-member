@@ -14,7 +14,7 @@ import (
 	"github.com/thellmwhisperer/agentic-team-member/internal/run"
 )
 
-// row is a row of the ATM box: a node of the graph, or, when check, a proof or command of the node before.
+// row is a row of the ATM box: a node of the graph, or, when check, a command of the node before.
 type row struct {
 	step, label, state, note string // state: pending, running, waiting, passed, failed, skipped, not run or unknown
 	check                    bool
@@ -397,7 +397,7 @@ func (m *Model) ended(e event) {
 	}
 }
 
-// failedAt is the failed node r's label, and its failed proof or command's, if one failed.
+// failedAt is the failed node r's label, and its failed command's, if one failed.
 func (m *Model) failedAt(r *row) string {
 	for _, c := range m.rows[slices.Index(m.rows, r)+1:] {
 		if !c.check {
@@ -410,7 +410,7 @@ func (m *Model) failedAt(r *row) string {
 	return r.label
 }
 
-// checkRow is the row of proof or command name under the current row of node step, added when new.
+// checkRow is the command row under the current row of node step, added when new.
 func (m *Model) checkRow(step, name string) *row {
 	i := slices.Index(m.rows, m.current(step))
 	for i++; i < len(m.rows) && m.rows[i].check; i++ {
