@@ -108,6 +108,12 @@ func TestRunDiesWhenCloneFails(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), c.why) {
 				t.Fatalf("want an error naming %q, got %v", c.why, err)
 			}
+			if c.args != nil { // its .atm.yaml is read from the base ref, before any step
+				if evs := events(t, &out); len(evs) != 0 || len(clones(t, root)) != 0 {
+					t.Fatalf("want the run dead before its clone, got %v", evs)
+				}
+				return
+			}
 			assertFailedCleanup(t, root, cloneStep(t, &out), err)
 		})
 	}

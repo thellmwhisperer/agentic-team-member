@@ -784,7 +784,7 @@ var auditCases = []struct {
 	name, mode, work, ponytail, report, atm, why, node, delivered string
 	base                                                          map[string]string
 }{
-	{name: "behaves", delivered: unit1 + initial + placed + "a.txt\na_test.sh\nfixed\n"},
+	{name: "behaves", delivered: unit1 + initial + placed + ".atm.yaml\na.txt\na_test.sh\nfixed\n"},
 	{name: "commits directly", work: fixWork + "; git add -A; git commit -qm fix", why: "the agent made commits",
 		node: "checks"},
 	{name: "a declared command commits during checks",

@@ -31,6 +31,7 @@ func TestResumeKeepsEarlierUnchainedFollowUps(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, ".atm.yaml"), []byte(fixedConfig), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	gitT(t, root, "commit", "-qam", "fix the config") // the resume reads it from the base ref
 	var resumed bytes.Buffer
 	args := []string{"--resume", "failed", issueFile(t, followUpIssue)}
 	if err := Run("resumed", args, &resumed, io.Discard); err != nil {

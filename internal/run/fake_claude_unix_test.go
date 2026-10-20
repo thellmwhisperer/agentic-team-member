@@ -39,6 +39,7 @@ func TestHeldFakeClaudeExitsWhenDirectoryRemoved(t *testing.T) {
 func TestHeldFakeClaudeExitsWhenOwnerDies(t *testing.T) {
 	if os.Getenv("ATM_TEST_CLAUDE_OWNER") == "1" {
 		root := repo(t, "git@github.com:owner/repo.git", atmYAML)
+		fakeGH(t, `[{"workflowName":"Go","conclusion":"success"}]`, false) // main is green
 		wait, _ := holdFakeAgents(t, 1)
 		if _, err := Start(root, []string{issueFile(t, issue)}); err != nil {
 			log, _ := os.ReadFile(filepath.Join(root, ".atm", "serve.log"))

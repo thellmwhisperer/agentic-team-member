@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -63,6 +64,11 @@ func writeResumeConfig(t *testing.T, dir, install, test string) {
 		"test_file: \"\"\ntest_patterns: []\ndocs_patterns: []\ndelivery: \"\"\n", install, test)
 	if err := os.WriteFile(filepath.Join(dir, ".atm.yaml"), []byte(config), 0o600); err != nil {
 		t.Fatal(err)
+	}
+	// The run reads it from the base ref.
+	commit := exec.Command("git", "-C", dir, "commit", "-q", "--allow-empty", "-am", "config")
+	if out, err := commit.CombinedOutput(); err != nil {
+		t.Fatalf("git commit: %v\n%s", err, out)
 	}
 }
 

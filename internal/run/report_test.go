@@ -52,7 +52,7 @@ func TestRunStopsAndReports(t *testing.T) {
 		{name: "passes without delivery", results: []string{"passed", "passed", "passed", "passed", "passed", "skipped"}},
 		{name: "unreadable issue", args: []string{filepath.Join(t.TempDir(), "missing.md")}, code: 2,
 			failed: "issue", results: []string{"failed", "not run", "not run", "not run", "not run", "not run"}},
-		{name: "preparation fails", args: []string{"--base-ref", "nope"}, code: 2, failed: "clone", why: "nope",
+		{name: "preparation fails", atm: atmInstall("echo nope >&2; exit 3"), code: 2, failed: "clone", why: "nope",
 			results: []string{"passed", "failed", "not run", "not run", "not run", "not run"}},
 		{name: "agent fails", agent: "fail", code: 1, failed: "agent",
 			results: []string{"passed", "passed", "passed", "failed", "not run", "not run"}},
