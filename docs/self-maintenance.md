@@ -25,6 +25,14 @@ it.
    [delivery gate](how-a-run-flows.md#delivery).
 4. **The gate.** The green branch goes through the
    [configured delivery line](configuration.md#atmyaml).
+   It launches with a nonce and validation generation kept beside
+   `report.json`, so recovering the same attempt replays the same run, even one
+   interrupted before binding it, through the receipt its launch saved, kept
+   through later replays that fail or are interrupted. Only the
+   run named by that launch's `launch_receipt` decides: the line follows it with
+   `axi status --run` and passes only when it completes; a decision, a failure, a
+   cancellation or any other answer fails. An active run the attempt cannot
+   prove its own is left to its operator, and the line fails without launching.
    Review, targeted test, lint and document run as fenced model steps. The reviewer
    only reports (`auto_fix.review: 0`); whoever launched the run answers each
    finding, fixing real defects and dismissing guesses.
