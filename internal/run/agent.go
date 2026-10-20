@@ -1157,7 +1157,8 @@ func editWrites(words []string) []string {
 // wordText is word as the shell reads it: ~ and $HOME resolve to the home directory; other parameters,
 // command substitutions and process substitutions stay as $ without running them.
 func wordText(word *syntax.Word) string {
-	fields, _ := expand.Fields(&shellWords, word)
+	cfg := shellWords // expand.Fields writes into its config, and runs check commands at the same time
+	fields, _ := expand.Fields(&cfg, word)
 	return strings.Join(fields, " ")
 }
 
