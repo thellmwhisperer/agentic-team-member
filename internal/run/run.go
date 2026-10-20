@@ -471,27 +471,3 @@ func git(dir string, args ...string) (string, error) {
 func gitRaw(dir string, args ...string) (string, error) {
 	return commandIn(nil, dir, "git", args...)
 }
-
-func (a agent) scopeChecked(r *verdict, dir, head string, n int, i Issue,
-	pending, in []followUp, base string) ([]followUp, []followUp, error) {
-	pending, in, err := a.scoped(a.root, dir, head, n, i, pending, in)
-	if errors.Is(err, errUnmet) && r.saved != 0 {
-		_, bundleErr := git(dir, "bundle", "create", filepath.Join(a.dir, "resume", "work.bundle"),
-			"refs/atm/resume", "HEAD", "^"+base)
-		err = errors.Join(err, bundleErr)
-	}
-	return pending, in, err
-}
-
-func (r *verdict) workerReport(ev map[string]any, n int, f *followUp) (report map[string]any, test string) {
-	if ev != nil {
-		ev["unit"] = n
-	}
-	report, _ = ev["report"].(map[string]any)
-	r.node("agent").Report, _ = ev["report"].(string)
-	test, _ = report["test_file"].(string)
-	if f != nil {
-		test = f.RedTest
-	}
-	return report, test
-}

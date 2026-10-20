@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -172,30 +173,32 @@ func decisionServer(t *testing.T, top string) string {
 	return bin
 }
 
-func TestRunAsksOnAFailedCheckInChainedWork(t *testing.T) {
+func TestRunAsksOnAFailedCheckInSingleUnit(t *testing.T) {
 	builtATM(t)
-	for _, blocked := range []bool{false, true} {
-		t.Run(map[bool]string{false: "later check", true: "scope check"}[blocked], func(t *testing.T) {
-			cfg := atmSet(atmYAML, "lint", "if test -f c1_test.sh; then echo failed-check-finding; exit 1; fi")
+	for _, row := range []string{"lint", "typecheck"} {
+		t.Run(row, func(t *testing.T) {
+			cfg := atmSet(atmYAML, row, "if test -f a_test.sh; then echo failed-check-finding; exit 1; fi")
 			top := gitT(t, repo(t, "local", cfg), "rev-parse", "--show-toplevel")
-			t.Setenv("FAKE_AGENT_WORK", scopeWork)
-			t.Setenv("ATM_TEST_RED", "c1_test.sh")
-			t.Setenv("ATM_TEST_FOLLOWUP", scopeFollowUp("c1_test.sh", "The retry error is reported.", `["a.txt"]`))
-			t.Setenv("ATM_TEST_UNIT2", "echo u2 >> a.txt")
-			if blocked {
-				t.Setenv("FAKE_SCOPE_REPORT", `{"disposition":"blocked","paths":["a.txt","c1_test.sh"],"findings":[`+
-					`{"path":"a.txt","clause":"The retry error is reported.","reason":"failed-check-finding"}],"summary":"s"}`)
-			}
+			t.Setenv("FAKE_AGENT_WORK", fixWork)
 			bin := decisionServer(t, top)
-			f := startFollow(t, bin, top, false, "run", "--follow", issueFile(t, followUpIssue))
-			_, label := failedCheckQuestion(t, f, top)
+			f := startFollow(t, bin, top, false, "run", "--follow", issueFile(t, issue))
+			clone, label := failedCheckQuestion(t, f, top)
 			f.exit(1)
+			assertCheckWaiting(t, top, label)
 			cmd := exec.Command(bin, "answer", label, "stop")
 			cmd.Dir = top
 			if out, err := cmd.CombinedOutput(); err != nil {
 				t.Fatalf("stop: %v %s", err, out)
 			}
 			startFollow(t, bin, top, false, "attach", label).exit(1)
+			rep := e2eReport(t, top, label)
+			if len(rep.Units) != 1 || rep.Units[0].Unit != 1 || rep.FailedNode != "checks" ||
+				!strings.Contains(rep.Reason, row+":") {
+				t.Fatalf("single-unit check failure lost: %+v", rep)
+			}
+			if data, err := os.ReadFile(filepath.Join(clone, "a.txt")); err != nil || string(data) != "fixed\n" {
+				t.Fatalf("stop lost single-unit work: %q, %v", data, err)
+			}
 		})
 	}
 }
@@ -229,5 +232,97 @@ func assertCheckWaiting(t *testing.T, top, label string) {
 	decisions, _ := rep["decisions"].([]any)
 	if rep["resumable"] != true || len(decisions) != 1 || decisions[0].(obj)["answer"] != "" {
 		t.Fatalf("question published before its resumable report: %v", rep)
+	}
+}
+
+func TestRunAsksOnAFailedCheckResumesSavedWorker(t *testing.T) {
+	builtATM(t)
+	cfg := atmSet(atmYAML, "lint", "echo failed-check-finding; exit 1") + "harness: codex\n"
+	top := gitT(t, repo(t, "local", cfg), "rev-parse", "--show-toplevel")
+	call, order := filepath.Join(t.TempDir(), "call"), filepath.Join(t.TempDir(), "order")
+	t.Setenv("FAKE_AGENT_CALL", call)
+	t.Setenv("FAKE_AGENT_ORDER", order)
+	t.Setenv("FAKE_AGENT_STREAM", `{"type":"system","subtype":"init","session_id":"saved-session"}`+"\n")
+	t.Setenv("FAKE_AGENT_WORK", fixWork)
+	bin := decisionServer(t, top)
+	f := startFollow(t, bin, top, false, "run", "--follow", "--harness", "claude", "--model", "saved-model",
+		"--effort", "high", "--harness-arg=--verbose", "--env", "ATM_SAVED_WORKER=yes", issueFile(t, issue))
+	_, original := failedCheckQuestion(t, f, top)
+	f.exit(1)
+	stop := exec.Command(bin, "answer", original, "stop")
+	stop.Dir = top
+	if out, err := stop.CombinedOutput(); err != nil {
+		t.Fatalf("stop original: %v %s", err, out)
+	}
+	startFollow(t, bin, top, false, "attach", original).exit(1)
+	f = startFollow(t, bin, top, false, "run", "--follow", "--resume", original)
+	_, label := failedCheckQuestion(t, f, top)
+	f.exit(1)
+	for _, answer := range []string{"fix", "stop"} {
+		cmd := exec.Command(bin, "answer", label, answer)
+		cmd.Dir = top
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%s: %v %s", answer, err, out)
+		}
+		startFollow(t, bin, top, false, "attach", label).exit(1)
+	}
+	got := agentCall(t, call)
+	args := strings.Join(got.Args, " ")
+	for _, want := range []string{"--resume saved-session", "--model saved-model", "--effort high", "--verbose"} {
+		if !strings.Contains(args, want) {
+			t.Fatalf("saved worker lost %q: %+v", want, got)
+		}
+	}
+	if !slices.Contains(got.Env, "ATM_SAVED_WORKER=yes") || !strings.Contains(got.Stdin, "failed-check-finding") {
+		t.Fatalf("saved worker lost environment or finding: %+v", got)
+	}
+	if calls := workerCalls(t, order); calls != 2 {
+		t.Fatalf("want initial worker and one fix turn, got %d", calls)
+	}
+	data, err := os.ReadFile(filepath.Join(runDir(top, label), "resume", "resume.json"))
+	var saved resumePoint
+	if err != nil || json.Unmarshal(data, &saved) != nil {
+		t.Fatalf("saved worker: %s, %v", data, err)
+	}
+	if saved.Agent.Harness != "claude" || saved.Agent.Model != "saved-model" || saved.Agent.Effort != "high" ||
+		saved.Session != "saved-session" || !slices.Equal(saved.Args, []string{"--verbose"}) ||
+		!slices.Equal(saved.Env, []string{"ATM_SAVED_WORKER=yes"}) {
+		t.Fatalf("fix saved a different worker: %+v", saved)
+	}
+	rep := e2eReport(t, top, label)
+	if len(rep.Decisions) != 2 || rep.Decisions[0].Answer != "fix" || rep.Decisions[1].Answer != "stop" {
+		t.Fatalf("saved worker decisions: %+v", rep.Decisions)
+	}
+}
+
+func TestRunAsksOnAFailedCheckDuringBinaryReplacement(t *testing.T) {
+	builtATM(t)
+	for _, trigger := range []string{"connection", "tick"} {
+		t.Run(trigger, func(t *testing.T) {
+			delivery := filepath.Join(t.TempDir(), "delivered")
+			cfg := atmSet(atmSet(atmYAML, "lint", "test -f repaired || { echo failed-check-finding; exit 1; }"),
+				"delivery", "pwd > "+delivery)
+			top := gitT(t, repo(t, "local", cfg), "rev-parse", "--show-toplevel")
+			t.Setenv("FAKE_AGENT_WORK", "if test -f first-turn; then touch repaired; else "+fixWork+"; touch first-turn; fi")
+			bin := decisionServer(t, top)
+			f := startFollow(t, bin, top, false, "run", "--follow", issueFile(t, issue))
+			clone, label := failedCheckQuestion(t, f, top)
+			f.exit(1)
+			replacement := filepath.Join(t.TempDir(), "atm")
+			buildATM(t, replacement, "follow-test")
+			if err := os.Rename(replacement, bin); err != nil {
+				t.Fatal(err)
+			}
+			if trigger == "tick" {
+				time.Sleep(2 * tick)
+			}
+			cmd := exec.Command(bin, "answer", label, "fix")
+			cmd.Dir = top
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("replacement lost pending question: %v %s", err, out)
+			}
+			startFollow(t, bin, top, false, "attach", label).exit(0)
+			assertCheckAnswer(t, top, label, clone, delivery, "fix")
+		})
 	}
 }
