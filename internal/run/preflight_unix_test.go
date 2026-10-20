@@ -167,14 +167,7 @@ func preflightResume(t *testing.T, bin string) {
 		Base: gitT(t, root, "rev-parse", "main"), Unit: 1, Args: []string{"--settings", missing},
 		Original: &Issue{Title: "Retry on timeout", Type: "fix", Text: issue}})
 	out, code := preflightLaunch(t, bin, root, "--resume", "failed-1")
-	entries, _ := os.ReadDir(runs)
-	_, cloned := os.Stat(filepath.Join(root, ".atm", "clones"))
-	_, served := os.Stat(filepath.Join(root, ".atm", "serve.log"))
-	if code != 2 || !strings.Contains(out, "preflight: worker files: --settings: open "+missing) ||
-		len(entries) != 1 || cloned == nil || served == nil {
-		t.Fatalf("exit %d, %d runs, want the resume stopped at worker files with no new run, got:\n%s",
-			code, len(entries), out)
-	}
+	assertNoStartedRun(t, root, out, code, 1, "preflight: worker files: --settings: open "+missing)
 }
 
 // writeConfig writes config as the working tree's .atm.yaml, which main does not have.
@@ -221,6 +214,17 @@ func assertStopped(t *testing.T, root, out string, code int, check, why string) 
 	}
 	if _, err := os.Stat(filepath.Join(root, ".atm")); err == nil {
 		t.Fatalf("the stopped launch left .atm behind:\n%s", out)
+	}
+}
+
+func assertNoStartedRun(t *testing.T, root, out string, code, wantRuns int, why string) {
+	t.Helper()
+	entries, _ := os.ReadDir(filepath.Join(root, ".atm", "runs"))
+	_, cloned := os.Stat(filepath.Join(root, ".atm", "clones"))
+	_, served := os.Stat(filepath.Join(root, ".atm", "serve.log"))
+	if code != 2 || !strings.Contains(out, why) || len(entries) != wantRuns || cloned == nil || served == nil {
+		t.Fatalf("exit %d, %d runs, want %d and %q without clone or server, got:\n%s",
+			code, len(entries), wantRuns, why, out)
 	}
 }
 
@@ -387,13 +391,7 @@ func preflightPiResources(t *testing.T, bin string) {
 			Base: gitT(t, root, "rev-parse", "main"), Unit: 1, Args: []string{"--skill", "missing-skill"},
 			Original: &Issue{Title: "Retry on timeout", Type: "fix", Text: issue}})
 		out, code := preflightLaunch(t, bin, root, "--resume", "failed-1")
-		entries, _ := os.ReadDir(runs)
-		_, cloned := os.Stat(filepath.Join(root, ".atm", "clones"))
-		_, served := os.Stat(filepath.Join(root, ".atm", "serve.log"))
-		if code != 2 || !strings.Contains(out, "preflight: worker files: --skill:") ||
-			len(entries) != 1 || cloned == nil || served == nil {
-			t.Fatalf("saved skill should stop resume: exit %d, %s", code, out)
-		}
+		assertNoStartedRun(t, root, out, code, 1, "preflight: worker files: --skill:")
 	})
 }
 
@@ -440,17 +438,11 @@ func preflightFetchFails(t *testing.T, bin string) {
 			if !resume {
 				assertStopped(t, root, out, code, "config", "git fetch")
 			}
-			entries, _ := os.ReadDir(filepath.Join(root, ".atm", "runs"))
-			_, cloned := os.Stat(filepath.Join(root, ".atm", "clones"))
-			_, served := os.Stat(filepath.Join(root, ".atm", "serve.log"))
 			wantRuns := 0
 			if resume {
 				wantRuns = 1
 			}
-			if code != 2 || !strings.Contains(out, "preflight: config: git fetch") ||
-				len(entries) != wantRuns || cloned == nil || served == nil {
-				t.Fatalf("fetch failure should stop launch: exit %d, runs %d, %s", code, len(entries), out)
-			}
+			assertNoStartedRun(t, root, out, code, wantRuns, "preflight: config: git fetch")
 		})
 	}
 }
@@ -483,12 +475,7 @@ func preflightResumeResources(t *testing.T, bin string) {
 						if present {
 							want = "preflight: delivery:"
 						}
-						entries, _ := os.ReadDir(runs)
-						_, cloned := os.Stat(filepath.Join(root, ".atm", "clones"))
-						_, served := os.Stat(filepath.Join(root, ".atm", "serve.log"))
-						if code != 2 || !strings.Contains(out, want) || len(entries) != 1 || cloned == nil || served == nil {
-							t.Fatalf("resource must match saved base %s: exit %d, %s", base, code, out)
-						}
+						assertNoStartedRun(t, root, out, code, 1, want)
 					})
 				}
 			}
