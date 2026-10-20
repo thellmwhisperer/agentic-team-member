@@ -1154,8 +1154,8 @@ func editWrites(words []string) []string {
 	return operands
 }
 
-// wordText is word as the shell reads it, ~ and $HOME as the home directory and any other parameter or command
-// left as $.
+// wordText is word as the shell reads it: ~ and $HOME resolve to the home directory; other parameters,
+// command substitutions and process substitutions stay as $ without running them.
 func wordText(word *syntax.Word) string {
 	fields, _ := expand.Fields(&shellWords, word)
 	return strings.Join(fields, " ")
