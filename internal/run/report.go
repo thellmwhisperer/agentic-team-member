@@ -36,6 +36,8 @@ type verdict struct {
 	at         string    // the node that runs
 	row        string    // the row that runs inside it, whose command prints the output events
 
+	checkCommands []cmdResult
+
 	// Resumable says atm run --resume picks the run up, from ResumableUnit's checks: it failed after its agent.
 	Resumable     bool `json:"resumable"`
 	ResumableUnit int  `json:"resumable_unit,omitempty"`
@@ -157,6 +159,7 @@ func (r *verdict) step(name string, fn func() (map[string]any, error)) {
 	cmds, _ := ev["commands"].([]cmdResult)
 	r.Commands = append(r.Commands, cmds...)
 	if name == "checks" {
+		r.checkCommands = cmds
 		for _, cmd := range cmds {
 			if cmd.Name == "e2e" {
 				n.Rows = append(n.Rows, partResult{Name: cmd.Name, Result: cmd.Result, span: cmd.span})

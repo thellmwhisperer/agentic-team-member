@@ -78,7 +78,8 @@ func (r *verdict) resumable(dir string) {
 		var p resumePoint
 		r.Resumable = err == nil && json.Unmarshal(b, &p) == nil
 		if r.Resumable {
-			for _, cmd := range r.Commands {
+			p.FailedRow, p.E2EOutput = "", ""
+			for _, cmd := range r.checkCommands {
 				if r.FailedNode == "checks" && cmd.Result == "failed" {
 					p.FailedRow = cmd.Name
 					if cmd.Name == "e2e" {

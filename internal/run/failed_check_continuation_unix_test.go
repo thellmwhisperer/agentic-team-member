@@ -4,6 +4,7 @@ package run
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,6 +14,83 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 )
+
+func TestRunAsksOnAFailedCheckResumesLatestAttempt(t *testing.T) {
+	builtATM(t)
+	top := gitT(t, repo(t, "local", atmYAML+"e2e: 'echo failed-check-finding; exit 1'\n"),
+		"rev-parse", "--show-toplevel")
+	order := filepath.Join(t.TempDir(), "order")
+	t.Setenv("FAKE_AGENT_ORDER", order)
+	t.Setenv("FAKE_AGENT_STREAM", `{"type":"system","subtype":"init","session_id":"sess-1"}`+"\n")
+	t.Setenv("FAKE_AGENT_WORK", "if test -f first-turn; then echo broken > a.txt; echo kept > fix-work.txt; else "+fixWork+"; touch first-turn; fi")
+	bin := decisionServer(t, top)
+	f := startFollow(t, bin, top, false, "run", "--follow", "--harness", "claude", issueFile(t, issue))
+	clone, label := failedCheckQuestion(t, f, top)
+	f.exit(1)
+	assertSaved := func(label, row, output string) {
+		t.Helper()
+		data, err := os.ReadFile(filepath.Join(runDir(top, label), "resume", "resume.json"))
+		var saved resumePoint
+		if err != nil || json.Unmarshal(data, &saved) != nil || saved.FailedRow != row || saved.E2EOutput != output {
+			t.Fatalf("%s saved the wrong Checks failure: %s, %v", label, data, err)
+		}
+	}
+	assertSaved(label, "e2e", "failed-check-finding")
+	prior := e2eReport(t, top, label)
+	cmd := exec.Command(bin, "answer", label, "fix")
+	cmd.Dir = top
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("fix: %v %s", err, out)
+	}
+	startFollow(t, bin, top, false, "attach", label).exit(1)
+	assertSaved(label, "", "")
+	stopCheckRun(t, top, label)
+	assertSaved(label, "", "")
+	rep := e2eReport(t, top, label)
+	if !rep.Resumable || rep.FailedNode != "checks" || !strings.Contains(rep.Reason, "a_test.sh fails with the fix") ||
+		len(rep.Decisions) != 2 || rep.Decisions[0].Answer != "fix" || rep.Decisions[1].Answer != "stop" ||
+		!strings.Contains(rep.Decisions[0].Finding, "failed-check-finding") ||
+		!strings.Contains(rep.Decisions[1].Finding, "a_test.sh fails with the fix") {
+		t.Fatalf("latest failure or decision history lost: %+v", rep)
+	}
+	if len(prior.Commands) != 2 || prior.Commands[1].Name != "e2e" || prior.Commands[1].Result != "failed" ||
+		prior.Commands[1].Tail != "failed-check-finding" || len(rep.Commands) != len(prior.Commands) {
+		t.Fatalf("command history lost or proof failure ran commands: before %+v, after %+v", prior.Commands, rep.Commands)
+	}
+	for i, command := range prior.Commands {
+		if rep.Commands[i] != command {
+			t.Fatalf("command history changed: before %+v, after %+v", command, rep.Commands[i])
+		}
+	}
+	evs := followedRun(t, bin, top, 1, "--resume", label)
+	resumedClone := ""
+	for _, ev := range evs {
+		if ev["step"] == "agent turn after e2e" {
+			t.Fatalf("resume used stale e2e failure: %v", ev)
+		}
+		if ev["step"] == "clone" && ev["state"] == "passed" {
+			resumedClone, _ = ev["clone"].(string)
+		}
+	}
+	if calls := workerCalls(t, order); calls != 2 {
+		t.Fatalf("want initial worker and one fix turn, got %d", calls)
+	}
+	resumed := lastRun(t, top, "failed")
+	assertSaved(resumed, "", "")
+	if r := e2eReport(t, top, resumed); !r.Resumable || !strings.Contains(r.Reason, "a_test.sh fails with the fix") {
+		t.Fatalf("resume lost current failure or saved work: %+v", r)
+	}
+	if resumedClone == "" || resumedClone == clone {
+		t.Fatalf("resume did not restore a separate clone: %q", resumedClone)
+	}
+	for _, dir := range []string{clone, resumedClone} {
+		for name, want := range map[string]string{"a.txt": "broken\n", "fix-work.txt": "kept\n"} {
+			if data, err := os.ReadFile(filepath.Join(dir, name)); err != nil || string(data) != want {
+				t.Fatalf("%s lost %s: %q, %v", dir, name, data, err)
+			}
+		}
+	}
+}
 
 func TestRunAsksOnAFailedCheckOnTerminal(t *testing.T) {
 	builtATM(t)
