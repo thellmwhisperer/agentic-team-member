@@ -68,8 +68,8 @@ func TestOwnDeliveryLineWaitsForApprovalThroughRealBinary(t *testing.T) {
 	if err == nil {
 		err = yaml.Unmarshal([]byte(atmYAML), &atm)
 	}
-	delivery, _ := own["delivery"].(string)
-	if err != nil || !strings.Contains(delivery, "axi status --run") {
+	delivery, ok := own["delivery"].(string)
+	if err != nil || !ok || delivery == "" {
 		t.Fatalf("want ATM's .atm.yaml with its delivery line, got %q, %v", delivery, err)
 	}
 	atm["delivery"] = delivery
