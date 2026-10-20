@@ -35,13 +35,18 @@ delivery: |
   id=$(r "$(cat "$a.out")")
   [ -n "$id" ] && [ "${b:-$id}" = "$id" ] && echo "$id" >"$a.run" ||
     { echo "delivery: no launch receipt of this attempt binds a run"; exit 1; }
-  # Only that run decides: its completion with a passing outcome passes; a decision, failure, query error or other answer does not.
-  while s=$(no-mistakes axi status --run "$id") && [ "$(f "$s" run id)" = "$id" ] && ! printf '%s\n' "$s" | grep -q '^gate:'; do
+  # Only that run decides: its completion with a passing outcome passes; a failure, query error or other answer does not.
+  # A decision keeps it running while its operator answers: each new gate is shown once.
+  while s=$(no-mistakes axi status --run "$id") && [ "$(f "$s" run id)" = "$id" ]; do
     case $(f "$s" run status) in
     completed)
       printf '%s\n' "$s" | grep -qxE 'outcome: passed(-with-override|-with-skips)?' || break
       printf '%s\n' "$s"; exit 0 ;;
-    pending | running) sleep 30 ;;
+    pending | running)
+      v=$(printf '%s\n' "$s" | sed -n '/^gate:/,/^[^ ]/p')
+      [ -z "$v" ] || [ "$v" = "$w" ] || printf '%s\n' "$s"
+      w=$v
+      sleep 30 ;;
     *) break ;;
     esac
   done

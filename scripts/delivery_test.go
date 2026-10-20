@@ -91,7 +91,7 @@ func toon(id, status string) string {
 }
 
 // decision is axi status of run id parked at an approval: the run still says running, the gate says why it waits.
-// The delivery reads only the gate key.
+// The delivery keeps following the run and shows the gate.
 func decision(id string) string {
 	return strings.Replace(toon(id, "running"), "ci,running", "review,awaiting_approval", 1) +
 		"gate:\n  step: review\n  status: awaiting_approval\n"
@@ -183,11 +183,15 @@ var gateWaits = []gate{
 	{"the branch's active run is left to its operator, not reattached", newRun, oldWait, 1, nil,
 		[]string{toon(newRun, "running"), toon(newRun, "running"), toon(newRun, "completed")}, 1, false, true,
 		"cannot prove"},
-	{"a pending decision returns zero", newRun, decision(newRun), 0, nil, []string{noRun, decision(newRun)}, 2,
-		false, false, "gate:"},
+	{"a pending decision returns zero", newRun, decision(newRun), 0, nil,
+		[]string{noRun, decision(newRun), toon(newRun, "completed")}, 3, true, false, "gate:"},
 	{"a decision while observing", newRun, oldWait, 1, nil,
-		[]string{noRun, toon(newRun, "running"), decision(newRun), toon(newRun, "completed")}, 3, false, false,
+		[]string{noRun, toon(newRun, "running"), decision(newRun), toon(newRun, "completed")}, 4, true, false,
 		"gate:"},
+	{"a document decision across queries, then the same run fails", newRun, oldWait, 1, nil,
+		[]string{noRun, toon(newRun, "running"), strings.ReplaceAll(decision(newRun), "review", "document"),
+			strings.ReplaceAll(decision(newRun), "review", "document"), toon(newRun, "failed")}, 5, false, false,
+		"step: document"},
 	{"the observed run changes", newRun, oldWait, 1, nil,
 		[]string{noRun, toon(newRun, "running"), toon(otherRun, "completed")}, 3, false, false, "not found"},
 	{"checks pass inside the hold, the run waits for merge, then completes", newRun, "outcome: checks-passed", 0,
