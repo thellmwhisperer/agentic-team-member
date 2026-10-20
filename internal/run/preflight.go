@@ -17,7 +17,7 @@ import (
 const preflightHelp = `Before the run, atm run checks what it stands on and exits 2 at the first check that fails,
 with no clone, no run directory and no agent:
   config        .atm.yaml as the base ref has it, which the run uses; a working tree's that differs gets a warning
-  base green    the latest completed CI run of each workflow on the base ref's head passed, as GitHub says;
+  base green    the latest completed CI run of each workflow on the base ref's head passed or was skipped, as GitHub says;
                 skipped when origin is not on GitHub
   worker files  each file a --harness-arg flag names, as --settings or --skill, exists in the base tree (saved base on resume) or is an absolute readable file
   delivery      the first word of delivery is a command sh finds: on PATH, or sh's own, as if or cd`
