@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.2](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.3.1...v1.3.2) (2026-10-20)
+
+
+### Bug Fixes
+
+* allow ATM agents to work beyond one hour ([3c4e252](https://github.com/thellmwhisperer/agentic-team-member/commit/3c4e25220a157334e2c5cfb8a426be9dc5b698f1))
+
 ## [1.3.1](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.3.0...v1.3.1) (2026-10-20)
 
 
