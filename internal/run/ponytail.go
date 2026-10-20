@@ -28,10 +28,10 @@ type finding struct {
 // ponytail is the slop detector on the run's work in clone, from base commit sha, for issue i as its last unit
 // is proven, whose units were proven as proofs: an agent that may only cut it. A cut that holds, a shorter diff
 // that passes every unit's proof and every check again, leaves two commits on the units before, the last unit
-// then the cut with a tombstone per finding. A file a finding names with a missing or non-empty issue sentence,
-// or that the cut deletes, adds, or touches as a test or outside the run's diff, is put back alone; what remains
-// is judged, and a cut that still fails policy or the checks is undone. A commit by the agent or a re-check
-// command fails the run.
+// then the cut with a tombstone per finding. A file a finding names with a missing issue sentence, or that the
+// cut deletes, adds, or touches as a test or outside the run's diff, is put back alone; what remains is judged,
+// and hold undoes the files that fail the checks. A cut that still fails policy or the checks is undone. A
+// commit by the agent or a re-check command fails the run.
 func (a agent) ponytail(root, clone, sha string, proofs []proof, i Issue, c config.Config) (map[string]any,
 	error) {
 	base, err := git(clone, "rev-parse", "HEAD") // the last unit's
@@ -76,7 +76,7 @@ func (a agent) ponytail(root, clone, sha string, proofs []proof, i Issue, c conf
 		}
 	}
 	if why == "" {
-		if why, ev["reproofs"], ev["commands"], err = reprove(a.dir, clone, base, proofs, c); err != nil {
+		if why, found, err = hold(ev, a.dir, clone, sha, base, before, all, files, found, proofs, c); err != nil {
 			return ev, err
 		}
 	}
@@ -86,7 +86,7 @@ func (a agent) ponytail(root, clone, sha string, proofs []proof, i Issue, c conf
 	ev["kept"] = why == ""
 	if why != "" {
 		ev["reason"] = why
-		ev["rejected_files"], err = restoreCut(clone, all, why, rejectedFiles)
+		ev["rejected_files"], err = restoreCut(clone, all, why, ev["rejected_files"].([]rejectedFile))
 		return ev, err
 	}
 	ev["commits"], ev["tombstones"], err = commit(root, clone, sha, before, i, found)
@@ -110,6 +110,94 @@ func restoreCut(clone, tree, why string, rejectedFiles []rejectedFile) ([]reject
 	}
 	slices.SortFunc(rejectedFiles, func(a, b rejectedFile) int { return strings.Compare(a.Path, b.Path) })
 	return rejectedFiles, restore(clone, tree)
+}
+
+// hold is undo on the cut left in clone, whole's tree all before it, on the run's work from sha, tree before,
+// which changes files. It records in ev the last re-proofs and their commands, and each file undone beside
+// those already rejected. What it keeps is fault again, the findings of its files kept.
+func hold(ev map[string]any, runDir, clone, sha, base, before, all string, files []string, found []finding,
+	proofs []proof, c config.Config) (string, []finding, error) {
+	why, ran, cmds, undone, err := undo(runDir, clone, base, all, proofs, c)
+	ev["reproofs"], ev["commands"] = ran, cmds
+	rejectedFiles, _ := ev["rejected_files"].([]rejectedFile)
+	for path, reason := range undone {
+		rejectedFiles = append(rejectedFiles, rejectedFile{Path: path, Reason: reason})
+	}
+	slices.SortFunc(rejectedFiles, func(a, b rejectedFile) int { return strings.Compare(a.Path, b.Path) })
+	ev["rejected_files"] = rejectedFiles
+	if err != nil || why != "" || len(undone) == 0 {
+		return why, found, err
+	}
+	found = slices.DeleteFunc(found, func(f finding) bool { return undone[f.File] != "" })
+	after, err := snapshot(clone)
+	if err == nil {
+		why, ev["net_lines"], err = fault(clone, sha, before, after, files, found, c.TestPatterns)
+	}
+	return why, found, err
+}
+
+// undo is reprove on the cut left in clone, whole's tree all before it, that puts back what fails: every cut
+// file the failure names, again while it names one, then alone's removal. undone is each file put back with the
+// failure it caused; why stays when no part of the cut passes. It re-proves at most twice per cut file, plus
+// once.
+func undo(runDir, clone, base, all string, proofs []proof, c config.Config) (why string, ran []unitResult,
+	cmds []cmdResult, undone map[string]string, err error) {
+	undone = map[string]string{}
+	cut, err := whole(clone)
+	names, e := every(clone, "diff", "--name-only", "--no-renames", "-z", all, cut)
+	left := strings.Split(strings.TrimRight(names, "\x00"), "\x00")
+	for err = errors.Join(err, e); err == nil; {
+		if why, ran, cmds, err = reprove(runDir, clone, base, proofs, c); err != nil || why == "" {
+			return why, ran, cmds, undone, err
+		}
+		// ponytail: a path inside a longer one's name counts as named too; a word match if that undoes too much.
+		named := slices.DeleteFunc(slices.Clone(left), func(p string) bool {
+			return !strings.Contains(why, p) && !strings.Contains(why, filepath.FromSlash(p))
+		})
+		if len(named) == 0 {
+			break
+		}
+		for _, p := range named {
+			undone[p] = why
+		}
+		left = slices.DeleteFunc(left, func(p string) bool { return undone[p] != "" })
+		if err = checkout(clone, all, named); err != nil || len(left) == 0 {
+			return why, ran, cmds, undone, err
+		}
+	}
+	if len(left) == 1 || err != nil { // undoing it leaves no cut
+		return why, ran, cmds, undone, err
+	}
+	p, r, cm, err := alone(runDir, clone, base, all, cut, left, proofs, c)
+	if p == "" || err != nil {
+		return why, ran, cmds, undone, err
+	}
+	undone[p] = why
+	return "", r, cm, undone, nil
+}
+
+// alone puts back in clone each of left, the cut files, from tree all, once and on its own, and is the first
+// whose removal passes reprove, with that re-proof and its commands, "" when none does. Each file that does not
+// comes back from tree cut.
+func alone(runDir, clone, base, all, cut string, left []string, proofs []proof, c config.Config) (p string,
+	ran []unitResult, cmds []cmdResult, err error) {
+	for i := 0; err == nil && i < len(left); i++ {
+		why := ""
+		if err = checkout(clone, all, left[i:i+1]); err == nil {
+			why, ran, cmds, err = reprove(runDir, clone, base, proofs, c)
+		}
+		if err != nil || why == "" {
+			return left[i], ran, cmds, err
+		}
+		err = checkout(clone, cut, left[i:i+1])
+	}
+	return "", nil, nil, err
+}
+
+// checkout puts each of paths back in clone byte for byte from tree, whole's.
+func checkout(clone, tree string, paths []string) error {
+	_, err := every(clone, append([]string{"--literal-pathspecs", "checkout", tree, "--"}, paths...)...)
+	return err
 }
 
 // reprove says why the work in clone, on HEAD base, the last unit's, fails a unit's proof again, each unit
@@ -190,8 +278,8 @@ func review(dir, clone, sha string, i Issue, c config.Config) (tree string, file
 }
 
 // fault says why the cut from tree before to tree after, on the run's work from sha, which changes files,
-// does not hold even before the checks, "" when it may: it must shorten the diff, report what it cut, touch
-// no sentence of the issue, and add or delete no file, touch no test nor file outside files. lines are the
+// does not hold even before the checks, "" when it may: it must shorten the diff, report what it cut with an
+// issue sentence, and add or delete no file, touch no test nor file outside files. lines are the
 // net lines the run adds before and after it.
 func fault(clone, sha, before, after string, files []string, found []finding, tests []string) (why string, lines [2]int,
 	err error) {
@@ -221,8 +309,8 @@ func fault(clone, sha, before, after string, files []string, found []finding, te
 	return "", lines, err
 }
 
-// judge is fault on the cut from before to after, once each file a finding names with a missing or non-empty
-// issue sentence, or that the cut deletes, adds, or touches as a test or outside files, is back byte for byte
+// judge is fault on the cut from before to after, once each file a finding names with a missing issue sentence,
+// or that the cut deletes, adds, or touches as a test or outside files, is back byte for byte
 // from whole's tree all.
 // Nothing of the cut left is fault on it as it stands, the same "no cut". kept are the findings of the files
 // that stay; rejectedFiles names each rejected file with its rule's reason.
@@ -271,13 +359,11 @@ func rejected(changed string, files []string, found []finding, tests []string) (
 	return bad, live
 }
 
-// sentenceFault is why finding f touches the issue, "" when it does not.
+// sentenceFault is why finding f lacks its issue sentence, "" when it has one: the sentence it quotes, recorded,
+// decides nothing.
 func sentenceFault(f finding) string {
-	switch {
-	case f.IssueSentence == nil:
+	if f.IssueSentence == nil {
 		return fmt.Sprintf("the cut touches the issue: finding %q lacks issue_sentence", f.Finding)
-	case *f.IssueSentence != "":
-		return "the cut touches the issue: " + *f.IssueSentence
 	}
 	return ""
 }

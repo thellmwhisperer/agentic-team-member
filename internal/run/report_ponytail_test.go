@@ -20,8 +20,7 @@ func TestPonytailDecisionPersistsInReport(t *testing.T) {
 		{name: "does not shorten", report: cut, after: 2,
 			reason: "the cut does not shorten the diff: 2 net added lines, 2 before"},
 		{name: "touches issue", work: "echo fixed > a.txt",
-			report: strings.Replace(cut, `"issue_sentence": ""`, `"issue_sentence": "Retry once."`, 1),
-			reason: "the cut touches the issue: Retry once."},
+			report: strings.Replace(cut, `"issue_sentence": ""`, `"issue_sentence": "Retry once."`, 1)}, // kept
 		{name: "touches test", work: "echo bad > a_test.sh", report: cut,
 			reason: "the cut touches the test a_test.sh"},
 		{name: "fresh", work: "echo fixed > a.txt; mkdir -p .atm; echo injected > .atm/injected.txt", report: cut,
@@ -50,6 +49,9 @@ func TestPonytailDecisionPersistsInReport(t *testing.T) {
 					t.Errorf("ponytail node %s = %#v (present: %t), want %#v", key, got, ok, want)
 				}
 			}
+			if got := n["rejected_files"]; c.reason == "" && !reflect.DeepEqual(got, []any{}) {
+				t.Errorf("a kept cut persisted rejected_files %#v, want none", got)
+			}
 		})
 	}
 }
@@ -70,9 +72,8 @@ func TestPonytailRejectedFilesInReport(t *testing.T) {
 			rejected: []obj{{"path": "c.txt", "reason": "the cut adds c.txt"}}},
 		{name: "partly kept beside an outside file", work: "echo fixed > a.txt; echo changed > b.txt", kept: true,
 			rejected: []obj{{"path": "b.txt", "reason": "the cut touches b.txt, outside the run's diff"}}},
-		{name: "rejected in full", work: "echo fixed > a.txt",
-			report:   strings.Replace(cut, `"issue_sentence": ""`, `"issue_sentence": "Retry once."`, 1),
-			rejected: []obj{{"path": "a.txt", "reason": "the cut touches the issue: Retry once."}}},
+		{name: "rejected in full", work: "echo fixed > a.txt", kept: true, // quoting the issue undoes nothing
+			report: strings.Replace(cut, `"issue_sentence": ""`, `"issue_sentence": "Retry once."`, 1)},
 		{name: "remainder fails proof", work: "echo broken > a.txt; echo bad > a_test.sh",
 			rejected: []obj{
 				{"path": "a.txt", "reason": "a_test.sh fails with the fix: exit status 1"},
@@ -95,6 +96,9 @@ func TestPonytailRejectedFilesInReport(t *testing.T) {
 			}
 			if got := n["rejected_files"]; !reflect.DeepEqual(got, want) {
 				t.Errorf("rejected_files = %#v, want %#v", got, want)
+			}
+			if reason, ok := n["reason"].(string); !ok || c.kept != (reason == "") {
+				t.Errorf("kept %t persisted reason %#v, want one only when undone", c.kept, n["reason"])
 			}
 		})
 	}
