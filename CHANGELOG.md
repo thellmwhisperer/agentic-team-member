@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.3](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.3.2...v1.3.3) (2026-10-20)
+
+
+### Bug Fixes
+
+* Screen fix batch: the right column always shows the running step, the Agent box names model and effort, the issue title wraps and folds ([025d0c0](https://github.com/thellmwhisperer/agentic-team-member/commit/025d0c04b0ac1183f5fa9a7a0685a08854999c6f))
+
 ## [1.3.2](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.3.1...v1.3.2) (2026-10-20)
 
 
