@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -150,9 +151,9 @@ func undo(runDir, clone, base, all string, proofs []proof, c config.Config) (why
 		if why, ran, cmds, err = reprove(runDir, clone, base, proofs, c); err != nil || why == "" {
 			return why, ran, cmds, undone, err
 		}
-		// ponytail: a path inside a longer one's name counts as named too; a word match if that undoes too much.
 		named := slices.DeleteFunc(slices.Clone(left), func(p string) bool {
-			return !strings.Contains(why, p) && !strings.Contains(why, filepath.FromSlash(p))
+			named := regexp.MustCompile(`(^|[[:space:]"'([{=:;,])(\./)?` + regexp.QuoteMeta(p) + `($|[[:space:]"')\]}:;,])`)
+			return !named.MatchString(strings.ReplaceAll(why, `\`, "/"))
 		})
 		if len(named) == 0 {
 			break
@@ -546,6 +547,10 @@ func tombstones(clone string, found []finding) ([]string, error) {
 		id := fmt.Sprintf("T-PONYTAIL-%s-%d", now.Format("20060102-150405"), n+1)
 		rel := ".slop/tombstones/" + id + ".yml"
 		path := filepath.Join(clone, filepath.FromSlash(rel))
+		example := f.Finding
+		if f.IssueSentence != nil && *f.IssueSentence != "" {
+			example += "\nissue_sentence: " + *f.IssueSentence
+		}
 		text := fmt.Sprintf(`schema: 1
 id: %[1]s
 status: accepted
@@ -559,12 +564,12 @@ incident:
   rule_established: "Cut by the ponytail pass; it does not come back."
   evidence:
     - family: %[4]s
-      example: %[2]q
+      example: %[6]q
       artifact: %[5]q
 match:
   family: %[4]s
   artifact: %[5]q
-`, id, f.Finding, now.Format("2006-01-02"), f.Family, f.File)
+`, id, f.Finding, now.Format("2006-01-02"), f.Family, f.File, example)
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			return paths, err
 		}
