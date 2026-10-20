@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.3](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.2.2...v1.2.3) (2026-10-20)
+
+
+### Bug Fixes
+
+* Proof: test_file reutiliza un verde de Go aunque cambien las fuentes del binario hijo ([74a4802](https://github.com/thellmwhisperer/agentic-team-member/commit/74a4802489de263d530e140bc2cfc3dc1ca0ba8f))
+
 ## [1.2.2](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.2.1...v1.2.2) (2026-10-20)
 
 
