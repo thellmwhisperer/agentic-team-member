@@ -3,8 +3,8 @@ package run
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -29,6 +29,11 @@ const scopeWork = `if [ -f "$ATM_TEST_RED" ]; then eval "$ATM_TEST_UNIT2"; ` + n
 	`echo 'grep -q u2 a.txt' > ".atm/follow-ups/1/$ATM_TEST_RED"; ` +
 	`printf '{"test_file":"a_test.sh","follow_ups":[%s]}' "$ATM_TEST_FOLLOWUP" > .atm/fake-report.json; fi`
 
+// scopeATM is scopeRun's .atm.yaml: its delivery writes the commits, files and a.txt it delivers to
+// $ATM_TEST_DELIVERED.
+var scopeATM = atmSet(atmYAML, "delivery",
+	`{ git log --format=%s; git ls-files; git show HEAD:a.txt; } > "$ATM_TEST_DELIVERED"`)
+
 // scopeFollowUp is a follow-up quoting criterion, its red test red, proposing paths, a JSON array.
 func scopeFollowUp(red, criterion, paths string) string {
 	return `{"title":"gap","red_test":"` + red + `","criterion":"` + criterion + `","paths":` + paths + `}`
@@ -38,47 +43,110 @@ func scopeFollowUp(red, criterion, paths string) string {
 // returns the repository, the run's directory, where the agents' calls went, the events and its error.
 func scopeRun(t *testing.T, issue, red, followUp string, env ...string) (root, runDir, call string,
 	out *bytes.Buffer, err error) {
+	return scopeRunAs(t, scopeATM, "t", issue, red, followUp, env...)
+}
+
+// scopeRunAs is scopeRun as run label of a repository whose .atm.yaml is atm.
+func scopeRunAs(t *testing.T, atm, label, issue, red, followUp string, env ...string) (root, runDir, call string,
+	out *bytes.Buffer, err error) {
 	t.Helper()
-	root = repo(t, "https://example.com/owner/repo.git", atmYAML)
+	root = repo(t, "https://example.com/owner/repo.git", atm)
 	call, out = filepath.Join(t.TempDir(), "call.json"), &bytes.Buffer{}
 	env = append([]string{"FAKE_AGENT_WORK", scopeWork, "FAKE_AGENT_CALL", call, "ATM_TEST_RED", red,
-		"ATM_TEST_FOLLOWUP", followUp, "ATM_TEST_UNIT2", "echo u2 >> a.txt"}, env...)
+		"ATM_TEST_FOLLOWUP", followUp, "ATM_TEST_UNIT2", "echo u2 >> a.txt",
+		"FAKE_AGENT_ORDER", filepath.Join(filepath.Dir(call), "order"),
+		"ATM_TEST_DELIVERED", filepath.Join(filepath.Dir(call), "delivered")}, env...)
 	for ; len(env) > 1; env = env[2:] {
 		t.Setenv(env[0], env[1])
 	}
-	err = Run("t", []string{issueFile(t, issue)}, out, io.Discard)
-	return root, filepath.Join(gitT(t, root, "rev-parse", "--show-toplevel"), ".atm", "runs", "t"), call, out, err
+	err = Run(label, []string{issueFile(t, issue)}, out, io.Discard)
+	return root, filepath.Join(gitT(t, root, "rev-parse", "--show-toplevel"), ".atm", "runs", label), call, out, err
 }
 
-// noSecondWorker checks the run failed naming why and no worker started after unit 1.
-func noSecondWorker(t *testing.T, err error, runDir string, out *bytes.Buffer, why ...string) {
+// scopeResume is scopeRun on a repository whose lint fails, then, once it passes, the resume of that failed run as
+// run resumed, its resume point holding followUp as the follow-up it chained, red, with legacy in it: its
+// scope review, and its cause, when it blocked, as a run kept it before follow-ups were retired. It checks the
+// failed run stopped at lint and the resume did the issue's unit alone, and returns what scopeRun does of it.
+func scopeResume(t *testing.T, issue, red, followUp string, legacy obj, env ...string) (root, runDir, call string,
+	out *bytes.Buffer, err error) {
 	t.Helper()
-	for _, w := range why {
-		if err == nil || !strings.Contains(err.Error(), w) {
-			t.Fatalf("want the run blocked naming %q, got %v", w, err)
-		}
+	root, runDir, call, failed, err := scopeRunAs(t, atmSet(scopeATM, "lint", "false"), "failed", issue, red,
+		followUp, env...)
+	if err == nil {
+		t.Fatal("want the unit's lint to fail")
 	}
-	if agents := ends(t, bytes.NewBuffer(out.Bytes()), "agent"); len(agents) != 1 {
-		t.Fatalf("want only unit 1's worker, got %v", agents)
+	failedUnit(t, root, "failed", failed, "lint")
+	commitConfig(t, root, scopeATM)
+	out, saved, err := legacyResume(t, root, "failed", "resumed", issue, obj{"follow_up": chained(t, followUp, legacy)})
+	resumedAlone(t, root, "resumed", out, err, saved)
+	return root, filepath.Join(filepath.Dir(runDir), "resumed"), call, out, err
+}
+
+// chained is followUp, as JSON, as a run that chained it kept it: its red test verified red, legacy in it.
+func chained(t *testing.T, followUp string, legacy obj) obj {
+	t.Helper()
+	var f obj
+	if err := json.Unmarshal([]byte(followUp), &f); err != nil {
+		t.Fatal(err)
 	}
+	f["test"], f["verified"] = "grep -q u2 a.txt\n", true
+	maps.Copy(f, legacy)
+	return f
+}
+
+// freshAndResumed runs issue, its unit 1 declaring followUp, red, env set, as scopeRun, then as scopeResume with
+// legacy. Each must do the issue's unit alone, check then looking at its directory and events.
+func freshAndResumed(t *testing.T, issue, red, followUp string, legacy obj, env []string,
+	check func(runDir string, out *bytes.Buffer)) {
+	t.Helper()
+	root, runDir, call, out, err := scopeRun(t, issue, red, followUp, env...)
+	noSecondWorker(t, err, root, runDir, call, out)
+	check(runDir, out)
+	root, runDir, call, out, err = scopeResume(t, issue, red, followUp, legacy, env...)
+	noSecondWorker(t, err, root, runDir, call, out)
+	check(runDir, out)
+}
+
+// noSecondWorker checks the run passed with unit 1's worker alone, each worker then the ponytail pass: no scope
+// review, no worker of a unit 2 and no follow-ups.json, and unit 1's work alone delivered.
+func noSecondWorker(t *testing.T, err error, root, runDir, call string, out *bytes.Buffer) {
+	t.Helper()
+	if err != nil {
+		t.Fatalf("want the issue's unit alone, nothing blocked, got %v", err)
+	}
+	oneUnit(t, out)
 	if _, e := os.Stat(filepath.Join(runDir, "worker-unit2.jsonl")); e == nil {
 		t.Fatal("the worker of unit 2 started")
 	}
+	if _, e := os.Stat(call + ".scope"); !os.IsNotExist(e) {
+		t.Fatalf("want no scope review, got %v", e)
+	}
+	if b, e := os.ReadFile(filepath.Join(filepath.Dir(call), "order")); e != nil || len(b) == 0 ||
+		strings.ReplaceAll(string(b), "worker\nponytail\n", "") != "" {
+		t.Fatalf("want each worker followed by the ponytail pass, nothing else, got %v:\n%s", e, b)
+	}
+	if dirs, _ := filepath.Glob(filepath.Join(runDir, "scope-review-unit*")); len(dirs) != 0 {
+		t.Fatalf("want no scope review's files, got %v", dirs)
+	}
+	noFollowUpsFile(t, root, filepath.Base(runDir))
+	if rep := readReport(t, filepath.Join(runDir, "report.json")); rep["failed_node"] != "" {
+		t.Fatalf("want the run passed, got %v", rep)
+	}
+	b, e := os.ReadFile(filepath.Join(filepath.Dir(call), "delivered"))
+	if title, rest, _ := strings.Cut(string(b), "\n"); e != nil || !strings.HasPrefix(title, "feat: ") ||
+		strings.ReplaceAll(rest, "config\n", "") != "init\n.atm.yaml\na.txt\na_test.sh\nfixed\n" {
+		t.Fatalf("want unit 1's work alone delivered, got %v:\n%s", e, b)
+	}
 }
 
-// blockedChild is the one follow-up follow-ups.json holds, after checking it is the blocking child of the
-// follow-up of criterion, red test red, with its cause and unit 1's commit as its dependency.
-func blockedChild(t *testing.T, root, criterion, red string, out *bytes.Buffer) obj {
+// briefOf is the brief.md of the run in runDir.
+func briefOf(t *testing.T, runDir string) string {
 	t.Helper()
-	left := readFollowUps(t, root)
-	clone, _ := ends(t, out, "clone")[0]["clone"].(string)
-	if len(left) != 1 || left[0]["criterion"] != criterion || left[0]["red_test"] != red ||
-		left[0]["verified"] != true || left[0]["cause"] == nil ||
-		left[0]["dependency"] != gitT(t, clone, "rev-parse", "HEAD") ||
-		gitT(t, clone, "log", "-1", "--format=%B") == "init" {
-		t.Fatalf("want a blocking child of %s with its cause and unit 1's commit, got %v", red, left)
+	b, err := os.ReadFile(filepath.Join(runDir, "brief.md"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	return left[0]
+	return string(b)
 }
 
 func TestFollowUpScopeBlocksBeforeTheWorker(t *testing.T) {
@@ -95,22 +163,18 @@ func TestFollowUpScopeBlocksBeforeTheWorker(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			report := `{"disposition": "blocked", "paths": {paths}, "findings": [{"path": "` + c.path +
 				`", "clause": "` + c.clause + `", "reason": "outside the issue's scope"}], "summary": "s"}`
-			root, runDir, call, out, err := scopeRun(t, c.issue, "c1_test.sh",
-				scopeFollowUp("c1_test.sh", c.criterion, c.paths), "FAKE_SCOPE_REPORT", report)
-			noSecondWorker(t, err, runDir, out, c.path, c.clause, c.criterion)
-			brief := agentCall(t, call+".scope").Stdin
-			if !strings.Contains(brief, c.issue) || !strings.Contains(brief, c.path) {
-				t.Fatalf("want the scope reviewer to get the literal issue and the paths, got:\n%s", brief)
+			var blocked obj
+			if err := json.Unmarshal([]byte(strings.Replace(report, "{paths}", c.paths, 1)), &blocked); err != nil {
+				t.Fatal(err)
 			}
-			child := blockedChild(t, root, c.criterion, "c1_test.sh", out)
-			b, _ := json.Marshal(child["scope"])
-			if !strings.Contains(string(b), c.path) || !strings.Contains(string(b), c.clause) ||
-				!strings.Contains(child["cause"].(string), c.criterion) {
-				t.Fatalf("want the child to keep the paths, clause and reason of the block, got %v", child)
-			}
-			if rep := readReport(t, filepath.Join(runDir, "report.json")); rep["result"] == "passed" {
-				t.Fatalf("want the run not passed, got %v", rep)
-			}
+			legacy := obj{"scope": obj{"paths": blocked["paths"], "approved": false, "report": blocked,
+				"reason": c.path + " is outside " + c.clause}, "cause": c.criterion + " blocked: " + c.path}
+			freshAndResumed(t, c.issue, "c1_test.sh", scopeFollowUp("c1_test.sh", c.criterion, c.paths), legacy,
+				[]string{"FAKE_SCOPE_REPORT", report}, func(_ string, out *bytes.Buffer) {
+					if strings.Contains(out.String(), "outside the issue's scope") || strings.Contains(out.String(), c.clause) {
+						t.Fatalf("want neither the block nor its clause in the run, got\n%s", out)
+					}
+				})
 		})
 	}
 }
@@ -118,36 +182,32 @@ func TestFollowUpScopeBlocksBeforeTheWorker(t *testing.T) {
 func TestFollowUpScopeReviewsTheRedTestPath(t *testing.T) {
 	issue := "# Android card route\nType: feature\n\nScope: android/Card.kt and c1_test.sh only.\n\n" +
 		"## Acceptance\n\n1. The android card opens the route.\n"
-	_, runDir, call, out, err := scopeRun(t, issue, "packages/ui/c1_test.sh", scopeFollowUp(
-		"packages/ui/c1_test.sh", "The android card opens the route.", `["android/Card.kt"]`), "FAKE_SCOPE", "issue")
-	noSecondWorker(t, err, runDir, out, "packages/ui/c1_test.sh")
-	if brief := agentCall(t, call+".scope").Stdin; !strings.Contains(brief, `"packages/ui/c1_test.sh"`) {
-		t.Fatalf("want the red test among the proposed paths, got:\n%s", brief)
-	}
+	legacy := obj{"scope": obj{"paths": []string{"android/Card.kt", "packages/ui/c1_test.sh"}, "approved": false,
+		"reason": "packages/ui/c1_test.sh is outside Scope: android/Card.kt and c1_test.sh only."}}
+	freshAndResumed(t, issue, "packages/ui/c1_test.sh", scopeFollowUp("packages/ui/c1_test.sh",
+		"The android card opens the route.", `["android/Card.kt"]`), legacy, []string{"FAKE_SCOPE", "issue"},
+		func(runDir string, _ *bytes.Buffer) {
+			if strings.Contains(briefOf(t, runDir), "packages/ui/c1_test.sh") {
+				t.Fatalf("want the red test's path in no brief, got\n%s", briefOf(t, runDir))
+			}
+		})
 }
 
 func TestFollowUpScopeApprovesAnInScopePlan(t *testing.T) {
-	_, runDir, call, out, err := scopeRun(t, androidIssue, "c1_test.sh",
-		scopeFollowUp("c1_test.sh", "The android card opens the route.", `["a.txt"]`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if agents := ends(t, out, "agent"); len(agents) != 2 || agents[1]["state"] != "passed" {
-		t.Fatalf("want unit 2 run, got %v", agents)
-	}
-	if brief := agentCall(t, call+".scope").Stdin; !strings.Contains(brief, androidIssue) {
-		t.Fatalf("want the scope reviewer to get the issue, got:\n%s", brief)
-	}
-	b, err := os.ReadFile(filepath.Join(runDir, "brief-unit-2.md"))
-	if err != nil || !strings.Contains(string(b), "`a.txt`") || !strings.Contains(string(b), "`c1_test.sh`") {
-		t.Fatalf("want unit 2's brief to name its approved paths, got %v:\n%s", err, b)
-	}
-	var report struct{ Units []obj }
-	b, _ = os.ReadFile(filepath.Join(runDir, "report.json"))
-	if json.Unmarshal(b, &report) != nil || len(report.Units) != 2 || report.Units[1]["result"] != "passed" ||
-		report.Units[1]["green"] == nil {
-		t.Fatalf("want unit 2 proven, got %s", b)
-	}
+	legacy := obj{"scope": obj{"paths": []string{"a.txt", "c1_test.sh"}, "approved": true}}
+	freshAndResumed(t, androidIssue, "c1_test.sh",
+		scopeFollowUp("c1_test.sh", "The android card opens the route.", `["a.txt"]`), legacy, nil,
+		func(runDir string, _ *bytes.Buffer) {
+			if _, err := os.Stat(filepath.Join(runDir, "brief-unit-2.md")); !os.IsNotExist(err) {
+				t.Fatalf("want no brief for a unit 2, got %v", err)
+			}
+			var report struct{ Units []obj }
+			b, _ := os.ReadFile(filepath.Join(runDir, "report.json"))
+			if json.Unmarshal(b, &report) != nil || len(report.Units) != 1 || report.Units[0]["result"] != "passed" ||
+				report.Units[0]["green"] == nil || report.Units[0]["test_file"] != "a_test.sh" {
+				t.Fatalf("want the issue's unit alone proven, on its own test, got %s", b)
+			}
+		})
 }
 
 func TestFollowUpScopeFailsClosed(t *testing.T) {
@@ -169,88 +229,73 @@ func TestFollowUpScopeFailsClosed(t *testing.T) {
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
-			root, runDir, _, out, err := scopeRun(t, androidIssue, "c1_test.sh",
-				scopeFollowUp("c1_test.sh", "The android card opens the route.", c.paths), c.key, c.value)
-			noSecondWorker(t, err, runDir, out, c.why)
-			child := blockedChild(t, root, "The android card opens the route.", "c1_test.sh", out)
-			if b, _ := json.Marshal(child["scope"]); !strings.Contains(string(b), c.why) {
-				t.Fatalf("want the child to keep why, %q, got %s", c.why, b)
+			var paths []string
+			if err := json.Unmarshal([]byte(c.paths), &paths); err != nil {
+				t.Fatal(err)
 			}
+			// What a run kept of a review that failed closed: its reason, as the cause of the blocked follow-up.
+			legacy := obj{"scope": obj{"paths": append(paths, "c1_test.sh"), "approved": false, "reason": c.why},
+				"cause": c.why}
+			// No reviewer runs to edit, commit or report: noSecondWorker delivers unit 1's work, as it made it.
+			freshAndResumed(t, androidIssue, "c1_test.sh",
+				scopeFollowUp("c1_test.sh", "The android card opens the route.", c.paths), legacy,
+				[]string{c.key, c.value}, func(_ string, out *bytes.Buffer) {
+					if strings.Contains(out.String(), c.why) {
+						t.Fatalf("want no %q in the run, got\n%s", c.why, out)
+					}
+				})
 		})
 	}
 }
 
-func blockedScopeRunDir(t *testing.T, root, label string, err error, why string) string {
-	t.Helper()
-	if label == "resumed" {
-		err = Run(label, []string{"--resume", "t", issueFile(t, androidIssue)}, io.Discard, io.Discard)
-	}
-	if err == nil || !strings.Contains(err.Error(), why) {
-		t.Fatalf("%s: want unit 2 blocked on %q, got %v", label, why, err)
-	}
-	return filepath.Join(root, ".atm", "runs", label)
-}
-
 func TestFollowUpScopeBlocksAnUnplannedPathAcrossResume(t *testing.T) {
-	root, _, _, _, err := scopeRun(t, androidIssue, "c1_test.sh",
-		scopeFollowUp("c1_test.sh", "The android card opens the route.", `["a.txt"]`),
-		"ATM_TEST_UNIT2", "echo u2 >> a.txt; echo extra > b.txt")
-	for _, label := range []string{"t", "resumed"} {
-		dir := blockedScopeRunDir(t, root, label, err, "b.txt")
-		var left []obj
-		b, _ := os.ReadFile(filepath.Join(dir, "follow-ups.json"))
-		if json.Unmarshal(b, &left) != nil || len(left) != 1 || left[0]["red_test"] != "c1_test.sh" ||
-			!strings.Contains(left[0]["cause"].(string), "b.txt") ||
-			!strings.Contains(left[0]["diff"].(string), "+extra") {
-			t.Fatalf("%s: want the discrepancy kept in follow-ups.json, got %s", label, b)
-		}
-		if rep := readReport(t, filepath.Join(dir, "report.json")); rep["failed_node"] != "checks" {
-			t.Fatalf("%s: want no delivery past unit 2's checks, got %v", label, rep["failed_node"])
-		}
-	}
+	legacy := obj{"scope": obj{"paths": []string{"a.txt", "c1_test.sh"}, "approved": true},
+		"cause": "unit 2 changes b.txt, outside the paths a.txt, c1_test.sh", "diff": "+u2\n+extra\n"}
+	freshAndResumed(t, androidIssue, "c1_test.sh",
+		scopeFollowUp("c1_test.sh", "The android card opens the route.", `["a.txt"]`), legacy,
+		[]string{"ATM_TEST_UNIT2", "echo u2 >> a.txt; echo extra > b.txt"}, func(_ string, out *bytes.Buffer) {
+			if strings.Contains(out.String(), "b.txt") {
+				t.Fatalf("want no unit 2 to change b.txt, nor its discrepancy, got\n%s", out)
+			}
+		})
 }
 
 func TestFollowUpScopeResumeReviewsTheOriginalIssue(t *testing.T) {
 	original := "# Android card route\nType: feature\n\nScope: a.txt and c1_test.sh only.\n\n" +
 		"## Acceptance\n\n1. The android card opens the route.\n"
 	changed := strings.Replace(original, "a.txt and", "a.txt, b.txt and", 1)
-	root, _, call, _, err := scopeRun(t, original, "c1_test.sh",
-		scopeFollowUp("c1_test.sh", "The android card opens the route.", `["a.txt","b.txt"]`),
-		"FAKE_SCOPE", "issue")
-	if err == nil {
-		t.Fatal("want the first run blocked on b.txt, outside the original issue")
-	}
-	// A run that fails its first unit's checks, before any scope review, resumes from them.
-	if err := os.WriteFile(filepath.Join(root, ".atm.yaml"), []byte(atmSet(atmYAML, "lint", "false")), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := Run("failed", []string{issueFile(t, original)}, io.Discard, io.Discard); err == nil {
+	followUp := scopeFollowUp("c1_test.sh", "The android card opens the route.", `["a.txt","b.txt"]`)
+	root, runDir, call, out, err := scopeRun(t, original, "c1_test.sh", followUp, "FAKE_SCOPE", "issue")
+	noSecondWorker(t, err, root, runDir, call, out)
+	// A run that fails its unit's checks resumes from them.
+	commitConfig(t, root, atmSet(scopeATM, "lint", "false"))
+	var failed bytes.Buffer
+	if err := Run("failed", []string{issueFile(t, original)}, &failed, io.Discard); err == nil {
 		t.Fatal("want unit 1's checks failed")
 	}
-	if err := os.WriteFile(filepath.Join(root, ".atm.yaml"), []byte(atmYAML), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Remove(call + ".scope"); err != nil {
-		t.Fatal(err)
-	}
-	err = Run("resumed", []string{"--resume", "failed", issueFile(t, changed)}, io.Discard, io.Discard)
-	if err == nil || !strings.Contains(err.Error(), "b.txt") {
-		t.Fatalf("want the resumed scope review to block b.txt, which only the changed issue allows, got %v", err)
-	}
-	if brief := agentCall(t, call+".scope").Stdin; !strings.Contains(brief, original) ||
-		strings.Contains(brief, "b.txt and") {
-		t.Fatalf("want the resumed scope review to get the original issue, got:\n%s", brief)
+	failedUnit(t, root, "failed", &failed, "lint")
+	commitConfig(t, root, scopeATM)
+	f := chained(t, followUp, obj{"scope": obj{"paths": []string{"a.txt", "b.txt", "c1_test.sh"}, "approved": false,
+		"reason": "b.txt is outside Scope: a.txt and c1_test.sh only."}})
+	resumed, saved, err := legacyResume(t, root, "failed", "resumed", changed, obj{"follow_up": f})
+	resumedAlone(t, root, "resumed", resumed, err, saved)
+	dir := filepath.Join(filepath.Dir(runDir), "resumed")
+	noSecondWorker(t, err, root, dir, call, resumed)
+	if b := briefOf(t, dir); !strings.Contains(b, "a.txt and") || strings.Contains(b, "b.txt and") {
+		t.Fatalf("want the resumed run on the original issue, got:\n%s", b)
 	}
 }
 
 func TestFollowUpScopeResumeRequiresSavedOriginalIssue(t *testing.T) {
-	root, dir, _, _, err := scopeRun(t, androidIssue, "c1_test.sh",
-		scopeFollowUp("c1_test.sh", "The android card opens the route.", `["a.txt"]`),
-		"ATM_TEST_UNIT2", "echo u2 >> a.txt; echo extra > b.txt")
-	if err == nil || !strings.Contains(err.Error(), "b.txt") {
-		t.Fatalf("want a resumable run blocked on b.txt, got %v", err)
+	root := repo(t, "https://example.com/owner/repo.git", atmSet(atmYAML, "lint", "false"))
+	t.Setenv("FAKE_AGENT_WORK", scopeWork)
+	t.Setenv("ATM_TEST_RED", "c1_test.sh")
+	t.Setenv("ATM_TEST_FOLLOWUP", scopeFollowUp("c1_test.sh", "The android card opens the route.", `["a.txt"]`))
+	err := Run("t", []string{issueFile(t, androidIssue)}, io.Discard, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "lint") {
+		t.Fatalf("want a resumable run failed at lint, got %v", err)
 	}
-	path := filepath.Join(dir, "resume", "resume.json")
+	path := filepath.Join(root, ".atm", "runs", "t", "resume", "resume.json")
 	b, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
@@ -260,6 +305,10 @@ func TestFollowUpScopeResumeRequiresSavedOriginalIssue(t *testing.T) {
 		t.Fatal(err)
 	}
 	delete(saved, "original")
+	// A chained follow-up an older run kept, its scope approved, does not stand in for the issue.
+	saved["follow_up"] = obj{"title": "gap", "red_test": "c1_test.sh", "criterion": "The android card opens the route.",
+		"test": "grep -q u2 a.txt\n", "verified": true, "scope": obj{"paths": []string{"a.txt", "c1_test.sh"},
+			"approved": true}}
 	b, err = json.Marshal(saved)
 	if err != nil {
 		t.Fatal(err)
@@ -285,22 +334,16 @@ func TestFollowUpScopeRequiresExactPlannedFiles(t *testing.T) {
 	for _, plan := range []string{".", "android", ""} {
 		t.Run("plan="+plan, func(t *testing.T) {
 			paths, _ := json.Marshal([]string{"a.txt", plan})
-			root, _, _, _, err := scopeRun(t, androidIssue, "c1_test.sh",
-				scopeFollowUp("c1_test.sh", "The android card opens the route.", string(paths)),
-				"ATM_TEST_UNIT2", "echo u2 >> a.txt; mkdir -p android; echo extra > android/unplanned.txt")
-			for _, label := range []string{"t", "resumed"} {
-				dir := blockedScopeRunDir(t, root, label, err, "changes android/unplanned.txt, outside the paths")
-				report := readReport(t, filepath.Join(dir, "report.json"))
-				if report["failed_node"] != "checks" {
-					t.Fatalf("%s: want delivery blocked at checks, got %v", label, report)
-				}
-				var left []obj
-				b, err := os.ReadFile(filepath.Join(dir, "follow-ups.json"))
-				if err != nil || json.Unmarshal(b, &left) != nil || len(left) != 1 ||
-					!strings.Contains(fmt.Sprint(left[0]["cause"]), "changes android/unplanned.txt, outside the paths") {
-					t.Fatalf("%s: want the exact discrepancy persisted, got %s, %v", label, b, err)
-				}
-			}
+			legacy := obj{"scope": obj{"paths": []string{"a.txt", plan, "c1_test.sh"}, "approved": true},
+				"cause": "unit 2 changes android/unplanned.txt, outside the paths"}
+			freshAndResumed(t, androidIssue, "c1_test.sh",
+				scopeFollowUp("c1_test.sh", "The android card opens the route.", string(paths)), legacy,
+				[]string{"ATM_TEST_UNIT2", "echo u2 >> a.txt; mkdir -p android; echo extra > android/unplanned.txt"},
+				func(_ string, out *bytes.Buffer) {
+					if strings.Contains(out.String(), "unplanned.txt") {
+						t.Fatalf("want no unit 2 to change android/unplanned.txt, got\n%s", out)
+					}
+				})
 		})
 	}
 }
@@ -310,8 +353,8 @@ func TestFollowUpScopeBlocksUnplannedCheckChanges(t *testing.T) {
 		for _, status := range []string{"true", "false"} {
 			t.Run(command+"/"+status, func(t *testing.T) {
 				line := "if [ -f c1_test.sh ]; then echo extra > b.txt; " + status + "; fi"
-				root := repo(t, "https://example.com/owner/repo.git", atmSet(atmSet(atmYAML,
-					command, line), "delivery", `echo delivered > "$ATM_TEST_DELIVERED"`))
+				fixed := atmSet(atmSet(atmYAML, command, line), "delivery", `ls > "$ATM_TEST_DELIVERED"`)
+				root := repo(t, "https://example.com/owner/repo.git", fixed)
 				delivered := filepath.Join(t.TempDir(), "delivered.txt")
 				t.Setenv("ATM_TEST_DELIVERED", delivered)
 				t.Setenv("FAKE_AGENT_WORK", scopeWork)
@@ -319,75 +362,86 @@ func TestFollowUpScopeBlocksUnplannedCheckChanges(t *testing.T) {
 				t.Setenv("ATM_TEST_FOLLOWUP", scopeFollowUp("c1_test.sh",
 					"The android card opens the route.", `["a.txt"]`))
 				t.Setenv("ATM_TEST_UNIT2", "echo u2 >> a.txt")
-				for _, label := range []string{"t", "resumed"} {
-					args := []string{issueFile(t, androidIssue)}
-					if label == "resumed" {
-						args = append([]string{"--resume", "t"}, args...)
+				var out bytes.Buffer
+				err := Run("t", []string{issueFile(t, androidIssue)}, &out, io.Discard)
+				if err != nil {
+					t.Fatalf("want the issue's unit alone, nothing blocked, got %v", err)
+				}
+				oneUnit(t, &out)
+				assertUnplannedCheckEvidence(t, root, "t", delivered)
+				if status == "false" { // a configured command that fails still blocks delivery, on its own reason
+					commitConfig(t, root, atmSet(fixed, command, "echo extra > b.txt; false"))
+					err := Run("blocked", []string{issueFile(t, androidIssue)}, io.Discard, io.Discard)
+					if err == nil || !strings.Contains(err.Error(), command+":") {
+						t.Fatalf("want the command failure preserved, got %v", err)
 					}
-					var out bytes.Buffer
-					err := Run(label, args, &out, io.Discard)
-					if err == nil || !strings.Contains(err.Error(), "changes b.txt, outside the paths") {
-						t.Fatalf("%s: want the check's unplanned b.txt blocked, got %v", label, err)
-					}
-					if status == "false" && !strings.Contains(err.Error(), command+":") {
-						t.Fatalf("%s: want the command failure preserved, got %v", label, err)
-					}
-					assertUnplannedCheckEvidence(t, root, label)
-					if _, err := os.Stat(delivered); !os.IsNotExist(err) {
-						t.Fatalf("%s: delivery ran despite the unplanned path: %v", label, err)
+					if b, _ := os.ReadFile(delivered); string(b) != "" {
+						t.Fatalf("blocked: delivery ran despite the failing %s:\n%s", command, b)
 					}
 				}
+				// A run that failed at another check, resumed with the follow-up an older run chained: no check
+				// finds its red test in place.
+				other := map[bool]string{true: "typecheck", false: "lint"}[command == "lint"]
+				commitConfig(t, root, atmSet(fixed, other, "false"))
+				var failed bytes.Buffer
+				if err := Run("failed", []string{issueFile(t, androidIssue)}, &failed, io.Discard); err == nil {
+					t.Fatalf("want the unit's %s to fail", other)
+				}
+				failedUnit(t, root, "failed", &failed, other)
+				commitConfig(t, root, fixed)
+				resumed, saved, err := legacyResume(t, root, "failed", "resumed", androidIssue, obj{"follow_up": obj{
+					"title": "gap", "red_test": "c1_test.sh", "criterion": "The android card opens the route.",
+					"paths": []string{"a.txt"}, "test": "grep -q u2 a.txt\n", "verified": true,
+					"scope": obj{"paths": []string{"a.txt", "c1_test.sh"}, "approved": true}}})
+				resumedAlone(t, root, "resumed", resumed, err, saved)
+				assertUnplannedCheckEvidence(t, root, "resumed", delivered)
 			})
 		}
 	}
 }
 
-func assertUnplannedCheckEvidence(t *testing.T, root, label string) {
+// assertUnplannedCheckEvidence checks run label of root delivered its one unit, which no red test of a follow-up
+// joined, so no check wrote b.txt.
+func assertUnplannedCheckEvidence(t *testing.T, root, label, delivered string) {
 	t.Helper()
-	dir := filepath.Join(root, ".atm", "runs", label)
 	var report struct {
-		FailedNode string       `json:"failed_node"`
-		Units      []unitResult `json:"units"`
+		Units []unitResult `json:"units"`
 	}
-	b, err := os.ReadFile(filepath.Join(dir, "report.json"))
-	if err != nil || json.Unmarshal(b, &report) != nil || report.FailedNode != "checks" ||
-		len(report.Units) == 0 {
-		t.Fatalf("%s: want delivery blocked at checks, got %s, %v", label, b, err)
+	b, err := os.ReadFile(filepath.Join(root, ".atm", "runs", label, "report.json"))
+	if err != nil || json.Unmarshal(b, &report) != nil || len(report.Units) != 1 ||
+		report.Units[0].TestFile != "a_test.sh" {
+		t.Fatalf("%s: want one unit, on the issue's test, got %s, %v", label, b, err)
 	}
-	var left []followUp
-	b, err = os.ReadFile(filepath.Join(dir, "follow-ups.json"))
-	if err != nil || json.Unmarshal(b, &left) != nil || len(left) != 1 ||
-		!strings.Contains(left[0].Cause, "changes b.txt, outside the paths") ||
-		!strings.Contains(left[0].Diff, "+extra") || left[0].RedTest != "c1_test.sh" ||
-		left[0].Dependency != report.Units[len(report.Units)-1].Base {
-		t.Fatalf("%s: want discrepancy, diff and dependency persisted, got %s, %v", label, b, err)
+	if b, err := os.ReadFile(delivered); err != nil || strings.Contains(string(b), "c1_test.sh") ||
+		strings.Contains(string(b), "b.txt") || !strings.Contains(string(b), "a_test.sh") {
+		t.Fatalf("%s: want delivery without a follow-up's red test or what it set off, got %v:\n%s", label, err, b)
+	}
+	if err := os.Remove(delivered); err != nil {
+		t.Fatal(err)
 	}
 }
 
-// TestFollowUpScopeBriefNamesItsScratch: the scope reviewer gets a scratch directory its brief names and
-// its TMPDIR points at, and its checks may write there.
+// TestFollowUpScopeBriefNamesItsScratch: no scope reviewer runs, so no scope scratch directory is made and nothing
+// writes the tickets or temporary file a reviewer did; the worker's brief names the worker's scratch alone, its
+// TMPDIR.
 func TestFollowUpScopeBriefNamesItsScratch(t *testing.T) {
-	_, runDir, call, _, err := scopeRun(t, androidIssue, "c1_test.sh",
-		scopeFollowUp("c1_test.sh", "The android card opens the route.", `["a.txt"]`),
-		"FAKE_REVIEW_SCRATCH", "1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	scope := agentCall(t, call+".scope")
-	dirs, _ := filepath.Glob(filepath.Join(runDir, "scope-review-unit*-scratch"))
-	if len(dirs) != 1 {
-		t.Fatalf("want one scope scratch directory under %s, got %v", runDir, dirs)
-	}
-	scratch := dirs[0]
-	if !strings.Contains(scope.Stdin, "`"+scratch+"`") {
-		t.Fatalf("want the scope brief to name the scratch %s, got:\n%s", scratch, scope.Stdin)
-	}
-	if !slices.Contains(scope.Env, "TMPDIR="+scratch) {
-		t.Fatalf("want the scope reviewer's TMPDIR at %s, got %v", scratch, scope.Env)
-	}
-	for _, name := range []string{"tickets.txt", "tmp.txt"} {
-		if _, e := os.Stat(filepath.Join(scratch, name)); e != nil {
-			t.Fatalf("want %s under the scope scratch directory: %v", name, e)
-		}
+	legacy := obj{"scope": obj{"paths": []string{"a.txt", "c1_test.sh"}, "approved": true}}
+	freshAndResumed(t, androidIssue, "c1_test.sh",
+		scopeFollowUp("c1_test.sh", "The android card opens the route.", `["a.txt"]`), legacy,
+		[]string{"FAKE_REVIEW_SCRATCH", "1"}, func(runDir string, _ *bytes.Buffer) {
+			scratch := filepath.Join(runDir, "worker-scratch")
+			if !strings.Contains(briefOf(t, runDir), "`"+scratch+"`") {
+				t.Fatalf("want the brief to name the worker's scratch %s, got:\n%s", scratch, briefOf(t, runDir))
+			}
+			for _, name := range []string{"tickets.txt", "tmp.txt", "plan.txt"} {
+				if found, _ := filepath.Glob(filepath.Join(filepath.Dir(runDir), "*", "*", name)); len(found) != 0 {
+					t.Fatalf("want no %s a scope reviewer wrote, got %v", name, found)
+				}
+			}
+		})
+	// The last worker is the failed run's: the resume calls none.
+	scratch := filepath.Join(gitT(t, ".", "rev-parse", "--show-toplevel"), ".atm", "runs", "failed", "worker-scratch")
+	if env := agentCall(t, os.Getenv("FAKE_AGENT_CALL")).Env; !slices.Contains(env, "TMPDIR="+scratch) {
+		t.Fatalf("want the worker's TMPDIR at its scratch %s, got %v", scratch, env)
 	}
 }

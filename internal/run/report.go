@@ -17,7 +17,7 @@ import (
 )
 
 // verdict is report.json, written at every node's start and end: why the run stopped, then each node's result,
-// the task type, each unit's proof, the proofs the slop detector re-ran and each command's result.
+// the task type, the unit's proof, the proof the slop detector re-ran and each command's result.
 type verdict struct {
 	FailedNode string         `json:"failed_node"`
 	Reason     string         `json:"reason"`

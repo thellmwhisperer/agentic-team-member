@@ -67,7 +67,7 @@ func runAt(label, ref string, args []string, out, summary io.Writer) (err error)
 		return ev, err
 	})
 	var dir, sha string
-	defer func() { err = errors.Join(err, leave(r, dir, repo)) }()
+	defer func() { err = errors.Join(err, release(dir, repo)) }()
 	r.step("clone", func() (ev map[string]any, err error) {
 		var install []cmdResult
 		dir, sha, install, err = clone(root, start, c.Install, repo, r.live)
@@ -75,18 +75,15 @@ func runAt(label, ref string, args []string, out, summary io.Writer) (err error)
 	})
 	var text string
 	r.step("contract", func() (ev map[string]any, err error) {
-		text, ev, err = writeBrief(filepath.Join(a.dir, "brief.md"), i, c, nil)
+		text, ev, err = writeBrief(filepath.Join(a.dir, "brief.md"), i, c)
 		return ev, err
 	})
 	byClone.Store(dir, r)
 	defer byClone.Delete(dir)
-	proofs, unit, pending := a.units(r, root, dir, sha, text, i, c,
+	proofs := a.unit(r, root, dir, sha, text, i, c,
 		resumePoint{Issue: args[len(args)-1], Original: &i, BaseRef: *base, Base: sha}, from)
-	if err := saveFollowUps(a.dir, pending); err != nil {
-		return err
-	}
 	r.step("ponytail", func() (map[string]any, error) {
-		ev, err := a.ponytail(root, dir, sha, proofs, unit, c)
+		ev, err := a.ponytail(root, dir, sha, proofs, i, c)
 		r.Reproofs, _ = ev["reproofs"].([]unitResult)
 		return ev, err
 	})
@@ -114,13 +111,6 @@ func theIssue(from *resumePoint, arg, repo string) (Issue, error) {
 		return *from.Original, nil
 	}
 	return readIssue(arg, repo)
-}
-
-func leave(r *verdict, dir, repo string) error {
-	if errors.Is(r.err, errUnmet) {
-		return nil
-	}
-	return release(dir, repo)
 }
 
 // parseArgs is atm run's command line: its flags and the issue, in any order. It returns them as flags, then the
@@ -164,77 +154,39 @@ type proof struct {
 	missing                      bool
 }
 
-// units runs the units of the run in clone dir, from base commit sha, for issue i under config c: the first on
-// brief text, each next one, up to maxUnits, on the first follow-up on the issue the one before proved. It
-// returns each unit's proof, the issue as the last unit is proven, a chained one by its red test, and the
-// follow-ups it did not chain. The units after the first change grossBudget lines at most, added plus deleted,
-// and a criterion of the issue left unmet blocks the run (unmet). Each unit goes to the report, and its agent's
-// work to keep, for atm run --resume. A run that resumes from puts the work it kept back in dir, in place of its
-// unit's agent.
-func (a agent) units(r *verdict, root, dir, sha, text string, i Issue, c config.Config, keep resumePoint,
-	from *resumePoint) (proofs []proof, unit Issue, pending []followUp) {
-	unit, head, n := i, sha, 1
-	var f *followUp      // the follow-up a chained unit makes pass
-	test, spent := "", 0 // spent: the gross lines of the units after the first
-	if from != nil {
-		n, f, proofs, pending = from.Unit, from.FollowUp, from.proofs(), append([]followUp(nil), from.Pending...)
-		spent = from.Gross
-		if f != nil {
-			unit.Type = "feature"
-		}
-	}
-	for ; ; n++ {
-		var report map[string]any
-		resumed := ""
-		r.step("agent", func() (map[string]any, error) {
-			var err error
-			var ev map[string]any
-			if from != nil {
-				resumed = from.run
-				head, ev, err = a.resumeUnit(r, root, dir, *from, &keep)
-				from = nil
-			} else {
-				head, unit, text, ev, err = a.runUnit(root, dir, head, text, unit, f, n, i, c, &keep)
-			}
-			if ev == nil {
-				return nil, err
-			}
-			ev["unit"] = n
-			report, _ = ev["report"].(map[string]any)
-			r.node("agent").Report, _ = ev["report"].(string)
-			test, _ = report["test_file"].(string)
-			if f != nil {
-				test = f.RedTest
-			}
-			return ev, err
-		})
-		r.keep(a.dir, dir, keep, n, report, f, proofs, pending, spent)
-		var in []followUp
+// unit runs the run's one unit in clone dir, from base commit sha, for issue i under config c, on brief text,
+// and returns its proof. The unit goes to the report, and its agent's work to keep, for atm run --resume. A run
+// that resumes from puts the work it kept back in dir, in place of its unit's agent.
+func (a agent) unit(r *verdict, root, dir, sha, text string, i Issue, c config.Config, keep resumePoint,
+	from *resumePoint) []proof {
+	head := sha
+	var report map[string]any
+	test, resumed := "", ""
+	r.step("agent", func() (map[string]any, error) {
+		var err error
 		var ev map[string]any
-		r.step("checks", func() (map[string]any, error) {
-			var err error
-			var p proof
-			var out []followUp
-			p, in, out, ev, err = checkUnit(a.dir, dir, head, test, unit.Type, f, n, spent, report, i.Body, c)
-			proofs = append(proofs, p)
-			pending = append(pending, out...)
-			spent, _ = ev["gross_lines"].(int) // none on unit 1, the primary work
-			if err == nil {
-				pending, in, err = a.scoped(root, dir, head, n, i, pending, in)
-				if errors.Is(err, errUnmet) && r.saved != 0 {
-					_, bundleErr := git(dir, "bundle", "create", filepath.Join(a.dir, "resume", "work.bundle"),
-						"refs/atm/resume", "HEAD", "^"+keep.Base)
-					err = errors.Join(err, bundleErr)
-				}
-			}
-			return ev, err
-		})
-		r.recordUnit(n, head, test, unit.Type, resumed, ev)
-		if r.err != nil || len(in) == 0 {
-			return proofs, unit, pending
+		if from != nil {
+			resumed = from.run
+			head, ev, err = a.resumeUnit(r, root, dir, *from, &keep)
+		} else {
+			ev, err = a.runUnit(dir, text, &keep)
 		}
-		f, pending = &in[0], append(pending, in[1:]...)
-	}
+		ev["unit"] = 1
+		report, _ = ev["report"].(map[string]any)
+		r.node("agent").Report, _ = ev["report"].(string)
+		test, _ = report["test_file"].(string)
+		return ev, err
+	})
+	r.keep(a.dir, dir, keep, 1, report)
+	var p proof
+	var ev map[string]any
+	r.step("checks", func() (map[string]any, error) {
+		var err error
+		p, ev, err = checkUnit(a.dir, dir, head, test, i.Type, report, c)
+		return ev, err
+	})
+	r.recordUnit(1, head, test, i.Type, resumed, ev)
+	return []proof{p}
 }
 
 func (r *verdict) recordUnit(n int, head, test, typ, resumed string, ev map[string]any) {
@@ -246,94 +198,28 @@ func (r *verdict) recordUnit(n int, head, test, typ, resumed string, ev map[stri
 		AgentModel: r.node("agent").AgentModel})
 }
 
-// checkUnit checks unit n, on commit head in clone dir. A unit after the first that changes a path its follow-up
-// f's scope review did not approve, or takes the gross lines of those before it, spent, over grossBudget, fails
-// with f as a blocking child: its contract, the unit's diff, the cause and head, its dependency.
-func checkUnit(
-	runDir, dir, head, test, typ string, f *followUp, n, spent int, report map[string]any, body string,
-	c config.Config,
-) (proof, []followUp, []followUp, map[string]any, error) {
-	ev := map[string]any{"unit": n}
-	// A unit that fails its checks still hands over its follow-ups, unverified, a problem with them noted
-	// after its checks' reason.
-	failed := func(err error, children ...followUp) (proof, []followUp, []followUp, map[string]any, error) {
-		out, verdicts, bad := unverified(dir, report)
-		ev["follow_ups"] = verdicts
-		if len(children) > 0 {
-			out = append(children, out...)
-		}
-		return proof{}, nil, out, ev, errors.Join(err, bad)
-	}
-	if f != nil {
-		if b, err := os.ReadFile(filepath.Join(dir, test)); err != nil || string(b) != f.Test {
-			return failed(fmt.Errorf("unit %d edited its red test %s, which it must make pass as it is", n, test))
-		}
-	}
-	if children, err := unitBounds(dir, head, f, n, spent, ev); err != nil {
-		return failed(err, children...)
-	}
-	result, err := checks(dir, runDir, head, typ, test, report == nil && test == "", c)
+// checkUnit checks the unit, on commit head in clone dir, for a task of type typ whose agent's report names test.
+func checkUnit(runDir, dir, head, test, typ string, report map[string]any, c config.Config) (proof,
+	map[string]any, error) {
+	ev := map[string]any{"unit": 1}
+	missing := report == nil && test == ""
+	result, err := checks(dir, runDir, head, typ, test, missing, c)
 	for key, value := range result {
 		ev[key] = value
 	}
-	if children, boundErr := unitBounds(dir, head, f, n, spent, ev); boundErr != nil {
-		return failed(errors.Join(err, boundErr), children...)
-	}
-	if err != nil {
-		return failed(err)
-	}
 	var testContent []byte
-	if test != "" && testedType(typ) {
+	if err == nil && test != "" && testedType(typ) {
 		testContent, err = os.ReadFile(filepath.Join(dir, test))
-		if err != nil {
-			return failed(err)
-		}
 	}
-	p := proof{head, test, typ, string(testContent), report == nil && test == ""}
-	in, out, followUpEvent, err := followUps(dir, report, body, c.TestFile)
-	ev["follow_ups"] = followUpEvent
-	return p, in, out, ev, err
+	return proof{head, test, typ, string(testContent), missing}, ev, err
 }
 
-func unitBounds(dir, head string, f *followUp, n, spent int, ev map[string]any) ([]followUp, error) {
-	if f == nil {
-		return nil, nil
-	}
-	g, diff, cause, err := beyond(dir, head, *f, n, spent)
-	if err != nil {
-		return nil, err
-	}
-	ev["gross_lines"] = spent + g
-	if cause == "" {
-		return nil, nil
-	}
-	child := *f
-	child.Diff, child.Dependency, child.Cause = diff, head, cause
-	return []followUp{child}, errors.New(child.Cause)
-}
-
-func (a agent) runUnit(
-	root, dir, head, text string, unit Issue, f *followUp, n int, i Issue, c config.Config, keep *resumePoint,
-) (string, Issue, string, map[string]any, error) {
-	name := "worker"
-	if f != nil {
-		var err error
-		head, err = chain(root, dir, n-1, i, *f)
-		if err != nil {
-			return head, unit, text, nil, err
-		}
-		unit.Type, name = "feature", "worker-unit"+strconv.Itoa(n)
-		path := filepath.Join(a.dir, "brief-unit-"+strconv.Itoa(n)+".md")
-		text, _, err = writeBrief(path, unit, c, f)
-		if err != nil {
-			return head, unit, text, nil, err
-		}
-	}
+func (a agent) runUnit(dir, text string, keep *resumePoint) (map[string]any, error) {
 	w := a // its scratch stays out of what keep saves
 	ev := map[string]any{}
-	_, err := w.reviewScratch("worker") // the one writeBrief names, fresh for each unit
+	_, err := w.reviewScratch("worker") // the one writeBrief names
 	if err == nil {
-		ev, err = w.run(dir, name, "ponytail", text, testFile)
+		ev, err = w.run(dir, "worker", "ponytail", text, testFile)
 	}
 	// A diff never goes for its report's format: without one, the unit goes to Checks with no test file.
 	if errors.As(err, &reportError{}) {
@@ -342,7 +228,7 @@ func (a agent) runUnit(
 		delete(ev, "tail")
 	}
 	keep.worker(a, ev)
-	return head, unit, text, ev, err
+	return ev, err
 }
 
 // deliver runs the delivery command line in clone, ATM_REPORT naming report.json, which is on disk already.
@@ -420,13 +306,9 @@ func prepareDelivery(r *verdict, root, clone, sha string, i Issue) (branch, cuts
 var conventional = map[string]string{"fix": "fix", "feature": "feat", "greenfield": "feat", "refactor": "refactor",
 	"tests": "test", "docs": "docs", "chore": "chore"}
 
-// unitMessage is the commit message of unit n of issue i: a conventional commit, a chained unit a feature.
+// unitMessage is the commit message of unit n of issue i: a conventional commit.
 func unitMessage(i Issue, n int) string {
-	typ := i.Type
-	if n > 1 {
-		typ = "feature"
-	}
-	return fmt.Sprintf("%s: %s\n\natm unit %d", conventional[typ], i.Title, n)
+	return fmt.Sprintf("%s: %s\n\natm unit %d", conventional[i.Type], i.Title, n)
 }
 
 // onBranch puts clone, at base commit sha, on a new branch name, what is left uncommitted committed as the
@@ -518,10 +400,10 @@ func GitHubRepo() string {
 	return ""
 }
 
-// writeBrief writes at path the brief for issue i under config c, whose unit makes follow-up next pass, if any.
-// Its scratch is the worker's, next to path, in the run's directory.
-func writeBrief(path string, i Issue, c config.Config, next *followUp) (string, map[string]any, error) {
-	b, err := brief(i, c, next, filepath.Join(filepath.Dir(path), "worker-scratch"))
+// writeBrief writes at path the brief for issue i under config c. Its scratch is the worker's, next to path, in
+// the run's directory.
+func writeBrief(path string, i Issue, c config.Config) (string, map[string]any, error) {
+	b, err := brief(i, c, filepath.Join(filepath.Dir(path), "worker-scratch"))
 	if err == nil {
 		err = os.MkdirAll(filepath.Dir(path), 0o755)
 	}

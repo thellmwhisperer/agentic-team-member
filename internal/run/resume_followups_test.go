@@ -2,7 +2,6 @@ package run
 
 import (
 	"bytes"
-	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -10,8 +9,12 @@ import (
 )
 
 func TestResumeKeepsEarlierUnchainedFollowUps(t *testing.T) {
-	root := repo(t, "https://example.com/owner/repo.git",
-		atmSet(atmYAML, "test", `if [ -f c1_test.sh ]; then false; else sh a_test.sh; fi`))
+	delivered, order := filepath.Join(t.TempDir(), "delivered"), filepath.Join(t.TempDir(), "order")
+	t.Setenv("ATM_TEST_OUT", delivered)
+	t.Setenv("FAKE_AGENT_ORDER", order)
+	deliver := atmSet(atmYAML, "delivery", `{ git log --format=%s; git ls-files; cat a.txt; } > "$ATM_TEST_OUT"`)
+	root := repo(t, "https://example.com/owner/repo.git", atmSet(atmSet(deliver,
+		"test", `if [ -f c1_test.sh ]; then false; else sh a_test.sh; fi`), "lint", "false"))
 	t.Setenv("ATM_TEST_CRITERION", "A retry runs once after a timeout.")
 	t.Setenv("FAKE_AGENT_WORK", `if [ -f c1_test.sh ]; then echo u2 >> a.txt; `+
 		`printf '{"test_file":"a_test.sh","follow_ups":[]}' > .atm/fake-report.json; `+
@@ -25,28 +28,30 @@ func TestResumeKeepsEarlierUnchainedFollowUps(t *testing.T) {
 	var first bytes.Buffer
 	err := Run("failed", []string{issueFile(t, followUpIssue)}, &first, io.Discard)
 	if err == nil {
-		t.Fatal("want unit 2 checks to fail")
+		t.Fatal("want unit 1's lint to fail")
 	}
-	fixedConfig := atmSet(atmYAML, "test", "test ! -e .atm/follow-ups/cache && sh a_test.sh")
-	if err := os.WriteFile(filepath.Join(root, ".atm.yaml"), []byte(fixedConfig), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	gitT(t, root, "commit", "-qam", "fix the config") // the resume reads it from the base ref
-	var resumed bytes.Buffer
-	args := []string{"--resume", "failed", issueFile(t, followUpIssue)}
-	if err := Run("resumed", args, &resumed, io.Discard); err != nil {
+	failedUnit(t, root, "failed", &first, "lint")
+	commitConfig(t, root, atmSet(deliver, "test", "test ! -e .atm/follow-ups/cache && "+
+		"test ! -e .atm/follow-ups/1/c1_test.sh && test ! -e c1_test.sh && test ! -e c2_test.sh && sh a_test.sh"))
+	// What a run that chained c1_test.sh kept before follow-ups were retired: no queue to take up again.
+	resumed, saved, err := legacyResume(t, root, "failed", "resumed", followUpIssue, obj{
+		"follow_up": obj{"title": "chained", "red_test": "c1_test.sh", "criterion": "A retry runs once after a timeout.",
+			"test": "grep -q u2 a.txt\n", "verified": true},
+		"pending": []obj{{"title": "pending", "red_test": "c2_test.sh", "criterion": "Some other work is documented.",
+			"test": "grep -q extra a.txt\n", "verified": true}}})
+	if err != nil {
 		b, _ := os.ReadFile(filepath.Join(root, ".atm", "runs", "failed", "resume", "resume.json"))
 		t.Fatalf("resume: %v; saved state: %s", err, b)
 	}
-	b, err := os.ReadFile(filepath.Join(root, ".atm", "runs", "resumed", "follow-ups.json"))
-	var followups []map[string]any
-	if err == nil {
-		err = json.Unmarshal(b, &followups)
+	resumedAlone(t, root, "resumed", resumed, err, saved)
+	if fs, _ := saved["follow_ups"].([]any); len(fs) != 2 {
+		t.Fatalf("want the unchained follow-up left in the kept report, as a note, got %v", saved)
 	}
-	if err != nil {
-		t.Fatalf("follow-ups.json: %v\n%s", err, b)
+	b, err := os.ReadFile(delivered)
+	if err != nil || string(b) != "fix: Retry on timeout\ninit\n.atm.yaml\na.txt\na_test.sh\nfixed\n" {
+		t.Fatalf("want unit 1's kept work alone delivered, got %v:\n%s", err, b)
 	}
-	if len(followups) != 1 || followups[0]["title"] != "pending" || followups[0]["red_test"] != "c2_test.sh" {
-		t.Fatalf("want unit 1's unchained follow-up preserved, got %v", followups)
+	if b, err := os.ReadFile(order); err != nil || string(b) != "worker\nponytail\n" {
+		t.Fatalf("want unit 1's worker alone, then the ponytail pass, got %v:\n%s", err, b)
 	}
 }

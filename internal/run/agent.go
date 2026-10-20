@@ -32,7 +32,7 @@ import (
 )
 
 // skills are the ponytail skills (github.com/DietrichGebert/ponytail, MIT): the implementing agent loads
-// ponytail, the slop detector and the scope reviewer ponytail-review.
+// ponytail, the slop detector ponytail-review.
 //
 //go:embed ponytail/SKILL.md ponytail-review/SKILL.md
 var skills embed.FS
@@ -204,7 +204,7 @@ func (e reportError) Unwrap() error { return e.error }
 
 // reported reads the run's report into ev. invalid is a validation error, so the caller can return it once;
 // fatal is why the step fails, that error wrapped as today when the report is what failed.
-func (a agent) reported(name, path, final, exit, cause string, runErr error, s *stream,
+func (a agent) reported(_, path, final, exit, cause string, runErr error, s *stream,
 	check func(map[string]any) error, ev map[string]any) (invalid, fatal error) {
 	if s == nil {
 		return nil, runErr
@@ -241,25 +241,12 @@ func (a agent) reported(name, path, final, exit, cause string, runErr error, s *
 	case s.failure != "":
 		return nil, fail(fmt.Errorf("%s; log: %s", exit, path))
 	}
-	report, err := finalReport(name, s.final, check)
+	report, err := report(s.final, check)
 	ev["report"] = report
 	if err != nil {
 		return err, fail(fmt.Errorf("%s; %w; log: %s", exit, err, path))
 	}
 	return nil, nil
-}
-
-// finalReport is the report in the agent's final message, which check accepts. A scope review's, whatever its
-// unit number, must be a single JSON object, nothing around it.
-func finalReport(name, final string, check func(map[string]any) error) (map[string]any, error) {
-	if strings.TrimRight(name, "0123456789") != "scope-review-unit" {
-		return report(final, check)
-	}
-	var r map[string]any
-	if json.Unmarshal([]byte(final), &r) != nil {
-		return nil, errors.New("agent left no report: invalid scope review: want a single JSON object")
-	}
-	return r, check(r)
 }
 
 // relative is live with each tool call's detail relative to clone: a path in it without clone, clone itself ".".

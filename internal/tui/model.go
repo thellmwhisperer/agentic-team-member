@@ -338,27 +338,11 @@ func (m *Model) started(step string, at time.Time) {
 	if step == "agent" && r.state == "pending" {
 		r.label = "Agent · unit 1"
 	}
-	if step == "agent" && r.state != "pending" { // a chained unit: its rows again, after the last unit's
-		i := slices.IndexFunc(m.rows, func(r *row) bool { return r.step == "ponytail" })
-		m.rows = slices.Insert(m.rows, i, &row{step: "agent", label: fmt.Sprintf("Agent · unit %d", m.units()+1)},
-			&row{step: "checks", label: "Checks", state: "pending"})
-		r = m.rows[i]
-	}
 	if step == "agent" || step == "ponytail" {
 		m.pipelineFocus = false
 		m.agent, m.history, m.open = nil, pane{}, nil
 	}
 	r.state, r.start = "running", at
-}
-
-// units is how many units have a row.
-func (m *Model) units() (n int) {
-	for _, r := range m.rows {
-		if !r.check && r.step == "agent" {
-			n++
-		}
-	}
-	return n
 }
 
 // tools is how many tool calls the Agent box has.

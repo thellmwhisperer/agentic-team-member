@@ -751,7 +751,7 @@ func TestRunChecksRunTheCommandsInOrderAndDieOnTheFirstFailure(t *testing.T) {
 }
 
 // chainedSource is a worker whose first unit fixes source.txt with two lines too many and declares the follow-up
-// second_test.sh, which the second unit makes pass.
+// second_test.sh, which once chained a second unit; no follow-up starts one any more.
 const chainedSource = `if [ -f second_test.sh ]; then echo second >> source.txt; ` +
 	`printf '{"test_file":"second_test.sh","follow_ups":[]}' > .atm/fake-report.json; ` +
 	`else printf 'fixed\nextra\nmore\n' > source.txt; ` +
@@ -805,9 +805,9 @@ var auditCases = []struct {
 		base: map[string]string{".gitignore": "cache/\n"},
 		work: "printf 'fixed\\nextra\\nmore\\n' > a.txt" + fixTest, report: cut,
 		ponytail: "echo extra >> a.txt; mkdir cache; echo injected > cache/injected.txt", why: "shorten"},
-	{name: "cut that breaks an earlier chained unit", delivered: "feat: Retry on timeout|" + atmID + "\n" +
-		unit1 + based + ".atm/fake-report.json\n" + placed + ".atm.yaml\na.txt\na_test.sh\nregression_test.sh\n" +
-		"second_test.sh\nsource.txt\nbroken\nfixed\nextra\nmore\nsecond\n",
+	{name: "cut that breaks an earlier chained unit", delivered: unit1 + based + ".atm/fake-report.json\n" +
+		".atm/follow-ups/1/second_test.sh\n" + placed + ".atm.yaml\na.txt\na_test.sh\nregression_test.sh\n" +
+		"source.txt\nbroken\nfixed\nextra\nmore\n",
 		base: map[string]string{"source.txt": "broken\n"},
 		work: chainedSource, report: strings.Replace(cut, "a.txt", "source.txt", 1),
 		ponytail: "printf 'broken\\nsecond\\n' > source.txt", why: "regression_test.sh"},

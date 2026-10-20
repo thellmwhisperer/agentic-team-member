@@ -38,16 +38,14 @@ var (
 	ponytailTmpl = template.Must(template.New("brief-ponytail.md").Funcs(funcs).Parse(ponytailText))
 )
 
-// brief is brief.md for issue i under the repository's config c, for a unit that makes next pass, if any, whose
-// agent's scratch directory is scratch.
-func brief(i Issue, c config.Config, next *followUp, scratch string) (string, error) {
+// brief is brief.md for issue i under the repository's config c, whose agent's scratch directory is scratch.
+func brief(i Issue, c config.Config, scratch string) (string, error) {
 	var b strings.Builder
 	err := briefTmpl.Execute(&b, struct {
 		Issue
 		config.Config
-		Next    *followUp
 		Scratch string
-	}{i, c, next, scratch})
+	}{i, c, scratch})
 	return b.String(), err
 }
 

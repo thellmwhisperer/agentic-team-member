@@ -67,12 +67,13 @@ func TestRunWritesTheContractForTheTaskType(t *testing.T) {
 				"`**/*_test.sh`", "`**/*.md`, `docs/**`",
 				"- Test: the red test, through `sh {file}`, and the tests of each package", "- Typecheck: `sh -n a_test.sh`",
 				"- Lint: none", "`ponytail` skill", "`git commit`, `git push`, `git rebase`, any `gh` command",
-				"`sleep` in tests", `"test_file"`, `"follow_ups"`, workerReachScope, netScope} {
+				"`sleep` in tests", `"test_file"`, "summary, as a note", workerReachScope, netScope} {
 				if !strings.Contains(got, want) {
 					t.Errorf("brief.md lacks %q:\n%s", want, got)
 				}
 			}
-			for _, unwanted := range []string{"CLAUDE.md", "Allowed paths", "{{", "`sh a_test.sh`"} {
+			for _, unwanted := range []string{"CLAUDE.md", "Allowed paths", "{{", "`sh a_test.sh`", "follow_ups",
+				"FOLLOW-UPS"} {
 				if strings.Contains(got, unwanted) {
 					t.Errorf("brief.md has %q:\n%s", unwanted, got)
 				}
@@ -94,7 +95,7 @@ func TestSuiteRunsOnce(t *testing.T) {
 		t.Fatalf("want ATM's .atm.yaml with test scripts/test.sh and a test_file, got %+v, %v", c, err)
 	}
 	for _, typ := range taskTypes {
-		got, err := brief(Issue{Title: "Retry", Body: "Retry once.", Type: typ}, c, nil, "/scratch")
+		got, err := brief(Issue{Title: "Retry", Body: "Retry once.", Type: typ}, c, "/scratch")
 		if err != nil {
 			t.Fatal(err)
 		}

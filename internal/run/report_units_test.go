@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -46,29 +47,77 @@ func checkProof(t *testing.T, what string, got any, n int, base, test, typ strin
 	}
 }
 
-// chainedCut runs two chained units under .atm.yaml atm, whose cut is kept, and returns root and its report.
+// chainedCut runs chainWork, which once chained two units and now runs one, under .atm.yaml atm, whose cut is
+// kept, and returns root and its report.
 func chainedCut(t *testing.T, atm string) (string, obj, []obj) {
 	t.Helper()
 	root := repo(t, "https://example.com/owner/repo.git", atm)
-	t.Setenv("FAKE_PONYTAIL_REPORT", cut)
-	t.Setenv("FAKE_PONYTAIL_WORK", "grep -v extra a.txt > cut; mv cut a.txt")
-	t.Setenv("FAKE_AGENT_WORK", chainWork)
-	t.Setenv("ATM_TEST_CRITERION", "A retry runs once after a timeout.")
-	t.Setenv("ATM_TEST_EDIT", "ATM_TEST_CRITERION=none") // unit 2's follow-up quotes no criterion: two units
+	chainedCutEnv(t)
 	var out capturedRun
 	if err := Run("t", []string{issueFile(t, followUpIssue)}, &out, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if p := ends(t, &out.Buffer, "ponytail"); len(p) != 1 || p[0]["kept"] != true {
+	return root, cutKept(t, root, "t", &out.Buffer), out.events
+}
+
+// chainedCutEnv sets chainedCut's agents up: chainWork, which declares a follow-up, and a cut that is kept.
+func chainedCutEnv(t *testing.T) {
+	t.Helper()
+	t.Setenv("FAKE_PONYTAIL_REPORT", cut)
+	t.Setenv("FAKE_PONYTAIL_WORK", "grep -v extra a.txt > cut; mv cut a.txt")
+	t.Setenv("FAKE_AGENT_WORK", chainWork)
+	t.Setenv("ATM_TEST_CRITERION", "A retry runs once after a timeout.")
+	t.Setenv("ATM_TEST_EDIT", "ATM_TEST_CRITERION=none") // a unit 2's follow-up would quote no criterion
+}
+
+// cutKept is the report of run label of root, after checking its events, out, kept the cut and hold unit 1's
+// alone, and its directory no brief of a unit 2.
+func cutKept(t *testing.T, root, label string, out *bytes.Buffer) obj {
+	t.Helper()
+	if p := ends(t, bytes.NewBuffer(out.Bytes()), "ponytail"); len(p) != 1 || p[0]["kept"] != true {
 		t.Fatalf("want the cut kept, got %v", p)
 	}
-	return root, readReport(t, filepath.Join(root, ".atm", "runs", "t", "report.json")), out.events
+	for _, ev := range events(t, bytes.NewBuffer(out.Bytes())) {
+		if u, ok := ev["unit"]; ok && u != float64(1) {
+			t.Fatalf("want unit 1's events alone, got %v", ev)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, ".atm", "runs", label, "brief-unit-2.md")); !os.IsNotExist(err) {
+		t.Fatalf("want no brief of a unit 2, got %v", err)
+	}
+	return readReport(t, filepath.Join(root, ".atm", "runs", label, "report.json"))
+}
+
+// resumedCut is chainedCut on a run that first failed at lint, then resumed, its resume point holding what a run
+// that reached a unit 2 kept before follow-ups were retired: the follow-up unit 1 chained and unit 1's proof. It
+// returns root, the base the failed run kept, and the resumed run's report and events.
+func resumedCut(t *testing.T, atm string) (root, base string, rep obj, events []obj) {
+	t.Helper()
+	root = repo(t, "https://example.com/owner/repo.git", atmSet(atm, "lint", "false"))
+	chainedCutEnv(t)
+	base = gitT(t, root, "rev-parse", "main")
+	if err := Run("failed", []string{issueFile(t, followUpIssue)}, io.Discard, io.Discard); err == nil {
+		t.Fatal("want the unit's lint to fail")
+	}
+	commitConfig(t, root, atm)
+	addLegacy(t, root, "failed", obj{
+		"follow_up": obj{"title": "gap 1", "red_test": "c1_test.sh", "criterion": "A retry runs once after a timeout.",
+			"test": "grep -q u2 a.txt\n", "verified": true},
+		"proofs": [][4]string{{base, "a_test.sh", "fix", "grep -q fixed a.txt && ! grep -q broken a.txt\n"}}})
+	var out capturedRun
+	if err := Run("resumed", []string{"--resume", "failed", issueFile(t, followUpIssue)}, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	return root, base, cutKept(t, root, "resumed", &out.Buffer), out.events
 }
 
 func TestReportKeepsWhenEveryNodeTrialAndCommandStartedAndTook(t *testing.T) {
-	_, rep, events := chainedCut(t, atmSet(atmSet(atmInstall("true"), "typecheck", "true"), "delivery", "true"))
+	atm := atmSet(atmSet(atmInstall("true"), "typecheck", "true"), "delivery", "true")
+	_, rep, events := chainedCut(t, atm)
 	timed := reportTimeline(t, rep)
 	checkTimeline(t, rep, events, timed)
+	_, _, rep, events = resumedCut(t, atm)
+	checkTimeline(t, rep, events, reportTimeline(t, rep))
 }
 
 func reportTimeline(t *testing.T, rep obj) []obj {
@@ -82,7 +131,7 @@ func reportTimeline(t *testing.T, rep obj) []obj {
 		timed = append(timed, u)
 		timed = append(timed, u["red"].(obj), u["green"].(obj))
 	}
-	var groups [][]obj // the commands of the clone, each unit's checks, the re-run checks and the delivery
+	var groups [][]obj // the commands of the clone, the unit's checks, the re-run checks and the delivery
 	for _, c := range rep["commands"].([]any) {
 		if c := c.(obj); c["name"] == "install" || len(groups) == 0 {
 			groups = append(groups, []obj{c})
@@ -90,8 +139,8 @@ func reportTimeline(t *testing.T, rep obj) []obj {
 			groups[len(groups)-1] = append(groups[len(groups)-1], c)
 		}
 	}
-	if len(groups) != 4 || len(groups[3]) != 4 || groups[3][3]["name"] != "delivery" {
-		t.Fatalf("want the clone's install, each unit's checks, the re-run checks and the delivery, got %v", groups)
+	if len(groups) != 3 || len(groups[2]) != 4 || groups[2][3]["name"] != "delivery" {
+		t.Fatalf("want the clone's install, the unit's checks, the re-run checks and the delivery, got %v", groups)
 	}
 	timed = append(timed, groups[0]...)
 	// Each checks' install runs before its proof, the rest after.
@@ -99,12 +148,8 @@ func reportTimeline(t *testing.T, rep obj) []obj {
 	trials("units", 0)
 	timed = append(timed, groups[1][1:]...)
 	timed = append(timed, groups[2][0])
-	trials("units", 1)
-	timed = append(timed, groups[2][1:]...)
 	trials("reproofs", 0)
-	timed = append(timed, groups[3][0])
-	trials("reproofs", 1)
-	timed = append(timed, groups[3][1:]...)
+	timed = append(timed, groups[2][1:]...)
 	return timed
 }
 
@@ -141,15 +186,13 @@ func checkProofScreenSpans(t *testing.T, rep obj, events []obj) {
 			proofRows = append(proofRows, ev)
 		}
 	}
-	if len(proofRows) != 4 {
-		t.Fatalf("want screen events for two unit proofs and two reproofs, got %v", proofRows)
+	if len(proofRows) != 2 {
+		t.Fatalf("want screen events for the unit's proof and its reproof, got %v", proofRows)
 	}
 	for i, key := range []string{"units", "reproofs"} {
-		for n := 0; n < 2; n++ {
-			row := rep[key].([]any)[n].(obj)
-			if row["duration_ms"] != proofRows[i*2+n]["duration_ms"] {
-				t.Fatalf("%s %d report span differs from screen row: %v vs %v", key, n+1, row, proofRows[i*2+n])
-			}
+		row := rep[key].([]any)[0].(obj)
+		if row["duration_ms"] != proofRows[i]["duration_ms"] {
+			t.Fatalf("%s 1 report span differs from screen row: %v vs %v", key, row, proofRows[i])
 		}
 	}
 }
@@ -215,30 +258,43 @@ func isConfiguredCommandEvent(ev obj) bool {
 
 func TestReportKeepsEveryUnitTheReproofsAndTheInstall(t *testing.T) {
 	root, rep, _ := chainedCut(t, atmInstall("true"))
+	checkOneUnitReport(t, rep, gitT(t, root, "rev-parse", "main"))
+	if units := rep["units"].([]any); units[0].(obj)["resumed_from"] != nil {
+		t.Fatalf("want a unit its agent made, got %v", units[0])
+	}
+	_, base, rep, _ := resumedCut(t, atmInstall("true"))
+	checkOneUnitReport(t, rep, base) // the base the failed run kept, not the config commit after it
+	if units := rep["units"].([]any); units[0].(obj)["resumed_from"] != "failed" {
+		t.Fatalf("want the unit resumed from the failed run, got %v", units[0])
+	}
+}
+
+// checkOneUnitReport checks rep holds unit 1 alone, on base, proven on a_test.sh, its proof re-run once alike, and
+// the clone's install, then the unit's checks and the re-run checks, each install first.
+func checkOneUnitReport(t *testing.T, rep obj, base string) {
+	t.Helper()
 	units, _ := rep["units"].([]any)
-	if len(units) != 2 {
-		t.Fatalf("want both units in the report, got %v", rep["units"])
+	if len(units) != 1 {
+		t.Fatalf("want the issue's unit alone in the report, got %v", rep["units"])
 	}
-	sha := gitT(t, root, "rev-parse", "main")
-	unit2, _ := units[1].(obj)["base"].(string)
-	if unit2 == "" || unit2 == sha {
-		t.Fatalf("want unit 2 on unit 1's commit, got %v", units[1])
-	}
-	checkProof(t, "unit", units[0], 1, sha, "a_test.sh", "fix")
-	checkProof(t, "unit", units[1], 2, unit2, "c1_test.sh", "feature")
+	checkProof(t, "unit", units[0], 1, base, "a_test.sh", "fix")
 	reproofs, _ := rep["reproofs"].([]any)
-	if len(reproofs) != 2 {
-		t.Fatalf("want both proofs the slop detector re-ran, got %v", rep["reproofs"])
+	if len(reproofs) != 1 {
+		t.Fatalf("want the one proof the slop detector re-ran, got %v", rep["reproofs"])
 	}
-	checkProof(t, "re-run proof of unit", reproofs[0], 1, sha, "a_test.sh", "fix")
-	checkProof(t, "re-run proof of unit", reproofs[1], 2, unit2, "c1_test.sh", "feature")
-	var installs int
+	checkProof(t, "re-run proof of unit", reproofs[0], 1, base, "a_test.sh", "fix")
+	if u, r := units[0].(obj), reproofs[0].(obj); u["red"].(obj)["command"] != r["red"].(obj)["command"] {
+		t.Fatalf("want the re-run proof on the unit's own test, got %v, %v", u, r)
+	}
+	var names []string
 	for _, c := range rep["commands"].([]any) {
-		if c := c.(obj); c["name"] == "install" && c["command"] == "true" && c["result"] == "passed" {
-			installs++
+		c := c.(obj)
+		if c["name"] == "install" && (c["command"] != "true" || c["result"] != "passed") {
+			t.Fatalf("want each install passed, got %v", c)
 		}
+		names = append(names, c["name"].(string))
 	}
-	if installs != 4 {
-		t.Fatalf("want the clone's install, then each unit's and the re-run checks', got %v", rep["commands"])
+	if got := strings.Join(names, " "); got != "install install test install test" {
+		t.Fatalf("want the clone's install, then the unit's and the re-run checks', got %v", rep["commands"])
 	}
 }
