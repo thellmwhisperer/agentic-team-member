@@ -128,10 +128,10 @@ func assertPonytailTestCase(t *testing.T, n obj, delivered string, action ponyta
 	rejected, reason := "", ""
 	switch mode {
 	case "failing suite":
-		want = redundant + proven + "fix: Retry on timeout\n"
+		want = redundant + proven + "chore: Retry on timeout\n"
 		rejected, reason = "redundant_test.sh", "test: "
 	case "changed proof":
-		rejected, reason = "a_test.sh", "unit 1: test a_test.sh changed since it was proven"
+		rejected, reason = "a_test.sh", "unit 1: test a_test.sh changed since it was recorded"
 	}
 	if n["kept"] != (mode != "failing suite") {
 		t.Fatalf("unexpected Ponytail decision: %v", n)
