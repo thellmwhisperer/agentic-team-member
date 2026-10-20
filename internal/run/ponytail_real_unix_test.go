@@ -37,7 +37,8 @@ func TestRealPonytailKeepsACutThatQuotesTheIssue(t *testing.T) {
 			report:    strings.Replace(cut, `"issue_sentence": ""`, `"issue_sentence": "Retry once."`, 1),
 			delivered: "fixed\nponytail: 1 cuts\n"},
 		{name: "quoted YAML characters", work: "echo fixed > a.txt",
-			report:    strings.Replace(cut, `"issue_sentence": ""`, `"issue_sentence": "Retry \"once\".\npath: C:\\tmp\t# quote"`, 1),
+			report: strings.Replace(cut, `"issue_sentence": ""`,
+				`"issue_sentence": "Retry \"once\".\npath: C:\\tmp\t# quote"`, 1),
 			delivered: "fixed\nponytail: 1 cuts\n"},
 		{name: "dependent pair", work: dependentCut, report: dependentCuts("x.go", "y.go"),
 			delivered: "fixed\nextra\nmore\nponytail: 2 cuts\nx.go\ny.go\n"},
@@ -57,12 +58,16 @@ func TestRealPonytailKeepsACutThatQuotesTheIssue(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) { realPonytail(t, c) })
 	}
-	for _, diagnostic := range []string{"dryrun.go:1: broken", "run.go.bak:1: broken", "d/run.go:1: broken", `d\run.go:1: broken`, "./d/run.go:1: broken"} {
+	for _, diagnostic := range []string{
+		"dryrun.go:1: broken", "run.go.bak:1: broken", "d/run.go:1: broken",
+		`d\run.go:1: broken`, "./d/run.go:1: broken",
+	} {
 		bad := strings.TrimPrefix(strings.ReplaceAll(strings.Split(diagnostic, ":")[0], `\`, "/"), "./")
 		t.Run(diagnostic, func(t *testing.T) {
 			realPonytail(t, realCut{work: "echo v2 > run.go; echo broken > " + bad,
 				report: dependentCuts("run.go", bad), rejected: []string{bad},
-				lint:      `! grep -q broken ` + bad + ` || { printf "%s\n" "` + strings.ReplaceAll(diagnostic, `\`, `\\`) + `"; exit 1; }`,
+				lint: `! grep -q broken ` + bad + ` || { printf "%s\n" "` +
+					strings.ReplaceAll(diagnostic, `\`, `\\`) + `"; exit 1; }`,
 				delivered: "fixed\nextra\nmore\nponytail: 1 cuts\nrun.go\n"})
 		})
 	}
@@ -77,12 +82,14 @@ func realPonytail(t *testing.T, c realCut) {
 	t.Setenv("ATM_TEST_SLOPSLINT", filepath.Join(filepath.Dir(source), "../../scripts/slopslint.sh"))
 	for k, v := range map[string]string{"ATM_TEST_OUT": delivered, "FAKE_PONYTAIL_WORK": c.work,
 		"FAKE_AGENT_WORK": "printf 'fixed\\nextra\\nmore\\n' > a.txt" + fixTest +
-			"; " + dependentSeed + "; mkdir -p d; for f in run.go dryrun.go run.go.bak d/run.go; do printf 'v1\\nextra\\n' > $f; done",
+			"; " + dependentSeed + "; mkdir -p d; for f in run.go dryrun.go run.go.bak d/run.go; " +
+			"do printf 'v1\\nextra\\n' > $f; done",
 		"FAKE_PONYTAIL_REPORT": c.report} {
 		t.Setenv(k, v)
 	}
 	atm := atmSet(atmSet(atmSet(atmYAML, "typecheck", builds), "lint", c.lint), "delivery",
-		`{ git show HEAD:a.txt; git log -1 --format=%s; git diff --name-only HEAD~1 HEAD -- x.go y.go z.txt run.go dryrun.go run.go.bak d/run.go; }`+
+		`{ git show HEAD:a.txt; git log -1 --format=%s; `+
+			`git diff --name-only HEAD~1 HEAD -- x.go y.go z.txt run.go dryrun.go run.go.bak d/run.go; }`+
 			` > "$ATM_TEST_OUT"; mkdir -p "$ATM_TEST_OUT.tombs"; `+
 			`if [ -d .slop/tombstones ]; then cp .slop/tombstones/*.yml "$ATM_TEST_OUT.tombs/" && `+
 			`bash "$ATM_TEST_SLOPSLINT" tombstone check --repo-root "$PWD"; fi`)
@@ -90,18 +97,7 @@ func realPonytail(t *testing.T, c realCut) {
 	if err := os.MkdirAll(filepath.Join(top, ".atm"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	config, err := os.ReadFile(filepath.Join(filepath.Dir(source), "../../.slop/config.yml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(top, ".slop"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(top, ".slop/config.yml"), config, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	gitT(t, top, "add", ".slop/config.yml")
-	gitT(t, top, "commit", "--amend", "--no-edit", "-q")
+	realPonytailConfig(t, top, source)
 	bin := filepath.Join(t.TempDir(), "atm")
 	buildATM(t, bin, "follow-test") // its own file, for endServe to change
 	server := startVersionServe(t, bin, top)
@@ -128,6 +124,28 @@ func realPonytail(t *testing.T, c realCut) {
 		c.delivered == "" && strings.Contains(string(b), "ponytail:") {
 		t.Fatalf("want the ponytail commit to hold the cut kept, delivered %q, %v", b, err)
 	}
+	realPonytailTombstones(t, c, delivered)
+	t.Logf("atm run %s: ponytail kept=%v, rejected %v", runs[0].Run, n["kept"], rejected)
+}
+
+func realPonytailConfig(t *testing.T, top, source string) {
+	t.Helper()
+	config, err := os.ReadFile(filepath.Join(filepath.Dir(source), "../../.slop/config.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(top, ".slop"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(top, ".slop/config.yml"), config, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitT(t, top, "add", ".slop/config.yml")
+	gitT(t, top, "commit", "--amend", "--no-edit", "-q")
+}
+
+func realPonytailTombstones(t *testing.T, c realCut, delivered string) {
+	t.Helper()
 	var report struct{ Findings []finding }
 	if err := json.Unmarshal([]byte(c.report), &report); err != nil {
 		t.Fatal(err)
@@ -149,20 +167,16 @@ func realPonytail(t *testing.T, c realCut) {
 			examples = append(examples, evidence.Example)
 		}
 	}
-	if c.delivered != "" {
-		for _, f := range report.Findings {
-			if slices.Contains(c.rejected, f.File) {
-				continue
-			}
-			want := f.Finding
-			if f.IssueSentence != nil && *f.IssueSentence != "" {
-				want += "\nissue_sentence: " + *f.IssueSentence
-			}
-			if !slices.Contains(examples, want) {
-				t.Fatalf("tombstones lost evidence %q: %v", want, examples)
-			}
+	for _, f := range report.Findings {
+		if c.delivered == "" || slices.Contains(c.rejected, f.File) {
+			continue
+		}
+		want := f.Finding
+		if f.IssueSentence != nil && *f.IssueSentence != "" {
+			want += "\nissue_sentence: " + *f.IssueSentence
+		}
+		if !slices.Contains(examples, want) {
+			t.Fatalf("tombstones lost evidence %q: %v", want, examples)
 		}
 	}
-
-	t.Logf("atm run %s: ponytail kept=%v, rejected %v", runs[0].Run, n["kept"], rejected)
 }

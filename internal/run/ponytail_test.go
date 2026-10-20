@@ -5,7 +5,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -466,16 +465,14 @@ func TestPonytailJudgesACutPerFile(t *testing.T) {
 					!strings.HasPrefix(gitT(t, clone, "log", "-1", "--format=%B"), "ponytail: 2 cuts") {
 					t.Fatalf("want c.txt's cut kept too, c.txt is %q", got)
 				}
-				keptCut(t, clone, sha, "c.txt")
-			} else {
-				keptCut(t, clone, sha)
 			}
+			keptCut(t, clone, sha, c.report == twoCuts)
 		})
 	}
 }
 
 // keptCut checks the ponytail commit is a.txt's cut and its tombstone, and every other file is as the unit left it.
-func keptCut(t *testing.T, clone, sha string, extra ...string) {
+func keptCut(t *testing.T, clone, sha string, extra ...bool) {
 	t.Helper()
 	if gitT(t, clone, "rev-parse", "HEAD~2") != sha {
 		t.Fatalf("want two commits on %s", sha)
@@ -487,8 +484,9 @@ func keptCut(t *testing.T, clone, sha string, extra ...string) {
 		t.Fatalf("cut a.txt: %q", got)
 	}
 	msg := "ponytail: 1 cuts\n\n- a.txt: dropped two lines (speculative_feature)"
-	if len(extra) != 0 {
-		msg = "ponytail: 2 cuts\n\n- a.txt: dropped two lines (speculative_feature)\n- c.txt: touches the issue (speculative_feature)"
+	if len(extra) != 0 && extra[0] {
+		msg = "ponytail: 2 cuts\n\n- a.txt: dropped two lines (speculative_feature)" +
+			"\n- c.txt: touches the issue (speculative_feature)"
 	}
 	if got := gitT(t, clone, "log", "-1", "--format=%B"); got != msg {
 		t.Fatalf("commit: %q", got)
@@ -498,7 +496,8 @@ func keptCut(t *testing.T, clone, sha string, extra ...string) {
 		t.Fatalf("cut commit lacks a.txt: %q", diff)
 	}
 	for _, name := range strings.Split(diff, "\n") {
-		if name != "a.txt" && !slices.Contains(extra, name) && !strings.HasPrefix(name, ".slop/tombstones/") {
+		if name != "a.txt" && (len(extra) == 0 || !extra[0] || name != "c.txt") &&
+			!strings.HasPrefix(name, ".slop/tombstones/") {
 			t.Fatalf("the cut commit touches %s", name)
 		}
 	}
@@ -568,15 +567,7 @@ func TestPonytailJudgesDependentCutsTogether(t *testing.T) {
 			if _, err := sh(clone, dependentSeed); err != nil {
 				t.Fatal(err)
 			}
-			for _, change := range []string{"true", cutX, cutY} {
-				out, err := sh(clone, change+"; "+builds)
-				if change == "true" && err != nil || change != "true" && (err == nil || !strings.Contains(out, "y.go:")) {
-					t.Fatalf("compiler must accept the original pair and reject either cut alone: %s, %v", out, err)
-				}
-				if _, err := sh(clone, dependentSeed); err != nil {
-					t.Fatal(err)
-				}
-			}
+			checkDependentCompiler(t, clone, builds)
 			if len(c.files) == 2 {
 				t.Setenv("FAKE_PONYTAIL_WORK", dependentCut)
 			}
@@ -605,6 +596,19 @@ func TestPonytailJudgesDependentCutsTogether(t *testing.T) {
 	}
 }
 
+func checkDependentCompiler(t *testing.T, clone, builds string) {
+	t.Helper()
+	for _, change := range []string{"true", cutX, cutY} {
+		out, err := sh(clone, change+"; "+builds)
+		if change == "true" && err != nil || change != "true" && (err == nil || !strings.Contains(out, "y.go:")) {
+			t.Fatalf("compiler must accept the original pair and reject either cut alone: %s, %v", out, err)
+		}
+		if _, err := sh(clone, dependentSeed); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 // rejectedAs checks ev's rejected files are want's, each with a reason holding want's part.
 func rejectedAs(t *testing.T, ev map[string]any, want map[string]string) {
 	t.Helper()
@@ -622,8 +626,10 @@ func rejectedAs(t *testing.T, ev map[string]any, want map[string]string) {
 // keptTogether checks the ponytail commit holds the cuts of x.go and y.go, and z.txt as the unit left it.
 func keptTogether(t *testing.T, clone string) {
 	t.Helper()
-	for _, f := range []string{"x.go", "y.go"} {
-		if got := gitT(t, clone, "show", "HEAD:"+f); got != map[string]string{"x.go": "package pair\nfunc x() int { return 1 }", "y.go": "package pair\nfunc y() int { return x() }"}[f] {
+	for f, want := range map[string]string{
+		"x.go": "package pair\nfunc x() int { return 1 }", "y.go": "package pair\nfunc y() int { return x() }",
+	} {
+		if got := gitT(t, clone, "show", "HEAD:"+f); got != want {
 			t.Fatalf("want %s's cut kept, got %q", f, got)
 		}
 	}
