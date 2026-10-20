@@ -1,11 +1,12 @@
+# No test command: the gate's Test step is targeted at the change; the whole suite runs in ATM's Checks and in CI.
 commands:
-  test: scripts/test.sh
   lint: scripts/lint.sh
 review:
   path_instructions:
     - path: "**"
       instructions: |
-        Run tests through `scripts/test.sh` (`go test ./...`) and lint through `scripts/lint.sh`.
+        Run the tests of the packages the change touches (`go test`), never the whole suite, and lint through
+        `scripts/lint.sh`.
         A finding is a defect against the linked issue's acceptance criteria, or one that breaks the
         repository's test, typecheck or lint commands. Hardening for a case the issue does not name is
         reported as a note and changes nothing.

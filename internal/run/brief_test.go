@@ -7,6 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
+
+	"github.com/thellmwhisperer/agentic-team-member/internal/config"
 )
 
 const briefYAML = `install: "true"
@@ -60,18 +64,50 @@ func TestRunWritesTheContractForTheTaskType(t *testing.T) {
 				t.Errorf("first line does not point to AGENTS.md: %q", first)
 			}
 			for _, want := range []string{"Task type: " + typ, "### Retry\n\n" + issue + "\n", proof,
-				"`**/*_test.sh`", "`**/*.md`, `docs/**`", "- Test: `sh a_test.sh`", "- Typecheck: `sh -n a_test.sh`",
+				"`**/*_test.sh`", "`**/*.md`, `docs/**`",
+				"- Test: the red test, through `sh {file}`, and the tests of each package", "- Typecheck: `sh -n a_test.sh`",
 				"- Lint: none", "`ponytail` skill", "`git commit`, `git push`, `git rebase`, any `gh` command",
 				"`sleep` in tests", `"test_file"`, `"follow_ups"`, workerReachScope, netScope} {
 				if !strings.Contains(got, want) {
 					t.Errorf("brief.md lacks %q:\n%s", want, got)
 				}
 			}
-			for _, unwanted := range []string{"CLAUDE.md", "Allowed paths", "{{"} {
+			for _, unwanted := range []string{"CLAUDE.md", "Allowed paths", "{{", "`sh a_test.sh`"} {
 				if strings.Contains(got, unwanted) {
 					t.Errorf("brief.md has %q:\n%s", unwanted, got)
 				}
 			}
 		})
+	}
+}
+
+// The suite runs once per issue, in Checks and in CI: neither ATM's own brief nor its gate runs the project's
+// test command.
+func TestSuiteRunsOnce(t *testing.T) {
+	root := filepath.Join("..", "..")
+	var c config.Config
+	b, err := os.ReadFile(filepath.Join(root, ".atm.yaml"))
+	if err == nil {
+		err = yaml.Unmarshal(b, &c)
+	}
+	if err != nil || c.Test != "scripts/test.sh" || c.TestFile == "" {
+		t.Fatalf("want ATM's .atm.yaml with test scripts/test.sh and a test_file, got %+v, %v", c, err)
+	}
+	for _, typ := range taskTypes {
+		got, err := brief(Issue{Title: "Retry", Body: "Retry once.", Type: typ}, c, nil, "/scratch")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(got, c.Test) || !strings.Contains(got, "- Test: the red test, through `"+c.TestFile+"`") {
+			t.Errorf("%s brief: want VERIFY with the red test and not %s:\n%s", typ, c.Test, got)
+		}
+	}
+	var gate struct{ Commands map[string]string }
+	b, err = os.ReadFile(filepath.Join(root, ".no-mistakes.yaml"))
+	if err == nil {
+		err = yaml.Unmarshal(b, &gate)
+	}
+	if test, ok := gate.Commands["test"]; err != nil || ok || strings.Contains(string(b), c.Test) {
+		t.Fatalf("want .no-mistakes.yaml without a test command or %s, got test %q, %v", c.Test, test, err)
 	}
 }
