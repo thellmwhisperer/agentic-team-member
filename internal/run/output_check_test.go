@@ -36,7 +36,10 @@ func TestOutputEventNamesItsCommand(t *testing.T) {
 			t.Errorf("output names no command: %v", ev)
 		}
 	}
-	for _, name := range []string{"install", "red/green", "test", "typecheck", "lint", "delivery"} {
+	if named["red/green"] {
+		t.Fatalf("removed proof still emitted output: %v", w.live)
+	}
+	for _, name := range []string{"install", "test", "typecheck", "lint", "delivery"} {
 		if !named[name] {
 			t.Errorf("no output event of %s in %v", name, w.live)
 		}

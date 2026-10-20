@@ -157,10 +157,10 @@ func unitProof(t *testing.T, clone, base string) proof {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return proof{base, "a_test.sh", "fix", string(content), false}
+	return proof{base, "a_test.sh", string(content), false}
 }
 
-var fixIssue = Issue{Title: "Retry on timeout", Body: "Type: fix\nRetry once.", Type: "fix"}
+var fixIssue = Issue{Title: "Retry on timeout", Body: "Type: fix\nRetry once."}
 
 // state is everything a pass could change in dir: HEAD, the index and the working tree.
 func state(t *testing.T, dir string) string {
@@ -198,7 +198,7 @@ func TestPonytailKeepsAShorterGreenCut(t *testing.T) {
 	if got := gitT(t, clone, "rev-parse", "HEAD~2"); got != sha {
 		t.Fatalf("want two commits on the base %s, HEAD~2 is %s", sha, got)
 	}
-	if got := gitT(t, clone, "log", "-1", "--format=%B", "HEAD~1"); got != "fix: Retry on timeout\n\natm unit 1" {
+	if got := gitT(t, clone, "log", "-1", "--format=%B", "HEAD~1"); got != "chore: Retry on timeout\n\natm unit 1" {
 		t.Fatalf("unit commit: %q", got)
 	}
 	if got := gitT(t, clone, "show", "HEAD~1:a.txt"); got != "fixed\nextra\nmore" {
@@ -254,11 +254,11 @@ func TestTombstonesNameNoProducer(t *testing.T) {
 
 func TestReproveFailsWhenAPriorUnitTestCommits(t *testing.T) {
 	_, clone, sha, cfg := unitDone(t, "echo fixed > a.txt")
-	cfg.TestFile = "sh {file} && git -c user.name=Test -c user.email=test@example.com commit --allow-empty -qm test"
+	cfg.Test = "sh a_test.sh && git -c user.name=Test -c user.email=test@example.com commit --allow-empty -qm test"
 	proofs := []proof{unitProof(t, clone, sha), unitProof(t, clone, sha)}
 
-	_, _, _, err := reprove(t.TempDir(), clone, sha, proofs, cfg)
-	if err == nil || !strings.Contains(err.Error(), "the commands made commits") {
+	why, _, _, err := reprove(t.TempDir(), clone, sha, proofs, cfg)
+	if err != nil || !strings.Contains(why, "the commands made commits") {
 		t.Fatalf("want the prior unit's test commit to fail re-proving, got %v", err)
 	}
 	if head := gitT(t, clone, "rev-parse", "HEAD"); head == sha {
@@ -275,7 +275,7 @@ func TestReproveHidesATMFromAnEarlierUnit(t *testing.T) {
 	proofs := []proof{unitProof(t, clone, sha), unitProof(t, clone, sha)}
 
 	why, _, _, err := reprove(t.TempDir(), clone, sha, proofs, cfg)
-	if err != nil || !strings.HasPrefix(why, "unit 1: ") {
+	if err != nil || !strings.HasPrefix(why, "test:") {
 		t.Fatalf("want unit 1's re-proof to fail without .atm/, got %q, %v", why, err)
 	}
 	if b, err := os.ReadFile(filepath.Join(clone, ".atm", "follow-ups", "1", "fixture.txt")); string(b) != "f\n" {
@@ -309,7 +309,7 @@ func TestPonytailDiscardsACutThatDoesNotHold(t *testing.T) {
 	cases := []struct{ name, work, report, why string }{
 		{name: "longer", work: "echo extra >> a.txt", report: cut, why: "shorten"},
 		{name: "no findings", work: "echo fixed > a.txt", why: "no finding"},
-		{name: "breaks a check", work: "echo broken > a.txt", report: cut, why: "fails with the fix"},
+		{name: "breaks a check", work: "echo broken > a.txt", report: cut, why: "test:"},
 		{name: "new ignored file", work: "echo fixed > a.txt" + inject, report: cut, why: "adds cache/injected.txt"},
 		{name: "longer with ignored files", work: "echo extra >> a.txt" + inject, report: cut, why: "shorten"},
 		{name: "deletes file", work: "rm a.txt", report: cut, why: "deletes a.txt"},
@@ -437,7 +437,7 @@ func TestPonytailJudgesACutPerFile(t *testing.T) {
 		{name: "remainder does not shorten", work: longer, report: cut, why: "shorten",
 			seed: "a_test.sh", body: strings.Repeat("grep -q fixed a.txt && ! grep -q broken a.txt\n", 10)},
 		{name: "remainder breaks a proof", work: "echo broken > a.txt; echo bad > a_test.sh", report: cut,
-			why: "fails with the fix"},
+			why: "test:"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

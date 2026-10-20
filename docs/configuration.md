@@ -118,7 +118,7 @@ your machine's file.
 | `e2e` | Optional command after `test` and before `typecheck`; absent or empty means no row. In this repository it is `scripts/cover-diff.sh`. A changed line inside a coverage block that no end-to-end run of the real `atm` binary executed fails; the check names those lines. Delete them, or write the end-to-end test that reaches them from a real `atm` command. Lines that no coverage block spans, `_test.go` files, files under `testdata/` and deletions do not fail it. It reads the diff and the coverage blocks, not the text of a line |
 | `typecheck` | Typechecks |
 | `lint` | Lints |
-| `test_file` | Runs one test: `{file}` is its path, `{dir}` its directory as `./dir`. When not empty, it must contain `{file}` or `{dir}`. For Go, `{tests}` expands to `^(TestA|TestB)$` for the Go tests defined in the reported file, for `go test -run`. A file with no Go tests fails; if the command reports `no tests to run`, the proof fails and names the reported file. |
+| `test_file` | Runs a follow-up test: `{file}` is its path, `{dir}` its directory as `./dir`. When not empty, it must contain `{file}` or `{dir}`. For Go, `{tests}` expands to `^(TestA|TestB)$` for the Go tests defined in the reported file, for `go test -run`. A file with no Go tests fails. This command does not run the worker's reported test separately from the configured suite. |
 | `test_patterns` | Globs of the test files |
 | `docs_patterns` | Globs of the documentation files |
 | `delivery` | Shell line that takes the run's branch from its clone, for example to a PR. Empty skips delivery |
@@ -157,7 +157,7 @@ Checks and exports it to `test` and `e2e` only. `scripts/test.sh` does
 not create it. With no counters, `scripts/cover-diff.sh` fails in the `e2e`
 row with its no-coverage-data diagnostic. Counters remain in the run directory.
 
-Optional: `check_timeout`, a positive Go duration such as `20m`, limits each checks command (install, test, e2e, typecheck, lint and red/green); absent means `10m`, and empty, null, invalid or non-positive values fail configuration.
+Optional: `check_timeout`, a positive Go duration such as `20m`, limits each checks command (install, test, e2e, typecheck, lint); absent means `10m`, and empty, null, invalid or non-positive values fail configuration.
 
 Also optional: `agent_timeout`, the limit for each agent call, including
 the slop detector, as a positive Go duration such as `45m` or `1h`. Without it,
@@ -313,15 +313,13 @@ missing`, including for older runs that did not save it.
 `origin` names. `atm run plans/retry.md` reads a file: its first line is the
 title (leading `#` characters dropped), the rest the body.
 
-Either way the body declares its task type on a case-sensitive `Type:` line,
-lowercase: `fix` (or `hotfix`), `feature`, `greenfield`, `refactor`, `tests`,
-`docs` or `chore`. The type picks the proof the checks ask for; see
-[How a run flows](how-a-run-flows.md#what-each-task-type-proves).
+The title and body must be nonempty. No `Type:` line is required; legacy or
+unknown values are ordinary issue text and do not select checks. All issues
+use the configured suite, e2e, typecheck and lint on the result. This also
+applies to saved runs resumed from an older ATM version.
 
 ```markdown
 # Retry the upload on a timeout
-
-Type: fix
 
 An upload that times out is lost. It should be retried once.
 

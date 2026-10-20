@@ -7,14 +7,14 @@ it.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/self-maintenance-dark.svg">
-  <img alt="The loop. An issue with a red test goes to an ATM run. A failed check first asks the launcher, and stop keeps the work for a later run. PASS goes to the no-mistakes gate; its findings go to whoever launched the run, who answers them, then the gate opens a PR. Required risk or no-mistakes review precedes auto-merge. Merged on main, the issue closes." src="assets/self-maintenance-light.svg" width="900">
+  <img alt="The loop. An issue with acceptance tests goes to an ATM run. A failed check first asks the launcher, and stop keeps the work for a later run. PASS goes to the no-mistakes gate; its findings go to whoever launched the run, who answers them, then the gate opens a PR. Required risk or no-mistakes review precedes auto-merge. Merged on main, the issue closes." src="assets/self-maintenance-light.svg" width="900">
 </picture>
 
 ## The loop
 
 1. **An issue with a contract.** Follow
    [the issue requirements](configuration.md#the-issue), with evidence and a
-   `## Red test` section naming the test that fails today.
+   `## Acceptance` section naming the test that demonstrates the result.
    The agent gets exactly this text; a vague issue gives a vague run.
 2. **An ATM run.** Start `atm run <number> --follow` in the launching session. Fill `.atm.yaml` once with the
    repository commands, file patterns and the no-mistakes delivery line; see

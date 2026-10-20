@@ -252,7 +252,7 @@ func TestRunReadsIssueFile(t *testing.T) {
 				t.Fatal(err)
 			}
 			end := issueStep(t, &out)
-			if end["state"] != "passed" || end["title"] != "Retry on timeout" || end["type"] != "fix" {
+			if end["state"] != "passed" || end["title"] != "Retry on timeout" || end["type"] != nil {
 				t.Fatalf("end event: %v", end)
 			}
 			if _, ok := end["number"]; ok {
@@ -270,7 +270,7 @@ func TestRunReadsGitHubIssueFromOrigin(t *testing.T) {
 		t.Fatal(err)
 	}
 	end := issueStep(t, &out)
-	if end["state"] != "passed" || end["number"] != float64(7) || end["type"] != "feature" {
+	if end["state"] != "passed" || end["number"] != float64(7) || end["type"] != nil {
 		t.Fatalf("end event: %v", end)
 	}
 	got, _ := os.ReadFile(args)
@@ -304,8 +304,8 @@ func TestRunDiesWhenIssueIsUnusable(t *testing.T) {
 		{name: "gh returns no JSON", viaGH: true, why: "JSON"},
 		{name: "empty title", file: "# \nType: fix\nbody", why: "title"},
 		{name: "empty body", file: "# Title\n", why: "body"},
-		{name: "missing type", file: "# Title\nbody", why: "task type"},
-		{name: "unknown type", viaGH: true, gh: `{"title":"T","body":"Type: bugfix\nbody"}`, why: "bugfix"},
+		{name: "missing type", file: "# Title\nbody", why: ""},
+		{name: "unknown type", viaGH: true, gh: `{"title":"T","body":"Type: bugfix\nbody"}`, why: ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -320,6 +320,15 @@ func TestRunDiesWhenIssueIsUnusable(t *testing.T) {
 			}
 			var out bytes.Buffer
 			err := Run("t", []string{arg}, &out, io.Discard)
+			if c.why == "" {
+				if err != nil {
+					t.Fatalf("type metadata must not reject an issue: %v", err)
+				}
+				if end := issueStep(t, &out); end["state"] != "passed" || end["type"] != nil {
+					t.Fatalf("issue classification: %v", end)
+				}
+				return
+			}
 			if err == nil || !strings.Contains(err.Error(), c.why) {
 				t.Fatalf("want an error naming %q, got %v", c.why, err)
 			}

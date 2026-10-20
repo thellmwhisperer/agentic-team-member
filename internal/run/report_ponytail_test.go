@@ -26,7 +26,7 @@ func TestPonytailDecisionPersistsInReport(t *testing.T) {
 		{name: "fresh", work: "echo fixed > a.txt; mkdir -p .atm; echo injected > .atm/injected.txt", report: cut,
 			reason: "the cut adds .atm/injected.txt"},
 		{name: "reprove", work: "echo broken > a.txt", report: cut,
-			reason: "a_test.sh fails with the fix: exit status 1"},
+			reason: "test: exit status 1"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			root, clone, sha, cfg := unitDone(t, c.work)
@@ -76,8 +76,8 @@ func TestPonytailRejectedFilesInReport(t *testing.T) {
 			report: strings.Replace(cut, `"issue_sentence": ""`, `"issue_sentence": "Retry once."`, 1)},
 		{name: "remainder fails proof", work: "echo broken > a.txt; echo bad > a_test.sh",
 			rejected: []obj{
-				{"path": "a.txt", "reason": "a_test.sh fails with the fix: exit status 1"},
-				{"path": "a_test.sh", "reason": "unit 1: test a_test.sh changed since it was proven"},
+				{"path": "a.txt", "reason": "test: exit status 1"},
+				{"path": "a_test.sh", "reason": "the cut touches the test a_test.sh"},
 			}},
 	} {
 		t.Run(c.name, func(t *testing.T) {

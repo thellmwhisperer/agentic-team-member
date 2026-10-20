@@ -133,7 +133,7 @@ func checkBackgroundRunEnd(t *testing.T, top string, o Outcome, outcome, failed 
 }
 
 // Two runs at once in one repository each write under .atm/runs/<label>/, sharing only what the background
-// process owns. The same work passes as a fix and fails as docs.
+// process owns. The same work passes regardless of legacy issue metadata.
 func TestBackgroundRunsAtOnceEachInItsOwnDirectory(t *testing.T) {
 	top := backgroundRepo(t)
 	wait, release := holdFakeAgents(t, 2)
@@ -172,14 +172,14 @@ func TestBackgroundRunsAtOnceEachInItsOwnDirectory(t *testing.T) {
 
 func checkConcurrentBackgroundReports(t *testing.T, top string, started []Outcome) {
 	t.Helper()
-	for i, want := range [][]string{{"fix", "", "passed"}, {"docs", "checks", "failed"}} {
+	for i, want := range [][]string{{"<nil>", "", "passed"}, {"<nil>", "", "passed"}} {
 		end, err := Attach(top, started[i].Run, &bytes.Buffer{})
 		dir := filepath.Join(top, ".atm", "runs", started[i].Run)
 		if err != nil || end.Outcome != want[2] || end.Report != filepath.Join(dir, "report.json") {
 			t.Fatalf("Attach = %+v, %v", end, err)
 		}
 		rep := readReport(t, end.Report)
-		if got := []string{rep["type"].(string), rep["failed_node"].(string), end.Outcome}; !reflect.DeepEqual(got,
+		if got := []string{fmt.Sprint(rep["type"]), rep["failed_node"].(string), end.Outcome}; !reflect.DeepEqual(got,
 			want) {
 			t.Fatalf("%s: report %v", end.Run, got)
 		}

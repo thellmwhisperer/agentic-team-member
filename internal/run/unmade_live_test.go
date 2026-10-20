@@ -51,7 +51,7 @@ func TestChecksRestoresIgnoredBytesBeforeInstall(t *testing.T) {
 			c := checksStashConfig(t, root)
 			c.Install = "set -x; test ! -e dep/link && cmp expected 'dep/state [x] file' && " +
 				"test ! -L dep/state && { grep -q old dep/state && touch dep/link || true; }"
-			result, err := checks(dir, runDir, sha, "fix", "a_test.sh", false, c)
+			result, err := checks(dir, runDir, sha, "a_test.sh", false, c)
 			t.Logf("Checks result: %+v", result)
 			if err != nil {
 				t.Fatal(err)

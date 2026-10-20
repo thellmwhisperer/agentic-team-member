@@ -165,7 +165,7 @@ func preflightResume(t *testing.T, bin string) {
 	runs := filepath.Join(root, ".atm", "runs")
 	keepResumable(t, filepath.Join(runs, "failed-1"), resumePoint{Issue: "7", BaseRef: "main",
 		Base: gitT(t, root, "rev-parse", "main"), Unit: 1, Args: []string{"--settings", missing},
-		Original: &Issue{Title: "Retry on timeout", Type: "fix", Text: issue}})
+		Original: &Issue{Title: "Retry on timeout", Text: issue}})
 	out, code := preflightLaunch(t, bin, root, "--resume", "failed-1")
 	assertNoStartedRun(t, root, out, code, 1, "preflight: worker files: --settings: open "+missing)
 }
@@ -295,7 +295,7 @@ func preflightFetchedBase(t *testing.T, bin string) {
 					want = old
 					keepResumable(t, filepath.Join(root, ".atm", "runs", "failed-1"), resumePoint{
 						Issue: path, BaseRef: "main", Base: old, Unit: 1,
-						Original: &Issue{Title: "Retry on timeout", Type: "fix", Text: issue}})
+						Original: &Issue{Title: "Retry on timeout", Text: issue}})
 					args = []string{"--resume", "failed-1"}
 				}
 				end := preflightFinished(t, bin, root, args...)
@@ -422,7 +422,7 @@ func preflightFetchFails(t *testing.T, bin string) {
 			if resume {
 				keepResumable(t, filepath.Join(root, ".atm", "runs", "failed-1"), resumePoint{
 					Issue: "7", BaseRef: "main", Base: gitT(t, root, "rev-parse", "main"), Unit: 1,
-					Original: &Issue{Title: "Retry on timeout", Type: "fix", Text: issue}})
+					Original: &Issue{Title: "Retry on timeout", Text: issue}})
 				args = []string{"--resume", "failed-1"}
 			}
 			out, code := preflightLaunch(t, bin, root, args...)
@@ -445,7 +445,7 @@ func preflightResumeResources(t *testing.T, bin string) {
 			t.Run(fmt.Sprintf("saved=%t/present=%t", saved, present), func(t *testing.T) {
 				root, base := resumeResourceFixture(t, present)
 				p := resumePoint{Issue: "7", BaseRef: "main", Base: base, Unit: 1,
-					Original: &Issue{Title: "Retry on timeout", Type: "fix", Text: issue}}
+					Original: &Issue{Title: "Retry on timeout", Text: issue}}
 				args := []string{"--resume", "failed-1"}
 				if saved {
 					p.Args = []string{"--skill", "worker.json"}

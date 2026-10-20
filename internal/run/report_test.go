@@ -113,8 +113,8 @@ func checkStopReport(t *testing.T, c struct {
 		!strings.Contains(rep["reason"].(string), c.why) {
 		t.Fatalf("want %s failed naming %q, got %v: %v", c.failed, c.why, rep["failed_node"], rep["reason"])
 	}
-	if c.failed != "issue" && rep["type"] != "fix" {
-		t.Fatalf("want the task type, got %v", rep["type"])
+	if c.failed != "issue" && rep["type"] != nil {
+		t.Fatalf("task type must be absent, got %v", rep["type"])
 	}
 	for i, name := range nodes {
 		n := reportNode(t, rep, name)

@@ -150,21 +150,19 @@ func fakeAgentCLI(name string) int {
 func fakeAgentTask(name string, args []string, mode *string) (string, string, string, string) {
 	stdin, _ := io.ReadAll(os.Stdin)
 	brief := map[bool]string{true: string(stdin), false: args[len(args)-1]}[name == "claude"]
-	_, typ, _ := strings.Cut(brief, "Task type: ")
-	typ, _, _ = strings.Cut(typ, ".")
-	skill, call, todo, text, kind := fakeAgentKind(brief, typ, mode)
+	skill, call, todo, text, kind := fakeAgentKind(brief, mode)
 	recordFakeAgentCall(args, stdin, call)
 	recordOrder(kind)
 	return call, skill, todo, text
 }
 
 // fakeAgentKind is which fake the brief plays, and the call suffix its recording uses.
-func fakeAgentKind(brief, typ string, mode *string) (skill, call, todo, text, kind string) {
+func fakeAgentKind(brief string, mode *string) (skill, call, todo, text, kind string) {
 	if k, ok := continuedKind(brief); ok {
 		*mode = k.Mode
 		return k.Skill, k.Call + ".return", k.Todo, k.Text, k.Kind
 	}
-	skill, call, todo, text, kind = "ponytail", "", cmp.Or(os.Getenv("FAKE_AGENT_WORK"), work[typ]), fakeReport, "worker"
+	skill, call, todo, text, kind = "ponytail", "", cmp.Or(os.Getenv("FAKE_AGENT_WORK"), fixWork), fakeReport, "worker"
 	if strings.Contains(brief, "`ponytail-review`") {
 		*mode = os.Getenv("FAKE_PONYTAIL")
 		skill, call, kind = "ponytail-review", ".ponytail", "ponytail"

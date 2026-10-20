@@ -30,22 +30,26 @@ const (
 	workerReachScope = "- Read, search and run only inside this clone; you may also read and write your " +
 		"scratch directory below.\n" +
 		"  Never access the repository around it, the rest of `.atm/runs/` or another clone."
-	netScope   = "- No network, except the project's package manager installing a dependency."
+	netScope = "- No network, except the project's package manager installing a dependency."
 )
 
 func TestRunWritesTheContractForTheTaskType(t *testing.T) {
 	for typ, proof := range map[string]string{
-		"fix":        "fails today on behaviour",
-		"feature":    "possibly on a missing symbol",
-		"greenfield": "possibly on a missing module",
-		"refactor":   "the full suite passes before and after",
-		"tests":      "passes on the base commit and after",
-		"docs":       "do not touch source or tests",
-		"chore":      "Reinstall dependencies (`true`)",
+		"":           "Implement the issue",
+		"fix":        "Implement the issue",
+		"feature":    "Implement the issue",
+		"greenfield": "Implement the issue",
+		"refactor":   "Implement the issue",
+		"tests":      "Implement the issue",
+		"docs":       "Implement the issue",
+		"chore":      "Implement the issue",
 	} {
 		t.Run(typ, func(t *testing.T) {
 			root := repo(t, "https://example.com/owner/repo.git", briefYAML)
-			issue := "Retry once on timeout.\n\nType: " + typ
+			issue := "Retry once on timeout."
+			if typ != "" {
+				issue += "\n\nType: " + typ
+			}
 			var out bytes.Buffer
 			if err := Run("t", []string{issueFile(t, "# Retry\n"+issue+"\n")}, &out, io.Discard); err != nil {
 				t.Fatal(err)
@@ -63,17 +67,16 @@ func TestRunWritesTheContractForTheTaskType(t *testing.T) {
 			if !strings.Contains(first, "`AGENTS.md`") || !strings.Contains(first, "this brief wins") {
 				t.Errorf("first line does not point to AGENTS.md: %q", first)
 			}
-			for _, want := range []string{"Task type: " + typ, "### Retry\n\n" + issue + "\n", proof,
+			for _, want := range []string{"The issue, verbatim:", "### Retry\n\n" + issue + "\n", proof,
 				"`**/*_test.sh`", "`**/*.md`, `docs/**`",
-				"- Test: the red test, through `sh {file}`, and the tests of each package", "- Typecheck: `sh -n a_test.sh`",
+				"- Test: the tests of each package", "- Typecheck: `sh -n a_test.sh`",
 				"- Lint: none", "`ponytail` skill", "`git commit`, `git push`, `git rebase`, any `gh` command",
 				"`sleep` in tests", `"test_file"`, "summary, as a note", workerReachScope, netScope} {
 				if !strings.Contains(got, want) {
 					t.Errorf("brief.md lacks %q:\n%s", want, got)
 				}
 			}
-			for _, unwanted := range []string{"CLAUDE.md", "Allowed paths", "{{", "`sh a_test.sh`", "follow_ups",
-				"FOLLOW-UPS"} {
+			for _, unwanted := range []string{"CLAUDE.md", "Allowed paths", "{{", "`sh a_test.sh`", "Task type:", "red test"} {
 				if strings.Contains(got, unwanted) {
 					t.Errorf("brief.md has %q:\n%s", unwanted, got)
 				}
@@ -94,13 +97,13 @@ func TestSuiteRunsOnce(t *testing.T) {
 	if err != nil || c.Test != "scripts/test.sh" || c.TestFile == "" {
 		t.Fatalf("want ATM's .atm.yaml with test scripts/test.sh and a test_file, got %+v, %v", c, err)
 	}
-	for _, typ := range taskTypes {
-		got, err := brief(Issue{Title: "Retry", Body: "Retry once.", Type: typ}, c, "/scratch")
+	for _, typ := range []string{"", "fix", "feature", "greenfield", "refactor", "tests", "docs", "chore", "unknown"} {
+		got, err := brief(Issue{Title: "Retry", Body: "Retry once.\nType: " + typ}, c, "/scratch")
 		if err != nil {
 			t.Fatal(err)
 		}
-		if strings.Contains(got, c.Test) || !strings.Contains(got, "- Test: the red test, through `"+c.TestFile+"`") {
-			t.Errorf("%s brief: want VERIFY with the red test and not %s:\n%s", typ, c.Test, got)
+		if strings.Contains(got, c.Test) || !strings.Contains(got, "- Test: the tests of each package") {
+			t.Errorf("%s brief: want package tests in VERIFY and not %s:\n%s", typ, c.Test, got)
 		}
 	}
 	var gate struct{ Commands map[string]string }

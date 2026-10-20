@@ -122,7 +122,7 @@ func TestRunDeliversThreeUnitsWhenTheLastFollowUpQuotesNoCriterion(t *testing.T)
 	}
 	oneUnit(t, out)
 	b, _ := os.ReadFile(delivered)
-	if string(b) != "ponytail: 1 cuts\nfix: Retry on timeout\ninit\n" {
+	if string(b) != "ponytail: 1 cuts\nchore: Retry on timeout\ninit\n" {
 		t.Fatalf("want the issue's unit committed, then the cut, got\n%s", b)
 	}
 	want := []any{chainedGap("1", "A retry runs once after a timeout.")}
@@ -137,7 +137,7 @@ func TestRunDeliversThreeUnitsWhenTheLastFollowUpQuotesNoCriterion(t *testing.T)
 	got := resumeDelivers(t, root, delivered, obj{"follow_up": chainedGap("2", "A retry runs once after a timeout."),
 		"pending": []obj{{"title": "gap 3", "red_test": "c3_test.sh", "criterion": "Errors are logged.",
 			"test": "grep -q u4 a.txt\n", "verified": true}}, "gross_lines": 2})
-	if !strings.HasPrefix(got, "ponytail: 1 cuts\nfix: Retry on timeout\ninit\n.atm.yaml\n") ||
+	if !strings.HasPrefix(got, "ponytail: 1 cuts\nchore: Retry on timeout\ninit\n.atm.yaml\n") ||
 		!strings.HasSuffix(got, "\na.txt\na_test.sh\n") {
 		t.Fatalf("want the resumed issue's unit committed, then the cut, and unit 3's follow-up nowhere, got\n%s", got)
 	}
@@ -160,7 +160,7 @@ func TestRunBlocksAnUnmetCriterionWithItsEvidence(t *testing.T) {
 	unmet["test"], unmet["verified"], unmet["diff"] = "grep -q u4 a.txt\n", true, "+u3\n"
 	unmet["cause"], unmet["dependency"] = "unit 3 leaves A retry runs once after a timeout. unmet", legacyDependency
 	if got := resumeDelivers(t, root, delivered, obj{"pending": []obj{unmet}}); !strings.HasPrefix(got,
-		"ponytail: 1 cuts\nfix: Retry on timeout\ninit\n") || strings.Contains(got, "c3_test.sh") {
+		"ponytail: 1 cuts\nchore: Retry on timeout\ninit\n") || strings.Contains(got, "c3_test.sh") {
 		t.Fatalf("want the resumed run delivered, the unmet criterion it kept blocking nothing, got\n%s", got)
 	}
 }
@@ -174,7 +174,7 @@ func TestRunExemptsThePrimaryUnitFromTheGrossBudget(t *testing.T) {
 
 	root, delivered, _ := failedAtLint(t)
 	got := resumeDelivers(t, root, delivered, obj{"follow_up": primaryGap(nil), "gross_lines": 0})
-	if got != "fix: Retry on timeout\ninit\n.atm.yaml\na.txt\na_test.sh\nbig.txt\n" {
+	if got != "chore: Retry on timeout\ninit\n.atm.yaml\na.txt\na_test.sh\nbig.txt\n" {
 		t.Fatalf("want the resumed 300 primary lines delivered, no unit 2 after them, got\n%s", got)
 	}
 }
@@ -202,7 +202,7 @@ func TestRunBlocksAdditionalWorkOverTheGrossBudgetThoughItsNetIsSmall(t *testing
 	got := resumeDelivers(t, root, delivered, obj{"follow_up": primaryGap(obj{"diff": "-81\n+119\n",
 		"cause": "unit 2 changes 201 gross lines, over the 200-line budget", "dependency": legacyDependency}),
 		"gross_lines": 201})
-	if got != "fix: Retry on timeout\ninit\n.atm.yaml\na.txt\na_test.sh\nbig.txt\n" {
+	if got != "chore: Retry on timeout\ninit\n.atm.yaml\na.txt\na_test.sh\nbig.txt\n" {
 		t.Fatalf("want the resumed unit 1 delivered, 201 kept gross lines blocking nothing, got\n%s", got)
 	}
 }
@@ -222,7 +222,7 @@ func TestRunKeepsTheGrossBudgetAcrossUnitsAndResume(t *testing.T) {
 	got := resumeDelivers(t, root, delivered, obj{"follow_up": obj{"title": "gap 2", "red_test": "c2_test.sh",
 		"criterion": "A retry runs once after a timeout.", "test": "grep -q u3 a.txt\n", "verified": true},
 		"gross_lines": 150})
-	if got != "fix: Retry on timeout\ninit\n.atm.yaml\na.txt\na_test.sh\n" {
+	if got != "chore: Retry on timeout\ninit\n.atm.yaml\na.txt\na_test.sh\n" {
 		t.Fatalf("want the resumed unit 1 alone delivered, under no budget, got\n%s", got)
 	}
 }
@@ -238,7 +238,7 @@ func TestRunPersistsTinyOutOfGoalWorkOfAnAdditionalUnit(t *testing.T) {
 	root, delivered, _ := failedAtLint(t)
 	got := resumeDelivers(t, root, delivered, obj{"pending": []obj{{"title": "logging", "red_test": "e_test.sh",
 		"criterion": "Errors are logged.", "test": "test -f log.txt\n", "verified": true}}})
-	if got != "fix: Retry on timeout\ninit\n.atm.yaml\na.txt\na_test.sh\n" {
+	if got != "chore: Retry on timeout\ninit\n.atm.yaml\na.txt\na_test.sh\n" {
 		t.Fatalf("want the resumed unit 1 delivered, its kept out-of-goal follow-up persisted nowhere, got\n%s", got)
 	}
 }
@@ -265,7 +265,7 @@ func TestRunKeepsUnmetDependencyInTheResumeBundle(t *testing.T) {
 	unmet := chainedGap("3", "A retry runs once after a timeout.")
 	unmet["test"], unmet["verified"], unmet["dependency"] = "grep -q u4 a.txt\n", true, work
 	if got := resumeDelivers(t, root, delivered, obj{"pending": []obj{unmet}}); !strings.HasPrefix(got,
-		"ponytail: 1 cuts\nfix: Retry on timeout\ninit\n") {
+		"ponytail: 1 cuts\nchore: Retry on timeout\ninit\n") {
 		t.Fatalf("want the kept work delivered, its dependency scheduling nothing, got\n%s", got)
 	}
 }
@@ -298,7 +298,7 @@ func TestRunKeepsEvidenceForEveryMandatoryPendingFollowUp(t *testing.T) {
 				t.Fatalf("want unit 1's follow-ups as reported, got %v", got)
 			}
 			if got := resumeDelivers(t, root, delivered, obj{"pending": pending}); got !=
-				"fix: Retry on timeout\ninit\n.atm.yaml\na.txt\na_test.sh\n" {
+				"chore: Retry on timeout\ninit\n.atm.yaml\na.txt\na_test.sh\n" {
 				t.Fatalf("want the resumed unit 1 delivered, no mandatory criterion blocking it, got\n%s", got)
 			}
 		})

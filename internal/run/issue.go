@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -19,17 +18,8 @@ type Issue struct {
 	Number int
 	Title  string
 	Body   string
-	Type   string // one of taskTypes' values
 	Text   string // the whole issue, title and body: a file's content
 }
-
-// taskTypes maps what an issue may declare in a "Type: <type>" line to its task type.
-var taskTypes = map[string]string{
-	"fix": "fix", "hotfix": "fix", "feature": "feature", "greenfield": "greenfield", "refactor": "refactor",
-	"tests": "tests", "docs": "docs", "chore": "chore",
-}
-
-var typeLine = regexp.MustCompile(`(?m)^Type:[ \t]*(\S+)[ \t]*\r?$`)
 
 // readIssue reads arg, a file or, when it is a number, an issue of the GitHub repository repo.
 func readIssue(arg, repo string) (Issue, error) {
@@ -64,7 +54,7 @@ func fromGitHub(n int, repo string) (Issue, error) {
 	return parse(Issue{Number: n, Title: data.Title, Body: data.Body, Text: "# " + data.Title + "\n\n" + data.Body})
 }
 
-// parse trims the issue and sets its task type, or says why it is not one ATM can run.
+// parse trims the issue and checks that it has a title and body.
 func parse(i Issue) (Issue, error) {
 	i.Title, i.Body = strings.TrimSpace(i.Title), strings.TrimSpace(i.Body)
 	switch {
@@ -72,14 +62,6 @@ func parse(i Issue) (Issue, error) {
 		return i, errors.New("issue: empty title")
 	case i.Body == "":
 		return i, errors.New("issue: empty body")
-	}
-	m := typeLine.FindStringSubmatch(i.Body)
-	if m == nil {
-		return i, errors.New(`issue: task type missing, want a "Type: <type>" line in the body`)
-	}
-	if i.Type = taskTypes[m[1]]; i.Type == "" {
-		return i, fmt.Errorf("issue: task type %q unknown, want fix, hotfix, feature, greenfield, refactor, "+
-			"tests, docs or chore", m[1])
 	}
 	return i, nil
 }

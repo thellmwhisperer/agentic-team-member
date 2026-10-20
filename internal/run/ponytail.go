@@ -199,53 +199,31 @@ func checkout(clone, tree string, paths []string) error {
 	return err
 }
 
-// reprove says why the work in clone fails the unit's proof or checks again, or "" when neither fails. It
-// returns the repeated proof and check commands.
+// reprove preserves reported tests and runs the configured suite on the completed cut.
 func reprove(runDir, clone, base string, history []proof, c config.Config) (string, []unitResult, []cmdResult, error) {
-	for n, p := range history {
-		if p.missing || !testedType(p.typ) {
-			continue
-		}
-		content, err := os.ReadFile(filepath.Join(clone, p.test))
-		if err != nil || string(content) != p.testContent {
-			return fmt.Sprintf("unit %d: test %s changed since it was proven", n+1, p.test), nil, nil, nil
-		}
-	}
 	var ran []unitResult
-	for n, p := range history[:len(history)-1] {
-		if _, err := git(clone, "reset", "-q", p.base); err != nil {
-			return "", ran, nil, err
-		}
-		restoreATM, err := hideATM(clone, runDir)
-		if err != nil {
-			return "", ran, nil, err
-		}
-		var red, green try
-		var proofErr error
-		proofSpan, proofErr := row(liveIn(clone), proofs[p.typ], func() error {
-			red, green, proofErr = prove(clone, p.typ, filepath.ToSlash(p.test), c)
-			return proofErr
+	for n, p := range history {
+		var err error
+		s := timed(func() {
+			if p.test == "" {
+				return
+			}
+			var content []byte
+			content, err = readTest(clone, p.test)
+			if err == nil && string(content) != p.testContent {
+				err = fmt.Errorf("test %s changed since it was recorded", p.test)
+			}
 		})
-		proofErr = errors.Join(proofErr, restoreATM())
-		ran = append(ran, unitResult{Unit: n + 1, Base: p.base, TestFile: p.test, Type: p.typ,
-			Red: red, Green: green, Result: outcome(proofErr), span: proofSpan})
-		if e := moved(clone, p.base, "the commands"); e != nil {
-			return "", ran, nil, e
-		}
-		if _, e := git(clone, "reset", "-q", base); e != nil {
-			return "", ran, nil, e
-		}
-		if proofErr != nil {
-			return fmt.Sprintf("unit %d: %v", n+1, proofErr), ran, nil, nil
+		ran = append(ran, unitResult{Unit: n + 1, Base: p.base, TestFile: p.test, Result: outcome(err), span: s})
+		if err != nil {
+			return fmt.Sprintf("unit %d: %v", n+1, err), ran, nil, nil
 		}
 	}
 	last := history[len(history)-1]
-	result, err := checks(clone, runDir, base, last.typ, last.test, last.missing, c)
-	red, _ := result["red"].(try)
-	green, _ := result["green"].(try)
-	proofSpan, _ := result["proof_span"].(span)
-	ran = append(ran, unitResult{Unit: len(history), Base: last.base, TestFile: last.test, Type: last.typ,
-		Red: red, Green: green, Result: outcome(err), span: proofSpan})
+	var result map[string]any
+	var err error
+	s := timed(func() { result, err = checks(clone, runDir, base, last.test, last.missing, c) })
+	ran[len(ran)-1].Result, ran[len(ran)-1].span = outcome(err), s
 	cmds, _ := result["commands"].([]cmdResult)
 	if err != nil {
 		return err.Error(), ran, cmds, nil

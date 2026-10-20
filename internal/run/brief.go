@@ -8,7 +8,7 @@ import (
 	"github.com/thellmwhisperer/agentic-team-member/internal/config"
 )
 
-// briefText is brief.md, the contract the agent works to; its ACCEPTANCE follows the task type.
+// briefText is brief.md, the contract the agent works to.
 //
 //go:embed brief.md.tmpl
 var briefText string
