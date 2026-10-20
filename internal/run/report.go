@@ -202,8 +202,8 @@ func (r *verdict) emit(name string, ev map[string]any) {
 // eventSink is a log a screen reads: it takes the live events inside a node too, which the log leaves out.
 type eventSink interface{ watch(ev []byte) }
 
-// live hands ev, an event inside the node that runs, to the screen that watches the log, if one does. An output
-// event names the command that printed it: the delivery's, or the row that runs.
+// live hands ev, an event inside the node that runs, to the screen that watches the log, if one does. Output
+// from a command row names that row; delivery command output names delivery.
 func (r *verdict) live(ev map[string]any) {
 	name, _ := ev["check"].(string)
 	if _, out := ev["output"]; out && r.at == "delivery" {
