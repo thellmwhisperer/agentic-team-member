@@ -16,7 +16,7 @@ decision, the newer one wins and the old rule is removed.
 ## Issues
 
 - An issue answers three questions: what breaks, with proof; which test says
-  it is done; what is not touched. One failure per issue. An issue never grows.
+  it is done; what is not touched. An issue never grows.
 - Acceptance runs inside the clone. Checks that only the operator can do after
   the PR go in their own section, never in Acceptance.
 - An issue with no Go change is not an ATM run.
