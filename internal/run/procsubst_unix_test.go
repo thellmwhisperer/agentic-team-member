@@ -29,7 +29,8 @@ func TestRealRunProcessSubstitutionDoesNotCrashBackground(t *testing.T) {
 		t.Fatalf("the background process is gone after the run: %v", err)
 	}
 	_ = c.Close()
-	t.Logf("atm run %s outcome=%s; atm serve socket answered after both process substitutions", runs[0].Run, runs[0].Outcome)
+	t.Logf("atm run %s outcome=%s; atm serve socket answered after both process substitutions",
+		runs[0].Run, runs[0].Outcome)
 	// Let it end normally, at its next tick without a socket, so it flushes its coverage.
 	log, err := os.ReadFile(filepath.Join(top, ".atm", "serve.log"))
 	_, after, _ := strings.Cut(string(log), "atm serve pid:")
