@@ -22,7 +22,7 @@ func TestPonytailDecisionPersistsInReport(t *testing.T) {
 		{name: "touches issue", work: "echo fixed > a.txt",
 			report: strings.Replace(cut, `"issue_sentence": ""`, `"issue_sentence": "Retry once."`, 1)}, // kept
 		{name: "touches test", work: "echo bad > a_test.sh", report: cut,
-			reason: "the cut touches the test a_test.sh"},
+			reason: "unit 1: test a_test.sh changed since it was proven"},
 		{name: "fresh", work: "echo fixed > a.txt; mkdir -p .atm; echo injected > .atm/injected.txt", report: cut,
 			reason: "the cut adds .atm/injected.txt"},
 		{name: "reprove", work: "echo broken > a.txt", report: cut,
@@ -65,7 +65,7 @@ func TestPonytailRejectedFilesInReport(t *testing.T) {
 		{name: "kept in full", work: "echo fixed > a.txt", kept: true},
 		{name: "no cut"},
 		{name: "partly kept beside a test", work: "echo fixed > a.txt; echo bad > a_test.sh", kept: true,
-			rejected: []obj{{"path": "a_test.sh", "reason": "the cut touches the test a_test.sh"}}},
+			rejected: []obj{{"path": "a_test.sh", "reason": "unit 1: test a_test.sh changed since it was proven"}}},
 		{name: "partly kept beside a deletion", work: "echo fixed > a.txt; rm b.txt", kept: true,
 			rejected: []obj{{"path": "b.txt", "reason": "the cut deletes b.txt"}}},
 		{name: "partly kept beside an addition", work: "echo fixed > a.txt; echo new > c.txt", kept: true,
@@ -77,7 +77,7 @@ func TestPonytailRejectedFilesInReport(t *testing.T) {
 		{name: "remainder fails proof", work: "echo broken > a.txt; echo bad > a_test.sh",
 			rejected: []obj{
 				{"path": "a.txt", "reason": "a_test.sh fails with the fix: exit status 1"},
-				{"path": "a_test.sh", "reason": "the cut touches the test a_test.sh"},
+				{"path": "a_test.sh", "reason": "unit 1: test a_test.sh changed since it was proven"},
 			}},
 	} {
 		t.Run(c.name, func(t *testing.T) {

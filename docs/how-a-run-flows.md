@@ -227,12 +227,13 @@ issue's `Type:`: `fix` and `hotfix` give `fix`, `feature` and `greenfield`
 
 Once the unit passed, the same agent gets `brief-ponytail.md`, the issue and
 the run's diff, with the bundled `ponytail-review` skill. It may only cut: delete, shrink, or swap in the standard library or
-an existing helper, in the diff's files, keeping every test. The required
+an existing helper, in the diff's files. The required
 report format is in the [ponytail brief](../internal/run/brief-ponytail.md.tmpl).
 
 ATM snapshots the whole clone first, then judges the cut per file. It rejects
-a file when a finding naming it has no `issue_sentence` key, or the cut adds or deletes it, touches it as a test, or changes it outside the
-run's diff. The sentence a finding quotes is recorded and decides nothing.
+a file when a finding naming it has no `issue_sentence` key, or the cut adds it,
+deletes a non-test file, or changes it outside the run's diff. The sentence a
+finding quotes is recorded and decides nothing.
 Only rejected files return to their contents before the cut;
 newly added rejected files are removed. Other files' cuts stay for validation.
 There is no splitting within a file. If no file survives, the whole cut is
@@ -252,7 +253,9 @@ the entire cut.
 
 A kept cut is its own commit, `ponytail: <n> cuts`, one line per surviving finding,
 after the unit commit, with one slopslint tombstone per surviving finding under
-`.slop/tombstones/`. Both commits use the repository's git identity; none, or
+`.slop/tombstones/`. For a deleted test, the tombstone embeds its path and
+pre-cut content and references that record as the evidence artifact.
+Both commits use the repository's git identity; none, or
 an email ending in `@localhost`, fails the run.
 
 ## Delivery

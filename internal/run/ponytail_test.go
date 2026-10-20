@@ -229,7 +229,8 @@ func TestPonytailKeepsAShorterGreenCut(t *testing.T) {
 
 func TestTombstonesNameNoProducer(t *testing.T) {
 	clone := t.TempDir()
-	paths, err := tombstones(clone, []finding{
+	writeFixture(t, filepath.Join(clone, "a.txt"), "fixed\n")
+	paths, err := tombstones(clone, "", []finding{
 		{File: "a.txt", Family: "speculative_feature", Finding: "dropped two lines"},
 	})
 	if err != nil {
@@ -423,7 +424,7 @@ func TestPonytailRestoresRejectedTestBytes(t *testing.T) {
 func TestPonytailJudgesACutPerFile(t *testing.T) {
 	touched := strings.Replace(cut, `"issue_sentence": ""`, `"issue_sentence": "Retry once."`, 1)
 	longer := "printf 'fixed\\nextra\\nmore\\n" + strings.Repeat("extra\\n", 5) +
-		"' > a.txt; echo x > long_test.sh"
+		"' > a.txt; echo x > a_test.sh"
 	cases := []struct {
 		name, work, report, why, seed, body string
 	}{
@@ -434,7 +435,7 @@ func TestPonytailJudgesACutPerFile(t *testing.T) {
 		{name: "valid file beside one outside the diff", work: "echo fixed > a.txt; rm b.txt", report: cut},
 		{name: "only file touches the issue", work: "echo fixed > a.txt", report: touched}, // kept
 		{name: "remainder does not shorten", work: longer, report: cut, why: "shorten",
-			seed: "long_test.sh", body: strings.Repeat("x\n", 10)},
+			seed: "a_test.sh", body: strings.Repeat("grep -q fixed a.txt && ! grep -q broken a.txt\n", 10)},
 		{name: "remainder breaks a proof", work: "echo broken > a.txt; echo bad > a_test.sh", report: cut,
 			why: "fails with the fix"},
 	}
