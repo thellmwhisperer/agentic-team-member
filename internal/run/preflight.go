@@ -17,9 +17,11 @@ import (
 const preflightHelp = `Before the run, atm run checks what it stands on and exits 2 at the first check that fails,
 with no clone, no run directory and no agent:
   config        .atm.yaml as the base ref has it, which the run uses; a working tree's that differs gets a warning
-  base green    the latest completed CI run of each workflow on the base ref's head passed or was skipped, as GitHub says;
+  base green    the latest completed CI run of each workflow on the base ref's head passed or was skipped,
+                as GitHub says;
                 skipped when origin is not on GitHub
-  worker files  each file a --harness-arg flag names, as --settings or --skill, exists in the base tree (saved base on resume) or is an absolute readable file
+  worker files  each file a --harness-arg flag names, as --settings or --skill, exists in the base tree
+                (saved base on resume) or is an absolute readable file
   delivery      the first word of delivery is a command sh finds: on PATH, or sh's own, as if or cd`
 
 // fileFlags are the harness flags whose value is a file the agent reads. A value that starts with { is inline JSON.
@@ -55,25 +57,7 @@ func preflight(root, ref, workerBase string, a agent, args []string) (string, er
 		{"base green", func() error { return baseGreen(sha) }},
 		{"worker files", func() error { return workerFiles(root, cmp.Or(workerBase, sha), args) }},
 		{"delivery", func() error { // sh runs it: its first word is a command sh finds, on PATH or its own
-			word := strings.TrimLeftFunc(c.Delivery, unicode.IsSpace)
-			var quote rune
-			var first strings.Builder
-			for _, r := range word {
-				if quote != 0 {
-					if r == quote {
-						quote = 0
-					} else {
-						first.WriteRune(r)
-					}
-				} else if r == '\'' || r == '"' {
-					quote = r
-				} else if unicode.IsSpace(r) || strings.ContainsRune(";&|<>()", r) {
-					break
-				} else {
-					first.WriteRune(r)
-				}
-			}
-			word = first.String()
+			word := deliveryWord(c.Delivery)
 			if strings.TrimSpace(c.Delivery) == "" {
 				word = "true"
 			}
@@ -88,6 +72,27 @@ func preflight(root, ref, workerBase string, a agent, args []string) (string, er
 		}
 	}
 	return sha, nil
+}
+
+func deliveryWord(line string) string {
+	var quote rune
+	var first strings.Builder
+	for _, r := range strings.TrimLeftFunc(line, unicode.IsSpace) {
+		if quote != 0 {
+			if r == quote {
+				quote = 0
+			} else {
+				first.WriteRune(r)
+			}
+		} else if r == '\'' || r == '"' {
+			quote = r
+		} else if unicode.IsSpace(r) || strings.ContainsRune(";&|<>()", r) {
+			break
+		} else {
+			first.WriteRune(r)
+		}
+	}
+	return first.String()
 }
 
 // baseConfig is the configuration of the repository at root with .atm.yaml as base ref ref has it, whatever

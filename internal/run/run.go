@@ -50,15 +50,10 @@ func runAt(label, ref string, args []string, out, summary io.Writer) (err error)
 		start = ref
 	}
 	repo := GitHubRepo()
-	home, err := os.UserHomeDir()
+	c, err := configureAgent(root, ref, label, a)
 	if err != nil {
 		return err
 	}
-	c, _, err := baseConfig(root, ref, home, a.Agent) // the steps after the issue take the config from here
-	if err != nil {
-		return err
-	}
-	a.Agent, a.root, a.dir, a.timeout = c.Agent, root, runDir(root, label), time.Duration(c.AgentTimeout)
 	r := a.verdict(out)
 	defer func() { r.resumable(a.dir); err = r.finish(err, summary) }()
 	var i Issue
@@ -97,6 +92,19 @@ func runAt(label, ref string, args []string, out, summary io.Writer) (err error)
 	})
 	deliver(r, root, dir, sha, *base, c.Delivery, i, summary)
 	return r.err
+}
+
+func configureAgent(root, ref, label string, a *agent) (config.Config, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return config.Config{}, err
+	}
+	c, _, err := baseConfig(root, ref, home, a.Agent) // the steps after the issue take the config from here
+	if err != nil {
+		return config.Config{}, err
+	}
+	a.Agent, a.root, a.dir, a.timeout = c.Agent, root, runDir(root, label), time.Duration(c.AgentTimeout)
+	return c, nil
 }
 
 // theIssue is the issue of run from, as it first read it, or else arg's, read from the GitHub repository repo
