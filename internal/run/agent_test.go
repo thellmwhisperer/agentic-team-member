@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -305,6 +306,21 @@ func TestShellWritesKeepEscapedClonePath(t *testing.T) {
 			t.Fatalf("local write %q was rejected: %s", command, got)
 		}
 	}
+}
+
+// Runs in one atm serve check their agents' shell commands at the same time.
+func TestShellWritesConcurrent(t *testing.T) {
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 200 {
+				shellWrites(`cat > "$HOME/out.txt" && tee ~/a "$TMPDIR/b"`)
+			}
+		}()
+	}
+	wg.Wait()
 }
 
 func insideStream(claude func(string, string) string) string {

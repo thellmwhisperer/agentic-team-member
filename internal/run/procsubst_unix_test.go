@@ -49,6 +49,35 @@ func TestRealRunProcessSubstitutionDoesNotCrashBackground(t *testing.T) {
 	}
 }
 
+// Two real runs under one atm serve whose agents run shell commands at the same time each end with their own
+// outcome, and the background process stays up.
+func TestRealRunsCheckShellCommandsAtOnce(t *testing.T) {
+	bin := builtATM(t)
+	top := atmRepo(t)
+	stopServing(t, top)
+	wait, release := holdFakeAgents(t, 2)
+	t.Setenv("FAKE_AGENT_WORK", fixWork)
+	command := `cat > "$PWD/out.txt" && tee a "$TMPDIR/b"`
+	t.Setenv("FAKE_AGENT_STREAM", strings.Repeat(bashEvent("claude", command, ""), 200))
+	fix := startFollow(t, bin, top, false, "run", "--follow", issueFile(t, "# Retry\nType: fix\nRetry once.\n"))
+	docs := startFollow(t, bin, top, false, "run", "--follow", issueFile(t, "# Retry\nType: docs\nRetry once.\n"))
+	wait()
+	release()
+	fix.exit(0)
+	docs.exit(1)
+	runs, err := RecordedRuns(top)
+	if err != nil || len(runs) != 2 || runs[0].Outcome == runs[1].Outcome {
+		t.Fatalf("concurrent shell commands outcomes: %+v, %v", runs, err)
+	}
+	c, err := net.Dial("unix", short(socket(top)))
+	if err != nil {
+		t.Fatalf("the background process is gone after both runs: %v", err)
+	}
+	_ = c.Close()
+	t.Logf("atm run %s outcome=%s and atm run %s outcome=%s in one atm serve; its socket answered",
+		runs[0].Run, runs[0].Outcome, runs[1].Run, runs[1].Outcome)
+}
+
 // Writes outside the clone are rejected with and without process substitution.
 func TestRealRunProcessSubstitutionKeepsCloneBoundary(t *testing.T) {
 	bin := builtATM(t)
