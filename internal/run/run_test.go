@@ -182,7 +182,8 @@ func initRepo() (string, error) {
 		}
 	}
 	for _, args := range [][]string{{"init", "-q", "-b", "main"}, {"add", "."}, {"commit", "-q", "-m", "init"}} {
-		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		// No detached maintenance: it would change .git while repo copies it.
+		cmd := exec.Command("git", append([]string{"-C", dir, "-c", "maintenance.auto=false"}, args...)...)
 		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=atm", "GIT_AUTHOR_EMAIL=atm@example.com",
 			"GIT_COMMITTER_NAME=atm", "GIT_COMMITTER_EMAIL=atm@example.com")
 		if out, err := cmd.CombinedOutput(); err != nil {
