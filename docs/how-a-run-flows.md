@@ -5,8 +5,6 @@ each step fail. Models write the fix and cut the diff; code enforces the step
 results. What you
 set before a run is in [Configuration](configuration.md).
 
-
-
 ## Following one run
 
 `atm run <issue> --follow` starts the run and prints one JSON object per run
@@ -15,7 +13,8 @@ goes before or after the issue and works on a pipe or a terminal. It also works
 with `--resume`.
 The events are the run's own step starts, results and live activity, with
 `step` and `ts`, plus fields specific to each event. Output from a clone or
-Checks command has `check` naming its row, such as `install`, `test`, `typecheck` or `lint`. Delivery output has `check: "delivery"`. Both
+Checks command has `check` naming its row, such as `install`, `test`,
+`typecheck` or `lint`. Delivery output has `check: "delivery"`. Both
 appear as `output` events without interpreting the command's text.
 
 The command exits with the run's code: 0 for success, 1 for agent or checks
@@ -103,8 +102,10 @@ For native agents, ATM writes the bundled `ponytail` skill into the clone, outsi
 [Hermes](configuration.md#hermes). Every line the agent writes
 goes to `worker.jsonl`, and its stderr to `worker.stderr.txt` too, as it is
 written. Its report is the last JSON
-object of its final message and must name `test_file`: ATM never guesses
-which test proves the fix. ATM checks each logged tool call for every
+object of its final message and must include `test_file`, which may be empty.
+When named, ATM checks that the file is inside the clone and records its
+contents to protect it during a slop detector cut. The configured suite runs
+the tests. ATM checks each logged tool call for every
 harness. A call fails the step only when it writes outside the clone and its
 scratch directory with an absolute path, such as `/tmp`, the repository around
 the clone or `$HOME`: a write or edit tool's destination, or a shell command's output
@@ -208,8 +209,7 @@ sessions that cannot resume go straight to Checks with
 `resume: no agent turn (<reason>)`; see
 [Resuming a failed run](configuration.md#resuming-a-failed-run).
 
-ATM does not classify tasks. A missing, legacy or unknown `Type:` line has
-no effect on Checks. The reported `test_file` must stay inside the clone.
+The [issue contract](configuration.md#the-issue) does not select checks.
 Checks run the configured suite on the completed work, followed by `e2e`,
 `typecheck` and `lint` when configured.
 

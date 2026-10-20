@@ -27,8 +27,8 @@ type finding struct {
 }
 
 // ponytail is the slop detector on the run's work in clone, from base commit sha, for issue i after its unit
-// is proven: an agent that may only cut it. A cut that holds, a shorter diff that passes the unit's proof and
-// every check again, leaves two commits: the unit then the cut with a tombstone per finding.
+// passes checks: an agent that may only cut it. A cut that holds, a shorter diff that preserves the reported
+// test and passes every check again, leaves two commits: the unit then the cut with a tombstone per finding.
 // A cut that still fails policy or the checks is undone. A
 // commit by the agent or a re-check command fails the run.
 func (a agent) ponytail(root, clone, sha string, proofs []proof, i Issue, c config.Config) (map[string]any,
@@ -112,7 +112,7 @@ func restoreCut(clone, tree, why string, rejectedFiles []rejectedFile) ([]reject
 }
 
 // hold is undo on the cut left in clone, whole's tree all before it, on the run's work from sha, tree before,
-// which changes files. It records in ev the last re-proofs and their commands, and each file undone beside
+// which changes files. It records in ev the latest check results and commands, and each file undone beside
 // those already rejected. What it keeps is fault again, the findings of its files kept.
 func hold(ev map[string]any, runDir, clone, sha, base, before, all string, files []string, found []finding,
 	proofs []proof, c config.Config) (string, []finding, error) {
@@ -137,7 +137,7 @@ func hold(ev map[string]any, runDir, clone, sha, base, before, all string, files
 
 // undo is reprove on the cut left in clone, whole's tree all before it, that puts back what fails: every cut
 // file the failure names, again while it names one, then alone's removal. undone is each file put back with the
-// failure it caused; why stays when no part of the cut passes. It re-proves at most twice per cut file, plus
+// failure it caused; why stays when no part of the cut passes. It checks at most twice per cut file, plus
 // once.
 func undo(runDir, clone, base, all string, proofs []proof, c config.Config) (why string, ran []unitResult,
 	cmds []cmdResult, undone map[string]string, err error) {
@@ -176,7 +176,7 @@ func undo(runDir, clone, base, all string, proofs []proof, c config.Config) (why
 }
 
 // alone puts back in clone each of left, the cut files, from tree all, once and on its own, and is the first
-// whose removal passes reprove, with that re-proof and its commands, "" when none does. Each file that does not
+// whose removal passes reprove, with that check result and its commands, "" when none does. Each file that does not
 // comes back from tree cut.
 func alone(runDir, clone, base, all, cut string, left []string, proofs []proof, c config.Config) (p string,
 	ran []unitResult, cmds []cmdResult, err error) {

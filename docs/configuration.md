@@ -123,14 +123,14 @@ your machine's file.
 | `docs_patterns` | Globs of the documentation files |
 | `delivery` | Shell line that takes the run's branch from its clone, for example to a PR. Empty skips delivery |
 
-Every command runs with `sh -c`. For a Go repository:
+Executable commands run with `sh -c`. For a Go repository:
 
 ```yaml
 install: go mod download
 test: go test ./...
 typecheck: go vet ./...
 lint: golangci-lint run
-test_file: go test -count=1 -run {tests} {dir}
+test_file: ''
 test_patterns: ["**/*_test.go"]
 docs_patterns: ["**/*.md", "docs/**"]
 delivery: ''

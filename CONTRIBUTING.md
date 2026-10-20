@@ -109,7 +109,7 @@ defines review completion, invalidation after a push, and discard.
 
 ## What is accepted
 
-- **Yes**: bug fixes with a red test, a new gate with the slop it catches
+- **Yes**: bug fixes with a regression test, a new gate with the slop it catches
   documented, language support through repository commands with a real
   repository it was tried on, documentation that matches the code.
 - **Discuss first**: changes to the contract the agent receives, to the
