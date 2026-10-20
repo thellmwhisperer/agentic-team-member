@@ -29,11 +29,12 @@ it.
    directory's name as its validation generation. On recovery, the same attempt
    replays the run bound by its saved launch receipt, including after an
    interrupted launch or a replay that failed before another receipt. The
-   command follows that run with `axi status --run` until a terminal result or
-   a decision; a PR ready to merge is not a terminal result. It passes only on
-   `completed` with outcome `passed`, `passed-with-override` or
-   `passed-with-skips`, and prints that result. A decision, failure,
-   cancellation, missing outcome or query error fails delivery. An active run
+   command follows that run with `axi status --run` until a terminal result;
+   a PR ready to merge or a decision is not a terminal result. It prints each
+   new gate and keeps following the same run while its operator answers. It
+   passes only on `completed` with outcome `passed`, `passed-with-override` or
+   `passed-with-skips`, and prints that result. A failure, cancellation,
+   missing outcome or query error fails delivery. An active run
    the attempt cannot prove its own is left untouched, and delivery fails
    without launching another run.
    Review, targeted test, lint and document run as fenced model steps. The reviewer
