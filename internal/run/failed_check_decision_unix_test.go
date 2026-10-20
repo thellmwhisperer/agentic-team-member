@@ -169,13 +169,7 @@ func decisionServer(t *testing.T, top string) string {
 		t.Fatal(err)
 	}
 	server := startVersionServe(t, bin, top)
-	t.Cleanup(func() {
-		if t.Failed() {
-			_ = server.Process.Kill()
-			return
-		}
-		endServe(bin, top, server)
-	})
+	t.Cleanup(func() { endServe(bin, top, server) })
 	return bin
 }
 

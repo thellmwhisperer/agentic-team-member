@@ -76,6 +76,9 @@ func TestRunE2EResume(t *testing.T) {
 			}
 			label := launch(path)
 			end, err := Attach(top, label, &bytes.Buffer{})
+			if err == nil && end.FailedNode == "checks" {
+				end = stopCheckRun(t, top, label)
+			}
 			if err != nil || end.FailedNode != "checks" || !strings.Contains(end.Reason, tc.row+":") {
 				t.Fatalf("first run: %+v, %v", end, err)
 			}
@@ -87,6 +90,9 @@ func TestRunE2EResume(t *testing.T) {
 			label = followE2EResume(t, bin, top, label, tc)
 			var screen bytes.Buffer
 			end, err = Attach(top, label, &screen)
+			if err == nil && end.FailedNode == "checks" {
+				end = stopCheckRun(t, top, label)
+			}
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -100,6 +106,24 @@ func TestRunE2EResume(t *testing.T) {
 // endServe ends server, the real serve of bin at top, gracefully and at once: once its file changed, the next
 // connection makes it exit, where a removed socket waits for its next tick, 5 s.
 func endServe(bin, top string, server *exec.Cmd) {
+	kill := time.AfterFunc(10*time.Second, func() { _ = server.Process.Kill() })
+	defer kill.Stop()
+	defer func() { _ = server.Wait() }()
+	runs, _ := RecordedRuns(top)
+	for _, r := range runs {
+		c, err := net.DialTimeout("unix", short(socket(top)), time.Second)
+		if err != nil {
+			break
+		}
+		pid, err := servePID(c)
+		if err != nil || pid != server.Process.Pid {
+			_ = c.Close()
+			return
+		}
+		_ = c.SetDeadline(time.Now().Add(time.Second))
+		_, _ = exchange(c, request{Cmd: "answer", Run: r.Run, Answer: "stop"}, nil, func(reply) {})
+		_ = c.Close()
+	}
 	later := time.Now().Add(time.Hour)
 	err := os.Chtimes(bin, later, later)
 	var c net.Conn
@@ -111,7 +135,18 @@ func endServe(bin, top string, server *exec.Cmd) {
 	} else {
 		_ = os.Remove(socket(top))
 	}
-	_ = server.Wait()
+}
+
+func stopCheckRun(t *testing.T, top, label string) Outcome {
+	t.Helper()
+	if err := Answer(top, label, "stop"); err != nil {
+		t.Fatalf("stop pending check in %s: %v", label, err)
+	}
+	end, err := Attach(top, label, io.Discard)
+	if err != nil || end.Outcome != "failed" || end.Ended.IsZero() {
+		t.Fatalf("stopped check in %s did not finish: %+v, %v", label, end, err)
+	}
+	return end
 }
 
 type e2eResumeCase struct{ name, harness, repair, row, skip string }

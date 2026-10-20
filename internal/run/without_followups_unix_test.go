@@ -290,6 +290,11 @@ func followedRun(t *testing.T, bin, top string, code int, args ...string) []obj 
 		log, _ := os.ReadFile(filepath.Join(top, ".atm", "serve.log"))
 		t.Fatalf("atm run %v: exit %d, want %d: %s\n%s", args, f.cmd.ProcessState.ExitCode(), code, f.errors(), log)
 	}
+	for _, ev := range evs {
+		if ev["step"] == "decision" && ev["state"] == "waiting" {
+			stopCheckRun(t, top, ev["run"].(string))
+		}
+	}
 	return evs
 }
 
