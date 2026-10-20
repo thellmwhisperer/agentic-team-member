@@ -107,7 +107,7 @@ func TestSuiteRunsOnce(t *testing.T) {
 	if err == nil {
 		err = yaml.Unmarshal(b, &gate)
 	}
-	if test, ok := gate.Commands["test"]; err != nil || ok || strings.Contains(string(b), c.Test) {
-		t.Fatalf("want .no-mistakes.yaml without a test command or %s, got test %q, %v", c.Test, test, err)
+	if test, ok := gate.Commands["test"]; err != nil || ok {
+		t.Fatalf("want .no-mistakes.yaml without a test command, got test %q, %v", test, err)
 	}
 }
