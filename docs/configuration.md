@@ -264,7 +264,9 @@ report, the failed row, its `e2e` output, and the agent's session and
 settings) and `work.bundle` (the failed unit's uncommitted work, new and
 binary files included, ignored files left out, on its base).
 Its `report.json` says `"resumable": true` and names the unit in
-`resumable_unit`, and its `next_step` names `atm run --resume <label>`. A run
+`resumable_unit`. The failed row and `e2e` output come from the latest Checks
+attempt. While a Checks answer is pending, `next_step` names `atm answer`;
+after `stop`, it names `atm run --resume <label>`. A run
 that failed before or in the agent is not resumable.
 
 A run kept before follow-ups were retired may have stopped at a later unit.
@@ -291,7 +293,8 @@ tools, guards and time limits, keeps the saved report, and must not commit.
 A missing or invalid worker report does not fail the turn.
 Its event is `agent turn after e2e`, with harness and duration; `--follow`
 prints its start and its result before Checks. Checks starts again at `install`.
-A second `e2e` red fails the run without another turn.
+A second `e2e` red asks for an answer without an automatic agent turn; see
+[Checks](how-a-run-flows.md#checks).
 
 Other failures, older bundles without the session fields, missing session
 ids and harnesses without session resume go straight to Checks. The screen
