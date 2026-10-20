@@ -248,7 +248,7 @@ Flags go before or after the issue. A second issue is an error.
 
 | Flag | Default | Meaning |
 |------|---------|---------|
-| `--base-ref <ref>` | `main` | The ref the run starts from, resolved in the repository |
+| `--base-ref <ref>` | `main` | The branch fetched from `origin`; preflight pins its commit for configuration, CI and the fresh clone |
 | `--harness <cli>` | from the layers | The `harness` value described [above](#configatmconfigyaml) |
 | `--model <model>` | from the layers | The agent's model |
 | `--effort <effort>` | from the layers | The agent's effort |

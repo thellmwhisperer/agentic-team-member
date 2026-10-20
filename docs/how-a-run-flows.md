@@ -29,13 +29,15 @@ to standard error. Interrupting the stream exits 1 and leaves the run going;
 `atm run`, `--resume` too, checks what the run stands on before it hands the
 run to the background process. The first check that fails stops the launch
 with exit 2, `atm: preflight: <check>: <why>` on standard error, no clone, no
-run directory and no agent. `atm run --help` lists them.
+run directory and no agent. `atm run --help` lists them. After fetching, ATM resolves the fetched
+`origin/<base-ref>` once. Configuration, CI and a fresh clone use
+that commit. A resumed clone still starts at its saved base commit.
 
 | Check | Passes when |
 |-------|-------------|
 | `config` | `.atm.yaml` as the base ref has it is complete. The run uses that file, never the working tree's; a working tree's `.atm.yaml` that differs gets one warning line |
 | `base green` | The latest completed CI run of each workflow on the base ref's head passed, as one `gh run list --commit` call says. No completed run, or a `gh` that does not answer, fails. A repository whose origin is not on GitHub skips it with one line saying so |
-| `worker files` | Each file a `--harness-arg` file flag names, as `--settings <file>` or `--settings=<file>`, exists and is readable. A value that starts with `{` is inline JSON and is not a file |
+| `worker files` | `--settings` and `--skill` accept either a separate value or `=<value>`. Absolute paths are readable on disk; relative paths exist in the resolved base commit, relative to the clone root. Only `--settings` values starting with `{` are inline JSON |
 | `delivery` | The first word of `delivery` is a command `sh` finds, as `command -v` says: on `PATH`, or one of `sh`'s own, as `if` or `cd`. An empty `delivery` passes |
 
 ## The steps
@@ -45,7 +47,7 @@ A failed step stops the run; the steps after it are not run.
 | Step | Does | Fails the run when |
 |------|------|--------------------|
 | Issue | Reads the issue file or GitHub issue and its `Type:` | The issue cannot be read, or has no valid type |
-| Clone | Resolves `--base-ref` to a commit, clones the repository there into `.atm/clones/`, runs `install` | The ref, the clone or `install` fails |
+| Clone | Clones the repository at the commit checked by preflight, or the saved base commit on resume into `.atm/clones/`, runs `install` | The ref, the clone or `install` fails |
 | Contract | Writes `brief.md`, the agent's contract | The brief cannot be written |
 | Agent | Runs the coding agent in the clone on the brief | It fails to complete successfully, times out or writes outside its clone and scratch directory. A missing or invalid report does not fail it: see [Rejected reports](#rejected-reports) |
 | Checks | Prepares the clone, then install, the proof, test, optional e2e, typecheck and lint; see [Checks](#checks) | Cleanup, proof or a command fails, anything committed, or a [follow-up limit or mandatory gap](#follow-ups) blocks the run |

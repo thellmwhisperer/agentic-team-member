@@ -29,11 +29,11 @@ var githubURL = regexp.MustCompile(`^(?:[a-z][a-z0-9+.-]*://)?(?:[^/@]+@)?github
 const Usage = "usage: atm run [--follow] [--base-ref r] [--harness h] [--model m] [--effort e] " +
 	"[--harness-arg a]... [--env KEY=VALUE]... <issue.md | issue number | --resume run>"
 
-// Run is atm run with args, its flags and the issue: a file, or an issue number of origin's repository.
+// runAt is atm run with args, its flags and the issue: a file, or an issue number of origin's repository.
 // Its report, briefs and logs go to .atm/runs/<label>/ (runDir): each node's start and end go to out, one JSON
 // object a line, and to report.json there; the summary goes to summary. ExitCode turns its error into atm's
 // exit code. With --resume, it picks up the work a failed run kept.
-func Run(label string, args []string, out, summary io.Writer) (err error) {
+func runAt(label, ref string, args []string, out, summary io.Writer) (err error) {
 	args, base, resume, a, err := parseArgs(args)
 	if err != nil {
 		return err
@@ -46,12 +46,15 @@ func Run(label string, args []string, out, summary io.Writer) (err error) {
 	if err != nil {
 		return err
 	}
+	if from == nil {
+		start = ref
+	}
 	repo := GitHubRepo()
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return err
 	}
-	c, _, err := baseConfig(root, *base, home, a.Agent) // the steps after the issue take the config from here
+	c, _, err := baseConfig(root, ref, home, a.Agent) // the steps after the issue take the config from here
 	if err != nil {
 		return err
 	}
@@ -116,7 +119,7 @@ func leave(r *verdict, dir, repo string) error {
 // issue, last.
 func parseArgs(args []string) (ordered []string, base, resume *string, a *agent, err error) {
 	fs := flag.NewFlagSet("atm run", flag.ContinueOnError)
-	base = fs.String("base-ref", "main", "the ref the run starts from, resolved in the repository")
+	base = fs.String("base-ref", "main", "the fetched origin branch whose commit the run starts from")
 	resume = fs.String("resume", "", "a run that failed after its agent: its issue again, from its agent's work")
 	a = &agent{}
 	fs.Usage = func() {

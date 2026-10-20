@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"unicode"
 
 	"github.com/thellmwhisperer/agentic-team-member/internal/config"
 )
@@ -17,15 +18,15 @@ with no clone, no run directory and no agent:
   config        .atm.yaml as the base ref has it, which the run uses; a working tree's that differs gets a warning
   base green    the latest completed CI run of each workflow on the base ref's head passed, as GitHub says;
                 skipped when origin is not on GitHub
-  worker files  each file a --harness-arg flag names, as --settings, exists and is readable
+  worker files  each file a --harness-arg flag names, as --settings or --skill, exists in the base tree or is an absolute readable file
   delivery      the first word of delivery is a command sh finds: on PATH, or sh's own, as if or cd`
 
 // fileFlags are the harness flags whose value is a file the agent reads. A value that starts with { is inline JSON.
-var fileFlags = []string{"--settings"}
+var fileFlags = []string{"--settings", "--skill"}
 
 // preflight checks, in the repository at root, what a run from base ref ref stands on, its agent a with the
 // harness arguments args: the first check that fails is the error, which names it.
-func preflight(root, ref string, a agent, args []string) error {
+func preflight(root, ref string, a agent, args []string) (string, error) {
 	var c config.Config
 	var sha string
 	for _, check := range []struct {
@@ -35,11 +36,11 @@ func preflight(root, ref string, a agent, args []string) error {
 		{"config", func() error {
 			home, err := os.UserHomeDir()
 			if err == nil {
-				sha, err = git(root, "rev-parse", "--verify", ref+"^{commit}")
+				sha, err = git(root, "rev-parse", "--verify", "refs/remotes/origin/"+ref+"^{commit}")
 			}
 			var b string
 			if err == nil {
-				c, b, err = baseConfig(root, ref, home, a.Agent)
+				c, b, err = baseConfig(root, sha, home, a.Agent)
 			}
 			if wt, _ := os.ReadFile(filepath.Join(root, ".atm.yaml")); err == nil && string(wt) != b {
 				fmt.Fprintf(os.Stderr, "preflight: config: warning: the working tree's .atm.yaml differs from %s's, "+
@@ -48,9 +49,30 @@ func preflight(root, ref string, a agent, args []string) error {
 			return err
 		}},
 		{"base green", func() error { return baseGreen(sha) }},
-		{"worker files", func() error { return workerFiles(args) }},
+		{"worker files", func() error { return workerFiles(root, sha, args) }},
 		{"delivery", func() error { // sh runs it: its first word is a command sh finds, on PATH or its own
-			word := append(strings.Fields(c.Delivery), "true")[0]
+			word := strings.TrimLeftFunc(c.Delivery, unicode.IsSpace)
+			var quote rune
+			var first strings.Builder
+			for _, r := range word {
+				if quote != 0 {
+					if r == quote {
+						quote = 0
+					} else {
+						first.WriteRune(r)
+					}
+				} else if r == '\'' || r == '"' {
+					quote = r
+				} else if unicode.IsSpace(r) || strings.ContainsRune(";&|<>()", r) {
+					break
+				} else {
+					first.WriteRune(r)
+				}
+			}
+			word = first.String()
+			if strings.TrimSpace(c.Delivery) == "" {
+				word = "true"
+			}
 			if _, err := command("", "sh", "-c", `command -v "$1"`, "sh", word); err != nil {
 				return fmt.Errorf("%q is not on PATH nor a word of sh", word)
 			}
@@ -58,10 +80,10 @@ func preflight(root, ref string, a agent, args []string) error {
 		}},
 	} {
 		if err := check.fn(); err != nil {
-			return fmt.Errorf("preflight: %s: %w", check.name, err)
+			return "", fmt.Errorf("preflight: %s: %w", check.name, err)
 		}
 	}
-	return nil
+	return sha, nil
 }
 
 // baseConfig is the configuration of the repository at root with .atm.yaml as base ref ref has it, whatever
@@ -104,13 +126,19 @@ func baseGreen(sha string) error {
 
 // workerFiles is why a file one of the harness arguments args names after a file flag, as --settings f or
 // --settings=f, cannot be read.
-func workerFiles(args []string) error {
+func workerFiles(root, ref string, args []string) error {
 	for i, arg := range args {
 		name, path, inline := strings.Cut(arg, "=")
 		if !inline && i+1 < len(args) {
 			path = args[i+1]
 		}
-		if !slices.Contains(fileFlags, name) || strings.HasPrefix(path, "{") {
+		if !slices.Contains(fileFlags, name) || name == "--settings" && strings.HasPrefix(path, "{") {
+			continue
+		}
+		if !filepath.IsAbs(path) {
+			if _, err := git(root, "cat-file", "-e", ref+":"+filepath.ToSlash(filepath.Clean(path))); err != nil {
+				return fmt.Errorf("%s: %w", name, err)
+			}
 			continue
 		}
 		f, err := os.Open(path)

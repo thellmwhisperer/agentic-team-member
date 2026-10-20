@@ -76,10 +76,11 @@ func (o Outcome) Err() error {
 }
 
 type request struct {
-	Cmd  string   `json:"cmd"` // run, attach or runs
-	Args []string `json:"args,omitempty"`
-	Run  string   `json:"run,omitempty"`
-	Size *[2]int  `json:"size,omitempty"` // the columns and rows of the terminal that attaches, if one does
+	BaseSHA string   `json:"base_sha,omitempty"`
+	Cmd     string   `json:"cmd"` // run, attach or runs
+	Args    []string `json:"args,omitempty"`
+	Run     string   `json:"run,omitempty"`
+	Size    *[2]int  `json:"size,omitempty"` // the columns and rows of the terminal that attaches, if one does
 }
 
 // Frame is a piece of a run's screen.
@@ -304,7 +305,7 @@ func (s *server) handle(c net.Conn) {
 	enc := json.NewEncoder(c)
 	switch req.Cmd {
 	case "run":
-		o, err := s.start(req.Args)
+		o, err := s.start(req.Args, req.BaseSHA)
 		if err != nil {
 			if errors.Is(err, errHandoff) {
 				return
@@ -331,7 +332,7 @@ func (s *server) handle(c net.Conn) {
 var errHandoff = errors.New("background process is handing off")
 
 // start runs args, atm run's command line, in the background and returns the run, just started.
-func (s *server) start(args []string) (Outcome, error) {
+func (s *server) start(args []string, baseSHA string) (Outcome, error) {
 	issue := ""
 	if len(args) > 0 {
 		issue = args[len(args)-1]
@@ -369,18 +370,18 @@ func (s *server) start(args []string) (Outcome, error) {
 	}
 	s.runs = append(s.runs, r)
 	s.save()
-	go s.run(r, args)
+	go s.run(r, args, baseSHA)
 	return r.Outcome, nil
 }
 
-func (s *server) run(r *bgRun, args []string) {
+func (s *server) run(r *bgRun, args []string, baseSHA string) {
 	err := func() (err error) {
 		defer func() {
 			if p := recover(); p != nil { // one run's crash ends that run, not every run
 				err = fmt.Errorf("atm crashed: %v", p)
 			}
 		}()
-		return Run(r.Run, args, &screen{s: s, r: r, events: true}, &screen{s: s, r: r})
+		return runAt(r.Run, baseSHA, args, &screen{s: s, r: r, events: true}, &screen{s: s, r: r})
 	}()
 	_, cannot := resumeFrom(s.root, r.Run)
 	s.Lock()
@@ -651,6 +652,7 @@ func (s *server) save() {
 func Start(root string, args []string) (Outcome, error) {
 	args, base, resume, a, err := parseArgs(args)
 	var p resumePoint
+	var sha string
 	if err == nil && *resume != "" {
 		if p, err = resumeFrom(root, *resume); err == nil {
 			args, _, _, _, err = parseArgs(append(args, p.Issue)) // and no other
@@ -658,7 +660,7 @@ func Start(root string, args []string) (Outcome, error) {
 		}
 	}
 	if err == nil {
-		err = preflight(root, *base, *a, append(a.args, p.Args...))
+		sha, err = preflight(root, *base, *a, append(a.args, p.Args...))
 	}
 	if err != nil {
 		return Outcome{}, err
@@ -669,7 +671,7 @@ func Start(root string, args []string) (Outcome, error) {
 		}
 	}
 	var o Outcome
-	err = call(root, request{Cmd: "run", Args: args}, nil, func(r reply) { o = *r.Run })
+	err = call(root, request{Cmd: "run", Args: args, BaseSHA: sha}, nil, func(r reply) { o = *r.Run })
 	return o, err
 }
 
