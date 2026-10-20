@@ -471,10 +471,14 @@ Above the rows, the issue's title wraps: up to three lines show whole; a
 longer one shows three lines and `… i unfold title`, and `i` shows or folds
 every line. The title stays above the rows while it leaves them a line; when
 the ATM box is too short for that, past its first line the title scrolls
-with the rows, and the ATM box's keys reach it. While a step runs, the right column always shows it: the Agent
-box for an agent, else the Log box, with the step's name and elapsed time
-until it has output. The Agent box's title names the effective harness,
-model and, when set, effort, as `Agent · pi zai/glm-5.3 · max`.
+with the rows, and the ATM box's keys reach it.
+
+While a step runs, the right column shows it. The Agent box shows an agent's
+events. For other steps, the Log box shows the step's name and elapsed time
+until output replaces them. The Agent box's title names the effective harness,
+model and, when set, effort, as
+`Agent · pi zai/glm-5.3 · max`.
+
 Like Checks, Delivery shows a sub-row per part that runs: `commit`, and
 `command` only when the command starts. Each has its own live state and
 elapsed time. Completed runs restore these rows from `report.json` when
