@@ -13,8 +13,7 @@ it.
 ## The loop
 
 1. **An issue with a contract.** Follow
-   [the issue requirements](configuration.md#the-issue), with evidence and a
-   `## Acceptance` section naming the test that demonstrates the result.
+   [the issue requirements](configuration.md#the-issue).
    The agent gets exactly this text; a vague issue gives a vague run.
 2. **An ATM run.** Start `atm run <number> --follow` in the launching session. Fill `.atm.yaml` once with the
    repository commands, file patterns and the no-mistakes delivery line; see

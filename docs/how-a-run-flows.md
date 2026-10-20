@@ -50,7 +50,7 @@ failure, which waits for the launcher's answer; see [Checks](#checks).
 | Clone | Clones the repository at the commit checked by preflight, or the saved base commit on resume into `.atm/clones/`, runs `install` | The ref, the clone or `install` fails |
 | Contract | Writes `brief.md`, the agent's contract | The brief cannot be written |
 | Agent | Runs the coding agent in the clone on the brief | It fails to complete successfully, times out or writes outside its clone and scratch directory. A missing or invalid report does not fail it: see [Rejected reports](#rejected-reports) |
-| Checks | Prepares the clone, then install, test, optional e2e, typecheck and lint; see [Checks](#checks) | Cleanup or a command fails, or anything committed |
+| Checks | Prepares the clone, then install, test, optional e2e, typecheck and lint; see [Checks](#checks) | Cleanup fails, the reported test file is invalid, a command fails, or HEAD moves |
 | Slop detector | Lets a model cut the diff; keeps the cut only if every check still passes | Its agent fails, fails [report validation](#rejected-reports), or anything commits |
 | Delivery | Commits the work on a branch and runs the `delivery` command | The branch or the command fails. Skipped when `delivery` is empty |
 
@@ -309,7 +309,7 @@ it is on disk before delivery reads it.
 | `agent` | The effective requested `harness`, `model`, `effort` and ordered `harness_args`, after global config, `.atm.yaml` and flags. Unset model and effort stay `""`; no extra arguments is `[]` |
 | `nodes` | Each step's `result` (`passed`, `failed`, `running`, `skipped` or `not run`), `started_at` (UTC, RFC 3339 with milliseconds) when its start is known, and `duration_ms` when it ends; the agent node also has `exit` and `tail` when the agent ran but its step failed, and `"report": "missing"` when the worker's report never came ([Rejected reports](#rejected-reports)). Checks includes an `e2e` row in `rows` when that command ran, passed or failed, with `name`, `result`, `started_at` and `duration_ms`. Delivery has `rows`, each with `name`, `result` (`running`, `passed` or `failed`), `started_at` and `duration_ms`, for each part that has started. |
 | `units` | The unit's number (`1`), base commit, reported test file, result, `started_at` and `duration_ms` |
-| `reproofs` | The latest reported-test integrity check and configured checks, with their spans, after a cut |
+| `reproofs` | Each rechecked unit's number, base commit, reported test file, result, `started_at` and `duration_ms` after a cut; configured commands are in `commands` |
 | `commands` | Every configured command that ran, the clone's `install` included, with its result, last 60 lines, `started_at` and `duration_ms` |
 | `decisions` | Each post-agent Checks finding and the launcher's `approve`, `fix` or `stop` answer; the answer is empty while the question is pending |
 | `head_sha` | The delivered branch's final commit |
