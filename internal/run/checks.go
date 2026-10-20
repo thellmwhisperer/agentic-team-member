@@ -21,7 +21,7 @@ import (
 )
 
 // checkChanges rejects empty work when there is no report.
-func checkChanges(clone string, missingReport bool, c config.Config) error {
+func checkChanges(clone string, missingReport bool) error {
 	if _, err := git(clone, "add", "-A"); err != nil {
 		return err
 	}
@@ -86,7 +86,7 @@ func checks(clone, runDir, sha, test string, missingReport bool,
 	if err != nil {
 		return result, err
 	}
-	if err = checkChanges(clone, missingReport, c); err == nil && test != "" {
+	if err = checkChanges(clone, missingReport); err == nil && test != "" {
 		_, err = readTest(clone, test)
 	}
 	if err != nil {
