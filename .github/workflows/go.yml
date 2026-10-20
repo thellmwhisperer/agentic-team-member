@@ -31,7 +31,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        # macOS splits internal/run in 3 parallel shards: run serially it took 674 s there (PR 518).
+        # Shard 0 runs every other package and the lint.
+        include:
+          - { os: ubuntu-latest, shard: all }
+          - { os: macos-latest, shard: 0 }
+          - { os: macos-latest, shard: 1 }
+          - { os: macos-latest, shard: 2 }
+          - { os: macos-latest, shard: 3 }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -42,9 +49,11 @@ jobs:
 
       # ponytail: golangci-lint is pinned here; bump it with .golangci.yml when a new linter is wanted.
       - name: Install golangci-lint
+        if: matrix.shard == 'all' || matrix.shard == 0
         run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.5.0
 
       - name: Test
+        if: matrix.shard == 'all'
         run: |
           if [ "${{ github.event_name }}" = "push" ] && [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
             GOCOVERDIR="$(mktemp -d "${RUNNER_TEMP}/atm-cover.XXXXXX")"
@@ -54,7 +63,18 @@ jobs:
           fi
           make test
 
+      - name: Test (shard)
+        if: matrix.shard != 'all'
+        run: |
+          if [ "${{ matrix.shard }}" = 0 ]; then
+            go list ./... | grep -v '/internal/run$' | xargs go test -timeout 30m
+          else
+            names=$(go test -list . ./internal/run | grep '^Test' | awk "NR % 3 == ${{ matrix.shard }} % 3" | paste -sd '|' -)
+            go test -timeout 30m -run "^(${names})\$" ./internal/run
+          fi
+
       - name: Lint
+        if: matrix.shard == 'all' || matrix.shard == 0
         run: make lint
 
       - name: Keep the end-to-end coverage profile
