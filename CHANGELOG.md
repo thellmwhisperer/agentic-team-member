@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.2](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.4.1...v1.4.2) (2026-10-20)
+
+
+### Bug Fixes
+
+* remove remaining issue and test preservation policies ([d14c4c9](https://github.com/thellmwhisperer/agentic-team-member/commit/d14c4c9d7d46ec5b98f0ba7d79f29bf1971a6d2e))
+
 ## [1.4.1](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.4.0...v1.4.1) (2026-10-20)
 
 
