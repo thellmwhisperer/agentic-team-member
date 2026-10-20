@@ -38,6 +38,7 @@ type finding struct {
 // Model is a run's screen: what the run's frames said so far, drawn at the terminal's size.
 type Model struct {
 	label, title, state           string
+	agentLabel                    string // " · " and the agent's harness, model and, when set, effort
 	number                        int
 	rows                          []*row
 	agent                         []*activity
@@ -55,6 +56,7 @@ type Model struct {
 	pipelineBounds, historyBounds bounds
 	unfold                        bool            // t: every tool call of the Agent box on its own line
 	unfoldThink                   bool            // h: every thinking message of the Agent box in full
+	unfoldTitle                   bool            // i: every line of the issue's title
 	open                          map[string]bool // a run of tool calls or thinking, by its key, clicked open or closed
 	toggles                       []string        // what each shown row of the Agent box opens or closes on a click
 }
@@ -187,8 +189,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// key scrolls the focused box, or, on tab, focuses the other, or, on t, folds or unfolds every tool call and,
-// on h, every thinking message.
+// key scrolls the focused box, or, on tab, focuses the other, or, on t, folds or unfolds every tool call,
+// on h, every thinking message and, on i, the issue's title.
 func (m *Model) key(k string) {
 	p := m.focused()
 	switch k {
@@ -196,6 +198,8 @@ func (m *Model) key(k string) {
 		m.unfold, m.open = !m.unfold, nil
 	case "h":
 		m.unfoldThink, m.open = !m.unfoldThink, nil
+	case "i":
+		m.unfoldTitle = !m.unfoldTitle
 	case "tab":
 		if m.agentRuns() {
 			m.pipelineFocus = !m.pipelineFocus
@@ -268,6 +272,7 @@ type event struct {
 	Number                                           int
 	DurationMS                                       int64 `json:"duration_ms"`
 	Kept                                             bool
+	Agent                                            *run.AgentSettings
 	Report                                           struct {
 		Findings []struct{ File, Family, Finding string }
 	}
@@ -280,6 +285,7 @@ func (m *Model) apply(f run.Frame) {
 		return
 	}
 	at, _ := time.Parse(time.RFC3339Nano, e.TS)
+	m.settings(e.Agent)
 	switch {
 	case e.ID != "" || e.Tool != "":
 		m.tool(e)
@@ -302,6 +308,17 @@ func (m *Model) apply(f run.Frame) {
 	}
 	if m.running() {
 		m.state = "running"
+	}
+}
+
+// settings names agent a, when the event carries it, in the Agent box's title.
+func (m *Model) settings(a *run.AgentSettings) {
+	if a == nil {
+		return
+	}
+	m.agentLabel = " · " + run.Outcome{Agent: a}.AgentLabel()
+	if a.Effort != "" {
+		m.agentLabel += " · " + a.Effort
 	}
 }
 

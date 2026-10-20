@@ -111,9 +111,8 @@ func stackedHeights(available, rightMinimum int) (int, int) {
 }
 
 func (m *Model) rightMinimum(width int) int {
-	log := m.running() && len(m.output) > 0
 	if m.agentRuns() {
-		if log {
+		if len(m.output) > 0 {
 			return minimumBoxRows * 2
 		}
 		return minimumBoxRows
@@ -122,10 +121,7 @@ func (m *Model) rightMinimum(width int) int {
 	if len(m.findings) > 0 {
 		top = lipgloss.Height(m.findingsBox(width))
 	}
-	if log {
-		if top == 0 {
-			return minimumBoxRows
-		}
+	if m.running() {
 		return top + minimumBoxRows
 	}
 	return top
@@ -207,7 +203,29 @@ func (m *Model) atm(width, height int) string {
 		}
 	}
 	state := m.icon(m.state) + " " + bold(states[m.state][1], m.state)
-	var rows []paneLine
+	// The title wraps beside the state: three lines and a hint until i shows them all.
+	head := strings.Split(ansi.Wrap(issue, max(1, inner-lipgloss.Width(state)-1), ""), "\n")
+	for i, l := range head {
+		head[i] = paint(dim, l)
+	}
+	if len(head) > 3 {
+		i := lipgloss.NewStyle().Bold(true).Render("i")
+		if m.unfoldTitle {
+			head = append(head, i+" "+paint(dim, "fold title"))
+		} else {
+			head = append(head[:3], paint(dim, "… ")+i+" "+paint(dim, "unfold title"))
+		}
+	}
+	head[0] = spread(head[0], state, inner)
+	// The title stays above the rows when it leaves them a line; else only its first line stays and the rest
+	// scroll above the rows, so a long title never makes the box taller.
+	lines, rows := append(head, ""), []paneLine(nil)
+	if len(lines)+1 > height-boxBorderRows {
+		lines = lines[:1]
+		for i, l := range append(head[1:], "") {
+			rows = append(rows, paneLine{key: fmt.Sprintf("title:%d", i), text: l})
+		}
+	}
 	for i, r := range m.rows {
 		if i > 0 && !r.check && m.height >= connectors {
 			key := fmt.Sprintf("row:%p", r)
@@ -215,8 +233,7 @@ func (m *Model) atm(width, height int) string {
 		}
 		rows = append(rows, paneLine{key: fmt.Sprintf("row:%p", r), text: m.row(r, inner)})
 	}
-	head := spread(paint(dim, ansi.Truncate(issue, inner-lipgloss.Width(state)-1, "…")), state, inner)
-	lines := append([]string{head, ""}, m.pipeline.show(rows, max(1, height-4))...)
+	lines = append(lines, m.pipeline.show(rows, max(1, height-2-len(lines)))...)
 	title := "ATM"
 	if m.focused() == &m.pipeline {
 		title += "*"
@@ -255,17 +272,16 @@ func (m *Model) row(r *row, width int) string {
 
 // sidebar says whether there is a box beside the ATM box to show.
 func (m *Model) sidebar() bool {
-	return m.agentRuns() || len(m.findings) > 0 || m.running() && len(m.output) > 0
+	return m.agentRuns() || len(m.findings) > 0 || m.running()
 }
 
 // right is, at width in height rows, the Agent box while an agent runs, else the Findings box when there are
-// findings, then the Log box while a node has output; "" for none. The Agent box takes every row the Log box,
-// at most a third of them, leaves.
+// findings, then the Log box while a node runs; "" for none. The Agent box takes every row the Log box, shown
+// with the agent's output, at most a third of them, leaves.
 func (m *Model) right(width, height int) string {
-	log := m.running() && len(m.output) > 0
 	top := ""
 	if m.agentRuns() {
-		if log {
+		if len(m.output) > 0 {
 			logLines := min(len(m.output), max(1, min(height/3-boxBorderRows, height-minimumBoxRows-boxBorderRows)))
 			logBox := m.logBox(width, logLines)
 			top = m.agentBox(width, max(1, height-lipgloss.Height(logBox)-boxBorderRows))
@@ -280,20 +296,23 @@ func (m *Model) right(width, height int) string {
 	if top != "" {
 		boxes = append(boxes, top)
 	}
-	if log {
-		logLines := min(len(m.output), max(1, height-lipgloss.Height(top)-boxBorderRows))
+	if m.running() {
+		logLines := min(len(m.logLines()), max(1, height-lipgloss.Height(top)-boxBorderRows))
 		boxes = append(boxes, m.logBox(width, logLines))
 	}
 	return strings.Join(boxes, "\n")
 }
 
-func (m *Model) running() bool {
+func (m *Model) running() bool { return m.runningRow() != nil }
+
+// runningRow is the row of the node that runs, nil when none does.
+func (m *Model) runningRow() *row {
 	for _, r := range m.rows {
 		if !r.check && r.state == "running" {
-			return true
+			return r
 		}
 	}
-	return false
+	return nil
 }
 
 // agentRuns says whether the agent of a unit, or of the slop detector, runs.
@@ -543,11 +562,11 @@ func (m *Model) agentBox(width, lines int) string {
 	for _, l := range out[m.history.top:min(len(out), m.history.top+lines)] {
 		m.toggles = append(m.toggles, l.toggle)
 	}
-	title := "Agent"
+	title := "Agent" + m.agentLabel
 	if m.focused() == &m.history {
 		title += "*"
 	}
-	result := box(bold(cyan, title), strings.Join(shown, "\n"), width, m.border(&m.history))
+	result := box(bold(cyan, ansi.Truncate(title, width-6, "…")), strings.Join(shown, "\n"), width, m.border(&m.history))
 	m.historyHeight = lipgloss.Height(result)
 	return result
 }
@@ -656,9 +675,19 @@ func (m *Model) findingsBox(width int) string {
 	return box(title, strings.Join(out, "\n"), width, dim)
 }
 
-// logBox is the last lines of the running node's output, dim.
+// logLines is the running node's output, or, until it has some, its name and how long it has run.
+func (m *Model) logLines() []string {
+	if len(m.output) > 0 {
+		return m.output
+	}
+	r := m.runningRow()
+	return []string{r.label + " · " + run.Human(m.now.Sub(r.start))}
+}
+
+// logBox is the last lines of logLines, dim.
 func (m *Model) logBox(width, lines int) string {
-	out := m.output[max(0, len(m.output)-lines):]
+	out := m.logLines()
+	out = out[max(0, len(out)-lines):]
 	styled := make([]string, len(out))
 	for i, l := range out {
 		styled[i] = paint(dim, l)
