@@ -79,7 +79,7 @@ func runAt(label, ref string, args []string, out, summary io.Writer) (err error)
 	})
 	byClone.Store(dir, r)
 	defer byClone.Delete(dir)
-	proofs := a.unit(r, root, dir, sha, text, i, c,
+	proofs := a.unit(r, root, dir, sha, text, c,
 		resumePoint{Issue: args[len(args)-1], Original: &i, BaseRef: *base, Base: sha}, from)
 	r.step("ponytail", func() (map[string]any, error) {
 		ev, err := a.ponytail(root, dir, sha, proofs, i, c)
@@ -155,10 +155,10 @@ type proof struct {
 	missing                 bool
 }
 
-// unit runs the run's one unit in clone dir, from base commit sha, for issue i under config c, on brief text,
+// unit runs the run's one unit in clone dir, from base commit sha, under config c, on brief text,
 // and returns its proof. The unit goes to the report, and its agent's work to keep, for atm run --resume. A run
 // that resumes from puts the work it kept back in dir, in place of its unit's agent.
-func (a agent) unit(r *verdict, root, dir, sha, text string, i Issue, c config.Config, keep resumePoint,
+func (a agent) unit(r *verdict, root, dir, sha, text string, c config.Config, keep resumePoint,
 	from *resumePoint) []proof {
 	head := sha
 	var report map[string]any
@@ -196,11 +196,11 @@ func (a agent) unit(r *verdict, root, dir, sha, text string, i Issue, c config.C
 		}
 		r.keep(a.dir, dir, keep, 1, report)
 	}
-	r.recordUnit(1, head, test, resumed, ev)
+	r.recordUnit(1, head, test, resumed)
 	return []proof{p}
 }
 
-func (r *verdict) recordUnit(n int, head, test, resumed string, ev map[string]any) {
+func (r *verdict) recordUnit(n int, head, test, resumed string) {
 	r.Units = append(r.Units, unitResult{Unit: n, Base: head, TestFile: test,
 		Result: outcome(r.err), ResumedFrom: resumed, span: r.node("checks").span,
 		AgentModel: r.node("agent").AgentModel})

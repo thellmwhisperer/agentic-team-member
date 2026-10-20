@@ -163,7 +163,7 @@ func TestAgentMetadataFirstModelPerInvocation(t *testing.T) {
 		r.step("agent", func() (map[string]any, error) {
 			return a.run(root, "worker", "ponytail", "Task type: fix.", testFile)
 		})
-		r.recordUnit(i+1, "base", "a_test.sh", "", nil)
+		r.recordUnit(i+1, "base", "a_test.sh", "")
 	}
 	t.Setenv("FAKE_AGENT_STREAM", `{"type":"system","subtype":"init","model":"slop-model"}`+"\n")
 	r.step("ponytail", func() (map[string]any, error) {

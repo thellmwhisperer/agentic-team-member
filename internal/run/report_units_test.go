@@ -192,7 +192,8 @@ func checkProofScreenSpans(t *testing.T, rep obj, events []obj) {
 	t.Helper()
 	var checkSteps []obj
 	for _, ev := range events {
-		if ev["check"] == "red/green" || ev["check"] == "suite on the base" || ev["check"] == "test on the base" {
+		switch ev["check"] {
+		case "red/green", "suite on the base", "test on the base":
 			t.Fatalf("removed proof emitted a screen row: %v", ev)
 		}
 		if ev["step"] == "checks" && ev["check"] == nil && ev["state"] == "passed" {
