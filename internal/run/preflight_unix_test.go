@@ -32,6 +32,12 @@ func preflightConfig(t *testing.T, bin string) {
 		out, code := preflightLaunch(t, bin, root, issueFile(t, issue))
 		assertStopped(t, root, out, code, "config", "main:.atm.yaml lacks delivery")
 	})
+	t.Run("only in the working tree", func(t *testing.T) {
+		root := repo(t, "local", "")
+		writeConfig(t, root, atmYAML)
+		out, code := preflightLaunch(t, bin, root, issueFile(t, issue))
+		assertStopped(t, root, out, code, "config", `base ref "main": git show main:.atm.yaml`)
+	})
 	t.Run("a base ref that does not resolve", func(t *testing.T) {
 		root := repo(t, "local", atmYAML)
 		out, code := preflightLaunch(t, bin, root, "--base-ref", "nope", issueFile(t, issue))
