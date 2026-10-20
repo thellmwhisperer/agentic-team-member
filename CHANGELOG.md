@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.1](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.4.0...v1.4.1) (2026-10-20)
+
+
+### Bug Fixes
+
+* Delivery keeps waiting while its bound no-mistakes run awaits a decision ([e6815df](https://github.com/thellmwhisperer/agentic-team-member/commit/e6815dfde18dabcb14b197aeabd9fed795889a2b))
+
 ## [1.4.0](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.3.4...v1.4.0) (2026-10-20)
 
 
