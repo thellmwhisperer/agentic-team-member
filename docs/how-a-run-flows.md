@@ -311,25 +311,24 @@ an existing helper, in the diff's files, keeping every test. The required
 report format is in the [ponytail brief](../internal/run/brief-ponytail.md.tmpl).
 
 ATM snapshots the whole clone first, then judges the cut per file. It rejects
-a file when a finding naming it has no `issue_sentence` key, or the cut adds
-or deletes it, touches it as a test, or changes it outside the run's diff.
-The sentence a finding quotes is recorded and decides nothing. Rejected files
-return to their contents before the cut; newly added rejected files are
-removed. Other files' cuts stay for validation. There is no splitting within
-a file. If no file survives, the whole cut is discarded.
+a file when a finding naming it has no `issue_sentence` key, or the cut adds or deletes it, touches it as a test, or changes it outside the
+run's diff. The sentence a finding quotes is recorded and decides nothing.
+Only rejected files return to their contents before the cut;
+newly added rejected files are removed. Other files' cuts stay for validation.
+There is no splitting within a file. If no file survives, the whole cut is
+discarded as before.
 
 The remaining cut must report a finding and lower the run's net added lines.
 ATM then checks for new files, including ignored files, and repeats every
 unit's proof and the last unit's checks on the remaining cut as a whole,
-preserving each unit's proven test. When a proof or check fails, ATM puts back
-every remaining cut file whose repo path the failure names, then re-proves
-the rest. It repeats while a failure names another remaining cut file. If a
-failure names none and at least two cut files remain, ATM tries putting back
-each file alone and keeps the first remainder that passes. The kept remainder
-must still report a finding and lower the net added lines. ATM runs at most
-twice the cut files, plus one, re-proofs. If no cut passes, or the policy or
-new-file check fails, ATM restores the whole clone byte for byte and discards
-the cut.
+preserving each unit's proven test. When those fail, ATM puts back every cut
+file whose full repo path the failure names, as compiler and test output name a file,
+and proves again, while the failure names one. A failure that names none, with at least two files left:
+ATM puts back each remaining file alone, once, and keeps the first remainder
+that passes. The kept remainder must still report a finding and lower the net
+added lines. At most twice the cut files, plus one, re-proofs. If any of these
+requirements fails, ATM restores the whole clone byte for byte and discards
+the entire cut.
 
 A kept cut is its own commit, `ponytail: <n> cuts`, one line per surviving finding,
 after the unit commit, with one slopslint tombstone per surviving finding under
@@ -432,7 +431,8 @@ whose values are not yet available are omitted.
 `rejected_files` lists each file ATM put back, once, with its `path` and the
 exact rejection `reason`. It is `[]` when nothing was put back, including a
 cut kept in full. A partly kept cut still has `kept: true` and `reason: ""`;
-its rejected files carry policy, proof, or check reasons. If the remaining
+its rejected files carry their individual policy, proof, or check reasons that
+put them back. If the remaining
 cut also fails, files already rejected retain their reasons, and the other
 files put back carry the whole-cut rejection reason. See
 [Slop detector](#slop-detector) for the rejection rules.
