@@ -26,6 +26,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	system "github.com/thellmwhisperer/agentic-team-member"
 	"github.com/thellmwhisperer/agentic-team-member/internal/config"
 	"mvdan.cc/sh/v3/expand"
 	"mvdan.cc/sh/v3/syntax"
@@ -90,11 +91,13 @@ func (a agent) argv(clone, skill, final, brief string) (argv []string, stdin str
 	case "claude":
 		argv = []string{"claude", "-p", "--output-format", "stream-json", "--verbose", "--setting-sources", "project",
 			"--strict-mcp-config", "--permission-mode", "acceptEdits", "--tools", tools, "--allowedTools", tools,
-			"--thinking-display", "summarized"} // else claude's thinking blocks come empty
+			"--thinking-display", "summarized", // else claude's thinking blocks come empty
+			"--append-system-prompt", system.Prompt}
 		argv = with(with(argv, a.Model, "--model", a.Model), a.Effort, "--effort", a.Effort)
 		return append(argv, a.args...), brief
 	case "codex":
-		argv = []string{"codex", "exec", "--json", "-C", clone, "--sandbox", "workspace-write", "-o", final}
+		argv = []string{"codex", "exec", "--json", "-C", clone, "--sandbox", "workspace-write", "-o", final,
+			"-c", "developer_instructions=" + strconv.Quote(system.Prompt)}
 		argv = with(argv, a.Model, "-c", "model="+strconv.Quote(a.Model))
 		argv = with(argv, a.Effort, "-c", "model_reasoning_effort="+strconv.Quote(a.Effort))
 	case "opencode":
@@ -105,7 +108,7 @@ func (a agent) argv(clone, skill, final, brief string) (argv []string, stdin str
 		argv = with(argv, a.Model, "--model", a.Model)
 	case "pi":
 		argv = []string{"pi", "-p", "--mode", "json", "--no-extensions", "--no-skills", "--no-prompt-templates",
-			"--no-context-files", "--skill", skill}
+			"--no-context-files", "--skill", skill, "--append-system-prompt", system.Prompt}
 		argv = with(with(argv, a.Model, "--model", a.Model), a.Effort, "--thinking", a.Effort)
 	}
 	return append(append(argv, a.args...), brief), ""
