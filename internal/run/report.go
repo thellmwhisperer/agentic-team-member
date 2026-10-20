@@ -27,6 +27,7 @@ type verdict struct {
 	Units      []unitResult   `json:"units"`
 	Reproofs   []unitResult   `json:"reproofs"`
 	Commands   []cmdResult    `json:"commands"`
+	Decisions  []Decision     `json:"decisions,omitempty"`
 	HeadSHA    string         `json:"head_sha,omitempty"` // the delivered branch's
 	Serve      string         `json:"serve,omitempty"`    // buildinfo.String() of the serve that wrote it
 	path       string
@@ -195,8 +196,8 @@ func (r *verdict) emit(name string, ev map[string]any) {
 	}
 	ev["ts"], ev["step"] = time.Now().UTC().Format(time.RFC3339Nano), name
 	b, _ := json.Marshal(ev)
+	_ = r.write() // persist the question before its event lets the launcher read the report
 	_, _ = r.out.Write(append(b, '\n'))
-	_ = r.write() // the run's last write says whether report.json is on disk
 }
 
 // eventSink is a log a screen reads: it takes the live events inside a node too, which the log leaves out.
