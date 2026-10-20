@@ -29,15 +29,16 @@ to standard error. Interrupting the stream exits 1 and leaves the run going;
 `atm run`, `--resume` too, checks what the run stands on before it hands the
 run to the background process. The first check that fails stops the launch
 with exit 2, `atm: preflight: <check>: <why>` on standard error, no clone, no
-run directory and no agent. `atm run --help` lists them. After fetching, ATM resolves the fetched
-`origin/<base-ref>` once. Configuration, CI and a fresh clone use
-that commit. A resumed clone still starts at its saved base commit.
+run directory and no agent. `atm run --help` lists them. ATM fetches the
+requested branch from `origin` itself, stops if fetching fails, and resolves
+`origin/<base-ref>` once. Configuration, CI and a fresh clone use that commit.
+A resumed clone still starts at its saved base commit.
 
 | Check | Passes when |
 |-------|-------------|
 | `config` | `.atm.yaml` as the base ref has it is complete. The run uses that file, never the working tree's; a working tree's `.atm.yaml` that differs gets one warning line |
 | `base green` | The latest completed CI run of each workflow on the base ref's head passed, as one `gh run list --commit` call says. No completed run, or a `gh` that does not answer, fails. A repository whose origin is not on GitHub skips it with one line saying so |
-| `worker files` | `--settings` and `--skill` accept either a separate value or `=<value>`. Absolute paths are readable on disk; relative paths exist in the resolved base commit, relative to the clone root. Only `--settings` values starting with `{` are inline JSON |
+| `worker files` | `--settings` and `--skill` accept either a separate value or `=<value>`. Absolute paths are readable on disk; relative paths exist in the resolved base commit, or the run's recorded base commit on resume, relative to the clone root. Only `--settings` values starting with `{` are inline JSON |
 | `delivery` | The first word of `delivery` is a command `sh` finds, as `command -v` says: on `PATH`, or one of `sh`'s own, as `if` or `cd`. An empty `delivery` passes |
 
 ## The steps

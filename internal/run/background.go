@@ -660,7 +660,7 @@ func Start(root string, args []string) (Outcome, error) {
 		}
 	}
 	if err == nil {
-		sha, err = preflight(root, *base, *a, append(a.args, p.Args...))
+		sha, err = preflight(root, *base, p.Base, *a, append(a.args, p.Args...))
 	}
 	if err != nil {
 		return Outcome{}, err
