@@ -6,6 +6,17 @@ lint: scripts/lint.sh
 test_file: go test -timeout 30m -run {tests} {dir}
 test_patterns: ["**/*_test.go", "tests/**"]
 docs_patterns: ["**/*.md", "docs/**"]
-delivery: 'no-mistakes init && no-mistakes axi run --intent "$ATM_INTENT"'
+# axi run's --wait bounds one hold, not the gate: when it elapses, reattach, without --intent so no new run starts.
+delivery: |
+  no-mistakes init || exit
+  log=$(mktemp) && rc=$(mktemp) || exit
+  trap 'rm -f "$log" "$rc"' EXIT
+  set -- --intent "$ATM_INTENT"
+  while { no-mistakes axi run "$@" 2>&1; echo $? > "$rc"; } | tee "$log" >&2
+    code=$(cat "$rc")
+    [ "$code" != 0 ] && grep -v '^[[:space:]]*$' "$log" | tail -n 1 |
+      grep -qx 'error: wait of [^ ]* elapsed while driving the run'
+  do set --; done
+  exit "$code"
 agent_timeout: 60m
 check_timeout: 20m
