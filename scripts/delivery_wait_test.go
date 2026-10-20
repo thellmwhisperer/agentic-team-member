@@ -62,6 +62,7 @@ func TestOwnDeliveryLineOutlivesTheGateWait(t *testing.T) {
 			if !strings.Contains(out, "progress: step test running\n") || !strings.HasSuffix(out, tc.end) {
 				t.Fatalf("output lost the gate's progress or its result:\n%s", out)
 			}
+			t.Logf("delivery exited %d; calls:\n%soutput on stderr:\n%s", got, log, out)
 		})
 	}
 }
