@@ -88,9 +88,13 @@ leave its check pending and block the merge.
 Subject to the no-mistakes review below, auto-merge by rebase is armed when
 the PR body's `## Risk Assessment` says Low or Medium, and GitHub merges once
 CI is green. High risk, or a level it cannot read, waits for the
-`risk-reviewed` label. A release-please PR that only changes `CHANGELOG.md`
-and `.release-please-manifest.json` counts as Low. Before adding it, whoever launched the run writes one
-comment:
+`risk-reviewed` label. A PR from `release-please--branches--main` that changes
+only `CHANGELOG.md` and `.release-please-manifest.json` is treated as Low and
+arms without a risk section or label. If it later changes another file, the
+usual risk rule applies and auto-merge is disabled while required clearance
+is missing.
+
+Before adding `risk-reviewed`, whoever launched the run writes one comment:
 
 ```
 Risk reviewed:
