@@ -9,9 +9,12 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
+
+	system "github.com/thellmwhisperer/agentic-team-member"
 )
 
 type obj = map[string]any
@@ -43,12 +46,13 @@ func TestRunDrivesTheAgent(t *testing.T) {
 	cases := map[string]string{
 		"claude": "-p --output-format stream-json --verbose --setting-sources project --strict-mcp-config " +
 			"--permission-mode acceptEdits --tools Read,Edit,Write,Bash,Glob,Grep,Skill " +
-			"--allowedTools Read,Edit,Write,Bash,Glob,Grep,Skill --thinking-display summarized --model m --effort e --x y",
-		"codex": `exec --json -C <clone> --sandbox workspace-write -o <log>.final.md -c model="m" ` +
-			`-c model_reasoning_effort="e" --x y <brief>`,
+			"--allowedTools Read,Edit,Write,Bash,Glob,Grep,Skill --thinking-display summarized " +
+			"--append-system-prompt <system> --model m --effort e --x y",
+		"codex": `exec --json -C <clone> --sandbox workspace-write -o <log>.final.md -c developer_instructions=<system> ` +
+			`-c model="m" -c model_reasoning_effort="e" --x y <brief>`,
 		"opencode": "run --pure --format json --dir <clone> -m m --variant e --x y <brief>",
 		"pi": "-p --mode json --no-extensions --no-skills --no-prompt-templates --no-context-files " +
-			"--skill <clone>/.atm/skills/ponytail --model m --thinking e --x y <brief>",
+			"--skill <clone>/.atm/skills/ponytail --append-system-prompt <system> --model m --thinking e --x y <brief>",
 		"cursor": "-p --output-format stream-json --trust --force --workspace <clone> --model m --x y <brief>",
 	}
 	for harness, want := range cases {
@@ -76,6 +80,8 @@ func TestRunDrivesTheAgent(t *testing.T) {
 			got := agentCall(t, call)
 			args := strings.Join(got.Args, " ")
 			args = strings.ReplaceAll(args, string(brief), "<brief>")
+			args = strings.ReplaceAll(args, strconv.Quote(system.Prompt), "<system>")
+			args = strings.ReplaceAll(args, system.Prompt, "<system>")
 			args = strings.ReplaceAll(args, strings.TrimSuffix(log, ".jsonl"), "<log>")
 			if args = filepath.ToSlash(strings.ReplaceAll(args, clone, "<clone>")); args != want {
 				t.Fatalf("args:\n%s\nwant\n%s", args, want)
