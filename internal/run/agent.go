@@ -1162,6 +1162,7 @@ func wordText(word *syntax.Word) string {
 }
 
 var shellWords = expand.Config{
+	ProcSubst: func(*syntax.ProcSubst) (string, error) { return "$", nil },
 	Env: expand.FuncEnviron(func(name string) string {
 		switch name {
 		case "HOME":
