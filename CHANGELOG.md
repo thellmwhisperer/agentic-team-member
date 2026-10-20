@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.2.0](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.1.3...v1.2.0) (2026-10-20)
+
+
+### Features
+
+* atm run checks config, base green, worker files and delivery before the run ([2bc91c1](https://github.com/thellmwhisperer/agentic-team-member/commit/2bc91c181e401ddd26b0c3f135e6e04e828b482b)), closes [#506](https://github.com/thellmwhisperer/agentic-team-member/issues/506)
+
+
+### Bug Fixes
+
+* Ponytail keeps every cut that compiles and passes: quoting the issue is no reason to undo, dependent files are judged together ([4134f2d](https://github.com/thellmwhisperer/agentic-team-member/commit/4134f2d01839a48d516e0266ac2f41f20d2fc090))
+* Process substitution in an agent's command crashes atm serve and every run in it ([74775d2](https://github.com/thellmwhisperer/agentic-team-member/commit/74775d20589fe17a4ec1c14d77f56953f964182c))
+* Release PRs from release-please arm auto-merge at once, without labels ([bb493ad](https://github.com/thellmwhisperer/agentic-team-member/commit/bb493ad837a63631c62ea19374c4edec2a15ca60))
+
 ## [1.1.3](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.1.2...v1.1.3) (2026-10-20)
 
 
