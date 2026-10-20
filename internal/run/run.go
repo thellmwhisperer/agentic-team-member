@@ -59,8 +59,7 @@ func runAt(label, ref string, args []string, out, summary io.Writer) (err error)
 	var i Issue
 	r.step("issue", func() (map[string]any, error) {
 		i, err = theIssue(from, args[len(args)-1], repo)
-		r.Type = i.Type
-		ev := map[string]any{"title": i.Title, "type": i.Type}
+		ev := map[string]any{"title": i.Title}
 		if i.Number != 0 {
 			ev["number"] = i.Number
 		}
@@ -150,15 +149,10 @@ func parseArgs(args []string) (ordered []string, base, resume *string, a *agent,
 	return ordered, base, resume, a, err
 }
 
-// testedType says whether a task of type typ is proven with a test: a fix, feature, greenfield or tests task.
-func testedType(typ string) bool {
-	return typ == "fix" || typ == "feature" || typ == "greenfield" || typ == "tests"
-}
-
-// proof is how a unit was proven: on its base commit, with its test's content and task type.
+// proof records a unit's base and reported test content for the ponytail test guard.
 type proof struct {
-	base, test, typ, testContent string
-	missing                      bool
+	base, test, testContent string
+	missing                 bool
 }
 
 // unit runs the run's one unit in clone dir, from base commit sha, for issue i under config c, on brief text,
@@ -190,7 +184,7 @@ func (a agent) unit(r *verdict, root, dir, sha, text string, i Issue, c config.C
 	for {
 		r.step("checks", func() (map[string]any, error) {
 			var err error
-			p, ev, err = checkUnit(a.dir, dir, head, test, i.Type, report, c)
+			p, ev, err = checkUnit(a.dir, dir, head, test, report, c)
 			return ev, err
 		})
 		if a.checkDecision(r) != "fix" {
@@ -202,35 +196,30 @@ func (a agent) unit(r *verdict, root, dir, sha, text string, i Issue, c config.C
 		}
 		r.keep(a.dir, dir, keep, 1, report)
 	}
-	r.recordUnit(1, head, test, i.Type, resumed, ev)
+	r.recordUnit(1, head, test, resumed, ev)
 	return []proof{p}
 }
 
-func (r *verdict) recordUnit(n int, head, test, typ, resumed string, ev map[string]any) {
-	red, _ := ev["red"].(try)
-	green, _ := ev["green"].(try)
-	proofSpan, _ := ev["proof_span"].(span)
-	r.Units = append(r.Units, unitResult{Unit: n, Base: head, TestFile: test, Type: typ,
-		Red: red, Green: green, Result: outcome(r.err), ResumedFrom: resumed, span: proofSpan,
+func (r *verdict) recordUnit(n int, head, test, resumed string, ev map[string]any) {
+	r.Units = append(r.Units, unitResult{Unit: n, Base: head, TestFile: test,
+		Result: outcome(r.err), ResumedFrom: resumed, span: r.node("checks").span,
 		AgentModel: r.node("agent").AgentModel})
 }
 
-// checkUnit checks the unit, on commit head in clone dir, for a task of type typ whose agent's report names test.
-func checkUnit(runDir, dir, head, test, typ string, report map[string]any, c config.Config) (proof,
+// checkUnit runs configured checks and records the reported test for the ponytail guard.
+func checkUnit(runDir, dir, head, test string, report map[string]any, c config.Config) (proof,
 	map[string]any, error) {
 	ev := map[string]any{"unit": 1}
 	missing := report == nil && test == ""
-	result, err := checks(dir, runDir, head, typ, test, missing, c)
+	result, err := checks(dir, runDir, head, test, missing, c)
 	for key, value := range result {
 		ev[key] = value
 	}
 	var testContent []byte
-	if test != "" && testedType(typ) {
-		var readErr error
-		testContent, readErr = os.ReadFile(filepath.Join(dir, test))
-		err = errors.Join(err, readErr)
+	if err == nil && test != "" {
+		testContent, err = readTest(dir, test)
 	}
-	return proof{head, test, typ, string(testContent), missing}, ev, err
+	return proof{head, test, string(testContent), missing}, ev, err
 }
 
 func (a agent) runUnit(dir, text string, keep *resumePoint) (map[string]any, error) {
@@ -321,13 +310,9 @@ func prepareDelivery(r *verdict, root, clone, sha string, i Issue) (branch, cuts
 	return branch, cuts, tombs, err
 }
 
-// conventional maps a task type to its conventional commit type, which release-please reads.
-var conventional = map[string]string{"fix": "fix", "feature": "feat", "greenfield": "feat", "refactor": "refactor",
-	"tests": "test", "docs": "docs", "chore": "chore"}
-
-// unitMessage is the commit message of unit n of issue i: a conventional commit.
+// unitMessage uses one conventional prefix for every issue, without classifying it.
 func unitMessage(i Issue, n int) string {
-	return fmt.Sprintf("%s: %s\n\natm unit %d", conventional[i.Type], i.Title, n)
+	return fmt.Sprintf("chore: %s\n\natm unit %d", i.Title, n)
 }
 
 // onBranch puts clone, at base commit sha, on a new branch name, what is left uncommitted committed as the

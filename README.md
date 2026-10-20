@@ -8,8 +8,8 @@
 Give ATM an issue, from GitHub or a text file. It hands the issue to a coding
 agent you already pay for (see [supported agents](docs/configuration.md#configatmconfigyaml)) inside an
 isolated clone, with a written contract. Then code, not the agent, decides:
-does the new test fail without the fix and pass with it, do the configured
-checks still pass, and does the task type's proof hold. A green run reaches
+do the configured checks pass on the completed work, and are existing tests
+preserved? A passing run reaches
 the slop detector, which may only cut.
 [Delivery](docs/how-a-run-flows.md#delivery) then reviews the committed work
 against the issue before handing the branch to your configured command.
@@ -24,7 +24,7 @@ against the issue before handing the branch to your configured command.
 Issue 218 of this repository, run 218-32 of the binary built from main at
 `c0a1d53`, 8 October 2026, Claude Opus 5.5 at high effort from
 `~/.config/atm/config.yaml`. 54 min 15 s in all: agent 11 min 16 s, 30 tool
-calls; red and green verified; the slop detector kept 1 cut and re-proved it;
+calls; checks passed; the slop detector kept 1 cut and checked it;
 delivery through no-mistakes opened
 [PR 244](https://github.com/thellmwhisperer/agentic-team-member/pull/244),
 CI green on ubuntu, macOS and Windows, merged, issue closed. It was the second
@@ -59,7 +59,7 @@ RESULT  PASS
 report  .atm/runs/218-32/report.json
 ```
 
-The red/green proof confirmed the fix. The slop detector kept one cut, and
+The configured suite checked the result. The slop detector kept one cut, and
 every check ran again before it was kept.
 
 ## Who decides what
@@ -68,7 +68,6 @@ every check ran again before it was kept.
 |------|-----|-----------|
 | Clone and contract | code | a failed clone or install, an incomplete configuration |
 | Write the fix | **model** | nothing: it decides nothing |
-| Red / green | code | a test that passes without the fix or fails with it |
 | The project's configured `install`, `test`, `e2e`, `typecheck` and `lint` commands | code | any failure |
 | Slop detector (code quality gate, not code review) | **model**, may only cut | See [Slop detector](docs/how-a-run-flows.md#slop-detector) for file rejection and validation of the remaining cut |
 | Delivery and code review gate | **model**, then your command | See [Delivery](docs/how-a-run-flows.md#delivery) for the review that must approve before the command runs |
@@ -116,7 +115,7 @@ agent, model and effort. Both are in [Configuration](docs/configuration.md).
 | `atm init` | Writes a commented `.atm.yaml` and ignores `.atm/` |
 | `atm doctor` | Checks local prerequisites; see [preflight](docs/how-a-run-flows.md#before-the-run) for launch checks |
 | `atm skill`, `atm skill install` | See [ATM's driving skill](docs/configuration.md#skill) |
-| `atm run [flags] <issue>` | Runs an issue: a GitHub number or a file with a `Type:` line |
+| `atm run [flags] <issue>` | Runs an issue: a GitHub number or a file with a title and body |
 | `atm run --resume <run>` | Runs a failed run's issue again from its agent's work; see [Resuming a failed run](docs/configuration.md#resuming-a-failed-run) |
 | `atm answer <run> <choice>` | Answers a failed post-agent check; see [Checks](docs/how-a-run-flows.md#checks) |
 | `atm status` | The runs going |
@@ -140,7 +139,7 @@ For `atm run`, including `--follow`, and `atm axi run`:
 ## Read more
 
 - [Configuration](docs/configuration.md): both YAML files, the commands and their flags, what a run leaves on disk.
-- [How a run flows](docs/how-a-run-flows.md): each step, what each task type proves, the report.
+- [How a run flows](docs/how-a-run-flows.md): each step, the configured checks, the report.
 - [ATM maintains itself](docs/self-maintenance.md): this repo's own fixes go through ATM; the hooks that hold the loop.
 - [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Code of conduct](CODE_OF_CONDUCT.md)
 

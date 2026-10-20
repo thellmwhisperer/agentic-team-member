@@ -28,10 +28,10 @@ func TestRunDeliversTheBranch(t *testing.T) {
 		kept                               bool
 	}{
 		{name: "file issue, cut discarded", origin: bare,
-			log: "fix: Retry on timeout|" + dev + "\ninit|atm <atm@example.com>|atm <atm@example.com>"},
+			log: "chore: Retry on timeout|" + dev + "\ninit|atm <atm@example.com>|atm <atm@example.com>"},
 		{name: "GitHub issue, cut kept", origin: "git@github.com:owner/repo.git", issue: "7", kept: true,
 			ponytail: "- a.txt: dropped two lines (speculative_feature)",
-			log:      "ponytail: 1 cuts|" + dev + "\nfix: Retry on timeout|" + dev},
+			log:      "ponytail: 1 cuts|" + dev + "\nchore: Retry on timeout|" + dev},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -83,7 +83,7 @@ func TestRunDeliversTheBranch(t *testing.T) {
 }
 
 func TestRunDeliversAConventionalUnitCommit(t *testing.T) {
-	for typ, want := range map[string]string{"fix": "fix", "feature": "feat"} {
+	for typ, want := range map[string]string{"fix": "chore", "feature": "chore"} {
 		t.Run(typ, func(t *testing.T) {
 			repo(t, "https://example.com/owner/repo.git", atmSet(atmYAML, "delivery", deliveryLine))
 			got := t.TempDir()

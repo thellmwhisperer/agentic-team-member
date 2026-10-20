@@ -28,7 +28,7 @@ func TestChecksUseConfiguredTimeout(t *testing.T) {
 			timeout = time.Second
 			t.Cleanup(func() { timeout = old })
 			hang := "while :; do :; done"
-			typ, test := "chore", ""
+			test := ""
 			switch step {
 			case "install":
 				c.Install = hang
@@ -39,7 +39,7 @@ func TestChecksUseConfiguredTimeout(t *testing.T) {
 			case "lint":
 				c.Lint = hang
 			case "red", "green":
-				typ, test = "fix", "a_test.sh"
+				test = "a_test.sh"
 				body := hang
 				if step == "green" {
 					body = "grep -q fixed a.txt || exit 1; " + hang
@@ -51,7 +51,7 @@ func TestChecksUseConfiguredTimeout(t *testing.T) {
 				}
 			}
 			start := time.Now()
-			_, err = checks(root, t.TempDir(), sha, typ, test, false, c)
+			_, err = checks(root, t.TempDir(), sha, test, false, c)
 			if !errors.Is(err, errTimeout) || !strings.Contains(err.Error(), "timed out after "+Human(2*time.Second)) {
 				t.Fatalf("want configured timeout, got %v", err)
 			}

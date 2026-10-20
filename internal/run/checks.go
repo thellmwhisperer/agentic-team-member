@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"go/ast"
 	"go/parser"
-	"go/scanner"
 	"go/token"
 	"io"
 	"io/fs"
@@ -26,36 +25,38 @@ import (
 	"github.com/thellmwhisperer/agentic-team-member/internal/config"
 )
 
-// unproven checks a unit with no report, so no test file, in clone for a task of type typ: it changed something,
-// and a tests task changed only tests or docs.
-func unproven(clone, typ string, c config.Config) error {
+// checkChanges rejects empty work when there is no report.
+func checkChanges(clone string, missingReport bool, c config.Config) error {
 	if _, err := git(clone, "add", "-A"); err != nil {
 		return err
 	}
-	changed, _, changeErr := changes(clone, typ, "")
-	if changeErr == nil && len(changed) == 0 {
-		changeErr = errors.New("no change to prove")
-	}
-	if changeErr == nil && typ == "tests" {
-		if p := first(changed, slices.Concat(c.TestPatterns, c.DocsPatterns), false); p != "" {
-			changeErr = fmt.Errorf("a tests task changed the source %s", p)
-		}
+	out, err := git(clone, "diff", "--cached", "--name-only", "--no-renames", "-z", "HEAD")
+	if err == nil && missingReport && out == "" {
+		err = errors.New("no change to prove")
 	}
 	_, resetErr := git(clone, "reset", "-q")
-	return errors.Join(changeErr, resetErr)
+	return errors.Join(err, resetErr)
 }
 
-// checks is the verdict on the agent's work in clone, at base commit sha, for a task of type typ whose report
-// names test: HEAD has not moved, the ignored files the agent made are gone, as delivery leaves them out, then
-// install, the type's proof, test, e2e, typecheck and lint pass, and HEAD has not
-// moved still. Install runs again before the proof: the agent may have changed dependencies. Each proof and
-// command is a row of the screen. Its result holds the proof's red and green trials.
-func checks(clone, runDir, sha, typ, test string, missingReport bool,
+// readTest confines every report and saved-history test read to the clone, including symlinks.
+func readTest(clone, test string) ([]byte, error) {
+	if !filepath.IsLocal(test) {
+		return nil, fmt.Errorf("the report's test_file %q is not a path in the clone", test)
+	}
+	file, err := os.OpenInRoot(clone, test)
+	if err != nil {
+		return nil, fmt.Errorf("the report's test_file %q cannot be opened inside the clone: %w", test, err)
+	}
+	defer func() { _ = file.Close() }()
+	b, err := io.ReadAll(file)
+	return b, wrap(err, fmt.Sprintf("the report's test_file %q cannot be read inside the clone", test))
+}
+
+// checks runs the configured commands on the completed work, preserving clone and test safeguards.
+func checks(clone, runDir, sha, test string, missingReport bool,
 	c config.Config) (result map[string]any, err error) {
 	live := liveIn(clone)
-	var red, green try
-	var proofSpan span
-	result = map[string]any{"red": red, "green": green, "proof_span": proofSpan}
+	result = map[string]any{}
 	cover, err := coverageEnv(runDir, c.E2E)
 	var ran []cmdResult
 	run := func(name, line string, env ...string) error {
@@ -90,14 +91,8 @@ func checks(clone, runDir, sha, typ, test string, missingReport bool,
 	if err != nil {
 		return result, err
 	}
-	if !missingReport || typ == "refactor" || typ == "docs" || typ == "chore" {
-		proofSpan, err = row(live, proofs[typ], func() (err error) {
-			red, green, err = prove(clone, typ, filepath.ToSlash(test), c)
-			return err
-		})
-		result["red"], result["green"], result["proof_span"] = red, green, proofSpan
-	} else {
-		err = unproven(clone, typ, c)
+	if err = checkChanges(clone, missingReport, c); err == nil && test != "" {
+		_, err = readTest(clone, test)
 	}
 	if err != nil {
 		return result, err
@@ -112,7 +107,7 @@ func checks(clone, runDir, sha, typ, test string, missingReport bool,
 }
 
 // coverageEnv is one fresh GOCOVERDIR for a Checks that declares e2e.
-// coverFor gives it to test and e2e only: proof, install, typecheck and lint must not write those counters.
+// coverFor gives it to test and e2e only: install, typecheck and lint must not write those counters.
 func coverageEnv(runDir, e2e string) ([]string, error) {
 	if e2e == "" {
 		return nil, nil
@@ -427,10 +422,6 @@ func moved(clone, want, who string) error {
 	return err
 }
 
-// proofs is the screen's row for the proof of each task type; a chore has none.
-var proofs = map[string]string{"fix": "red/green", "feature": "red/green", "greenfield": "red/green",
-	"refactor": "suite on the base", "tests": "test on the base", "docs": "docs only"}
-
 // row runs fn as the screen's row name, under the node that runs, when name is not "", and returns its span, the one
 // the screen shows.
 func row(live func(map[string]any), name string, fn func() error) (s span, err error) {
@@ -443,334 +434,12 @@ func row(live func(map[string]any), name string, fn func() error) (s span, err e
 	return s, err
 }
 
-// prove runs the proof of task type typ on the agent's work in clone, all of it staged meanwhile, and returns its
-// trials: red without the work, green with it, each zero when not run.
-func prove(clone, typ, test string, c config.Config) (red, green try, err error) {
-	limit := cmp.Or(time.Duration(c.CheckTimeout), timeout)
-	if _, err := git(clone, "add", "-A"); err != nil {
-		return red, green, err
-	}
-	defer func() {
-		_, e := git(clone, "reset", "-q") // the agent's work back to unstaged
-		err = errors.Join(err, e)
-	}()
-	tree, err := keep(clone)
-	if err != nil {
-		return red, green, err
-	}
-	changed, aside, err := changes(clone, typ, test)
-	if err != nil {
-		return red, green, err
-	}
-	switch typ {
-	case "fix", "feature", "greenfield":
-		red, green, err := redGreen(clone, tree, aside, test, c.TestFile, limit)
-		if err == nil && typ == "fix" {
-			err = onBase(clone, tree, aside, test, c.TestFile, limit)
-		}
-		return red, green, err
-	case "refactor":
-		if p := first(changed, c.TestPatterns, true); p != "" {
-			return red, green, fmt.Errorf("a refactor changed the test %s", p)
-		}
-		base, _, err := trial(clone, tree, changed, c.Test, "", "", false, nil, limit)
-		return base, green, errors.Join(err, wrap(base.err, "the suite fails on the base"))
-	case "tests":
-		if p := first(changed, slices.Concat(c.TestPatterns, c.DocsPatterns), false); p != "" {
-			return red, green, fmt.Errorf("a tests task changed the source %s", p)
-		}
-		line, err := testLine(clone, c.TestFile, test)
-		if err != nil {
-			return red, green, err
-		}
-		base, after, err := trial(clone, tree, aside, line, line, test,
-			strings.Contains(c.TestFile, "{tests}"), nil, limit)
-		return base, after, errors.Join(err, wrap(base.err, test+" fails on the base"),
-			wrap(after.err, test+" fails after the change"))
-	case "docs":
-		if p := first(changed, c.DocsPatterns, false); p != "" {
-			return red, green, fmt.Errorf("a docs task changed %s, which is not docs", p)
-		}
-	}
-	return red, green, nil
-}
-
-// changes is every path the staged work in clone changes and what the base run sets aside: all but the test;
-// for a fix, only what the base has. A test that fails without the fix's new files alone then passes without
-// the fix. ponytail: so a fix made only of new files is rejected too.
-func changes(clone, typ, test string) (changed, aside []string, err error) {
-	out, err := git(clone, "diff", "--cached", "--name-status", "--no-renames", "-z", "HEAD")
-	for f := strings.Split(out, "\x00"); len(f) > 1; f = f[2:] {
-		if changed = append(changed, f[1]); f[1] != test && (typ != "fix" || f[0] != "A") {
-			aside = append(aside, f[1])
-		}
-	}
-	return changed, aside, err
-}
-
-// notRun matches parse or compile diagnostics printed by Go, pytest, node --test, and tsc.
-var notRun = regexp.MustCompile(`^(FAIL\s+\S+\s+\[(build|setup) failed\]$|_+ ERROR collecting .+ _+$|` +
-	`E\s+(SyntaxError|ImportError)\b|(# )?SyntaxError:|` +
-	`\S.*\(\d+,\d+\): error TS\d+:|\S.*:\d+:\d+ - error TS\d+:|error TS\d+:)`)
-
-// jestFile is Jest's FAIL header of a test file, under which it says the file's suite failed to run.
-var jestFile = regexp.MustCompile(`^\s*FAIL\s+\S+(\s+\(.*\))?\s*$`)
-
-var testResult = regexp.MustCompile(`^(--- (PASS|FAIL):|ok\s+\S+|` +
-	`.+::.+\s+(PASSED|FAILED|SKIPPED|XFAIL|XPASS)\b|(PASSED|FAILED|SKIPPED|XFAIL|XPASS)\s+\S+::|` +
-	`[✓✔√]\s|[✕✘×]\s|● )`)
-var jestTestsRan = regexp.MustCompile(`^Tests:\s+[1-9]\d*\s+(passed|failed|skipped|todo)\b`)
-var tapFailedTest = regexp.MustCompile(`^not ok \d+ - `)
-var tapAssertionFailure = regexp.MustCompile(`^(code: 'ERR_ASSERTION'|name: 'AssertionError')$`)
-var vitestRun = regexp.MustCompile(`^RUN\s+v\d`)
-var vitestLoadError = regexp.MustCompile(`^Error: Failed to load url\s+`)
-var vitestNoTests = regexp.MustCompile(`^Tests\s+(no tests|0(?:\s|$))`)
-var vitestTestsFailed = regexp.MustCompile(`^Tests\s+[1-9]\d*\s+failed\b`)
-var vitestFilesFailed = regexp.MustCompile(`^Test Files\s+[1-9]\d*\s+failed\b`)
-
-// redDidNotRun says whether output, a red's whole, holds a runner's diagnostic that the test file did not parse
-// or compile and no test result.
-func redDidNotRun(output string) bool {
-	lines := strings.Split(output, "\n")
-	return hasRunnerDiagnostic(lines) && !hasTestResult(lines) || vitestLoadFailure(lines)
-}
-
-func hasRunnerDiagnostic(lines []string) bool {
-	jest := false
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(strings.TrimRight(line, "\r"))
-		if jest && trimmed == "● Test suite failed to run" || notRun.MatchString(line) {
-			return true
-		}
-		jest = jest || jestFile.MatchString(line)
-	}
-	return false
-}
-
-func hasTestResult(lines []string) bool {
-	jest, tap, tapFailed := false, false, false
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(strings.TrimRight(line, "\r"))
-		if trimmed != "● Test suite failed to run" && testResult.MatchString(trimmed) ||
-			tap && tapFailed && tapAssertionFailure.MatchString(trimmed) ||
-			runnerSummaryHasFailure(trimmed, jest, vitestRun.MatchString(trimmed)) {
-			return true
-		}
-		jest = jest || jestFile.MatchString(line)
-		tap = tap || strings.HasPrefix(trimmed, "TAP version ")
-		tapFailed = tapFailed || tap && tapFailedTest.MatchString(trimmed)
-	}
-	return false
-}
-
-func runnerSummaryHasFailure(line string, jest, vitest bool) bool {
-	return jest && jestTestsRan.MatchString(line) || vitest && vitestTestsFailed.MatchString(line)
-}
-
-func vitestLoadFailure(lines []string) bool {
-	run, load := false, false
-	noTests, failedFiles := false, false
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(strings.TrimRight(line, "\r"))
-		run = run || vitestRun.MatchString(trimmed)
-		if !run {
-			continue
-		}
-		load = load || vitestLoadError.MatchString(trimmed)
-		if strings.HasPrefix(trimmed, "Tests ") {
-			if vitestTestsFailed.MatchString(trimmed) {
-				return false
-			}
-			noTests = vitestNoTests.MatchString(trimmed)
-		}
-		if strings.HasPrefix(trimmed, "Test Files ") {
-			failedFiles = vitestFilesFailed.MatchString(trimmed)
-		}
-	}
-	return load && noTests && failedFiles
-}
-
-// redGreen sets aside, in clone, the paths aside, runs test alone with tmpl, which must fail, brings the
-// agent's work, tree, back and runs test again, which must pass.
-func redGreen(clone, tree string, aside []string, test, tmpl string, limit time.Duration) (red, green try, err error) {
-	line, err := testLine(clone, tmpl, test)
-	if err != nil {
-		var parseErr goTestParseError
-		if errors.As(err, &parseErr) {
-			return red, green, fmt.Errorf("red did not run: parse/compile error: %s fails before any test runs", test)
-		}
-		return red, green, err
-	}
-	red, green, err = trial(clone, tree, aside, line, line, test, strings.Contains(tmpl, "{tests}"), func(red try) error {
-		if redDidNotRun(red.output) {
-			return fmt.Errorf("red did not run: parse/compile error: %s fails before any test runs", test)
-		}
-		return nil
-	}, limit)
-	switch {
-	case err != nil:
-		return red, green, err
-	case red.err == nil:
-		return red, green, fmt.Errorf("%s passes without the fix", test)
-	}
-	return red, green, wrap(green.err, test+" fails with the fix")
-}
-
-// onBase runs test, after a fix's red and green, twice more with the files the fix adds kept and each old file
-// it changes, of the paths aside, rebuilt from its diff: first the base with every added line in place, before
-// the base lines it replaces, then the added lines alone. A test that passes on both depends on nothing the
-// base had. ponytail: added lines that cannot run alone, as in a compiled language, fail the second and let
-// such a test pass.
-func onBase(clone, tree string, aside []string, test, tmpl string, limit time.Duration) error {
-	line, err := testLine(clone, tmpl, test)
-	if err != nil {
-		return err
-	}
-	both, alone := map[string]string{}, map[string]string{}
-	for _, p := range aside {
-		out, err := git(clone, "--literal-pathspecs", "diff", "--cached", "--no-color", "--no-ext-diff",
-			"--no-textconv", "--diff-filter=M", "-U2147483647", "HEAD", "--", p)
-		if err != nil {
-			return err
-		}
-		_, hunk, ok := strings.Cut(out, "\n@@")
-		if !ok {
-			continue // deleted, binary or only its mode changed
-		}
-		var b, a, cut strings.Builder
-		for _, l := range strings.Split(hunk, "\n")[1:] {
-			switch {
-			case strings.HasPrefix(l, "+"):
-				b.WriteString(l[1:] + "\n")
-				a.WriteString(l[1:] + "\n")
-			case strings.HasPrefix(l, "-"):
-				cut.WriteString(l[1:] + "\n")
-			case strings.HasPrefix(l, " "):
-				b.WriteString(cut.String() + l[1:] + "\n")
-				cut.Reset()
-			}
-		}
-		both[p], alone[p] = b.String()+cut.String(), a.String()
-	}
-	if len(both) == 0 {
-		return nil
-	}
-	for _, files := range []map[string]string{both, alone} {
-		for p, s := range files {
-			if err := os.WriteFile(filepath.Join(clone, p), []byte(s), 0o600); err != nil {
-				return err
-			}
-		}
-		if red, _, err := trial(clone, tree, nil, line, "", "", false, nil, limit); err != nil || red.err != nil {
-			return err
-		}
-	}
-	return fmt.Errorf("%s depends on nothing the base had: it passes on the old files with the fix's added "+
-		"lines put in the base, and with only those lines", test)
-}
-
-// trial runs base with the paths aside as they are at HEAD, brings the agent's work, tree, back and runs
-// after, "" for nothing, and returns how each ended, zero when not run. A hang in either, or a clone that is no
-// longer tree, is err: the verdict is void. After each run, every file git ignores is back as keep left them,
-// changed or deleted ones too, so the green cannot pass on what the red left there.
-func trial(clone, tree string, aside []string, base, after, test string, usesTests bool,
-	checkRed func(try) error, limit time.Duration) (red, green try, err error) {
-	defer func() { err = errors.Join(err, reset(clone)) }()
-	if len(aside) > 0 {
-		args := append([]string{"--literal-pathspecs", "restore", "--source=HEAD", "--staged", "--worktree", "--"},
-			aside...)
-		if _, err := git(clone, args...); err != nil {
-			return red, green, err
-		}
-	}
-	red = attemptWithTimeout(clone, base, limit)
-	classifyTestRun(&red, test, usesTests)
-	if checkRed != nil {
-		if err := checkRed(red); err != nil {
-			return red, green, err
-		}
-	}
-	if err := restoreTrialTree(clone, tree); err != nil {
-		return red, green, err
-	}
-	if errors.Is(red.err, errTimeout) {
-		return red, green, red.err
-	}
-	if after != "" {
-		green = attemptWithTimeout(clone, after, limit)
-		if errors.Is(green.err, errTimeout) {
-			return red, green, green.err
-		}
-		classifyTestRun(&green, test, usesTests)
-	}
-	if _, err := git(clone, "add", "-A"); err != nil {
-		return red, green, err
-	}
-	if now, err := git(clone, "write-tree"); err != nil || now != tree {
-		return red, green, errors.Join(err, errVoid)
-	}
-	return red, green, nil
-}
-
-func classifyTestRun(result *try, test string, usesTests bool) {
-	if usesTests && strings.Contains(result.Tail, "no tests to run") {
-		result.err = fmt.Errorf("the test line ran no test of %s: check its build tags against test_file", test)
-	}
-}
-
-func restoreTrialTree(clone, tree string) error {
-	if _, err := git(clone, "restore", "--source="+tree, "--staged", "--worktree", "--", "."); err != nil {
-		return err
-	}
-	return reset(clone)
-}
-
-// try is how a trial's command line ended: its exit code, -1 when it did not exit, its last 60 lines of output
-// and its span.
-type try struct {
-	Command string `json:"command"`
-	Exit    int    `json:"exit_code"`
-	Tail    string `json:"tail"`
-	span
-	err    error
-	output string
-}
-
-// attempt runs line in clone, as sh does.
-func attempt(clone, line string) try {
-	return attemptWithTimeout(clone, line, timeout)
-}
-
-func attemptWithTimeout(clone, line string, limit time.Duration) try {
-	var tail, output string
-	var err error
-	s := timed(func() { tail, output, err = shOutput(clone, line, limit) })
-	t := try{Command: line, Tail: tail, span: s, err: err, output: output}
-	var exit *exec.ExitError
-	if errors.As(err, &exit) {
-		t.Exit = exit.ExitCode()
-	} else if err != nil {
-		t.Exit = -1
-	}
-	return t
-}
-
 // every runs git in clone on .git/atm-files, a repository of its own that keeps every file of the working tree,
 // the ones git ignores too, which the clone's write-tree never sees. It reads big files, every one above a
 // byte, in chunks: macOS kills git for mapping a binary that ran and whose signature, like slopslint's, is bad.
 func every(clone string, args ...string) (string, error) {
 	return git(clone, append([]string{"-c", "core.bigFileThreshold=1",
 		"--git-dir=.git/atm-files", "--work-tree=."}, args...)...)
-}
-
-// keep is the tree of clone's index, and records every file in clone, ignored or not, for reset. ponytail: a
-// copy of each, node_modules too; links or reflinks if a large one makes it slow.
-func keep(clone string) (string, error) {
-	tree, err := git(clone, "write-tree")
-	if err == nil {
-		_, err = whole(clone)
-	}
-	return tree, err
 }
 
 // whole records every file in clone, ignored or not, as reset knows them, byte for byte: no line ending is
@@ -799,28 +468,11 @@ func store(clone, name string) error {
 	return err
 }
 
-// reset brings clone's working tree back to what keep recorded, byte for byte, new files gone, the ignored ones
-// too. An ignored file a run changed or deleted, a runner's cache say, is put back, not void: the next run cannot
-// see it. A file of the index is the clone's own git's to check, which may rewrite its line endings.
-func reset(clone string) error {
-	_, err := every(clone, "clean", "-fdqx")
-	if err == nil {
-		_, err = every(clone, "checkout", "--", ".")
-	}
-	return err
-}
-
-var errVoid = errors.New("the clone changed during verification: the verdict is void")
-
-type goTestParseError struct{ error }
-
-func (e goTestParseError) Unwrap() error { return e.error }
-
 // testLine is test_file, tmpl, for test, a path in clone. {tests} is ^(TestA|TestB)$, the Go tests test defines.
 func testLine(clone, tmpl, test string) (string, error) {
 	switch {
 	case tmpl == "":
-		return "", errors.New("test_file is empty in .atm.yaml: this task type runs its test alone")
+		return "", errors.New("test_file is empty in .atm.yaml: follow-ups need a test command")
 	case test == "" || !filepath.IsLocal(test):
 		return "", fmt.Errorf("the report's test_file %q is not a path in the clone", test)
 	}
@@ -828,10 +480,6 @@ func testLine(clone, tmpl, test string) (string, error) {
 	if strings.Contains(tmpl, "{tests}") {
 		f, parseErr := parser.ParseFile(token.NewFileSet(), filepath.Join(clone, filepath.FromSlash(test)), nil, 0)
 		if f == nil {
-			var syntaxErrors scanner.ErrorList
-			if errors.As(parseErr, &syntaxErrors) {
-				return "", goTestParseError{parseErr}
-			}
 			return "", parseErr
 		}
 		for _, decl := range f.Decls {

@@ -133,7 +133,7 @@ func noSecondWorker(t *testing.T, err error, root, runDir, call string, out *byt
 		t.Fatalf("want the run passed, got %v", rep)
 	}
 	b, e := os.ReadFile(filepath.Join(filepath.Dir(call), "delivered"))
-	if title, rest, _ := strings.Cut(string(b), "\n"); e != nil || !strings.HasPrefix(title, "feat: ") ||
+	if title, rest, _ := strings.Cut(string(b), "\n"); e != nil || !strings.HasPrefix(title, "chore: ") ||
 		strings.ReplaceAll(rest, "config\n", "") != "init\n.atm.yaml\na.txt\na_test.sh\nfixed\n" {
 		t.Fatalf("want unit 1's work alone delivered, got %v:\n%s", e, b)
 	}

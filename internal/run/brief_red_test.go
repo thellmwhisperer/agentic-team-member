@@ -49,8 +49,12 @@ func TestBriefRedRequiresExecution(t *testing.T) {
 			}
 			_, acceptance, _ := strings.Cut(strings.ReplaceAll(string(b), "\r\n", "\n"), "## ACCEPTANCE\n")
 			acceptance, _, _ = strings.Cut(acceptance, "3. Then every command in VERIFY passes.")
-			if acceptance != steps {
-				t.Errorf("ACCEPTANCE steps:\n%s\nwant:\n%s", acceptance, steps)
+			if want := "1. Implement the issue and cover the changed behaviour with tests.\n" +
+				"2. Preserve existing tests and safeguards.\n"; acceptance != want {
+				t.Errorf("want uniform acceptance %q, got %q", want, acceptance)
+			}
+			if acceptance == steps || strings.Contains(acceptance, redOnBase) {
+				t.Errorf("ACCEPTANCE retains removed steps:\n%s\nold:\n%s", acceptance, steps)
 			}
 		})
 	}

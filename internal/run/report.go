@@ -17,13 +17,12 @@ import (
 )
 
 // verdict is report.json, written at every node's start and end: why the run stopped, then each node's result,
-// the task type, the unit's proof, the proof the slop detector re-ran and each command's result.
+// each unit's result, the checks the slop detector re-ran and each command's result.
 type verdict struct {
 	FailedNode string         `json:"failed_node"`
 	Reason     string         `json:"reason"`
 	Agent      *AgentSettings `json:"agent,omitempty"`
 	Nodes      []*node        `json:"nodes"`
-	Type       string         `json:"type"`
 	Units      []unitResult   `json:"units"`
 	Reproofs   []unitResult   `json:"reproofs"`
 	Commands   []cmdResult    `json:"commands"`
@@ -85,15 +84,12 @@ func timed(fn func()) span {
 	return span{start.UTC().Format("2006-01-02T15:04:05.000Z07:00"), time.Since(start).Milliseconds()}
 }
 
-// unitResult is a unit's proof: the unit, its base commit, test and task type, its trials and how it ended.
+// unitResult records the unit, its base commit, reported test and check result.
 type unitResult struct {
 	Unit       int     `json:"unit"`
 	AgentModel *string `json:"agent_model,omitempty"`
 	Base       string  `json:"base"`
 	TestFile   string  `json:"test_file"`
-	Type       string  `json:"type"`
-	Red        try     `json:"red,omitzero"`
-	Green      try     `json:"green,omitzero"`
 	Result     string  `json:"result"`
 	span
 	// ResumedFrom is the run whose agent's work the unit picked up, instead of a new agent call.

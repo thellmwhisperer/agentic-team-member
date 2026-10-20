@@ -18,8 +18,8 @@ const childTest = "package p\n\nimport (\n\t\"os/exec\"\n\t\"testing\"\n)\n\nfun
 	"\tif out, err := exec.Command(\"go\", \"run\", \"../child\").Output(); string(out) != \"fixed\" {\n" +
 	"\t\tt.Fatalf(\"child printed %q: %v\", out, err)\n\t}\n}\n"
 
-// A real fix run under ATM's own test_file proves on base files that do not build: the child binary of its test
-// is rebuilt each time, so the green go test kept for the fixed sources is never reused.
+// The configured suite builds the child binary from the completed sources. A legacy test_file command
+// is not an extra before/after check; the suite itself must verify the result without cached Go tests.
 func TestOwnProofDoesNotReuseCachedResult(t *testing.T) {
 	bin := builtATM(t)
 	keepGoCache(t)
@@ -33,11 +33,12 @@ func TestOwnProofDoesNotReuseCachedResult(t *testing.T) {
 		t.Fatalf("want ATM's .atm.yaml with a test_file, got %q, %v", own.TestFile, err)
 	}
 	atm := strings.Replace(atmSet(atmYAML, "test_file", own.TestFile), `"**/*_test.sh"`, `"**/*_test.go"`, 1)
+	atm = atmSet(atm, "test", "go test -count=1 ./p")
 	top := gitT(t, repo(t, "https://example.com/owner/repo.git", atm), "rev-parse", "--show-toplevel")
 	stopServing(t, top)
 	value := "package main\n\nfunc value() string { return \"%s\" }\n"
 	commitFiles(t, top, "", map[string]string{"go.mod": "module example.com/m\n\ngo 1.21\n",
-		"child/main.go": "package main\n\nimport \"fmt\"\n\nfunc main() { fmt.Print(value()) }\n",
+		"child/main.go":  "package main\n\nimport \"fmt\"\n\nfunc main() { fmt.Print(value()) }\n",
 		"child/value.go": strings.Replace(value, "%s", "broken", 1)})
 	gitT(t, top, "update-ref", "refs/remotes/origin/main", "main")
 	if err := os.MkdirAll(filepath.Join(top, ".atm"), 0o755); err != nil {

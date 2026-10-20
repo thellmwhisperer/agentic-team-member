@@ -31,19 +31,26 @@ func (c *capturedRun) Write(p []byte) (int, error) {
 	return c.Buffer.Write(p)
 }
 
-// checkProof checks rep's proof of unit n, on base, with test and type typ: red, then green, then passed.
+// checkProof checks a unit's recorded result without the removed task classification or trials.
 func checkProof(t *testing.T, what string, got any, n int, base, test, typ string) {
 	t.Helper()
-	u, _ := got.(obj)
-	red, _ := u["red"].(obj)
-	green, _ := u["green"].(obj)
-	if u["unit"] != float64(n) || u["base"] != base || u["test_file"] != test || u["type"] != typ ||
-		u["result"] != "passed" || !strings.Contains(red["command"].(string), test) || red["exit_code"] != float64(1) ||
-		green["command"] != red["command"] || green["exit_code"] != float64(0) {
-		t.Fatalf("%s %d: want it on %s with %s, %s, red then green and passed, got %v", what, n, base, test, typ, u)
+	u, ok := got.(obj)
+	if !ok {
+		t.Fatalf("%s %d: expected unit object, got %v", what, n, got)
 	}
-	if _, ok := red["tail"].(string); !ok {
-		t.Fatalf("%s %d: want the red trial's output, got %v", what, n, red)
+	if u["unit"] != float64(n) || u["base"] != base || u["test_file"] != test || u["result"] != "passed" {
+		t.Fatalf("%s %d: want it on %s with %s, passed, got %v", what, n, base, test, u)
+	}
+	for _, removed := range []string{"type", "red", "green"} {
+		if _, exists := u[removed]; exists {
+			t.Fatalf("%s %d: removed %s retained for legacy type %s: %v", what, n, removed, typ, u)
+		}
+	}
+	if _, ok := u["duration_ms"].(float64); !ok {
+		t.Fatalf("unit duration missing: %v", u)
+	}
+	if started, ok := u["started_at"].(string); !ok || !startedAtPattern.MatchString(started) {
+		t.Fatalf("unit start missing: %v", u)
 	}
 }
 
@@ -129,9 +136,13 @@ func reportTimeline(t *testing.T, rep obj) []obj {
 	trials := func(key string, n int) {
 		u := rep[key].([]any)[n].(obj)
 		timed = append(timed, u)
-		timed = append(timed, u["red"].(obj), u["green"].(obj))
+		for _, removed := range []string{"red", "green", "type"} {
+			if _, ok := u[removed]; ok {
+				t.Fatalf("%s still contains %s: %v", key, removed, u)
+			}
+		}
 	}
-	var groups [][]obj // the commands of the clone, the unit's checks, the re-run checks and the delivery
+	var groups [][]obj // the commands of the clone, each unit's checks, the re-run checks and the delivery
 	for _, c := range rep["commands"].([]any) {
 		if c := c.(obj); c["name"] == "install" || len(groups) == 0 {
 			groups = append(groups, []obj{c})
@@ -140,16 +151,15 @@ func reportTimeline(t *testing.T, rep obj) []obj {
 		}
 	}
 	if len(groups) != 3 || len(groups[2]) != 4 || groups[2][3]["name"] != "delivery" {
-		t.Fatalf("want the clone's install, the unit's checks, the re-run checks and the delivery, got %v", groups)
+		t.Fatalf("want the clone's install, each unit's checks, the re-run checks and the delivery, got %v", groups)
 	}
 	timed = append(timed, groups[0]...)
-	// Each checks' install runs before its proof, the rest after.
-	timed = append(timed, groups[1][0])
+	// A unit now spans all its checks, starting before install.
 	trials("units", 0)
-	timed = append(timed, groups[1][1:]...)
-	timed = append(timed, groups[2][0])
+	timed = append(timed, groups[1]...)
+	// Ponytail checks recorded test content, then runs configured checks once.
 	trials("reproofs", 0)
-	timed = append(timed, groups[2][1:]...)
+	timed = append(timed, groups[2]...)
 	return timed
 }
 
@@ -180,19 +190,31 @@ func checkTimedSpans(t *testing.T, timed []obj, nodeCount int) {
 
 func checkProofScreenSpans(t *testing.T, rep obj, events []obj) {
 	t.Helper()
-	var proofRows []obj
+	var checkSteps []obj
 	for _, ev := range events {
-		if ev["check"] == "red/green" && ev["state"] == "passed" {
-			proofRows = append(proofRows, ev)
+		if ev["check"] == "red/green" || ev["check"] == "suite on the base" || ev["check"] == "test on the base" {
+			t.Fatalf("removed proof emitted a screen row: %v", ev)
+		}
+		if ev["step"] == "checks" && ev["check"] == nil && ev["state"] == "passed" {
+			checkSteps = append(checkSteps, ev)
 		}
 	}
-	if len(proofRows) != 2 {
-		t.Fatalf("want screen events for the unit's proof and its reproof, got %v", proofRows)
+	units := rep["units"].([]any)
+	if len(checkSteps) != len(units) {
+		t.Fatalf("want one completed Checks step per unit: %v, %v", checkSteps, units)
 	}
-	for i, key := range []string{"units", "reproofs"} {
-		row := rep[key].([]any)[0].(obj)
-		if row["duration_ms"] != proofRows[i]["duration_ms"] {
-			t.Fatalf("%s 1 report span differs from screen row: %v vs %v", key, row, proofRows[i])
+	for n, got := range units {
+		unit := got.(obj)
+		if unit["duration_ms"] != checkSteps[n]["duration_ms"] {
+			t.Fatalf("unit %d span differs from Checks: %v vs %v", n+1, unit, checkSteps[n])
+		}
+		if _, ok := unit["started_at"].(string); !ok {
+			t.Fatalf("missing unit start: %v", unit)
+		}
+	}
+	for _, got := range rep["reproofs"].([]any) {
+		if unit := got.(obj); unit["red"] != nil || unit["green"] != nil || unit["type"] != nil {
+			t.Fatalf("ponytail retained task proof: %v", unit)
 		}
 	}
 }
@@ -283,8 +305,8 @@ func checkOneUnitReport(t *testing.T, rep obj, base string) {
 		t.Fatalf("want the one proof the slop detector re-ran, got %v", rep["reproofs"])
 	}
 	checkProof(t, "re-run proof of unit", reproofs[0], 1, base, "a_test.sh", "fix")
-	if u, r := units[0].(obj), reproofs[0].(obj); u["red"].(obj)["command"] != r["red"].(obj)["command"] {
-		t.Fatalf("want the re-run proof on the unit's own test, got %v, %v", u, r)
+	if u, r := units[0].(obj), reproofs[0].(obj); u["test_file"] != r["test_file"] {
+		t.Fatalf("want the same reported test checked after the cut, got %v, %v", u, r)
 	}
 	var names []string
 	for _, c := range rep["commands"].([]any) {

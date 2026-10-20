@@ -45,7 +45,7 @@ func TestChecksRestoresItsStash(t *testing.T) {
 	c := checksStashConfig(t, root)
 	done := make(chan error, 1)
 	go func() {
-		_, err := checks(dir, runDir, sha, "chore", "", false, c)
+		_, err := checks(dir, runDir, sha, "", false, c)
 		done <- err
 	}()
 	defer func() {
@@ -77,10 +77,10 @@ func TestMissingReportKeepsAvailableProofs(t *testing.T) {
 	for _, tc := range []struct {
 		name, typ, file, content, suite, want string
 	}{
-		{"refactor test restriction", "refactor", "a_test.sh", "echo changed\n", "", "a refactor changed the test"},
-		{"refactor base suite", "refactor", "a.txt", "changed\n", "false", "the suite fails on the base"},
-		{"tests source restriction", "tests", "a.txt", "changed\n", "", "a tests task changed the source"},
-		{"docs restriction", "docs", "a.txt", "changed\n", "", "a docs task changed"},
+		{"refactor test change accepted", "refactor", "a_test.sh", "echo changed\n", "", ""},
+		{"refactor base suite", "refactor", "a.txt", "changed\n", "false", "test:"},
+		{"tests source restriction", "tests", "a.txt", "changed\n", "", ""},
+		{"docs restriction", "docs", "a.txt", "changed\n", "", ""},
 		{"fix without a change", "fix", "", "", "", "no change to prove"},
 		{"tests without a change", "tests", "", "", "", "no change to prove"},
 	} {
@@ -100,8 +100,8 @@ func TestMissingReportKeepsAvailableProofs(t *testing.T) {
 			if tc.suite != "" {
 				c.Test = tc.suite
 			}
-			_, err := checks(dir, checksStashRunDir(t, root), sha, tc.typ, "", true, c)
-			if err == nil || !strings.Contains(err.Error(), tc.want) {
+			_, err := checks(dir, checksStashRunDir(t, root), sha, "", true, c)
+			if tc.want == "" && err != nil || tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)) {
 				t.Fatalf("missing report bypassed %s: %v", tc.name, err)
 			}
 		})
@@ -232,7 +232,7 @@ var proofCases = []struct {
 	{name: "Go fix whose test does not compile without it", typ: "fix", atm: goAtm, files: goBase,
 		work: `printf 'package p\n\nfunc Value() string { return "broken" }\n\nfunc Fixed() string { return "fixed" }\n'` +
 			" > p/p.go; " + goTest("Fixed"),
-		why: "red did not run: parse/compile error"},
+		why: ""},
 	{name: "Go fix whose test fails on an assertion without it", typ: "fix", atm: goAtm, files: goBase,
 		work: `printf 'package p\n\nfunc Value() string { return "fixed" }\n' > p/p.go; ` + goTest("Value")},
 	{name: "Go fix whose assertion mentions a build diagnostic", typ: "fix", atm: goAtm, files: goBase,
@@ -242,23 +242,23 @@ var proofCases = []struct {
 			reportJSON("p/p_test.go")},
 	{name: "Go feature whose red test does not compile", typ: "feature", atm: goAtm, files: goBase,
 		work: `printf 'package p\n\nfunc TestFix(t *testing.T) {\n' > p/p_test.go; ` + reportJSON("p/p_test.go"),
-		why:  "red did not run: parse/compile error"},
+		why:  ""},
 	{name: "Go feature whose red test has no package clause", typ: "feature", atm: goAtm, files: goBase,
-		work: noPackage, why: "red did not run: parse/compile error"},
+		work: noPackage, why: ""},
 	{name: "Go greenfield whose red test has no package clause", typ: "greenfield", atm: goAtm, files: goBase,
-		work: noPackage, why: "red did not run: parse/compile error"},
+		work: noPackage, why: ""},
 	{name: "Go fix whose red test has no package clause", typ: "fix", atm: goAtm, files: goBase,
-		work: noPackage, why: "red did not run: parse/compile error"},
+		work: noPackage, why: ""},
 	{name: "fix whose malformed Python test fails in red and green", typ: "fix",
 		atm: atmSet(atmYAML, "test_file", "sh pytest.sh {file}"), files: map[string]string{"pytest.sh": fakePytest},
 		work: "echo fixed > a.txt; printf 'def test_broken(:\\n    assert True\\n' > test_bad.py; " +
 			reportJSON("test_bad.py"),
-		why: "red did not run: parse/compile error"},
+		why: ""},
 	{name: "Jest suite parse diagnostic rejected at red green boundary", typ: "fix",
 		atm:   atmSet(atmYAML, "test_file", "sh runner.sh {file}"),
 		files: map[string]string{"runner.sh": recordedRunner(jestZeroTestOutput)},
 		work:  "echo fixed > a.txt; echo test > index.test.js; " + reportJSON("index.test.js"),
-		why:   "red did not run: parse/compile error"},
+		why:   ""},
 	{name: "Jest assertion with suite diagnostic title remains a valid red", typ: "feature",
 		atm:   atmSet(atmYAML, "test_file", "sh runner.sh {file}"),
 		files: map[string]string{"runner.sh": recordedRunnerWhenFixed(jestAssertionOutput)},
@@ -267,7 +267,7 @@ var proofCases = []struct {
 		atm:   atmSet(atmYAML, "test_file", "sh runner.sh {file}"),
 		files: map[string]string{"runner.sh": recordedRunner(nodeSyntaxOutput)},
 		work:  "echo fixed > a.txt; echo test > a.test.js; " + reportJSON("a.test.js"),
-		why:   "red did not run: parse/compile error"},
+		why:   ""},
 	{name: "node TAP assertion output with SyntaxError remains a valid red", typ: "feature",
 		atm:   atmSet(atmYAML, "test_file", "sh runner.sh {file}"),
 		files: map[string]string{"runner.sh": recordedRunnerWhenFixed(nodeAssertionOutput)},
@@ -276,12 +276,12 @@ var proofCases = []struct {
 		atm: atmSet(atmYAML, "test_file", "sh runner.sh {file}"), files: map[string]string{"runner.sh": recordedRunner(
 			"src/a.test.ts(3,7): error TS2322: Type 'number' is not assignable to type 'string'.")},
 		work: "echo fixed > a.txt; echo test > a.test.ts; " + reportJSON("a.test.ts"),
-		why:  "red did not run: parse/compile error"},
+		why:  ""},
 	{name: "Vitest load failure with no tests rejected at red green boundary", typ: "feature",
 		atm: atmSet(atmYAML, "test_file", "sh runner.sh {file}"), files: map[string]string{"runner.sh": recordedRunner(
 			vitestLoadOutput)},
 		work: "echo fixed > a.txt; echo test > a.test.js; " + reportJSON("a.test.js"),
-		why:  "red did not run: parse/compile error"},
+		why:  ""},
 	{name: "Vitest assertion output with load wording remains a valid red", typ: "feature",
 		atm:   atmSet(atmYAML, "test_file", "sh runner.sh {file}"),
 		files: map[string]string{"runner.sh": recordedRunnerWhenFixed(vitestAssertionOutput)},
@@ -291,10 +291,10 @@ var proofCases = []struct {
 		files: map[string]string{"runner.sh": recordedRunnerWhenFixed(vitestLoggedNoTestsOutput)},
 		work:  "echo fixed > a.txt; echo test > a.test.js; " + reportJSON("a.test.js")},
 	{name: "fix whose test only calls a function it adds to an old file", typ: "fix", lib: lib,
-		work: "echo '" + helper + "' >> lib.sh" + testThrough("helper"), why: "depends on nothing the base had"},
+		work: "echo '" + helper + "' >> lib.sh" + testThrough("helper"), why: ""},
 	{name: "fix whose test only calls a function it adds next to a changed line", typ: "fix", lib: lib,
 		work: "printf '# lib, v2\\n" + helper + "\\nvalue() { echo broken; }\\n' > lib.sh" + testThrough("helper"),
-		why:  "depends on nothing the base had"},
+		why:  ""},
 	{name: "fix whose test depends on the base", typ: "fix", lib: lib,
 		work: "printf '# lib\\nvalue() { echo fixed; }\\n' > lib.sh" + testThrough("value")},
 	{name: "fix that adds a line inside a function", typ: "fix", lib: "value() {\n  v=broken\n  echo $v\n}\n",
@@ -302,31 +302,31 @@ var proofCases = []struct {
 	{name: "fix", typ: "fix"},
 	{name: "fix that adds a file", typ: "fix",
 		work: `echo fixed > conf.txt; echo conf.txt > a.txt; echo 'grep -q fixed "$(cat a.txt)"' > a_test.sh`},
-	{name: "fix whose test only exercises a new file", typ: "fix", work: newFile, why: "passes without the fix"},
+	{name: "fix whose test only exercises a new file", typ: "fix", work: newFile, why: ""},
 	{name: "fix whose test fails with it", typ: "fix", work: "echo fixed > a.txt; echo false > a_test.sh",
-		why: "fails with the fix"},
-	{name: "fix whose test hangs without it", typ: "fix", why: "timed out", hang: true,
+		why: "test:"},
+	{name: "fix whose test hangs without it", typ: "fix", why: "", hang: true,
 		work: "echo fixed > a.txt; echo 'grep -q fixed a.txt || while :; do :; done' > a_test.sh"},
 	{name: "fix-less test that passes on its second run", typ: "fix", ignore: ".atm/\n",
-		why: "regression_test.sh fails with the fix",
+		why: "",
 		work: "echo 'if test -f .atm/seen; then exit 0; fi; touch .atm/seen; exit 1' > regression_test.sh; " +
 			reportJSON("regression_test.sh")},
 	{name: "fix whose test writes ignored output", typ: "fix", ignore: "build/\n",
 		work: `echo fixed > a.txt; echo 'mkdir -p build; cp a.txt build; test "$(cat build/a.txt)" = fixed' > a_test.sh; ` +
 			reportJSON("a_test.sh")},
 	{name: "fix whose test reads an ignored fixture its agent made", typ: "fix", ignore: "fixture.txt\n",
-		work: fixtureWork, why: "fails with the fix"},
+		work: fixtureWork, why: "test:"},
 	{name: "fix whose test reads a fixture its agent made", typ: "fix", work: fixtureWork},
 	{name: "fix whose test reads an ignored fixture in .atm", typ: "fix", ignore: ".atm/\n",
 		work: `mkdir -p .atm; echo ok > .atm/fixture.txt; echo fixed > a.txt; ` +
 			`echo 'grep -q fixed a.txt && grep -q ok .atm/fixture.txt' > a_test.sh; ` + reportJSON("a_test.sh"),
-		why: "fails with the fix"},
+		why: "test:"},
 	{name: "fix whose test reads an ignored follow-up fixture in .atm", typ: "fix", ignore: ".atm/\n",
 		work: `mkdir -p .atm/follow-ups/1; echo ok > .atm/follow-ups/1/fixture.txt; echo fixed > a.txt; ` +
 			`echo 'grep -q fixed a.txt && grep -q ok .atm/follow-ups/1/fixture.txt' > a_test.sh; ` +
 			`printf '{"test_file":"a_test.sh","follow_ups":[{"title":"gap","red_test":"fixture.txt",` +
 			`"criterion":"A retry runs once after a timeout."}]}' > .atm/fake-report.json`,
-		why: "fails with the fix"},
+		why: "test:"},
 	{name: "fix whose test changes an ignored file", typ: "fix", ignore: "cache.txt\n",
 		work: "echo fixed > a.txt; echo kept > cache.txt; " +
 			"echo 'grep -q fixed a.txt && ! grep -q broken a.txt && echo x >> cache.txt' > a_test.sh; " +
@@ -337,7 +337,7 @@ var proofCases = []struct {
 			"echo 'grep -q fixed a.txt && ! grep -q broken a.txt && rm cache.txt' > a_test.sh; " +
 			reportJSON("a_test.sh")},
 	{name: "fix whose test passes on what its red left in an ignored file", typ: "fix", ignore: "cache.txt\n",
-		why: "a_test.sh fails with the fix",
+		why: "test:",
 		work: "echo fixed > a.txt; echo 0 > cache.txt; " +
 			"echo 'if grep -q 1 cache.txt; then exit 0; fi; echo 1 > cache.txt; exit 1' > a_test.sh; " +
 			reportJSON("a_test.sh")},
@@ -345,21 +345,22 @@ var proofCases = []struct {
 		work: `mkdir .tmp; cp "$ATM_TEST_BINARY" .tmp/bin; .tmp/bin; echo fixed > a.txt; ` +
 			"echo 'touch .tmp/bin; grep -q fixed a.txt && ! grep -q broken a.txt' > a_test.sh"},
 	{name: "fix whose test changes the clone", typ: "fix",
-		work: "echo fixed > a.txt; echo 'grep -q fixed a.txt && echo x >> a.txt' > a_test.sh", why: "void"},
-	{name: "fix without test_file", typ: "fix", atm: atmSet(atmYAML, "test_file", ""), why: "test_file"},
+		work: "echo fixed > a.txt; echo 'grep -q fixed a.txt && echo x >> a.txt' > a_test.sh", why: ""},
+	{name: "fix without test_file", typ: "fix", atm: atmSet(atmYAML, "test_file", ""), why: ""},
 	{name: "feature red on a missing file", typ: "feature", work: newFile},
 	{name: "greenfield red on a missing file", typ: "greenfield", work: newFile},
 	{name: "agent commits", typ: "fix", work: fixWork + "; git add -A; git commit -qm fix", why: "commits"},
 	{name: "refactor", typ: "refactor"},
-	{name: "refactor that touches a test", typ: "refactor", work: "echo true > a_test.sh", why: "a_test.sh"},
+	{name: "refactor that touches a test", typ: "refactor", work: "echo true > a_test.sh", why: ""},
 	{name: "refactor on a red suite", typ: "refactor", atm: atmSet(atmYAML, "test", "test -f b.txt"),
-		why: "fails on the base"},
+		work: "echo b > b.txt",
+		why:  ""},
 	{name: "tests", typ: "tests"},
 	{name: "tests that touch source", typ: "tests", work: "echo b > b.txt; echo 'test -f b.txt' > b_test.sh",
-		why: "b.txt"},
-	{name: "tests failing on the base", typ: "tests", work: "echo false > a_test.sh", why: "fails on the base"},
+		why: ""},
+	{name: "tests failing on the base", typ: "tests", work: "echo false > a_test.sh", why: "test:"},
 	{name: "docs", typ: "docs"},
-	{name: "docs that touch code", typ: "docs", work: "echo doc > README.md; echo fixed > a.txt", why: "a.txt"},
+	{name: "docs that touch code", typ: "docs", work: "echo doc > README.md; echo fixed > a.txt", why: ""},
 	{name: "chore", typ: "chore"},
 	{name: "fix that deletes a test", typ: "fix", atm: atmSet(atmYAML, "test", suite),
 		work: "echo fixed > a.txt; rm a_test.sh" + reportTest("regression_test.sh")},
@@ -494,8 +495,13 @@ func keepGoCache(t *testing.T) {
 func TestRedDidNotRunMatchesRunnerOutput(t *testing.T) {
 	for _, c := range redDidNotRunCases() {
 		t.Run(c.name, func(t *testing.T) {
-			if got := redDidNotRun(c.output); got != c.want {
-				t.Fatalf("redDidNotRun() = %v, want %v", got, c.want)
+			root := repo(t, "local", atmSet(atmYAML, "test", "sh runner.sh"))
+			commitBase(t, root, "runner.sh", recordedRunner(c.output))
+			var out bytes.Buffer
+			err := Run("t", []string{issueFile(t, issue)}, &out, io.Discard)
+			if err == nil || !strings.HasPrefix(err.Error(), "test:") ||
+				!strings.Contains(err.Error(), strings.TrimSpace(c.output)) {
+				t.Fatalf("suite diagnostic must remain an ordinary command failure: %v", err)
 			}
 		})
 	}
@@ -596,9 +602,9 @@ func TestRedClassificationUsesOutputBeyondTheDisplayedTail(t *testing.T) {
 	command.WriteString("printf '%s\\n' ")
 	command.WriteString("'_________________________ ERROR collecting test_bad.py _________________________'; ")
 	command.WriteString("i=0; while [ $i -lt 65 ]; do printf 'line %s\\n' \"$i\"; i=$((i+1)); done")
-	red := attempt(t.TempDir(), command.String())
-	if strings.Contains(red.Tail, "ERROR collecting") || !redDidNotRun(red.output) {
-		t.Fatalf("want only the full output to retain the collection error; tail: %q", red.Tail)
+	tail, output, err := shOutput(t.TempDir(), command.String(), timeout)
+	if err != nil || strings.Contains(tail, "ERROR collecting") || !strings.Contains(output, "ERROR collecting") {
+		t.Fatalf("want only the full output to retain the collection error; tail: %q", tail)
 	}
 }
 
@@ -632,6 +638,7 @@ func TestRunChecksTheProofOfEachTaskType(t *testing.T) {
 			case c.why != "" && (end["state"] != "failed" || end["error"] != err.Error()):
 				t.Fatalf("end event: %v", end)
 			}
+			assertNoTrials(t, end)
 			if left := clones(t, root); len(left) != 0 {
 				t.Fatalf("the run's clone outlived it: %v", left)
 			}
@@ -668,8 +675,8 @@ func TestRunProvesATestsIssueOnlyThroughTheReportedFilesGoTests(t *testing.T) {
 	for _, m := range ran {
 		names = append(names, m[1])
 	}
-	if strings.Join(names, " ") != "TestNew TestNewToo TestAlias TestNew TestNewToo TestAlias" {
-		t.Fatalf("want only new_test.go's tests, on the base and after, got %q", names)
+	if strings.Join(names, " ") != "" {
+		t.Fatalf("want no isolated test_file invocation, got %q", names)
 	}
 }
 
@@ -708,9 +715,8 @@ func TestRunRejectsATestsIssueWhenBuildTagsSelectNoTests(t *testing.T) {
 	t.Setenv("FAKE_AGENT_WORK", `printf %s "$ATM_TEST_TAGGED" > p/new_test.go; `+reportJSON("p/new_test.go"))
 	var out bytes.Buffer
 	err = Run("t", []string{issueFile(t, "# Cover p\nType: tests\nCover p.\n")}, &out, io.Discard)
-	if err == nil || !strings.Contains(err.Error(),
-		"the test line ran no test of p/new_test.go: check its build tags against test_file") {
-		t.Fatalf("want tagged-test warning to fail the proof, got %v", err)
+	if err != nil || checksStep(t, &out)["state"] != "passed" {
+		t.Fatalf("want the configured suite, with no type-specific proof, got %v", err)
 	}
 }
 
@@ -739,13 +745,13 @@ func TestRunChecksRunTheCommandsInOrderAndDieOnTheFirstFailure(t *testing.T) {
 	}
 	// Install runs in the clone step, then again in the checks before the proof: the agent may have changed
 	// dependencies.
-	if b, _ := os.ReadFile(got); !regexp.MustCompile(`^install\ninstall\n(proof\n)+test\ntypecheck\n$`).Match(b) {
+	if b, _ := os.ReadFile(got); !regexp.MustCompile(`^install\ninstall\ntest\ntypecheck\n$`).Match(b) {
 		t.Fatalf("ran %q", b)
 	}
 }
 
 // chainedSource is a worker whose first unit fixes source.txt with two lines too many and declares the follow-up
-// second_test.sh, which once chained a second unit; no follow-up starts one any more.
+// second_test.sh, which the second unit makes pass.
 const chainedSource = `if [ -f second_test.sh ]; then echo second >> source.txt; ` +
 	`printf '{"test_file":"second_test.sh","follow_ups":[]}' > .atm/fake-report.json; ` +
 	`else printf 'fixed\nextra\nmore\n' > source.txt; ` +
@@ -787,12 +793,12 @@ var auditCases = []struct {
 		work:      "echo fixed > a.txt; rm a_test.sh" + reportTest("regression_test.sh"),
 		delivered: unit1 + initial + ".atm/fake-report.json\n" + placed + ".atm.yaml\na.txt\nregression_test.sh\nfixed\n"},
 	{name: "red on a new symbol in an old file", base: map[string]string{"lib.sh": lib},
-		work: "echo '" + helper + "' >> lib.sh" + testThrough("helper"), why: "depends on nothing the base had",
-		node: "checks"},
+		work:      "echo '" + helper + "' >> lib.sh" + testThrough("helper"),
+		delivered: unit1 + based + placed + ".atm.yaml\na.txt\na_test.sh\nlib.sh\nbroken\n"},
 	{name: "red faked with ignored state", base: map[string]string{".gitignore": "state/\n"},
 		work: "echo 'if test -f state/seen; then exit 0; fi; mkdir -p state; touch state/seen; exit 1' > " +
 			"regression_test.sh; " + reportJSON("regression_test.sh"),
-		why: "regression_test.sh fails with the fix", node: "checks"},
+		why: "test:", node: "checks", atm: atmSet(atmYAML, "test", suite)},
 	{name: "kept cut that creates an ignored file", delivered: uncut, base: map[string]string{".gitignore": "cache/\n"},
 		work: "printf 'fixed\\nextra\\nmore\\n' > a.txt" + fixTest, report: cut,
 		ponytail: "echo fixed > a.txt; mkdir cache; echo injected > cache/injected.txt", why: "adds cache/injected.txt"},
@@ -800,12 +806,13 @@ var auditCases = []struct {
 		base: map[string]string{".gitignore": "cache/\n"},
 		work: "printf 'fixed\\nextra\\nmore\\n' > a.txt" + fixTest, report: cut,
 		ponytail: "echo extra >> a.txt; mkdir cache; echo injected > cache/injected.txt", why: "shorten"},
-	{name: "cut that breaks an earlier chained unit", delivered: unit1 + based + ".atm/fake-report.json\n" +
-		".atm/follow-ups/1/second_test.sh\n" + placed + ".atm.yaml\na.txt\na_test.sh\nregression_test.sh\n" +
-		"source.txt\nbroken\nfixed\nextra\nmore\n",
+	{name: "cut that breaks an earlier chained unit", delivered: "chore: Retry on timeout|" + atmID + "\n" +
+		unit1 + based + ".atm/fake-report.json\n" + placed + ".atm.yaml\na.txt\na_test.sh\nregression_test.sh\n" +
+		"second_test.sh\nsource.txt\nbroken\nfixed\nextra\nmore\nsecond\n",
 		base: map[string]string{"source.txt": "broken\n"},
 		work: chainedSource, report: strings.Replace(cut, "a.txt", "source.txt", 1),
-		ponytail: "printf 'broken\\nsecond\\n' > source.txt", why: "regression_test.sh"},
+		ponytail: "printf 'broken\\nsecond\\n' > source.txt", why: "test:",
+		atm: atmSet(atmYAML, "test", suite)},
 	{name: "runs real tools in the clone", work: realToolsWork(), delivered: unit1 + based + placed +
 		".atm.yaml\n.gitignore\n.slop/ceilings.yml\n.slop/config.yml\n.slop/tombstones/README.md\n" +
 		"a.txt\na_test.sh\ngo.mod\ninternal/probe1/probe.go\ninternal/probe2/probe.go\nmain.go\nscripts/lint.sh\n" +
@@ -834,7 +841,7 @@ var auditCases = []struct {
 // placed the skills ATM leaves in the clone, and uncut what delivery gets when a cut on a.txt is rejected.
 const (
 	atmID   = "atm <atm@example.com>|atm <atm@example.com>"
-	unit1   = "fix: Retry on timeout|" + atmID + "\n"
+	unit1   = "chore: Retry on timeout|" + atmID + "\n"
 	initial = "init|" + atmID + "\n"
 	based   = "base|" + atmID + "\n" + initial
 	placed  = ".claude/skills/ponytail-review/SKILL.md\n.claude/skills/ponytail/SKILL.md\n"
@@ -945,5 +952,14 @@ func TestRunGivesTheAuditsAdversarialAgentsNoPass(t *testing.T) {
 	}
 	for _, c := range auditCases {
 		t.Run(c.name, func(t *testing.T) { runAuditCase(t, atm, strings.TrimSpace(string(gocache)), c) })
+	}
+}
+
+func assertNoTrials(t *testing.T, result obj) {
+	t.Helper()
+	for _, removed := range []string{"red", "green", "proof_span"} {
+		if _, exists := result[removed]; exists {
+			t.Fatalf("removed proof still recorded: %v", result)
+		}
 	}
 }

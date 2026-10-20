@@ -33,7 +33,7 @@ func TestRunFollowOutputNamesItsCommand(t *testing.T) {
 		t.Fatalf("atm run --follow: %v; stderr: %s; stdout: %s", err, &stderr, out)
 	}
 	want := map[string]string{
-		"out-install": "install", "out-red/green": "red/green", "out-test": "test",
+		"out-install": "install", "out-test": "test",
 		"out-typecheck": "typecheck", "out-lint": "lint", "out-delivery": "delivery",
 	}
 	seen := map[string]bool{}
@@ -41,6 +41,9 @@ func TestRunFollowOutputNamesItsCommand(t *testing.T) {
 	var deliveryRows []string
 	deliveryOutputs := 0
 	for _, ev := range events(t, bytes.NewReader(out)) {
+		if ev["check"] == "red/green" {
+			t.Fatalf("removed proof emitted: %v", ev)
+		}
 		if row := checkFollowDeliveryRow(t, ev, &evidence); row != "" {
 			deliveryRows = append(deliveryRows, row)
 		}

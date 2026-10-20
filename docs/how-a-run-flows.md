@@ -5,10 +5,7 @@ each step fail. Models write the fix and cut the diff; code enforces the step
 results. What you
 set before a run is in [Configuration](configuration.md).
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/red-green-dark.svg">
-  <img alt="For fix and hotfix tasks, ATM sets aside changes to files already in the base while keeping the test and new files: the test must fail. ATM restores the changes and runs the test again: it must pass. A test that passes without the fix or fails with it asks the launcher to approve, fix or stop." src="assets/red-green-light.svg" width="900">
-</picture>
+
 
 ## Following one run
 
@@ -18,8 +15,7 @@ goes before or after the issue and works on a pipe or a terminal. It also works
 with `--resume`.
 The events are the run's own step starts, results and live activity, with
 `step` and `ts`, plus fields specific to each event. Output from a clone or
-Checks command has `check` naming its row, such as `install`, `red/green`,
-`test`, `typecheck` or `lint`. Delivery output has `check: "delivery"`. Both
+Checks command has `check` naming its row, such as `install`, `test`, `typecheck` or `lint`. Delivery output has `check: "delivery"`. Both
 appear as `output` events without interpreting the command's text.
 
 The command exits with the run's code: 0 for success, 1 for agent or checks
@@ -51,11 +47,11 @@ failure, which waits for the launcher's answer; see [Checks](#checks).
 
 | Step | Does | Failure condition |
 |------|------|--------------------|
-| Issue | Reads the issue file or GitHub issue and its `Type:` | The issue cannot be read, or has no valid type |
+| Issue | Reads the issue file or GitHub issue | The issue cannot be read or has no title or body |
 | Clone | Clones the repository at the commit checked by preflight, or the saved base commit on resume into `.atm/clones/`, runs `install` | The ref, the clone or `install` fails |
 | Contract | Writes `brief.md`, the agent's contract | The brief cannot be written |
 | Agent | Runs the coding agent in the clone on the brief | It fails to complete successfully, times out or writes outside its clone and scratch directory. A missing or invalid report does not fail it: see [Rejected reports](#rejected-reports) |
-| Checks | Prepares the clone, then install, the proof, test, optional e2e, typecheck and lint; see [Checks](#checks) | Cleanup, proof or a command fails, or anything committed |
+| Checks | Prepares the clone, then install, test, optional e2e, typecheck and lint; see [Checks](#checks) | Cleanup or a command fails, or anything committed |
 | Slop detector | Lets a model cut the diff; keeps the cut only if every check still passes | Its agent fails, fails [report validation](#rejected-reports), or anything commits |
 | Delivery | Commits the work on a branch and runs the `delivery` command | The branch or the command fails. Skipped when `delivery` is empty |
 
@@ -75,8 +71,7 @@ contents are copied. If the cache is absent, cloning proceeds without creating
 
 The contract, `brief.md` in the run's
 directory, tells the agent to read `AGENTS.md` if there is one, then gives the
-issue, the acceptance criteria of its task type, and VERIFY: the red test
-through `test_file`, the tests of each changed package, then the configured
+issue and VERIFY: the tests of each changed package, then the configured
 `typecheck` and `lint`. The configured `test` suite runs later in Checks.
 The contract also gives the style, what is forbidden and the JSON report it
 must end with. It limits reading, searching and running to the clone, with
@@ -150,11 +145,8 @@ same session. Otherwise ATM runs the agent again on its last message followed
 by that text. If the second report validates, the step uses it.
 
 If the worker's second report still fails, the Agent step passes and records
-`"report": "missing"`. The unit goes to Checks with no test file: `fix`,
-`hotfix`, `feature`, `greenfield` and `tests` skip their proof, but the unit
-must have changed something, and a `tests` unit may change only test and doc
-files. The other types prove as usual. The slop detector fails with the second
-error instead.
+`"report": "missing"`. The unit goes to Checks with no test file. It must
+have changed something. All configured commands still run. The slop detector fails with the second error instead.
 
 The agent's `.jsonl` log records a `report_rejected` event with the exact
 error in `error`. Both
@@ -185,7 +177,7 @@ again or follows the continuation after an answer.
 
 The agent must not have committed. ATM records the clone's paths before the
 agent starts, including contents of ignored nested repositories. Before
-`install` or proof, Checks removes newly made ignored files and directories,
+`install`, Checks removes newly made ignored files and directories,
 including read-only cache trees and new contents within retained directories.
 It then restores changed or deleted pre-existing ignored files from the
 pre-agent snapshot, byte for byte, so package-manager state cannot claim
@@ -196,13 +188,13 @@ A repository nested inside one of those repositories is still recorded only
 as a Git reference, so its file contents are not restored. Existing directory
 modes remain; symlinks are removed as links, without changing their targets.
 A cleanup or restoration error stops Checks before
-`install` or proof. Delivery leaves the removed paths out, so a test that
+`install`. Delivery leaves the removed paths out, so a test that
 needs one fails. ATM moves `.atm/` out of the clone while Checks runs,
-including `install`, the proof and the other commands, then restores it even
+including `install` and the other commands, then restores it even
 if a check fails. This keeps `.atm/` artefacts out of every check command. Checks
-then run `install` again (the agent may have changed dependencies), prove the
-task type, and run `test`, `e2e`, `typecheck` and `lint`, empty ones skipped. In
-this repository `e2e` runs `scripts/cover-diff.sh` on the counters `test`
+then run `install` again (the agent may have changed dependencies), and run
+`test`, `e2e`, `typecheck` and `lint`, empty ones skipped. In this repository
+`e2e` runs `scripts/cover-diff.sh` on the counters `test`
 wrote in ATM's fresh `GOCOVERDIR`. Which lines fail,
 and the ways out, are under [`e2e`](configuration.md#atmyaml). The first
 failed command asks the launcher with its last 60 lines as the finding. A
@@ -216,34 +208,16 @@ sessions that cannot resume go straight to Checks with
 `resume: no agent turn (<reason>)`; see
 [Resuming a failed run](configuration.md#resuming-a-failed-run).
 
-### What each task type proves
+ATM does not classify tasks. A missing, legacy or unknown `Type:` line has
+no effect on Checks. The reported `test_file` must stay inside the clone.
+Checks run the configured suite on the completed work, followed by `e2e`,
+`typecheck` and `lint` when configured.
 
-| Type | Proof |
-|------|-------|
-| `fix`, `hotfix` | Red/green on the files the base already has: the files the fix added stay, so the test must fail on behaviour. Then twice more, on the base with only the fix's added lines in place: a test that passes there depends on nothing the base had and is rejected |
-| `feature`, `greenfield` | Red/green with everything set aside; the red may fail on a missing symbol at runtime, but not on a parse or compile error of the test file itself |
-| `refactor` | `test` passes on the base, and no test file changed |
-| `tests` | The new test passes on the base and after; only test and doc files changed |
-| `docs` | Only files matching `docs_patterns` changed |
-| `chore` | Nothing beyond the commands |
-
-For `fix`, `feature` and `greenfield`, ATM classifies the red at the shared red/green boundary, on its whole output, before it judges the green. Recognized runner diagnostics fail with "red did not run: parse/compile error", never with "fails with the fix". For Go test files parsed before execution, a parser error gets the same classification. A red that fails on a missing symbol at runtime or on an assertion is a valid red. ATM uses each runner's output structure to distinguish diagnostics from test failures. It recognizes Go's `FAIL <package> [build failed]` or `[setup failed]` line, which a test file without a valid package clause also gets; pytest's `ERROR collecting` header and `E   SyntaxError` / `E   ImportError` lines; Jest's `● Test suite failed to run` under a `FAIL <file>` header when its `Tests` summary reports zero tests; Vitest's `Error: Failed to load url` diagnostic when its final summary reports a failed test file and no tests; node --test's `SyntaxError:` report without an assertion failure record, or its plain spec reporter error; and tsc's `<file>(<line>,<column>): error TS<n>` or `<file>:<line>:<column> - error TS<n>` diagnostic. A Jest or Vitest final summary with failed tests or a TAP test failure marked `ERR_ASSERTION` shows that an assertion ran, even if its text contains one of those markers. So a Go assertion whose own text holds `[build failed]` remains a valid red.
-
-Red/green runs the report's `test_file` alone through `test_file` in
-`.atm.yaml`, once with the fix set aside and once with it back. After each
-trial ATM restores ignored files to their state before the first, including
-files the trial changed or deleted, so the green cannot pass on the red's
-changes. A changed tracked file voids the verdict, and a test that hangs fails
-it. Known limit of the `fix` proof: where added lines cannot run alone, as in
-a compiled language that needs the base's declarations, that trial fails and
-the test passes it.
 
 ## Unit commit
 
-A unit commit is a conventional commit, so release-please sees it: its
-subject is `<type>: <title>`, its body `atm unit 1`. The type comes from the
-issue's `Type:`: `fix` and `hotfix` give `fix`, `feature` and `greenfield`
-`feat`, `refactor` `refactor`, `tests` `test`, `docs` `docs`, `chore` `chore`.
+A unit commit uses `chore: <title>` and the body `atm unit 1` for every
+issue. ATM does not infer a release type from issue metadata.
 
 ## Slop detector
 
@@ -262,14 +236,14 @@ There is no splitting within a file. If no file survives, the whole cut is
 discarded as before.
 
 The remaining cut must report a finding and lower the run's net added lines.
-ATM then checks for new files, including ignored files, and repeats the
-unit's proof and checks on the remaining cut as a whole, preserving its proven
-test. When those fail, ATM puts back every cut
+ATM then checks for new files, including ignored files, preserves the reported
+test, and runs the configured checks on the completed cut. When those fail,
+ATM puts back every cut
 file whose full repo path the failure names, as compiler and test output name a file,
-and proves again, while the failure names one. A failure that names none, with at least two files left:
+and checks again, while the failure names one. A failure that names none, with at least two files left:
 ATM puts back each remaining file alone, once, and keeps the first remainder
 that passes. The kept remainder must still report a finding and lower the net
-added lines. At most twice the cut files, plus one, re-proofs. If any of these
+added lines. At most twice the cut files, plus one, repeated checks. If any of these
 requirements fails, ATM restores the whole clone byte for byte and discards
 the entire cut.
 
@@ -314,7 +288,7 @@ ATM runs on Linux and macOS, and on Windows through WSL.
 | What | Limit |
 |------|-------|
 | Reading a GitHub issue | 60 s |
-| Each checks command (`install`, `test`, `e2e`, `typecheck`, `lint`, a proof) | See [`check_timeout`](configuration.md#atmyaml) |
+| Each checks command (`install`, `test`, `e2e`, `typecheck`, `lint`) | See [`check_timeout`](configuration.md#atmyaml) |
 | Each agent call, the slop detector's included | See [`agent_timeout`](configuration.md) |
 | The delivery command | none |
 
@@ -334,9 +308,8 @@ it is on disk before delivery reads it.
 | `failed_node`, `reason` | The step that failed, if any, and the reason for failure |
 | `agent` | The effective requested `harness`, `model`, `effort` and ordered `harness_args`, after global config, `.atm.yaml` and flags. Unset model and effort stay `""`; no extra arguments is `[]` |
 | `nodes` | Each step's `result` (`passed`, `failed`, `running`, `skipped` or `not run`), `started_at` (UTC, RFC 3339 with milliseconds) when its start is known, and `duration_ms` when it ends; the agent node also has `exit` and `tail` when the agent ran but its step failed, and `"report": "missing"` when the worker's report never came ([Rejected reports](#rejected-reports)). Checks includes an `e2e` row in `rows` when that command ran, passed or failed, with `name`, `result`, `started_at` and `duration_ms`. Delivery has `rows`, each with `name`, `result` (`running`, `passed` or `failed`), `started_at` and `duration_ms`, for each part that has started. |
-| `type` | The task type |
-| `units` | The unit's number (`1`), base commit, test file, type, result, red/green proof row span, and red and green trials: command, exit code, last 60 lines, `started_at` and `duration_ms` |
-| `reproofs` | The latest repeated proof and span, after a kept cut |
+| `units` | The unit's number (`1`), base commit, reported test file, result, `started_at` and `duration_ms` |
+| `reproofs` | The latest reported-test integrity check and configured checks, with their spans, after a cut |
 | `commands` | Every configured command that ran, the clone's `install` included, with its result, last 60 lines, `started_at` and `duration_ms` |
 | `decisions` | Each post-agent Checks finding and the launcher's `approve`, `fix` or `stop` answer; the answer is empty while the question is pending |
 | `head_sha` | The delivered branch's final commit |
@@ -365,7 +338,7 @@ Runs recorded before this field existed display `-` in these listings.
 
 The `ponytail` node also records `kept` (`true` or `false`) once ATM decides
 whether to keep the cut, and `reason`: the exact rejection reason from the
-cut policy, new-file check or repeated proofs and checks, or `""` when kept.
+cut policy, new-file check or repeated checks, or `""` when kept.
 `net_lines` is `[before, after]`, the run's net added lines before and after
 the judged cut, measured against the run's base. When some files survive and
 others are restored, `after` measures the remaining cut. `findings` preserves
@@ -377,7 +350,7 @@ whose values are not yet available are omitted.
 `rejected_files` lists each file ATM put back, once, with its `path` and the
 exact rejection `reason`. It is `[]` when nothing was put back, including a
 cut kept in full. A partly kept cut still has `kept: true` and `reason: ""`;
-its rejected files carry their individual policy, proof, or check reasons that
+its rejected files carry their individual policy or check reasons that
 put them back. If the remaining
 cut also fails, files already rejected retain their reasons, and the other
 files put back carry the whole-cut rejection reason. See

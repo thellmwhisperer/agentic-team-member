@@ -52,9 +52,9 @@ func watch(t *testing.T, harness, stream, yml string) *watched {
 	return &w
 }
 
-// checkRows are the rows a fix's checks tell the screen, in order: install first.
-var checkRows = [][2]any{{"install", "started"}, {"install", "passed"}, {"red/green", "started"},
-	{"red/green", "passed"}, {"test", "started"}, {"test", "passed"}}
+// checkRows are the configured commands the checks tell the screen, with no task proof.
+var checkRows = [][2]any{{"install", "started"}, {"install", "passed"},
+	{"test", "started"}, {"test", "passed"}}
 
 // The screen's rows and boxes come from what the run tells a screen that watches it: each tool call of the
 // agent with its outcome, what it says and its thinking, each proof and command of the checks, and their output.

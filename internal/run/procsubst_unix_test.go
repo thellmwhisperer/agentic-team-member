@@ -64,9 +64,9 @@ func TestRealRunsCheckShellCommandsAtOnce(t *testing.T) {
 	wait()
 	release()
 	fix.exit(0)
-	docs.exit(1)
+	docs.exit(0)
 	runs, err := RecordedRuns(top)
-	if err != nil || len(runs) != 2 || runs[0].Outcome == runs[1].Outcome {
+	if err != nil || len(runs) != 2 || runs[0].Outcome != "passed" || runs[1].Outcome != "passed" {
 		t.Fatalf("concurrent shell commands outcomes: %+v, %v", runs, err)
 	}
 	c, err := net.Dial("unix", short(socket(top)))

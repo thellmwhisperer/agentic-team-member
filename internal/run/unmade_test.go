@@ -57,7 +57,7 @@ func TestUnmadeKeepsWhatWasAndRemovesWhatIsNew(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			dir, err := unmadeChecks(t, c.old, c.work, c.kept, c.proof)
 			if c.proof {
-				if err == nil || !strings.Contains(err.Error(), "fails with the fix") {
+				if err == nil || !strings.Contains(err.Error(), "test:") {
 					t.Fatalf("proof using removed helper must fail after running: %v", err)
 				}
 			} else if err != nil {
@@ -114,10 +114,10 @@ func unmadeChecks(t *testing.T, old, work, kept string, proof bool) (dir string,
 	c.Install = "set -x; is() { printf '%s\\n' \"$2\" | cmp - \"$1\"; }; " +
 		`ro() { test -n "$(find "$1" -prune -perm 555)"; }; ` +
 		kept + " && touch installed"
-	typ, test := "chore", ""
+	test := ""
 	if proof {
-		typ, test = "fix", "a_test.sh"
+		test = "a_test.sh"
 	}
-	_, err = checks(dir, runDir, sha, typ, test, false, c)
+	_, err = checks(dir, runDir, sha, test, false, c)
 	return dir, err
 }

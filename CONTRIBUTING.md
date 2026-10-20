@@ -15,9 +15,9 @@ it:
   named. Strip paths and hostnames you do not want published.
 - **Issue contract**: follow [the issue requirements](docs/configuration.md#the-issue).
   Number the acceptance criteria.
-- **Red test**: the test that fails today, or a sentence describing it.
+- **Acceptance test**: the end-to-end test that demonstrates the requested behaviour.
 
-An issue without a red test gets one before any code is written.
+An issue names the existing acceptance test to extend, or the new one to write.
 
 ## Development setup
 
@@ -50,8 +50,8 @@ when the pipeline cannot do the job yet; say so in the PR body.
 Either way:
 
 1. Branch off `main`. One change per PR.
-2. Write the failing test first, then the fix. Red/green is what ATM checks
-   in every target and what reviewers check here.
+2. Cover the changed behaviour with an end-to-end test of the real binary.
+   ATM runs the configured suite on the completed work.
 3. Do not weaken, skip or delete a test to make a change pass. If a test is
    wrong, say so in the PR and change it in the open.
 4. Keep the diff as small as the change allows. No scaffolding for later, no

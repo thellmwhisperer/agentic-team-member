@@ -179,7 +179,7 @@ func TestResumeKeepsAFailedUnitsFollowUpsUntilItsReportReplacesThem(t *testing.T
 		t.Fatalf("want the report unit 1 wrote resumed, got %v", saved)
 	}
 	b, err := os.ReadFile(delivered)
-	if err != nil || string(b) != "fix: Retry on timeout\ninit\n.atm.yaml\na.txt\na_test.sh\nfixed\n" {
+	if err != nil || string(b) != "chore: Retry on timeout\ninit\n.atm.yaml\na.txt\na_test.sh\nfixed\n" {
 		t.Fatalf("want unit 1's kept work alone delivered, got %v:\n%s", err, b)
 	}
 }

@@ -227,7 +227,7 @@ func TestRunChainsAFollowUpOnTheIssueUpToThreeUnits(t *testing.T) {
 	if p := ends(t, bytes.NewBuffer(out.Bytes()), "ponytail"); len(p) != 1 || p[0]["kept"] != true {
 		t.Fatalf("want the cut kept on the one unit, got %v", p)
 	}
-	if b, err := os.ReadFile(got); err != nil || string(b) != "ponytail: 1 cuts\nfix: Retry on timeout\ninit\n" {
+	if b, err := os.ReadFile(got); err != nil || string(b) != "ponytail: 1 cuts\nchore: Retry on timeout\ninit\n" {
 		t.Fatalf("want only the issue's unit, then the cut, delivered, got %v\n%s", err, b)
 	}
 	if _, err := os.Stat(filepath.Join(root, ".atm", "runs", "t", "brief-unit-2.md")); !os.IsNotExist(err) {
@@ -251,7 +251,7 @@ func TestRunLabelsDeliveredChainedUnitAndChecks(t *testing.T) {
 		t.Fatal(err)
 	}
 	dev := "atm <atm@example.com>|atm <atm@example.com>"
-	want := "fix: Retry on timeout|" + dev + "\ninit|" + dev
+	want := "chore: Retry on timeout|" + dev + "\ninit|" + dev
 	if b, err := os.ReadFile(filepath.Join(got, "log")); err != nil || string(b) != want+"\n" {
 		t.Fatalf("want the issue's unit type alone in commit history, got %q, %v", b, err)
 	}
@@ -282,7 +282,7 @@ func TestRunDiesWhenAUnitEditsItsRedTest(t *testing.T) {
 }
 
 func TestRunDiscardsACutThatUndoesAnEarlierUnit(t *testing.T) {
-	root := repo(t, "https://example.com/owner/repo.git", atmSet(atmSet(atmYAML, "test", ""), "delivery",
+	root := repo(t, "https://example.com/owner/repo.git", atmSet(atmSet(atmYAML, "test", suite), "delivery",
 		"sh regression_test.sh && test ! -e second_test.sh"))
 	if err := os.WriteFile(filepath.Join(root, "source.txt"), []byte("broken\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -303,7 +303,7 @@ func TestRunDiscardsACutThatUndoesAnEarlierUnit(t *testing.T) {
 		t.Fatalf("want the cut discarded, the issue's test passing and no follow-up's test at delivery, got %v", err)
 	}
 	if p := ends(t, &out, "ponytail"); len(p) != 1 || p[0]["kept"] != false ||
-		!strings.Contains(fmt.Sprint(p[0]["reason"]), "regression_test.sh") {
-		t.Fatalf("want the cut discarded by unit 1's proof, got %v", p)
+		!strings.Contains(fmt.Sprint(p[0]["reason"]), "test:") {
+		t.Fatalf("want the cut discarded by the configured suite, got %v", p)
 	}
 }
