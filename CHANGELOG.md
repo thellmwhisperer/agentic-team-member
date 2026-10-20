@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.4](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.3.3...v1.3.4) (2026-10-20)
+
+
+### Bug Fixes
+
+* **ci:** authenticate published release verification ([#557](https://github.com/thellmwhisperer/agentic-team-member/issues/557)) ([01575d2](https://github.com/thellmwhisperer/agentic-team-member/commit/01575d2511d4b7432b9d5337ef82e95668e816f0))
+
 ## [1.3.3](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.3.2...v1.3.3) (2026-10-20)
 
 
