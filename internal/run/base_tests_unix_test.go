@@ -158,3 +158,41 @@ func TestRunPonytailAllowsDeletedOrShorterTests(t *testing.T) {
 		}
 	}
 }
+
+func TestRunPonytailBacktracksADeletedTest(t *testing.T) {
+	builtATM(t)
+	delivered, trace := filepath.Join(t.TempDir(), "delivered"), filepath.Join(t.TempDir(), "checks")
+	t.Setenv("ATM_TEST_OUT", delivered)
+	t.Setenv("ATM_TEST_TRACE", trace)
+	t.Setenv("FAKE_AGENT_WORK", fixWork+"; echo true > a_redundant_test.sh; printf 'good\\nextra\\n' > z.txt")
+	t.Setenv("FAKE_PONYTAIL_WORK", "rm a_redundant_test.sh; echo broken > z.txt")
+	t.Setenv("FAKE_PONYTAIL_REPORT", dependentCuts("a_redundant_test.sh", "z.txt"))
+	check := `{ if test -e a_redundant_test.sh; then printf "present "; else printf "absent "; fi; ` +
+		`head -n 1 z.txt; } >> "$ATM_TEST_TRACE"; ` +
+		`! grep -q broken z.txt || { echo "a line is broken"; exit 1; }`
+	cfg := atmSet(atmSet(atmSet(atmYAML, "test", suite), "lint", check), "delivery",
+		`test ! -e a_redundant_test.sh && `+
+			`{ cat z.txt; git show HEAD:z.txt; git log -1 --format=%s; `+
+			`git diff --name-status HEAD~1 HEAD -- a_redundant_test.sh z.txt; } > "$ATM_TEST_OUT"`)
+	top := gitT(t, repo(t, "https://example.com/owner/repo.git", cfg), "rev-parse", "--show-toplevel")
+	bin := followUpsServer(t, top)
+	followedRun(t, bin, top, 0, issueFile(t, issue))
+	rep := readReport(t, filepath.Join(runDir(top, lastRun(t, top, "passed")), "report.json"))
+	n := reportNode(t, rep, "ponytail")
+	if n["kept"] != true || reportNode(t, rep, "delivery")["result"] != "passed" {
+		t.Fatalf("want the valid deletion kept and delivered, got %v", rep)
+	}
+	files := n["rejected_files"].([]any)
+	if len(files) != 1 || files[0].(obj)["path"] != "z.txt" ||
+		!strings.Contains(files[0].(obj)["reason"].(string), "a line is broken") {
+		t.Fatalf("want only the breaking cut rejected for the unnamed failure, got %v", files)
+	}
+	if b, err := os.ReadFile(delivered); err != nil ||
+		string(b) != "good\nextra\ngood\nextra\nponytail: 1 cuts\nD\ta_redundant_test.sh\n" {
+		t.Fatalf("want the deletion committed with z.txt restored in disk and commit, got %q, %v", b, err)
+	}
+	if b, err := os.ReadFile(trace); err != nil ||
+		string(b) != "present good\nabsent broken\npresent broken\nabsent good\n" {
+		t.Fatalf("want the deleted test restored, then deleted again before restoring the breaking cut, got %q, %v", b, err)
+	}
+}
