@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.0](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.3.4...v1.4.0) (2026-10-20)
+
+
+### Features
+
+* Remove the ATM follow-up mechanism ([7aaf300](https://github.com/thellmwhisperer/agentic-team-member/commit/7aaf3008bea7667d3171e2f0b95efe3385cea653))
+
 ## [1.3.4](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.3.3...v1.3.4) (2026-10-20)
 
 
