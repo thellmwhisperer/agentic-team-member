@@ -97,6 +97,8 @@ func fakeGH(args []string) int {
 		fmt.Print(os.Getenv("FAKE_GH_COMMENTS"))
 	case fields == "body":
 		fmt.Println(os.Getenv("FAKE_GH_BODY"))
+	case fields == "headRefName,files":
+		fmt.Print(os.Getenv("FAKE_GH_FILES"))
 	case strings.Contains(fields, "labels"):
 		fmt.Print(os.Getenv("FAKE_GH_LABELS"))
 	}
@@ -116,10 +118,10 @@ func cleared(head string) comment {
 
 // pr is a pull request as GitHub reports it: head is what pr view reads, live the head when pr merge runs.
 type pr struct {
-	head, live, body string
-	labels, subjects []string
-	comments         []comment
-	autoMerge, fail  bool
+	head, live, body, branch string
+	labels, subjects, files  []string
+	comments                 []comment
+	autoMerge, fail          bool
 }
 
 // view is the gh --jq projection of the PR's auto-merge state and labels that arm-auto-merge.sh asks for.
@@ -127,6 +129,15 @@ func (p pr) view() string {
 	lines := []string{fmt.Sprint("armed ", p.autoMerge)}
 	for _, l := range p.labels {
 		lines = append(lines, "label "+l)
+	}
+	return strings.Join(lines, "\n") + "\n"
+}
+
+// changes is the gh --jq projection of the PR's branch and changed files that arm-auto-merge.sh asks for.
+func (p pr) changes() string {
+	lines := []string{"branch " + cmp.Or(p.branch, "feat/unit")}
+	for _, f := range p.files {
+		lines = append(lines, "file "+f)
 	}
 	return strings.Join(lines, "\n") + "\n"
 }
@@ -165,6 +176,7 @@ func (p pr) run(t *testing.T, command string) result {
 	t.Setenv("FAKE_GH_HEAD", cmp.Or(p.live, p.head))
 	t.Setenv("FAKE_GH_BODY", cmp.Or(p.body, lowRisk))
 	t.Setenv("FAKE_GH_LABELS", p.view())
+	t.Setenv("FAKE_GH_FILES", p.changes())
 	t.Setenv("FAKE_GH_FAIL", map[bool]string{true: "1"}[p.fail])
 	cmd := exec.Command("sh", "-c", command)
 	cmd.Dir = ".."
@@ -283,6 +295,21 @@ func TestArmKeepsHighRiskClearance(t *testing.T) {
 	reviewed.labels = append(reviewed.labels, "risk-reviewed")
 	if r := reviewed.run(t, arm+" labeled"); r.err != nil || !strings.Contains(r.calls, armed) {
 		t.Fatalf("high risk with risk-reviewed: calls = %q, %v; want armed", r.calls, r.err)
+	}
+}
+
+func TestArmArmsAReleasePleasePR(t *testing.T) {
+	release := pr{head: newHead, subjects: []string{"chore(main): release 1.1.3"},
+		body: ":robot: I have created a release", branch: "release-please--branches--main",
+		files: []string{"CHANGELOG.md", ".release-please-manifest.json"}}
+	r := release.run(t, arm+" opened")
+	if r.err != nil || !strings.Contains(r.calls, armed) || strings.Contains(r.calls, "pr edit") {
+		t.Fatalf("release PR: calls = %q, out = %q, %v; want %q and no label", r.calls, r.out, r.err, armed)
+	}
+	release.files = append(release.files, "go.mod")
+	r = release.run(t, arm+" opened")
+	if r.err != nil || strings.Contains(r.calls, "pr merge") || !strings.Contains(r.out, "risk high") {
+		t.Fatalf("release branch changing go.mod: out = %q, calls = %q, %v; want risk-reviewed", r.out, r.calls, r.err)
 	}
 }
 

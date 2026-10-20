@@ -2,8 +2,9 @@
 # Arms GitHub auto-merge by rebase on PR $1 ($2 is the pull_request event action): GitHub merges
 # it once main's required checks pass. Low and Medium risk arm at once. High risk, or a body
 # without a readable level under `## Risk Assessment`, waits for the `risk-reviewed` label (see
-# CONTRIBUTING.md). No-mistakes commits label it review-required and wait for review-completed,
-# which any push removes; pr-discarded never arms (skills/no-mistakes-review/SKILL.md).
+# CONTRIBUTING.md); a release-please PR that only changes CHANGELOG.md and the manifest is Low.
+# No-mistakes commits label it review-required and wait for review-completed, which any push
+# removes; pr-discarded never arms (skills/no-mistakes-review/SKILL.md).
 set -eu
 # The workflow token's merges start no workflow and close no issue, so never fall back to it.
 if [ -z "${GH_TOKEN:-}" ]; then
@@ -52,6 +53,12 @@ level=$(printf '%s\n' "$body" | awk '
   !found && /^## Risk Assessment[[:space:]]*$/ { found = 1; next }
   found && /^#+[[:space:]]/ { exit }
   found && NF { if (match($0, /[A-Za-z]+/)) print substr($0, RSTART, RLENGTH); exit }')
+changes=$(gh pr view "$1" --repo "$repo" --json headRefName,files \
+  --jq '"branch \(.headRefName)", "file \(.files[].path)"')
+if ! printf '%s\n' "$changes" |
+  grep -qvxE 'branch release-please--branches--main|file (CHANGELOG\.md|\.release-please-manifest\.json)'; then
+  level=Low
+fi
 case "$level" in
   Low|Medium) ;;
   *)
