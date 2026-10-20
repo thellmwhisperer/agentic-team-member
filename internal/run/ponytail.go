@@ -195,7 +195,7 @@ func alone(runDir, clone, base, all, cut string, left []string, proofs []proof, 
 
 // checkout puts each of paths back in clone byte for byte from tree, whole's.
 func checkout(clone, tree string, paths []string) error {
-	_, err := every(clone, append([]string{"--literal-pathspecs", "checkout", tree, "--"}, paths...)...)
+	_, err := every(clone, append([]string{"--literal-pathspecs", "checkout", "--no-overlay", tree, "--"}, paths...)...)
 	return err
 }
 
