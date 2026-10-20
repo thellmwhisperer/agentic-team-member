@@ -68,7 +68,7 @@ func TestRunE2EResume(t *testing.T) {
 				t.Helper()
 				cmd := exec.Command(bin, append([]string{"run", "--harness", tc.harness}, args...)...)
 				cmd.Dir = top
-				out, err := cmd.CombinedOutput()
+				out, err := stdout(cmd)
 				if err != nil {
 					t.Fatalf("launch: %s, %v", out, err)
 				}

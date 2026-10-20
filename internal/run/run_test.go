@@ -153,6 +153,9 @@ func repo(t *testing.T, origin, atm string) string {
 		if err := os.WriteFile(filepath.Join(dir, ".atm.yaml"), []byte(atm), 0o600); err != nil {
 			t.Fatal(err)
 		}
+		// The run reads it from the base ref: it goes in the one commit.
+		gitT(t, dir, "add", ".atm.yaml")
+		gitT(t, dir, "commit", "-q", "--amend", "--no-edit")
 	}
 	t.Chdir(dir)
 	return dir

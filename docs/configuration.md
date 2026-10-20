@@ -36,7 +36,7 @@ a `.atm.yaml` key there still fails.
 |-------|-------|------|
 | Built-in defaults | the binary | `harness: claude` |
 | Your machine | `~/.config/atm/config.yaml` | `harness`, `model`, `effort` |
-| The repository | `.atm.yaml` at its root | keys in [`.atm.yaml`](#atmyaml) below |
+| The repository | `.atm.yaml` at its root, as the base ref has it committed | keys in [`.atm.yaml`](#atmyaml) below |
 | One run | `atm run` flags | [`--follow`](how-a-run-flows.md#following-one-run), `--base-ref`, `--harness`, `--model`, `--effort`, `--harness-arg`, `--env`, `--resume` |
 
 ## `~/.config/atm/config.yaml`
@@ -275,8 +275,8 @@ budget and the dependency evidence kept when a mandatory gap blocks the run.
 
 `atm run --resume <label>` starts a new run of the same issue under its own
 label. It uses the saved original issue for briefs and scope review; it never
-re-reads the live issue. It reads `.atm.yaml` again,
-so a fixed config counts, clones the saved base commit and puts the work back.
+re-reads the live issue. It reads `.atm.yaml` again from the base ref,
+so a fixed config committed there counts, clones the saved base commit and puts the work back.
 Its Agent row reads `resumed from <label>`, also as `resumed_from` on its unit
 in `report.json`. If the failed row was `e2e` and the saved harness can resume
 the saved session, ATM gives that agent exactly one turn in the restored

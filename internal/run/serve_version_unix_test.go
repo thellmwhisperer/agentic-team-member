@@ -157,5 +157,5 @@ func versionLaunch(bin, top, path string) ([]byte, error) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, bin, "run", path)
 	cmd.Dir = top
-	return cmd.CombinedOutput()
+	return stdout(cmd)
 }

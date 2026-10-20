@@ -645,15 +645,20 @@ func (s *server) save() {
 	}
 }
 
-// Start checks args, atm run's command line, and has the background process of the repository at root run it.
-// It returns the run, just started. A run that resumes another takes that one's issue.
+// Start checks args, atm run's command line, and what the run stands on, its preflight, and has the background
+// process of the repository at root run it. It returns the run, just started. A run that resumes another takes
+// that one's issue and base ref, and its agent's harness arguments are checked too.
 func Start(root string, args []string) (Outcome, error) {
-	args, _, resume, _, err := parseArgs(args)
+	args, base, resume, a, err := parseArgs(args)
+	var p resumePoint
 	if err == nil && *resume != "" {
-		var p resumePoint
 		if p, err = resumeFrom(root, *resume); err == nil {
 			args, _, _, _, err = parseArgs(append(args, p.Issue)) // and no other
+			*base = p.BaseRef
 		}
+	}
+	if err == nil {
+		err = preflight(root, *base, *a, append(a.args, p.Args...))
 	}
 	if err != nil {
 		return Outcome{}, err

@@ -51,7 +51,7 @@ func Run(label string, args []string, out, summary io.Writer) (err error) {
 	if err != nil {
 		return err
 	}
-	c, err := config.Load(root, home, a.Agent) // the steps after the issue take the config from here
+	c, _, err := baseConfig(root, *base, home, a.Agent) // the steps after the issue take the config from here
 	if err != nil {
 		return err
 	}
@@ -119,6 +119,10 @@ func parseArgs(args []string) (ordered []string, base, resume *string, a *agent,
 	base = fs.String("base-ref", "main", "the ref the run starts from, resolved in the repository")
 	resume = fs.String("resume", "", "a run that failed after its agent: its issue again, from its agent's work")
 	a = &agent{}
+	fs.Usage = func() {
+		_, _ = fmt.Fprintln(fs.Output(), Usage+"\n\n"+preflightHelp+"\n\nFlags:")
+		fs.PrintDefaults()
+	}
 	fs.BoolVar(&a.follow, "follow", false, "print the run's events as JSON until it ends")
 	a.flags(fs)
 	// flag stops at the first argument that is not one: the issue, after which the flags go on.

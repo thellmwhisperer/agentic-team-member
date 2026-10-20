@@ -5,6 +5,7 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -183,13 +184,19 @@ func cleanBackgroundServer(t *testing.T, dir string) {
 
 func setupConcurrentRunRepo(t *testing.T) string {
 	t.Helper()
+	return setupRunRepo(t, "")
+}
+
+// setupRunRepo is a repository whose main commits retry.md and an .atm.yaml for codex that runs install.
+func setupRunRepo(t *testing.T, install string) string {
+	t.Helper()
 	dir := repo(t, "https://example.com/o/r.git")
 	cleanBackgroundServer(t, dir)
 	if err := os.WriteFile(filepath.Join(dir, "retry.md"), []byte("# Retry\nType: fix\nRetry.\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	config := "harness: codex\ninstall: \"\"\ntest: \"\"\ntypecheck: \"\"\nlint: \"\"\n" +
-		"test_file: \"\"\ntest_patterns: []\ndocs_patterns: []\ndelivery: \"\"\n"
+	config := fmt.Sprintf("harness: codex\ninstall: %q\ntest: \"\"\ntypecheck: \"\"\nlint: \"\"\n"+
+		"test_file: \"\"\ntest_patterns: []\ndocs_patterns: []\ndelivery: \"\"\n", install)
 	if err := os.WriteFile(filepath.Join(dir, ".atm.yaml"), []byte(config), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -331,12 +338,7 @@ func assertBothRunsFinish(t *testing.T, release string) {
 
 func setupRetryRepo(t *testing.T) string {
 	t.Helper()
-	dir := repo(t, "https://example.com/o/r.git") // no .atm.yaml: every run fails at once
-	cleanBackgroundServer(t, dir)
-	if err := os.WriteFile(filepath.Join(dir, "retry.md"), []byte("# Retry\nType: fix\nRetry.\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	return dir
+	return setupRunRepo(t, "echo broken >&2; exit 3") // every run fails at once, at its clone
 }
 
 func TestRunGoesToTheBackgroundAndEveryCommandSeesIt(t *testing.T) {
@@ -349,14 +351,15 @@ func TestRunGoesToTheBackgroundAndEveryCommandSeesIt(t *testing.T) {
 	if out := atmIn(t, 0, "status"); out != "nothing runs\n" {
 		t.Fatalf("atm status: %q", out)
 	}
-	if out := atmIn(t, 0, "runs"); !strings.HasPrefix(out, "retry-1  failed  ") ||
-		!strings.HasSuffix(out, " s  -  "+filepath.Join(dir, "retry.md")+"  "+buildinfo.String()+"\n") {
+	if out := atmIn(t, 0, "runs"); !strings.HasPrefix(out, "retry-1  failed at clone  ") ||
+		!strings.Contains(out, " s  codex default  "+filepath.Join(dir, "retry.md")+"  ") ||
+		!strings.HasSuffix(out, filepath.Join(".atm", "runs", "retry-1", "report.json")+"  "+buildinfo.String()+"\n") {
 		t.Fatalf("atm runs: %q", out)
 	}
 
 	out := atmIn(t, 2, "axi", "run", "retry.md")
-	if !strings.HasPrefix(out, "outcome: failed\nrun: retry-2\nfailed_node: \"\"\nreason: \"config incomplete") ||
-		!strings.Contains(out, "\nreport: \"\"\nnext_step: ") {
+	if !strings.HasPrefix(out, "outcome: failed\nrun: retry-2\nfailed_node: clone\nreason: \"install: exit status 3") ||
+		!strings.Contains(out, "retry-2/report.json\nnext_step: ") {
 		t.Fatalf("atm axi run:\n%s", out)
 	}
 	var runs struct{ Runs []map[string]string }

@@ -89,7 +89,7 @@ func stampedAtm(t *testing.T, bin, top string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command(bin, args...)
 	cmd.Dir = top
-	out, err := cmd.CombinedOutput()
+	out, err := stdout(cmd)
 	if err != nil {
 		t.Fatalf("atm %v: %s, %v", args, out, err)
 	}

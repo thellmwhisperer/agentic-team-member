@@ -193,8 +193,10 @@ func TestBackgroundRunThatNeverStartedHasNoReport(t *testing.T) {
 	root := repo(t, "https://example.com/owner/repo.git", "test: go test ./...\n")
 	top := gitT(t, root, "rev-parse", "--show-toplevel")
 	background(t, top)
-	o, err := Start(top, []string{issueFile(t, issue)})
-	if err != nil {
+	// Past Start, whose preflight stops this config: the background process meets it as a .atm.yaml changed since.
+	var o Outcome
+	req := request{Cmd: "run", Args: []string{issueFile(t, issue)}}
+	if err := call(top, req, nil, func(r reply) { o = *r.Run }); err != nil {
 		t.Fatal(err)
 	}
 	end, err := Attach(top, "", &bytes.Buffer{})

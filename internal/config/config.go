@@ -109,13 +109,23 @@ func readMachine(home string) (machine, error) {
 // Load is the defaults, overridden by home's .config/atm/config.yaml, root's .atm.yaml and the non-empty
 // fields of flags.
 func Load(root, home string, flags Agent) (Config, error) {
+	project := filepath.Join(root, ".atm.yaml")
+	return load(project, home, flags, func(c *Config) (map[string]any, error) { return decode(project, c) })
+}
+
+// Parse is Load with b as .atm.yaml, which project names.
+func Parse(project string, b []byte, home string, flags Agent) (Config, error) {
+	return load(project, home, flags, func(c *Config) (map[string]any, error) { return decodeBytes(project, b, c) })
+}
+
+// load is Load with .atm.yaml, which project names, decoded over its argument by decodeProject.
+func load(project, home string, flags Agent, decodeProject func(*Config) (map[string]any, error)) (Config, error) {
 	m, err := readMachine(home)
 	if err != nil {
 		return Config{}, err
 	}
 	c := Config{Agent: Agent{Harness: m.Harness, Model: m.Model, Effort: m.Effort}}
-	project := filepath.Join(root, ".atm.yaml")
-	keys, err := decode(project, &c)
+	keys, err := decodeProject(&c)
 	if err != nil {
 		return c, err
 	}
@@ -165,6 +175,11 @@ func decode(path string, v any) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
+	return decodeBytes(path, b, v)
+}
+
+// decodeBytes is decode with b as the file at path.
+func decodeBytes(path string, b []byte, v any) (map[string]any, error) {
 	keys := map[string]any{}
 	dec := yaml.NewDecoder(bytes.NewReader(b))
 	dec.KnownFields(true)
