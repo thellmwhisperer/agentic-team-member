@@ -100,7 +100,7 @@ func TestRunTellsAWatchingScreenWhatItsAgentAndChecksDo(t *testing.T) {
 			}
 			var checks [][2]any
 			for _, ev := range w.live {
-				if ev["step"] == "checks" && ev["check"] != nil {
+				if ev["step"] == "checks" && ev["check"] != nil && ev["state"] != nil {
 					checks = append(checks, [2]any{ev["check"], ev["state"]})
 				}
 			}
