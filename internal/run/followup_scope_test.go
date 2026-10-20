@@ -204,8 +204,9 @@ func TestFollowUpScopeApprovesAnInScopePlan(t *testing.T) {
 			var report struct{ Units []obj }
 			b, _ := os.ReadFile(filepath.Join(runDir, "report.json"))
 			if json.Unmarshal(b, &report) != nil || len(report.Units) != 1 || report.Units[0]["result"] != "passed" ||
-				report.Units[0]["green"] == nil || report.Units[0]["test_file"] != "a_test.sh" {
-				t.Fatalf("want the issue's unit alone proven, on its own test, got %s", b)
+				report.Units[0]["red"] != nil || report.Units[0]["green"] != nil ||
+				report.Units[0]["test_file"] != "a_test.sh" {
+				t.Fatalf("want the issue's unit alone checked without red/green, got %s", b)
 			}
 		})
 }

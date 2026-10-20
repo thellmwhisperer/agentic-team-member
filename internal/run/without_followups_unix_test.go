@@ -86,7 +86,7 @@ func followUpsServer(t *testing.T, top string) string {
 
 // resumeHistoricalUnit: a run kept at a later unit before the retirement is refused, whatever its old task type,
 // before ATM restores its work or runs anything, its saved files left byte for byte. A saved first unit still
-// resumes under the original guards: configured checks, the original proof and commits.
+// resumes under configured checks, protected tests and commits.
 func resumeHistoricalUnit(t *testing.T) {
 	lint, delivered, call := filepath.Join(t.TempDir(), "lint"), filepath.Join(t.TempDir(), "delivered"),
 		filepath.Join(t.TempDir(), "call")
@@ -110,17 +110,17 @@ func resumeHistoricalUnit(t *testing.T) {
 		t.Fatal(err)
 	}
 	historicalRefused(t, bin, top, failed, delivered, call)
-	// A failed configured check must still block delivery, after the original proof.
+	// A failed configured check must still block delivery.
 	followedRun(t, bin, top, 1, "--resume", failed)
 	again := lastRun(t, top, "failed")
 	rep := readReport(t, filepath.Join(runDir(top, again), "report.json"))
 	if rep["failed_node"] != "checks" || !strings.Contains(rep["reason"].(string), "lint") {
-		t.Fatalf("want configured lint failure after the original proof, got %v", rep)
+		t.Fatalf("want configured lint failure, got %v", rep)
 	}
 	u := rep["units"].([]any)[0].(obj)
 	if u["test_file"] != "a_test.sh" || u["base"] != savedBase(t, top, failed) ||
-		u["red"].(obj)["exit_code"] != float64(1) || u["green"].(obj)["exit_code"] != float64(0) {
-		t.Fatalf("want original proof before the configured failure, got %v", u)
+		u["red"] != nil || u["green"] != nil {
+		t.Fatalf("want the saved unit without red/green proof, got %v", u)
 	}
 	if _, err := os.Stat(delivered); !os.IsNotExist(err) {
 		t.Fatalf("failed checks delivered: %v", err)
@@ -128,12 +128,12 @@ func resumeHistoricalUnit(t *testing.T) {
 	if err := os.Remove(lint); err != nil {
 		t.Fatal(err)
 	}
-	// The configured suite is green: only the original proof can reject the slop detector's cut.
+	// The configured suite rejects the slop detector's cut.
 	issueOnly(t, "first unit resume", top, call, delivered, followedRun(t, bin, top, 0, "--resume", again))
 	pony := reportNode(t, readReport(t, filepath.Join(runDir(top, lastRun(t, top, "passed")), "report.json")),
 		"ponytail")
-	if pony["kept"] != false || !strings.Contains(pony["reason"].(string), "a_test.sh") {
-		t.Fatalf("want original regression rejected by ponytail, got %v", pony)
+	if pony["kept"] != false || !strings.Contains(pony["reason"].(string), "test") {
+		t.Fatalf("want configured suite to reject the cut, got %v", pony)
 	}
 	firstUnitGuards(t, bin, top, failed, delivered)
 }
@@ -243,7 +243,7 @@ func firstUnitGuards(t *testing.T, bin, top, label, delivered string) {
 		name, reason string
 		change       func(work, label string)
 	}{
-		{"original regression", "a_test.sh fails with the fix", func(work, _ string) {
+		{"original regression", "test: exit status 1", func(work, _ string) {
 			writeFixture(t, filepath.Join(work, "a.txt"), "broken\n")
 		}},
 		{"command commit", "the commands made commits", func(string, string) {
@@ -370,7 +370,7 @@ func issueOnlyOnDisk(t *testing.T, name, dir, call, delivered string) {
 		t.Fatalf("%s: want one unit in report.json, got %s", name, b)
 	}
 	b, err := os.ReadFile(delivered)
-	if err != nil || !strings.HasPrefix(string(b), "fix: Retry on timeout\ninit\nfixed\n") ||
+	if err != nil || !strings.HasPrefix(string(b), "chore: Retry on timeout\ninit\nfixed\n") ||
 		strings.Contains(string(b), "c1_test.sh") {
 		t.Fatalf("%s: want the issue's unit delivered without a red test, got %v:\n%s", name, err, b)
 	}
