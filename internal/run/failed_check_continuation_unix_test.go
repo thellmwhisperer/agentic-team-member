@@ -189,3 +189,29 @@ func TestRunAsksOnAFailedCheckCleanupAfterAssertion(t *testing.T) {
 		t.Fatalf("pending-question assertion did not fail cleanly: %v, %v\n%s", ctx.Err(), err, out)
 	}
 }
+
+func TestRunAsksOnAFailedCheckCleanupStopsPendingRun(t *testing.T) {
+	builtATM(t)
+	top := gitT(t, repo(t, "local", atmSet(atmYAML, "lint", "echo failed-check-finding; exit 1")),
+		"rev-parse", "--show-toplevel")
+	bin := filepath.Join(t.TempDir(), "atm")
+	buildATM(t, bin, "follow-test")
+	if err := os.MkdirAll(filepath.Join(top, ".atm"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	server := startVersionServe(t, bin, top)
+	f := startFollow(t, bin, top, false, "run", "--follow", issueFile(t, issue))
+	clone, label := failedCheckQuestion(t, f, top)
+	f.exit(1)
+	endServe(bin, top, server)
+	if server.ProcessState == nil || !server.ProcessState.Success() {
+		t.Fatalf("cleanup killed the server instead of resolving its question: %v", server.ProcessState)
+	}
+	rep := e2eReport(t, top, label)
+	if len(rep.Decisions) != 1 || rep.Decisions[0].Answer != "stop" || len(rep.Units) != 1 || !rep.Resumable {
+		t.Fatalf("cleanup did not finish and retain the stopped run: %+v", rep)
+	}
+	if data, err := os.ReadFile(filepath.Join(clone, "a.txt")); err != nil || string(data) != "fixed\n" {
+		t.Fatalf("cleanup lost the stopped run's work: %q, %v", data, err)
+	}
+}
