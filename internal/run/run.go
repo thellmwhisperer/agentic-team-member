@@ -216,8 +216,10 @@ func checkUnit(runDir, dir, head, test string, report map[string]any, c config.C
 		ev[key] = value
 	}
 	var testContent []byte
-	if err == nil && test != "" {
-		testContent, err = readTest(dir, test)
+	if test != "" {
+		var readErr error
+		testContent, readErr = readTest(dir, test)
+		err = errors.Join(err, readErr)
 	}
 	return proof{head, test, string(testContent), missing}, ev, err
 }

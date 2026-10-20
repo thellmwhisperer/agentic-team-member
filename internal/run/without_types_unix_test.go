@@ -41,7 +41,7 @@ func runWithoutType(t *testing.T, typ string) {
 		cfg = atmSet(cfg, name, `echo `+name+` >> "$ATM_TEST_TRACE"; grep -q fixed a.txt`)
 	}
 	cfg += "e2e: 'echo e2e >> \"$ATM_TEST_TRACE\"; grep -q fixed a.txt'\n"
-	top, bin := untypedRepo(t, cfg)
+	top := gitT(t, repo(t, "local", cfg), "rev-parse", "--show-toplevel")
 	work, test, want := fixWork, "a_test.sh", "test\ne2e\ntypecheck\nlint\ndelivery\n"
 	if typ == "" || typ == "unknown" {
 		work = "printf 'fixed\\nextra\\nmore\\n' > a.txt" + fixTest
@@ -57,7 +57,7 @@ func runWithoutType(t *testing.T, typ string) {
 	if typ != "" {
 		body += "Type: " + typ + "\n"
 	}
-	serveUntyped(t, bin, top)
+	bin := followUpsServer(t, top)
 	out, err := exec.Command(bin, "run", "--follow", issueFile(t, body)).CombinedOutput()
 	if err != nil {
 		t.Fatalf("untyped checks failed: %v\n%s", err, out)
@@ -94,11 +94,11 @@ func resumeWithoutType(t *testing.T) {
 	cfg := atmSet(atmYAML, "test", `echo test >> "$ATM_TEST_TRACE"; grep -q fixed a.txt && test -f "$ATM_TEST_READY"`)
 	cfg = atmSet(cfg, "test_file", `echo forbidden {file} >> "$ATM_TEST_TRACE"; exit 73`)
 	cfg = atmSet(cfg, "delivery", `echo delivery >> "$ATM_TEST_TRACE"`)
-	top, bin := untypedRepo(t, cfg)
+	top := gitT(t, repo(t, "local", cfg), "rev-parse", "--show-toplevel")
 	t.Setenv("FAKE_AGENT_WORK", "printf 'fixed\\nextra\\nmore\\n' > a.txt"+fixTest+"; "+reportJSON("a_test.sh"))
 	t.Setenv("FAKE_PONYTAIL_WORK", "echo fixed > a.txt")
 	t.Setenv("FAKE_PONYTAIL_REPORT", cut)
-	serveUntyped(t, bin, top)
+	bin := followUpsServer(t, top)
 	out, err := exec.Command(bin, "run", "--follow", issueFile(t, issue)).CombinedOutput()
 	if err == nil || !bytes.Contains(out, []byte("test:")) {
 		t.Fatalf("suite failure not enforced: %v, %s", err, out)
@@ -140,7 +140,7 @@ func externalReportedTest(t *testing.T, kind string) {
 	t.Helper()
 	sentinel := filepath.Join(t.TempDir(), "sentinel_test.sh")
 	writeFixture(t, sentinel, "innocuous external sentinel\n")
-	top, bin := untypedRepo(t, atmYAML)
+	top := gitT(t, repo(t, "local", atmYAML), "rev-parse", "--show-toplevel")
 	name := sentinel
 	work := fixWork
 	if kind == "parent" {
@@ -156,7 +156,7 @@ func externalReportedTest(t *testing.T, kind string) {
 		work += `; ln -s "$ATM_TEST_SENTINEL" outside_test.sh`
 	}
 	t.Setenv("FAKE_AGENT_WORK", work+"; "+reportJSON(name))
-	serveUntyped(t, bin, top)
+	bin := followUpsServer(t, top)
 	out, err := exec.Command(bin, "run", "--follow", issueFile(t, issue)).CombinedOutput()
 	if err == nil || !bytes.Contains(out, []byte("test_file")) {
 		t.Fatalf("external test accepted: %v, %s", err, out)
@@ -192,35 +192,17 @@ func assertNoTaskProof(t *testing.T, rep map[string]any) {
 	}
 }
 
-// A separate server exits gracefully, so real-command coverage includes the run itself.
-func untypedRepo(t *testing.T, cfg string) (string, string) {
-	t.Helper()
-	top := gitT(t, repo(t, "local", cfg), "rev-parse", "--show-toplevel")
-	bin := filepath.Join(t.TempDir(), "atm")
-	buildATM(t, bin, "follow-test")
-	if err := os.MkdirAll(filepath.Join(top, ".atm"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	return top, bin
-}
-
-func serveUntyped(t *testing.T, bin, top string) {
-	t.Helper()
-	server := startVersionServe(t, bin, top)
-	t.Cleanup(func() { endServe(bin, top, server) })
-}
-
 func suiteRejectsPonytailCut(t *testing.T) {
 	got := filepath.Join(t.TempDir(), "delivered")
 	t.Setenv("ATM_TEST_OUT", got)
 	cfg := atmSet(atmSet(atmYAML, "test", suite), "delivery",
 		`{ git log --format=%s; cat source.txt; } > "$ATM_TEST_OUT"`)
-	top, bin := untypedRepo(t, cfg)
+	top := gitT(t, repo(t, "local", cfg), "rev-parse", "--show-toplevel")
 	commitFiles(t, top, "", map[string]string{"source.txt": "broken\n"})
 	t.Setenv("FAKE_AGENT_WORK", sourceWork)
 	t.Setenv("FAKE_PONYTAIL_WORK", "echo broken > source.txt")
 	t.Setenv("FAKE_PONYTAIL_REPORT", strings.Replace(cut, "a.txt", "source.txt", 1))
-	serveUntyped(t, bin, top)
+	bin := followUpsServer(t, top)
 	out, err := exec.Command(bin, "run", "--follow", issueFile(t, followUpIssue)).CombinedOutput()
 	if err != nil {
 		t.Fatalf("cut rejection failed: %v\n%s", err, out)
@@ -240,10 +222,10 @@ func suiteRejectsPonytailCut(t *testing.T) {
 }
 
 func emptyUntypedWork(t *testing.T) {
-	top, bin := untypedRepo(t, atmYAML)
+	top := gitT(t, repo(t, "local", atmYAML), "rev-parse", "--show-toplevel")
 	t.Setenv("FAKE_AGENT", "no-report")
 	t.Setenv("FAKE_AGENT_WORK", "true")
-	serveUntyped(t, bin, top)
+	bin := followUpsServer(t, top)
 	out, err := exec.Command(bin, "run", "--follow", issueFile(t, issue)).CombinedOutput()
 	if err == nil || !bytes.Contains(out, []byte("no change to prove")) {
 		t.Fatalf("missing report delivered empty work: %v, %s", err, out)

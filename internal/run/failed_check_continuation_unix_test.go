@@ -29,9 +29,9 @@ func TestRunAsksOnAFailedCheckResumesLatestAttempt(t *testing.T) {
 	assertLatestAttemptSaved(t, top, label, "e2e", "failed-check-finding")
 	prior := e2eReport(t, top, label)
 	answerFailedCheck(t, bin, top, label, "fix", 1)
-	assertLatestAttemptSaved(t, top, label, "", "")
+	assertLatestAttemptSaved(t, top, label, "test", "")
 	stopCheckRun(t, top, label)
-	assertLatestAttemptSaved(t, top, label, "", "")
+	assertLatestAttemptSaved(t, top, label, "test", "")
 	rep := e2eReport(t, top, label)
 	assertLatestAttemptDecision(t, rep)
 	assertLatestAttemptCommands(t, prior, rep)
@@ -41,8 +41,8 @@ func TestRunAsksOnAFailedCheckResumesLatestAttempt(t *testing.T) {
 		t.Fatalf("want initial worker and one fix turn, got %d", calls)
 	}
 	resumed := lastRun(t, top, "failed")
-	assertLatestAttemptSaved(t, top, resumed, "", "")
-	if r := e2eReport(t, top, resumed); !r.Resumable || !strings.Contains(r.Reason, "a_test.sh fails with the fix") {
+	assertLatestAttemptSaved(t, top, resumed, "test", "")
+	if r := e2eReport(t, top, resumed); !r.Resumable || !strings.Contains(r.Reason, "test: exit status 1") {
 		t.Fatalf("resume lost current failure or saved work: %+v", r)
 	}
 	if resumedClone == "" || resumedClone == clone {
@@ -62,10 +62,10 @@ func assertLatestAttemptSaved(t *testing.T, top, label, row, output string) {
 
 func assertLatestAttemptDecision(t *testing.T, rep *verdict) {
 	t.Helper()
-	if !rep.Resumable || rep.FailedNode != "checks" || !strings.Contains(rep.Reason, "a_test.sh fails with the fix") ||
+	if !rep.Resumable || rep.FailedNode != "checks" || !strings.Contains(rep.Reason, "test: exit status 1") ||
 		len(rep.Decisions) != 2 || rep.Decisions[0].Answer != "fix" || rep.Decisions[1].Answer != "stop" ||
 		!strings.Contains(rep.Decisions[0].Finding, "failed-check-finding") ||
-		!strings.Contains(rep.Decisions[1].Finding, "a_test.sh fails with the fix") {
+		!strings.Contains(rep.Decisions[1].Finding, "test: exit status 1") {
 		t.Fatalf("latest failure or decision history lost: %+v", rep)
 	}
 }
@@ -73,8 +73,9 @@ func assertLatestAttemptDecision(t *testing.T, rep *verdict) {
 func assertLatestAttemptCommands(t *testing.T, prior, rep *verdict) {
 	t.Helper()
 	if len(prior.Commands) != 2 || prior.Commands[1].Name != "e2e" || prior.Commands[1].Result != "failed" ||
-		prior.Commands[1].Tail != "failed-check-finding" || len(rep.Commands) != len(prior.Commands) {
-		t.Fatalf("command history lost or proof failure ran commands: before %+v, after %+v", prior.Commands, rep.Commands)
+		prior.Commands[1].Tail != "failed-check-finding" || len(rep.Commands) != len(prior.Commands)+1 ||
+		rep.Commands[len(prior.Commands)].Name != "test" || rep.Commands[len(prior.Commands)].Result != "failed" {
+		t.Fatalf("command history lost or suite failure missing: before %+v, after %+v", prior.Commands, rep.Commands)
 	}
 	for i, command := range prior.Commands {
 		if rep.Commands[i] != command {
