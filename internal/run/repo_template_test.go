@@ -3,6 +3,7 @@ package run
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -10,11 +11,19 @@ import (
 
 // The template repo copies must not race a detached git maintenance that its commit started.
 func TestRepoTemplateCommitDoesNotStartMaintenance(t *testing.T) {
+	if os.Getenv("ATM_REPO_TEMPLATE_CHILD") != "1" {
+		t.Setenv("GIT_CONFIG_COUNT", "1")
+		t.Setenv("GIT_CONFIG_KEY_0", "maintenance.auto")
+		t.Setenv("GIT_CONFIG_VALUE_0", "true")
+		cmd := exec.Command(os.Args[0], "-test.run=^TestRepoTemplateCommitDoesNotStartMaintenance$")
+		cmd.Env = append(os.Environ(), "ATM_REPO_TEMPLATE_CHILD=1")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("template test child: %v\n%s", err, out)
+		}
+		return
+	}
 	trace := filepath.Join(t.TempDir(), "trace2.json")
 	t.Setenv("GIT_TRACE2_EVENT", trace)
-	t.Setenv("GIT_CONFIG_COUNT", "1")
-	t.Setenv("GIT_CONFIG_KEY_0", "maintenance.auto")
-	t.Setenv("GIT_CONFIG_VALUE_0", "true")
 	dir, err := initRepo()
 	if dir != "" {
 		t.Cleanup(func() { _ = os.RemoveAll(dir) })
