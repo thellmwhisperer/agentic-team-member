@@ -149,6 +149,7 @@ func repo(t *testing.T, origin, atm string) string {
 		t.Fatal(err)
 	}
 	gitT(t, dir, "remote", "add", "origin", origin)
+	gitT(t, dir, "symbolic-ref", "refs/remotes/origin/main", "refs/heads/main")
 	if atm != "" {
 		if err := os.WriteFile(filepath.Join(dir, ".atm.yaml"), []byte(atm), 0o600); err != nil {
 			t.Fatal(err)
@@ -393,4 +394,19 @@ func TestRepoTemplate(t *testing.T) {
 	if heads[0] != heads[1] {
 		t.Fatalf("each repo made its own base commit: %v", heads)
 	}
+}
+
+func Run(label string, args []string, out, summary io.Writer) error {
+	_, base, resume, _, err := parseArgs(args)
+	if err != nil {
+		return err
+	}
+	root, err := git("", "rev-parse", "--show-toplevel")
+	if err != nil {
+		return runAt(label, "main", args, out, summary)
+	}
+	if _, _, err = resuming(root, *resume, base); err != nil {
+		return err
+	}
+	return runAt(label, *base, args, out, summary)
 }

@@ -195,7 +195,7 @@ func TestBackgroundRunThatNeverStartedHasNoReport(t *testing.T) {
 	background(t, top)
 	// Past Start, whose preflight stops this config: the background process meets it as a .atm.yaml changed since.
 	var o Outcome
-	req := request{Cmd: "run", Args: []string{issueFile(t, issue)}}
+	req := request{Cmd: "run", Args: []string{issueFile(t, issue)}, BaseSHA: gitT(t, root, "rev-parse", "main")}
 	if err := call(top, req, nil, func(r reply) { o = *r.Run }); err != nil {
 		t.Fatal(err)
 	}
@@ -356,7 +356,7 @@ func TestBackgroundKeepsLabelMonotonicWhenNewestIsPruned(t *testing.T) {
 		t.Fatalf("history after newest run ended = %d runs, %v; want 200 with issue-201 pruned", len(saved), err)
 	}
 	t.Setenv("FAKE_AGENT", "fail")
-	started, err := s.start([]string{issueFile(t, issue)})
+	started, err := s.start([]string{issueFile(t, issue)}, "main")
 	wantReport := filepath.Join(top, ".atm", "runs", "issue-202", "report.json")
 	if err != nil || started.Run != "issue-202" || started.Report != wantReport {
 		t.Fatalf("Start = %+v, %v; want issue-202 and its unique run directory", started, err)

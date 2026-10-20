@@ -194,7 +194,7 @@ func TestAgentMetadataHistoryWithoutSocket(t *testing.T) {
 		Report: filepath.Join(root, ".atm", "runs", "metadata-1", "report.json")}, more: make(chan struct{})}
 	s := &server{root: root, runs: []*bgRun{r}}
 	s.run(r, []string{"--harness", "pi", "--model", "m1", "--effort", "high",
-		"--harness-arg", "--x", issueFile(t, issue)})
+		"--harness-arg", "--x", issueFile(t, issue)}, "main")
 	if r.Outcome.Outcome != "passed" {
 		t.Fatal(r.Reason)
 	}

@@ -206,6 +206,7 @@ func setupRunRepo(t *testing.T, install string) string {
 		{"add", "."},
 		{"commit", "-m", "retry"},
 		{"branch", "-M", "main"},
+		{"symbolic-ref", "refs/remotes/origin/main", "refs/heads/main"},
 	} {
 		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
 		if out, err := cmd.CombinedOutput(); err != nil {
