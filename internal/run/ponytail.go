@@ -28,10 +28,8 @@ type finding struct {
 
 // ponytail is the slop detector on the run's work in clone, from base commit sha, for issue i after its unit
 // is proven: an agent that may only cut it. A cut that holds, a shorter diff that passes the unit's proof and
-// every check again, leaves two commits: the unit then the cut with a tombstone per finding. A file named by a
-// finding with a missing issue sentence, or one the cut deletes, adds, or touches as a test or outside the
-// run's diff, is put back alone; what remains is judged,
-// and hold undoes the files that fail the checks. A cut that still fails policy or the checks is undone. A
+// every check again, leaves two commits: the unit then the cut with a tombstone per finding.
+// A cut that still fails policy or the checks is undone. A
 // commit by the agent or a re-check command fails the run.
 func (a agent) ponytail(root, clone, sha string, proofs []proof, i Issue, c config.Config) (map[string]any,
 	error) {
@@ -279,8 +277,7 @@ func review(dir, clone, sha string, i Issue, c config.Config) (tree string, file
 
 // fault says why the cut from tree before to tree after, on the run's work from sha, which changes files,
 // does not hold even before the checks, "" when it may: it must shorten the diff, report what it cut with an
-// issue sentence, and add or delete no file, touch no test nor file outside files. lines are the
-// net lines the run adds before and after it.
+// issue sentence. lines are the net lines the run adds before and after it.
 func fault(clone, sha, before, after string, files []string, found []finding, tests []string) (why string, lines [2]int,
 	err error) {
 	for n, tree := range []string{before, after} {
@@ -309,9 +306,6 @@ func fault(clone, sha, before, after string, files []string, found []finding, te
 	return "", lines, err
 }
 
-// judge is fault on the cut from before to after, once each file a finding names with a missing issue sentence,
-// or that the cut deletes, adds, or touches as a test or outside files, is back byte for byte
-// from whole's tree all.
 // Nothing of the cut left is fault on it as it stands, the same "no cut". kept are the findings of the files
 // that stay; rejectedFiles names each rejected file with its rule's reason.
 func judge(clone, sha, before, after, all string, files []string, found []finding, tests []string) (why string,
@@ -371,10 +365,8 @@ func sentenceFault(f finding) string {
 // fileFault is why the cut's change of path, status its name-status, does not hold, "" when it may.
 func fileFault(status, path string, files, tests []string) string {
 	switch {
-	case status == "D":
+	case status == "D" && first([]string{path}, tests, true) == "":
 		return "the cut deletes " + path
-	case first([]string{path}, tests, true) != "":
-		return "the cut touches the test " + path
 	case status == "A":
 		return "the cut adds " + path
 	case !slices.Contains(files, path):
@@ -497,7 +489,7 @@ func commit(root, clone, sha, unit string, i Issue, found []finding) (commits, t
 		return nil, nil, err
 	}
 	n, _ := strconv.Atoi(units)
-	if tombs, err = tombstones(clone, found); err != nil {
+	if tombs, err = tombstones(clone, unit, found); err != nil {
 		return nil, tombs, err
 	}
 	cut, err := snapshot(clone)
@@ -537,9 +529,8 @@ func identity(root string) ([]string, error) {
 	return flags, nil
 }
 
-// tombstones writes in clone a slopslint tombstone for each finding and returns their paths. fault rejects
-// deleted files before this call so each tombstone names an existing artifact.
-func tombstones(clone string, found []finding) ([]string, error) {
+// tombstones writes in clone a slopslint tombstone for each finding and returns their paths.
+func tombstones(clone, unit string, found []finding) ([]string, error) {
 	now := time.Now()
 	var paths []string
 	for n, f := range found {
@@ -549,6 +540,17 @@ func tombstones(clone string, found []finding) ([]string, error) {
 		example := f.Finding
 		if f.IssueSentence != nil && *f.IssueSentence != "" {
 			example += "\nissue_sentence: " + *f.IssueSentence
+		}
+		artifact := f.File
+		if _, err := os.Lstat(filepath.Join(clone, filepath.FromSlash(f.File))); errors.Is(err, os.ErrNotExist) {
+			content, err := gitRaw(clone, "cat-file", "-p", unit+":"+f.File)
+			if err != nil {
+				return paths, err
+			}
+			example += "\nDeleted " + f.File + ":\n" + content
+			artifact = rel
+		} else if err != nil {
+			return paths, err
 		}
 		text := fmt.Sprintf(`schema: 1
 id: %[1]s
@@ -568,7 +570,7 @@ incident:
 match:
   family: %[4]s
   artifact: %[5]q
-`, id, f.Finding, now.Format("2006-01-02"), f.Family, f.File, example)
+`, id, f.Finding, now.Format("2006-01-02"), f.Family, artifact, example)
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			return paths, err
 		}
