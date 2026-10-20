@@ -194,10 +194,9 @@ func before(clone string) error {
 	return err
 }
 
-// unmade removes agent-created ignored content using before's paths, except follow-up tests the run keeps, then
-// puts back, byte for byte, each ignored file before recorded that the agent changed or deleted, those of an
-// ignored nested repository too: a package manager's own state, which would tell install the agent's
-// dependencies are there.
+// unmade removes agent-created ignored content using before's paths, then puts back, byte for byte, each
+// ignored file before recorded that the agent changed or deleted, those of an ignored nested repository too: a
+// package manager's own state, which would tell install the agent's dependencies are there.
 func unmade(clone string) error {
 	err := prunes(clone)
 	if err == nil {
@@ -329,7 +328,7 @@ func nestedGit(clone, dir string, args ...string) (string, error) {
 		"--work-tree=" + dir}, args...)...)
 }
 
-// prunes removes agent-created ignored content using before's paths, except follow-up tests the run keeps.
+// prunes removes agent-created ignored content using before's paths.
 func prunes(clone string) error {
 	root, err := os.OpenRoot(clone)
 	if err != nil {

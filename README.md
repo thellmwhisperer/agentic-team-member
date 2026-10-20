@@ -16,7 +16,7 @@ against the issue before handing the branch to your configured command.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/pipeline-dark.svg">
-  <img alt="ATM pipeline: issue, isolated clone, contract, coding agent, checks. FAIL stops the run. PASS goes to the slop detector, a code quality gate where a model may only cut, then to the delivery and code review gate. The documented example of that gate is no-mistakes, a graph of its own where review and document are models, test and PR are code with a model part, and rebase, lint and CI call a model only after a fix answer. Follow-up dispatch is described in the run-flow guide." src="docs/assets/pipeline-light.svg" width="1000">
+  <img alt="ATM pipeline: issue, isolated clone, contract, coding agent, checks. FAIL stops the run. PASS goes to the slop detector, a code quality gate where a model may only cut, then to the delivery and code review gate. The documented example of that gate is no-mistakes, a graph of its own where review and document are models, test and PR are code with a model part, and rebase, lint and CI call a model only after a fix answer." src="docs/assets/pipeline-light.svg" width="1000">
 </picture>
 
 ## A real run
@@ -70,7 +70,6 @@ every check ran again before it was kept.
 | Write the fix | **model** | nothing: it decides nothing |
 | Red / green | code | a test that passes without the fix or fails with it |
 | The project's configured `install`, `test`, `e2e`, `typecheck` and `lint` commands | code | any failure |
-| Follow-ups | code and **model** | See [Follow-ups](docs/how-a-run-flows.md#follow-ups) for verification and scope approval |
 | Slop detector (code quality gate, not code review) | **model**, may only cut | See [Slop detector](docs/how-a-run-flows.md#slop-detector) for file rejection and validation of the remaining cut |
 | Delivery and code review gate | **model**, then your command | See [Delivery](docs/how-a-run-flows.md#delivery) for the review that must approve before the command runs |
 
@@ -132,10 +131,10 @@ For `atm run`, including `--follow`, and `atm axi run`:
 
 | Exit | Meaning |
 |------|---------|
-| `0` | Every unit passed and Delivery passed or was skipped; see [Delivery](docs/how-a-run-flows.md#delivery) |
-| `1` | A unit failed; nothing is delivered |
+| `0` | The unit passed and Delivery passed or was skipped; see [Delivery](docs/how-a-run-flows.md#delivery) |
+| `1` | The unit failed; nothing is delivered |
 | `2` | [preflight](docs/how-a-run-flows.md#before-the-run), [serve build check](docs/how-a-run-flows.md#the-screen), issue, clone or contract failed |
-| `4` | Every unit passed, but Delivery failed |
+| `4` | The unit passed, but Delivery failed |
 
 ## Read more
 

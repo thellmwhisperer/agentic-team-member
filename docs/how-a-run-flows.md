@@ -53,12 +53,13 @@ A failed step stops the run; the steps after it are not run.
 | Clone | Clones the repository at the commit checked by preflight, or the saved base commit on resume into `.atm/clones/`, runs `install` | The ref, the clone or `install` fails |
 | Contract | Writes `brief.md`, the agent's contract | The brief cannot be written |
 | Agent | Runs the coding agent in the clone on the brief | It fails to complete successfully, times out or writes outside its clone and scratch directory. A missing or invalid report does not fail it: see [Rejected reports](#rejected-reports) |
-| Checks | Prepares the clone, then install, the proof, test, optional e2e, typecheck and lint; see [Checks](#checks) | Cleanup, proof or a command fails, anything committed, or a [follow-up limit or mandatory gap](#follow-ups) blocks the run |
+| Checks | Prepares the clone, then install, the proof, test, optional e2e, typecheck and lint; see [Checks](#checks) | Cleanup, proof or a command fails, or anything committed |
 | Slop detector | Lets a model cut the diff; keeps the cut only if every check still passes | Its agent fails, fails [report validation](#rejected-reports), or anything commits |
 | Delivery | Commits the work on a branch and runs the `delivery` command | The branch or the command fails. Skipped when `delivery` is empty |
 
-Agent and Checks run again for each chained follow-up, at most three units in
-one run; see [Follow-ups](#follow-ups). For the configured delivery command, see [Delivery](#delivery).
+A run is one unit: the issue's work. A gap the agent sees and does not fix is a
+note in its report's `summary`; ATM takes no action on it. For the configured
+delivery command, see [Delivery](#delivery).
 
 ## Issue, clone and contract
 
@@ -152,8 +153,7 @@ If the worker's second report still fails, the Agent step passes and records
 `hotfix`, `feature`, `greenfield` and `tests` skip their proof, but the unit
 must have changed something, no test file the base has may get shorter or go,
 and a `tests` unit may change only test and doc files. The other types prove
-as usual. The slop detector and scope reviewer fail with the second error
-instead.
+as usual. The slop detector fails with the second error instead.
 
 The agent's `.jsonl` log records a `report_rejected` event with the exact
 error in `error`. Both
@@ -179,8 +179,7 @@ A cleanup or restoration error stops Checks before
 `install` or proof. Delivery leaves the removed paths out, so a test that
 needs one fails. ATM moves `.atm/` out of the clone while Checks runs,
 including `install`, the proof and the other commands, then restores it even
-if a check fails. This keeps follow-up tests and other `.atm/` artefacts for
-ATM to process after Checks without exposing them to a check command. Checks
+if a check fails. This keeps `.atm/` artefacts out of every check command. Checks
 then run `install` again (the agent may have changed dependencies), prove the
 task type, and run `test`, `e2e`, `typecheck` and `lint`, empty ones skipped. In
 this repository `e2e` runs `scripts/cover-diff.sh` on the counters `test`
@@ -223,91 +222,16 @@ deleted or has fewer lines. A shorter file with the same line count is allowed.
 If Git detects a rename, ATM checks the staged file at its new path, so moving
 an unchanged or longer test is allowed.
 
-## Follow-ups
-
-A follow-up is a behaviour gap the agent found and did not fix. Its report
-lists each as `{"title", "red_test", "criterion", "paths"}`, with the failing test
-written at `.atm/follow-ups/<n>/<red_test>`. After a unit passes Checks, ATM
-runs each follow-up test at `red_test` on the unit's work: it must fail. One
-without its test, or whose test passes or hangs, is rejected. Code verifies
-this failure.
-
-The first accepted follow-up whose `criterion` quotes the issue is proposed
-for the next unit, while a unit remains. After scope approval, it runs in the
-same clone: the unit before is committed as a unit commit, the red test is
-put in place, and the agent gets
-`brief-unit-<n>.md` to make it pass without editing it. The checks prove that
-unit red/green as a `feature`. The quote matches a whole issue line or sentence;
-whitespace, list markers and a line's final punctuation are normalized.
-Other follow-ups go to `follow-ups.json` in the run's directory with their
-tests. Each accepted follow-up there has `"verified": true`.
-
-Before that next unit starts, a read-only reviewer compares the follow-up's
-`paths` plus its
-red test with the issue as the run first read it: its declared scope, non-goals
-and paths it reserves to another owner. Quoting a criterion widens none of
-them. The CoS must declare ownership reservations in the issue; ATM does not
-discover other owners. Unclear scope blocks approval. `paths` lists exact
-repository-relative file paths; directories and `.` do not authorize files
-below them. The red test destination is included in the review and actual-path
-check. The verdict must be a single JSON object echoing exactly those paths;
-each finding names a path, the issue's clause verbatim and a reason. No paths,
-a missing, malformed or stale verdict, a block, or a reviewer that changes the
-clone or HEAD stops the run before the worker starts: the follow-up becomes a
-mandatory pending item, as below, with the review under `scope`. Once approved,
-`brief-unit-<n>.md` names the approved paths. Checks compare the actual changed
-paths before and after the configured commands run, including when a command
-fails. Any unplanned path fails the unit and saves a blocking child draft as
-for the budget below, with `cause` naming the unplanned and approved paths.
-The same comparison runs on resume; a saved approval must match the current
-proposal. See [resuming a failed run](configuration.md#resuming-a-failed-run)
-for the saved original issue and review evidence. Each scope review call gets
-its own empty scratch directory under the run's directory, outside the clone,
-named in its brief and set as its `TMPDIR`; the files its checks write go there,
-never into the clone, which must not change.
-
-The run allows at most three units. Units after the first share a fixed
-200-line gross diff budget: additions plus deletions measured for each unit
-against its starting commit, then accumulated. Deleting a line added by an
-earlier unit counts again; net growth does not determine the budget. The
-primary unit is exempt. The red test ATM placed for the additional unit is
-excluded, and binary files contribute no lines. Resuming retains the earlier
-units' total and measures the resumed unit again. This budget does not apply
-to the slop detector's cuts.
-
-Exceeding the budget fails Checks and saves the chained follow-up as a
-blocking child draft in `follow-ups.json`: its title, criterion and red test
-form the contract, `diff` holds the actual unit diff, `cause` names the total
-and limit, and `dependency` names the unit's starting commit.
-
-A quoted criterion with a verified failing test is mandatory. When no next
-unit chains, including after unit three, any such pending follow-up blocks
-the run with an error naming the criterion. Neither the slop detector nor
-delivery runs. Every mandatory pending item retains its test and criterion,
-plus the stopping unit's actual `diff`, a `cause`, and the committed stopping
-unit as its `dependency`. The dependency commit is preserved in the resume
-bundle. Follow-ups without a matching quote remain out of goal, however
-small: they are persisted separately and do not block delivery. The CoS
-creates and dispatches child issues from these drafts; workers do not.
-
-A unit that fails before follow-up verification still hands over every
-follow-up its report lists: none is run or chained, and each goes to
-`follow-ups.json` with the test the
-agent left, if any, and `"verified": false`. The run ends at that failure.
-When `follow_ups` is invalid, the Checks failure remains the reason, with the
-follow-ups problem on the next line. `atm run --resume` reads that unit's
-report again, so its follow-ups appear once: unverified while Checks fail,
-then verified and sorted as above if Checks pass and their red tests fail.
+## Unit commit
 
 A unit commit is a conventional commit, so release-please sees it: its
-subject is `<type>: <title>`, its body `atm unit <n>`. The type comes from the
+subject is `<type>: <title>`, its body `atm unit 1`. The type comes from the
 issue's `Type:`: `fix` and `hotfix` give `fix`, `feature` and `greenfield`
 `feat`, `refactor` `refactor`, `tests` `test`, `docs` `docs`, `chore` `chore`.
-A chained unit, a `feature`, is a `feat`.
 
 ## Slop detector
 
-Once every unit passed, the same agent gets `brief-ponytail.md`, the issue and
+Once the unit passed, the same agent gets `brief-ponytail.md`, the issue and
 the run's diff, with the bundled `ponytail-review` skill. It may only cut: delete, shrink, or swap in the standard library or
 an existing helper, in the diff's files, keeping every test. The required
 report format is in the [ponytail brief](../internal/run/brief-ponytail.md.tmpl).
@@ -321,9 +245,9 @@ There is no splitting within a file. If no file survives, the whole cut is
 discarded as before.
 
 The remaining cut must report a finding and lower the run's net added lines.
-ATM then checks for new files, including ignored files, and repeats every
-unit's proof and the last unit's checks on the remaining cut as a whole,
-preserving each unit's proven test. When those fail, ATM puts back every cut
+ATM then checks for new files, including ignored files, and repeats the
+unit's proof and checks on the remaining cut as a whole, preserving its proven
+test. When those fail, ATM puts back every cut
 file whose full repo path the failure names, as compiler and test output name a file,
 and proves again, while the failure names one. A failure that names none, with at least two files left:
 ATM puts back each remaining file alone, once, and keeps the first remainder
@@ -392,8 +316,8 @@ it is on disk before delivery reads it.
 | `agent` | The effective requested `harness`, `model`, `effort` and ordered `harness_args`, after global config, `.atm.yaml` and flags. Unset model and effort stay `""`; no extra arguments is `[]` |
 | `nodes` | Each step's `result` (`passed`, `failed`, `running`, `skipped` or `not run`), `started_at` (UTC, RFC 3339 with milliseconds) when its start is known, and `duration_ms` when it ends; the agent node also has `exit` and `tail` when the agent ran but its step failed, and `"report": "missing"` when the worker's report never came ([Rejected reports](#rejected-reports)). Checks includes an `e2e` row in `rows` when that command ran, passed or failed, with `name`, `result`, `started_at` and `duration_ms`. Delivery has `rows`, each with `name`, `result` (`running`, `passed` or `failed`), `started_at` and `duration_ms`, for each part that has started. |
 | `type` | The task type |
-| `units` | Each unit's number, base commit, test file, type, result, red/green proof row span, and red and green trials: command, exit code, last 60 lines, `started_at` and `duration_ms` |
-| `reproofs` | The latest repeated unit proofs and spans, after a kept cut |
+| `units` | The unit's number (`1`), base commit, test file, type, result, red/green proof row span, and red and green trials: command, exit code, last 60 lines, `started_at` and `duration_ms` |
+| `reproofs` | The latest repeated proof and span, after a kept cut |
 | `commands` | Every configured command that ran, the clone's `install` included, with its result, last 60 lines, `started_at` and `duration_ms` |
 | `head_sha` | The delivered branch's final commit |
 | `serve` | The version of the `atm serve` process that executed the run, from `buildinfo.String()`, for example `vA (aaa1111) 2026-10-15` |
@@ -405,8 +329,8 @@ supplies `message.provider` and `message.model`, recorded as
 `<provider>/<model>` or just `<model>` when the provider is absent. For Codex
 and OpenCode, ATM reads only an event's top-level `model` field. This value never
 falls back to the requested model.
-Each `units` entry keeps its own `agent_model`, so a later unit or the slop
-detector cannot replace an earlier unit's attribution. A resumed unit that
+The `units` entry keeps its own `agent_model`, so the slop detector cannot
+replace the unit's attribution. A resumed unit that
 does not invoke an agent has an empty observed model.
 
 `atm runs` and `atm status`, including their `axi` forms and `--json` output,

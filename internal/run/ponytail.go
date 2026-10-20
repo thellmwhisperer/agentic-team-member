@@ -26,11 +26,11 @@ type finding struct {
 	IssueSentence         *string `json:"issue_sentence"` // the sentence of the issue the cut touches, "" for none
 }
 
-// ponytail is the slop detector on the run's work in clone, from base commit sha, for issue i as its last unit
-// is proven, whose units were proven as proofs: an agent that may only cut it. A cut that holds, a shorter diff
-// that passes every unit's proof and every check again, leaves two commits on the units before, the last unit
-// then the cut with a tombstone per finding. A file a finding names with a missing issue sentence, or that the
-// cut deletes, adds, or touches as a test or outside the run's diff, is put back alone; what remains is judged,
+// ponytail is the slop detector on the run's work in clone, from base commit sha, for issue i after its unit
+// is proven: an agent that may only cut it. A cut that holds, a shorter diff that passes the unit's proof and
+// every check again, leaves two commits: the unit then the cut with a tombstone per finding. A file named by a
+// finding with a missing issue sentence, or one the cut deletes, adds, or touches as a test or outside the
+// run's diff, is put back alone; what remains is judged,
 // and hold undoes the files that fail the checks. A cut that still fails policy or the checks is undone. A
 // commit by the agent or a re-check command fails the run.
 func (a agent) ponytail(root, clone, sha string, proofs []proof, i Issue, c config.Config) (map[string]any,
@@ -201,9 +201,8 @@ func checkout(clone, tree string, paths []string) error {
 	return err
 }
 
-// reprove says why the work in clone, on HEAD base, the last unit's, fails a unit's proof again, each unit
-// before the last on its own base, or the last unit's checks, "" when it fails none, each proof it re-ran and
-// the commands of those checks.
+// reprove says why the work in clone fails the unit's proof or checks again, or "" when neither fails. It
+// returns the repeated proof and check commands.
 func reprove(runDir, clone, base string, history []proof, c config.Config) (string, []unitResult, []cmdResult, error) {
 	for n, p := range history {
 		if p.missing || !testedType(p.typ) {
@@ -484,7 +483,7 @@ func added(clone, sha, tree string) (int, error) {
 	return n, err
 }
 
-// commit commits in clone, on HEAD, the run's last unit from base commit sha, tree unit, then the cut, the
+// commit commits in clone, on HEAD, the run's unit from base commit sha, tree unit, then the cut, the
 // working tree with a tombstone per finding, under the git identity of the repository at root, and returns
 // both commits and the tombstones.
 func commit(root, clone, sha, unit string, i Issue, found []finding) (commits, tombs []string, err error) {
@@ -493,7 +492,7 @@ func commit(root, clone, sha, unit string, i Issue, found []finding) (commits, t
 		return nil, nil, err
 	}
 	parent := "HEAD"
-	units, err := git(clone, "rev-list", "--count", sha+"..HEAD") // the units chained before it
+	units, err := git(clone, "rev-list", "--count", sha+"..HEAD") // the commits before the unit's
 	if err != nil {
 		return nil, nil, err
 	}

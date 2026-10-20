@@ -51,9 +51,7 @@ var work = map[string]string{"fix": fixWork, "feature": fixWork, "greenfield": f
 // so init adopts it. The ponytail pass plays the same with the ponytail-review skill,
 // $FAKE_PONYTAIL as its mode, $FAKE_PONYTAIL_WORK as its work and $FAKE_PONYTAIL_REPORT, or no findings, as
 // its report; its call goes to $FAKE_AGENT_CALL.ponytail. With FAKE_WORKER_TMPDIR set, the worker writes
-// test.log under its $TMPDIR, by a tool call naming its absolute path. With FAKE_REVIEW_SCRATCH set, the scope reviewer
-// also writes into the scratch directory its brief names, by a tool call naming its absolute path and through
-// $TMPDIR. $FAKE_AGENT_ORDER, when
+// test.log under its $TMPDIR, by a tool call naming its absolute path. $FAKE_AGENT_ORDER, when
 // set, receives one line per call. $FAKE_AGENT_STREAM goes to its stdout after its first
 // line, <clone> in it its working directory.
 func fakeAgent(name string) int {
@@ -94,7 +92,7 @@ func fakeAgentCLI(name string) int {
 		return 0
 	}
 	args := os.Args[1:]
-	stdin, call, skill, todo, text := fakeAgentTask(name, args, &mode)
+	call, skill, todo, text := fakeAgentTask(name, args, &mode)
 	if flag := codexResumeRejected(name, args); flag != "" {
 		fmt.Fprintf(os.Stderr, "unexpected argument '%s'\n", flag)
 		return 2
@@ -110,7 +108,6 @@ func fakeAgentCLI(name string) int {
 		return exit
 	}
 	fakeAgentSkill(name, args, skill)
-	scratchCall(name, map[bool]string{true: string(stdin), false: args[len(args)-1]}[name == "claude"])
 	if skill == "ponytail" && os.Getenv("FAKE_WORKER_TMPDIR") != "" { // the worker logs to its $TMPDIR
 		log := filepath.ToSlash(filepath.Join(os.Getenv("TMPDIR"), "test.log"))
 		fmt.Print(bashEvent(name, `echo log > "`+log+`"`))
@@ -150,7 +147,7 @@ func fakeAgentCLI(name string) int {
 	return 0
 }
 
-func fakeAgentTask(name string, args []string, mode *string) ([]byte, string, string, string, string) {
+func fakeAgentTask(name string, args []string, mode *string) (string, string, string, string) {
 	stdin, _ := io.ReadAll(os.Stdin)
 	brief := map[bool]string{true: string(stdin), false: args[len(args)-1]}[name == "claude"]
 	_, typ, _ := strings.Cut(brief, "Task type: ")
@@ -158,7 +155,7 @@ func fakeAgentTask(name string, args []string, mode *string) ([]byte, string, st
 	skill, call, todo, text, kind := fakeAgentKind(brief, typ, mode)
 	recordFakeAgentCall(args, stdin, call)
 	recordOrder(kind)
-	return stdin, call, skill, todo, text
+	return call, skill, todo, text
 }
 
 // fakeAgentKind is which fake the brief plays, and the call suffix its recording uses.
@@ -168,37 +165,14 @@ func fakeAgentKind(brief, typ string, mode *string) (skill, call, todo, text, ki
 		return k.Skill, k.Call + ".return", k.Todo, k.Text, k.Kind
 	}
 	skill, call, todo, text, kind = "ponytail", "", cmp.Or(os.Getenv("FAKE_AGENT_WORK"), work[typ]), fakeReport, "worker"
-	switch {
-	case strings.Contains(brief, "# Scope review"):
-		*mode = os.Getenv("FAKE_SCOPE")
-		skill, call, todo = "ponytail-review", ".scope", os.Getenv("FAKE_SCOPE_WORK")
-		text, kind = fakeScope(brief, *mode), "scope"
-	case strings.Contains(brief, "`ponytail-review`"):
+	if strings.Contains(brief, "`ponytail-review`") {
 		*mode = os.Getenv("FAKE_PONYTAIL")
 		skill, call, kind = "ponytail-review", ".ponytail", "ponytail"
 		todo = os.Getenv("FAKE_PONYTAIL_WORK")
 		text = cmp.Or(os.Getenv("FAKE_PONYTAIL_REPORT"), `{"findings": [], "summary": "Lean already."}`)
 	}
-	if s := briefScratch(brief); s != "" && os.Getenv("FAKE_REVIEW_SCRATCH") != "" && kind == "scope" {
-		todo = cmp.Or(todo, "true") + `; echo tickets > "` + s + `/tickets.txt"; echo tmp > "$TMPDIR/tmp.txt"`
-	}
 	saveKind(fakeKind{skill, call, todo, text, kind, *mode})
 	return skill, call, todo, text, kind
-}
-
-// briefScratch is the scratch directory a review brief names after "only under `", "" when it names none.
-func briefScratch(brief string) string {
-	_, s, _ := strings.Cut(brief, "only under `")
-	s, _, _ = strings.Cut(s, "`")
-	return s
-}
-
-// scratchCall emits the reviewer's tool call that writes into the scratch directory its brief names, as the
-// line the clone boundary check reads; nothing when the brief names none or no review runs with a scratch.
-func scratchCall(name, brief string) {
-	if s := briefScratch(brief); s != "" && os.Getenv("FAKE_REVIEW_SCRATCH") != "" {
-		fmt.Print(bashEvent(name, `echo plan > "`+s+`/plan.txt"`))
-	}
 }
 
 // fakeKind is the brief's fake, kept outside the clone so a returned report replays a review, not a new worker.
@@ -389,46 +363,10 @@ func waitForFakeAgentRelease() {
 	}
 }
 
-// fakeScope is the scope reviewer's report on brief: $FAKE_SCOPE_REPORT, or an approval, {paths} in it the
-// brief's. In mode issue it blocks each path its brief's issue does not name, on the issue's Scope line.
-func fakeScope(brief, mode string) string {
-	_, paths, _ := strings.Cut(brief, "\n- Paths: ")
-	paths, _, _ = strings.Cut(paths, "\n")
-	if mode == "issue" {
-		_, issue, _ := strings.Cut(brief, "## ISSUE\n")
-		issue, _, _ = strings.Cut(issue, "\n## PLAN")
-		_, clause, _ := strings.Cut(issue, "\nScope:")
-		clause, _, _ = strings.Cut(clause, "\n")
-		var all []string
-		_ = json.Unmarshal([]byte(paths), &all)
-		findings := []obj{}
-		for _, p := range all {
-			if !strings.Contains(issue, p) {
-				findings = append(findings, obj{"path": p, "clause": "Scope:" + clause, "reason": "not in the scope"})
-			}
-		}
-		b, _ := json.Marshal(obj{"disposition": map[bool]string{true: "approved", false: "blocked"}[len(findings) == 0],
-			"paths": json.RawMessage(paths), "findings": findings, "summary": "s"})
-		return string(b)
-	}
-	return strings.ReplaceAll(cmp.Or(os.Getenv("FAKE_SCOPE_REPORT"),
-		`{"disposition": "approved", "paths": {paths}, "findings": [], "summary": "s"}`), "{paths}", paths)
-}
-
 // workReport is the report the worker's work left in .atm/fake-report.json, "" for none or for the ponytail
 // pass, whose call is ".ponytail".
 func workReport(call string) string {
 	b, _ := os.ReadFile(".atm/fake-report.json")
-	var r obj
-	if json.Unmarshal(b, &r) == nil {
-		fs, _ := r["follow_ups"].([]any)
-		for _, f := range fs {
-			if f, ok := f.(obj); ok && f["paths"] == nil {
-				f["paths"] = []string{"a.txt", "source.txt", "big.txt", "more.txt", "x.txt"}
-			}
-		}
-		b, _ = json.Marshal(r)
-	}
 	return map[bool]string{true: string(b)}[call == ""]
 }
 

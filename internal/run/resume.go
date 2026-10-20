@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/thellmwhisperer/agentic-team-member/internal/config"
@@ -15,42 +14,26 @@ import (
 
 // resumePoint is what a run that fails after its agent keeps in resume/, in its directory, for atm run
 // --resume: its issue, as given and as first read, base ref and base commit, the unit it failed at with its
-// agent's report and the follow-up it chained, the proofs of the units before, and work.bundle: their commits,
-// then the failed unit's work as one commit on them.
+// agent's report, and work.bundle: the unit's work as one commit on the base.
 type resumePoint struct {
-	Issue    string         `json:"issue"`
-	Original *Issue         `json:"original"`
-	BaseRef  string         `json:"base_ref"`
-	Base     string         `json:"base"`
-	Unit     int            `json:"unit"`
-	Report   map[string]any `json:"report"`
-	FollowUp *followUp      `json:"follow_up"`
-	Pending  []followUp     `json:"pending"`
-	Proofs   [][4]string    `json:"proofs"` // each unit's before: its base, test, type and test content
-	// Gross is the lines, added plus deleted, of the units after the first, before Unit.
-	Gross     int          `json:"gross_lines"`
-	run       string       // the run that kept it
-	FailedRow string       `json:"failed_row,omitempty"`
-	E2EOutput string       `json:"e2e_output,omitempty"`
-	Session   string       `json:"session_id,omitempty"`
-	Agent     config.Agent `json:"agent,omitempty"`
-	Args      []string     `json:"harness_args,omitempty"`
-	Env       []string     `json:"env,omitempty"`
+	Issue     string         `json:"issue"`
+	Original  *Issue         `json:"original"`
+	BaseRef   string         `json:"base_ref"`
+	Base      string         `json:"base"`
+	Unit      int            `json:"unit"`
+	Report    map[string]any `json:"report"`
+	run       string         // the run that kept it
+	FailedRow string         `json:"failed_row,omitempty"`
+	E2EOutput string         `json:"e2e_output,omitempty"`
+	Session   string         `json:"session_id,omitempty"`
+	Agent     config.Agent   `json:"agent,omitempty"`
+	Args      []string       `json:"harness_args,omitempty"`
+	Env       []string       `json:"env,omitempty"`
 }
 
 // keepWork writes p and the work in clone, on HEAD, to resume/ in the run's directory dir. The work leaves the
-// files git ignores out, but for the agent's follow-ups.
+// files git ignores out.
 func keepWork(dir, clone string, p resumePoint) error {
-	paths, err := declaredFollowUpPaths(clone, p.Report["follow_ups"])
-	if err != nil {
-		return err
-	}
-	if len(paths) > 0 {
-		args := append([]string{"--literal-pathspecs", "add", "-f", "--"}, paths...)
-		if _, err := git(clone, args...); err != nil {
-			return err
-		}
-	}
 	tree, err := snapshot(clone)
 	if err != nil {
 		return err
@@ -74,44 +57,13 @@ func keepWork(dir, clone string, p resumePoint) error {
 	return os.WriteFile(filepath.Join(keep, "resume.json"), append(b, '\n'), 0o644)
 }
 
-func declaredFollowUpPaths(clone string, followUps any) ([]string, error) {
-	b, err := json.Marshal(followUps)
-	if err != nil {
-		return nil, err
-	}
-	var declared []followUp
-	if err := json.Unmarshal(b, &declared); err != nil {
-		return nil, err
-	}
-	var paths []string
-	for i, f := range declared {
-		name := filepath.Clean(filepath.FromSlash(f.RedTest))
-		if !filepath.IsLocal(name) || name == "." {
-			continue
-		}
-		path := filepath.Join(".atm", "follow-ups", strconv.Itoa(i+1), name)
-		info, err := os.Lstat(filepath.Join(clone, path))
-		if err == nil && !info.IsDir() {
-			paths = append(paths, filepath.ToSlash(path))
-		} else if err != nil && !os.IsNotExist(err) {
-			return nil, err
-		}
-	}
-	return paths, nil
-}
-
 // keep keeps unit n's work in the run's clone, once its agent passed, in the run's directory dir, as p with
-// the unit, its agent's report, the follow-up it chained, the proofs of the units before and their gross lines.
-func (r *verdict) keep(dir, clone string, p resumePoint, n int, report map[string]any, f *followUp,
-	proofs []proof, pending []followUp, gross int) {
+// the unit and its agent's report.
+func (r *verdict) keep(dir, clone string, p resumePoint, n int, report map[string]any) {
 	if r.saved = 0; r.err != nil {
 		return
 	}
-	p.Unit, p.Report, p.FollowUp, p.Gross = n, report, f, gross
-	p.Pending = append([]followUp(nil), pending...)
-	for _, q := range proofs {
-		p.Proofs = append(p.Proofs, [4]string{q.base, q.test, q.typ, q.testContent})
-	}
+	p.Unit, p.Report = n, report
 	if keepWork(dir, clone, p) == nil { // ponytail: work it fails to keep leaves the run not resumable
 		r.saved = n
 	}
@@ -152,6 +104,7 @@ func (p *resumePoint) worker(a agent, ev map[string]any) {
 
 func (a agent) resumeUnit(r *verdict, root, clone string, p resumePoint,
 	keep *resumePoint) (head string, ev map[string]any, err error) {
+	ev = map[string]any{}                // a failure before the agent's turn still names its unit
 	if err = before(clone); err == nil { // the work it puts back leaves the ignored files out
 		head, err = putBack(root, clone, p)
 	}
@@ -220,30 +173,13 @@ func (a agent) afterE2E(r *verdict, clone string, p resumePoint) (map[string]any
 	return ev, err
 }
 
-// putBack puts the work run p kept in clone, at p's base: the units' commits, then the failed unit's work,
-// uncommitted, byte for byte as kept, whatever core.autocrlf says. It returns the new HEAD, the last of those
-// commits.
+// putBack puts the work run p kept in clone, at p's base, uncommitted, byte for byte as kept, whatever
+// core.autocrlf says. It returns the new HEAD.
 func putBack(root, clone string, p resumePoint) (string, error) {
 	bundle := filepath.Join(runDir(root, p.run), "resume", "work.bundle")
 	for _, args := range [][]string{{"fetch", "-q", bundle, "refs/atm/resume"},
 		{"-c", "core.autocrlf=false", "reset", "-q", "--hard", "FETCH_HEAD"}, {"reset", "-q", "HEAD~1"}} {
 		if _, err := git(clone, args...); err != nil {
-			return "", err
-		}
-	}
-	if p.FollowUp != nil {
-		name := filepath.Clean(filepath.FromSlash(p.FollowUp.RedTest))
-		if !filepath.IsLocal(name) || name == "." {
-			return "", fmt.Errorf("red_test %s is not a new test path", name)
-		}
-		path := filepath.Join(clone, name)
-		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-			return "", err
-		}
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			return "", err
-		}
-		if err := os.WriteFile(path, []byte(p.FollowUp.Test), 0o644); err != nil {
 			return "", err
 		}
 	}
@@ -265,6 +201,10 @@ func resumeFrom(root, label string) (p resumePoint, err error) {
 	}
 	if !r.Resumable || err != nil {
 		return p, fmt.Errorf("run %s is not resumable: only a run that failed after its agent is", label)
+	}
+	if p.Unit > 1 {
+		return p, fmt.Errorf("cannot resume run %s: it stopped at unit %d, a follow-up unit; follow-ups were "+
+			"retired, so launch the issue again", label, p.Unit)
 	}
 	if p.Original == nil || strings.TrimSpace(p.Original.Text) == "" {
 		return p, fmt.Errorf("cannot resume run %s: saved original issue text is missing", label)
@@ -288,12 +228,4 @@ func resuming(root, label string, base *string) (*resumePoint, string, error) {
 	}
 	*base = p.BaseRef
 	return &p, p.Base, nil
-}
-
-// proofs is p's proofs as the units' proofs.
-func (p resumePoint) proofs() (ps []proof) {
-	for _, q := range p.Proofs {
-		ps = append(ps, proof{q[0], q[1], q[2], q[3], false})
-	}
-	return ps
 }

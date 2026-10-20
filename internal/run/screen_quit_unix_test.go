@@ -3,8 +3,6 @@
 package run
 
 import (
-	"encoding/json"
-	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -142,42 +140,50 @@ func TestRealDoctorReadsTheMachineConfig(t *testing.T) {
 func TestRealAttachIgnoresUnknownSteps(t *testing.T) {
 	bin := builtATM(t)
 	top := atmRepo(t)
-	listener, err := net.Listen("unix", short(socket(top)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = listener.Close() }()
-	done := make(chan error, 1)
-	go func() {
-		c, err := listener.Accept()
-		if err != nil {
-			done <- err
-			return
-		}
-		defer func() { _ = c.Close() }()
-		var req request
-		if err := json.NewDecoder(c).Decode(&req); err != nil {
-			done <- err
-			return
-		}
-		enc := json.NewEncoder(c)
-		for _, event := range []string{
-			`{"step":"delivery","state":"passed"}`,
-			`{"step":"external-stage","state":"started"}`,
-			`{"step":"external-stage","check":"external-check","state":"failed"}`,
-		} {
-			if err := enc.Encode(reply{Frame: Frame{Event: json.RawMessage(event)}}); err != nil {
-				done <- err
-				return
-			}
-		}
-		done <- enc.Encode(reply{Run: &Outcome{Run: "old-run", Outcome: "passed", Ended: time.Now()}})
-	}()
+	done := replayed(t, top,
+		`{"step":"delivery","state":"passed"}`,
+		`{"step":"external-stage","state":"started"}`,
+		`{"step":"external-stage","check":"external-check","state":"failed"}`,
+	)
 	shown := coldDeliveryAttach(t, bin, top, "old-run")
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(shown, "✓ Delivery") || strings.Contains(shown, "external-") {
 		t.Fatalf("unknown steps changed the screen:\n%s", shown)
+	}
+}
+
+// Retired or unknown steps between historical units must not obscure the current graph's rows.
+// The real attach still shows the final proof and delivery, without adding another Agent row.
+func TestRealAttachIgnoresRetiredStepsBetweenHistoricalUnits(t *testing.T) {
+	bin := builtATM(t)
+	top := atmRepo(t)
+	done := replayed(t, top,
+		`{"step":"agent","state":"started","unit":1}`,
+		`{"step":"agent","state":"passed","unit":1}`,
+		`{"step":"checks","state":"started","unit":1}`,
+		`{"step":"checks","state":"passed","unit":1}`,
+		`{"step":"scope-review-unit2","state":"started"}`,
+		`{"step":"scope-review-unit2","state":"passed"}`,
+		`{"step":"agent","state":"started","unit":2}`,
+		`{"step":"agent","state":"passed","unit":2}`,
+		`{"step":"checks","state":"started","unit":2}`,
+		`{"step":"checks","check":"red/green","state":"passed"}`,
+		`{"step":"checks","state":"passed","unit":2}`,
+		`{"step":"ponytail","state":"passed"}`,
+		`{"step":"delivery","state":"passed"}`,
+	)
+	shown := coldDeliveryAttach(t, bin, top, "old-run")
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"✓ Agent · unit 1", "✓ red/green", "✓ Slop detector", "✓ Delivery"} {
+		if !strings.Contains(shown, want) {
+			t.Errorf("historical replay lost %q:\n%s", want, shown)
+		}
+	}
+	if strings.Contains(shown, "scope-review") || strings.Contains(shown, "unit 2") {
+		t.Fatalf("historical replay added retired rows:\n%s", shown)
 	}
 }

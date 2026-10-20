@@ -20,12 +20,7 @@ Task type: {{.Type}}. The issue, verbatim:
   Every other file is source.
 
 ## ACCEPTANCE
-{{- if .Next}}
-1. The previous unit is committed. Its follow-up "{{.Next.Title}}" left its red test, `{{.Next.RedTest}}`, in
-   place: it fails today. Do not edit it.
-2. Make it pass, changing only the paths its scope review approved: {{code .Next.Scope.Paths}}. Any other
-   blocks the unit. Report `{{.Next.RedTest}}` as test_file.
-{{- else if eq .Type "fix"}}
+{{- if eq .Type "fix"}}
 1. Write a test on the existing code that fails today on behaviour, not on a missing symbol or module.
    The fix may add files: the test must still fail with those files present and the fix reverted.
    ATM runs the red test with your source changes reverted to the base commit, so the test may only name
@@ -68,21 +63,12 @@ Task type: {{.Type}}. The issue, verbatim:
 Use the `ponytail` skill.
 
 ## FORBIDDEN
-- Anything the issue does not ask for. A real behaviour gap goes to follow-ups, with a red test.
+- Anything the issue does not ask for. A real behaviour gap you see and do not fix goes in your report's
+  summary, as a note.
 - `git commit`, `git push`, `git rebase`, any `gh` command.
 - Deleting, skipping or weakening tests.
 - `sleep` in tests.
 
-## FOLLOW-UPS
-- A follow-up is a behaviour gap you found and did not fix. Write its failing test first, at
-  `.atm/follow-ups/<n>/<red_test>` (n is its 1-based position in follow_ups), never at `<red_test>` itself.
-  ATM runs it at `<red_test>`: one without its test, or whose test passes today, is rejected.
-- Its `criterion` is one sentence copied verbatim from the issue that the gap breaks: ATM then runs it as the
-  next unit. Any other goes to `follow-ups.json`, to become a new issue.
-- Its `paths` are every path that next unit would change, its red test aside. A reviewer checks them, and the
-  red test, against the issue's scope before the unit starts; the unit may change no other.
-
 ## REPORT
 Your final message must be ONLY this JSON object, nothing else:
-{"test_file": "<repo-relative path of the new test, or empty>", "changed_files": ["<path>"], "summary": "<one paragraph>", "commands_run": ["<command>"], "follow_ups": [{"title": "<gap>", "red_test": "<repo-relative path of its failing test>", "criterion": "<sentence copied from the issue>", "paths": ["<repo-relative path its unit would change>"]}]}
-Use `"follow_ups": []` when there are none.
+{"test_file": "<repo-relative path of the new test, or empty>", "changed_files": ["<path>"], "summary": "<one paragraph>", "commands_run": ["<command>"]}

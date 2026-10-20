@@ -36,9 +36,8 @@ only on issues and repositories you would let that agent work on unattended.
 
 Reports in this area are in scope:
 
-- ATM's own path handling: the reported `test_file` must be a local path;
-  follow-up red tests must be new paths outside `.atm/`, and a unit fails if
-  its agent moved HEAD. ATM's logged tool-call boundary is described in
+- ATM's own path handling: the reported `test_file` must be a local path,
+  and a unit fails if its agent moved HEAD. ATM's logged tool-call boundary is described in
   [Agent](docs/how-a-run-flows.md#agent). A way around these checks is a
   vulnerability.
 - Command execution: ATM runs the target repository's `install`, `test`,

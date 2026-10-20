@@ -261,20 +261,21 @@ Flags go before or after the issue. A second issue is an error.
 A run that fails at the checks, the slop detector or the delivery keeps its
 agent's work in `.atm/runs/<label>/resume/`: `resume.json` (the issue argument
 and original issue text, the base commit, the failed unit's number, its agent
-report, the follow-up it chained with its scope review, pending follow-ups,
-earlier proofs, `gross_lines` accumulated before that unit, the failed row,
-its `e2e` output, and the agent's session and settings) and
-`work.bundle` (the commits of the units before it, then the failed unit's
-uncommitted work, new and binary files included, ignored files left
-out). Its `report.json` says `"resumable": true` and names the unit in
+report, the failed row, its `e2e` output, and the agent's session and
+settings) and `work.bundle` (the failed unit's uncommitted work, new and
+binary files included, ignored files left out, on its base).
+Its `report.json` says `"resumable": true` and names the unit in
 `resumable_unit`, and its `next_step` names `atm run --resume <label>`. A run
 that failed before or in the agent is not resumable.
 
-The [follow-up rules](how-a-run-flows.md#follow-ups) describe the cumulative
-budget and the dependency evidence kept when a mandatory gap blocks the run.
+A run kept before follow-ups were retired may have stopped at a later unit.
+`atm run --resume` refuses it before restoring anything, saying follow-ups
+were retired and to launch the issue again; its `report.json`, `resume.json`
+and `work.bundle` stay as they are. Retired fields in a first unit's
+`resume.json` (`follow_up`, `pending`, `gross_lines`, `proofs`) are ignored.
 
 `atm run --resume <label>` starts a new run of the same issue under its own
-label. It uses the saved original issue for briefs and scope review; it never
+label. It uses the saved original issue for its brief; it never
 re-reads the live issue. It reads `.atm.yaml` again from the base ref,
 so a fixed config committed there counts, clones the saved base commit and puts the work back.
 Its Agent row reads `resumed from <label>`, also as `resumed_from` on its unit
@@ -336,7 +337,7 @@ ignores.
 
 | Path | Holds | Kept |
 |------|-------|------|
-| `.atm/runs/<label>/` | `report.json`, the briefs, the agent logs, the worker's scratch directory, each review's scratch directory, `follow-ups.json`, `delivery-output.txt`, this repository's gate files (`delivery.nonce`, `delivery.out` and `delivery.run` when bound), and `resume/` when the run is resumable | Always |
+| `.atm/runs/<label>/` | `report.json`, the briefs, the agent logs, the worker's scratch directory, `delivery-output.txt`, this repository's gate files (`delivery.nonce`, `delivery.out` and `delivery.run` when bound), and `resume/` when the run is resumable | Always |
 | `.atm/clones/atm-run-<timestamp>/` | The run's isolated clone | Removed after the run when no longer needed and cleanup can verify its identity |
 | `.atm/runs.jsonl` | The last state of each retained run, so `atm runs` survives the background process | Every run going and the newest 200 that ended |
 | `.atm/atm.sock`, `.atm/atm.lock`, `.atm/serve.log` | The background process | While it runs; the log stays |

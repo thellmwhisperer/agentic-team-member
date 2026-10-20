@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -27,22 +29,96 @@ func ends(t *testing.T, out *bytes.Buffer, step string) []obj {
 	return got
 }
 
-// readFollowUps is root's .atm/follow-ups.json.
-func readFollowUps(t *testing.T, root string) []obj {
+// noFollowUpsFile fails the test when run label of root wrote a follow-ups.json: follow-ups are retired
+// (decision 7934), and the follow-ups an agent reports stay in its report, with no action on them.
+func noFollowUpsFile(t *testing.T, root, label string) {
 	t.Helper()
-	b, err := os.ReadFile(filepath.Join(root, ".atm", "runs", "t", "follow-ups.json"))
-	var got []obj
-	if err == nil {
-		err = json.Unmarshal(b, &got)
+	if b, err := os.ReadFile(filepath.Join(root, ".atm", "runs", label, "follow-ups.json")); !os.IsNotExist(err) {
+		t.Fatalf("want no follow-ups.json, got %v\n%s", err, b)
 	}
-	if err != nil {
-		t.Fatalf("follow-ups.json: %v\n%s", err, b)
+}
+
+// stateEnds is ends with a state: a resumed agent's message has none.
+func stateEnds(t *testing.T, out *bytes.Buffer, step string) []obj {
+	t.Helper()
+	var got []obj
+	for _, ev := range ends(t, bytes.NewBuffer(out.Bytes()), step) {
+		if ev["state"] != nil {
+			got = append(got, ev)
+		}
 	}
 	return got
 }
 
+// oneUnit fails the test unless out holds one agent and one checks end, unit 1's, neither with follow-ups.
+func oneUnit(t *testing.T, out *bytes.Buffer) {
+	t.Helper()
+	agents, checks := stateEnds(t, out, "agent"), stateEnds(t, out, "checks")
+	if len(agents) != 1 || len(checks) != 1 || agents[0]["unit"] != float64(1) || checks[0]["unit"] != float64(1) ||
+		checks[0]["follow_ups"] != nil || checks[0]["gross_lines"] != nil {
+		t.Fatalf("want one unit with no follow-up handling, got %v, %v", agents, checks)
+	}
+}
+
+// commitConfig commits atm as root's .atm.yaml: a run reads it from the base ref.
+func commitConfig(t *testing.T, root, atm string) {
+	t.Helper()
+	writeFixture(t, filepath.Join(root, ".atm.yaml"), atm)
+	gitT(t, root, "add", ".atm.yaml")
+	gitT(t, root, "commit", "-qm", "config")
+}
+
+// legacyResume resumes run failed of root as run label on issue, once fields, what a resume point kept before
+// follow-ups were retired, are in its resume.json. It returns the resumed run's events and error, and the report
+// the failed run kept.
+func legacyResume(t *testing.T, root, failed, label, issue string, fields obj) (*bytes.Buffer, obj, error) {
+	t.Helper()
+	report := addLegacy(t, root, failed, fields)
+	var out bytes.Buffer
+	err := Run(label, []string{"--resume", failed, issueFile(t, issue)}, &out, io.Discard)
+	return &out, report, err
+}
+
+// addLegacy adds fields to the resume.json of run failed of root and returns the report it kept.
+func addLegacy(t *testing.T, root, failed string, fields obj) obj {
+	t.Helper()
+	path := filepath.Join(root, ".atm", "runs", failed, "resume", "resume.json")
+	var saved obj
+	if b, err := os.ReadFile(path); err != nil || json.Unmarshal(b, &saved) != nil {
+		t.Fatalf("%s's resume.json: %v\n%s", failed, err, b)
+	}
+	report, _ := saved["report"].(obj)
+	maps.Copy(saved, fields)
+	b, _ := json.Marshal(saved)
+	writeFixture(t, path, string(b))
+	return report
+}
+
+// resumedAlone fails the test unless run label of root, which ended with err and events out, resumed the issue's
+// unit alone and passed: its agent's report the one its failed run kept, saved, untouched, and no follow-ups.json,
+// brief of a unit 2 or resume point of its own.
+func resumedAlone(t *testing.T, root, label string, out *bytes.Buffer, err error, saved obj) {
+	t.Helper()
+	if err != nil {
+		t.Fatalf("%s: want the resumed unit alone, nothing blocked, got %v", label, err)
+	}
+	oneUnit(t, out)
+	if got := stateEnds(t, out, "agent")[0]; got["resumed_from"] == nil || !reflect.DeepEqual(got["report"], saved) {
+		t.Fatalf("%s: want the kept report resumed untouched, %v, got %v", label, saved, got)
+	}
+	noFollowUpsFile(t, root, label)
+	for _, name := range []string{"brief-unit-2.md", "resume"} {
+		if _, err := os.Stat(filepath.Join(root, ".atm", "runs", label, name)); !os.IsNotExist(err) {
+			t.Fatalf("%s: want no %s, got %v", label, name, err)
+		}
+	}
+}
+
 func TestRunSortsTheFollowUps(t *testing.T) {
-	root := repo(t, "https://example.com/owner/repo.git", atmYAML)
+	delivered := filepath.Join(t.TempDir(), "delivered")
+	t.Setenv("ATM_TEST_OUT", delivered)
+	root := repo(t, "https://example.com/owner/repo.git",
+		atmSet(atmYAML, "delivery", `{ git ls-files; ls; } > "$ATM_TEST_OUT"`))
 	t.Setenv("ATM_TEST_REPORT", `{"test_file": "a_test.sh", "follow_ups": [`+
 		`{"title": "no test", "red_test": "b_test.sh", "criterion": "The retry error is reported."}, `+
 		`{"title": "green", "red_test": "c_test.sh", "criterion": "The retry error is reported."}, `+
@@ -56,22 +132,25 @@ func TestRunSortsTheFollowUps(t *testing.T) {
 	if err := Run("t", []string{issueFile(t, followUpIssue)}, &out, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if agents := ends(t, bytes.NewBuffer(out.Bytes()), "agent"); len(agents) != 1 {
-		t.Fatalf("no follow-up quotes a criterion: want one unit, got %v", agents)
+	oneUnit(t, &out)
+	var want obj
+	if err := json.Unmarshal([]byte(os.Getenv("ATM_TEST_REPORT")), &want); err != nil {
+		t.Fatal(err)
 	}
-	checks := ends(t, &out, "checks")
-	verdicts, _ := json.Marshal(checks[0]["follow_ups"])
-	for _, want := range []string{"b_test.sh: rejected", "c_test.sh: rejected: it passes today"} {
-		if !strings.Contains(string(verdicts), want) {
-			t.Errorf("the checks' follow_ups lack %q: %s", want, verdicts)
+	report, _ := stateEnds(t, &out, "agent")[0]["report"].(obj)
+	if !reflect.DeepEqual(report["follow_ups"], want["follow_ups"]) {
+		t.Fatalf("want the four follow-ups left as the agent reported them, in order, got %v", report["follow_ups"])
+	}
+	if strings.Contains(out.String(), "_test.sh: rejected") {
+		t.Fatalf("want no follow-up sorted, rejected or verified, got\n%s", out.String())
+	}
+	b, err := os.ReadFile(delivered)
+	for _, red := range []string{"b_test.sh", "c_test.sh", "d_test.sh", "e_test.sh"} {
+		if err != nil || strings.Contains(string(b), red) {
+			t.Fatalf("want %s neither placed nor delivered, got %v:\n%s", red, err, b)
 		}
 	}
-	got := readFollowUps(t, root)
-	if len(got) != 2 || got[0]["red_test"] != "d_test.sh" || got[0]["test"] != "false\n" ||
-		got[0]["criterion"] != "A retry runs once" || got[1]["title"] != "outside" ||
-		got[1]["red_test"] != "t/e_test.sh" || got[1]["test"] != "test -f e.txt\n" {
-		t.Fatalf("want the two red follow-ups outside the issue, with their tests, got %v", got)
-	}
+	noFollowUpsFile(t, root, "t")
 }
 
 func TestFollowUpRedTestMustBeNewOutsideATM(t *testing.T) {
@@ -83,32 +162,47 @@ func TestFollowUpRedTestMustBeNewOutsideATM(t *testing.T) {
 		{name: "inside atm", path: ".atm/hidden_test.sh"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			dir := repo(t, "https://example.com/owner/repo.git", atmYAML)
-			f := followUp{RedTest: tc.path}
-			source := filepath.Join(dir, ".atm", "follow-ups", "1", filepath.FromSlash(tc.path))
-			if err := os.MkdirAll(filepath.Dir(source), 0o755); err != nil {
-				t.Fatal(err)
+			delivered := filepath.Join(t.TempDir(), "delivered")
+			t.Setenv("ATM_TEST_OUT", delivered)
+			root := repo(t, "https://example.com/owner/repo.git", atmSet(atmYAML, "delivery",
+				`{ cat a_test.sh; test ! -e .atm/hidden_test.sh || echo hidden; } > "$ATM_TEST_OUT"`))
+			t.Setenv("ATM_TEST_RED", tc.path)
+			t.Setenv("FAKE_AGENT_WORK", fixWork+`; mkdir -p ".atm/follow-ups/1/$(dirname "$ATM_TEST_RED")"; `+
+				`echo false > ".atm/follow-ups/1/$ATM_TEST_RED"; printf '{"test_file":"a_test.sh","follow_ups":`+
+				`[{"title":"gap","red_test":"%s","criterion":"The retry error is reported."}]}' "$ATM_TEST_RED" `+
+				`> .atm/fake-report.json`)
+			var out bytes.Buffer
+			if err := Run("t", []string{issueFile(t, followUpIssue)}, &out, io.Discard); err != nil {
+				t.Fatalf("want a follow-up's red test neither placed nor run, got %v", err)
 			}
-			if err := os.WriteFile(source, []byte("false\n"), 0o644); err != nil {
-				t.Fatal(err)
+			oneUnit(t, &out)
+			if b, err := os.ReadFile(delivered); err != nil ||
+				string(b) != "grep -q fixed a.txt && ! grep -q broken a.txt\n" {
+				t.Fatalf("want the issue's test delivered as written and %s not placed, got %v:\n%s", tc.path, err, b)
 			}
-			why, err := red(dir, 1, &f, "sh {file}")
-			if err != nil || why != "red_test "+filepath.FromSlash(tc.path)+" is not a new test path" {
-				t.Fatalf("want new-path rejection, got %q, %v", why, err)
-			}
+			noFollowUpsFile(t, root, "t")
 		})
 	}
 }
 
 func TestQuotedAcceptsCriterionAsMarkedWholeLine(t *testing.T) {
-	if !quoted("Acceptance criteria:\n  7) Exit code is 0.\n", "Exit code is 0") {
-		t.Fatal("a criterion matching a whole numbered line should chain without punctuation")
+	root := repo(t, "https://example.com/owner/repo.git", atmYAML)
+	t.Setenv("FAKE_AGENT_WORK", fixWork+"; mkdir -p .atm/follow-ups/1; echo false > .atm/follow-ups/1/c1_test.sh; "+
+		`printf '{"test_file":"a_test.sh","follow_ups":[{"title":"gap","red_test":"c1_test.sh",`+
+		`"criterion":"Exit code is 0"}]}' > .atm/fake-report.json`)
+	var out bytes.Buffer
+	err := Run("t", []string{issueFile(t, "# Exit\nType: fix\n\nAcceptance criteria:\n  7) Exit code is 0.\n")},
+		&out, io.Discard)
+	if err != nil {
+		t.Fatalf("a criterion matching a whole numbered line chains nothing, got %v", err)
 	}
+	oneUnit(t, &out)
+	noFollowUpsFile(t, root, "t")
 }
 
-// chainWork is unit k's work: unit 1 fixes a.txt with a line too many, each later unit makes the red test of
-// the one before pass by adding u<k> to a.txt. Each declares the follow-up c<k>_test.sh, red until a.txt has
-// u<k+1>, quoting $ATM_TEST_CRITERION. Unit 2 runs $ATM_TEST_EDIT first.
+// chainWork is unit k's work: unit 1 fixes a.txt with a line too many, each later unit, were one to run, would
+// make the red test of the one before pass by adding u<k> to a.txt. Each declares the follow-up c<k>_test.sh, red
+// until a.txt has u<k+1>, quoting $ATM_TEST_CRITERION. Unit 2 would run $ATM_TEST_EDIT first.
 const chainWork = `if [ -f c2_test.sh ]; then k=3; echo u3 >> a.txt; elif [ -f c1_test.sh ]; then k=2; ` +
 	`eval "$ATM_TEST_EDIT"; echo u2 >> a.txt; else k=1; printf 'fixed\nextra\n' > a.txt; ` +
 	`echo 'grep -q fixed a.txt && ! grep -q broken a.txt' > a_test.sh; fi; mkdir -p .atm/follow-ups/1; ` +
@@ -126,33 +220,20 @@ func TestRunChainsAFollowUpOnTheIssueUpToThreeUnits(t *testing.T) {
 	t.Setenv("FAKE_PONYTAIL_WORK", "grep -v extra a.txt > cut; mv cut a.txt")
 	t.Setenv("FAKE_PONYTAIL_REPORT", cut)
 	var out bytes.Buffer
-	err := Run("t", []string{issueFile(t, followUpIssue)}, &out, io.Discard)
-	if err == nil || !strings.Contains(err.Error(), "A retry runs once after a timeout.") {
-		t.Fatalf("want the run blocked on the criterion unit 3 leaves unmet, got %v", err)
+	if err := Run("t", []string{issueFile(t, followUpIssue)}, &out, io.Discard); err != nil {
+		t.Fatalf("want a follow-up on the issue to chain nothing and block nothing, got %v", err)
 	}
-	agents := ends(t, bytes.NewBuffer(out.Bytes()), "agent")
-	if len(agents) != 3 || agents[2]["unit"] != float64(3) || agents[2]["state"] != "passed" {
-		t.Fatalf("want three units, got %v", agents)
+	oneUnit(t, &out)
+	if p := ends(t, bytes.NewBuffer(out.Bytes()), "ponytail"); len(p) != 1 || p[0]["kept"] != true {
+		t.Fatalf("want the cut kept on the one unit, got %v", p)
 	}
-	if p := ends(t, bytes.NewBuffer(out.Bytes()), "ponytail"); len(p) != 0 {
-		t.Fatalf("want no ponytail cut on a blocked run, got %v", p)
+	if b, err := os.ReadFile(got); err != nil || string(b) != "ponytail: 1 cuts\nfix: Retry on timeout\ninit\n" {
+		t.Fatalf("want only the issue's unit, then the cut, delivered, got %v\n%s", err, b)
 	}
-	if _, err := os.Stat(got); !os.IsNotExist(err) {
-		t.Fatalf("want no delivery on a blocked run, got %v", err)
+	if _, err := os.Stat(filepath.Join(root, ".atm", "runs", "t", "brief-unit-2.md")); !os.IsNotExist(err) {
+		t.Fatalf("want no brief for a second unit, got %v", err)
 	}
-	clone, _ := ends(t, &out, "clone")[0]["clone"].(string)
-	want := "feat: Retry on timeout\nfeat: Retry on timeout\nfix: Retry on timeout\ninit"
-	if b := gitT(t, clone, "log", "--format=%s"); b != want {
-		t.Fatalf("want each unit committed on the one before, got\n%s\nwant\n%s", b, want)
-	}
-	brief, err := os.ReadFile(filepath.Join(root, ".atm", "runs", "t", "brief-unit-2.md"))
-	if err != nil || !strings.Contains(string(brief), "`c1_test.sh`") {
-		t.Fatalf("want unit 2's brief to name its red test, got %v\n%s", err, brief)
-	}
-	if left := readFollowUps(t, root); len(left) != 1 || left[0]["red_test"] != "c3_test.sh" ||
-		left[0]["test"] != "grep -q u4 a.txt\n" {
-		t.Fatalf("want unit 3's follow-up, past the third unit, in follow-ups.json, got %v", left)
-	}
+	noFollowUpsFile(t, root, "t")
 }
 
 func TestRunLabelsDeliveredChainedUnitAndChecks(t *testing.T) {
@@ -170,35 +251,39 @@ func TestRunLabelsDeliveredChainedUnitAndChecks(t *testing.T) {
 		t.Fatal(err)
 	}
 	dev := "atm <atm@example.com>|atm <atm@example.com>"
-	want := "feat: Retry on timeout|" + dev + "\nfix: Retry on timeout|" + dev
+	want := "fix: Retry on timeout|" + dev + "\ninit|" + dev
 	if b, err := os.ReadFile(filepath.Join(got, "log")); err != nil || string(b) != want+"\n" {
-		t.Fatalf("want delivered unit types in commit history, got %q, %v", b, err)
+		t.Fatalf("want the issue's unit type alone in commit history, got %q, %v", b, err)
 	}
 	clone := reader(t, got)("ATM_CLONE")
-	if b := gitT(t, clone, "log", "-2", "--format=%b"); b != "atm unit 2\n\natm unit 1" {
-		t.Fatalf("want delivered unit numbers in commit bodies, got %q", b)
+	if b := gitT(t, clone, "log", "-1", "--format=%b"); b != "atm unit 1" {
+		t.Fatalf("want the delivered unit number in its commit body, got %q", b)
 	}
-	checks := ends(t, &out, "checks")
-	if len(checks) != 2 || checks[0]["unit"] != float64(1) || checks[1]["unit"] != float64(2) {
-		t.Fatalf("want unit numbers on both checks events, got %v", checks)
-	}
+	oneUnit(t, &out)
 }
 
 func TestRunDiesWhenAUnitEditsItsRedTest(t *testing.T) {
-	repo(t, "https://example.com/owner/repo.git", atmYAML)
+	delivered := filepath.Join(t.TempDir(), "delivered")
+	t.Setenv("ATM_TEST_OUT", delivered)
+	root := repo(t, "https://example.com/owner/repo.git",
+		atmSet(atmYAML, "delivery", `{ git ls-files; cat a.txt; } > "$ATM_TEST_OUT"`))
 	t.Setenv("ATM_TEST_CRITERION", "The retry error is reported.")
 	t.Setenv("ATM_TEST_EDIT", "echo 'grep -q u2 a.txt # edited' > c1_test.sh;")
 	t.Setenv("FAKE_AGENT_WORK", chainWork)
 	var out bytes.Buffer
-	err := Run("t", []string{issueFile(t, followUpIssue)}, &out, io.Discard)
-	if err == nil || !strings.Contains(err.Error(), "c1_test.sh") || !strings.Contains(err.Error(), "edit") {
-		t.Fatalf("want unit 2 to fail for editing its red test, got %v", err)
+	if err := Run("t", []string{issueFile(t, followUpIssue)}, &out, io.Discard); err != nil {
+		t.Fatalf("want no unit 2, so no red test of its own to edit, got %v", err)
 	}
+	oneUnit(t, &out)
+	if b, err := os.ReadFile(delivered); err != nil || string(b) != ".atm.yaml\na.txt\na_test.sh\nfixed\nextra\n" {
+		t.Fatalf("want unit 1's work alone delivered, no red test placed or edited, got %v:\n%s", err, b)
+	}
+	noFollowUpsFile(t, root, "t")
 }
 
 func TestRunDiscardsACutThatUndoesAnEarlierUnit(t *testing.T) {
 	root := repo(t, "https://example.com/owner/repo.git", atmSet(atmSet(atmYAML, "test", ""), "delivery",
-		"sh regression_test.sh && sh second_test.sh"))
+		"sh regression_test.sh && test ! -e second_test.sh"))
 	if err := os.WriteFile(filepath.Join(root, "source.txt"), []byte("broken\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -215,7 +300,7 @@ func TestRunDiscardsACutThatUndoesAnEarlierUnit(t *testing.T) {
 	t.Setenv("FAKE_PONYTAIL_REPORT", strings.Replace(cut, "a.txt", "source.txt", 1))
 	var out bytes.Buffer
 	if err := Run("t", []string{issueFile(t, followUpIssue)}, &out, io.Discard); err != nil {
-		t.Fatalf("want the cut discarded and both units' tests passing at delivery, got %v", err)
+		t.Fatalf("want the cut discarded, the issue's test passing and no follow-up's test at delivery, got %v", err)
 	}
 	if p := ends(t, &out, "ponytail"); len(p) != 1 || p[0]["kept"] != false ||
 		!strings.Contains(fmt.Sprint(p[0]["reason"]), "regression_test.sh") {
