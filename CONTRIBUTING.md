@@ -74,7 +74,7 @@ ATM runs on Linux and macOS, and on Windows through WSL.
 
 | Workflow | Runs on | Filtered jobs | Does |
 |---|---|---|---|
-| `go.yml` | every PR to `main`, push to `main` | Test/lint: paths classified by [`scripts/changed-areas.sh`](scripts/changed-areas.sh) | `make test` and `make lint` on ubuntu and macos |
+| `go.yml` | every PR to `main`, push to `main` | Test/lint: paths classified by [`scripts/changed-areas.sh`](scripts/changed-areas.sh) | `make test` and `make lint` on ubuntu; on macos, `internal/run` in 3 parallel shards by test name, each running its tests in 3 processes, beside one job for the other packages and the lint |
 | `release.yml` | push to `main` | always | release-please keeps a release PR with the changelog from the commits; when it merges, builds the darwin and linux archives (amd64, arm64) and their checksums into the draft release, then publishes it as a prerelease; a maintainer marks the blessed release as latest for `atm update` and `install.sh` |
 | `auto-merge.yml` | every PR to `main` | always | manages `review-required` and `review-completed`, and arms or disarms auto-merge (below) |
 
