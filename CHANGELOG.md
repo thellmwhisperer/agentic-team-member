@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.0](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.6.0...v1.7.0) (2026-10-20)
+
+
+### Features
+
+* Remove ATM task types and the entire red/green test ([ff7dd05](https://github.com/thellmwhisperer/agentic-team-member/commit/ff7dd059e463bc23bf9c47ecd4593f1d10e0e2d9))
+
 ## [1.6.0](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.5.0...v1.6.0) (2026-10-20)
 
 
