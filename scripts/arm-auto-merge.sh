@@ -1,8 +1,6 @@
 #!/bin/sh
 # Arms GitHub auto-merge by rebase on PR $1 ($2 is the pull_request event action): GitHub merges
-# it once main's required checks pass. Low and Medium risk arm at once. High risk, or a body
-# without a readable level under `## Risk Assessment`, waits for the `risk-reviewed` label (see
-# CONTRIBUTING.md); a release-please PR that only changes CHANGELOG.md and the manifest is Low.
+# it once main's required checks pass. Risk and release eligibility: CONTRIBUTING.md.
 # No-mistakes commits label it review-required and wait for review-completed, which any push
 # removes; pr-discarded never arms (skills/no-mistakes-review/SKILL.md).
 set -eu
