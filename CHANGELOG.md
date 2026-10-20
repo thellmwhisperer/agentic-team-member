@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.3](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.1.2...v1.1.3) (2026-10-20)
+
+
+### Bug Fixes
+
+* the fake agent takes its own session when FAKE_AGENT_SETSID is set ([715601d](https://github.com/thellmwhisperer/agentic-team-member/commit/715601d33fac41d45aa812a5be32f738d6e73893))
+* the lost-server test waits for its released fake agent ([8360133](https://github.com/thellmwhisperer/agentic-team-member/commit/8360133aa8787307af41e16208d4acf48a2fd18d))
+
 ## [1.1.2](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.1.1...v1.1.2) (2026-10-19)
 
 
