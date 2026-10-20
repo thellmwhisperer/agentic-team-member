@@ -116,8 +116,7 @@ worker call gets an empty scratch directory under the run's directory, outside
 the clone, named in its brief and set as its `TMPDIR`. Logs, outputs and files
 the worker sets aside go there, including on an agent turn after an e2e failure
 in a resumed run. The system temp directory remains outside the allowance.
-A read-only review may also write under its own scratch directory. Reading
-outside the clone, writing inside it by any means, and URLs pass. The error
+Reading outside the clone, writing inside it by any means, and URLs pass. The error
 names the first offending call. Missing or invalid reports follow
 [Rejected reports](#rejected-reports).
 For native agents, any non-zero exit

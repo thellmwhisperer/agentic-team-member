@@ -88,9 +88,8 @@ Permission requests get the first `allow_once` option when every location
 and raw-input path value is inside the clone and no command writes outside.
 Path values are taken whole; relative values resolve against the clone.
 Commands use the [post-step reach checker](how-a-run-flows.md#agent).
-Permission requests from a worker or read-only review also allow that call's
-scratch directory, the same single outside-the-clone allowance the post-step
-checker makes.
+Permission requests from the worker also allow its scratch directory, the
+same single outside-the-clone allowance the post-step checker makes.
 Otherwise ATM selects the first `reject_once`, never an `*_always` option.
 If the required option is absent, ATM returns `cancelled`. Each answer is a
 line in the agent's log. Tool calls remain subject to the post-step check,

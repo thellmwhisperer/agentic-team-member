@@ -71,6 +71,6 @@ next time.
 ## Before a PR merges
 
 Read `git log --oneline origin/main..<branch>` and the run's `report.json` for
-the unit commit, any cuts and the agent's notes. If the gate added a
-`no-mistakes(...)` commit, follow
+the unit commit and any cuts; read `worker.jsonl` for the agent's notes. If the
+gate added a `no-mistakes(...)` commit, follow
 [the review circuit](../skills/no-mistakes-review/SKILL.md) before merging.
