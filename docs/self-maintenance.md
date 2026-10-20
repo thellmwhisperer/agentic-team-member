@@ -7,7 +7,7 @@ it.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/self-maintenance-dark.svg">
-  <img alt="The loop. An issue with a red test goes to an ATM run. FAIL goes back to the issue. PASS goes to the no-mistakes gate; its findings go to whoever launched the run, who answers them, then the gate opens a PR. Required risk or no-mistakes review precedes auto-merge. Merged on main, the issue closes." src="assets/self-maintenance-light.svg" width="900">
+  <img alt="The loop. An issue with a red test goes to an ATM run. A failed check first asks the launcher, and stop keeps the work for a later run. PASS goes to the no-mistakes gate; its findings go to whoever launched the run, who answers them, then the gate opens a PR. Required risk or no-mistakes review precedes auto-merge. Merged on main, the issue closes." src="assets/self-maintenance-light.svg" width="900">
 </picture>
 
 ## The loop
@@ -19,9 +19,8 @@ it.
 2. **An ATM run.** Start `atm run <number> --follow` in the launching session. Fill `.atm.yaml` once with the
    repository commands, file patterns and the no-mistakes delivery line; see
    [following one run](how-a-run-flows.md#following-one-run) and [Configuration](configuration.md).
-3. **The checks.** A failed check stops the run: the report says which check
-   failed and why, and the issue gets a better contract or the code a better
-   check. The final [report](how-a-run-flows.md#the-report) also covers the
+3. **The checks.** A failed check [asks the launcher](how-a-run-flows.md#checks).
+   The final [report](how-a-run-flows.md#the-report) also covers the
    [delivery gate](how-a-run-flows.md#delivery).
 4. **The gate.** The green branch goes through the
    [configured delivery line](configuration.md#atmyaml).

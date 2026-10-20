@@ -16,7 +16,7 @@ against the issue before handing the branch to your configured command.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/pipeline-dark.svg">
-  <img alt="ATM pipeline: issue, isolated clone, contract, coding agent, checks. FAIL stops the run. PASS goes to the slop detector, a code quality gate where a model may only cut, then to the delivery and code review gate. The documented example of that gate is no-mistakes, a graph of its own where review and document are models, test and PR are code with a model part, and rebase, lint and CI call a model only after a fix answer." src="docs/assets/pipeline-light.svg" width="1000">
+  <img alt="ATM pipeline: issue, isolated clone, contract, coding agent, checks. A failed check asks the launcher to approve, fix or stop. PASS goes to the slop detector, a code quality gate where a model may only cut, then to the delivery and code review gate. The documented example of that gate is no-mistakes, a graph of its own where review and document are models, test and PR are code with a model part, and rebase, lint and CI call a model only after a fix answer." src="docs/assets/pipeline-light.svg" width="1000">
 </picture>
 
 ## A real run
@@ -64,7 +64,7 @@ every check ran again before it was kept.
 
 ## Who decides what
 
-| Step | Who | Says no to |
+| Step | Who | Blocks on |
 |------|-----|-----------|
 | Clone and contract | code | a failed clone or install, an incomplete configuration |
 | Write the fix | **model** | nothing: it decides nothing |
@@ -102,8 +102,8 @@ atm doctor
 atm run 280 --follow
 ```
 
-`--follow` prints the run's events as JSON lines until it ends. Omit the flag
-for the terminal screen. A run can also take an issue file, such as
+`--follow` prints the run's events as JSON lines until it ends or awaits a
+Checks answer. Omit the flag for the terminal screen. A run can also take an issue file, such as
 `plans/retry.md`.
 
 `.atm.yaml` declares the repository's `install`, `test`, optional `e2e`,
@@ -118,6 +118,7 @@ agent, model and effort. Both are in [Configuration](docs/configuration.md).
 | `atm skill`, `atm skill install` | See [ATM's driving skill](docs/configuration.md#skill) |
 | `atm run [flags] <issue>` | Runs an issue: a GitHub number or a file with a `Type:` line |
 | `atm run --resume <run>` | Runs a failed run's issue again from its agent's work; see [Resuming a failed run](docs/configuration.md#resuming-a-failed-run) |
+| `atm answer <run> <choice>` | Answers a failed post-agent check; see [Checks](docs/how-a-run-flows.md#checks) |
 | `atm status` | The runs going |
 | `atm attach [run]` | A run's [screen and tool-call controls](docs/how-a-run-flows.md#the-screen); it quits when the run ends, or on q or Ctrl+C |
 | `atm runs` | Every retained run and its report |
@@ -132,7 +133,7 @@ For `atm run`, including `--follow`, and `atm axi run`:
 | Exit | Meaning |
 |------|---------|
 | `0` | The unit passed and Delivery passed or was skipped; see [Delivery](docs/how-a-run-flows.md#delivery) |
-| `1` | The unit failed; nothing is delivered |
+| `1` | The unit failed or awaits a Checks answer; nothing is delivered yet |
 | `2` | [preflight](docs/how-a-run-flows.md#before-the-run), [serve build check](docs/how-a-run-flows.md#the-screen), issue, clone or contract failed |
 | `4` | The unit passed, but Delivery failed |
 

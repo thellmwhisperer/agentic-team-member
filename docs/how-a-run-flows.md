@@ -7,14 +7,15 @@ set before a run is in [Configuration](configuration.md).
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/red-green-dark.svg">
-  <img alt="For fix and hotfix tasks, ATM sets aside changes to files already in the base while keeping the test and new files: the test must fail. ATM restores the changes and runs the test again: it must pass. A test that passes without the fix or fails with it fails the run." src="assets/red-green-light.svg" width="900">
+  <img alt="For fix and hotfix tasks, ATM sets aside changes to files already in the base while keeping the test and new files: the test must fail. ATM restores the changes and runs the test again: it must pass. A test that passes without the fix or fails with it asks the launcher to approve, fix or stop." src="assets/red-green-light.svg" width="900">
 </picture>
 
 ## Following one run
 
 `atm run <issue> --follow` starts the run and prints one JSON object per run
-event on standard output until the run ends. The flag goes before or after
-the issue and works on a pipe or a terminal. It also works with `--resume`.
+event on standard output until the run ends or awaits a Checks answer. The flag
+goes before or after the issue and works on a pipe or a terminal. It also works
+with `--resume`.
 The events are the run's own step starts, results and live activity, with
 `step` and `ts`, plus fields specific to each event. Output from a clone or
 Checks command has `check` naming its row, such as `install`, `red/green`,
@@ -45,9 +46,10 @@ A resumed clone still starts at its saved base commit.
 
 ## The steps
 
-A failed step stops the run; the steps after it are not run.
+A failed step stops the run before later steps, except a post-agent Checks
+failure, which waits for the launcher's answer; see [Checks](#checks).
 
-| Step | Does | Fails the run when |
+| Step | Does | Failure condition |
 |------|------|--------------------|
 | Issue | Reads the issue file or GitHub issue and its `Type:` | The issue cannot be read, or has no valid type |
 | Clone | Clones the repository at the commit checked by preflight, or the saved base commit on resume into `.atm/clones/`, runs `install` | The ref, the clone or `install` fails |
@@ -172,12 +174,14 @@ atm answer <run> stop
 
 The `decision` event carries the finding and these three choices. The clone and
 its work stay in place while the launcher decides. `approve` records the finding
-and approval in `report.json` under `decisions`, then continues through the remaining steps to delivery. `fix` gives the worker one turn with the
-finding, reusing its session when supported, then runs Checks again. Another
+and approval, then continues through the remaining steps to delivery. `fix`
+gives the worker one turn with the finding, reusing its session when supported,
+then runs Checks again. Another
 failure asks again. `stop` ends the run and keeps its work. Answers are recorded
 before the run continues; a second answer to the same question is rejected.
-`atm attach <run>` shows the question again or follows the continuation.
-
+`atm run --follow` and an attached screen return with exit 1 at the question;
+the background run remains waiting. `atm attach <run>` shows the question
+again or follows the continuation after an answer.
 
 The agent must not have committed. ATM records the clone's paths before the
 agent starts, including contents of ignored nested repositories. Before
@@ -201,14 +205,15 @@ task type, and run `test`, `e2e`, `typecheck` and `lint`, empty ones skipped. In
 this repository `e2e` runs `scripts/cover-diff.sh` on the counters `test`
 wrote in ATM's fresh `GOCOVERDIR`. Which lines fail,
 and the ways out, are under [`e2e`](configuration.md#atmyaml). The first
-failure stops the run with that command's last 60 lines. A command that
-commits fails the checks too.
+failed command asks the launcher with its last 60 lines as the finding. A
+command that commits fails the checks too.
 
 Resuming an `e2e` red gives the agent one turn in its saved session before
 Checks starts again at `install`. The turn receives the failed output and
 the two ways out above, with the Agent step's time limits. A second
-red stops the run. Other failures and sessions that cannot resume go straight
-to Checks with `resume: no agent turn (<reason>)`; see
+red asks the launcher without an automatic agent turn. Other failures and
+sessions that cannot resume go straight to Checks with
+`resume: no agent turn (<reason>)`; see
 [Resuming a failed run](configuration.md#resuming-a-failed-run).
 
 ### What each task type proves
@@ -333,6 +338,7 @@ it is on disk before delivery reads it.
 | `units` | The unit's number (`1`), base commit, test file, type, result, red/green proof row span, and red and green trials: command, exit code, last 60 lines, `started_at` and `duration_ms` |
 | `reproofs` | The latest repeated proof and span, after a kept cut |
 | `commands` | Every configured command that ran, the clone's `install` included, with its result, last 60 lines, `started_at` and `duration_ms` |
+| `decisions` | Each post-agent Checks finding and the launcher's `approve`, `fix` or `stop` answer; the answer is empty while the question is pending |
 | `head_sha` | The delivered branch's final commit |
 | `serve` | The version of the `atm serve` process that executed the run, from `buildinfo.String()`, for example `vA (aaa1111) 2026-10-15` |
 
