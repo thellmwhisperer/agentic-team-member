@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.1](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.3.0...v1.3.1) (2026-10-20)
+
+
+### Bug Fixes
+
+* Delivery fails a run when no-mistakes' 8-minute wait elapses while the gate is still running ([319997a](https://github.com/thellmwhisperer/agentic-team-member/commit/319997a31384f2ae80f1aedeb3cd23b7aea6a1bb))
+
 ## [1.3.0](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.2.3...v1.3.0) (2026-10-20)
 
 
