@@ -48,7 +48,7 @@ func TestResumeKeepsEarlierUnchainedFollowUps(t *testing.T) {
 		t.Fatalf("want the unchained follow-up left in the kept report, as a note, got %v", saved)
 	}
 	b, err := os.ReadFile(delivered)
-	if err != nil || string(b) != "fix: Retry on timeout\ninit\n.atm.yaml\na.txt\na_test.sh\nfixed\n" {
+	if err != nil || string(b) != "chore: Retry on timeout\ninit\n.atm.yaml\na.txt\na_test.sh\nfixed\n" {
 		t.Fatalf("want unit 1's kept work alone delivered, got %v:\n%s", err, b)
 	}
 	if b, err := os.ReadFile(order); err != nil || string(b) != "worker\nponytail\n" {

@@ -149,7 +149,8 @@ func TestRunBlocksAnUnmetCriterionWithItsEvidence(t *testing.T) {
 		t.Fatalf("want a follow-up quoting a criterion to block nothing, got %v", err)
 	}
 	oneUnit(t, out)
-	if b, err := os.ReadFile(delivered); err != nil || !strings.HasPrefix(string(b), "ponytail: 1 cuts\nfix:") {
+	if b, err := os.ReadFile(delivered); err != nil ||
+		!strings.HasPrefix(string(b), "ponytail: 1 cuts\nchore: Retry on timeout\ninit\n") {
 		t.Fatalf("want the run delivered, got %v\n%s", err, b)
 	}
 	noFollowUpsFile(t, root, "t")

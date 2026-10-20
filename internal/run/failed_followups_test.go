@@ -92,8 +92,8 @@ func TestAUnitThatFailsChecksKeepsItsFollowUps(t *testing.T) {
 	}
 }
 
-// failsOnTestFile checks that the unit of a run whose agent does work, reporting an empty test_file, fails at
-// checks on it alone, before any delivery, and returns the run's events.
+// failsOnTestFile checks that the unit of a run whose agent reports a missing test file fails at checks on it
+// alone, before any delivery, and returns the run's events.
 func failsOnTestFile(t *testing.T, work string) *bytes.Buffer {
 	t.Helper()
 	delivered := filepath.Join(t.TempDir(), "delivered")
@@ -102,7 +102,7 @@ func failsOnTestFile(t *testing.T, work string) *bytes.Buffer {
 	t.Setenv("FAKE_AGENT_WORK", work)
 	var out bytes.Buffer
 	if err := Run("t", []string{issueFile(t, followUpIssue)}, &out, io.Discard); err == nil {
-		t.Fatal("want checks to reject the empty test_file")
+		t.Fatal("want checks to reject the missing test_file")
 	}
 	failedUnit(t, root, "t", &out, "test_file")
 	if _, err := os.Stat(delivered); !os.IsNotExist(err) {
@@ -114,7 +114,7 @@ func failsOnTestFile(t *testing.T, work string) *bytes.Buffer {
 func TestUnit1ThatFailsChecksKeepsItsFollowUps(t *testing.T) {
 	out := failsOnTestFile(t, fixWork+"; mkdir -p .atm/follow-ups/1; "+
 		"echo 'grep -q restored a.txt' > .atm/follow-ups/1/r_test.sh; "+
-		`printf '{"test_file":"","follow_ups":[{"title":"atomic restore","red_test":"r_test.sh",`+
+		`printf '{"test_file":"missing_test.sh","follow_ups":[{"title":"atomic restore","red_test":"r_test.sh",`+
 		`"criterion":"Restores are atomic."}]}' > .atm/fake-report.json`)
 	report, _ := stateEnds(t, out, "agent")[0]["report"].(obj)
 	want := []any{obj{"title": "atomic restore", "red_test": "r_test.sh", "criterion": "Restores are atomic."}}
@@ -125,7 +125,7 @@ func TestUnit1ThatFailsChecksKeepsItsFollowUps(t *testing.T) {
 
 func TestInvalidFollowUpsDoNotHideAChecksFailure(t *testing.T) {
 	out := failsOnTestFile(t,
-		fixWork+`; mkdir -p .atm; printf '{"test_file":"","follow_ups":"later"}' > .atm/fake-report.json`)
+		fixWork+`; mkdir -p .atm; printf '{"test_file":"missing_test.sh","follow_ups":"later"}' > .atm/fake-report.json`)
 	reason, _ := stateEnds(t, out, "checks")[0]["error"].(string)
 	if first, rest, _ := strings.Cut(reason, "\n"); !strings.Contains(first, "test_file") || rest != "" {
 		t.Fatalf("want the checks reason alone, nothing on the follow-ups next to it, got %q", reason)
