@@ -8,8 +8,7 @@
 Give ATM an issue, from GitHub or a text file. It hands the issue to a coding
 agent you already pay for (see [supported agents](docs/configuration.md#configatmconfigyaml)) inside an
 isolated clone, with a written contract. Then code, not the agent, decides:
-do the configured checks pass on the completed work, and are existing tests
-preserved? A passing run reaches
+do the configured checks pass on the completed work? A passing run reaches
 the slop detector, which may only cut.
 [Delivery](docs/how-a-run-flows.md#delivery) then reviews the committed work
 against the issue before handing the branch to your configured command.
