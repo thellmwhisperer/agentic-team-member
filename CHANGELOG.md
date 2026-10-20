@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.2](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.2.1...v1.2.2) (2026-10-20)
+
+
+### Bug Fixes
+
+* Test repository template races Git maintenance while being copied ([dea225c](https://github.com/thellmwhisperer/agentic-team-member/commit/dea225cf07ce33b2803e67e488c526f92e211a45))
+
 ## [1.2.1](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.2.0...v1.2.1) (2026-10-20)
 
 
