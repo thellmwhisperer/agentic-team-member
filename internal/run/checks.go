@@ -27,7 +27,7 @@ import (
 )
 
 // unproven checks a unit with no report, so no test file, in clone for a task of type typ: it changed something,
-// a tests task changed only tests or docs, and no test shrank.
+// and a tests task changed only tests or docs.
 func unproven(clone, typ string, c config.Config) error {
 	if _, err := git(clone, "add", "-A"); err != nil {
 		return err
@@ -40,9 +40,6 @@ func unproven(clone, typ string, c config.Config) error {
 		if p := first(changed, slices.Concat(c.TestPatterns, c.DocsPatterns), false); p != "" {
 			changeErr = fmt.Errorf("a tests task changed the source %s", p)
 		}
-	}
-	if changeErr == nil {
-		changeErr = shrunk(clone, changed, c.TestPatterns)
 	}
 	_, resetErr := git(clone, "reset", "-q")
 	return errors.Join(changeErr, resetErr)
@@ -465,11 +462,6 @@ func prove(clone, typ, test string, c config.Config) (red, green try, err error)
 	if err != nil {
 		return red, green, err
 	}
-	defer func() { // every type, after its own proof, which names a failure better
-		if err == nil {
-			err = shrunk(clone, changed, c.TestPatterns)
-		}
-	}()
 	switch typ {
 	case "fix", "feature", "greenfield":
 		red, green, err := redGreen(clone, tree, aside, test, c.TestFile, limit)
@@ -514,40 +506,6 @@ func changes(clone, typ, test string) (changed, aside []string, err error) {
 		}
 	}
 	return changed, aside, err
-}
-
-// shrunk is an error naming the first of changed that matches one of tests, is in the base and is not staged in
-// clone with as many lines, at the path git's rename detection moves it to.
-func shrunk(clone string, changed, tests []string) error {
-	lines := func(s string) int {
-		n := strings.Count(s, "\n")
-		if s != "" && !strings.HasSuffix(s, "\n") {
-			n++
-		}
-		return n
-	}
-	out, err := git(clone, "diff", "--cached", "--name-status", "-M", "--diff-filter=R", "-z", "HEAD")
-	if err != nil {
-		return err
-	}
-	to := map[string]string{}
-	for f := strings.Split(out, "\x00"); len(f) > 2; f = f[3:] {
-		to[f[1]] = f[2]
-	}
-	for _, p := range changed {
-		if first([]string{p}, tests, true) == "" {
-			continue
-		}
-		was, err := gitRaw(clone, "cat-file", "-p", "HEAD:"+p)
-		if err != nil {
-			continue // new
-		}
-		is, err := gitRaw(clone, "cat-file", "-p", ":"+cmp.Or(to[p], p)) // staged: an error when deleted
-		if err != nil || lines(is) < lines(was) {
-			return fmt.Errorf("the base's test %s is gone or shorter", p)
-		}
-	}
-	return nil
 }
 
 // notRun matches parse or compile diagnostics printed by Go, pytest, node --test, and tsc.

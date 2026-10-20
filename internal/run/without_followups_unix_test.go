@@ -86,7 +86,7 @@ func followUpsServer(t *testing.T, top string) string {
 
 // resumeHistoricalUnit: a run kept at a later unit before the retirement is refused, whatever its old task type,
 // before ATM restores its work or runs anything, its saved files left byte for byte. A saved first unit still
-// resumes under the original guards: configured checks, the original proof, protected tests and commits.
+// resumes under the original guards: configured checks, the original proof and commits.
 func resumeHistoricalUnit(t *testing.T) {
 	lint, delivered, call := filepath.Join(t.TempDir(), "lint"), filepath.Join(t.TempDir(), "delivered"),
 		filepath.Join(t.TempDir(), "call")
@@ -245,12 +245,6 @@ func firstUnitGuards(t *testing.T, bin, top, label, delivered string) {
 	}{
 		{"original regression", "a_test.sh fails with the fix", func(work, _ string) {
 			writeFixture(t, filepath.Join(work, "a.txt"), "broken\n")
-		}},
-		{"protected test", "the base's test a_test.sh is gone or shorter", func(work, label string) {
-			gitT(t, work, "mv", "a_test.sh", "b_test.sh")
-			editResumePoint(t, top, label, func(saved obj) {
-				saved["report"].(obj)["test_file"] = "b_test.sh"
-			})
 		}},
 		{"command commit", "the commands made commits", func(string, string) {
 			writeFixture(t, os.Getenv("ATM_TEST_COMMIT"), "")

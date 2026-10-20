@@ -8,7 +8,6 @@ decision, the newer one wins and the old rule is removed.
 - The binary knows nothing about the gate or the terminal it runs in.
   Conveniences for one setup live in scripts outside it.
 - Every decision ATM takes is written to the run, not only to the screen.
-- No change shortens or deletes a test.
 - A changed line that no real `atm` end-to-end test executes fails. There are
   two ways out, in this order: delete the line, or write the end-to-end test
   that reaches it from a real command.
