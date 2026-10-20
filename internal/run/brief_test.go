@@ -76,7 +76,8 @@ func TestRunWritesTheContractForTheTaskType(t *testing.T) {
 					t.Errorf("brief.md lacks %q:\n%s", want, got)
 				}
 			}
-			for _, unwanted := range []string{"CLAUDE.md", "Allowed paths", "{{", "`sh a_test.sh`", "Task type:", "red test"} {
+			for _, unwanted := range []string{"CLAUDE.md", "Allowed paths", "{{", "`sh a_test.sh`", "follow_ups",
+				"FOLLOW-UPS", "Task type:", "red test"} {
 				if strings.Contains(got, unwanted) {
 					t.Errorf("brief.md has %q:\n%s", unwanted, got)
 				}
