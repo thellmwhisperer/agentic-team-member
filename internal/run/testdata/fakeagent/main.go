@@ -35,13 +35,9 @@ const fixTest = "; echo 'grep -q fixed a.txt && ! grep -q broken a.txt' > a_test
 // fixWork fixes a.txt and tests it, as the tests' fixWork does.
 const fixWork = "echo fixed > a.txt" + fixTest
 
-// work is what the fake agent does in its clone for each task type, a shell line.
-var work = map[string]string{"fix": fixWork, "feature": fixWork, "greenfield": fixWork, "refactor": "echo b > b.txt",
-	"tests": "echo 'grep -q broken a.txt' > a_test.sh", "docs": "echo doc > README.md", "chore": "echo d > deps.txt"}
-
 // fakeAgent plays the agent CLI name in its working directory, as $FAKE_AGENT says. Its call goes to
 // $FAKE_AGENT_CALL. The default plays a run that, when the ponytail skill is where name finds it and outside
-// git, uses it, does $FAKE_AGENT_WORK or else the work of the brief's task type, and reports what that work
+// git, uses it, does $FAKE_AGENT_WORK or else fixWork, and reports what that work
 // left in .atm/fake-report.json, or else fakeReport; fail
 // writes boom to stderr and exits 3; silent writes its pid to $FAKE_AGENT_PID and says nothing more;
 // killed
