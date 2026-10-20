@@ -288,10 +288,7 @@ func (m *Model) apply(f run.Frame) {
 	m.settings(e.Agent)
 	switch {
 	case e.Step == "decision":
-		m.findings = slices.DeleteFunc(m.findings, func(f finding) bool { return f.ref == "Decision" })
-		if e.State == "waiting" {
-			m.findings = append(m.findings, finding{"warning", "Decision", e.Message})
-		}
+		m.decision(e)
 	case e.ID != "" || e.Tool != "":
 		m.tool(e)
 	case e.Thinking != "" || e.Says != "":
@@ -313,6 +310,13 @@ func (m *Model) apply(f run.Frame) {
 	}
 	if m.running() {
 		m.state = "running"
+	}
+}
+
+func (m *Model) decision(e event) {
+	m.findings = slices.DeleteFunc(m.findings, func(f finding) bool { return f.ref == "Decision" })
+	if e.State == "waiting" {
+		m.findings = append(m.findings, finding{"warning", "Decision", e.Message})
 	}
 }
 
