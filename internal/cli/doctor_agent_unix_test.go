@@ -18,12 +18,14 @@ import (
 )
 
 // fakeHello is a claude that writes its directory and arguments to $FAKE_HELLO_CALL, then plays $FAKE_HELLO:
-// no-auth exits 2, hang waits while its owner and directory exist, any other fails with a controlling terminal
-// and answers OK to the brief.
+// no-auth exits 2 after 1.5 s, past the hang's limit, hang waits while its owner and directory exist, any other
+// fails with a controlling terminal and answers OK to the brief.
 const fakeHello = `#!/bin/sh
 { pwd; echo "$@"; } > "$FAKE_HELLO_CALL"
 case "$FAKE_HELLO" in
-no-auth) echo 'no auth' >&2; exit 2 ;;
+no-auth)
+	ATM_FAKE_HELLO_HANG=1 ATM_FAKE_HELLO_TICKS=6 "$ATM_FAKE_TEST_BINARY" -test.run=^TestFakeHelloClaudeHang$ >/dev/null
+	echo 'no auth' >&2; exit 2 ;;
 hang) ATM_FAKE_HELLO_HANG=1 exec "$ATM_FAKE_TEST_BINARY" -test.run=^TestFakeHelloClaudeHang$ ;;
 esac
 if (exec </dev/tty) 2>/dev/null; then echo 'has a terminal'; exit 3; fi
@@ -44,7 +46,8 @@ func helloRepo(t *testing.T, mode string) (dir, call string) {
 	return helloRepoWith(t, "claude", mode, fakeHello)
 }
 
-// Invoked by fakeHello instead of tail so a killed test cannot leave the hang running.
+// Invoked by fakeHello instead of tail so a killed test cannot leave the hang running; with $ATM_FAKE_HELLO_TICKS
+// it stops after that many ticks.
 func TestFakeHelloClaudeHang(t *testing.T) {
 	if os.Getenv("ATM_FAKE_HELLO_HANG") != "1" {
 		return
@@ -53,12 +56,14 @@ func TestFakeHelloClaudeHang(t *testing.T) {
 	if err != nil || owner <= 0 {
 		t.Fatalf("invalid fake claude owner: %v", err)
 	}
+	ticks, _ := strconv.Atoi(os.Getenv("ATM_FAKE_HELLO_TICKS"))
 	wd, wdErr := os.Getwd()
 	tick := time.NewTicker(250 * time.Millisecond)
 	defer tick.Stop()
-	for range tick.C {
+	for i := 1; ; i++ {
+		<-tick.C
 		_, err := os.Stat(wd)
-		if syscall.Kill(owner, 0) == syscall.ESRCH || wdErr != nil || err != nil {
+		if syscall.Kill(owner, 0) == syscall.ESRCH || wdErr != nil || err != nil || i == ticks {
 			return
 		}
 	}
@@ -198,7 +203,9 @@ func TestDoctorAgentSaysHelloTheWayARunDoes(t *testing.T) {
 	} {
 		t.Run(c.mode, func(t *testing.T) {
 			defer func(d time.Duration) { helloLimit = d }(helloLimit)
-			helloLimit = time.Second
+			if c.mode == "hang" {
+				helloLimit = time.Second
+			}
 			dir, call := helloRepo(t, c.mode)
 			out, err := atm(t, "doctor", "--agent")
 			got := lastLine(out)
