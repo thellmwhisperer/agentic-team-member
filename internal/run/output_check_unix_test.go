@@ -41,31 +41,11 @@ func TestRunFollowOutputNamesItsCommand(t *testing.T) {
 	var deliveryRows []string
 	deliveryOutputs := 0
 	for _, ev := range events(t, bytes.NewReader(out)) {
-		if ev["step"] == "delivery" && ev["state"] != nil && ev["check"] != nil {
-			deliveryRows = append(deliveryRows, ev["check"].(string)+":"+ev["state"].(string))
-			if ev["state"] != "started" {
-				if ms, ok := ev["duration_ms"].(float64); !ok || ms < 0 {
-					t.Errorf("delivery row has no duration: %v", ev)
-				}
-			}
-			b, _ := json.Marshal(ev)
-			evidence.Write(append(b, '\n'))
+		if row := checkFollowDeliveryRow(t, ev, &evidence); row != "" {
+			deliveryRows = append(deliveryRows, row)
 		}
-		output, ok := ev["output"].(string)
-		if !ok || ev["step"] != "checks" && ev["step"] != "delivery" {
-			continue
-		}
-		check, _ := ev["check"].(string)
-		if check == "" || want[output] != "" && check != want[output] {
-			t.Errorf("output %q names %q, want %q: %v", output, check, want[output], ev)
-		}
-		if want[output] != "" {
-			seen[output] = true
-			if output == "out-delivery" {
-				deliveryOutputs++
-			}
-			b, _ := json.Marshal(ev)
-			evidence.Write(append(b, '\n'))
+		if checkFollowOutput(t, ev, want, seen, &evidence) {
+			deliveryOutputs++
 		}
 	}
 	for output := range want {
@@ -82,4 +62,38 @@ func TestRunFollowOutputNamesItsCommand(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+}
+
+func checkFollowDeliveryRow(t *testing.T, ev map[string]any, evidence *bytes.Buffer) string {
+	if ev["step"] == "delivery" && ev["state"] != nil && ev["check"] != nil {
+		if ev["state"] != "started" {
+			if ms, ok := ev["duration_ms"].(float64); !ok || ms < 0 {
+				t.Errorf("delivery row has no duration: %v", ev)
+			}
+		}
+		b, _ := json.Marshal(ev)
+		evidence.Write(append(b, '\n'))
+		return ev["check"].(string) + ":" + ev["state"].(string)
+	}
+	return ""
+}
+
+func checkFollowOutput(
+	t *testing.T, ev map[string]any, want map[string]string, seen map[string]bool, evidence *bytes.Buffer,
+) bool {
+	output, ok := ev["output"].(string)
+	if !ok || ev["step"] != "checks" && ev["step"] != "delivery" {
+		return false
+	}
+	check, _ := ev["check"].(string)
+	if check == "" || want[output] != "" && check != want[output] {
+		t.Errorf("output %q names %q, want %q: %v", output, check, want[output], ev)
+	}
+	if want[output] != "" {
+		seen[output] = true
+		b, _ := json.Marshal(ev)
+		evidence.Write(append(b, '\n'))
+		return output == "out-delivery"
+	}
+	return false
 }
