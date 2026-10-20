@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.0](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.4.2...v1.5.0) (2026-10-20)
+
+
+### Features
+
+* A check that fails after the agent stops the run and asks: approve, fix or stop (part 1 of [#501](https://github.com/thellmwhisperer/agentic-team-member/issues/501)) ([7974cf5](https://github.com/thellmwhisperer/agentic-team-member/commit/7974cf5ea855fc945e5c789005762e23fc47d0c6))
+
 ## [1.4.2](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.4.1...v1.4.2) (2026-10-20)
 
 
