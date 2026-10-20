@@ -143,6 +143,12 @@ var gateWaits = []gate{
 		[]string{noRun, toon(newRun, "completed")}, 2, true, false, "outcome: passed"},
 	{"hold expires and the run completes before the first query", newRun, oldWait, 1, nil,
 		[]string{noRun, toon(newRun, "completed")}, 2, true, false, "outcome: passed"},
+	{"completed without a successful outcome is not success", newRun, oldWait, 1, nil,
+		[]string{noRun, strings.Replace(toon(newRun, "completed"), "outcome: passed\n", "", 1)}, 2,
+		false, false, "status: completed"},
+	{"completed with a failed outcome is not success", newRun, oldWait, 1, nil,
+		[]string{noRun, strings.Replace(toon(newRun, "completed"), "outcome: passed", "outcome: failed", 1)}, 2,
+		false, false, "outcome: failed"},
 	{"terminal failure quoting the old wait", newRun, "outcome: failed\n" + oldWait, 1, nil,
 		[]string{noRun, toon(newRun, "failed")}, 2, false, false, "outcome: failed"},
 	{"state query fails", newRun, oldWait, 1, nil,
@@ -407,6 +413,7 @@ func observed(t *testing.T, c gate, pass bool, out, calls string) {
 	if !strings.Contains(out, c.shows) {
 		t.Fatalf("delivery does not show the gate's last state %q:\n%s", c.shows, out)
 	}
+	t.Logf("delivery output:\n%s\nno-mistakes calls:\n%s", out, calls)
 }
 
 // launched checks that a delivery against c inits, asks the branch's state, then starts one run with its nonce and

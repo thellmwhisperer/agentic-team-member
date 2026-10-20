@@ -122,7 +122,7 @@ your machine's file.
 | `test_file` | Runs one test: `{file}` is its path, `{dir}` its directory as `./dir`. When not empty, it must contain `{file}` or `{dir}`. For Go, `{tests}` expands to `^(TestA|TestB)$` for the Go tests defined in the reported file, for `go test -run`. A file with no Go tests fails; if the command reports `no tests to run`, the proof fails and names the reported file. |
 | `test_patterns` | Globs of the test files |
 | `docs_patterns` | Globs of the documentation files |
-| `delivery` | Shell line that takes the run's branch from its clone, for example to a PR. Empty skips delivery |
+| `delivery` | Shell command that takes the run's branch from its clone, for example to a PR. Empty skips delivery |
 
 Every command runs with `sh -c`. For a Go repository:
 
@@ -134,13 +134,13 @@ lint: golangci-lint run
 test_file: go test -count=1 -run {tests} {dir}
 test_patterns: ["**/*_test.go"]
 docs_patterns: ["**/*.md", "docs/**"]
-delivery: 'no-mistakes init && no-mistakes axi run --intent "$ATM_INTENT"'
+delivery: ''
 ```
 
-The `delivery` line hands the branch to
-[no-mistakes](https://github.com/kunchenguid/no-mistakes). Each run's clone is
-new, so the line sets up its gate with `no-mistakes init` first. Without
-`--yes` it only reports: whoever launched the run answers each finding.
+This repository's [delivery line](../.atm.yaml) hands the branch to
+[no-mistakes](https://github.com/kunchenguid/no-mistakes); see
+[the gate](self-maintenance.md#the-loop) for its run and recovery contract.
+Without `--yes` it only reports: whoever launched the run answers each finding.
 
 The `Go` workflow of this repository keeps, for every push to `main`, the
 end-to-end coverage profile of that commit as the artifact `cover-main-<sha>`
