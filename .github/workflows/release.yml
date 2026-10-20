@@ -4,6 +4,12 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published release tag to verify
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -16,6 +22,7 @@ jobs:
   # AUTO_MERGE_TOKEN, not GITHUB_TOKEN: a release PR opened with GITHUB_TOKEN
   # starts no workflow, so the required Go checks never reports and it cannot merge.
   release-please:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
@@ -122,9 +129,15 @@ jobs:
           TAG: ${{ needs.release-please.outputs.tag_name }}
         run: gh release edit "$TAG" --draft=false --prerelease=false
 
-  # The real artefact: the release just published, installed by install.sh, must answer its own tag.
+  # The real artefact: a published release, installed by install.sh, must answer its own tag.
   answers:
     needs: [release-please, finalize]
+    if: |
+      !cancelled() &&
+      (github.event_name == 'workflow_dispatch' ||
+       (needs.release-please.result == 'success' && needs.finalize.result == 'success'))
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -133,15 +146,20 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ needs.release-please.outputs.tag_name }}
+          ref: ${{ inputs.tag || needs.release-please.outputs.tag_name }}
 
       - name: Install the release and ask its version
         env:
-          TAG: ${{ needs.release-please.outputs.tag_name }}
+          TAG: ${{ inputs.tag || needs.release-please.outputs.tag_name }}
           ATM_PREFIX: ${{ runner.temp }}/bin
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          sh install.sh --version "$TAG"
+          umask 077
+          curl_config="$(mktemp -d "$RUNNER_TEMP/atm-curl.XXXXXX")"
+          trap 'rm -rf "$curl_config"' EXIT
+          printf 'header = "Authorization: Bearer %s"\n' "$GH_TOKEN" > "$curl_config/.curlrc"
+          CURL_HOME="$curl_config" sh install.sh --version "$TAG"
           version="$("$ATM_PREFIX/atm" --version)"
           set -- $version
           [ "$1" = atm ] && [ "$2" = "$TAG" ]
