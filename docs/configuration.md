@@ -131,7 +131,7 @@ install: go mod download
 test: go test ./...
 typecheck: go vet ./...
 lint: golangci-lint run
-test_file: go test -run {tests} {dir}
+test_file: go test -count=1 -run {tests} {dir}
 test_patterns: ["**/*_test.go"]
 docs_patterns: ["**/*.md", "docs/**"]
 delivery: 'no-mistakes init && no-mistakes axi run --intent "$ATM_INTENT"'

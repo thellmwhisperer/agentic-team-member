@@ -52,4 +52,5 @@ func TestOwnProofDoesNotReuseCachedResult(t *testing.T) {
 	if err != nil || len(runs) != 1 || runs[0].Outcome != "passed" {
 		t.Fatalf("want the fix proved on base files that do not build, got %+v, %v", runs, err)
 	}
+	t.Logf("ATM recorded outcome: %s; proof: %v", runs[0].Outcome, readReport(t, runs[0].Report)["units"])
 }
