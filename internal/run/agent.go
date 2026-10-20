@@ -989,8 +989,8 @@ func strs(input json.RawMessage, write bool) []string {
 
 // outside is the first of calls that writes outside clone, as its tool and its first 200 characters: a write or
 // edit tool, or a shell command, whose destination is an absolute path not under clone. Reading outside, and
-// writing inside by any means, pass. scratch, when given, is the one directory outside clone those calls may
-// write in: a review's or worker's.
+// writing inside by any means, pass. scratch, when given, is the one directory outside clone the worker may
+// write in.
 func outside(calls []use, clone string, scratch ...string) string {
 	allowed := []string{filepath.ToSlash(clone)}
 	if len(scratch) > 0 && scratch[0] != "" {
