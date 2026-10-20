@@ -24,10 +24,8 @@ func TestRunAsksOnAFailedCheck(t *testing.T) {
 			call := filepath.Join(t.TempDir(), "call")
 			t.Setenv("FAKE_AGENT_CALL", call)
 			t.Setenv("FAKE_AGENT_WORK", "if test -f first-turn; then touch repaired; else "+fixWork+"; touch first-turn; fi")
-			bin := decisionServer(t, top)
-			f := startFollow(t, bin, top, false, "run", "--follow", issueFile(t, issue))
-			clone, label := failedCheckQuestion(t, f, top)
-			f.exit(1)
+			bin := followUpsServer(t, top)
+			clone, label := failedCheckQuestion(t, bin, top, "run", "--follow", issueFile(t, issue))
 			assertCheckWaiting(t, top, label)
 			if data, err := os.ReadFile(filepath.Join(clone, "a.txt")); err != nil || string(data) != "fixed\n" {
 				t.Fatalf("paused run lost its work: %q, %v", data, err)
@@ -70,8 +68,9 @@ func TestRunAsksOnAFailedCheck(t *testing.T) {
 	}
 }
 
-func failedCheckQuestion(t *testing.T, f *followed, top string) (string, string) {
+func failedCheckQuestion(t *testing.T, bin, top string, args ...string) (string, string) {
 	t.Helper()
+	f := startFollow(t, bin, top, false, args...)
 	var clone, label string
 	timer := time.NewTimer(30 * time.Second)
 	defer timer.Stop()
@@ -100,6 +99,7 @@ func failedCheckQuestion(t *testing.T, f *followed, top string) (string, string)
 			t.Fatal("no question after failed check")
 		}
 	}
+	f.exit(1)
 	return clone, label
 }
 
@@ -131,18 +131,10 @@ func TestRunAsksOnAFailedCheckAgain(t *testing.T) {
 	t.Setenv("FAKE_AGENT_CALL", call)
 	t.Setenv("FAKE_AGENT_STREAM", `{"type":"system","subtype":"init","session_id":"sess-1"}`+"\n")
 	t.Setenv("FAKE_AGENT_WORK", fixWork)
-	bin := decisionServer(t, top)
-	f := startFollow(t, bin, top, false, "run", "--follow", "--harness", "claude", issueFile(t, issue))
-	_, label := failedCheckQuestion(t, f, top)
-	f.exit(1)
+	bin := followUpsServer(t, top)
+	_, label := failedCheckQuestion(t, bin, top, "run", "--follow", "--harness", "claude", issueFile(t, issue))
 	for _, answer := range []string{"fix", "stop"} {
-		cmd := exec.Command(bin, "answer", label, answer)
-		cmd.Dir = top
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("%s: %v %s", answer, err, out)
-		}
-		end := startFollow(t, bin, top, false, "attach", label)
-		end.exit(1)
+		answerFailedCheck(t, bin, top, label, answer, 1)
 	}
 	rep := readReport(t, filepath.Join(runDir(top, label), "report.json"))
 	decisions, _ := rep["decisions"].([]any)
@@ -160,19 +152,6 @@ func TestRunAsksOnAFailedCheckAgain(t *testing.T) {
 	}
 }
 
-// Exit serve gracefully so real-binary coverage counters reach GOCOVERDIR.
-func decisionServer(t *testing.T, top string) string {
-	t.Helper()
-	bin := filepath.Join(t.TempDir(), "atm")
-	buildATM(t, bin, "follow-test")
-	if err := os.MkdirAll(filepath.Join(top, ".atm"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	server := startVersionServe(t, bin, top)
-	t.Cleanup(func() { endServe(bin, top, server) })
-	return bin
-}
-
 func TestRunAsksOnAFailedCheckInSingleUnit(t *testing.T) {
 	builtATM(t)
 	for _, row := range []string{"lint", "typecheck"} {
@@ -180,17 +159,10 @@ func TestRunAsksOnAFailedCheckInSingleUnit(t *testing.T) {
 			cfg := atmSet(atmYAML, row, "if test -f a_test.sh; then echo failed-check-finding; exit 1; fi")
 			top := gitT(t, repo(t, "local", cfg), "rev-parse", "--show-toplevel")
 			t.Setenv("FAKE_AGENT_WORK", fixWork)
-			bin := decisionServer(t, top)
-			f := startFollow(t, bin, top, false, "run", "--follow", issueFile(t, issue))
-			clone, label := failedCheckQuestion(t, f, top)
-			f.exit(1)
+			bin := followUpsServer(t, top)
+			clone, label := failedCheckQuestion(t, bin, top, "run", "--follow", issueFile(t, issue))
 			assertCheckWaiting(t, top, label)
-			cmd := exec.Command(bin, "answer", label, "stop")
-			cmd.Dir = top
-			if out, err := cmd.CombinedOutput(); err != nil {
-				t.Fatalf("stop: %v %s", err, out)
-			}
-			startFollow(t, bin, top, false, "attach", label).exit(1)
+			answerFailedCheck(t, bin, top, label, "stop", 1)
 			rep := e2eReport(t, top, label)
 			if len(rep.Units) != 1 || rep.Units[0].Unit != 1 || rep.FailedNode != "checks" ||
 				!strings.Contains(rep.Reason, row+":") {
@@ -207,10 +179,8 @@ func TestRunAsksOnAFailedCheckKeepsQuestionInHistory(t *testing.T) {
 	builtATM(t)
 	top := gitT(t, repo(t, "local", atmSet(atmYAML, "lint", "echo failed-check-finding; exit 1")),
 		"rev-parse", "--show-toplevel")
-	bin := decisionServer(t, top)
-	f := startFollow(t, bin, top, false, "run", "--follow", issueFile(t, issue))
-	_, label := failedCheckQuestion(t, f, top)
-	f.exit(1)
+	bin := followUpsServer(t, top)
+	_, label := failedCheckQuestion(t, bin, top, "run", "--follow", issueFile(t, issue))
 	// Cheap failures fill the ordinary 200-run history while this question remains unanswered.
 	for range 200 {
 		cmd := exec.Command(bin, "run", "missing-issue.md")
@@ -235,6 +205,16 @@ func assertCheckWaiting(t *testing.T, top, label string) {
 	}
 }
 
+func answerFailedCheck(t *testing.T, bin, top, label, answer string, code int) {
+	t.Helper()
+	cmd := exec.Command(bin, "answer", label, answer)
+	cmd.Dir = top
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("%s: %v %s", answer, err, out)
+	}
+	startFollow(t, bin, top, false, "attach", label).exit(code)
+}
+
 func TestRunAsksOnAFailedCheckResumesSavedWorker(t *testing.T) {
 	builtATM(t)
 	cfg := atmSet(atmYAML, "lint", "echo failed-check-finding; exit 1") + "harness: codex\n"
@@ -244,28 +224,25 @@ func TestRunAsksOnAFailedCheckResumesSavedWorker(t *testing.T) {
 	t.Setenv("FAKE_AGENT_ORDER", order)
 	t.Setenv("FAKE_AGENT_STREAM", `{"type":"system","subtype":"init","session_id":"saved-session"}`+"\n")
 	t.Setenv("FAKE_AGENT_WORK", fixWork)
-	bin := decisionServer(t, top)
-	f := startFollow(t, bin, top, false, "run", "--follow", "--harness", "claude", "--model", "saved-model",
+	bin := followUpsServer(t, top)
+	_, original := failedCheckQuestion(t, bin, top, "run", "--follow", "--harness", "claude", "--model", "saved-model",
 		"--effort", "high", "--harness-arg=--verbose", "--env", "ATM_SAVED_WORKER=yes", issueFile(t, issue))
-	_, original := failedCheckQuestion(t, f, top)
-	f.exit(1)
 	stop := exec.Command(bin, "answer", original, "stop")
 	stop.Dir = top
 	if out, err := stop.CombinedOutput(); err != nil {
 		t.Fatalf("stop original: %v %s", err, out)
 	}
 	startFollow(t, bin, top, false, "attach", original).exit(1)
-	f = startFollow(t, bin, top, false, "run", "--follow", "--resume", original)
-	_, label := failedCheckQuestion(t, f, top)
-	f.exit(1)
+	_, label := failedCheckQuestion(t, bin, top, "run", "--follow", "--resume", original)
 	for _, answer := range []string{"fix", "stop"} {
-		cmd := exec.Command(bin, "answer", label, answer)
-		cmd.Dir = top
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("%s: %v %s", answer, err, out)
-		}
-		startFollow(t, bin, top, false, "attach", label).exit(1)
+		answerFailedCheck(t, bin, top, label, answer, 1)
 	}
+	assertSavedWorkerInvocation(t, call, order)
+	assertSavedWorkerResume(t, top, label)
+}
+
+func assertSavedWorkerInvocation(t *testing.T, call, order string) {
+	t.Helper()
 	got := agentCall(t, call)
 	args := strings.Join(got.Args, " ")
 	for _, want := range []string{"--resume saved-session", "--model saved-model", "--effort high", "--verbose"} {
@@ -279,6 +256,10 @@ func TestRunAsksOnAFailedCheckResumesSavedWorker(t *testing.T) {
 	if calls := workerCalls(t, order); calls != 2 {
 		t.Fatalf("want initial worker and one fix turn, got %d", calls)
 	}
+}
+
+func assertSavedWorkerResume(t *testing.T, top, label string) {
+	t.Helper()
 	data, err := os.ReadFile(filepath.Join(runDir(top, label), "resume", "resume.json"))
 	var saved resumePoint
 	if err != nil || json.Unmarshal(data, &saved) != nil {
@@ -304,10 +285,8 @@ func TestRunAsksOnAFailedCheckDuringBinaryReplacement(t *testing.T) {
 				"delivery", "pwd > "+delivery)
 			top := gitT(t, repo(t, "local", cfg), "rev-parse", "--show-toplevel")
 			t.Setenv("FAKE_AGENT_WORK", "if test -f first-turn; then touch repaired; else "+fixWork+"; touch first-turn; fi")
-			bin := decisionServer(t, top)
-			f := startFollow(t, bin, top, false, "run", "--follow", issueFile(t, issue))
-			clone, label := failedCheckQuestion(t, f, top)
-			f.exit(1)
+			bin := followUpsServer(t, top)
+			clone, label := failedCheckQuestion(t, bin, top, "run", "--follow", issueFile(t, issue))
 			replacement := filepath.Join(t.TempDir(), "atm")
 			buildATM(t, replacement, "follow-test")
 			if err := os.Rename(replacement, bin); err != nil {
