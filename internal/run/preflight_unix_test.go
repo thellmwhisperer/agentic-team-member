@@ -41,7 +41,8 @@ func preflightConfig(t *testing.T, bin string) {
 		root := repo(t, "local", "")
 		writeConfig(t, root, atmYAML)
 		out, code := preflightLaunch(t, bin, root, issueFile(t, issue))
-		assertStopped(t, root, out, code, "config", fmt.Sprintf(`base ref %q: git show %s:.atm.yaml`, gitT(t, root, "rev-parse", "main"), gitT(t, root, "rev-parse", "main")))
+		base := gitT(t, root, "rev-parse", "main")
+		assertStopped(t, root, out, code, "config", fmt.Sprintf(`base ref %q: git show %s:.atm.yaml`, base, base))
 	})
 	t.Run("a base ref that does not resolve", func(t *testing.T) {
 		root := repo(t, "local", atmYAML)
@@ -264,31 +265,7 @@ func preflightFinished(t *testing.T, bin, root string, args ...string) Outcome {
 func preflightFetchedBase(t *testing.T, bin string) {
 	for _, name := range []string{"config", "CI", "clone and background config", "custom branch", "resume"} {
 		t.Run(name, func(t *testing.T) {
-			root := repo(t, "local", atmYAML)
-			old := gitT(t, root, "rev-parse", "main")
-			remote := filepath.Join(t.TempDir(), "remote")
-			gitT(t, root, "clone", "-q", root, remote)
-			gitT(t, root, "remote", "set-url", "origin", remote)
-			if got := gitT(t, root, "rev-parse", "origin/main"); got != old {
-				t.Fatalf("initial remote head %s, want %s", got, old)
-			}
-			config := atmYAML
-			switch name {
-			case "config":
-				config = strings.Replace(atmYAML, "delivery: \"\"\n", "", 1)
-			case "clone and background config", "custom branch", "resume":
-				config = atmSet(atmYAML, "install", "git rev-parse HEAD > "+filepath.Join(root, "observed-head")+"; exit 37")
-			}
-			writeConfig(t, remote, config)
-			gitT(t, remote, "add", ".atm.yaml")
-			gitT(t, remote, "commit", "-q", "--allow-empty", "-m", "remote base")
-			latest := gitT(t, remote, "rev-parse", "main")
-			if name == "custom branch" {
-				gitT(t, remote, "branch", "release", latest)
-			}
-			if got := gitT(t, root, "rev-parse", "origin/main"); got != old {
-				t.Fatalf("fixture fetched %s before launch", got)
-			}
+			root, remote, old, latest := staleBaseFixture(t, name)
 			path := issueFile(t, issue)
 			switch name {
 			case "config":
@@ -319,7 +296,8 @@ func preflightFetchedBase(t *testing.T, bin string) {
 				}
 				end := preflightFinished(t, bin, root, args...)
 				got, err := os.ReadFile(filepath.Join(root, "observed-head"))
-				if end.FailedNode != "clone" || !strings.Contains(end.Reason, "37") || err != nil || strings.TrimSpace(string(got)) != want {
+				if end.FailedNode != "clone" || !strings.Contains(end.Reason, "37") || err != nil ||
+					strings.TrimSpace(string(got)) != want {
 					t.Fatalf("want fetched config and clone %s, got %+v, head %q, %v", want, end, got, err)
 				}
 			}
@@ -328,6 +306,36 @@ func preflightFetchedBase(t *testing.T, bin string) {
 			}
 		})
 	}
+}
+
+func staleBaseFixture(t *testing.T, name string) (root, remote, old, latest string) {
+	t.Helper()
+	root = repo(t, "local", atmYAML)
+	old = gitT(t, root, "rev-parse", "main")
+	remote = filepath.Join(t.TempDir(), "remote")
+	gitT(t, root, "clone", "-q", root, remote)
+	gitT(t, root, "remote", "set-url", "origin", remote)
+	if got := gitT(t, root, "rev-parse", "origin/main"); got != old {
+		t.Fatalf("initial remote head %s, want %s", got, old)
+	}
+	config := atmYAML
+	switch name {
+	case "config":
+		config = strings.Replace(atmYAML, "delivery: \"\"\n", "", 1)
+	case "clone and background config", "custom branch", "resume":
+		config = atmSet(atmYAML, "install", "git rev-parse HEAD > "+filepath.Join(root, "observed-head")+"; exit 37")
+	}
+	writeConfig(t, remote, config)
+	gitT(t, remote, "add", ".atm.yaml")
+	gitT(t, remote, "commit", "-q", "--allow-empty", "-m", "remote base")
+	latest = gitT(t, remote, "rev-parse", "main")
+	if name == "custom branch" {
+		gitT(t, remote, "branch", "release", latest)
+	}
+	if got := gitT(t, root, "rev-parse", "origin/main"); got != old {
+		t.Fatalf("fixture fetched %s before launch", got)
+	}
+	return root, remote, old, latest
 }
 
 func preflightRelativeResources(t *testing.T, bin string) {
@@ -382,14 +390,18 @@ func preflightPiResources(t *testing.T, bin string) {
 		entries, _ := os.ReadDir(runs)
 		_, cloned := os.Stat(filepath.Join(root, ".atm", "clones"))
 		_, served := os.Stat(filepath.Join(root, ".atm", "serve.log"))
-		if code != 2 || !strings.Contains(out, "preflight: worker files: --skill:") || len(entries) != 1 || cloned == nil || served == nil {
+		if code != 2 || !strings.Contains(out, "preflight: worker files: --skill:") ||
+			len(entries) != 1 || cloned == nil || served == nil {
 			t.Fatalf("saved skill should stop resume: exit %d, %s", code, out)
 		}
 	})
 }
 
 func preflightShellWord(t *testing.T, bin string) {
-	for _, line := range []string{"true; echo done", "'true'; echo done", `"true" && echo done`, "  true|cat", "true&", "true>/dev/null", "true</dev/null", "true()", "if true; then true; fi", "cd ."} {
+	for _, line := range []string{
+		"true; echo done", "'true'; echo done", `"true" && echo done`, "  true|cat", "true&",
+		"true>/dev/null", "true</dev/null", "true()", "if true; then true; fi", "cd .",
+	} {
 		t.Run(line, func(t *testing.T) {
 			config := atmSet(strings.Replace(atmYAML, `delivery: ""`, "delivery: "+strconv.Quote(line), 1), "install", "exit 37")
 			root := repo(t, "local", config)
@@ -435,7 +447,8 @@ func preflightFetchFails(t *testing.T, bin string) {
 			if resume {
 				wantRuns = 1
 			}
-			if code != 2 || !strings.Contains(out, "preflight: config: git fetch") || len(entries) != wantRuns || cloned == nil || served == nil {
+			if code != 2 || !strings.Contains(out, "preflight: config: git fetch") ||
+				len(entries) != wantRuns || cloned == nil || served == nil {
 				t.Fatalf("fetch failure should stop launch: exit %d, runs %d, %s", code, len(entries), out)
 			}
 		})
@@ -448,25 +461,7 @@ func preflightResumeResources(t *testing.T, bin string) {
 			for _, saved := range []bool{false, true} {
 				for _, present := range []bool{false, true} {
 					t.Run(fmt.Sprintf("%s/equals=%t/saved=%t/present=%t", flag, equals, saved, present), func(t *testing.T) {
-						root := repo(t, "local", atmSet(atmYAML, "delivery", "no-such-delivery"))
-						resource := filepath.Join(root, "worker.json")
-						if present {
-							if err := os.WriteFile(resource, []byte("{}"), 0o600); err != nil {
-								t.Fatal(err)
-							}
-							gitT(t, root, "add", "worker.json")
-							gitT(t, root, "commit", "-q", "-m", "saved resource")
-						}
-						base := gitT(t, root, "rev-parse", "main")
-						if present {
-							gitT(t, root, "rm", "-q", "worker.json")
-						} else {
-							if err := os.WriteFile(resource, []byte("{}"), 0o600); err != nil {
-								t.Fatal(err)
-							}
-							gitT(t, root, "add", "worker.json")
-						}
-						gitT(t, root, "commit", "-q", "-m", "change current resource")
+						root, base := resumeResourceFixture(t, present)
 						resourceArgs := []string{flag, "worker.json"}
 						if equals {
 							resourceArgs = []string{flag + "=worker.json"}
@@ -499,4 +494,28 @@ func preflightResumeResources(t *testing.T, bin string) {
 			}
 		}
 	}
+}
+
+func resumeResourceFixture(t *testing.T, present bool) (root, base string) {
+	t.Helper()
+	root = repo(t, "local", atmSet(atmYAML, "delivery", "no-such-delivery"))
+	resource := filepath.Join(root, "worker.json")
+	if present {
+		if err := os.WriteFile(resource, []byte("{}"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		gitT(t, root, "add", "worker.json")
+		gitT(t, root, "commit", "-q", "-m", "saved resource")
+	}
+	base = gitT(t, root, "rev-parse", "main")
+	if present {
+		gitT(t, root, "rm", "-q", "worker.json")
+	} else {
+		if err := os.WriteFile(resource, []byte("{}"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		gitT(t, root, "add", "worker.json")
+	}
+	gitT(t, root, "commit", "-q", "-m", "change current resource")
+	return root, base
 }
