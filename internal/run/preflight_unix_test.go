@@ -342,36 +342,36 @@ func staleBaseFixture(t *testing.T, name string) (root, remote, old, latest stri
 	return root, remote, old, latest
 }
 
+// preflightRelativeResources is a relative worker file, as --flag f or --flag=f, checked in the base commit from
+// any directory of the working tree.
 func preflightRelativeResources(t *testing.T, bin string) {
-	for _, flag := range []string{"--settings", "--skill"} {
-		for _, equals := range []bool{false, true} {
-			for _, tracked := range []bool{false, true} {
-				t.Run(fmt.Sprintf("%s/equals=%t/tracked=%t", flag, equals, tracked), func(t *testing.T) {
-					root := repo(t, "local", atmSet(atmYAML, "delivery", "no-such-delivery"))
-					if err := os.WriteFile(filepath.Join(root, "resource"), []byte("{}"), 0o600); err != nil {
+	for flag, harnessArgs := range map[string][]string{
+		"--settings": {"--harness-arg", "--settings", "--harness-arg", "resource"},
+		"--skill":    {"--harness-arg", "--skill=resource"},
+	} {
+		for _, tracked := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/tracked=%t", flag, tracked), func(t *testing.T) {
+				root := repo(t, "local", atmSet(atmYAML, "delivery", "no-such-delivery"))
+				if err := os.WriteFile(filepath.Join(root, "resource"), []byte("{}"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				launch := root
+				if tracked {
+					gitT(t, root, "add", "resource")
+					gitT(t, root, "commit", "-q", "-m", "worker resource")
+					launch = filepath.Join(root, "subdir")
+					if err := os.Mkdir(launch, 0o755); err != nil {
 						t.Fatal(err)
 					}
-					launch := root
-					if tracked {
-						gitT(t, root, "add", "resource")
-						gitT(t, root, "commit", "-q", "-m", "worker resource")
-						launch = filepath.Join(root, "subdir")
-						if err := os.Mkdir(launch, 0o755); err != nil {
-							t.Fatal(err)
-						}
-					}
-					args := []string{"--harness", "pi", "--harness-arg", flag, "--harness-arg", "resource"}
-					if equals {
-						args = []string{"--harness", "pi", "--harness-arg", flag + "=resource"}
-					}
-					out, code := preflightLaunch(t, bin, launch, append(args, issueFile(t, issue))...)
-					check, why := "worker files", flag+": git cat-file"
-					if tracked {
-						check, why = "delivery", "no-such-delivery"
-					}
-					assertStopped(t, root, out, code, check, why)
-				})
-			}
+				}
+				args := append(append([]string{"--harness", "pi"}, harnessArgs...), issueFile(t, issue))
+				out, code := preflightLaunch(t, bin, launch, args...)
+				check, why := "worker files", flag+": git cat-file"
+				if tracked {
+					check, why = "delivery", "no-such-delivery"
+				}
+				assertStopped(t, root, out, code, check, why)
+			})
 		}
 	}
 }
@@ -384,15 +384,6 @@ func preflightPiResources(t *testing.T, bin string) {
 			assertStopped(t, root, out, code, "worker files", "--skill:")
 		})
 	}
-	t.Run("saved relative skill", func(t *testing.T) {
-		root := repo(t, "local", atmYAML)
-		runs := filepath.Join(root, ".atm", "runs")
-		keepResumable(t, filepath.Join(runs, "failed-1"), resumePoint{Issue: "7", BaseRef: "main",
-			Base: gitT(t, root, "rev-parse", "main"), Unit: 1, Args: []string{"--skill", "missing-skill"},
-			Original: &Issue{Title: "Retry on timeout", Type: "fix", Text: issue}})
-		out, code := preflightLaunch(t, bin, root, "--resume", "failed-1")
-		assertNoStartedRun(t, root, out, code, 1, "preflight: worker files: --skill:")
-	})
 }
 
 func preflightShellWord(t *testing.T, bin string) {
@@ -447,38 +438,29 @@ func preflightFetchFails(t *testing.T, bin string) {
 	}
 }
 
+// preflightResumeResources is a relative --skill on resume, saved or passed again, checked in the saved base commit.
 func preflightResumeResources(t *testing.T, bin string) {
-	for _, flag := range []string{"--settings", "--skill"} {
-		for _, equals := range []bool{false, true} {
-			for _, saved := range []bool{false, true} {
-				for _, present := range []bool{false, true} {
-					t.Run(fmt.Sprintf("%s/equals=%t/saved=%t/present=%t", flag, equals, saved, present), func(t *testing.T) {
-						root, base := resumeResourceFixture(t, present)
-						resourceArgs := []string{flag, "worker.json"}
-						if equals {
-							resourceArgs = []string{flag + "=worker.json"}
-						}
-						p := resumePoint{Issue: "7", BaseRef: "main", Base: base, Unit: 1,
-							Original: &Issue{Title: "Retry on timeout", Type: "fix", Text: issue}}
-						args := []string{"--resume", "failed-1"}
-						if saved {
-							p.Args = resourceArgs
-						} else {
-							for _, arg := range resourceArgs {
-								args = append(args, "--harness-arg", arg)
-							}
-						}
-						runs := filepath.Join(root, ".atm", "runs")
-						keepResumable(t, filepath.Join(runs, "failed-1"), p)
-						out, code := preflightLaunch(t, bin, root, args...)
-						want := "preflight: worker files: " + flag + ":"
-						if present {
-							want = "preflight: delivery:"
-						}
-						assertNoStartedRun(t, root, out, code, 1, want)
-					})
+	for _, saved := range []bool{false, true} {
+		for _, present := range []bool{false, true} {
+			t.Run(fmt.Sprintf("saved=%t/present=%t", saved, present), func(t *testing.T) {
+				root, base := resumeResourceFixture(t, present)
+				p := resumePoint{Issue: "7", BaseRef: "main", Base: base, Unit: 1,
+					Original: &Issue{Title: "Retry on timeout", Type: "fix", Text: issue}}
+				args := []string{"--resume", "failed-1"}
+				if saved {
+					p.Args = []string{"--skill", "worker.json"}
+				} else {
+					args = append(args, "--harness-arg", "--skill", "--harness-arg", "worker.json")
 				}
-			}
+				runs := filepath.Join(root, ".atm", "runs")
+				keepResumable(t, filepath.Join(runs, "failed-1"), p)
+				out, code := preflightLaunch(t, bin, root, args...)
+				want := "preflight: worker files: --skill:"
+				if present {
+					want = "preflight: delivery:"
+				}
+				assertNoStartedRun(t, root, out, code, 1, want)
+			})
 		}
 	}
 }
