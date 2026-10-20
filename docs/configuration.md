@@ -134,12 +134,14 @@ lint: golangci-lint run
 test_file: go test -run {tests} {dir}
 test_patterns: ["**/*_test.go"]
 docs_patterns: ["**/*.md", "docs/**"]
-delivery: 'no-mistakes init && no-mistakes axi run --intent "$ATM_INTENT"'
+delivery: ''
 ```
 
-The `delivery` line hands the branch to
+This repository's [configured delivery line](../.atm.yaml) hands the branch to
 [no-mistakes](https://github.com/kunchenguid/no-mistakes). Each run's clone is
-new, so the line sets up its gate with `no-mistakes init` first. Without
+new, so the line sets up its gate with `no-mistakes init` first. If an `axi run`
+wait elapses while the gate is still running, the line reattaches and waits for
+the gate's final result, streaming its output on stderr throughout. Without
 `--yes` it only reports: whoever launched the run answers each finding.
 
 The `Go` workflow of this repository keeps, for every push to `main`, the

@@ -49,6 +49,7 @@ func TestOwnDeliveryLineOutlivesTheGateWait(t *testing.T) {
 	for _, gate := range []string{"passed", "failed"} {
 		t.Run(gate, func(t *testing.T) {
 			progress, calls, rest, err := deliverThroughFake(t, c.Delivery, gate)
+			t.Logf("gate=%s progress_before_release=%t calls=%q stderr_after_release=%q exit=%v", gate, progress, calls, rest, err)
 			if !progress {
 				t.Error("the gate's progress did not reach stderr while the gate ran")
 			}
