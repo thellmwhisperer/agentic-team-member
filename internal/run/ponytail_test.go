@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -465,15 +466,16 @@ func TestPonytailJudgesACutPerFile(t *testing.T) {
 					!strings.HasPrefix(gitT(t, clone, "log", "-1", "--format=%B"), "ponytail: 2 cuts") {
 					t.Fatalf("want c.txt's cut kept too, c.txt is %q", got)
 				}
-				return
+				keptCut(t, clone, sha, "c.txt")
+			} else {
+				keptCut(t, clone, sha)
 			}
-			keptCut(t, clone, sha)
 		})
 	}
 }
 
 // keptCut checks the ponytail commit is a.txt's cut and its tombstone, and every other file is as the unit left it.
-func keptCut(t *testing.T, clone, sha string) {
+func keptCut(t *testing.T, clone, sha string, extra ...string) {
 	t.Helper()
 	if gitT(t, clone, "rev-parse", "HEAD~2") != sha {
 		t.Fatalf("want two commits on %s", sha)
@@ -485,6 +487,9 @@ func keptCut(t *testing.T, clone, sha string) {
 		t.Fatalf("cut a.txt: %q", got)
 	}
 	msg := "ponytail: 1 cuts\n\n- a.txt: dropped two lines (speculative_feature)"
+	if len(extra) != 0 {
+		msg = "ponytail: 2 cuts\n\n- a.txt: dropped two lines (speculative_feature)\n- c.txt: touches the issue (speculative_feature)"
+	}
 	if got := gitT(t, clone, "log", "-1", "--format=%B"); got != msg {
 		t.Fatalf("commit: %q", got)
 	}
@@ -493,7 +498,7 @@ func keptCut(t *testing.T, clone, sha string) {
 		t.Fatalf("cut commit lacks a.txt: %q", diff)
 	}
 	for _, name := range strings.Split(diff, "\n") {
-		if name != "a.txt" && !strings.HasPrefix(name, ".slop/tombstones/") {
+		if name != "a.txt" && !slices.Contains(extra, name) && !strings.HasPrefix(name, ".slop/tombstones/") {
 			t.Fatalf("the cut commit touches %s", name)
 		}
 	}
@@ -527,38 +532,53 @@ func dependentCuts(files ...string) string {
 	return `{"findings": [` + strings.Join(found, ", ") + `], "summary": "s"}`
 }
 
-// The unit's x.txt and y.txt only build together, as a function and its caller do, and z.txt stands alone.
+const (
+	dependentSeed = "printf 'package pair\\nfunc x(unused int) int {\\n return 1\\n}\\n' > x.go; " +
+		"printf 'package pair\\nfunc y() int {\\n return x(1)\\n}\\n' > y.go; printf 'v1\\nextra\\n' > z.txt"
+	cutX         = "printf 'package pair\\nfunc x() int { return 1 }\\n' > x.go"
+	cutY         = "printf 'package pair\\nfunc y() int { return x() }\\n' > y.go"
+	dependentCut = cutX + "; " + cutY
+)
+
+// The unit's x.go and y.go only build together, as a function and its caller do, and z.txt stands alone.
 // The checks of each pass count its re-proofs, which may not exceed twice its cut files, plus one.
 func TestPonytailJudgesDependentCutsTogether(t *testing.T) {
-	const builds = `[ "$(cat x.txt)" = "$(cat y.txt)" ] || { echo "y.txt:3:1: too many arguments"; exit 1; }`
+	const builds = "go test x.go y.go"
 	cases := []struct {
 		name, lint string
 		files      []string
 		kept       bool
 		rejected   map[string]string // each undone file and a part of its reason
 	}{
-		{name: "together", files: []string{"x.txt", "y.txt"}, kept: true},
-		{name: "a check names z.txt", files: []string{"x.txt", "y.txt", "z.txt"}, kept: true,
+		{name: "together", files: []string{"x.go", "y.go"}, kept: true},
+		{name: "a check names z.txt", files: []string{"x.go", "y.go", "z.txt"}, kept: true,
 			lint:     `! grep -q broken z.txt || { echo "z.txt:1: broken"; exit 1; }`,
 			rejected: map[string]string{"z.txt": "lint: exit status 1\nz.txt:1: broken"}},
-		{name: "a check names no cut file", files: []string{"x.txt", "y.txt", "z.txt"}, kept: true,
+		{name: "a check names no cut file", files: []string{"x.go", "y.go", "z.txt"}, kept: true,
 			lint:     `! grep -q broken z.txt || { echo "a line is broken"; exit 1; }`,
 			rejected: map[string]string{"z.txt": "lint: exit status 1\na line is broken"}},
-		{name: "no removal holds", files: []string{"x.txt", "y.txt", "z.txt"},
-			lint: `grep -q extra x.txt || { echo "a line is broken"; exit 1; }`,
-			rejected: map[string]string{"x.txt": "a line is broken", "y.txt": "a line is broken",
+		{name: "no removal holds", files: []string{"x.go", "y.go", "z.txt"},
+			lint: `grep -q unused x.go || { echo "a line is broken"; exit 1; }`,
+			rejected: map[string]string{"x.go": "a line is broken", "y.go": "a line is broken",
 				"z.txt": "a line is broken"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			root, clone, sha, cfg := unitDone(t, "echo v2 > x.txt; echo v2 > y.txt; echo broken > z.txt")
-			for _, f := range []string{"x.txt", "y.txt", "z.txt"} {
-				if err := os.WriteFile(filepath.Join(clone, f), []byte("v1\nextra\n"), 0o600); err != nil {
+			root, clone, sha, cfg := unitDone(t, dependentCut+"; echo broken > z.txt")
+			if _, err := sh(clone, dependentSeed); err != nil {
+				t.Fatal(err)
+			}
+			for _, change := range []string{"true", cutX, cutY} {
+				out, err := sh(clone, change+"; "+builds)
+				if change == "true" && err != nil || change != "true" && (err == nil || !strings.Contains(out, "y.go:")) {
+					t.Fatalf("compiler must accept the original pair and reject either cut alone: %s, %v", out, err)
+				}
+				if _, err := sh(clone, dependentSeed); err != nil {
 					t.Fatal(err)
 				}
 			}
 			if len(c.files) == 2 {
-				t.Setenv("FAKE_PONYTAIL_WORK", "echo v2 > x.txt; echo v2 > y.txt")
+				t.Setenv("FAKE_PONYTAIL_WORK", dependentCut)
 			}
 			counter := filepath.Join(t.TempDir(), "reproofs")
 			cfg.Install, cfg.Typecheck, cfg.Lint = "echo >> '"+filepath.ToSlash(counter)+"'", builds, c.lint
@@ -599,15 +619,15 @@ func rejectedAs(t *testing.T, ev map[string]any, want map[string]string) {
 	}
 }
 
-// keptTogether checks the ponytail commit holds the cuts of x.txt and y.txt, and z.txt as the unit left it.
+// keptTogether checks the ponytail commit holds the cuts of x.go and y.go, and z.txt as the unit left it.
 func keptTogether(t *testing.T, clone string) {
 	t.Helper()
-	for _, f := range []string{"x.txt", "y.txt"} {
-		if got := gitT(t, clone, "show", "HEAD:"+f); got != "v2" {
+	for _, f := range []string{"x.go", "y.go"} {
+		if got := gitT(t, clone, "show", "HEAD:"+f); got != map[string]string{"x.go": "package pair\nfunc x() int { return 1 }", "y.go": "package pair\nfunc y() int { return x() }"}[f] {
 			t.Fatalf("want %s's cut kept, got %q", f, got)
 		}
 	}
-	msg := "ponytail: 2 cuts\n\n- x.txt: cut x.txt (speculative_feature)\n- y.txt: cut y.txt (speculative_feature)"
+	msg := "ponytail: 2 cuts\n\n- x.go: cut x.go (speculative_feature)\n- y.go: cut y.go (speculative_feature)"
 	if got := gitT(t, clone, "log", "-1", "--format=%B"); got != msg {
 		t.Fatalf("ponytail commit: %q", got)
 	}
