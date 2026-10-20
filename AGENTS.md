@@ -40,5 +40,5 @@ decision, the newer one wins and the old rule is removed.
 ## After each merge
 
 - Rebuild and install the binary before the next run.
-- Before a run, check that `main` is green with one call to its latest CI run.
-  With `main` red, no run starts.
+- Before a run, check that `main` is green as defined in
+  [Before the run](docs/how-a-run-flows.md#before-the-run).
