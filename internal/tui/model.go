@@ -266,7 +266,7 @@ func (b bounds) contains(x, y int) bool {
 type event struct {
 	Step, State, Error, TS, Title, Type, SHA, Branch string
 	Check, ID, Tool, Detail, Result, Summary         string
-	Thinking, Says                                   string
+	Thinking, Says, Message                          string
 	ResumedFrom                                      string `json:"resumed_from"`
 	Output                                           *string
 	Number                                           int
@@ -287,6 +287,11 @@ func (m *Model) apply(f run.Frame) {
 	at, _ := time.Parse(time.RFC3339Nano, e.TS)
 	m.settings(e.Agent)
 	switch {
+	case e.Step == "decision":
+		m.findings = slices.DeleteFunc(m.findings, func(f finding) bool { return f.ref == "Decision" })
+		if e.State == "waiting" {
+			m.findings = append(m.findings, finding{"warning", "Decision", e.Message})
+		}
 	case e.ID != "" || e.Tool != "":
 		m.tool(e)
 	case e.Thinking != "" || e.Says != "":
