@@ -33,6 +33,7 @@ type verdict struct {
 	out        io.Writer // the log: each node's start and end, one JSON object a line
 	err        error     // the failed node's
 	at         string    // the node that runs
+	row        string    // the row that runs inside it, whose command prints the output events
 
 	// Resumable says atm run --resume picks the run up, from ResumableUnit's checks: it failed after its agent.
 	Resumable     bool `json:"resumable"`
@@ -201,9 +202,21 @@ func (r *verdict) emit(name string, ev map[string]any) {
 // eventSink is a log a screen reads: it takes the live events inside a node too, which the log leaves out.
 type eventSink interface{ watch(ev []byte) }
 
-// live hands ev, an event inside the node that runs, to the screen that watches the log, if one does.
+// live hands ev, an event inside the node that runs, to the screen that watches the log, if one does. An output
+// event names the command that printed it: the delivery's, or the row that runs.
 func (r *verdict) live(ev map[string]any) {
-	if name, _ := ev["check"].(string); r.at == "delivery" && name != "" {
+	name, _ := ev["check"].(string)
+	if _, out := ev["output"]; out && r.at == "delivery" {
+		ev["check"] = "delivery"
+	} else if out && r.row != "" {
+		ev["check"] = r.row
+	} else if name != "" {
+		r.row = ""
+		if ev["state"] == "started" {
+			r.row = name
+		}
+	}
+	if r.at == "delivery" && name != "" {
 		switch name {
 		case "commit", "command":
 		default:

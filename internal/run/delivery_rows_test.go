@@ -30,7 +30,7 @@ func TestDeliveryEmitsARowPerPart(t *testing.T) {
 	}
 	for _, ev := range w.live {
 		name, _ := ev["check"].(string)
-		if ev["step"] != "delivery" || name == "" {
+		if ev["step"] != "delivery" || name == "" || ev["state"] == nil && ev["output"] != nil {
 			continue
 		}
 		state, _ := ev["state"].(string)
@@ -95,7 +95,7 @@ func TestDeliveryCommandOutputIsNotDuplicated(t *testing.T) {
 	for _, ev := range w.live {
 		if output, _ := ev["output"].(string); strings.Contains(output, "delivery-output-once") {
 			outputs++
-			if ev["check"] != nil {
+			if ev["check"] != "delivery" || ev["state"] != nil {
 				t.Fatalf("command sub-row duplicates output: %v", ev)
 			}
 		}
