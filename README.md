@@ -28,8 +28,8 @@ calls; red and green verified; the slop detector kept 1 cut and re-proved it;
 delivery through no-mistakes opened
 [PR 244](https://github.com/thellmwhisperer/agentic-team-member/pull/244),
 CI green on ubuntu, macOS and Windows, merged, issue closed. It was the second
-run of the issue: the first, 218-29, failed at checks because the agent
-shortened an existing test file.
+run of the issue: the first, 218-29, failed under the former rule against
+shortening an existing test file.
 
 The same run outside a terminal, `atm attach 218-32` piped. Its output:
 
