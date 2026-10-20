@@ -67,7 +67,7 @@ func runAt(label, ref string, args []string, out, summary io.Writer) (err error)
 		return ev, err
 	})
 	var dir, sha string
-	defer func() { err = errors.Join(err, release(dir, repo)) }()
+	defer func() { err = errors.Join(err, leave(r, dir, repo)) }()
 	r.step("clone", func() (ev map[string]any, err error) {
 		var install []cmdResult
 		dir, sha, install, err = clone(root, start, c.Install, repo, r.live)
@@ -111,6 +111,13 @@ func theIssue(from *resumePoint, arg, repo string) (Issue, error) {
 		return *from.Original, nil
 	}
 	return readIssue(arg, repo)
+}
+
+func leave(r *verdict, dir, repo string) error {
+	if r.err != nil && len(r.Decisions) > 0 {
+		return nil
+	}
+	return release(dir, repo)
 }
 
 // parseArgs is atm run's command line: its flags and the issue, in any order. It returns them as flags, then the
@@ -180,11 +187,21 @@ func (a agent) unit(r *verdict, root, dir, sha, text string, i Issue, c config.C
 	r.keep(a.dir, dir, keep, 1, report)
 	var p proof
 	var ev map[string]any
-	r.step("checks", func() (map[string]any, error) {
-		var err error
-		p, ev, err = checkUnit(a.dir, dir, head, test, i.Type, report, c)
-		return ev, err
-	})
+	for {
+		r.step("checks", func() (map[string]any, error) {
+			var err error
+			p, ev, err = checkUnit(a.dir, dir, head, test, i.Type, report, c)
+			return ev, err
+		})
+		if a.checkDecision(r) != "fix" {
+			break
+		}
+		if next := a.fixCheck(r, dir, text, &keep); next != nil {
+			report = next
+			test, _ = report["test_file"].(string)
+		}
+		r.keep(a.dir, dir, keep, 1, report)
+	}
 	r.recordUnit(1, head, test, i.Type, resumed, ev)
 	return []proof{p}
 }
@@ -453,4 +470,28 @@ func git(dir string, args ...string) (string, error) {
 
 func gitRaw(dir string, args ...string) (string, error) {
 	return commandIn(nil, dir, "git", args...)
+}
+
+func (a agent) scopeChecked(r *verdict, dir, head string, n int, i Issue,
+	pending, in []followUp, base string) ([]followUp, []followUp, error) {
+	pending, in, err := a.scoped(a.root, dir, head, n, i, pending, in)
+	if errors.Is(err, errUnmet) && r.saved != 0 {
+		_, bundleErr := git(dir, "bundle", "create", filepath.Join(a.dir, "resume", "work.bundle"),
+			"refs/atm/resume", "HEAD", "^"+base)
+		err = errors.Join(err, bundleErr)
+	}
+	return pending, in, err
+}
+
+func (r *verdict) workerReport(ev map[string]any, n int, f *followUp) (report map[string]any, test string) {
+	if ev != nil {
+		ev["unit"] = n
+	}
+	report, _ = ev["report"].(map[string]any)
+	r.node("agent").Report, _ = ev["report"].(string)
+	test, _ = report["test_file"].(string)
+	if f != nil {
+		test = f.RedTest
+	}
+	return report, test
 }

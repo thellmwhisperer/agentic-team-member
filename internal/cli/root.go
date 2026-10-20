@@ -28,7 +28,7 @@ func root() *cobra.Command {
 		Version: buildinfo.String(), SilenceErrors: true, SilenceUsage: true}
 	c.SetVersionTemplate("atm {{.Version}}\n")
 	c.AddCommand(runCmd(), attachCmd(), listCmd(true), listCmd(false), axiCmd(), initCmd(), doctorCmd(),
-		serveCmd(), updateCmd(), skillCmd())
+		serveCmd(), updateCmd(), skillCmd(), answerCmd())
 	return c
 }
 

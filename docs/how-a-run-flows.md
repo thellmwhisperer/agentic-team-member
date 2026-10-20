@@ -162,6 +162,23 @@ calls fail without returning the report.
 
 ## Checks
 
+When a post-agent check fails, the background run asks its launcher:
+
+```sh
+atm answer <run> approve
+atm answer <run> fix
+atm answer <run> stop
+```
+
+The `decision` event carries the finding and these three choices. The clone and
+its work stay in place while the launcher decides. `approve` records the finding
+and approval in `report.json` under `decisions`, then continues through the remaining steps to delivery. `fix` gives the worker one turn with the
+finding, reusing its session when supported, then runs Checks again. Another
+failure asks again. `stop` ends the run and keeps its work. Answers are recorded
+before the run continues; a second answer to the same question is rejected.
+`atm attach <run>` shows the question again or follows the continuation.
+
+
 The agent must not have committed. ATM records the clone's paths before the
 agent starts, including contents of ignored nested repositories. Before
 `install` or proof, Checks removes newly made ignored files and directories,

@@ -77,6 +77,7 @@ func (o Outcome) Err() error {
 
 type request struct {
 	BaseSHA string   `json:"base_sha,omitempty"`
+	Answer  string   `json:"answer,omitempty"`
 	Cmd     string   `json:"cmd"` // run, attach or runs
 	Args    []string `json:"args,omitempty"`
 	Run     string   `json:"run,omitempty"`
@@ -186,6 +187,7 @@ type bgRun struct {
 	ttys   int
 	size   [2]int
 	pty    *os.File
+	answer chan decisionAnswer
 }
 
 // add puts f on r's screen. Under the server's lock.
@@ -245,7 +247,8 @@ func (s *server) shouldExit(c net.Conn, sock string, moved func() bool) bool {
 	_, gone := os.Stat(sock)
 	s.Lock()
 	defer s.Unlock()
-	if moved() || c == nil && s.busy() == 0 && (gone != nil || time.Since(s.last) > idle) {
+	waiting := s.waiting()
+	if moved() || c == nil && s.busy() == 0 && (gone != nil || !waiting && time.Since(s.last) > idle) {
 		s.handoff = true
 	}
 	if c == nil && s.busy() > 0 {
@@ -314,6 +317,12 @@ func (s *server) handle(c net.Conn) {
 			return
 		}
 		_ = enc.Encode(reply{Run: &o})
+	case "answer":
+		if err := s.answerRun(req.Run, req.Answer); err != nil {
+			_ = enc.Encode(reply{Error: err.Error()})
+		} else {
+			_ = enc.Encode(reply{})
+		}
 	case "runs":
 		s.Lock()
 		runs := make([]Outcome, len(s.runs))
@@ -544,6 +553,9 @@ func (r *bgRun) event(line string) string {
 	if json.Unmarshal([]byte(line), &ev) != nil {
 		return line
 	}
+	if ev.Step == "decision" {
+		return r.decision(line)
+	}
 	if ev.Message != "" {
 		return ev.Message
 	}
@@ -625,7 +637,7 @@ func recordedRuns(root string) ([]Outcome, time.Time, error) {
 // over it, so a crash leaves the last one whole. Under the server's lock.
 func (s *server) save() {
 	for i := 0; len(s.runs) > maxRuns && i < len(s.runs); {
-		if s.runs[i].Ended.IsZero() {
+		if s.runs[i].Ended.IsZero() || s.runs[i].answer != nil {
 			i++
 		} else {
 			s.runs = slices.Delete(s.runs, i, i+1)
