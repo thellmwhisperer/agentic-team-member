@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.0](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.5.0...v1.6.0) (2026-10-20)
+
+
+### Features
+
+* **run:** workers start with SYSTEM.md as their system prompt ([c14f26f](https://github.com/thellmwhisperer/agentic-team-member/commit/c14f26f94e7e693121f500ed22d31e5c3141342e))
+
 ## [1.5.0](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.4.2...v1.5.0) (2026-10-20)
 
 
