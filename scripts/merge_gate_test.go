@@ -316,11 +316,18 @@ func TestArmArmsAReleasePleasePR(t *testing.T) {
 		r = release.run(t, arm+" "+event)
 		if r.err != nil || !strings.Contains(r.calls, disarm) || strings.Contains(r.calls, "--auto ") ||
 			strings.Contains(r.calls, "pr edit") || !strings.Contains(r.out, "risk high") {
-			t.Fatalf("%s: release lost exemption: calls = %q, out = %q, %v; want disabled auto-merge without label changes", event, r.calls, r.out, r.err)
+			t.Fatalf("%s: release lost exemption: calls = %q, out = %q, %v; "+
+				"want disabled auto-merge without label changes", event, r.calls, r.out, r.err)
 		}
 	}
-	release.labels = []string{"risk-reviewed"}
-	r = release.run(t, arm+" synchronize")
+}
+
+func TestArmArmsAReleasePleasePRWithRiskClearance(t *testing.T) {
+	release := pr{head: newHead, subjects: []string{"chore(main): release 1.1.3"},
+		body: ":robot: I have created a release", branch: "release-please--branches--main",
+		files:     []string{"CHANGELOG.md", ".release-please-manifest.json", "go.mod"},
+		autoMerge: true, labels: []string{"risk-reviewed"}}
+	r := release.run(t, arm+" synchronize")
 	if r.err != nil || !strings.Contains(r.calls, armed) || strings.Contains(r.calls, disarm) {
 		t.Fatalf("release with risk clearance: calls = %q, %v; want armed", r.calls, r.err)
 	}
