@@ -397,9 +397,14 @@ the ATM box is too short for that, past its first line the title scrolls
 with the rows, and the ATM box's keys reach it.
 
 While a step runs, the right column shows it. The Agent box shows an agent's
-events. For other steps, the Log box shows the step's name and elapsed time
-until output replaces them. The Agent box's title names the effective harness,
-model and, when set, effort, as
+events, with the Log box below it when the agent emits output. For other steps,
+the Log box shows the step's name and elapsed time until output replaces them.
+Output appears under a header for each command, or under the step when it has
+no command. The header shows its name and state.
+By default, it opens while the command runs and folds when it ends; click
+the header to show or hide its output. Folded headers preview the first line.
+The preview and unfolded output render Markdown as the Agent box does. The Agent
+box's title names the effective harness, model and, when set, effort, as
 `Agent · pi zai/glm-5.3 · max`.
 
 Like Checks, Delivery shows a sub-row per part that runs: `commit`, and
@@ -414,14 +419,14 @@ The Agent box renders the agent's Markdown prose within the panel width as
 `✎` lines; non-empty thinking appears as `∴` lines. By default, consecutive
 successful or running tool calls are folded into one dim line below them,
 with tool names and repeat counts, and each thinking message folds to one
-row with its first line, cut to the panel width, until it is unfolded to its
-full text. A running group has a spinner and its active tool's detail; a
-failed tool keeps its own row, including the first line of its error when
-available. Every row a click folds or unfolds starts with `▸` folded and
-`▾` unfolded, the arrow alone underlined like a link. The box omits empty
-thinking, user messages, skill text, full tool output and the JSON report
-at the end of the agent's final message. Its `N tools` note counts tool
-calls only.
+row with its first line rendered as Markdown and cut to the panel width,
+until it is unfolded to its full text. A running group has a spinner and
+its active tool's detail; a failed tool keeps its own row, including the first
+line of its error when available. Every row a click folds or unfolds starts
+with `▸` folded and `▾` unfolded, the arrow alone underlined like a link.
+The box omits empty thinking, user messages, skill text, full tool output
+and the JSON report at the end of the agent's final message. Its `N tools`
+note counts tool calls only.
 
 In both `atm run` and `atm attach`, press `t` to unfold all tool groups and
 press it again to fold them, and `h` to do the same for every thinking
@@ -438,16 +443,17 @@ or `t hide tool use`, and `h show thinking` or `h hide thinking`, beside
 `q detach` while the Agent box is visible. Fold choices are not saved across
 attaches.
 
-The ATM box and the Agent box each keep every line and scroll on their own.
+The ATM box and the Agent box each keep every line. The Log box keeps up to
+200 output events from the current step. All three boxes scroll on their own.
 The mouse wheel scrolls the box under the pointer. The keys scroll the box
-with the `*` marker in its title: the Agent box while it shows, the ATM box
-after `Tab`. `↑` and `↓` move by a line, `PgUp` and `PgDn` by a page, and
-`Home` and `End` go to the first and the last lines. A box scrolled above its
-last line stays where it is as new lines come; back at its last line it follows
-them again. Folding or unfolding preserves the reading position; a call
-hidden by folding anchors to its group header. Stacked under 100 columns,
-the ATM box takes at most two thirds of the space left after the footer and
-panel gap.
+with the `*` marker in its title: the Agent box while it shows, then the Log
+box and the ATM box on successive `Tab` presses. `↑` and `↓` move by a line,
+`PgUp` and `PgDn` by a page, and `Home` and `End` go to the first and the last
+lines. A box scrolled above its last line stays where it is as new lines come
+while those lines remain available; back at its last line it follows them
+again. Folding or unfolding preserves the reading position; a call hidden by
+folding anchors to its group header. Stacked under 100 columns, the ATM box
+takes at most two thirds of the space left after the footer and panel gap.
 On Linux and macOS, and on Windows through WSL, ATM keeps its screen live
 while the delivery command is silent. From the command's first output until
 it ends, ATM gives it the attached terminal
