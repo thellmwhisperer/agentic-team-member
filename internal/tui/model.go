@@ -404,6 +404,9 @@ func (m *Model) current(step string) *row {
 func (m *Model) started(step string, at time.Time) {
 	m.state, m.output, m.log = "running", nil, pane{}
 	r := m.current(step)
+	if step == "agent" && r.state == "pending" {
+		r.label = "Agent · unit 1"
+	}
 	if step == "agent" || step == "ponytail" {
 		m.focus = nil
 		m.agent, m.history, m.open = nil, pane{}, nil
