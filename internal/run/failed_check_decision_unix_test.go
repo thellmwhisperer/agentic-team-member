@@ -4,6 +4,7 @@ package run
 
 import (
 	"encoding/json"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -27,6 +28,7 @@ func TestRunAsksOnAFailedCheck(t *testing.T) {
 			bin := followUpsServer(t, top)
 			clone, label := failedCheckQuestion(t, bin, top, "run", "--follow", issueFile(t, issue))
 			assertCheckWaiting(t, top, label)
+			assertQuestionNextStep(t, top, label, true)
 			if data, err := os.ReadFile(filepath.Join(clone, "a.txt")); err != nil || string(data) != "fixed\n" {
 				t.Fatalf("paused run lost its work: %q, %v", data, err)
 			}
@@ -233,6 +235,7 @@ func TestRunAsksOnAFailedCheckResumesSavedWorker(t *testing.T) {
 	bin := followUpsServer(t, top)
 	_, original := failedCheckQuestion(t, bin, top, "run", "--follow", "--harness", "claude", "--model", "saved-model",
 		"--effort", "high", "--harness-arg=--verbose", "--env", "ATM_SAVED_WORKER=yes", issueFile(t, issue))
+	assertQuestionNextStep(t, top, original, true)
 	stop := exec.Command(bin, "answer", original, "stop")
 	stop.Dir = top
 	if out, err := stop.CombinedOutput(); err != nil {
@@ -240,6 +243,7 @@ func TestRunAsksOnAFailedCheckResumesSavedWorker(t *testing.T) {
 	}
 	startFollow(t, bin, top, false, "attach", original).exit(1)
 	_, label := failedCheckQuestion(t, bin, top, "run", "--follow", "--resume", original)
+	assertQuestionNextStep(t, top, label, true)
 	for _, answer := range []string{"fix", "stop"} {
 		answerFailedCheck(t, bin, top, label, answer, 1)
 	}
@@ -309,5 +313,20 @@ func TestRunAsksOnAFailedCheckDuringBinaryReplacement(t *testing.T) {
 			startFollow(t, bin, top, false, "attach", label).exit(0)
 			assertCheckAnswer(t, top, label, clone, delivery, "fix")
 		})
+	}
+}
+
+func assertQuestionNextStep(t *testing.T, top, label string, resumable bool) {
+	t.Helper()
+	end, err := Attach(top, label, io.Discard)
+	if err != nil {
+		t.Fatalf("read next_step: %v", err)
+	}
+	want := "atm answer " + label + " approve|fix|stop"
+	if resumable {
+		want += "; recovery: atm run --resume " + label
+	}
+	if end.Run != label || end.NextStep != want || e2eReport(t, top, label).Resumable != resumable {
+		t.Fatalf("run %s next_step = %q, want %q with resumable=%t", end.Run, end.NextStep, want, resumable)
 	}
 }
