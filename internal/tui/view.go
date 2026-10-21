@@ -138,6 +138,9 @@ func (m *Model) footer() string {
 	if m.height < 10 {
 		gap = "\n  "
 	}
+	if m.typing {
+		return gap + map[bool]string{true: "answer", false: "fix"}[m.question() != ""] + " › " + m.text + "█"
+	}
 	keys := lipgloss.NewStyle().Bold(true).Render("q") + " " + paint(dim, action)
 	if m.agentRuns() {
 		keys += "  " + lipgloss.NewStyle().Bold(true).Render("t") + " " +
@@ -145,7 +148,7 @@ func (m *Model) footer() string {
 		keys += "  " + lipgloss.NewStyle().Bold(true).Render("h") + " " +
 			paint(dim, map[bool]string{true: "hide", false: "show"}[m.unfoldThink]+" thinking")
 	}
-	return gap + keys
+	return gap + keys + m.gateKeys()
 }
 
 // columns is left, every line padded to width, beside right.

@@ -16,7 +16,8 @@ import (
 
 // gateNM answers like no-mistakes for the screen: axi status, in the run's clone, shows its branch's run, review
 // running on its first call and then waiting with one finding, until $FAKE_NM/done makes the run complete; axi
-// logs --step review shows review's log and finding. With $FAKE_NM/none the branch has no run.
+// logs --step review shows review's log and finding. With $FAKE_NM/none the branch has no run. axi respond, answer
+// and abort add their arguments, each in braces, to review's log, and abort makes the run complete.
 const gateNM = `#!/bin/sh
 echo "$PWD $*" >>"$FAKE_NM/log"
 case "$*" in
@@ -33,6 +34,9 @@ case "$*" in
 	printf '    review,%s,1,1200\n    test,pending,0,0\n    lint,skipped,0,0\n' "$step" ;;
 "axi logs --step review --full")
 	cat "$FAKE_NM/review.toon" ;;
+"axi respond "*|"axi answer "*|"axi abort")
+	printf '  "%s"\n' "$(for a; do printf '{%s}' "$a"; done)" >>"$FAKE_NM/review.toon"
+	[ "$2" != abort ] || touch "$FAKE_NM/done" ;;
 *) exit 2 ;;
 esac
 `
@@ -74,7 +78,7 @@ func TestRealAttachPaintsTheGate(t *testing.T) {
 	nm, clone := gateFake(t), t.TempDir()
 	a := liveAttach(t, 120, 40)
 	a.delivered(clone)
-	finding := `error internal/run/run.go Delivery drops the "gate", verdict and all.`
+	finding := `delivery error internal/run/run.go Delivery drops the "gate"`
 	folded := a.sees(func(s string) bool { return strings.Contains(s, finding) && strings.Contains(s, "▸ ⏸ review") })
 	assertGateFolded(t, a, folded)
 	a.key("\x1b[<0;45;2M\x1b[<0;45;2m") // a click on review's header, the right column's first row
@@ -142,7 +146,7 @@ func TestRealAttachScrollsTheFullGateLog(t *testing.T) {
 	unfoldedFrom := a.raw.Len()
 	a.key("\x1b[<0;45;2M\x1b[<0;45;2m")
 	rows := append([]string{"▾ ⏸ review"}, want...)
-	rows = append(rows, `error internal/run/run.go Delivery drops the "gate", verdict and all.`)
+	rows = append(rows, `delivery error internal/run/run.go Delivery drops the "gate"`)
 	page := func(top int) {
 		a.sees(func(s string) bool {
 			for _, line := range rows[top : top+7] {
@@ -213,7 +217,7 @@ func TestRealAttachShowsGateFindingsWithoutLogLines(t *testing.T) {
 	a.delivered(t.TempDir())
 	a.sees(func(s string) bool {
 		return strings.Contains(s, "▸ ⏸ review") &&
-			strings.Contains(s, `error internal/run/run.go Delivery drops the "gate", verdict and all.`)
+			strings.Contains(s, `delivery error internal/run/run.go Delivery drops the "gate"`)
 	})
 	a.key("\x1b[<0;45;2M\x1b[<0;45;2m")
 	a.sees(func(s string) bool { return strings.Contains(s, "▾ ⏸ review") })

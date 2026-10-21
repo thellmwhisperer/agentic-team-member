@@ -144,6 +144,142 @@ func (m *Model) ask(g gate, wait time.Duration) tea.Cmd {
 	return tea.Tick(wait, func(time.Time) tea.Msg { return askGate(clone) })
 }
 
+// gateKey answers the gate from the footer, through no-mistakes' own commands in the clone: a, f and s approve,
+// fix and skip the step waiting; x, then y, aborts the gate; enter takes a line, the answer to the reviewer's
+// question while one shows, else a fix's instructions. ok when the key was the gate's.
+func (m *Model) gateKey(k tea.KeyMsg) (cmd tea.Cmd, ok bool) {
+	switch {
+	case m.typing:
+		return m.typed(k), true
+	case m.aborting:
+		m.aborting = false
+		if k.String() == "y" {
+			return m.respond("abort"), true
+		}
+		return nil, true
+	}
+	waiting := m.waiting() != nil
+	switch s := k.String(); {
+	case s == "x" && m.gateSteps != nil:
+		m.aborting = true
+	case s == "enter" && (waiting || m.question() != ""):
+		m.typing, m.text = true, ""
+	case waiting && (s == "a" || s == "s"):
+		return m.respond("respond", "--action", map[string]string{"a": "approve", "s": "skip"}[s]), true
+	case waiting && s == "f":
+		return m.fix(""), true
+	default:
+		return nil, false
+	}
+	return nil, true
+}
+
+// typed takes k into the line: enter sends it, esc drops it, backspace deletes its last character.
+func (m *Model) typed(k tea.KeyMsg) tea.Cmd {
+	switch k.Type {
+	case tea.KeyEnter:
+		m.typing = false
+		return m.send(m.text)
+	case tea.KeyEsc:
+		m.typing = false
+	case tea.KeyBackspace:
+		m.text = string([]rune(m.text)[:max(0, len([]rune(m.text))-1)])
+	case tea.KeyRunes, tea.KeySpace:
+		m.text += string(k.Runes)
+	}
+	return nil
+}
+
+// gateKeys is the footer's keys for the gate while it shows.
+func (m *Model) gateKeys() string {
+	key := func(k, what string) string {
+		return "  " + lipgloss.NewStyle().Bold(true).Render(k) + " " + paint(dim, what)
+	}
+	switch {
+	case m.aborting:
+		return key("y", "abort the gate")
+	case m.question() != "":
+		return key("enter", "answer") + key("x", "abort")
+	case m.waiting() != nil:
+		return key("a", "approve") + key("f", "fix") + key("s", "skip") + key("x", "abort") +
+			key("enter", "fix with a line")
+	case m.gateSteps != nil:
+		return key("x", "abort")
+	}
+	return ""
+}
+
+// waiting is the gate's step waiting for an answer, nil for none.
+func (m *Model) waiting() *gateStep {
+	for i := range m.gateSteps {
+		if m.gateSteps[i].state == "waiting" {
+			return &m.gateSteps[i]
+		}
+	}
+	return nil
+}
+
+// question is the id of the first question the gate's reviewer asked, a question-<id> finding; empty for none.
+func (m *Model) question() string {
+	for _, s := range m.gateSteps {
+		for _, f := range s.findings {
+			if strings.HasPrefix(f["id"], "question-") {
+				return f["id"]
+			}
+		}
+	}
+	return ""
+}
+
+// send answers the reviewer's question with line while one shows, and else fixes with line.
+func (m *Model) send(line string) tea.Cmd {
+	if q := m.question(); q != "" {
+		return m.respond("answer", "--question", q, "--answer", line)
+	}
+	return m.fix(line)
+}
+
+// fix fixes the waiting step's findings with line as instructions: those named by ids before a colon
+// ("<id>,<id>: <text>"), ignoring the others shown, or else every one shown.
+func (m *Model) fix(line string) tea.Cmd {
+	var shown []string
+	if w := m.waiting(); w != nil {
+		for _, f := range w.findings {
+			shown = append(shown, f["id"])
+		}
+	}
+	fix, ignore := shown, []string(nil)
+	if head, text, ok := strings.Cut(line, ":"); ok {
+		named := strings.Split(head, ",")
+		for i := range named {
+			named[i] = strings.TrimSpace(named[i])
+		}
+		if !slices.ContainsFunc(named, func(id string) bool { return !slices.Contains(shown, id) }) {
+			fix, line = named, strings.TrimSpace(text)
+			ignore = slices.DeleteFunc(slices.Clone(shown), func(id string) bool { return slices.Contains(named, id) })
+		}
+	}
+	args := []string{"respond", "--action", "fix", "--findings", strings.Join(fix, ",")}
+	if len(ignore) > 0 {
+		args = append(args, "--ignore", strings.Join(ignore, ","))
+	}
+	if line != "" {
+		args = append(args, "--instructions", line)
+	}
+	return m.respond(args...)
+}
+
+// respond runs no-mistakes axi args in the clone, aside, as respond blocks until the gate's next stop; the screen
+// sees what it did on its next ask.
+// ponytail: a refused answer shows nowhere but in the gate staying parked; paint its error if that confuses.
+func (m *Model) respond(args ...string) tea.Cmd {
+	clone := m.clone
+	return func() tea.Msg {
+		_, _, _ = axi(clone, args...)
+		return nil
+	}
+}
+
 // gateBox is what the gate's started steps emit, in lines rows: a header row for each, a click folding it as
 // thinking folds, then its log rendered as the Agent box renders Markdown, its first line only while folded,
 // then its findings, one line each.
@@ -165,7 +301,7 @@ func (m *Model) gateBox(width, lines int) string {
 			out = append(out, paneLine{key: key, text: text})
 		}
 		for _, f := range s.findings {
-			out = append(out, paneLine{key: key, text: "  " + paint(yellow, f["severity"]) + " " +
+			out = append(out, paneLine{key: key, text: "  " + f["id"] + " " + paint(yellow, f["severity"]) + " " +
 				f["file"] + " " + paint(dim, oneLine(f["description"]))})
 		}
 	}

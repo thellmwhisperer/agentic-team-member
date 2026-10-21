@@ -72,6 +72,8 @@ type Model struct {
 	open                          map[string]bool // tool calls, thinking or output, by its key, clicked open or closed
 	clone                         string          // the run's clone, where the gate after Delivery is asked
 	gateSteps                     []gateStep      // the gate's steps, once the run delivered and the gate shows a run
+	typing, aborting              bool            // the footer takes a line for the gate, or asks to confirm its abort
+	text                          string          // the line typed for the gate so far
 }
 
 type bounds struct{ x, y, width, height int }
@@ -200,6 +202,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		default: // ponytail: a size dropped while the queue is full; the next one gets through
 		}
 	case tea.KeyMsg:
+		if cmd, ok := m.gateKey(msg); ok {
+			return m, cmd
+		}
 		if s := msg.String(); s == "q" || s == "ctrl+c" {
 			m.detached = !m.done
 			return m, tea.Quit
