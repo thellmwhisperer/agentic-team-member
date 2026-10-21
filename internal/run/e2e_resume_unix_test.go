@@ -61,7 +61,8 @@ func TestRealRunChecksRestoresATMDirectory(t *testing.T) {
 	if err != nil || strings.TrimSpace(string(output)) != "restored" {
 		t.Fatalf("delivery did not see restored .atm/marker: %q, %v", output, err)
 	}
-	t.Logf("atm run %s outcome=%s; configured test saw no .atm; delivery saw restored marker", runs[0].Run, runs[0].Outcome)
+	t.Logf("atm run %s outcome=%s; configured test saw no .atm; delivery saw restored marker",
+		runs[0].Run, runs[0].Outcome)
 }
 
 func TestRunE2EResume(t *testing.T) {
