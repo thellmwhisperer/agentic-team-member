@@ -8,6 +8,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -112,30 +113,56 @@ func lost(git func(dir string, args ...string) (string, error), clone, base, iss
 		}
 		text = text[m[8]:]
 	}
-	current, err := inventories(git, clone, base, "", tests, removed)
-	allowed := map[string]int{}
+	return lostAcrossCuts(git, clone, base, tests, removed, cuts)
+}
+
+type testInventory struct {
+	from, to      string
+	before, after int
+}
+
+func lostAcrossCuts(git func(dir string, args ...string) (string, error), clone, base string,
+	tests []string, removed map[string]bool, cuts []string) error {
+	var versions []string
 	for _, cut := range cuts {
-		before, beforeErr := inventories(git, clone, base, cut+"^", tests, removed)
-		after, afterErr := inventories(git, clone, base, cut, tests, removed)
-		err = errors.Join(err, beforeErr, afterErr)
-		for file, counts := range after {
-			prior := counts[0]
-			if pair, ok := before[file]; ok {
-				prior = pair[1]
+		versions = append(versions, cut+"^", cut)
+	}
+	tracked := map[string]*testInventory{}
+	var required []*testInventory
+	previous := base
+	for n, rev := range append(versions, "") {
+		changes, err := inventories(git, clone, previous, rev, tests, removed)
+		if err != nil {
+			return err
+		}
+		next := maps.Clone(tracked)
+		for _, change := range changes {
+			delete(next, change.from)
+		}
+		for _, change := range changes {
+			prior := tracked[change.from]
+			if prior == nil {
+				prior = &testInventory{from: change.from, before: change.before}
+				required = append(required, prior)
 			}
-			allowed[file] += max(0, min(counts[0]-allowed[file], prior)-counts[1])
+			if n%2 == 1 {
+				prior.before -= max(0, min(prior.before, change.before)-change.after)
+			}
+			prior.after = change.after
+			next[change.to] = prior
+		}
+		tracked, previous = next, rev
+	}
+	for _, count := range required {
+		if count.after < count.before {
+			return fmt.Errorf("the test file %s loses tests: %d before, %d after", count.from, count.before, count.after)
 		}
 	}
-	for file, counts := range current {
-		if before := counts[0] - allowed[file]; err == nil && counts[1] < before {
-			err = fmt.Errorf("the test file %s loses tests: %d before, %d after", file, before, counts[1])
-		}
-	}
-	return err
+	return nil
 }
 
 func inventories(git func(dir string, args ...string) (string, error), clone, base, rev string,
-	tests []string, removed map[string]bool) (map[string][2]int, error) {
+	tests []string, removed map[string]bool) ([]testInventory, error) {
 	arg := rev
 	if arg == "" {
 		arg = "--cached"
@@ -145,7 +172,7 @@ func inventories(git func(dir string, args ...string) (string, error), clone, ba
 		spec = append(spec, ":(glob)"+g)
 	}
 	out, err := git(clone, spec...)
-	counts := map[string][2]int{}
+	var counts []testInventory
 	count := func(rev, path string, absent bool) (int, error) {
 		if absent || filepath.Ext(path) != ".go" {
 			return 0, nil
@@ -164,7 +191,7 @@ func inventories(git func(dir string, args ...string) (string, error), clone, ba
 		if err = errors.Join(beforeErr, afterErr); err != nil {
 			return counts, fmt.Errorf("count tests in %s: %w", was, err)
 		}
-		counts[was] = [2]int{before, after}
+		counts = append(counts, testInventory{was, is, before, after})
 	}
 	return counts, err
 }
