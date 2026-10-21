@@ -461,7 +461,7 @@ the first rejection reason. Each `checks run n` row retains its attempt's result
 and elapsed time; a failed attempt can name the files it implicated. Earlier
 attempts remain available by scrolling after later attempts finish. Phase rows show
 elapsed time where available. The Findings box shows every finding the agent
-reported, including rejected and discarded cuts. Each entry starts with
+reported, including rejected and discarded cuts. Each reference starts with
 `kept`, `rejected: <reason>`, or `discarded: checks failed`, followed by its
 repository-relative file path and one-line text. Long entries wrap; scroll the
 Findings box to read entries outside its visible height.

@@ -1,0 +1,22 @@
+schema: 1
+id: T-ATM-586-20261021-4
+status: accepted
+category: duplication
+title: Preserve separate constrained terminal scenarios
+created_at: 2026-10-21
+incident:
+  pattern: Slop findings and report overflow each run ATM on a 24-row terminal.
+  what_went_wrong: Their terminal lifecycle shares six lines.
+  root_cause: Each scenario must independently prove its content remains reachable.
+  rule_established: Keep both complete scenarios; accept only this exact clone.
+  evidence:
+    - family: clone_fingerprint
+      example: Slop findings PTY lifecycle at lines 43-48.
+      artifact: internal/run/ponytail_scroll_unix_test.go
+    - family: clone_fingerprint
+      example: Report overflow PTY lifecycle at lines 280-285.
+      artifact: internal/run/report_rows_unix_test.go
+match:
+  family: clone_fingerprint
+  scope: go_tests
+  fingerprint: dc9819ab968d52a3a42697d88c0ce524b3cf519b066c8f726e8757a3434946da
