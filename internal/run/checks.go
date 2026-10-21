@@ -2,7 +2,6 @@ package run
 
 import (
 	"bytes"
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -17,20 +16,23 @@ import (
 	"strings"
 	"time"
 
+	chk "github.com/thellmwhisperer/agentic-team-member/internal/checks"
 	"github.com/thellmwhisperer/agentic-team-member/internal/config"
 )
 
-// checkChanges rejects empty work when there is no report.
-func checkChanges(clone string, missingReport bool) error {
-	if _, err := git(clone, "add", "-A"); err != nil {
-		return err
-	}
-	out, err := git(clone, "diff", "--cached", "--name-only", "--no-renames", "-z", "HEAD")
-	if err == nil && missingReport && out == "" {
-		err = errors.New("no change to prove")
-	}
-	_, resetErr := git(clone, "reset", "-q")
-	return errors.Join(err, resetErr)
+// checks runs Checks on the completed work in clone with what it shares with the run's other steps.
+func checks(clone, runDir, sha, test string, missingReport bool, c config.Config) (map[string]any, error) {
+	live := liveIn(clone)
+	return chk.Run(clone, runDir, sha, test, missingReport, c, chk.Tools[cmdResult]{
+		Git: git, Moved: moved, Unmade: unmade, ReadTest: readTest, Timeout: timeout,
+		Command: func(name, line string, limit time.Duration, env ...string) (cmdResult, error) {
+			var tail string
+			s, err := row(live, name, func() (err error) {
+				tail, _, err = shOutput(clone, line, limit, env...)
+				return err
+			})
+			return cmdResult{name, line, outcome(err), tail, s}, err
+		}})
 }
 
 // readTest confines every report and saved-history test read to the clone, including symlinks.
@@ -45,104 +47,6 @@ func readTest(clone, test string) ([]byte, error) {
 	defer func() { _ = file.Close() }()
 	b, err := io.ReadAll(file)
 	return b, wrap(err, fmt.Sprintf("the report's test_file %q cannot be read inside the clone", test))
-}
-
-// checks runs the configured commands on the completed work, preserving clone and test safeguards.
-func checks(clone, runDir, sha, test string, missingReport bool,
-	c config.Config) (result map[string]any, err error) {
-	live := liveIn(clone)
-	result = map[string]any{}
-	cover, err := coverageEnv(runDir, c.E2E)
-	var ran []cmdResult
-	run := func(name, line string, env ...string) error {
-		if line == "" {
-			return nil
-		}
-		var tail string
-		s, err := row(live, name, func() (err error) {
-			tail, _, err = shOutput(clone, line, cmp.Or(time.Duration(c.CheckTimeout), timeout), env...)
-			return err
-		})
-		ran = append(ran, cmdResult{name, line, outcome(err), tail, s})
-		result["commands"] = ran
-		return wrap(err, name)
-	}
-	if err == nil {
-		err = moved(clone, sha, "the agent")
-	}
-	if err == nil {
-		var restore func() error
-		restore, err = hideATM(clone, runDir)
-		if restore != nil {
-			defer func() { err = errors.Join(err, restore()) }()
-		}
-		if err == nil {
-			err = unmade(clone)
-		}
-	}
-	if err == nil {
-		err = run("install", c.Install)
-	}
-	if err != nil {
-		return result, err
-	}
-	if err = checkChanges(clone, missingReport); err == nil && test != "" {
-		_, err = readTest(clone, test)
-	}
-	if err != nil {
-		return result, err
-	}
-	for _, cmd := range [][2]string{{"test", c.Test}, {"e2e", c.E2E}, {"typecheck", c.Typecheck}, {"lint", c.Lint}} {
-		if err := run(cmd[0], cmd[1], coverFor(cover, cmd[0])...); err != nil {
-			return result, err
-		}
-	}
-	result["commands"] = ran
-	return result, moved(clone, sha, "the commands")
-}
-
-// coverageEnv is one fresh GOCOVERDIR for a Checks that declares e2e.
-// coverFor gives it to test and e2e only: install, typecheck and lint must not write those counters.
-func coverageEnv(runDir, e2e string) ([]string, error) {
-	if e2e == "" {
-		return nil, nil
-	}
-	dir, err := os.MkdirTemp(runDir, "coverage-")
-	if err != nil {
-		return nil, err
-	}
-	return []string{"GOCOVERDIR=" + dir}, nil
-}
-
-func coverFor(cover []string, name string) []string {
-	if name == "test" || name == "e2e" {
-		return cover
-	}
-	return nil
-}
-
-func hideATM(clone, runDir string) (func() error, error) {
-	path := filepath.Join(clone, ".atm")
-	stash := filepath.Join(runDir, "checks-atm")
-	if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
-		return func() error { return os.RemoveAll(path) }, nil
-	} else if err != nil {
-		return nil, err
-	}
-	if _, err := os.Lstat(stash); err == nil {
-		return nil, fmt.Errorf("checks artefact path already exists: %s", stash)
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return nil, err
-	}
-	if err := os.Rename(path, stash); err != nil {
-		return nil, err
-	}
-	return func() error {
-		if err := os.RemoveAll(path); err != nil {
-			return err
-		}
-		return os.Rename(stash, path)
-	}, nil
 }
 
 // before records every file in clone, ignored or not, as the agent finds it, for reset and, as refs/atm-before,
