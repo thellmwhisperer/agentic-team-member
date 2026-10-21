@@ -178,23 +178,25 @@ func (a agent) unit(r *verdict, root, dir, sha, text string, c config.Config, ke
 		test, _ = report["test_file"].(string)
 		return ev, err
 	})
-	r.keep(a.dir, dir, keep, 1, report)
 	var p proof
 	var ev map[string]any
 	for {
+		r.keep(a.dir, dir, keep, 1, report)
 		r.step("checks", func() (map[string]any, error) {
 			var err error
 			p, ev, err = checkUnit(a.dir, dir, head, test, report, c)
 			return ev, err
 		})
-		if a.checkDecision(r) != "fix" {
+		atAgent := r.FailedNode == "agent" // approved, the agent's work goes on to Checks
+		answer := a.checkDecision(r)
+		if answer == "fix" {
+			if next := a.fixCheck(r, dir, text, &keep); next != nil {
+				report = next
+				test, _ = report["test_file"].(string)
+			}
+		} else if answer != "approve" || !atAgent {
 			break
 		}
-		if next := a.fixCheck(r, dir, text, &keep); next != nil {
-			report = next
-			test, _ = report["test_file"].(string)
-		}
-		r.keep(a.dir, dir, keep, 1, report)
 	}
 	r.recordUnit(1, head, test, resumed)
 	return []proof{p}

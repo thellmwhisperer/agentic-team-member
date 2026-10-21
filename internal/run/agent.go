@@ -200,6 +200,11 @@ func (a agent) run(clone, name, skill, brief string, check func(map[string]any) 
 	return ev, nil
 }
 
+// askError is an agent failure the launcher answers: a write outside the clone, or an exit with an error.
+type askError struct{ error }
+
+func (e askError) Unwrap() error { return e.error }
+
 // reportError is why an agent step failed when the agent ended cleanly but left its report missing or invalid.
 type reportError struct{ error }
 
@@ -236,7 +241,9 @@ func (a agent) reported(_, path, final, exit, cause string, runErr error, s *str
 	}
 	switch {
 	case s.reach != "":
-		return nil, fail(fmt.Errorf("%s; the agent reached outside its clone: %s; log: %s", exit, s.reach, path))
+		return nil, askError{fail(fmt.Errorf("%s; the agent reached outside its clone: %s; log: %s", exit, s.reach, path))}
+	case strings.HasPrefix(cause, "exit code "):
+		return nil, askError{fail(fmt.Errorf("%s; log: %s", cause, path))}
 	case cause != "":
 		return nil, fail(fmt.Errorf("%s; log: %s", cause, path))
 	case runErr != nil:
