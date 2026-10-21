@@ -463,8 +463,9 @@ attempts remain available by scrolling after later attempts finish. Phase rows s
 elapsed time where available. The Findings box shows every finding the agent
 reported, including rejected and discarded cuts. Each reference starts with
 `kept`, `rejected: <reason>`, or `discarded: checks failed`, followed by its
-repository-relative file path and one-line text. Long entries wrap; scroll the
-Findings box to read entries outside its visible height.
+repository-relative file path. The finding's one-line text appears below the
+reference. Long entries wrap; scroll the Findings box to read entries outside
+its visible height.
 
 Once a run ends with Delivery passed, the screen goes on with the gate: it
 asks `no-mistakes axi status`, in the run's clone, for the run of the

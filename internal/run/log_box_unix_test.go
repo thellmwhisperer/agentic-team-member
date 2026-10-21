@@ -275,6 +275,9 @@ func free(t *testing.T, path string) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := f.Write([]byte("\n")); err != nil {
+		t.Fatal(err)
+	}
 	_ = f.Close()
 }
 
