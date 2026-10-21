@@ -409,8 +409,9 @@ Without `--follow`, `atm run` attaches the screen on a terminal; see
 [Following one run](#following-one-run) for that flag's output. The screen is
 the ATM box, a row per step with its icon (`○`
 pending, a spinner running, `⏸` waiting, `✓` passed, `✗` failed, `–` skipped), duration and
-note, and beside it, from 100 columns, the Agent box while an agent works,
-the Findings box with a failure or the slop detector's cuts, and the Log box.
+note, and beside it, from 100 columns, the Agent box while an agent works or
+its report remains visible during checks, the Findings box with a failure or
+the slop detector's cuts, and the Log box.
 The ATM box's Agent row reads `Agent`; Log headers and Findings references for
 that agent retain `Agent · unit 1`.
 Above the rows, the issue's title wraps: up to three lines show whole; a
@@ -420,7 +421,8 @@ the ATM box is too short for that, past its first line the title scrolls
 with the rows, and the ATM box's keys reach it.
 
 While a step runs, the right column shows it. The Agent box shows an agent's
-events, with the Log box below it when the agent emits output. For other steps,
+events, with the Log box below it when the agent emits output. During checks,
+the worker's report remains above the Log box. For other steps,
 the Log box shows the step's name and elapsed time until output replaces them.
 Output appears under a header for each command, or under the step when it has
 no command. The header shows its name and state.
@@ -497,14 +499,16 @@ controls filtered out. Result summaries are read for pi, Claude, Codex,
 OpenCode and Cursor. If the result is absent or its first line is blank,
 the separator and summary are omitted. The footer shows `t show tool use`
 or `t hide tool use`, and `h show thinking` or `h hide thinking`, beside
-`q detach` while the Agent box is visible. Fold choices are not saved across
+`q detach` while an agent runs. Fold choices are not saved across
 attaches.
 
 The ATM, Agent and Gate boxes each keep every line. The Log box keeps up to
 200 output events from the current step. All boxes scroll on their own.
 The mouse wheel scrolls the box under the pointer. The keys scroll the box
 with the `*` marker in its title. `Tab` cycles through the visible boxes:
-ATM, Agent and Log while the agent runs, or ATM and Gate after Delivery.
+ATM and Agent while the agent runs, also Log when there is output; ATM, Agent
+and Log while the report remains visible during checks; or ATM and Gate after
+Delivery.
 `↑` and `↓` move by a line, `PgUp` and `PgDn` by a page, and `Home` and `End`
 go to the first and the last lines. A box scrolled above its last line stays
 where it is as new lines come while those lines remain available; back at its

@@ -300,7 +300,11 @@ func (m *Model) right(width, height int) string {
 	}
 	if m.agentVisible() {
 		if len(m.output) > 0 || !m.agentRuns() && m.running() {
-			logBox := m.logBox(width, max(1, min(height/3-boxBorderRows, height-minimumBoxRows-boxBorderRows)))
+			logHeight := min(height/3-boxBorderRows, height-minimumBoxRows-boxBorderRows)
+			if !m.agentRuns() {
+				logHeight = height - minimumBoxRows*2 - boxBorderRows
+			}
+			logBox := m.logBox(width, max(1, logHeight))
 			top = m.agentBox(width, max(1, height-lipgloss.Height(logBox)-boxBorderRows))
 			return strings.Join([]string{top, logBox}, "\n")
 		}
