@@ -78,18 +78,18 @@ type Model struct {
 	focus                         *pane // the box tab moved to, while it shows
 	pipelineBounds, historyBounds bounds
 	logBounds, findingsBounds     bounds
-	unfold                        bool            // t: every tool call of the Agent box on its own line
-	unfoldThink                   bool            // h: every thinking message of the Agent box in full
-	unfoldTitle                   bool            // i: every line of the issue's title
+	unfold                        bool // t: every tool call of the Agent box on its own line
+	unfoldThink                   bool // h: every thinking message of the Agent box in full
+	unfoldTitle                   bool // i: every line of the issue's title
 	// tool calls, thinking, output or report rows, by key,
 	// clicked open or closed
-	open                          map[string]bool
-	clone                         string          // the run's clone, where the gate after Delivery is asked
-	gateSteps                     []gateStep      // the gate's steps, once the run delivered and the gate shows a run
-	typing, aborting              bool            // the footer takes a line for the gate, or asks to confirm its abort
-	fixSelected                   bool
-	answered                      []string
-	text                          string // the line typed for the gate so far
+	open             map[string]bool
+	clone            string     // the run's clone, where the gate after Delivery is asked
+	gateSteps        []gateStep // the gate's steps, once the run delivered and the gate shows a run
+	typing, aborting bool       // the footer takes a line for the gate, or asks to confirm its abort
+	fixSelected      bool
+	answered         []string
+	text             string // the line typed for the gate so far
 }
 
 type bounds struct{ x, y, width, height int }
@@ -345,7 +345,7 @@ type event struct {
 	Kept                                             bool
 	Agent                                            *run.AgentSettings
 	Report                                           json.RawMessage
-	Verdicts []struct{ File, Finding, Verdict string } // each finding of the slop detector, kept or not
+	Verdicts                                         []struct{ File, Finding, Verdict string }
 }
 
 // apply reads frame f, when it carries an event: a node's start or end, or what happens inside it.
