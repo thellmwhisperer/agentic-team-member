@@ -34,6 +34,9 @@ func TestRealScreenShowsSlopDetectorPhases(t *testing.T) {
 		"✓ commit", "1 kept · 1 rejected: adds code", "run 1 ok", "ponytail: 1 cuts", "kept · a.txt", "cut a.txt", "rejected: adds code · old.txt", "cut old.txt"} {
 		untilShown(t, f, shown, want)
 	}
+	if !regexp.MustCompile(`agent reading the diff +[0-9.]+ s`).MatchString(ansi.Strip(shown.String())) {
+		t.Fatalf("the agent reading phase did not show its elapsed time:\n%s", ansi.Strip(shown.String()))
+	}
 	f.exit(0)
 }
 
