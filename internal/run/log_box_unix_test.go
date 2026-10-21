@@ -124,59 +124,66 @@ func TestRealATMLogFenceContextSurvivesEviction(t *testing.T) {
 			a.drawn(func(s string) bool { return strings.Contains(s, "Log*") })
 			a.key("\x1b[A")
 			a.drawn(func(s string) bool { return !strings.Contains(s, "literal-199") })
-			codeRows := func() []string {
-				t.Helper()
-				styled := a.styled()
-				plain := ansi.Strip(styled)
-				literals := regexp.MustCompile(`literal-\d+`).FindAllString(plain, -1)
-				code := regexp.MustCompile("\x1b\\[33m"+`\*\*literal-\d+\*\*`).FindAllString(styled, -1)
-				if len(literals) == 0 || len(code) != len(literals) {
-					t.Fatalf("fenced output must keep literal asterisks and code styling:\n%q", styled)
-				}
-				return code
-			}
-			held := codeRows()
+			held := a.fencedCodeRows()
 			for i := 200; i < 250; i++ {
 				output(fmt.Sprintf("**literal-%03d**", i))
 			}
 			a.send(`{"step":"checks","check":"appended","state":"started"}`)
 			a.drawn(func(s string) bool { return strings.Contains(s, "appended") })
-			if got := codeRows(); !slices.Equal(got, held) {
+			if got := a.fencedCodeRows(); !slices.Equal(got, held) {
 				t.Fatalf("eviction changed retained text or styling: before %q; after %q", held, got)
 			}
-			a.send(`{"step":"checks","check":"test","state":"passed"}`)
-			s := a.drawn(func(s string) bool { return strings.Contains(s, "▸ ") && strings.Contains(s, "literal-050") })
-			if got := codeRows(); len(got) != 1 {
-				t.Fatalf("folded Log must show one literal code preview: %q", got)
-			}
-			a.click(rowOf(s, "▸ "))
-			a.drawn(func(s string) bool { return strings.Contains(s, "literal-249") })
-			codeRows()
-			a.key("\x1b[H")
-			a.drawn(func(s string) bool { return strings.Contains(s, "▾ ") && strings.Contains(s, "literal-050") })
-			codeRows()
-			a.key("\x1b[F")
-			a.drawn(func(s string) bool { return strings.Contains(s, "literal-249") })
-			codeRows()
-			for _, wrong := range []string{"~~~", "``", tc.closing + "info"} {
-				output(wrong)
-			}
-			output("**literal-250**")
-			a.drawn(func(s string) bool { return strings.Contains(s, "literal-250") })
-			codeRows()
-			output(tc.closing)
-			output("**after fence**")
-			a.drawn(func(s string) bool { return strings.Contains(s, "after fence") })
-			if !strings.Contains(a.styled(), "\x1b[1mafter fence") || strings.Contains(ansi.Strip(a.styled()), "**after fence**") {
-				t.Fatalf("closing the retained fence must restore Markdown:\n%q", a.styled())
-			}
-			output(tc.opening)
-			a.send(`{"step":"checks","check":"next","state":"started"}`)
-			a.send(`{"step":"checks","check":"next","output":"**Running tests**"}`)
-			a.boldRow(a.drawn(func(s string) bool { return strings.Contains(s, "Running tests") }), "│ ", "the next command")
-			a.end()
+			a.checkFenceAfterEviction(output, tc.opening, tc.closing)
 		})
 	}
+}
+
+func (a *attached) checkFenceAfterEviction(output func(string), opening, closing string) {
+	a.t.Helper()
+	a.send(`{"step":"checks","check":"test","state":"passed"}`)
+	s := a.drawn(func(s string) bool { return strings.Contains(s, "▸ ") && strings.Contains(s, "literal-050") })
+	if got := a.fencedCodeRows(); len(got) != 1 {
+		a.t.Fatalf("folded Log must show one literal code preview: %q", got)
+	}
+	a.click(rowOf(s, "▸ "))
+	a.drawn(func(s string) bool { return strings.Contains(s, "literal-249") })
+	a.fencedCodeRows()
+	a.key("\x1b[H")
+	a.drawn(func(s string) bool { return strings.Contains(s, "▾ ") && strings.Contains(s, "literal-050") })
+	a.fencedCodeRows()
+	a.key("\x1b[F")
+	a.drawn(func(s string) bool { return strings.Contains(s, "literal-249") })
+	a.fencedCodeRows()
+	for _, wrong := range []string{"~~~", "``", closing + "info"} {
+		output(wrong)
+	}
+	output("**literal-250**")
+	a.drawn(func(s string) bool { return strings.Contains(s, "literal-250") })
+	a.fencedCodeRows()
+	output(closing)
+	output("**after fence**")
+	a.drawn(func(s string) bool { return strings.Contains(s, "after fence") })
+	if !strings.Contains(a.styled(), "\x1b[1mafter fence") ||
+		strings.Contains(ansi.Strip(a.styled()), "**after fence**") {
+		a.t.Fatalf("closing the retained fence must restore Markdown:\n%q", a.styled())
+	}
+	output(opening)
+	a.send(`{"step":"checks","check":"next","state":"started"}`)
+	a.send(`{"step":"checks","check":"next","output":"**Running tests**"}`)
+	a.boldRow(a.drawn(func(s string) bool { return strings.Contains(s, "Running tests") }), "│ ", "the next command")
+	a.end()
+}
+
+func (a *attached) fencedCodeRows() []string {
+	a.t.Helper()
+	styled := a.styled()
+	plain := ansi.Strip(styled)
+	literals := regexp.MustCompile(`literal-\d+`).FindAllString(plain, -1)
+	code := regexp.MustCompile("\x1b\\[33m"+`\*\*literal-\d+\*\*`).FindAllString(styled, -1)
+	if len(literals) == 0 || len(code) != len(literals) {
+		a.t.Fatalf("fenced output must keep literal asterisks and code styling:\n%q", styled)
+	}
+	return code
 }
 
 var stackedLog = regexp.MustCompile(`(?m)^╭─ Log\* `)
@@ -398,15 +405,14 @@ func (a *attached) styled() string {
 	for _, m := range cursorMoves.FindAllStringSubmatchIndex(raw, -1) {
 		write(raw[last:m[0]])
 		last = m[1]
-		switch {
-		case m[4] < 0:
+		if m[4] < 0 {
 			at = min(at+1, len(rows)-1)
-		case raw[m[4]] == 'H':
+		} else if raw[m[4]] == 'H' {
 			n, _ := strconv.Atoi(raw[m[2]:m[3]])
 			at = min(max(n-1, 0), len(rows)-1)
-		case raw[m[2]:m[3]] == "2":
+		} else if raw[m[2]:m[3]] == "2" {
 			clear(rows)
-		default:
+		} else {
 			clear(rows[at+1:])
 		}
 	}
