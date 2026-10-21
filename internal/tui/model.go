@@ -70,6 +70,8 @@ type Model struct {
 	unfoldThink                   bool            // h: every thinking message of the Agent box in full
 	unfoldTitle                   bool            // i: every line of the issue's title
 	open                          map[string]bool // tool calls, thinking or output, by its key, clicked open or closed
+	clone                         string          // the run's clone, where the gate after Delivery is asked
+	gateSteps                     []gateStep      // the gate's steps, once the run delivered and the gate shows a run
 }
 
 type bounds struct{ x, y, width, height int }
@@ -147,7 +149,7 @@ func (m *Model) focused() *pane {
 	if slices.Contains(m.panes(), m.focus) {
 		return m.focus
 	}
-	if m.agentRuns() {
+	if m.agentRuns() || m.gateSteps != nil {
 		return &m.history
 	}
 	return &m.pipeline
@@ -156,10 +158,10 @@ func (m *Model) focused() *pane {
 // panes is the panes of the boxes shown, in the order tab moves through them.
 func (m *Model) panes() []*pane {
 	shown := []*pane{&m.pipeline}
-	if m.agentRuns() {
+	if m.agentRuns() || m.gateSteps != nil {
 		shown = append(shown, &m.history)
 	}
-	if m.agentRuns() && len(m.output) > 0 || !m.agentRuns() && m.running() {
+	if m.gateSteps == nil && (m.agentRuns() && len(m.output) > 0 || !m.agentRuns() && m.running()) {
 		shown = append(shown, &m.log)
 	}
 	return shown
@@ -214,7 +216,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.apply(msg)
 	case ended:
 		m.end(msg.o, msg.err)
-		return m, tea.Quit // the run ended, or attach failed: Show leaves the last screen on the terminal
+		// The run ended, or attach failed: Show leaves the last screen on the terminal, unless the gate goes on.
+		return m, m.ask(gate{ok: m.clone != "" && m.current("delivery").state == "passed"}, 0)
+	case gate:
+		m.gate(msg)
+		return m, m.ask(msg, time.Second)
 	}
 	return m, nil
 }
@@ -300,7 +306,7 @@ func (b bounds) contains(x, y int) bool {
 type event struct {
 	Step, State, Error, TS, Title, Type, SHA, Branch string
 	Check, ID, Tool, Detail, Result, Summary         string
-	Thinking, Says, Message                          string
+	Thinking, Says, Message, Clone                   string
 	ResumedFrom                                      string `json:"resumed_from"`
 	Output                                           *string
 	Number                                           int
@@ -420,7 +426,7 @@ func (m *Model) ended(e event) {
 	case "issue":
 		m.title, m.number, r.note = e.Title, e.Number, e.Type
 	case "clone":
-		r.note = e.SHA[:min(8, len(e.SHA))]
+		r.note, m.clone = e.SHA[:min(8, len(e.SHA))], e.Clone
 	case "agent":
 		r.note = fmt.Sprintf("%d tools", m.tools())
 		if e.ResumedFrom != "" { // its agent's work, picked up: no agent call
