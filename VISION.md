@@ -50,7 +50,7 @@ same kind.
 ## Workers
 
 - A worker starts with a curated kit of skills and hooks, chosen for the task.
-- A worker has a time limit, as the gate's steps do.
+- A worker is stopped when it is hung, never at a fixed time.
 
 ## Open
 

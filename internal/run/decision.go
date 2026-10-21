@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -128,8 +129,9 @@ func (a agent) afterCheck(clone, text, session, finding string, attempt int) (ma
 
 func (a agent) checkDecision(r *verdict) string {
 	q, ok := r.out.(*screen)
+	hung := r.FailedNode == "agent" && strings.HasPrefix(r.Reason, "hung: ")
 	if !ok || !slices.Contains([]string{"checks", "ponytail", "delivery"}, r.FailedNode) &&
-		!errors.As(r.err, new(askError)) {
+		!errors.As(r.err, new(askError)) && !hung {
 		return ""
 	}
 	r.resumable(a.dir)

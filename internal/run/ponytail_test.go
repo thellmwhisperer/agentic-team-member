@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/thellmwhisperer/agentic-team-member/internal/config"
 )
@@ -90,7 +89,7 @@ func TestRunDiesWhenThePonytailAgentFails(t *testing.T) {
 		hang                          bool
 	}{
 		{name: "exit", mode: "fail", why: "exit code 3"},
-		{name: "hang", mode: "hang", why: "timed out", hang: true},
+		{name: "hang", mode: "hang", why: "hung", hang: true},
 		{name: "no report", mode: "no-report", why: "no report"},
 		{name: "no summary", report: `{"findings": []}`, why: "summary"},
 		{name: "unknown key", report: `{"findings": [], "summary": "s", "cuts": 1}`, why: "cuts"},
@@ -106,8 +105,8 @@ func TestRunDiesWhenThePonytailAgentFails(t *testing.T) {
 			t.Setenv("FAKE_PONYTAIL_WORK", c.work)
 			t.Setenv("FAKE_PONYTAIL_REPORT", c.report)
 			if c.hang {
-				defer func(d time.Duration) { agentTimeout = d }(agentTimeout)
-				agentTimeout = 3 * time.Second
+				defer func(d string) { hangAfter = d }(hangAfter)
+				hangAfter = "3s"
 			}
 			var out bytes.Buffer
 			err := Run("t", []string{issueFile(t, issue)}, &out, io.Discard)

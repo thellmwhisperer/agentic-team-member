@@ -158,14 +158,9 @@ Checks and exports it to `test` and `e2e` only. `scripts/test.sh` does
 not create it. With no counters, `scripts/cover-diff.sh` fails in the `e2e`
 row with its no-coverage-data diagnostic. Counters remain in the run directory.
 
-Optional: `check_timeout`, a positive Go duration such as `20m`, limits each checks command (install, test, e2e, typecheck, lint); absent means `10m`, and empty, null, invalid or non-positive values fail configuration.
-
-Also optional: `agent_timeout`, the limit for each agent call, including
-the slop detector, as a positive Go duration such as `45m` or `1h`. Without it,
-the limit is `30m`. An empty, null, unitless, invalid, zero, negative or
-overflowed value fails before the agent starts. Past the limit, the agent's
-group is killed and its step fails with `timed out after <duration>`, where the
-duration is the effective limit.
+ATM puts no time cap on the checks commands or the agent; a hung agent is
+stopped as [Hung agents](how-a-run-flows.md#hung-agents) says. The retired
+`check_timeout` and `agent_timeout` keys still load and limit nothing.
 
 ## Commands
 
@@ -292,7 +287,7 @@ clone before Checks. The prompt begins:
 The saved `e2e` output follows it, then a reminder names the new run's worker
 scratch directory as `$TMPDIR` and tells the agent to use it instead of an old
 scratch directory or the system temp directory. The turn uses the Agent step's
-tools, guards and time limits, keeps the saved report, and must not commit.
+tools, guards and hang detection, keeps the saved report, and must not commit.
 A missing or invalid worker report does not fail the turn.
 Its event is `agent turn after e2e`, with harness and duration; `--follow`
 prints its start and its result before Checks. Checks starts again at `install`.

@@ -4,14 +4,18 @@ package run
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
+	"time"
 )
 
 // ownGroup starts cmd as the leader of a new session and process group, so no terminal controls it, marks its
@@ -76,4 +80,50 @@ func bearing(mark string) map[int]bool {
 // detach starts cmd in a session of its own, so the terminal that started it can close.
 func detach(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+}
+
+// hangAfter is how long an agent may stay silent while no process under it works before ATM stops it as hung.
+// A string, so a build can set it with -ldflags -X.
+var hangAfter = "10m"
+
+var errHung = errors.New("hung")
+
+// watchHang cancels ctx with errHung once, for hangAfter, the agent pid has written no byte to stdout or stderr
+// (out) and no descendant of it has started, ended or used CPU time.
+// ponytail: a child blocked on I/O for hangAfter counts as hung; per-process I/O counters are the upgrade.
+func watchHang(ctx context.Context, cancel context.CancelCauseFunc, pid int, out *heard) {
+	limit, _ := time.ParseDuration(hangAfter)
+	tick := time.NewTicker(limit / 10)
+	defer tick.Stop()
+	was, quiet := "", time.Now()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+		}
+		if now := fmt.Sprint(atomic.LoadInt64((*int64)(out)), working(pid)); now != was {
+			was, quiet = now, time.Now()
+		} else if time.Since(quiet) >= limit {
+			cancel(errHung)
+			return
+		}
+	}
+}
+
+// working is the CPU time of each descendant of pid, by pid, as ps shows it.
+func working(pid int) string {
+	out, _ := exec.Command("ps", "-A", "-o", "pid=,ppid=,time=").Output()
+	tree, cpu := map[int]bool{pid: true}, map[int]string{}
+	for grew := true; grew; {
+		grew = false
+		for line := range strings.Lines(string(out)) {
+			var p, parent int
+			var t string
+			if _, err := fmt.Sscan(line, &p, &parent, &t); err == nil && tree[parent] && !tree[p] {
+				tree[p], cpu[p], grew = true, t, true
+			}
+		}
+	}
+	return fmt.Sprint(cpu)
 }

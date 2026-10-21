@@ -49,7 +49,8 @@ const fixWork = "echo fixed > a.txt" + fixTest
 // its report; its call goes to $FAKE_AGENT_CALL.ponytail. With FAKE_WORKER_TMPDIR set, the worker writes
 // test.log under its $TMPDIR, by a tool call naming its absolute path. $FAKE_AGENT_ORDER, when
 // set, receives one line per call. $FAKE_AGENT_STREAM goes to its stdout after its first
-// line, <clone> in it its working directory.
+// line, <clone> in it its working directory. With $FAKE_AGENT_PARTIAL naming a file that says stdout or stderr, it
+// writes a dot there every 500ms for 3s, then ends the line, starting no process meanwhile.
 func fakeAgent(name string) int {
 	go watchFakeAgentOwner()
 	if script := os.Getenv("REJECTION_SCRIPT"); script != "" {
@@ -99,6 +100,14 @@ func fakeAgentCLI(name string) int {
 	if mode != "empty-fail" {
 		fmt.Print(`{"type": "system", "subtype": "init"}`+"\n", stream) // the test's lines too
 		fmt.Fprintln(os.Stderr, "fake stderr")
+	}
+	if b, err := os.ReadFile(os.Getenv("FAKE_AGENT_PARTIAL")); err == nil {
+		w := map[string]*os.File{"stdout": os.Stdout, "stderr": os.Stderr}[strings.TrimSpace(string(b))]
+		for range 6 {
+			fmt.Fprint(w, ".")
+			time.Sleep(500 * time.Millisecond)
+		}
+		fmt.Fprintln(w)
 	}
 	if exit, done := fakeAgentMode(mode); done {
 		return exit
