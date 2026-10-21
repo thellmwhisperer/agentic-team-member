@@ -2,6 +2,7 @@ package run
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -24,14 +25,14 @@ import (
 func checks(clone, runDir, sha, test string, missingReport bool, c config.Config) (map[string]any, error) {
 	live := liveIn(clone)
 	return chk.Run(clone, runDir, sha, test, missingReport, c, chk.Tools[cmdResult]{
-		Git: git, Moved: moved, Unmade: unmade, ReadTest: readTest, Timeout: timeout,
-		Command: func(name, line string, limit time.Duration, env ...string) (cmdResult, error) {
+		Git: git, Moved: moved, Unmade: unmade, ReadTest: readTest,
+		Command: func(name, line string, env ...string) (cmdResult, error) {
 			var tail string
 			s, err := row(live, name, func() (err error) {
-				tail, _, err = shOutput(clone, line, limit, env...)
+				tail, _, err = shOutput(clone, line, cmp.Or(time.Duration(c.CheckTimeout), timeout), env...)
 				return err
 			})
-			return cmdResult{name, line, outcome(err), tail, s}, err
+			return cmdResult{name, line, outcome(err), tail, s}, wrap(err, name)
 		}})
 }
 

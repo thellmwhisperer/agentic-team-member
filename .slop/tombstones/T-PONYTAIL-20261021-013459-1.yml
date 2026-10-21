@@ -1,0 +1,18 @@
+schema: 1
+id: T-PONYTAIL-20261021-013459-1
+status: accepted
+category: alien_code
+title: "Cut the `Tools.Timeout` field, its comment and the `limit` parameter of `Command`. `Run` was taking the run's default timeout and handing it straight back to `Command`. The run-side `Command` closure now computes `cmp.Or(time.Duration(c.CheckTimeout), timeout)` itself, so `checks.go` no longer imports `cmp` or `time`."
+created_at: 2026-10-21
+incident:
+  pattern: "Cut the `Tools.Timeout` field, its comment and the `limit` parameter of `Command`. `Run` was taking the run's default timeout and handing it straight back to `Command`. The run-side `Command` closure now computes `cmp.Or(time.Duration(c.CheckTimeout), timeout)` itself, so `checks.go` no longer imports `cmp` or `time`."
+  what_went_wrong: "A coding agent wrote it and the ponytail pass cut it before delivery."
+  root_cause: "The coding agent wrote more than the issue needed."
+  rule_established: "Cut by the ponytail pass; it does not come back."
+  evidence:
+    - family: speculative_feature
+      example: "Cut the `Tools.Timeout` field, its comment and the `limit` parameter of `Command`. `Run` was taking the run's default timeout and handing it straight back to `Command`. The run-side `Command` closure now computes `cmp.Or(time.Duration(c.CheckTimeout), timeout)` itself, so `checks.go` no longer imports `cmp` or `time`.\nissue_sentence: Proposed scope clarification: mechanical imports, call-site/data adaptation and test access changes are allowed only to connect the extracted Checks."
+      artifact: "internal/checks/checks.go"
+match:
+  family: speculative_feature
+  artifact: "internal/checks/checks.go"
