@@ -24,9 +24,34 @@ type row struct {
 }
 
 // activity is a line of the Agent box: a tool call, by its id, its result and the first line of its output, or
-// what the agent says or thinks.
+// what the agent says, with the report it ends with, or thinks.
 type activity struct {
 	id, tool, detail, result, summary, thinking, says string
+	report                                            *report
+}
+
+// report is the report the agent's message ends with: its summary in Markdown, the files it changed, the commands
+// it ran, its test and its findings.
+type report struct {
+	Summary      string
+	TestFile     string   `json:"test_file"`
+	ChangedFiles []string `json:"changed_files"`
+	CommandsRun  []string `json:"commands_run"`
+	Findings     []struct{ Severity, File, Finding, Description string }
+}
+
+// said is what the agent says or thinks; the last JSON object of what it says, when it has a summary, is its report,
+// cut from what it says.
+func said(thinking, says string) *activity {
+	a := &activity{thinking: thinking, says: says}
+	obj, at := run.LastObject(says)
+	if _, ok := obj["summary"]; ok {
+		b, _ := json.Marshal(obj)
+		a.report = &report{}
+		_ = json.Unmarshal(b, a.report)
+		a.says = strings.TrimSpace(says[:at])
+	}
+	return a
 }
 
 // logLine is a line of the Log box: what the command check, or else node step, printed.
@@ -264,7 +289,7 @@ func (m *Model) key(k string) {
 }
 
 // wheel scrolls the box under the pointer: the ATM box, or the Agent or Log box while it shows. A click on a row of
-// folded tool calls, thinking or command output unfolds it, and on its first row once unfolded folds it again.
+// folded tool calls, thinking, command output or report unfolds it, and on its first row once unfolded folds it again.
 func (m *Model) wheel(msg tea.MouseMsg) {
 	p, b := &m.pipeline, m.pipelineBounds
 	switch {
@@ -291,11 +316,14 @@ func (m *Model) wheel(msg tea.MouseMsg) {
 	}
 }
 
-// unfolded says whether the run of tool calls, the thinking message or the command output by key shows in full;
-// command output does while its command runs.
+// unfolded says whether the run of tool calls, the thinking message, the command output or the report's row by key
+// shows in full; command output does while its command runs, a report does, its rows under it do not.
 func (m *Model) unfolded(key string) bool {
 	if open, ok := m.open[key]; ok {
 		return open
+	}
+	if part, ok := strings.CutPrefix(key, "report:"); ok {
+		return !strings.Contains(part, ":")
 	}
 	if command, ok := strings.CutPrefix(key, "log:"); ok {
 		step, check, _ := strings.Cut(command, "/")
@@ -341,7 +369,7 @@ func (m *Model) apply(f run.Frame) {
 	case e.ID != "" || e.Tool != "":
 		m.tool(e)
 	case e.Thinking != "" || e.Says != "":
-		m.agent = append(m.agent, &activity{thinking: e.Thinking, says: e.Says})
+		m.agent = append(m.agent, said(e.Thinking, e.Says))
 	case e.Output != nil:
 		m.appendOutput(e)
 	case m.current(e.Step) == nil:

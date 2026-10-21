@@ -540,7 +540,7 @@ func (m *Model) agentBox(width, lines int) string {
 	var out []paneLine
 	var calls []*activity
 	for _, a := range m.agent {
-		if a.says == "" && a.thinking == "" {
+		if a.says == "" && a.thinking == "" && a.report == nil {
 			calls = append(calls, a)
 			continue
 		}
@@ -550,6 +550,11 @@ func (m *Model) agentBox(width, lines int) string {
 			for _, text := range texts {
 				out = append(out, paneLine{key: fmt.Sprintf("activity:%p", a), text: text})
 			}
+		}
+		if a.report != nil {
+			out = m.reportLines(out, a, width)
+		}
+		if a.thinking == "" {
 			continue
 		}
 		// Thinking folds like a run of tool calls: one row, its first line, until clicked or h opens it.
@@ -582,6 +587,108 @@ func (m *Model) agentBox(width, lines int) string {
 	result := box(bold(cyan, ansi.Truncate(title, width-6, "…")), strings.Join(shown, "\n"), width, m.border(&m.history))
 	m.historyHeight = lipgloss.Height(result)
 	return result
+}
+
+// reportLines is out with the report of a: its Informe row, then, until a click folds it, its summary's Markdown
+// and a folded row for its changed files, its commands, its test and its findings, each item a row once unfolded.
+func (m *Model) reportLines(out []paneLine, a *activity, width int) []paneLine {
+	r, key := a.report, fmt.Sprintf("report:%p", a)
+	open := m.unfolded(key)
+	out = append(out, paneLine{key: key, toggle: key, text: fold(open) + " Informe"})
+	if !open {
+		return out
+	}
+	for _, text := range summaryRows(r.Summary, width) {
+		out = append(out, paneLine{key: key + ":summary", parent: key, text: text})
+	}
+	lines := func(items []string) (rows []string) {
+		for _, item := range items {
+			rows = append(rows, oneLine(item))
+		}
+		return rows
+	}
+	var findings []string
+	for _, f := range r.Findings {
+		severity := cmp.Or(f.Severity, "warning")
+		findings = append(findings, paint(cmp.Or(severities[severity][1], yellow), oneLine(severity))+" "+
+			oneLine(f.File)+" "+paint(dim, oneLine(cmp.Or(f.Description, f.Finding))))
+	}
+	for i, part := range []struct {
+		title string
+		rows  []string
+	}{
+		{fmt.Sprintf("Ficheros cambiados (%d)", len(r.ChangedFiles)), lines(r.ChangedFiles)},
+		{fmt.Sprintf("Comandos ejecutados (%d)", len(r.CommandsRun)), lines(r.CommandsRun)},
+		{"Test " + oneLine(r.TestFile), lines([]string{r.TestFile})},
+		{fmt.Sprintf("Hallazgos (%d)", len(r.Findings)), findings},
+	} {
+		k := fmt.Sprintf("%s:%d", key, i)
+		open := m.unfolded(k)
+		out = append(out, paneLine{key: k, parent: key, toggle: k, text: "  " + fold(open) + " " + part.title})
+		for _, row := range part.rows {
+			if open {
+				out = append(out, paneLine{key: k + ":" + row, parent: k, text: "      " + row})
+			}
+		}
+	}
+	return out
+}
+
+// tableDelimiter is the row under a Markdown table's header: its cells' dashes, with their colons.
+var tableDelimiter = regexp.MustCompile(`^\s*\|?(\s*:?-+:?\s*\|)*\s*:?-+:?\s*\|?\s*$`)
+
+// summaryRows is the Markdown of a report's summary in rows of width, indented, its tables in aligned columns.
+func summaryRows(text string, width int) []string {
+	lines := strings.Split(text, "\n")
+	var rows, prose []string
+	say := func() {
+		if len(prose) > 0 {
+			texts, _, _ := agentTextRows("  ", strings.Join(prose, "\n"), width, codeFence{})
+			rows, prose = append(rows, texts...), nil
+		}
+	}
+	for i := 0; i < len(lines); i++ {
+		end := i
+		for end < len(lines) && strings.HasPrefix(strings.TrimSpace(lines[end]), "|") {
+			end++
+		}
+		if end-i < 2 || !tableDelimiter.MatchString(lines[i+1]) {
+			prose = append(prose, lines[i])
+			continue
+		}
+		say()
+		rows = append(rows, tableRows(append([]string{lines[i]}, lines[i+2:end]...))...)
+		i = end - 1
+	}
+	say()
+	return rows
+}
+
+// tableRows is a Markdown table's header and rows, each cell's Markdown rendered and padded to its column's width.
+// ponytail: an escaped pipe splits its cell and a table wider than the box is cut; parse cells if tables need them.
+func tableRows(lines []string) []string {
+	var cells [][]string
+	var widths []int
+	for _, line := range lines {
+		line = strings.TrimSuffix(strings.TrimPrefix(strings.TrimSpace(line), "|"), "|")
+		var row []string
+		for j, cell := range strings.Split(line, "|") {
+			text, _, _ := markdown(strings.TrimSpace(cell))
+			if row = append(row, text); j == len(widths) {
+				widths = append(widths, 0)
+			}
+			widths[j] = max(widths[j], ansi.StringWidth(text))
+		}
+		cells = append(cells, row)
+	}
+	rows := make([]string, len(cells))
+	for i, row := range cells {
+		for j, cell := range row {
+			rows[i] += cell + strings.Repeat(" ", widths[j]-ansi.StringWidth(cell)+2)
+		}
+		rows[i] = "  " + strings.TrimRight(rows[i], " ")
+	}
+	return rows
 }
 
 func (m *Model) toolLines(out []paneLine, calls []*activity) []paneLine {

@@ -202,7 +202,8 @@ func TestHermesSpeaksACPItselfWithoutATerminal(t *testing.T) {
 	}
 	want := []string{"∴ **Executing shell command to create file**",
 		"tool tc-1 execute terminal: cat nope.txt + 1 command running", "tool tc-1   passed",
-		"∴ **Verifying file reading function**", "tool tc-2 read read_file: hola.txt running", "✎ DONE", "✎ Done."}
+		"∴ **Verifying file reading function**", "tool tc-2 read read_file: hola.txt running", "✎ DONE", "✎ Done.\n" +
+			`{"test_file": "a_test.sh", "changed_files": ["a.txt"], "summary": "s", "commands_run": [], "follow_ups": []}`}
 	if got := boxLines(w.live); !slices.Equal(got[:min(len(got), len(want))], want) {
 		t.Fatalf("box lines:\n%s\nwant first\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
