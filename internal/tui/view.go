@@ -248,7 +248,9 @@ func (m *Model) atm(width, height int) string {
 		if r.step == "ponytail" && r.check {
 			display.note = ""
 		}
-		rows = append(rows, paneLine{key: key, text: m.row(&display, inner)})
+		for _, line := range strings.Split(m.row(&display, inner), "\n") {
+			rows = append(rows, paneLine{key: key, text: line})
+		}
 		if r.step == "ponytail" && r.check && r.note != "" {
 			for n, line := range strings.Split(ansi.Wrap(r.note, max(1, inner-2), ""), "\n") {
 				rows = append(rows, paneLine{key: fmt.Sprintf("%s:note:%d", key, n), parent: key,
@@ -280,6 +282,11 @@ func (m *Model) row(r *row, width int) string {
 	}
 	word := r.state
 	status := bold(states[word][1], word)
+	if r.step == "ponytail" && r.check {
+		indent := strings.Repeat(" ", lipgloss.Width(prefix))
+		return prefix + strings.ReplaceAll(ansi.Wrap(r.label+suffix+" "+status,
+			max(1, width-lipgloss.Width(prefix)), ""), "\n", "\n"+indent)
+	}
 	if r.note != "" {
 		// The note gives way before the label: it gets only what the label, the duration and the state leave.
 		room := width - lipgloss.Width(prefix) - lipgloss.Width(r.label) - lipgloss.Width(suffix) - lipgloss.Width(status) - 4
@@ -812,7 +819,11 @@ func (m *Model) findingsBox(width int) string {
 			out = append(out, "")
 		}
 		s := severities[f.severity]
-		out = append(out, "  "+paint(s[1], s[0])+" "+f.ref)
+		ref := strings.Split(ansi.Wrap(f.ref, max(1, width-8), ""), "\n")
+		out = append(out, "  "+paint(s[1], s[0])+" "+ref[0])
+		for _, line := range ref[1:] {
+			out = append(out, "    "+line)
+		}
 		for _, l := range strings.Split(lipgloss.NewStyle().Width(max(10, width-8)).Render(f.text), "\n") {
 			out = append(out, "    "+paint(dim, strings.TrimRight(l, " ")))
 		}

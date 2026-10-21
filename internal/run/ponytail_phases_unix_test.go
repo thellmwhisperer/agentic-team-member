@@ -6,8 +6,12 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/charmbracelet/x/ansi"
 )
 
 // The real terminal must unfold the Slop detector row into its phases and list every finding the ponytail agent
@@ -144,6 +148,79 @@ func TestRealScreenShowsFullSlopRestoration(t *testing.T) {
 				if putBack[path] != 1 {
 					t.Fatalf("want exactly one restoration of %s, got %v", path, putBack)
 				}
+			}
+		})
+	}
+}
+
+func TestRealScreenShowsCompleteSlopReferences(t *testing.T) {
+	builtATM(t)
+	const path = "internal/run/ponytail.go"
+	for _, c := range []struct {
+		name, work, lint, verdict string
+		pair                      bool
+	}{
+		{name: "global rejection", work: "printf 'changed\\nextra\\n' > " + path,
+			verdict: "rejected: does not shorten the diff: 4 net added lines, 4 before"},
+		{name: "full restoration", work: "echo keep > " + path,
+			lint: "grep -q extra " + path + " || { echo failed; exit 1; }", verdict: "discarded: checks failed"},
+		{name: "named restoration", work: "echo keep > " + path, pair: true,
+			lint: "grep -q extra " + path + " || { echo " + path + "; exit 1; }", verdict: "discarded: checks failed"},
+		{name: "individual restoration", work: "echo keep > " + path, pair: true,
+			lint: "grep -q extra " + path + " || { echo failed; exit 1; }", verdict: "discarded: checks failed"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			delivered := filepath.Join(t.TempDir(), "delivered")
+			t.Setenv("ATM_TEST_OUT", delivered)
+			t.Setenv("FAKE_AGENT_WORK", "printf 'fixed\\nextra\\nmore\\n' > a.txt"+fixTest+
+				"; mkdir -p internal/run; printf 'keep\\nextra\\n' > "+path)
+			work, files := c.work, []string{path}
+			if c.pair {
+				work += "; echo fixed > a.txt"
+				files = append(files, "a.txt")
+			}
+			t.Setenv("FAKE_PONYTAIL_WORK", work)
+			t.Setenv("FAKE_PONYTAIL_REPORT", dependentCuts(files...))
+			cfg := atmSet(atmSet(atmYAML, "lint", c.lint), "delivery", "cat "+path+` > "$ATM_TEST_OUT"`)
+			top := gitT(t, repo(t, "https://example.com/owner/repo.git", cfg), "rev-parse", "--show-toplevel")
+			f, shown := realScreen(t, top)
+			deadline := time.After(2 * time.Minute)
+			open := true
+			for open {
+				select {
+				case line, more := <-f.lines:
+					open = more
+					shown.WriteString(line + "\n")
+				case <-deadline:
+					t.Fatal("the real terminal did not finish")
+				}
+			}
+			f.exit(0)
+			screen := ansi.Strip(shown.String())
+			start := strings.LastIndex(screen, "╭─ ATM")
+			if start < 0 {
+				t.Fatalf("missing final terminal view:\n%s", screen)
+			}
+			var left, right []string
+			for _, line := range strings.Split(screen[start:], "\n") {
+				cells := strings.Split(line, "│")
+				if len(cells) >= 3 {
+					left = append(left, cells[1])
+				}
+				if len(cells) == 5 {
+					right = append(right, cells[3])
+				}
+			}
+			want := "W " + c.verdict + " · " + path + " cut " + path
+			if got := strings.Join(strings.Fields(strings.Join(right, "\n")), " "); !strings.Contains(got, want) {
+				t.Fatalf("issue 586 requires the complete verdict, then file and finding, want %q:\n%s", want, screen[start:])
+			}
+			if !regexp.MustCompile(`✓ put back\s*\n\s*internal/run/ponytail\.go`).MatchString(strings.Join(left, "\n")) {
+				t.Fatalf("issue 586 requires the complete restored path on its continuation row:\n%s", screen[start:])
+			}
+			got, err := os.ReadFile(delivered)
+			if err != nil || string(got) != "keep\nextra\n" {
+				t.Fatalf("the displayed restoration did not reach delivery: %q, %v", got, err)
 			}
 		})
 	}
