@@ -3,12 +3,10 @@
 package checks
 
 import (
-	"cmp"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"time"
 
 	"github.com/thellmwhisperer/agentic-team-member/internal/config"
 )
@@ -20,10 +18,8 @@ type Tools[C any] struct {
 	Moved    func(clone, want, who string) error // an error when HEAD in clone is not want: who made commits
 	Unmade   func(clone string) error            // removes the agent's ignored content and puts back what was
 	ReadTest func(clone, test string) ([]byte, error)
-	// Command runs line in clone as the screen's row name, env added to its environment, killed past limit.
-	Command func(name, line string, limit time.Duration, env ...string) (C, error)
-	// Timeout is a command's limit when the config sets no check_timeout.
-	Timeout time.Duration
+	// Command runs line in clone as the screen's row name, env added to its environment, its error named name.
+	Command func(name, line string, env ...string) (C, error)
 }
 
 // Run runs the configured commands on the completed work, preserving clone and test safeguards.
@@ -36,13 +32,10 @@ func Run[C any](clone, runDir, sha, test string, missingReport bool, c config.Co
 		if line == "" {
 			return nil
 		}
-		cmd, err := t.Command(name, line, cmp.Or(time.Duration(c.CheckTimeout), t.Timeout), env...)
+		cmd, err := t.Command(name, line, env...)
 		ran = append(ran, cmd)
 		result["commands"] = ran
-		if err != nil {
-			return fmt.Errorf("%s: %w", name, err)
-		}
-		return nil
+		return err
 	}
 	if err == nil {
 		err = t.Moved(clone, sha, "the agent")

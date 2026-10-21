@@ -1,0 +1,18 @@
+schema: 1
+id: T-PONYTAIL-20261021-013459-2
+status: accepted
+category: alien_code
+title: "Replaced the hand-written if/fmt.Errorf/return nil in the `run` closure with `return err`. The run-side `Command` adapter now returns the existing `wrap(err, name)` helper from `internal/run/checks.go`, so the error text \"<name>: <err>\" stays the same."
+created_at: 2026-10-21
+incident:
+  pattern: "Replaced the hand-written if/fmt.Errorf/return nil in the `run` closure with `return err`. The run-side `Command` adapter now returns the existing `wrap(err, name)` helper from `internal/run/checks.go`, so the error text \"<name>: <err>\" stays the same."
+  what_went_wrong: "A coding agent wrote it and the ponytail pass cut it before delivery."
+  root_cause: "The coding agent wrote more than the issue needed."
+  rule_established: "Cut by the ponytail pass; it does not come back."
+  evidence:
+    - family: speculative_hardening
+      example: "Replaced the hand-written if/fmt.Errorf/return nil in the `run` closure with `return err`. The run-side `Command` adapter now returns the existing `wrap(err, name)` helper from `internal/run/checks.go`, so the error text \"<name>: <err>\" stays the same.\nissue_sentence: Checks keeps its remaining commands, order, results, events and error messages exactly as on that base."
+      artifact: "internal/checks/checks.go"
+match:
+  family: speculative_hardening
+  artifact: "internal/checks/checks.go"
