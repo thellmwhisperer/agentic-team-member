@@ -51,7 +51,7 @@ Delivery failure waits for the launcher's answer; see [Checks](#checks).
 | Clone | Clones the repository at the commit checked by preflight, or the saved base commit on resume into `.atm/clones/`, runs `install` | The ref, the clone or `install` fails |
 | Contract | Writes `brief.md`, the agent's contract | The brief cannot be written |
 | Agent | Runs the coding agent in the clone on the brief | It fails to complete successfully, times out or writes outside its clone and scratch directory. A missing or invalid report does not fail it: see [Rejected reports](#rejected-reports) |
-| Checks | Prepares the clone, then install, test, optional e2e, typecheck and lint; see [Checks](#checks) | Cleanup fails, the reported test file is invalid, a command fails, or HEAD moves |
+| Checks | Prepares the clone, then install, test, optional e2e, typecheck and lint; see [Checks](#checks) | Cleanup fails, a changed Go test file loses tests, the reported test file is invalid, a command fails, or HEAD moves |
 | Slop detector | Lets a model cut the diff; keeps the cut only if every check still passes | Its agent fails, fails [report validation](#rejected-reports), or anything commits |
 | Delivery | Commits the work on a branch and runs the `delivery` command | The branch or the command fails. Skipped when `delivery` is empty |
 
@@ -200,7 +200,8 @@ question again or follows the continuation after an answer.
 
 The Agent and a worker fixing a failure must not commit. A Delivery command
 may commit before failing; Checks use the commit left by Delivery as the
-starting point for the fix turn. ATM records the clone's paths before the
+starting point for the fix turn. The test-loss comparison still uses the run's
+original base commit. ATM records the clone's paths before the
 agent starts, including contents of ignored nested repositories. Before
 `install`, Checks removes newly made ignored files and directories,
 including read-only cache trees and new contents within retained directories.
@@ -225,6 +226,15 @@ and the ways out, are under [`e2e`](configuration.md#atmyaml). The first
 failed command asks the launcher with its last 60 lines as the finding. A
 command that commits fails the checks too.
 
+After `install` and before `test`, Checks compare each changed Go test file
+matching `test_patterns` with the run's original base commit. They count
+`func Test...` declarations and `t.Run` subtests, including nested subtests.
+If the count falls, Checks fails and names the file and its before and after
+counts in the reason. A test or subtest that the issue explicitly names for
+removal is exempt, along with its nested subtests. Other mentions of a test do
+not authorize its removal. This check also fails if a changed Go test file
+cannot be parsed. It does not detect deleted assertions inside a retained test.
+
 Resuming an `e2e` red gives the agent one turn in its saved session before
 Checks starts again at `install`. The turn receives the failed output and
 the two ways out above, under the Agent step's hang detection. A second
@@ -233,7 +243,7 @@ sessions that cannot resume go straight to Checks with
 `resume: no agent turn (<reason>)`; see
 [Resuming a failed run](configuration.md#resuming-a-failed-run).
 
-The [issue contract](configuration.md#the-issue) does not select checks.
+The [issue contract](configuration.md#the-issue) does not select check commands.
 Checks run the configured suite on the completed work, followed by `e2e`,
 `typecheck` and `lint` when configured.
 

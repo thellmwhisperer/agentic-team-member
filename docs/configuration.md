@@ -119,7 +119,7 @@ your machine's file.
 | `typecheck` | Typechecks |
 | `lint` | Lints |
 | `test_file` | Legacy configuration key, required but not executed. An empty value is allowed; a non-empty value must contain `{file}` or `{dir}`. Tests run through the configured `test` suite. |
-| `test_patterns` | Globs of the test files |
+| `test_patterns` | Globs of the test files; Checks also uses them for the [test-loss check](how-a-run-flows.md#checks) on changed Go files |
 | `docs_patterns` | Globs of the documentation files |
 | `delivery` | Shell line that takes the run's branch from its clone, for example to a PR. Empty skips delivery |
 
