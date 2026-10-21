@@ -411,9 +411,11 @@ the ATM box, a row per step with its icon (`○`
 pending, a spinner running, `⏸` waiting, `✓` passed, `✗` failed, `–` skipped), duration and
 note, and beside it, from 100 columns, the Agent box while an agent works,
 the Findings box with a failure or the slop detector's cuts, and the Log box.
-Above the rows, the issue's title shows on one line. A longer one folds to
-that line behind `▸`, cut with `…`; `i` or a click on the arrow wraps it whole
-in whole lines behind `▾`, and folds it again. The title stays above the rows while it leaves them a line; when
+Above the rows, a title that fits shows on one line without an arrow. A longer
+title folds to one line with an underlined `▸` before it and `…` at the end.
+Press `i` or click the arrow to show the whole title, wrapped at words, behind
+`▾`; either action folds it again. The state stays at the right of the first
+line. The title stays above the rows while it leaves them a line; when
 the ATM box is too short for that, past its first line the title scrolls
 with the rows, and the ATM box's keys reach it.
 
