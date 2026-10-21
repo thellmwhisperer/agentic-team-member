@@ -70,16 +70,58 @@ func TestRealAttachNamesAgentSettings(t *testing.T) {
 	}
 }
 
-// The real atm attach wraps the issue's title: whole within three lines, else three and a hint whose key, i,
-// shows every line and folds them again.
+// The real screen folds issue #467's eleven-word title to one line, the arrow in front and an ellipsis at its end;
+// i and a click on the arrow split it in whole lines, and fold it again. No label names the fold.
+func TestRealScreenFoldsTheTitle(t *testing.T) {
+	title := "The issue title folds to one line with the arrow and an ellipsis; i or a click unfolds it"
+	a := liveAttach(t, 60, 40)
+	a.send(`{"step":"issue","state":"started"}`)
+	a.send(`{"step":"issue","state":"passed","title":"` + title + `","number":467}`)
+	folded := regexp.MustCompile(`(?m)^│ ▸ #467 The issue title[^…▾]*… +\S+ \w+ │$`)
+	// unfolded is the screen's title, read from its rows behind the open arrow, when every word shows.
+	unfolded := func(s string) bool {
+		at := rowOf(s, "▾ #467")
+		if at < 0 {
+			return false
+		}
+		var words []string
+		for i, line := range strings.Split(s, "\n")[at:] {
+			fields := strings.Fields(strings.Trim(line, "│ "))
+			if len(fields) == 0 {
+				break
+			}
+			if i == 0 {
+				fields = fields[1 : len(fields)-2] // the arrow, then the state's icon and word
+			}
+			words = append(words, fields...)
+		}
+		return strings.Join(words, " ") == "#467 "+title
+	}
+	arrow := "\x1b[<0;3;2M\x1b[<0;3;2m" // a click on the ATM box's first row, its third column
+	a.sees(folded.MatchString)
+	a.key("i")
+	a.sees(unfolded)
+	a.key("i")
+	a.sees(folded.MatchString)
+	a.key(arrow)
+	a.sees(unfolded)
+	a.key(arrow)
+	a.sees(folded.MatchString)
+	if shown := ansi.Strip(a.raw.String()); strings.Contains(shown, "unfold title") {
+		t.Fatalf("the screen names the fold:\n%s", shown)
+	}
+	a.end()
+}
+
+// The real atm attach folds the issue's title to one line: whole when it fits, else behind ▸ until i shows every
+// line behind ▾ and folds them again.
 func TestRealAttachWrapsAndFoldsIssueTitle(t *testing.T) {
 	t.Run("short", func(t *testing.T) {
 		a := liveAttach(t, 60, 40)
 		a.send(`{"step":"issue","state":"started"}`)
-		a.send(`{"step":"issue","state":"passed","title":"A short title that wraps onto a few lines of the ATM box ` +
-			`and ends with tail-short","number":7}`)
-		if shown := a.until(`tail-short`); strings.Contains(shown, "unfold title") {
-			t.Fatalf("a title within three lines has a hint:\n%s", shown)
+		a.send(`{"step":"issue","state":"passed","title":"A short title, tail-short","number":7}`)
+		if shown := a.until(`tail-short`); strings.ContainsAny(shown, "▸▾…") {
+			t.Fatalf("a title within one line has an arrow:\n%s", shown)
 		}
 		a.end()
 	})
@@ -88,22 +130,22 @@ func TestRealAttachWrapsAndFoldsIssueTitle(t *testing.T) {
 		a.send(`{"step":"issue","state":"started"}`)
 		a.send(`{"step":"issue","state":"passed","title":"` + strings.Repeat("long words wrap ", 15) +
 			`tail-long","number":8}`)
-		if shown := a.until(`… i unfold title`); strings.Contains(shown, "tail-long") {
+		if shown := a.until(`▸ #8 long words[^\n]*…`); strings.Contains(shown, "tail-long") {
 			t.Fatalf("a long title shows whole before i:\n%s", shown)
 		}
 		a.key("i")
+		a.until(`▾ #8 long words`)
 		a.until(`tail-long`)
-		a.until(`i fold title`)
 		a.key("i")
-		a.until(`… i unfold title`)
+		a.until(`▸ #8 long words[^\n]*…`)
 		a.end()
 	})
-	// While Contract runs under the ATM box, one screen, with no key pressed, shows a title of three lines whole,
-	// and of a longer one its first three lines and the hint, never the rest. At 60 columns a line holds 11 words.
-	t.Run("three lines while running", func(t *testing.T) { compactTitleWhileRunning(t, 30, 30, false) })
-	t.Run("compact long while running", func(t *testing.T) { compactTitleWhileRunning(t, 50, 33, true) })
+	// While Contract runs under the ATM box, one screen, with no key pressed, shows of a long title its first words
+	// on one line behind the arrow, never the rest. At 60 columns that line holds 10 words.
+	t.Run("folded while running", func(t *testing.T) { compactTitleWhileRunning(t, 30, 10, true) })
+	t.Run("folded long while running", func(t *testing.T) { compactTitleWhileRunning(t, 50, 10, true) })
 	// On a short terminal, beside and under the ATM box, every screen keeps the title's start and the running
-	// step, and the ATM box's keys reach every line of the title, folded and unfolded.
+	// step, the folded title its arrow, and the ATM box's keys reach every line of the unfolded title.
 	for _, cols := range []uint16{120, 60} {
 		t.Run(fmt.Sprintf("short %d×9", cols), func(t *testing.T) {
 			a := liveAttach(t, cols, 9)
@@ -114,20 +156,23 @@ func TestRealAttachWrapsAndFoldsIssueTitle(t *testing.T) {
 			a.send(`{"step":"issue","state":"started"}`)
 			a.send(`{"step":"issue","state":"passed","title":"` + strings.Join(words, " ") + `","number":8}`)
 			a.send(`{"step":"contract","state":"started"}`)
-			tokens := append([]string{"i fold title", "i unfold title"}, words...)
+			tokens := append([]string{"▾", "▸"}, words...)
 			seen := map[string]bool{}
 			a.scrollsTitle(seen, tokens, "w00")
 			a.key("\x1b[H") // home
-			a.scrollsTitle(seen, tokens, "i unfold title")
+			if !seen["▸"] {
+				t.Fatal("the folded title shows no arrow")
+			}
 			a.key("i")
-			a.scrollsTitle(seen, tokens, append(words, "i fold title")...)
+			a.key("\x1b[H") // home: the unfolded title's lines are above the rows the box reads
+			a.scrollsTitle(seen, tokens, append(words, "▾")...)
 			a.end()
 		})
 	}
 }
 
 // compactTitleWhileRunning attaches at 60×30 to a run whose title is count words and whose Contract runs, and
-// checks one screen shows, on three lines, the first shown words, the unfold hint when hint, and no other word.
+// checks one screen shows, on one line, the first shown words, behind the fold arrow when hint, and no other word.
 func compactTitleWhileRunning(t *testing.T, count, shown int, hint bool) {
 	a := liveAttach(t, 60, 30)
 	words := make([]string, count)
@@ -143,10 +188,10 @@ func compactTitleWhileRunning(t *testing.T, count, shown int, hint bool) {
 				return false
 			}
 		}
-		return runningContract.MatchString(s) && strings.Contains(s, "… i unfold title") == hint
+		return runningContract.MatchString(s) && strings.Contains(s, "▸ #7 w00") == hint
 	})
-	if n := len(regexp.MustCompile(`(?m)^.*\bw\d\d\b.*$`).FindAllString(s, -1)); n != 3 {
-		t.Fatalf("the title shows on %d lines, not 3:\n%s", n, s)
+	if n := len(regexp.MustCompile(`(?m)^.*\bw\d\d\b.*$`).FindAllString(s, -1)); n != 1 {
+		t.Fatalf("the title shows on %d lines, not 1:\n%s", n, s)
 	}
 	for _, w := range words[shown:] {
 		if strings.Contains(s, w) {
