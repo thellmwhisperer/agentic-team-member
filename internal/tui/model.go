@@ -295,17 +295,17 @@ func (m *Model) wheel(msg tea.MouseMsg) {
 	case !m.pipelineBounds.contains(msg.X, msg.Y):
 		return
 	}
-	switch msg.Button {
-	case tea.MouseButtonWheelUp:
+	switch {
+	case msg.Button == tea.MouseButtonWheelUp:
 		p.scroll(-3)
-	case tea.MouseButtonWheelDown:
+	case msg.Button == tea.MouseButtonWheelDown:
 		p.scroll(3)
-	case tea.MouseButtonLeft:
-		if msg.Action == tea.MouseActionPress && p == &m.pipeline && m.titleArrow.contains(msg.X-b.x, msg.Y-b.y) {
+	case msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionPress:
+		if p == &m.pipeline && m.titleArrow.contains(msg.X-b.x, msg.Y-b.y) {
 			m.unfoldTitle = !m.unfoldTitle
 		}
 		row := msg.Y - b.y - 1 // under the box's top border
-		if msg.Action == tea.MouseActionPress && row >= 0 && row < len(p.toggles) && p.toggles[row] != "" {
+		if row >= 0 && row < len(p.toggles) && p.toggles[row] != "" {
 			if m.open == nil {
 				m.open = map[string]bool{}
 			}

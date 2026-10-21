@@ -72,6 +72,8 @@ func TestRealAttachNamesAgentSettings(t *testing.T) {
 
 // The real screen folds issue #467's eleven-word title to one line, the arrow in front and an ellipsis at its end;
 // i and a click on the arrow split it in whole lines, and fold it again. No label names the fold.
+//
+//nolint:funlen // Keep the complete real-terminal fold, click and scroll scenario with every assertion.
 func TestRealScreenFoldsTheTitle(t *testing.T) {
 	title := "The issue title folds to one line with the arrow and an ellipsis; i or a click unfolds it"
 	a := liveAttach(t, 60, 40)
