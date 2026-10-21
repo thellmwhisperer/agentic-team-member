@@ -4,7 +4,6 @@ package run
 
 import (
 	"fmt"
-	"html"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -30,7 +29,8 @@ case "$*" in
 	[ ! -f "$FAKE_NM/fixing" ] || step=fixing
 	[ ! -f "$FAKE_NM/done" ] || run=completed step=completed
 	printf 'run:\n  id: "01M5D0SWRMZ44NM79H2NNC3YZ8"\n  branch: atm/the-unit\n  status: %s\n' "$run"
-	printf '  steps[3]{step,status,findings,duration_ms}:\n    review,%s,1,1200\n    test,pending,0,0\n    lint,skipped,0,0\n' "$step" ;;
+	printf '  steps[3]{step,status,findings,duration_ms}:\n'
+	printf '    review,%s,1,1200\n    test,pending,0,0\n    lint,skipped,0,0\n' "$step" ;;
 "axi logs --step review --full")
 	cat "$FAKE_NM/review.toon" ;;
 *) exit 2 ;;
@@ -76,7 +76,35 @@ func TestRealAttachPaintsTheGate(t *testing.T) {
 	a.delivered(clone)
 	finding := `error internal/run/run.go Delivery drops the "gate", verdict and all.`
 	folded := a.sees(func(s string) bool { return strings.Contains(s, finding) && strings.Contains(s, "▸ ⏸ review") })
-	gateEvidence(t, "gate-folded", a)
+	assertGateFolded(t, a, folded)
+	a.key("\x1b[<0;45;2M\x1b[<0;45;2m") // a click on review's header, the right column's first row
+	a.sees(func(s string) bool {
+		return strings.Contains(s, "▾ ⏸ review") && strings.Contains(s, "reading internal/run/run.go") &&
+			strings.Contains(s, "checking the delivery") && strings.Contains(s, finding)
+	})
+	if err := os.WriteFile(filepath.Join(nm, "fixing"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fixing := a.sees(func(s string) bool {
+		return regexp.MustCompile(`│ [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] review .*running │`).MatchString(s) &&
+			regexp.MustCompile(`│ ▾ [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] review +│`).MatchString(s)
+	})
+	if !strings.Contains(fixing, finding) || strings.Contains(fixing, "internal/run/run.go:") {
+		t.Fatalf("fixing lost or invented a finding position:\n%s", fixing)
+	}
+	if err := os.WriteFile(filepath.Join(nm, "done"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a.exits()
+	assertGateLast(t, a)
+	log, _ := os.ReadFile(filepath.Join(nm, "log"))
+	if !strings.HasPrefix(string(log), clone+" axi status\n") {
+		t.Fatalf("the screen did not ask no-mistakes in the run's clone:\n%s", log)
+	}
+}
+
+func assertGateFolded(t *testing.T, a *attached, folded string) {
+	t.Helper()
 	for _, want := range []string{`│ ⏸ review .*waiting │`, `│ ○ test .*pending │`, `│ ▸ ⏸ review +│`,
 		`│   Reviewing the diff +│`} {
 		if !regexp.MustCompile(want).MatchString(folded) {
@@ -87,56 +115,21 @@ func TestRealAttachPaintsTheGate(t *testing.T) {
 		!strings.Contains(a.raw.String(), "\x1b[1mReviewing the diff") {
 		t.Fatalf("folded, review shows more than its first line, in bold:\n%q", a.raw.String())
 	}
-	a.key("\x1b[<0;45;2M\x1b[<0;45;2m") // a click on review's header, the right column's first row
-	a.sees(func(s string) bool {
-		return strings.Contains(s, "▾ ⏸ review") && strings.Contains(s, "reading internal/run/run.go") &&
-			strings.Contains(s, "checking the delivery") && strings.Contains(s, finding)
-	})
-	gateEvidence(t, "gate-unfolded", a)
-	if err := os.WriteFile(filepath.Join(nm, "fixing"), nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	fixing := a.sees(func(s string) bool {
-		return regexp.MustCompile(`│ [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] review .*running │`).MatchString(s) &&
-			regexp.MustCompile(`│ ▾ [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] review +│`).MatchString(s)
-	})
-	gateEvidence(t, "gate-fixing", a)
-	if !strings.Contains(fixing, finding) || strings.Contains(fixing, "internal/run/run.go:") {
-		t.Fatalf("fixing lost or invented a finding position:\n%s", fixing)
-	}
-	if err := os.WriteFile(filepath.Join(nm, "done"), nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	a.exits()
+}
+
+func assertGateLast(t *testing.T, a *attached) {
+	t.Helper()
 	last := a.raw.String()
 	last = last[strings.LastIndex(last, "\x1b[?1049l"):]
 	if !strings.Contains(last, "\x1b[1mReviewing the diff") || strings.Contains(last, "**") ||
 		!strings.Contains(last, "checking the delivery") || !strings.Contains(ansi.Strip(last), "▾ ✓ review") {
 		t.Fatalf("the gate's last screen lacks review, passed and unfolded in bold:\n%q", last)
 	}
-	log, _ := os.ReadFile(filepath.Join(nm, "log"))
-	if !strings.HasPrefix(string(log), clone+" axi status\n") {
-		t.Fatalf("the screen did not ask no-mistakes in the run's clone:\n%s", log)
-	}
 }
 
 func TestRealAttachScrollsTheFullGateLog(t *testing.T) {
 	nm := gateFake(t)
-	fixture, err := os.ReadFile(filepath.Join(nm, "review.toon"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	long := strings.ReplaceAll(string(fixture), "3 total", "83 total")
-	long = strings.ReplaceAll(long, "log[3]", "log[83]")
-	want := []string{"Reviewing the diff", "reading internal/run/run.go", "checking the delivery"}
-	for i := 0; i < 80; i++ {
-		line := fmt.Sprintf("review-line-%02d", i)
-		want = append(want, line)
-		long += "  " + line + "\n"
-	}
-	if err := os.WriteFile(filepath.Join(nm, "review.toon"), []byte(long), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	want := longGateLog(t, nm)
 	a := liveAttach(t, 120, 12)
 	a.delivered(t.TempDir())
 	folded := a.sees(func(s string) bool {
@@ -162,7 +155,6 @@ func TestRealAttachScrollsTheFullGateLog(t *testing.T) {
 	}
 	top := len(rows) - 7
 	page(top)
-	gateEvidence(t, "gate-long-log-bottom", a)
 	a.key("\t\x1b[H")
 	pipeline := a.sees(func(s string) bool { return strings.Contains(s, "– Issue") })
 	if !strings.Contains(pipeline, "review-line-79") {
@@ -186,45 +178,24 @@ func TestRealAttachScrollsTheFullGateLog(t *testing.T) {
 	a.exits()
 }
 
-// gateEvidence saves the actual terminal frame as a viewable artifact when the test phase requests it.
-func gateEvidence(t *testing.T, name string, a *attached) {
+func longGateLog(t *testing.T, nm string) []string {
 	t.Helper()
-	dir := os.Getenv("ATM_GATE_EVIDENCE_DIR")
-	if dir == "" {
-		return
-	}
-	// A screen assertion can match midway through a terminal write; wait for the frame to finish.
-	quiet := time.NewTimer(150 * time.Millisecond)
-	defer quiet.Stop()
-collect:
-	for {
-		select {
-		case chunk, ok := <-a.chunks:
-			if !ok {
-				break collect
-			}
-			a.raw.WriteString(chunk)
-			if !quiet.Stop() {
-				select {
-				case <-quiet.C:
-				default:
-				}
-			}
-			quiet.Reset(150 * time.Millisecond)
-		case <-quiet.C:
-			break collect
-		}
-	}
-	shown := html.EscapeString(a.screen())
-	if strings.Contains(a.raw.String(), "\x1b[1mReviewing the diff") {
-		shown = strings.ReplaceAll(shown, "Reviewing the diff", "<strong>Reviewing the diff</strong>")
-	}
-	page := "<!doctype html><meta charset=\"utf-8\"><title>atm attach gate</title>" +
-		"<style>body{background:#111827;color:#e5e7eb;padding:24px}pre{font:15px/1.25 monospace;white-space:pre}</style><pre>" +
-		shown + "</pre>"
-	if err := os.WriteFile(filepath.Join(dir, name+".html"), []byte(page), 0o600); err != nil {
+	fixture, err := os.ReadFile(filepath.Join(nm, "review.toon"))
+	if err != nil {
 		t.Fatal(err)
 	}
+	long := strings.ReplaceAll(string(fixture), "3 total", "83 total")
+	long = strings.ReplaceAll(long, "log[3]", "log[83]")
+	want := []string{"Reviewing the diff", "reading internal/run/run.go", "checking the delivery"}
+	for i := 0; i < 80; i++ {
+		line := fmt.Sprintf("review-line-%02d", i)
+		want = append(want, line)
+		long += "  " + line + "\n"
+	}
+	if err := os.WriteFile(filepath.Join(nm, "review.toon"), []byte(long), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return want
 }
 
 func TestRealAttachShowsGateFindingsWithoutLogLines(t *testing.T) {
@@ -234,13 +205,15 @@ func TestRealAttachShowsGateFindingsWithoutLogLines(t *testing.T) {
 		t.Fatal(err)
 	}
 	header, _, _ := strings.Cut(string(fixture), "lines:")
-	if err := os.WriteFile(filepath.Join(nm, "review.toon"), []byte(header+"lines: 0 total\nlog[0]{line}:\n"), 0o600); err != nil {
+	noLines := header + "lines: 0 total\nlog[0]{line}:\n"
+	if err := os.WriteFile(filepath.Join(nm, "review.toon"), []byte(noLines), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	a := liveAttach(t, 120, 40)
 	a.delivered(t.TempDir())
 	a.sees(func(s string) bool {
-		return strings.Contains(s, "▸ ⏸ review") && strings.Contains(s, `error internal/run/run.go Delivery drops the "gate", verdict and all.`)
+		return strings.Contains(s, "▸ ⏸ review") &&
+			strings.Contains(s, `error internal/run/run.go Delivery drops the "gate", verdict and all.`)
 	})
 	a.key("\x1b[<0;45;2M\x1b[<0;45;2m")
 	a.sees(func(s string) bool { return strings.Contains(s, "▾ ⏸ review") })
