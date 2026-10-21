@@ -33,6 +33,19 @@ const (
 	netScope = "- No network, except the project's package manager installing a dependency."
 )
 
+// runBrief runs atm on issue in a fresh repo and returns the brief.md it wrote.
+func runBrief(t *testing.T, issue string, out io.Writer) string {
+	root := repo(t, "https://example.com/owner/repo.git", briefYAML)
+	if err := Run("t", []string{issueFile(t, issue)}, out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(root, ".atm", "runs", "t", "brief.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.ReplaceAll(string(b), "\r\n", "\n")
+}
+
 func TestRunWritesTheContractForTheTaskType(t *testing.T) {
 	for typ, proof := range map[string]string{
 		"":           "Implement the issue",
@@ -45,24 +58,16 @@ func TestRunWritesTheContractForTheTaskType(t *testing.T) {
 		"chore":      "Implement the issue",
 	} {
 		t.Run(typ, func(t *testing.T) {
-			root := repo(t, "https://example.com/owner/repo.git", briefYAML)
 			issue := "Retry once on timeout."
 			if typ != "" {
 				issue += "\n\nType: " + typ
 			}
 			var out bytes.Buffer
-			if err := Run("t", []string{issueFile(t, "# Retry\n"+issue+"\n")}, &out, io.Discard); err != nil {
-				t.Fatal(err)
-			}
+			got := runBrief(t, "# Retry\n"+issue+"\n", &out)
 			evs := events(t, &out)
 			if evs[5]["step"] != "contract" || evs[5]["state"] != "passed" {
 				t.Fatalf("want the contract step passed, got %v", evs)
 			}
-			b, err := os.ReadFile(filepath.Join(root, ".atm", "runs", "t", "brief.md"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			got := strings.ReplaceAll(string(b), "\r\n", "\n")
 			first, _, _ := strings.Cut(got, "\n")
 			if !strings.Contains(first, "`AGENTS.md`") || !strings.Contains(first, "this brief wins") {
 				t.Errorf("first line does not point to AGENTS.md: %q", first)
@@ -83,6 +88,17 @@ func TestRunWritesTheContractForTheTaskType(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// Decision 8087: a worker adapts the tests its change invalidates instead of removing them.
+func TestBriefForbidsDeletingTests(t *testing.T) {
+	_, forbidden, _ := strings.Cut(runBrief(t, "# Retry\nRetry once on timeout.\n", io.Discard), "## FORBIDDEN\n")
+	forbidden, _, _ = strings.Cut(forbidden, "\n## ")
+	want := "- Deleting or shortening an existing test, subtest or assertion. A test the change invalidates is " +
+		"updated to\n  expect the new behaviour. The only exception is a test the issue names as one to remove.\n"
+	if !strings.Contains(forbidden, want) {
+		t.Errorf("FORBIDDEN lacks %q:\n%s", want, forbidden)
 	}
 }
 
