@@ -48,6 +48,8 @@ func TestRunE2EResume(t *testing.T) {
 		{"refactor", "claude", "true", "e2e", ""},
 		{"tests", "claude", "true", "e2e", ""},
 		{"commits", "claude", "git add a.txt; git commit -qm forbidden", "e2e", ""},
+		// The resumed agent leaves ATM's directory in its clone and Checks' artefact path in its run taken.
+		{"stash", "claude", `mkdir -p .atm "$TMPDIR/../checks-atm"`, "e2e", ""},
 		{"test", "claude", "true", "test", "failed row is test"},
 		{"missing_session", "claude", "true", "e2e", "no saved session id"},
 		{"unsupported", "opencode", "true", "e2e", "harness opencode cannot resume"},
@@ -242,6 +244,10 @@ func assertE2EResult(t *testing.T, tc e2eResumeCase, r *verdict, end Outcome) {
 	case "commits":
 		if !strings.Contains(end.Reason, "made commits") {
 			t.Fatalf("commit accepted: %+v", end)
+		}
+	case "stash":
+		if end.FailedNode != "checks" || !strings.Contains(end.Reason, "checks artefact path already exists: ") {
+			t.Fatalf("taken checks artefact path accepted: %+v", end)
 		}
 	default:
 		if end.FailedNode != "checks" || !strings.Contains(end.Reason, tc.row+":") {
