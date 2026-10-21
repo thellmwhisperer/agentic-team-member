@@ -1,0 +1,18 @@
+schema: 1
+id: T-ATM-588-20261021-4
+status: accepted
+category: duplication
+title: Full PageUp and PageDown traversal assertions
+created_at: 2026-10-21
+incident:
+  pattern: The keyboard scenario walks the report in both directions and records visible content.
+  what_went_wrong: PageUp and PageDown loops have the same polling and recording structure.
+  root_cause: Both directions must independently prove every summary and file row is reachable while checks run.
+  rule_established: Preserve both traversal loops and their separate content assertions; accept only this fingerprint.
+  evidence:
+    - family: clone_fingerprint
+      example: internal/run/report_rows_unix_test.go:312-318 and :330-336
+match:
+  family: clone_fingerprint
+  scope: go_tests
+  fingerprint: 73610aecf3fe53b3a41e445af9162cd53abcbc868cda7a82b0be5ffc8a6c7e49
