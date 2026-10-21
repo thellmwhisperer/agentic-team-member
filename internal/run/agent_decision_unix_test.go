@@ -32,20 +32,8 @@ func TestRunAsksAtTheAgent(t *testing.T) {
 			rep := e2eReport(t, top, label)
 			decisions := 1
 			if tc.name == "outside" {
-				if len(rep.Decisions) != 2 || rep.Decisions[0].Answer != "approve" ||
-					!strings.Contains(rep.Decisions[0].Finding, tc.finding) ||
-					rep.node("checks").Result != "passed" || rep.FailedNode != "ponytail" ||
-					rep.Decisions[1].Answer != "" || !strings.Contains(rep.Decisions[1].Finding, tc.finding) {
-					t.Fatalf("agent approval did not reach the separate ponytail question: %+v", rep)
-				}
-				assertQuestionNextStep(t, top, label, true)
-				answerFailedCheck(t, bin, top, label, "stop", 2)
-				rep = e2eReport(t, top, label)
+				rep = stopOutsideAgentQuestion(t, bin, top, label, tc.finding, rep)
 				decisions = 2
-				if len(rep.Decisions) != 2 || rep.Decisions[1].Answer != "stop" ||
-					!strings.Contains(rep.Decisions[1].Finding, tc.finding) {
-					t.Fatalf("ponytail stop not recorded with finding: %+v", rep.Decisions)
-				}
 			}
 			if len(rep.Decisions) != decisions || rep.Decisions[0].Answer != tc.answer ||
 				!strings.Contains(rep.Decisions[0].Finding, tc.finding) {
@@ -56,6 +44,24 @@ func TestRunAsksAtTheAgent(t *testing.T) {
 			}
 		})
 	}
+}
+
+func stopOutsideAgentQuestion(t *testing.T, bin, top, label, finding string, rep *verdict) *verdict {
+	t.Helper()
+	if len(rep.Decisions) != 2 || rep.Decisions[0].Answer != "approve" ||
+		!strings.Contains(rep.Decisions[0].Finding, finding) ||
+		rep.node("checks").Result != "passed" || rep.FailedNode != "ponytail" ||
+		rep.Decisions[1].Answer != "" || !strings.Contains(rep.Decisions[1].Finding, finding) {
+		t.Fatalf("agent approval did not reach the separate ponytail question: %+v", rep)
+	}
+	assertQuestionNextStep(t, top, label, true)
+	answerFailedCheck(t, bin, top, label, "stop", 2)
+	rep = e2eReport(t, top, label)
+	if len(rep.Decisions) != 2 || rep.Decisions[1].Answer != "stop" ||
+		!strings.Contains(rep.Decisions[1].Finding, finding) {
+		t.Fatalf("ponytail stop not recorded with finding: %+v", rep.Decisions)
+	}
+	return rep
 }
 
 func TestRunAsksAtTheAgentAfterFix(t *testing.T) {
