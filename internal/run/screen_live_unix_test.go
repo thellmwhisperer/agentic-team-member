@@ -188,23 +188,20 @@ func liveAttach(t *testing.T, cols, rows uint16) *attached {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = a.cmd.Process.Kill(); _ = a.p.Close() })
-	go a.read()
+	go func() {
+		defer close(a.chunks)
+		b := make([]byte, 4096)
+		for {
+			n, err := a.p.Read(b)
+			if n > 0 {
+				a.chunks <- string(b[:n])
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
 	return a
-}
-
-// read hands what the terminal shows to chunks until it closes.
-func (a *attached) read() {
-	defer close(a.chunks)
-	b := make([]byte, 4096)
-	for {
-		n, err := a.p.Read(b)
-		if n > 0 {
-			a.chunks <- string(b[:n])
-		}
-		if err != nil {
-			return
-		}
-	}
 }
 
 // serveLive answers one attach with events, as frames, and, once events is closed, the run's end.
@@ -317,16 +314,13 @@ func (a *attached) sees(ok func(screen string) bool) string {
 
 var cursorMoves = regexp.MustCompile(`\x1b\[(\d*)(?:;\d*)?([HJ])|\n`)
 
-// screen is the terminal's rows, without ANSI, as atm attach drew them so far on its alternate screen.
-func (a *attached) screen() string { return ansi.Strip(a.styled()) }
-
-// styled is the terminal's rows, with their styles, as atm attach drew them so far on its alternate screen: each
-// line it writes or erases, on the row its cursor moved to.
-func (a *attached) styled() string {
+// screen is the terminal's rows, without ANSI, as atm attach drew them so far on its alternate screen: each
+// line it writes, on the row its cursor moved to.
+func (a *attached) screen() string {
 	rows := make([]string, a.rows)
 	raw, at, last := a.raw.String(), 0, 0
 	write := func(s string) {
-		if s = strings.ReplaceAll(s, "\r", ""); ansi.Strip(s) != "" || strings.Contains(s, ansi.EraseLineRight) {
+		if s = strings.ReplaceAll(ansi.Strip(s), "\r", ""); s != "" {
 			rows[at] = s
 		}
 	}
