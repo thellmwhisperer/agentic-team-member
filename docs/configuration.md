@@ -147,10 +147,11 @@ of the run (`cover-main.profile`, `cover-main.func.txt`). To answer "which
 real-atm test reaches this function?" without running anything:
 
     gh run download --name cover-main-<sha> -R thellmwhisperer/agentic-team-member
-    grep 'internal/run/<file>.go' cover-main.func.txt
+    grep 'internal/checks/checks.go' cover-main.func.txt
 
 A function at 0.0 % has no end-to-end run reaching it: write the test that
-does. Any other percentage names a file whose tests already reach it.
+does. Replace the path to inspect another file. Any other percentage names a
+file whose tests already reach it.
 
 When `e2e` is non-empty, ATM supplies one fresh `GOCOVERDIR` directory per
 Checks and exports it to `test` and `e2e` only. `scripts/test.sh` does

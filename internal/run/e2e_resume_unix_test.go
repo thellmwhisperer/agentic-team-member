@@ -39,6 +39,31 @@ func TestChecksE2ERow(t *testing.T) {
 	}
 }
 
+func TestRealRunChecksRestoresATMDirectory(t *testing.T) {
+	builtATM(t)
+	bin := filepath.Join(t.TempDir(), "atm")
+	buildATM(t, bin, "follow-test")
+	cfg := atmSet(atmYAML, "test", "test ! -e .atm && sh a_test.sh")
+	cfg = atmSet(cfg, "delivery", `test "$(cat .atm/marker)" = retained && echo restored`)
+	top := repo(t, t.TempDir(), cfg)
+	if err := os.MkdirAll(filepath.Join(top, ".atm"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FAKE_AGENT_WORK", fixWork+`; mkdir -p .atm; printf retained > .atm/marker`)
+	server := startVersionServe(t, bin, top)
+	defer endServe(bin, top, server)
+	startFollow(t, bin, top, false, "run", "--follow", issueFile(t, issue)).exit(0)
+	runs, err := RecordedRuns(top)
+	if err != nil || len(runs) != 1 || runs[0].Outcome != "passed" {
+		t.Fatalf("Checks did not hide and restore .atm: %+v, %v", runs, err)
+	}
+	output, err := os.ReadFile(filepath.Join(runDir(top, runs[0].Run), "delivery-output.txt"))
+	if err != nil || strings.TrimSpace(string(output)) != "restored" {
+		t.Fatalf("delivery did not see restored .atm/marker: %q, %v", output, err)
+	}
+	t.Logf("atm run %s outcome=%s; configured test saw no .atm; delivery saw restored marker", runs[0].Run, runs[0].Outcome)
+}
+
 func TestRunE2EResume(t *testing.T) {
 	builtATM(t) // before repo moves HOME, where go build would fill a module cache
 	for _, tc := range []e2eResumeCase{
