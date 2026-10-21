@@ -143,7 +143,8 @@ func TestScreenCutsARowsNoteBeforeItsName(t *testing.T) {
 	evs = append(evs, `{"step":"agent","state":"passed","unit":1,"duration_ms":676000}`,
 		`{"step":"ponytail","state":"started"}`,
 		`{"step":"ponytail","state":"passed","kept":true,"duration_ms":695000,"report":{"findings":[`+
-			`{"file":"a.go","family":"speculative_feature","finding":"dropped two lines"}]}}`,
+			`{"file":"a.go","family":"speculative_feature","finding":"dropped two lines"}]},`+
+			`"verdicts":[{"file":"a.go","finding":"dropped two lines","verdict":"kept"}]}`,
 		`{"step":"delivery","state":"started"}`,
 		`{"step":"delivery","state":"passed","duration_ms":1379000,`+
 			`"branch":"atm/go-port-report-json-keeps-every-units-proofs-and-the-install"}`)
@@ -151,6 +152,11 @@ func TestScreenCutsARowsNoteBeforeItsName(t *testing.T) {
 	m := screen(138, 40, evs...)
 	m.end(run.Outcome{Outcome: "passed"}, nil)
 	s := view(m)
+	first, _, _ := strings.Cut(s, "\n")
+	left, _, beside := strings.Cut(first, "╮  ╭─ Findings")
+	if !beside || !strings.HasPrefix(left, "╭─ ATM") || ansi.StringWidth(left+"╮") != 46 {
+		t.Fatalf("want Findings beside a 46-column ATM box:\n%s", s)
+	}
 	for _, want := range []string{`✓ Agent  11 min 16 s .* passed │`, `✓ Slop detector  11 min 35 s .*passed │`,
 		`✓ Delivery  22 min 59 s .*passed │`} {
 		if !regexp.MustCompile(want).MatchString(s) {
