@@ -100,12 +100,13 @@ func TestRealScreenScrollsEverySlopFinding(t *testing.T) {
 			a.key(fmt.Sprintf("\x1b[<65;50;%dM", y))
 			a.drawn(func(s string) bool { return inspect(s) != previous })
 			free(t, barrier)
+			deadline := time.After(time.Minute)
 			for open := true; open; {
 				select {
 				case chunk, more := <-a.chunks:
 					open = more
 					a.raw.WriteString(chunk)
-				case <-time.After(time.Minute):
+				case <-deadline:
 					t.Fatal("run did not finish")
 				}
 			}

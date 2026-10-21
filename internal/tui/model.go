@@ -280,7 +280,7 @@ func (m *Model) key(k string) {
 	}
 }
 
-// wheel scrolls the box under the pointer: the ATM box, or the Agent or Log box while it shows. A click on a row of
+// wheel scrolls the box under the pointer: ATM, Agent, Findings or Log while each shows. A click on a row of
 // folded tool calls, thinking, command output or report unfolds it, and on its first row once unfolded folds it again.
 func (m *Model) wheel(msg tea.MouseMsg) {
 	p, b := &m.pipeline, m.pipelineBounds
