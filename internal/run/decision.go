@@ -30,7 +30,8 @@ func (w *screen) ask(r *verdict) string {
 	d := &r.Decisions[len(r.Decisions)-1]
 	r.emit("decision", map[string]any{"state": "waiting", "run": w.r.Run,
 		"finding": d.Finding, "choices": "approve, fix, stop",
-		"message": "Check failed: " + d.Finding + "\nAnswer: atm answer " + w.r.Run + " approve|fix|stop"})
+		"message": map[string]string{"checks": "Check", "agent": "Agent"}[r.FailedNode] + " failed: " + d.Finding +
+			"\nAnswer: atm answer " + w.r.Run + " approve|fix|stop"})
 	reply := <-ch
 	d.Answer = reply.answer
 	err := r.write()
@@ -97,7 +98,7 @@ func (a agent) afterCheck(clone, text, session, finding string, attempt int) (ma
 		_, err = a.reviewScratch("worker")
 	}
 	if err == nil {
-		prompt := text + "\n\nThe launcher chose fix. Fix this check failure in one turn:\n" + finding
+		prompt := text + "\n\nThe launcher chose fix. Fix this failure in one turn:\n" + finding
 		argv, stdin, ok := a.resumeArgv(clone, skill, final, session, prompt)
 		if session == "" || !ok {
 			argv, stdin = a.argv(clone, skill, final, prompt)
@@ -118,7 +119,7 @@ func (a agent) afterCheck(clone, text, session, finding string, attempt int) (ma
 
 func (a agent) checkDecision(r *verdict) string {
 	q, ok := r.out.(*screen)
-	if !ok || r.FailedNode != "checks" {
+	if !ok || r.FailedNode != "checks" && !errors.As(r.err, new(askError)) {
 		return ""
 	}
 	r.resumable(a.dir)

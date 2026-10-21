@@ -70,6 +70,12 @@ func TestRunAsksOnAFailedCheck(t *testing.T) {
 
 func failedCheckQuestion(t *testing.T, bin, top string, args ...string) (string, string) {
 	t.Helper()
+	return question(t, bin, top, "failed-check-finding", args...)
+}
+
+// question starts args and returns the run's clone and label once it asks about a finding containing finding.
+func question(t *testing.T, bin, top, finding string, args ...string) (string, string) {
+	t.Helper()
 	f := startFollow(t, bin, top, false, args...)
 	var clone, label string
 	timer := time.NewTimer(30 * time.Second)
@@ -90,7 +96,7 @@ func failedCheckQuestion(t *testing.T, bin, top string, args ...string) (string,
 			}
 			if ev["step"] == "decision" && ev["state"] == "waiting" {
 				label, _ = ev["run"].(string)
-				if !strings.Contains(ev["finding"].(string), "failed-check-finding") ||
+				if !strings.Contains(ev["finding"].(string), finding) ||
 					ev["choices"] != "approve, fix, stop" {
 					t.Fatalf("missing finding or choices: %v", ev)
 				}

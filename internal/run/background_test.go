@@ -83,7 +83,7 @@ func TestBackgroundRunsAndTellsHowEachEnded(t *testing.T) {
 		code                         int
 	}{
 		{name: "passed", outcome: "passed"},
-		{name: "agent fails", agent: "fail", outcome: "failed", failed: "agent", code: 1},
+		{name: "agent killed", agent: "killed", outcome: "failed", failed: "agent", code: 1}, // an error exit asks
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			top := backgroundRepo(t)
