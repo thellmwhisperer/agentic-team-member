@@ -72,20 +72,11 @@ func TestRunAsksOnAFailedCheck(t *testing.T) {
 
 func failedCheckQuestion(t *testing.T, bin, top string, args ...string) (string, string) {
 	t.Helper()
-	return question(t, bin, top, "failed-check-finding", args...)
+	return question(t, bin, top, "failed-check-finding", 1, args...)
 }
 
-// question accepts the existing agent/check calls and the later-step calls with an explicit exit code.
-// It returns the run's clone and label once the matching finding is published.
-func question(t *testing.T, first string, second any, third string, args ...string) (string, string) {
+func question(t *testing.T, bin, top, want string, code int, args ...string) (string, string) {
 	t.Helper()
-	var bin, top, want string
-	code := 1
-	if exit, ok := second.(int); ok {
-		want, code, bin, top, args = first, exit, third, args[0], args[1:]
-	} else {
-		bin, top, want = first, second.(string), third
-	}
 	f := startFollow(t, bin, top, false, args...)
 	var clone, label string
 	timer := time.NewTimer(30 * time.Second)

@@ -160,8 +160,7 @@ type proof struct {
 // unit runs the run's one unit in clone dir, from base commit sha, under config c, on brief text, then its
 // checks and the steps after, each given the checks' proof. The unit goes to the report, and its agent's work to
 // keep, for atm run --resume. A run that resumes from puts the work it kept back in dir, in place of its unit's
-// agent. A failure of the checks or a step after asks the launcher; after a fix turn the checks run again, or
-// the delivery alone when it failed.
+// agent. A failure of the checks or a step after asks the launcher; after a fix turn the checks run again.
 func (a agent) unit(r *verdict, root, dir, sha, text string, c config.Config, keep resumePoint,
 	from *resumePoint, after ...func(proof)) {
 	head := sha
@@ -182,12 +181,14 @@ func (a agent) unit(r *verdict, root, dir, sha, text string, c config.Config, ke
 		test, _ = report["test_file"].(string)
 		return ev, err
 	})
+	checkHead := head
 	var p proof
 	steps := append([]func(proof){func(proof) {
 		r.step("checks", func() (map[string]any, error) {
 			var ev map[string]any
 			var err error
-			p, ev, err = checkUnit(a.dir, dir, head, test, report, c)
+			p, ev, err = checkUnit(a.dir, dir, checkHead, test, report, c)
+			p.base = head
 			return ev, err
 		})
 	}}, after...)
@@ -201,6 +202,9 @@ func (a agent) unit(r *verdict, root, dir, sha, text string, c config.Config, ke
 		failed := r.FailedNode
 		answer := a.checkDecision(r)
 		if answer == "fix" {
+			if failed == "delivery" && r.HeadSHA != "" {
+				checkHead = r.HeadSHA
+			}
 			if next := a.fixCheck(r, dir, text, &keep); next != nil {
 				report = next
 				test, _ = report["test_file"].(string)

@@ -32,7 +32,7 @@ func TestRunAsksAfterChecks(t *testing.T) {
 				top := gitT(t, repo(t, "local", atmSet(atmYAML, "delivery", c.delivery+"pwd > "+delivered)),
 					"rev-parse", "--show-toplevel")
 				bin := followUpsServer(t, top)
-				clone, label := question(t, c.want, c.code, bin, top, "run", "--follow", issueFile(t, issue))
+				clone, label := question(t, bin, top, c.want, c.code, "run", "--follow", issueFile(t, issue))
 				assertCheckWaiting(t, top, label)
 				_, early := os.Stat(delivered)
 				answerFailedCheck(t, bin, top, label, answer, map[bool]int{true: c.code}[answer == "stop"])
@@ -40,6 +40,73 @@ func TestRunAsksAfterChecks(t *testing.T) {
 					t.Fatalf("delivered before the answer: %v", early)
 				}
 				assertAnsweredAfterChecks(t, top, label, clone, delivered, step, answer, c.want, call)
+			})
+		}
+	}
+}
+
+func TestRunDeliveryFixRechecks(t *testing.T) {
+	builtATM(t)
+	for _, cuts := range []bool{false, true} {
+		for _, tc := range []struct{ name, repair, finding string }{
+			{"passes", "touch repaired", ""},
+			{"check fails", "touch repaired broken-check", "repair-check-finding"},
+			{"agent commits", "touch repaired; git add -A; git commit -qm agent-commit", "the agent made commits"},
+		} {
+			t.Run(map[bool]string{false: "without cuts/", true: "with cuts/"}[cuts]+tc.name, func(t *testing.T) {
+				delivered, order := filepath.Join(t.TempDir(), "delivered"), filepath.Join(t.TempDir(), "order")
+				cfg := atmSet(atmSet(atmYAML, "lint",
+					"test ! -f broken-check || { echo repair-check-finding; exit 1; }"), "delivery",
+					"test -f repaired || { echo delivery-finding; exit 1; }; cat a.txt > "+delivered)
+				top := gitT(t, repo(t, "local", cfg), "rev-parse", "--show-toplevel")
+				base := gitT(t, top, "rev-parse", "HEAD")
+				work := fixWork
+				if cuts {
+					work = "printf 'fixed\\nextra\\nmore\\n' > a.txt" + fixTest
+					t.Setenv("FAKE_PONYTAIL_WORK", "if test -f repaired; then echo fixed > a.txt; "+
+						"else printf 'fixed\\nextra\\n' > a.txt; fi")
+					t.Setenv("FAKE_PONYTAIL_REPORT", cut)
+				}
+				t.Setenv("FAKE_AGENT_ORDER", order)
+				t.Setenv("FAKE_AGENT_WORK", "if test -f first-turn; then "+tc.repair+"; else "+work+"; touch first-turn; fi")
+				bin := followUpsServer(t, top)
+				clone, label := question(t, bin, top, "delivery-finding", 4, "run", "--follow", issueFile(t, issue))
+				before := e2eReport(t, top, label)
+				if before.HeadSHA == base || before.HeadSHA != gitT(t, clone, "rev-parse", "HEAD") {
+					t.Fatalf("delivery did not record ATM's commits: %+v", before)
+				}
+				answerFailedCheck(t, bin, top, label, "fix", map[bool]int{true: 1}[tc.finding != ""])
+				rep := e2eReport(t, top, label)
+				if workerCalls(t, order) != 2 || len(rep.Decisions) == 0 || rep.Decisions[0].Answer != "fix" ||
+					!strings.Contains(rep.Decisions[0].Finding, "delivery-finding") ||
+					len(rep.Units) != 1 || rep.Units[0].Base != base {
+					t.Fatalf("delivery fix lost its one turn, decision, or original base: %+v", rep)
+				}
+				if tc.finding != "" {
+					if rep.FailedNode != "checks" || len(rep.Decisions) != 2 || rep.Decisions[1].Answer != "" ||
+						!strings.Contains(rep.Decisions[1].Finding, tc.finding) {
+						t.Fatalf("delivery repair did not ask about its new failure: %+v", rep)
+					}
+					if _, err := os.Stat(delivered); !os.IsNotExist(err) {
+						t.Fatalf("repair delivered before the check answer: %v", err)
+					}
+					assertQuestionNextStep(t, top, label, true)
+					answerFailedCheck(t, bin, top, label, "stop", 1)
+					return
+				}
+				if len(rep.Decisions) != 1 || rep.FailedNode != "" || rep.node("checks").Result != "passed" ||
+					rep.node("ponytail").Result != "passed" || rep.node("delivery").Result != "passed" {
+					t.Fatalf("delivery repair did not pass all steps: %+v", rep)
+				}
+				if calls, err := os.ReadFile(order); err != nil || string(calls) != "worker\nponytail\nworker\nponytail\n" {
+					t.Fatalf("repair did not rerun ponytail after its single fix turn: %q, %v", calls, err)
+				}
+				if data, err := os.ReadFile(delivered); err != nil || string(data) != "fixed\n" {
+					t.Fatalf("delivery lost the repair or the second cut of committed work: %q, %v", data, err)
+				}
+				if cuts && (len(rep.Reproofs) != 1 || rep.Reproofs[0].Base != base || rep.Reproofs[0].Result != "passed") {
+					t.Fatalf("second cut lost its proof against the original base: %+v", rep.Reproofs)
+				}
 			})
 		}
 	}
