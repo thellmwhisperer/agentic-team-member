@@ -284,8 +284,9 @@ a time limit, with these variables:
 The command's output goes to the screen and to `delivery-output.txt`.
 ATM executes the configured command without recognizing its name or parsing
 its output. Exit zero passes Delivery; a nonzero exit fails Delivery. The
-run ends when the command ends. Publishing, review decisions, PR tracking
-and any further monitoring belong to that command or its launcher.
+run ends when the command ends. Publishing, review decisions and PR tracking
+belong to that command or its launcher. The attached screen observes the gate
+after the run ends, as described below.
 
 ## Time limits
 
