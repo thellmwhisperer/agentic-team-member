@@ -105,8 +105,17 @@ func lost(git func(dir string, args ...string) (string, error), clone, base, iss
 	}
 	out, err := git(clone, spec...)
 	removed := map[string]bool{}
-	for _, m := range removal.FindAllStringSubmatch(issue, -1) {
-		removed[m[1]+m[2]+m[3]] = true
+	for text := issue; ; {
+		m := removal.FindStringSubmatchIndex(text)
+		if m == nil {
+			break
+		}
+		for i := 2; i < 8; i += 2 {
+			if m[i] >= 0 {
+				removed[text[m[i]:m[i+1]]] = true
+			}
+		}
+		text = text[m[8]:]
 	}
 	count := func(rev, path string, absent bool) (int, error) {
 		if absent || filepath.Ext(path) != ".go" {
@@ -133,7 +142,7 @@ func lost(git func(dir string, args ...string) (string, error), clone, base, iss
 	return err
 }
 
-var removal = regexp.MustCompile("(?im)(?:^[ \t]*(?:[-*][ \t]+)?|[.!?][ \t]+|[ \t]+and[ \t]+)(?:remove|delete)[ \t]+(?:the[ \t]+)?(?:(?:test|subtest)[ \t]+)?(?:`([^`]+)`|\"([^\"]+)\"|([[:alnum:]_/-]+))[.!]?[ \t]*$")
+var removal = regexp.MustCompile("(?im)(?:^[ \t]*(?:[-*][ \t]+)?|[.!?][ \t]+|[ \t]+and[ \t]+)(?:remove|delete)[ \t]+(?:the[ \t]+)?(?:(?:test|subtest)[ \t]+)?(?:`([^`]+)`|\"([^\"]+)\"|([[:alnum:]_/-]+))([.!](?:[ \t]|$)|[ \t]*$)")
 
 func countTests(text string, removed map[string]bool) (int, error) {
 	f, err := parser.ParseFile(token.NewFileSet(), "", text, 0)
