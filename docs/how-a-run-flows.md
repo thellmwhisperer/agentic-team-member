@@ -427,9 +427,9 @@ its report remains visible during checks, the Findings box with a failure or
 the slop detector's findings, and the Log box.
 The ATM box's Agent row reads `Agent`; Log headers and Findings references for
 that agent retain `Agent · unit 1`.
-Above the rows, the issue's title wraps: up to three lines show whole; a
-longer one shows three lines and `… i unfold title`, and `i` shows or folds
-every line. The title stays above the rows while it leaves them a line; when
+Above the rows, the issue's title shows on one line beside the state. A
+longer one folds behind `▸`, cut with `…`; `i` or a click on the arrow splits
+it in whole lines behind `▾`, and folds it again. The title stays above the rows while it leaves them a line; when
 the ATM box is too short for that, past its first line the title scrolls
 with the rows, and the ATM box's keys reach it.
 

@@ -281,7 +281,8 @@ func (m *Model) key(k string) {
 }
 
 // wheel scrolls the box under the pointer: ATM, Agent, Findings or Log while each shows. A click on a row of
-// folded tool calls, thinking, command output or report unfolds it, and on its first row once unfolded folds it again.
+// folded tool calls, thinking, command output or report unfolds it, and on its first row once unfolded folds it again;
+// one on the ATM box's first row folds or unfolds the issue's title.
 func (m *Model) wheel(msg tea.MouseMsg) {
 	p, b := &m.pipeline, m.pipelineBounds
 	switch {
@@ -300,13 +301,22 @@ func (m *Model) wheel(msg tea.MouseMsg) {
 	case tea.MouseButtonWheelDown:
 		p.scroll(3)
 	case tea.MouseButtonLeft:
-		row := msg.Y - b.y - 1 // under the box's top border
-		if msg.Action == tea.MouseActionPress && row >= 0 && row < len(p.toggles) && p.toggles[row] != "" {
-			if m.open == nil {
-				m.open = map[string]bool{}
-			}
-			m.open[p.toggles[row]] = !m.unfolded(p.toggles[row])
+		if msg.Action == tea.MouseActionPress {
+			m.click(p, msg.Y-b.y-1) // under the box's top border
 		}
+	}
+}
+
+// click folds or unfolds what row of pane p shows; the ATM box's first row is the issue's title, its arrow first.
+func (m *Model) click(p *pane, row int) {
+	if p == &m.pipeline && row == 0 {
+		m.unfoldTitle = !m.unfoldTitle
+	}
+	if row >= 0 && row < len(p.toggles) && p.toggles[row] != "" {
+		if m.open == nil {
+			m.open = map[string]bool{}
+		}
+		m.open[p.toggles[row]] = !m.unfolded(p.toggles[row])
 	}
 }
 

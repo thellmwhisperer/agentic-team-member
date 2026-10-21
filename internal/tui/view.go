@@ -215,18 +215,19 @@ func (m *Model) atm(width, height int) string {
 		}
 	}
 	state := m.icon(m.state) + " " + bold(states[m.state][1], m.state)
-	// The title wraps beside the state: three lines and a hint until i shows them all.
-	head := strings.Split(ansi.Wrap(issue, max(1, inner-lipgloss.Width(state)-1), ""), "\n")
-	for i, l := range head {
-		head[i] = paint(dim, l)
-	}
-	if len(head) > 3 {
-		i := lipgloss.NewStyle().Bold(true).Render("i")
+	// A title too long for its line beside the state folds behind the arrow, cut with an ellipsis, until i or a
+	// click on it splits it in whole lines.
+	room := max(1, inner-lipgloss.Width(state)-1)
+	head := []string{paint(dim, issue)}
+	if ansi.StringWidth(issue) > room {
+		head = []string{ansi.Truncate(issue, max(1, room-2), "…")}
 		if m.unfoldTitle {
-			head = append(head, i+" "+paint(dim, "fold title"))
-		} else {
-			head = append(head[:3], paint(dim, "… ")+i+" "+paint(dim, "unfold title"))
+			head = strings.Split(ansi.Wrap(issue, max(1, room-2), ""), "\n")
 		}
+		for i, l := range head {
+			head[i] = "  " + paint(dim, l)
+		}
+		head[0] = fold(m.unfoldTitle) + head[0][1:]
 	}
 	head[0] = spread(head[0], state, inner)
 	// The title stays above the rows when it leaves them a line; else only its first line stays and the rest
