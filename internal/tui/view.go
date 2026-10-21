@@ -477,7 +477,7 @@ func listRows(line string, width int) ([]string, bool) {
 // agentTextRows is the Markdown of text in rows of width, the first behind prefix, the rest indented under
 // it: fenced code kept as is, hard wrapped, lists with their continuation under their text. Terminal
 // controls are stripped and tabs are expanded before they reach the terminal.
-func agentTextRows(prefix, text string, width int) ([]string, []int) {
+func agentTextRows(prefix, text string, width int, code codeFence) ([]string, []int, codeFence) {
 	text = strings.Map(func(r rune) rune {
 		if unicode.IsControl(r) && r != '\n' && r != '\t' {
 			return -1
@@ -487,19 +487,17 @@ func agentTextRows(prefix, text string, width int) ([]string, []int) {
 	w := max(1, width-6)
 	var rows []string
 	var sources []int
-	var codeMarker byte
-	codeLength := 0
 	for source, line := range strings.Split(text, "\n") {
 		var wrapped []string
 		marker, length, info, isFence := fence(line)
-		if codeLength > 0 {
-			if isFence && marker == codeMarker && length >= codeLength && info == "" {
-				codeMarker, codeLength = 0, 0
+		if code.length > 0 {
+			if isFence && marker == code.marker && length >= code.length && info == "" {
+				code = codeFence{}
 				continue
 			}
 			wrapped = strings.Split(paint(yellow, ansi.Hardwrap(displayText(line), w, true)), "\n")
 		} else if isFence {
-			codeMarker, codeLength = marker, length
+			code = codeFence{marker, length}
 			continue
 		} else {
 			lineText, hasCode, isBlock := markdown(line)
@@ -520,7 +518,7 @@ func agentTextRows(prefix, text string, width int) ([]string, []int) {
 			}
 		}
 	}
-	return rows, sources
+	return rows, sources, code
 }
 
 // agentBox is what the agent says and thinks, and the tool calls between two of those, in lines rows ending with
@@ -535,7 +533,7 @@ func (m *Model) agentBox(width, lines int) string {
 		}
 		out, calls = m.toolLines(out, calls), nil
 		if a.says != "" {
-			texts, _ := agentTextRows("✎ ", a.says, width)
+			texts, _, _ := agentTextRows("✎ ", a.says, width, codeFence{})
 			for _, text := range texts {
 				out = append(out, paneLine{key: fmt.Sprintf("activity:%p", a), text: text})
 			}
@@ -547,7 +545,7 @@ func (m *Model) agentBox(width, lines int) string {
 			out = append(out, paneLine{key: key, toggle: key, text: fold(false) + " ∴ " + firstMarkdown(a.thinking)})
 			continue
 		}
-		texts, _ := agentTextRows(fold(true)+" ∴ ", a.thinking, width-2)
+		texts, _, _ := agentTextRows(fold(true)+" ∴ ", a.thinking, width-2, codeFence{})
 		for i, text := range texts {
 			line := paneLine{key: key, text: text}
 			if i == 0 {
@@ -699,19 +697,19 @@ func (m *Model) logRows(width int) []paneLine {
 				keys = append(keys, fmt.Sprintf("log:%p:%d", m.output[i], j))
 			}
 		}
+		texts, sources, _ := agentTextRows("  ", strings.Join(lines, "\n"), width, o.code)
 		key := "log:" + o.step + "/" + o.check
 		if r := m.command(o.step, o.check); r != nil {
 			header, open := *r, m.unfolded(key)
 			header.check = false
-			if first := firstMarkdown(lines[0]); !open && first != "" {
-				header.label += " · " + first
+			if !open && len(texts) > 0 && len(texts[0]) > 2 {
+				header.label += " · " + strings.TrimPrefix(texts[0], "  ")
 			}
 			out = append(out, paneLine{key: key, toggle: key, text: fold(open) + " " + m.row(&header, width-6)})
 			if !open {
 				continue
 			}
 		}
-		texts, sources := agentTextRows("  ", strings.Join(lines, "\n"), width)
 		for j, text := range texts {
 			out = append(out, paneLine{key: keys[sources[j]], parent: key, text: text})
 		}

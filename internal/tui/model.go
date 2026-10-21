@@ -30,7 +30,15 @@ type activity struct {
 }
 
 // logLine is a line of the Log box: what the command check, or else node step, printed.
-type logLine struct{ step, check, text string }
+type logLine struct {
+	step, check, text string
+	code              codeFence
+}
+
+type codeFence struct {
+	marker byte
+	length int
+}
 
 // finding is a row of the Findings box, with a severity, error or warning, a reference and
 // a description.
@@ -320,7 +328,14 @@ func (m *Model) apply(f run.Frame) {
 	case e.Thinking != "" || e.Says != "":
 		m.agent = append(m.agent, &activity{thinking: e.Thinking, says: e.Says})
 	case e.Output != nil:
-		m.output = append(m.output[max(0, len(m.output)-199):], &logLine{e.Step, e.Check, ansi.Strip(*e.Output)})
+		line := &logLine{step: e.Step, check: e.Check, text: ansi.Strip(*e.Output)}
+		if len(m.output) > 0 {
+			previous := m.output[len(m.output)-1]
+			if previous.step == line.step && previous.check == line.check {
+				_, _, line.code = agentTextRows("", previous.text, m.width, previous.code)
+			}
+		}
+		m.output = append(m.output[max(0, len(m.output)-199):], line)
 	case m.current(e.Step) == nil:
 		return
 	case e.Check != "":
