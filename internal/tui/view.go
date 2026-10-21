@@ -240,11 +240,21 @@ func (m *Model) atm(width, height int) string {
 			key := fmt.Sprintf("row:%p", r)
 			rows = append(rows, paneLine{key: "connector:" + key, parent: key, text: paint(dim, "│")})
 		}
-		shown := *r
+		key := fmt.Sprintf("row:%p", r)
+		display := *r
 		if r.step == "agent" && !r.check {
-			shown.label = "Agent"
+			display.label = "Agent"
 		}
-		rows = append(rows, paneLine{key: fmt.Sprintf("row:%p", r), text: m.row(&shown, inner)})
+		if r.step == "ponytail" && r.check {
+			display.note = ""
+		}
+		rows = append(rows, paneLine{key: key, text: m.row(&display, inner)})
+		if r.step == "ponytail" && r.check && r.note != "" {
+			for n, line := range strings.Split(ansi.Wrap(r.note, max(1, inner-2), ""), "\n") {
+				rows = append(rows, paneLine{key: fmt.Sprintf("%s:note:%d", key, n), parent: key,
+					text: "  " + paint(dim, line)})
+			}
+		}
 	}
 	lines = append(lines, m.pipeline.show(rows, max(1, height-2-len(lines)))...)
 	title := "ATM"
