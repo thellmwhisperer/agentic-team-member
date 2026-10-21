@@ -443,11 +443,27 @@ delivered branch, and `no-mistakes axi logs --step <step> --full` for each step 
 every second. The gate's steps get rows below Delivery in the ATM box, and
 the Gate box in the right column has a header row per started step, its log
 rendered as the Agent box renders Markdown, folded to its first line like
-thinking, and one line per finding: severity, file and its description.
+thinking, and one line per finding: ID, severity, file and description. Findings
+from status also show for the current gate step when its log has not shown them;
+an ID already in the log is shown only once.
 The public findings table does not expose a source line number; the screen
 shows the supplied file without inventing a line. Tab switches between the
 ATM and Gate boxes; arrows, PageUp, PageDown, Home and End scroll the focused box.
 The run writes nothing of the gate.
+
+While a gate step waits, the footer offers `a` to approve or `s` to skip it.
+For a fix, press `f`, Enter, type one line, then Enter. Enter alone also opens
+the line. The line becomes fix instructions. To fix selected findings, start it
+with their displayed IDs, as in `id1,id2: instructions`; the other findings
+shown for that step are ignored. Without IDs, the fix covers every finding
+shown for the waiting step. While a reviewer question shows, Enter opens the
+line for its answer instead; Enter submits it. Questions are answered in order
+during the current attachment.
+Answered questions are remembered only until the screen closes: if you detach
+between questions while the gate still lists both, reattaching can target the
+first question again. Press `x`, then `y`, to abort the gate; any other key
+cancels the confirmation. These actions use no-mistakes' commands in the run's
+clone. `q` or Ctrl+C still detaches without aborting.
 
 The Agent box renders the agent's Markdown prose within the panel width as
 `✎` lines; non-empty thinking appears as `∴` lines. By default, consecutive

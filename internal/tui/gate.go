@@ -151,9 +151,9 @@ func (m *Model) ask(g gate, wait time.Duration) tea.Cmd {
 	return tea.Tick(wait, func(time.Time) tea.Msg { return askGate(clone) })
 }
 
-// gateKey answers the gate from the footer, through no-mistakes' own commands in the clone: a, f and s approve,
-// fix and skip the step waiting; x, then y, aborts the gate; enter takes a line, the answer to the reviewer's
-// question while one shows, else a fix's instructions. ok when the key was the gate's.
+// gateKey answers the gate from the footer, through no-mistakes' own commands in the clone: a and s approve
+// and skip the waiting step; f selects a fix line; x, then y, aborts the gate. Enter takes a line for the
+// reviewer's question while one shows, else a fix's instructions. ok when the key was the gate's.
 func (m *Model) gateKey(k tea.KeyMsg) (cmd tea.Cmd, ok bool) {
 	switch {
 	case m.typing:
@@ -233,7 +233,7 @@ func (m *Model) waiting() *gateStep {
 	return nil
 }
 
-// question is the id of the first question the gate's reviewer asked, a question-<id> finding; empty for none.
+// question is the first question-<id> finding not answered during this attachment; empty for none.
 func (m *Model) question() string {
 	for _, s := range m.gateSteps {
 		for _, f := range s.findings {
