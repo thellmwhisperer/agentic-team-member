@@ -219,7 +219,9 @@ func (m *Model) atm(width, height int) string {
 	// click on it splits it in whole lines.
 	room := max(1, inner-lipgloss.Width(state)-1)
 	head := []string{paint(dim, issue)}
+	m.titleArrow = bounds{}
 	if ansi.StringWidth(issue) > room {
+		m.titleArrow = bounds{x: 2, y: 1, width: 1, height: 1}
 		head = []string{ansi.Truncate(issue, max(1, room-2), "…")}
 		if m.unfoldTitle {
 			head = strings.Split(ansi.Wrap(issue, max(1, room-2), ""), "\n")
