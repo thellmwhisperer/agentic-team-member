@@ -238,7 +238,11 @@ func (m *Model) atm(width, height int) string {
 			key := fmt.Sprintf("row:%p", r)
 			rows = append(rows, paneLine{key: "connector:" + key, parent: key, text: paint(dim, "│")})
 		}
-		rows = append(rows, paneLine{key: fmt.Sprintf("row:%p", r), text: m.row(r, inner)})
+		shown := *r
+		if r.step == "agent" && !r.check {
+			shown.label = "Agent"
+		}
+		rows = append(rows, paneLine{key: fmt.Sprintf("row:%p", r), text: m.row(&shown, inner)})
 	}
 	lines = append(lines, m.pipeline.show(rows, max(1, height-2-len(lines)))...)
 	title := "ATM"

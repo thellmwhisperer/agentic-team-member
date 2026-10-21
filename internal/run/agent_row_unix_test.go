@@ -31,3 +31,28 @@ func TestRealScreenAgentRowHasNoUnit(t *testing.T) {
 		t.Fatalf("want the unit commit's message one line, got %q, %v", b, err)
 	}
 }
+
+func TestRealScreenAgentFailureKeepsUnitInFindings(t *testing.T) {
+	for _, tc := range []struct {
+		name, check, reference string
+	}{
+		{"agent", "", "E Agent · unit 1"},
+		{"command", "validation", "E Agent · unit 1 · validation"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := liveAttach(t, 120, 40)
+			a.send(`{"step":"agent","state":"started"}`)
+			if tc.check != "" {
+				a.send(`{"step":"agent","check":"` + tc.check + `","state":"failed"}`)
+			}
+			a.send(`{"step":"agent","state":"failed","duration_ms":1000,"error":"agent failed"}`)
+			s := a.drawn(func(s string) bool { return strings.Contains(s, "Findings - E 1") })
+			for _, want := range []string{"✗ Agent  1.0 s", tc.reference, "agent failed"} {
+				if !strings.Contains(s, want) {
+					t.Fatalf("want %q on the failed agent screen:\n%s", want, s)
+				}
+			}
+			a.end()
+		})
+	}
+}
