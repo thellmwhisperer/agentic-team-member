@@ -63,6 +63,12 @@ func TestRealAttachFooterAnswersTheGate(t *testing.T) {
 	if err := pty.Setsize(a.p, &pty.Winsize{Cols: 200, Rows: 40}); err != nil {
 		t.Fatal(err)
 	}
+	answerQuestionsAndAbort(t, a, nm)
+	assertGateResponses(t, nm, clone, long)
+}
+
+func answerQuestionsAndAbort(t *testing.T, a *attached, nm string) {
+	t.Helper()
 	setFindings(t, nm, "findings[4]{id,severity,file,action,description}:\n"+
 		`  question-q1,warning,,ask,"Keep the old name?"`+"\n"+
 		`  question-q2,warning,,ask,"Keep the old layout?"`+"\n"+
@@ -81,6 +87,10 @@ func TestRealAttachFooterAnswersTheGate(t *testing.T) {
 	a.footer("y abort the gate", "x")
 	a.key("y")
 	a.exits()
+}
+
+func assertGateResponses(t *testing.T, nm, clone, long string) {
+	t.Helper()
 	log, _ := os.ReadFile(filepath.Join(nm, "log"))
 	if strings.Count(string(log), " axi respond ") != 6 ||
 		!strings.Contains(string(log), "--instructions "+long+"\n") ||
