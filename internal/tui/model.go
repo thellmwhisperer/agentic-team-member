@@ -283,12 +283,11 @@ func (m *Model) wheel(msg tea.MouseMsg) {
 		p.scroll(3)
 	case tea.MouseButtonLeft:
 		row := msg.Y - b.y - 1 // under the box's top border
-		if msg.Action != tea.MouseActionPress || row < 0 || row >= len(p.toggles) || p.toggles[row] == "" {
-			return
-		}
-		if p.toggles[row] == "title" {
-			m.unfoldTitle = !m.unfoldTitle
-		} else {
+		if msg.Action == tea.MouseActionPress && row >= 0 && row < len(p.toggles) && p.toggles[row] != "" {
+			if p.toggles[row] == "title" {
+				m.unfoldTitle = !m.unfoldTitle
+				return
+			}
 			if m.open == nil {
 				m.open = map[string]bool{}
 			}

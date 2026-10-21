@@ -1,0 +1,18 @@
+schema: 1
+id: T-PONYTAIL-20261021-180519-1
+status: accepted
+category: alien_code
+title: "Undid the rewrite of the click handler's guard into an early return with an if/else. The original `if msg.Action == tea.MouseActionPress && ...` guard is back as it was, and a 4-line `if p.toggles[row] == \"title\" { m.unfoldTitle = !m.unfoldTitle; return }` sits inside it, so the handling of other folded rows is untouched."
+created_at: 2026-10-21
+incident:
+  pattern: "Undid the rewrite of the click handler's guard into an early return with an if/else. The original `if msg.Action == tea.MouseActionPress && ...` guard is back as it was, and a 4-line `if p.toggles[row] == \"title\" { m.unfoldTitle = !m.unfoldTitle; return }` sits inside it, so the handling of other folded rows is untouched."
+  what_went_wrong: "A coding agent wrote it and the ponytail pass cut it before delivery."
+  root_cause: "The coding agent wrote more than the issue needed."
+  rule_established: "Cut by the ponytail pass; it does not come back."
+  evidence:
+    - family: format_churn
+      example: "Undid the rewrite of the click handler's guard into an early return with an if/else. The original `if msg.Action == tea.MouseActionPress && ...` guard is back as it was, and a 4-line `if p.toggles[row] == \"title\" { m.unfoldTitle = !m.unfoldTitle; return }` sits inside it, so the handling of other folded rows is untouched.\nissue_sentence: Both the `i` key and a click on the arrow fold and unfold it."
+      artifact: "internal/tui/model.go"
+match:
+  family: format_churn
+  artifact: "internal/tui/model.go"
