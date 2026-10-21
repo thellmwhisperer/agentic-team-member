@@ -42,6 +42,14 @@ func TestMain(m *testing.M) {
 	if runtime.GOOS == "darwin" {
 		directGit()
 	}
+	// Child test processes inherit HOME from repo(t); keep Go's module cache outside its TempDir.
+	if cache, err := exec.Command("go", "env", "GOMODCACHE").Output(); err != nil {
+		fmt.Fprintln(os.Stderr, "go module cache:", err)
+		os.Exit(1)
+	} else if err := os.Setenv("GOMODCACHE", strings.TrimSpace(string(cache))); err != nil {
+		fmt.Fprintln(os.Stderr, "go module cache:", err)
+		os.Exit(1)
+	}
 	dir, err := linkFakes()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "fake agents:", err)
