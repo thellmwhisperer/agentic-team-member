@@ -87,10 +87,10 @@ func detach(cmd *exec.Cmd) {
 var hangAfter = "10m"
 
 var errHung = errors.New("hung")
+var errActivity = errors.New("observe agent activity")
 
 // watchHang cancels ctx with errHung once, for hangAfter, the agent pid has written no byte to stdout or stderr
-// (out) and no descendant of it has started, ended or used CPU time.
-// ponytail: a child blocked on I/O for hangAfter counts as hung; per-process I/O counters are the upgrade.
+// (out) and no descendant of it has started, ended, used CPU time or transferred bytes.
 func watchHang(ctx context.Context, cancel context.CancelCauseFunc, pid int, out *heard) {
 	limit, _ := time.ParseDuration(hangAfter)
 	tick := time.NewTicker(limit / 10)
@@ -102,7 +102,12 @@ func watchHang(ctx context.Context, cancel context.CancelCauseFunc, pid int, out
 			return
 		case <-tick.C:
 		}
-		if now := fmt.Sprint(atomic.LoadInt64((*int64)(out)), working(pid)); now != was {
+		activity, err := working(pid)
+		if err != nil {
+			cancel(fmt.Errorf("%w: %w", errActivity, err))
+			return
+		}
+		if now := fmt.Sprint(atomic.LoadInt64((*int64)(out)), activity); now != was {
 			was, quiet = now, time.Now()
 		} else if time.Since(quiet) >= limit {
 			cancel(errHung)
@@ -111,19 +116,28 @@ func watchHang(ctx context.Context, cancel context.CancelCauseFunc, pid int, out
 	}
 }
 
-// working is the CPU time of each descendant of pid, by pid, as ps shows it.
-func working(pid int) string {
-	out, _ := exec.Command("ps", "-A", "-o", "pid=,ppid=,time=").Output()
-	tree, cpu := map[int]bool{pid: true}, map[int]string{}
+func working(pid int) (string, error) {
+	out, err := exec.Command("ps", "-A", "-o", "pid=,ppid=").Output()
+	if err != nil {
+		return "", err
+	}
+	tree, activity := map[int]bool{pid: true}, map[int]string{}
 	for grew := true; grew; {
 		grew = false
 		for line := range strings.Lines(string(out)) {
 			var p, parent int
-			var t string
-			if _, err := fmt.Sscan(line, &p, &parent, &t); err == nil && tree[parent] && !tree[p] {
-				tree[p], cpu[p], grew = true, t, true
+			if _, err := fmt.Sscan(line, &p, &parent); err == nil && tree[parent] && !tree[p] {
+				tree[p], grew = true, true
+				value, err := processActivity(p)
+				if errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ESRCH) {
+					continue
+				}
+				if err != nil {
+					return "", fmt.Errorf("pid %d: %w", p, err)
+				}
+				activity[p] = value
 			}
 		}
 	}
-	return fmt.Sprint(cpu)
+	return fmt.Sprint(activity), nil
 }
