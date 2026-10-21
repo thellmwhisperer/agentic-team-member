@@ -99,14 +99,17 @@ func judged(clone string, reported, kept []finding, rejectedFiles []rejectedFile
 	verdicts, rejected := make([]ruling, len(reported)), []string{}
 	for n, f := range reported {
 		verdicts[n] = ruling{File: f.File, Finding: f.Finding}
-		reason := why
-		if reason == "" && !slices.Contains(kept, f) {
+		reason := ""
+		if !slices.Contains(kept, f) {
 			reason = sentenceFault(f)
-			for _, r := range rejectedFiles {
-				if r.Path == f.File && reason == "" {
-					reason = r.Reason
-				}
+		}
+		for _, r := range rejectedFiles {
+			if r.Path == f.File && reason == "" {
+				reason = r.Reason
 			}
+		}
+		if reason == "" {
+			reason = why
 		}
 		if reason != "" {
 			verdicts[n].Verdict = "rejected: " + gist(reason)
@@ -173,7 +176,15 @@ func restoreCut(clone, tree, why string, rejectedFiles []rejectedFile) ([]reject
 		}
 	}
 	slices.SortFunc(rejectedFiles, func(a, b rejectedFile) int { return strings.Compare(a.Path, b.Path) })
-	return rejectedFiles, restore(clone, tree)
+	err = restore(clone, tree)
+	if err == nil {
+		for _, path := range strings.Split(changed, "\x00") {
+			if path != "" {
+				liveIn(clone)(map[string]any{"check": "put back " + path, "state": "passed"})
+			}
+		}
+	}
+	return rejectedFiles, err
 }
 
 // hold is undo on the cut left in clone, whole's tree all before it, on the run's work from sha, tree before,
@@ -235,10 +246,15 @@ func undo(runDir, clone, base, all string, proofs []proof, c config.Config) (why
 			"note": fmt.Sprintf("run %d failed: %s", runs, strings.Join(named, ", "))})
 		for _, p := range named {
 			undone[p] = why
-			live(map[string]any{"check": "put back " + p, "state": "passed"})
 		}
 		left = slices.DeleteFunc(left, func(p string) bool { return undone[p] != "" })
-		if err = checkout(clone, all, named); err != nil || len(left) == 0 {
+		err = checkout(clone, all, named)
+		if err == nil {
+			for _, p := range named {
+				live(map[string]any{"check": "put back " + p, "state": "passed"})
+			}
+		}
+		if err != nil || len(left) == 0 {
 			return why, ran, cmds, undone, err
 		}
 	}
