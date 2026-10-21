@@ -164,7 +164,7 @@ func (m *Model) focused() *pane {
 	if slices.Contains(m.panes(), m.focus) {
 		return m.focus
 	}
-	if m.agentRuns() || m.gateSteps != nil {
+	if m.agentVisible() || m.gateSteps != nil {
 		return &m.history
 	}
 	return &m.pipeline
@@ -173,7 +173,7 @@ func (m *Model) focused() *pane {
 // panes is the panes of the boxes shown, in the order tab moves through them.
 func (m *Model) panes() []*pane {
 	shown := []*pane{&m.pipeline}
-	if m.agentRuns() || m.gateSteps != nil {
+	if m.agentVisible() || m.gateSteps != nil {
 		shown = append(shown, &m.history)
 	}
 	if m.gateSteps == nil && (m.agentRuns() && len(m.output) > 0 || !m.agentRuns() && m.running()) {

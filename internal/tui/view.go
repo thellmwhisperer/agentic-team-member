@@ -115,7 +115,7 @@ func stackedHeights(available, rightMinimum int) (int, int) {
 }
 
 func (m *Model) rightMinimum(width int) int {
-	if m.agentRuns() || len(m.findings) == 0 && len(m.agent) > 0 && m.agent[len(m.agent)-1].report != nil {
+	if m.agentVisible() {
 		if len(m.output) > 0 || !m.agentRuns() && m.running() {
 			return minimumBoxRows * 2
 		}
@@ -285,7 +285,7 @@ func (m *Model) row(r *row, width int) string {
 
 // sidebar says whether there is a box beside the ATM box to show.
 func (m *Model) sidebar() bool {
-	return m.agentRuns() || len(m.findings) > 0 || m.running() || m.gateSteps != nil
+	return m.agentVisible() || len(m.findings) > 0 || m.running() || m.gateSteps != nil
 }
 
 // right is, at width in height rows, the Gate box once the gate after Delivery shows its run, else the Agent
@@ -298,7 +298,7 @@ func (m *Model) right(width, height int) string {
 	if m.gateSteps != nil {
 		return m.gateBox(width, max(1, height-boxBorderRows))
 	}
-	if m.agentRuns() || len(m.findings) == 0 && len(m.agent) > 0 && m.agent[len(m.agent)-1].report != nil {
+	if m.agentVisible() {
 		if len(m.output) > 0 || !m.agentRuns() && m.running() {
 			logBox := m.logBox(width, max(1, min(height/3-boxBorderRows, height-minimumBoxRows-boxBorderRows)))
 			top = m.agentBox(width, max(1, height-lipgloss.Height(logBox)-boxBorderRows))
@@ -329,6 +329,10 @@ func (m *Model) runningRow() *row {
 		}
 	}
 	return nil
+}
+
+func (m *Model) agentVisible() bool {
+	return m.agentRuns() || len(m.findings) == 0 && len(m.agent) > 0 && m.agent[len(m.agent)-1].report != nil
 }
 
 // agentRuns says whether the agent of a unit, or of the slop detector, runs.
@@ -371,8 +375,12 @@ func markdownText(source []byte, root ast.Node) (string, bool) {
 		case *ast.CodeSpan:
 			code = true
 			var value strings.Builder
-			for _, index := range n.Value.Indices() {
-				value.Write(source[index.Start:index.Stop])
+			if n.Value.IsOwned() {
+				value.WriteString(n.Value.Str(source))
+			} else {
+				for _, index := range n.Value.Indices() {
+					value.Write(source[index.Start:index.Stop])
+				}
 			}
 			out.WriteString(paint(yellow, displayText(value.String())))
 			return
