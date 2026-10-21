@@ -445,7 +445,7 @@ The Slop detector unfolds as the agent reads the diff, then shows its finding
 count, the number kept or rejected and the first rejection reason, each check
 attempt and any files put back, and the cut commit when one is kept. Its phase
 rows show elapsed time where available. The Findings box shows every finding
-the agent reported, including rejected and discarded cuts. Each entry starts
+the agent reported, including rejected and discarded cuts. Each reference starts
 with `kept`,
 `rejected: <reason>`, or `discarded: checks failed`, followed by the full file
 path and the finding's text. Long entries wrap; scroll the Findings box to read
