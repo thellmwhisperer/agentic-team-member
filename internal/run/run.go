@@ -79,12 +79,15 @@ func runAt(label, ref string, args []string, out, summary io.Writer) (err error)
 	})
 	byClone.Store(dir, r)
 	defer byClone.Delete(dir)
-	a.unit(r, root, dir, sha, text, c,
-		resumePoint{Issue: args[len(args)-1], Original: &i, BaseRef: *base, Base: sha}, from,
+	keep := resumePoint{Issue: args[len(args)-1], Original: &i, BaseRef: *base, Base: sha}
+	a.unit(r, root, dir, sha, text, c, &keep, from,
 		func(p proof) {
 			r.step("ponytail", func() (map[string]any, error) {
 				ev, err := a.ponytail(root, dir, sha, []proof{p}, i, c)
 				r.Reproofs, _ = ev["reproofs"].([]unitResult)
+				if commits, _ := ev["commits"].([]string); err == nil && len(commits) == 2 {
+					keep.Cuts = append(keep.Cuts, commits[1])
+				}
 				return ev, err
 			})
 		},
@@ -161,7 +164,7 @@ type proof struct {
 // checks and the steps after, each given the checks' proof. The unit goes to the report, and its agent's work to
 // keep, for atm run --resume. A run that resumes from puts the work it kept back in dir, in place of its unit's
 // agent. A failure of the checks or a step after asks the launcher; after a fix turn the checks run again.
-func (a agent) unit(r *verdict, root, dir, sha, text string, c config.Config, keep resumePoint,
+func (a agent) unit(r *verdict, root, dir, sha, text string, c config.Config, keep *resumePoint,
 	from *resumePoint, after ...func(proof)) {
 	checkHead := sha
 	var report map[string]any
@@ -170,10 +173,10 @@ func (a agent) unit(r *verdict, root, dir, sha, text string, c config.Config, ke
 		var err error
 		var ev map[string]any
 		if from != nil {
-			resumed = from.run
-			checkHead, ev, err = a.resumeUnit(r, root, dir, *from, &keep)
+			resumed, keep.Cuts = from.run, from.Cuts
+			checkHead, ev, err = a.resumeUnit(r, root, dir, *from, keep)
 		} else {
-			ev, err = a.runUnit(dir, text, &keep)
+			ev, err = a.runUnit(dir, text, keep)
 		}
 		ev["unit"] = 1
 		report, _ = ev["report"].(map[string]any)
@@ -186,7 +189,7 @@ func (a agent) unit(r *verdict, root, dir, sha, text string, c config.Config, ke
 		r.step("checks", func() (map[string]any, error) {
 			var ev map[string]any
 			var err error
-			p, ev, err = checkUnit(a.dir, dir, checkHead, sha, test, keep.Original.Text, report, c)
+			p, ev, err = checkUnit(a.dir, dir, checkHead, sha, test, keep.Original.Text, report, c, keep.Cuts...)
 			p.base = sha
 			return ev, err
 		})
@@ -194,7 +197,7 @@ func (a agent) unit(r *verdict, root, dir, sha, text string, c config.Config, ke
 	for n := 0; n < len(steps); n++ {
 		if r.err == nil {
 			if n == 0 {
-				r.keep(a.dir, dir, keep, 1, report)
+				r.keep(a.dir, dir, *keep, 1, report)
 			}
 			steps[n](p)
 		}
@@ -204,7 +207,7 @@ func (a agent) unit(r *verdict, root, dir, sha, text string, c config.Config, ke
 			if failed == "delivery" && !r.captureDeliveryHead(dir, &checkHead) {
 				break
 			}
-			if next := a.fixCheck(r, dir, text, &keep); next != nil {
+			if next := a.fixCheck(r, dir, text, keep); next != nil {
 				report = next
 				test, _ = report["test_file"].(string)
 			}
@@ -244,11 +247,11 @@ func (r *verdict) recordUnit(n int, head, test, resumed string) {
 
 // checkUnit runs configured checks, keeping the tests of changed test files issue does not name, and records
 // the reported test for the ponytail guard.
-func checkUnit(runDir, dir, head, base, test, issue string, report map[string]any, c config.Config) (proof,
+func checkUnit(runDir, dir, head, base, test, issue string, report map[string]any, c config.Config, cuts ...string) (proof,
 	map[string]any, error) {
 	ev := map[string]any{"unit": 1}
 	missing := report == nil && test == ""
-	result, err := checks(dir, runDir, head, base, test, &issue, missing, c)
+	result, err := checks(dir, runDir, head, base, test, &issue, missing, c, cuts...)
 	for key, value := range result {
 		ev[key] = value
 	}
