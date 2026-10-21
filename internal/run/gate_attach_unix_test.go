@@ -4,6 +4,7 @@ package run
 
 import (
 	"fmt"
+	"html"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -75,6 +76,7 @@ func TestRealAttachPaintsTheGate(t *testing.T) {
 	a.delivered(clone)
 	finding := `error internal/run/run.go Delivery drops the "gate", verdict and all.`
 	folded := a.sees(func(s string) bool { return strings.Contains(s, finding) && strings.Contains(s, "▸ ⏸ review") })
+	gateEvidence(t, "gate-folded", a)
 	for _, want := range []string{`│ ⏸ review .*waiting │`, `│ ○ test .*pending │`, `│ ▸ ⏸ review +│`,
 		`│   Reviewing the diff +│`} {
 		if !regexp.MustCompile(want).MatchString(folded) {
@@ -90,6 +92,7 @@ func TestRealAttachPaintsTheGate(t *testing.T) {
 		return strings.Contains(s, "▾ ⏸ review") && strings.Contains(s, "reading internal/run/run.go") &&
 			strings.Contains(s, "checking the delivery") && strings.Contains(s, finding)
 	})
+	gateEvidence(t, "gate-unfolded", a)
 	if err := os.WriteFile(filepath.Join(nm, "fixing"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -97,6 +100,7 @@ func TestRealAttachPaintsTheGate(t *testing.T) {
 		return regexp.MustCompile(`│ [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] review .*running │`).MatchString(s) &&
 			regexp.MustCompile(`│ ▾ [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] review +│`).MatchString(s)
 	})
+	gateEvidence(t, "gate-fixing", a)
 	if !strings.Contains(fixing, finding) || strings.Contains(fixing, "internal/run/run.go:") {
 		t.Fatalf("fixing lost or invented a finding position:\n%s", fixing)
 	}
@@ -158,6 +162,7 @@ func TestRealAttachScrollsTheFullGateLog(t *testing.T) {
 	}
 	top := len(rows) - 7
 	page(top)
+	gateEvidence(t, "gate-long-log-bottom", a)
 	a.key("\t\x1b[H")
 	pipeline := a.sees(func(s string) bool { return strings.Contains(s, "– Issue") })
 	if !strings.Contains(pipeline, "review-line-79") {
@@ -179,6 +184,47 @@ func TestRealAttachScrollsTheFullGateLog(t *testing.T) {
 		t.Fatal(err)
 	}
 	a.exits()
+}
+
+// gateEvidence saves the actual terminal frame as a viewable artifact when the test phase requests it.
+func gateEvidence(t *testing.T, name string, a *attached) {
+	t.Helper()
+	dir := os.Getenv("ATM_GATE_EVIDENCE_DIR")
+	if dir == "" {
+		return
+	}
+	// A screen assertion can match midway through a terminal write; wait for the frame to finish.
+	quiet := time.NewTimer(150 * time.Millisecond)
+	defer quiet.Stop()
+collect:
+	for {
+		select {
+		case chunk, ok := <-a.chunks:
+			if !ok {
+				break collect
+			}
+			a.raw.WriteString(chunk)
+			if !quiet.Stop() {
+				select {
+				case <-quiet.C:
+				default:
+				}
+			}
+			quiet.Reset(150 * time.Millisecond)
+		case <-quiet.C:
+			break collect
+		}
+	}
+	shown := html.EscapeString(a.screen())
+	if strings.Contains(a.raw.String(), "\x1b[1mReviewing the diff") {
+		shown = strings.ReplaceAll(shown, "Reviewing the diff", "<strong>Reviewing the diff</strong>")
+	}
+	page := "<!doctype html><meta charset=\"utf-8\"><title>atm attach gate</title>" +
+		"<style>body{background:#111827;color:#e5e7eb;padding:24px}pre{font:15px/1.25 monospace;white-space:pre}</style><pre>" +
+		shown + "</pre>"
+	if err := os.WriteFile(filepath.Join(dir, name+".html"), []byte(page), 0o600); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestRealAttachShowsGateFindingsWithoutLogLines(t *testing.T) {

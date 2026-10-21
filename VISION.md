@@ -9,9 +9,9 @@ same kind.
 
 ## The boundary with the gate
 
-- The `atm` binary emits events. It knows nothing about the gate.
+- The ATM run emits events and knows nothing about the gate.
 - `atm attach` paints ATM's events and, once they end, the gate's events until
-  the end of the run. It reads as one pipeline; inside, it is two programs.
+  the gate ends. It reads as one pipeline; inside, it is two programs.
 - ATM does not change the gate's code and does not copy it.
 
 ## The screen

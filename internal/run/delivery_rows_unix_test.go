@@ -4,7 +4,7 @@ package run
 
 import (
 	"bytes"
-	"io"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -39,6 +39,10 @@ func TestDeliveryCommandOutputIsNotDuplicatedOnTerminal(t *testing.T) {
 }
 
 func TestDeliveryRowsThroughRealBinaryAndColdAttach(t *testing.T) {
+	nm := gateFake(t)
+	if err := os.WriteFile(filepath.Join(nm, "none"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	bin := builtATM(t)
 	// The real binary's serve binds at git's toplevel. t.TempDir can be another spelling of that
 	// directory (Darwin's /var, or any symlink); short() then cannot dial the socket.
@@ -54,10 +58,48 @@ func TestDeliveryRowsThroughRealBinaryAndColdAttach(t *testing.T) {
 		t.Fatalf("atm run: %v\n%s", err, out)
 	}
 	label := strings.TrimSpace(string(out))
-	if end, err := Attach(top, label, io.Discard); err != nil || end.Outcome != "passed" {
+	var emitted bytes.Buffer
+	end, err := Follow(top, label, nil, nil, func(f Frame) {
+		if len(f.Event) > 0 {
+			emitted.Write(f.Event)
+			emitted.WriteByte('\n')
+		}
+	})
+	if err != nil || end.Outcome != "passed" {
 		t.Fatalf("delivery: %+v, %v", end, err)
 	}
-	assertDeliveryRows(t, readReport(t, filepath.Join(top, ".atm", "runs", label, "report.json")))
+	reportPath := filepath.Join(top, ".atm", "runs", label, "report.json")
+	report := readReport(t, reportPath)
+	assertDeliveryRows(t, report)
+	if _, ok := report["gate"]; ok {
+		t.Fatalf("atm run saved a gate field: %v", report["gate"])
+	}
+	for _, node := range report["nodes"].([]any) {
+		if node.(map[string]any)["name"] == "gate" {
+			t.Fatal("atm run saved a gate node")
+		}
+	}
+	for _, line := range bytes.Split(bytes.TrimSpace(emitted.Bytes()), []byte{'\n'}) {
+		var event map[string]any
+		if err := json.Unmarshal(line, &event); err != nil {
+			t.Fatalf("run event: %v: %s", err, line)
+		}
+		if event["step"] == "gate" {
+			t.Fatalf("atm run emitted a gate event: %s", line)
+		}
+	}
+	if dir := os.Getenv("ATM_GATE_EVIDENCE_DIR"); dir != "" {
+		if err := os.WriteFile(filepath.Join(dir, "atm-run-events.jsonl"), emitted.Bytes(), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		body, err := os.ReadFile(reportPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "atm-run-report.json"), body, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
 	// Let the real server exit normally, flushing coverage and discarding its replay frames.
 	endDeliveryServer(t, server, top)
 	server = startVersionServe(t, bin, top)
