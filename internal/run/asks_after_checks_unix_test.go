@@ -3,8 +3,10 @@
 package run
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -62,23 +64,30 @@ func TestRunDeliveryFixRechecks(t *testing.T) {
 			{"agent commits", "touch repaired; git add -A; git commit -qm agent-commit", "the agent made commits"},
 		} {
 			t.Run(cuts.name+"/"+tc.name, func(t *testing.T) {
-				runDeliveryFixRecheck(t, cuts.first, cuts.second, tc.repair, tc.finding)
+				runDeliveryFixRecheck(t, cuts.first, cuts.second, tc.repair, tc.finding, false)
+			})
+			t.Run(cuts.name+"/delivery commits/"+tc.name, func(t *testing.T) {
+				runDeliveryFixRecheck(t, cuts.first, cuts.second, tc.repair, tc.finding, true)
 			})
 		}
 	}
 }
 
-func runDeliveryFixRecheck(t *testing.T, first, second bool, repair, finding string) {
+func runDeliveryFixRecheck(t *testing.T, first, second bool, repair, finding string, commits bool) {
 	delivered, order := filepath.Join(t.TempDir(), "delivered"), filepath.Join(t.TempDir(), "order")
 	metadata := t.TempDir()
 	t.Setenv("ATM_TEST_METADATA", metadata)
+	commit := ""
+	if commits {
+		commit = "git commit --allow-empty -qm delivery-commit || exit; "
+	}
 	cfg := atmSet(atmSet(atmYAML, "lint",
 		"test ! -f broken-check || { echo repair-check-finding; exit 1; }"), "delivery",
 		`test -f repaired && attempt=second || attempt=first; `+
 			`for field in ATM_PONYTAIL ATM_INTENT ATM_ISSUE_TEXT; do `+
 			`printenv "$field" > "$ATM_TEST_METADATA/$attempt-$field"; done; `+
 			`git ls-files .slop/tombstones > "$ATM_TEST_METADATA/$attempt-tombs"; `+
-			"test -f repaired || { echo delivery-finding; exit 1; }; cat a.txt > "+delivered)
+			"test -f repaired || { "+commit+"echo delivery-finding; exit 1; }; cat a.txt > "+delivered)
 	top := gitT(t, repo(t, "local", cfg), "rev-parse", "--show-toplevel")
 	base := gitT(t, top, "rev-parse", "HEAD")
 	work := deliveryCutWork(t, first, second)
@@ -91,9 +100,7 @@ func runDeliveryFixRecheck(t *testing.T, first, second bool, repair, finding str
 	clone, label := question(t, bin, top, "delivery-finding", 4, "run", "--follow", issueFile(t, issue))
 	assertDeliveryCutMetadata(t, metadata, "first", map[bool]int{true: 1}[first])
 	before := e2eReport(t, top, label)
-	if before.HeadSHA == base || before.HeadSHA != gitT(t, clone, "rev-parse", "HEAD") {
-		t.Fatalf("delivery did not record ATM's commits: %+v", before)
-	}
+	assertDeliveryCommitBoundary(t, clone, base, before, commits)
 	answerFailedCheck(t, bin, top, label, "fix", map[bool]int{true: 1}[finding != ""])
 	rep := e2eReport(t, top, label)
 	if workerCalls(t, order) != 2 || len(rep.Decisions) == 0 || rep.Decisions[0].Answer != "fix" ||
@@ -106,6 +113,7 @@ func runDeliveryFixRecheck(t *testing.T, first, second bool, repair, finding str
 		return
 	}
 	assertDeliveryRepairSuccess(t, delivered, order, metadata, base, first, second, rep)
+	assertDeliveryAttemptHistory(t, top, label, before, rep)
 }
 
 func deliveryCutWork(t *testing.T, first, second bool) string {
@@ -123,6 +131,78 @@ func deliveryCutWork(t *testing.T, first, second bool) string {
 	t.Setenv("FAKE_PONYTAIL_WORK", "if test -f repaired; then "+secondWork+"; else "+firstWork+"; fi")
 	t.Setenv("FAKE_PONYTAIL_REPORT", cut)
 	return "printf 'fixed\\nextra\\nmore\\n' > a.txt" + fixTest
+}
+
+func assertDeliveryCommitBoundary(t *testing.T, clone, base string, before *verdict, commits bool) {
+	t.Helper()
+	want := gitT(t, clone, "rev-parse", "HEAD")
+	if commits {
+		if gitT(t, clone, "log", "-1", "--format=%s") != "delivery-commit" {
+			t.Fatal("the configured delivery did not make its commit")
+		}
+		want = gitT(t, clone, "rev-parse", "HEAD^")
+	}
+	if before.HeadSHA == base || before.HeadSHA != want {
+		t.Fatalf("delivery did not record ATM's commits: %+v", before)
+	}
+}
+
+func assertDeliveryAttemptHistory(t *testing.T, top, label string, before, after *verdict) {
+	t.Helper()
+	rows := after.node("delivery").Rows
+	if len(before.node("delivery").Rows) != 2 || len(rows) != 4 ||
+		!slices.Equal(before.node("delivery").Rows, rows[:2]) {
+		t.Fatalf("delivery retry rewrote its first attempt: before %+v; after %+v", before.node("delivery").Rows, rows)
+	}
+	var emitted []partResult
+	end, err := Follow(top, label, nil, nil, func(f Frame) {
+		if len(f.Event) == 0 {
+			return
+		}
+		var ev struct {
+			Step, Check, State string
+			DurationMS         int64 `json:"duration_ms"`
+		}
+		if err := json.Unmarshal(f.Event, &ev); err != nil {
+			t.Fatal(err)
+		}
+		if ev.Step == "delivery" && (ev.Check == "commit" || ev.Check == "command") &&
+			(ev.State == "passed" || ev.State == "failed") {
+			emitted = append(emitted, partResult{Name: ev.Check, Result: ev.State, span: span{DurationMS: ev.DurationMS}})
+		}
+	})
+	if err != nil || end.Outcome != "passed" || len(emitted) != 4 {
+		t.Fatalf("delivery attempt events: %+v, %v, %+v", end, err, emitted)
+	}
+	for i, result := range []string{"passed", "failed", "passed", "passed"} {
+		name := []string{"commit", "command"}[i%2]
+		if rows[i].Name != name || rows[i].Result != result || emitted[i].Name != name ||
+			emitted[i].Result != result || rows[i].DurationMS != emitted[i].DurationMS || rows[i].StartedAt == "" {
+			t.Fatalf("delivery attempt %d: saved %+v, emitted %+v, want %s %s", i, rows[i], emitted[i], name, result)
+		}
+	}
+}
+
+func TestRunDeliveryFixRequiresHead(t *testing.T) {
+	builtATM(t)
+	top := gitT(t, repo(t, "local", atmSet(atmYAML, "delivery", "echo delivery-finding; exit 1")),
+		"rev-parse", "--show-toplevel")
+	order := filepath.Join(t.TempDir(), "order")
+	t.Setenv("FAKE_AGENT_ORDER", order)
+	bin := followUpsServer(t, top)
+	clone, label := question(t, bin, top, "delivery-finding", 4, "run", "--follow", issueFile(t, issue))
+	if err := os.Remove(filepath.Join(clone, ".git", "HEAD")); err != nil {
+		t.Fatal(err)
+	}
+	answerFailedCheck(t, bin, top, label, "fix", 4)
+	rep := e2eReport(t, top, label)
+	if rep.FailedNode != "delivery" || !strings.Contains(rep.Reason, "rev-parse --verify HEAD^{commit}") ||
+		len(rep.Decisions) != 1 || rep.Decisions[0].Answer != "fix" || workerCalls(t, order) != 1 {
+		t.Fatalf("unknown HEAD allowed repair or hid the failure: %+v", rep)
+	}
+	if data, err := os.ReadFile(filepath.Join(clone, "a.txt")); err != nil || string(data) != "fixed\n" {
+		t.Fatalf("HEAD query failure lost work: %q, %v", data, err)
+	}
 }
 
 func assertDeliveryRepairQuestion(t *testing.T, bin, top, label, delivered, finding string, rep *verdict) {

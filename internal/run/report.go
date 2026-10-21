@@ -227,10 +227,11 @@ func (r *verdict) live(ev map[string]any) {
 			n.Rows = append(n.Rows, partResult{Name: name, Result: "running",
 				span: span{StartedAt: time.Now().UTC().Format("2006-01-02T15:04:05.000Z07:00")}})
 		} else {
-			for j := range n.Rows {
-				if n.Rows[j].Name == name {
+			for j := len(n.Rows) - 1; j >= 0; j-- {
+				if n.Rows[j].Name == name && n.Rows[j].Result == "running" {
 					n.Rows[j].Result, _ = ev["state"].(string)
 					n.Rows[j].DurationMS, _ = ev["duration_ms"].(int64)
+					break
 				}
 			}
 		}
