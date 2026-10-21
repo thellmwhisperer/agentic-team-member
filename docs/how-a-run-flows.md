@@ -454,15 +454,16 @@ output. The Delivery row becomes passed or failed when the command exits.
 An empty delivery command
 shows `Delivery skipped` without sub-rows.
 
-The Slop detector unfolds as the agent reads the diff, then shows its finding
-count, the number kept or rejected and the first rejection reason, each check
-attempt and any files put back, and the cut commit when one is kept. Its phase
-rows show elapsed time where available. The Findings box shows every finding
-the agent reported, including rejected and discarded cuts. Each entry starts
-with `kept`,
-`rejected: <reason>`, or `discarded: checks failed`, followed by the full file
-path and the finding's text. Long entries wrap; scroll the Findings box to read
-entries outside its visible height.
+The Slop detector unfolds into `agent reading the diff`, `N findings`, `judged`,
+`checks`, `put back <file>`, and, when a cut is kept, `commit` rows. The `judged`
+row shows the number of findings accepted for checks, the number rejected and
+the first rejection reason. The `checks` row shows the latest attempt's number
+and result; a failed attempt can name the files it implicated. Phase rows show
+elapsed time where available. The Findings box shows every finding the agent
+reported, including rejected and discarded cuts. Each entry starts with
+`kept`, `rejected: <reason>`, or `discarded: checks failed`, followed by its
+repository-relative file path and one-line text. Long entries wrap; scroll the
+Findings box to read entries outside its visible height.
 
 Once a run ends with Delivery passed, the screen goes on with the gate: it
 asks `no-mistakes axi status`, in the run's clone, for the run of the
