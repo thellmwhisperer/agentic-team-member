@@ -328,14 +328,7 @@ func (m *Model) apply(f run.Frame) {
 	case e.Thinking != "" || e.Says != "":
 		m.agent = append(m.agent, &activity{thinking: e.Thinking, says: e.Says})
 	case e.Output != nil:
-		line := &logLine{step: e.Step, check: e.Check, text: ansi.Strip(*e.Output)}
-		if len(m.output) > 0 {
-			previous := m.output[len(m.output)-1]
-			if previous.step == line.step && previous.check == line.check {
-				_, _, line.code = agentTextRows("", previous.text, m.width, previous.code)
-			}
-		}
-		m.output = append(m.output[max(0, len(m.output)-199):], line)
+		m.appendOutput(e)
 	case m.current(e.Step) == nil:
 		return
 	case e.Check != "":
@@ -352,6 +345,17 @@ func (m *Model) apply(f run.Frame) {
 	if m.running() {
 		m.state = "running"
 	}
+}
+
+func (m *Model) appendOutput(e event) {
+	line := &logLine{step: e.Step, check: e.Check, text: ansi.Strip(*e.Output)}
+	if len(m.output) > 0 {
+		previous := m.output[len(m.output)-1]
+		if previous.step == line.step && previous.check == line.check {
+			_, _, line.code = agentTextRows("", previous.text, m.width, previous.code)
+		}
+	}
+	m.output = append(m.output[max(0, len(m.output)-199):], line)
 }
 
 func (m *Model) decision(e event) {
