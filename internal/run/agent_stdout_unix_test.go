@@ -11,7 +11,6 @@ import (
 	"strings"
 	"syscall"
 	"testing"
-	"time"
 )
 
 func TestRunKillsAChildHoldingTheAgentsStdout(t *testing.T) {
@@ -23,8 +22,6 @@ func TestRunKillsAChildHoldingTheAgentsStdout(t *testing.T) {
 		{name: "agent exits non-zero", mode: "fail", why: "exit code 3"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			defer func(d time.Duration) { agentTimeout = d }(agentTimeout)
-			agentTimeout = 10 * time.Second // bounds the run
 			repo(t, "https://example.com/owner/repo.git", atmYAML)
 			// Each claude call starts a grandchild that inherits its stdout and never ends, its pid in
 			// pids/<call's pid>, then plays the fake agent in tc.mode, by default one that exits 0 with a valid

@@ -270,6 +270,9 @@ func sharedATM(t *testing.T, version string) string {
 
 func compileATM(path, version string, cover bool) error {
 	ldflags := fmt.Sprintf("-X github.com/thellmwhisperer/agentic-team-member/internal/buildinfo.Version=%s", version)
+	if version == hangBuild {
+		ldflags += " -X github.com/thellmwhisperer/agentic-team-member/internal/run.hangAfter=2s"
+	}
 	args := []string{"build", "-ldflags", ldflags}
 	// With GOCOVERDIR set, the built atm writes coverage counters on exit, so
 	// cover-diff can see which changed lines an end-to-end run executes.

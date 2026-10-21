@@ -101,7 +101,7 @@ func configureAgent(root, ref, label string, a *agent) (config.Config, error) {
 	if err != nil {
 		return config.Config{}, err
 	}
-	a.Agent, a.root, a.dir, a.timeout = c.Agent, root, runDir(root, label), time.Duration(c.AgentTimeout)
+	a.Agent, a.root, a.dir = c.Agent, root, runDir(root, label)
 	return c, nil
 }
 
@@ -461,12 +461,9 @@ func writeBrief(path string, i Issue, c config.Config) (string, map[string]any, 
 // runDir is the directory of run label in the repository at root, which nothing removes.
 func runDir(root, label string) string { return filepath.Join(root, ".atm", "runs", label) }
 
-// timeout is the default limit for checks commands and the limit for other non-agent, non-delivery commands.
+// timeout is the limit for commands other than the agent, the checks and delivery.
 // ponytail: command kills only the command itself; a process group, as sh uses, is the upgrade.
 var timeout = 10 * time.Minute
-
-// agentTimeout bounds the agent when .atm.yaml sets no agent_timeout.
-var agentTimeout = 30 * time.Minute
 
 // command runs name in dir, "" for the working directory, and returns its trimmed stdout; a failure or a
 // timeout carries stderr.

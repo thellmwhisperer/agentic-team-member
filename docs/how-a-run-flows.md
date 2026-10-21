@@ -153,8 +153,18 @@ have changed something. All configured commands still run. The slop detector fai
 The agent's `.jsonl` log records a `report_rejected` event with the exact
 error in `error`. Both
 attempts' output stays in that log, and both attempts' stderr stays in its
-companion `.stderr.txt` file. Process failures, timeouts and forbidden tool
+companion `.stderr.txt` file. Process failures, hangs and forbidden tool
 calls fail without returning the report.
+
+### Hung agents
+
+An agent call is hung after 10 minutes with no output while no process under
+it starts, ends or uses CPU time. ATM kills it with every process it started,
+and its step fails with `hung: no output and no child process working for 10m`.
+An agent that is silent while a child works, such as a test pass, is never
+stopped. A hung worker asks its launcher as a failed check does (see
+[Checks](#checks)): `approve` runs Checks on the work it left, `fix` gives it
+one turn with the finding. Any other hung agent call fails its step.
 
 ## Checks
 
@@ -212,7 +222,7 @@ command that commits fails the checks too.
 
 Resuming an `e2e` red gives the agent one turn in its saved session before
 Checks starts again at `install`. The turn receives the failed output and
-the two ways out above, with the Agent step's time limits. A second
+the two ways out above, under the Agent step's hang detection. A second
 red asks the launcher without an automatic agent turn. Other failures and
 sessions that cannot resume go straight to Checks with
 `resume: no agent turn (<reason>)`; see
@@ -300,8 +310,8 @@ ATM runs on Linux and macOS, and on Windows through WSL.
 | What | Limit |
 |------|-------|
 | Reading a GitHub issue | 60 s |
-| Each checks command (`install`, `test`, `e2e`, `typecheck`, `lint`) | See [`check_timeout`](configuration.md#atmyaml) |
-| Each agent call, the slop detector's included | See [`agent_timeout`](configuration.md) |
+| Each checks command (`install`, `test`, `e2e`, `typecheck`, `lint`) | none |
+| Each agent call, the slop detector's included | none; stopped when [hung](#hung-agents) |
 | The delivery command | none |
 
 Past its limit, or when the background process executing the run gets

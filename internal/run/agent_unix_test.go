@@ -21,19 +21,19 @@ func TestRunKillsTheAgentGroup(t *testing.T) {
 		name, why, mode string
 		sig             syscall.Signal
 	}{
-		{name: "timeout", why: "timed out", mode: "hang"},
+		{name: "hung", why: "hung", mode: "hang"},
 		{name: "SIGINT", why: "interrupted", mode: "hang", sig: syscall.SIGINT},
 		{name: "SIGTERM", why: "interrupted", mode: "hang", sig: syscall.SIGTERM},
-		{name: "timeout, own session", why: "timed out", mode: "hang-session"},
+		{name: "hung, own session", why: "hung", mode: "hang-session"},
 		{name: "SIGTERM, own session", why: "interrupted", mode: "hang-session", sig: syscall.SIGTERM},
-		{name: "timeout, orphan", why: "timed out", mode: "hang-orphan"},
+		{name: "hung, orphan", why: "hung", mode: "hang-orphan"},
 		{name: "SIGTERM, orphan", why: "interrupted", mode: "hang-orphan", sig: syscall.SIGTERM},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			root := repo(t, "https://example.com/owner/repo.git", atmYAML)
 			if c.sig == 0 {
-				defer func(d time.Duration) { agentTimeout = d }(agentTimeout)
-				agentTimeout = 3 * time.Second
+				defer func(d string) { hangAfter = d }(hangAfter)
+				hangAfter = "3s"
 			}
 			// The grandchild writes its pid to a fifo: reading it blocks until the agent's group is up.
 			fifo := filepath.Join(t.TempDir(), "pid")

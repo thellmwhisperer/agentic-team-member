@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 	"unicode"
@@ -52,8 +53,7 @@ type agent struct {
 	args, env []string
 	scratch   string // the call's scratch directory: the one path outside the clone its calls may write to
 	root, dir string
-	follow    bool          // atm run --follow: the launching process watches the run itself
-	timeout   time.Duration // .atm.yaml's agent_timeout, 0 for agentTimeout
+	follow    bool // atm run --follow: the launching process watches the run itself
 }
 
 // flags adds the agent's flags to fs.
@@ -314,7 +314,7 @@ func clonePathRune(r rune) bool {
 // exec runs argv in clone, stdin on its stdin, in its own process group, and returns what its lines said, and
 // how it ended, as ended says; a nil stream when it never got to run. Every line it writes goes to the log at
 // path, in the run's directory, which outlives the clone, and its stderr to <name>.stderr.txt next to it as
-// well. The timeout, SIGINT and SIGTERM kill the group.
+// well. A hang (watchHang), SIGINT and SIGTERM kill the group.
 func (a agent) exec(
 	clone, path string, argv []string, stdin string, appendLog bool,
 ) (*stream, string, string, error) {
@@ -334,9 +334,8 @@ func (a agent) exec(
 	defer func() { _ = stderr.Close() }()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	limit := cmp.Or(a.timeout, agentTimeout)
-	ctx, cancel := context.WithTimeout(ctx, limit)
-	defer cancel()
+	ctx, hang := context.WithCancelCause(ctx)
+	defer hang(nil)
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir, cmd.Stdin, cmd.WaitDelay = clone, strings.NewReader(stdin), time.Second
 	cmd.Env = append(slices.DeleteFunc(os.Environ(), func(kv string) bool {
@@ -348,24 +347,21 @@ func (a agent) exec(
 	}
 	s := &stream{live: relative(clone, liveIn(clone)), clone: clone,
 		scratch: a.scratch}
+	s.started = func(pid int) { go watchHang(ctx, hang, pid, &s.heard) }
 	if err := s.talk(cmd, f, a.Harness, stdin); err != nil {
 		return nil, "", "", err
 	}
 	err = s.read(cmd, f, stderr, a.Harness)
-	limitText := Human(limit)
-	if a.timeout != 0 {
-		limitText = a.timeout.String()
-	}
-	exit, cause := ended(ctx, cmd.ProcessState, limitText)
+	exit, cause := ended(ctx, cmd.ProcessState)
 	return s.acpEnded(exit, cause, err)
 }
 
-// ended is how the agent run under ctx, bounded by limit, ended, its exit, "" when it never ran, and the cause
-// its step fails with, "" when it exited 0.
-func ended(ctx context.Context, p *os.ProcessState, limitText string) (exit, cause string) {
+// ended is how the agent run under ctx ended, its exit, "" when it never ran, and the cause its step fails
+// with, "" when it exited 0.
+func ended(ctx context.Context, p *os.ProcessState) (exit, cause string) {
 	switch {
-	case errors.Is(ctx.Err(), context.DeadlineExceeded):
-		exit = "timed out after " + limitText
+	case errors.Is(context.Cause(ctx), errHung):
+		exit = "hung: no output and no child process working for " + hangAfter
 	case ctx.Err() != nil:
 		exit = "interrupted"
 	case p == nil:
@@ -444,6 +440,8 @@ type stream struct {
 	scratch string // this call's directory outside the clone its calls may write in
 	reach   string
 	live    func(map[string]any)
+	started func(pid int) // called once the agent runs
+	heard   heard
 	pending string
 	thought string   // cursor's thinking deltas until completed
 	failure string   // cursor's error result or pi's unrecovered model error, even when the process exits 0
@@ -486,13 +484,16 @@ func (s *stream) read(cmd *exec.Cmd, log, stderr io.Writer, harness string) erro
 		}
 	}
 	out, errout := &lineWriter{fn: func(l string) { emit(l, true) }}, &lineWriter{fn: func(l string) { emit(l, false) }}
-	cmd.Stdout, cmd.Stderr = out, io.MultiWriter(stderr, errout)
+	cmd.Stdout, cmd.Stderr = io.MultiWriter(&s.heard, out), io.MultiWriter(&s.heard, stderr, errout)
 	err = cmd.Start()
 	if err == nil {
 		if err = attach(); err != nil {
 			_ = cmd.Cancel()
 			err = errors.Join(err, cmd.Wait())
 		} else {
+			if s.started != nil {
+				s.started(cmd.Process.Pid)
+			}
 			err = cmd.Wait()
 		}
 	}
@@ -506,6 +507,14 @@ func (s *stream) read(cmd *exec.Cmd, log, stderr io.Writer, harness string) erro
 	out.flush()
 	errout.flush()
 	return errors.Join(err, werr)
+}
+
+// heard counts the bytes the agent writes to stdout and stderr as they come, a line ended or not.
+type heard int64
+
+func (h *heard) Write(p []byte) (int, error) {
+	atomic.AddInt64((*int64)(h), int64(len(p)))
+	return len(p), nil
 }
 
 // event is the fields of every harness's events that say what its final message is and that it used its

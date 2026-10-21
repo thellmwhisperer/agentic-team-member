@@ -2,7 +2,6 @@ package run
 
 import (
 	"bytes"
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -29,7 +28,7 @@ func checks(clone, runDir, sha, test string, missingReport bool, c config.Config
 		Command: func(name, line string, env ...string) (cmdResult, error) {
 			var tail string
 			s, err := row(live, name, func() (err error) {
-				tail, _, err = shOutput(clone, line, cmp.Or(time.Duration(c.CheckTimeout), timeout), env...)
+				tail, _, err = teeRun(context.Background(), nil, io.Discard, clone, line, 0, env...)
 				return err
 			})
 			return cmdResult{name, line, outcome(err), tail, s}, wrap(err, name)

@@ -74,11 +74,17 @@ func replayHistoricalUnits(t *testing.T) {
 
 func followUpsServer(t *testing.T, top string) string {
 	t.Helper()
+	return versionServer(t, top, "follow-test")
+}
+
+// versionServer is a copy of the atm of version, its background process serving top until the test ends.
+func versionServer(t *testing.T, top, version string) string {
+	t.Helper()
 	if err := os.MkdirAll(filepath.Join(top, ".atm"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	bin := filepath.Join(t.TempDir(), "atm")
-	buildATM(t, bin, "follow-test")
+	buildATM(t, bin, version)
 	server := startVersionServe(t, bin, top)
 	t.Cleanup(func() { endServe(bin, top, server) })
 	return bin

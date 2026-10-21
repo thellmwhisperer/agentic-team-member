@@ -52,5 +52,3 @@ delivery: |
   done
   printf '%s\n' "$s"
   exit 1
-agent_timeout: 24h
-check_timeout: 20m
