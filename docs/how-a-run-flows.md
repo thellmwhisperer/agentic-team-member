@@ -441,6 +441,16 @@ output. The Delivery row becomes passed or failed when the command exits.
 An empty delivery command
 shows `Delivery skipped` without sub-rows.
 
+The Slop detector unfolds as the agent reads the diff, then shows its finding
+count, the number kept or rejected and the first rejection reason, each check
+attempt and any files put back, and the cut commit when one is kept. Its phase
+rows show elapsed time where available. The Findings box shows every finding
+the agent reported, including rejected and discarded cuts. Each entry starts
+with `kept`,
+`rejected: <reason>`, or `discarded: checks failed`, followed by the full file
+path and the finding's text. Long entries wrap; scroll the Findings box to read
+entries outside its visible height.
+
 Once a run ends with Delivery passed, the screen goes on with the gate: it
 asks `no-mistakes axi status`, in the run's clone, for the run of the
 delivered branch, and `no-mistakes axi logs --step <step> --full` for each step it started,
@@ -502,13 +512,12 @@ or `t hide tool use`, and `h show thinking` or `h hide thinking`, beside
 `q detach` while an agent runs. Fold choices are not saved across
 attaches.
 
-The ATM, Agent and Gate boxes each keep every line. The Log box keeps up to
-200 output events from the current step. All boxes scroll on their own.
+The ATM, Agent, Findings and Gate boxes each keep every line. The Log box keeps
+up to 200 output events from the current step. All boxes scroll on their own.
 The mouse wheel scrolls the box under the pointer. The keys scroll the box
 with the `*` marker in its title. `Tab` cycles through the visible boxes:
-ATM and Agent while the agent runs, also Log when there is output; ATM, Agent
-and Log while the report remains visible during checks; or ATM and Gate after
-Delivery.
+ATM, then Agent while it runs or its report remains visible during checks,
+or Findings when shown, then Log when shown; after Delivery, ATM and Gate.
 `↑` and `↓` move by a line, `PgUp` and `PgDn` by a page, and `Home` and `End`
 go to the first and the last lines. A box scrolled above its last line stays
 where it is as new lines come while those lines remain available; back at its
