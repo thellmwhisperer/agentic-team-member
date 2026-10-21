@@ -352,12 +352,13 @@ func onBranch(root, clone, sha, name string, i Issue) (cuts, tombs string, err e
 	if err != nil {
 		return "", "", fmt.Errorf("no origin to deliver to: %w", err)
 	}
-	head, err := git(clone, "rev-parse", "HEAD")
-	if err == nil && head != sha {
-		cuts, err = git(clone, "log", "-1", "--format=%b") // the ponytail commit's body: its findings
-	}
-	if err == nil && head != sha {
-		tombs, err = git(clone, "show", "--name-only", "--format=", "HEAD", "--", ".slop/tombstones/")
+	const kept = "--grep=^ponytail: [0-9][0-9]* cuts$"
+	cuts, err = git(clone, "log", "--reverse", "--format=%b", kept, sha+"..HEAD")
+	cuts = strings.ReplaceAll(cuts, "\n\n", "\n")
+	if err == nil {
+		tombs, err = git(clone, "log", "--reverse", "--name-only", "--format=", "--diff-filter=A", kept,
+			sha+"..HEAD", "--", ".slop/tombstones/")
+		tombs = strings.Join(strings.Fields(tombs), "\n")
 	}
 	if err == nil {
 		_, err = git(clone, "checkout", "-q", "-B", name) // again after a fix
