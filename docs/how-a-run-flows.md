@@ -476,11 +476,12 @@ until it is unfolded to its full text. A running group has a spinner and
 its active tool's detail; a failed tool keeps its own row, including the first
 line of its error when available. Every row a click folds or unfolds starts
 with `▸` folded and `▾` unfolded, the arrow alone underlined like a link.
-The JSON report a message ends with is never shown raw: it becomes an
+The worker's final JSON report is never shown raw: it becomes an
 `Informe` row, unfolded, with its summary's Markdown, tables in aligned
 columns, and four folded rows, `Ficheros cambiados (n)`,
 `Comandos ejecutados (n)`, `Test <file>` and `Hallazgos (n)`; unfolded,
-each item is a row, a finding with its severity first. The box omits empty
+each item is a row, a finding with its severity first. The report stays visible
+during checks, until the next agent starts or a failure needs the box. The box omits empty
 thinking, user messages, skill text and full tool output. Its `N tools`
 note counts tool calls only.
 

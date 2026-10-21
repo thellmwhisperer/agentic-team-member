@@ -171,8 +171,8 @@ func TestOnlyTheAgentMessageIsShownInACombinedStream(t *testing.T) {
 				s.final = report
 			}
 			s.finish()
-			if !reflect.DeepEqual(said, []any{"I'll run the tests.", report}) { // the screen draws the report
-				t.Fatalf("the combined stream says %q, want only the agent's messages", said)
+			if !reflect.DeepEqual(said, []any{"I'll run the tests."}) {
+				t.Fatalf("the combined stream says %q, want only the agent message", said)
 			}
 		})
 	}
@@ -212,6 +212,32 @@ func TestIntermediateJSONMessagesRemainWholeForEveryHarness(t *testing.T) {
 				t.Fatalf("intermediate message %q, want %q", got, message)
 			}
 		})
+	}
+}
+
+func TestClaudeFinalReportSplitAcrossTextBlocks(t *testing.T) {
+	report := `{"test_file":"a_test.go"}`
+	final := "All green.\n" + report
+	q := func(s string) string { b, _ := json.Marshal(s); return string(b) }
+	var got []any
+	s := stream{live: func(ev map[string]any) {
+		if ev["says"] != nil {
+			got = append(got, ev["says"])
+		}
+	}}
+	message := []byte(`{"type":"assistant","message":{"role":"assistant","content":[` +
+		`{"type":"text","text":"All green."},{"type":"text","text":` + q(report) + `}]}}`)
+	if !json.Valid(message) {
+		t.Fatalf("invalid Claude message: %s", message)
+	}
+	s.see("claude", message)
+	if !reflect.DeepEqual(got, []any{"All green."}) {
+		t.Fatalf("Claude prose before result %q, want %q", got, "All green.")
+	}
+	s.see("claude", []byte(`{"type":"result","result":`+q(final)+`}`))
+	s.finish()
+	if !reflect.DeepEqual(got, []any{"All green."}) {
+		t.Fatalf("final Claude text %q, want only the prose", got)
 	}
 }
 
