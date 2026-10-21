@@ -1,0 +1,19 @@
+schema: 1
+id: T-ATM-20261021-592-1
+status: accepted
+category: duplication
+title: Preserve accepted-cut ATM fixture setup
+created_at: 2026-10-21
+incident:
+  pattern: Accepted-cut and inventory real-ATM tests repeat fixture setup.
+  what_went_wrong: Preserving complete independent regressions repeats six setup lines.
+  root_cause: Both scenarios need isolated clones and the same test globs.
+  rule_established: Preserve both test bodies and assertions; accept only this exact clone.
+  evidence:
+    - family: clone_fingerprint
+      example: accepted_test_cuts_unix_test.go:74-79 and test_inventory_unix_test.go:36-41
+      artifact: internal/run/accepted_test_cuts_unix_test.go
+match:
+  family: clone_fingerprint
+  scope: go_tests
+  fingerprint: 90ff52fdd4dd8a9963e001ae3b2dfc8bb1881ae9b4448ef7f11abbdf386af6e9

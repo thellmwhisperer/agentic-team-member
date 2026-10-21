@@ -1,0 +1,19 @@
+schema: 1
+id: T-ATM-20261021-592-2
+status: accepted
+category: duplication
+title: Preserve lost-test ATM fixture setup
+created_at: 2026-10-21
+incident:
+  pattern: Lost-test and inventory real-ATM tests repeat fixture setup.
+  what_went_wrong: Preserving complete independent regressions repeats seven setup lines.
+  root_cause: Both scenarios need isolated clones with a committed test file.
+  rule_established: Preserve both test bodies and assertions; accept only this exact clone.
+  evidence:
+    - family: clone_fingerprint
+      example: lost_tests_unix_test.go:61-67 and test_inventory_unix_test.go:31-37
+      artifact: internal/run/lost_tests_unix_test.go
+match:
+  family: clone_fingerprint
+  scope: go_tests
+  fingerprint: 2d1a2987d751a3a1f75b163c80ec41e665f2e196e633f369e03b584d4d328578
