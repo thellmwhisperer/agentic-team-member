@@ -5,9 +5,13 @@ package checks
 import (
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/thellmwhisperer/agentic-team-member/internal/config"
@@ -26,7 +30,7 @@ type Tools[C any] struct {
 
 // Run runs the configured commands on the completed work, preserving clone and test safeguards. issue, when not
 // nil, is the issue's text: a changed test file must keep its tests but those it names (decision 8087).
-func Run[C any](clone, runDir, sha, test string, issue *string, missingReport bool, c config.Config,
+func Run[C any](clone, runDir, sha, base, test string, issue *string, missingReport bool, c config.Config,
 	t Tools[C]) (result map[string]any, err error) {
 	result = map[string]any{}
 	cover, err := coverageEnv(runDir, c.E2E)
@@ -59,7 +63,7 @@ func Run[C any](clone, runDir, sha, test string, issue *string, missingReport bo
 	if err != nil {
 		return result, err
 	}
-	if err = checkChanges(t.Git, clone, issue, c.TestPatterns, missingReport); err == nil && test != "" {
+	if err = checkChanges(t.Git, clone, base, issue, c.TestPatterns, missingReport); err == nil && test != "" {
 		_, err = t.ReadTest(clone, test)
 	}
 	if err != nil {
@@ -76,7 +80,7 @@ func Run[C any](clone, runDir, sha, test string, issue *string, missingReport bo
 
 // checkChanges rejects empty work when there is no report and, when issue is not nil, a changed test file that
 // loses tests.
-func checkChanges(git func(dir string, args ...string) (string, error), clone string, issue *string,
+func checkChanges(git func(dir string, args ...string) (string, error), clone, base string, issue *string,
 	tests []string, missingReport bool) error {
 	_, err := git(clone, "add", "-A")
 	if err == nil {
@@ -86,7 +90,7 @@ func checkChanges(git func(dir string, args ...string) (string, error), clone st
 			err = errors.New("no change to prove")
 		}
 		if err == nil && issue != nil && len(tests) > 0 {
-			err = lost(git, clone, *issue, tests)
+			err = lost(git, clone, base, *issue, tests)
 		}
 		_, resetErr := git(clone, "reset", "-q")
 		err = errors.Join(err, resetErr)
@@ -94,38 +98,82 @@ func checkChanges(git func(dir string, args ...string) (string, error), clone st
 	return err
 }
 
-// testOrSubtest is a test function or a t.Run subtest, its name the first or second group when written out.
-var testOrSubtest = regexp.MustCompile(`(?m)^func (Test\w*)|t\.Run\((?:"([^"]*)")?`)
-
-// lost is an error naming the first staged test file, matched by tests, that has fewer tests than in HEAD, at the
-// path git's rename detection moves it to, those issue names left out.
-func lost(git func(dir string, args ...string) (string, error), clone, issue string, tests []string) error {
-	spec := []string{"diff", "--cached", "--name-status", "-M", "-z", "HEAD", "--"}
+func lost(git func(dir string, args ...string) (string, error), clone, base, issue string, tests []string) error {
+	spec := []string{"diff", "--cached", "--name-status", "-M", "-z", base, "--"}
 	for _, g := range tests {
 		spec = append(spec, ":(glob)"+g)
 	}
 	out, err := git(clone, spec...)
-	count := func(rev string) int {
-		text, _ := git(clone, "show", rev) // a file that is not there has none
-		n := 0
-		for _, m := range testOrSubtest.FindAllStringSubmatch(text, -1) {
-			// ponytail: a name inside a longer one of the issue counts as named; match words if that bites.
-			if name := m[1] + m[2]; name == "" || !strings.Contains(issue, name) {
-				n++
-			}
+	removed := map[string]bool{}
+	for _, m := range removal.FindAllStringSubmatch(issue, -1) {
+		removed[m[1]+m[2]+m[3]] = true
+	}
+	count := func(rev, path string, absent bool) (int, error) {
+		if absent || filepath.Ext(path) != ".go" {
+			return 0, nil
 		}
-		return n
+		text, err := git(clone, "show", rev+":"+path)
+		n, parseErr := countTests(text, removed)
+		return n, errors.Join(err, parseErr)
 	}
 	for f := strings.Split(out, "\x00"); err == nil && len(f) > 1; f = f[2:] {
 		was, is := f[1], f[1]
 		if f[0][0] == 'R' {
 			is, f = f[2], f[1:]
 		}
-		if before, after := count("HEAD:"+was), count(":"+is); after < before {
+		before, beforeErr := count(base, was, f[0] == "A")
+		after, afterErr := count("", is, f[0] == "D")
+		if err = errors.Join(beforeErr, afterErr); err != nil {
+			return fmt.Errorf("count tests in %s: %w", was, err)
+		}
+		if after < before {
 			err = fmt.Errorf("the test file %s loses tests: %d before, %d after", was, before, after)
 		}
 	}
 	return err
+}
+
+var removal = regexp.MustCompile("(?im)(?:^[ \t]*(?:[-*][ \t]+)?|[.!?][ \t]+|[ \t]+and[ \t]+)(?:remove|delete)[ \t]+(?:the[ \t]+)?(?:(?:test|subtest)[ \t]+)?(?:`([^`]+)`|\"([^\"]+)\"|([[:alnum:]_/-]+))[.!]?[ \t]*$")
+
+func countTests(text string, removed map[string]bool) (int, error) {
+	f, err := parser.ParseFile(token.NewFileSet(), "", text, 0)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	var walk func(ast.Node, string)
+	walk = func(root ast.Node, parent string) {
+		ast.Inspect(root, func(node ast.Node) bool {
+			name, body := "", ast.Node(nil)
+			switch v := node.(type) {
+			case *ast.FuncDecl:
+				if v.Recv == nil && v.Body != nil && strings.HasPrefix(v.Name.Name, "Test") {
+					name, body = v.Name.Name, v.Body
+				}
+			case *ast.CallExpr:
+				if sel, ok := v.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "Run" {
+					if receiver, ok := sel.X.(*ast.Ident); ok && receiver.Name == "t" && len(v.Args) == 2 {
+						body = v.Args[1]
+						if literal, ok := v.Args[0].(*ast.BasicLit); ok && literal.Kind == token.STRING {
+							name, _ = strconv.Unquote(literal.Value)
+						}
+					}
+				}
+			}
+			if body == nil {
+				return true
+			}
+			identity := strings.TrimPrefix(parent+"/"+name, "/")
+			if name != "" && (removed[name] || removed[identity]) {
+				return false
+			}
+			n++
+			walk(body, identity)
+			return false
+		})
+	}
+	walk(f, "")
+	return n, nil
 }
 
 // coverageEnv is one fresh GOCOVERDIR for a Checks that declares e2e, of no use when it cannot be made.

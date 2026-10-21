@@ -186,7 +186,7 @@ func (a agent) unit(r *verdict, root, dir, sha, text string, c config.Config, ke
 		r.step("checks", func() (map[string]any, error) {
 			var ev map[string]any
 			var err error
-			p, ev, err = checkUnit(a.dir, dir, checkHead, test, keep.Original.Text, report, c)
+			p, ev, err = checkUnit(a.dir, dir, checkHead, sha, test, keep.Original.Text, report, c)
 			p.base = sha
 			return ev, err
 		})
@@ -244,11 +244,11 @@ func (r *verdict) recordUnit(n int, head, test, resumed string) {
 
 // checkUnit runs configured checks, keeping the tests of changed test files issue does not name, and records
 // the reported test for the ponytail guard.
-func checkUnit(runDir, dir, head, test, issue string, report map[string]any, c config.Config) (proof,
+func checkUnit(runDir, dir, head, base, test, issue string, report map[string]any, c config.Config) (proof,
 	map[string]any, error) {
 	ev := map[string]any{"unit": 1}
 	missing := report == nil && test == ""
-	result, err := checks(dir, runDir, head, test, &issue, missing, c)
+	result, err := checks(dir, runDir, head, base, test, &issue, missing, c)
 	for key, value := range result {
 		ev[key] = value
 	}

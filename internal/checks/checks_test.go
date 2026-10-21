@@ -44,7 +44,7 @@ func TestChecksFailWhenATestFileLosesTests(t *testing.T) {
 			}
 			sha, _ := gitT("rev-parse", "HEAD")
 			write(c.work)
-			_, err := Run(clone, t.TempDir(), sha, "", &c.issue, false,
+			_, err := Run(clone, t.TempDir(), sha, sha, "", &c.issue, false,
 				config.Config{TestPatterns: []string{"**/*_test.go"}}, Tools[string]{
 					Git:     func(_ string, args ...string) (string, error) { return gitT(args...) },
 					Moved:   func(string, string, string) error { return nil },
