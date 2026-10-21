@@ -345,7 +345,8 @@ type event struct {
 	Kept                                             bool
 	Agent                                            *run.AgentSettings
 	Report                                           json.RawMessage
-	Verdicts                                         []struct{ File, Finding, Verdict string } // each finding of the slop detector, kept or not
+	// Each finding of the slop detector, kept or not.
+	Verdicts []struct{ File, Finding, Verdict string }
 }
 
 // apply reads frame f, when it carries an event: a node's start or end, or what happens inside it.
