@@ -29,6 +29,9 @@ type activity struct {
 	id, tool, detail, result, summary, thinking, says string
 }
 
+// logLine is a line of the Log box: what the command check, or else node step, printed.
+type logLine struct{ step, check, text string }
+
 // finding is a row of the Findings box, with a severity, error or warning, a reference and
 // a description.
 type finding struct {
@@ -42,7 +45,7 @@ type Model struct {
 	number                        int
 	rows                          []*row
 	agent                         []*activity
-	output                        []string
+	output                        []logLine
 	findings                      []finding
 	width, height, spin           int
 	historyHeight                 int
@@ -51,14 +54,14 @@ type Model struct {
 	done, detached                bool
 	outcome                       run.Outcome
 	err                           error
-	pipeline, history             pane
-	pipelineFocus                 bool
+	pipeline, history, log        pane
+	focus                         *pane // the box tab moved to, while it shows
 	pipelineBounds, historyBounds bounds
+	logBounds                     bounds
 	unfold                        bool            // t: every tool call of the Agent box on its own line
 	unfoldThink                   bool            // h: every thinking message of the Agent box in full
 	unfoldTitle                   bool            // i: every line of the issue's title
-	open                          map[string]bool // a run of tool calls or thinking, by its key, clicked open or closed
-	toggles                       []string        // what each shown row of the Agent box opens or closes on a click
+	open                          map[string]bool // tool calls, thinking or output, by its key, clicked open or closed
 }
 
 type bounds struct{ x, y, width, height int }
@@ -69,6 +72,7 @@ type pane struct {
 	top, last, h, part int
 	anchor, parent     string
 	held               bool
+	toggles            []string // what each shown row opens or closes on a click
 }
 
 func (p *pane) show(lines []paneLine, h int) []string {
@@ -91,8 +95,10 @@ func (p *pane) show(lines []paneLine, h int) []string {
 		p.part = countKey(lines, p.top, lines[p.top].key)
 	}
 	out := make([]string, 0, min(h, len(lines)-p.top))
+	p.toggles = p.toggles[:0]
 	for _, line := range lines[p.top:min(len(lines), p.top+h)] {
 		out = append(out, line.text)
+		p.toggles = append(p.toggles, line.toggle)
 	}
 	return out
 }
@@ -127,12 +133,28 @@ func (p *pane) scroll(n int) {
 	p.anchor, p.parent, p.part = "", "", 0
 }
 
-// focused is the pane keys scroll: the Agent box's while it shows, unless the user moved to the ATM box.
+// focused is the pane keys scroll: the box tab moved to while it shows, else the Agent box's while it shows, else
+// the ATM box's.
 func (m *Model) focused() *pane {
-	if m.pipelineFocus || !m.agentRuns() {
-		return &m.pipeline
+	if slices.Contains(m.panes(), m.focus) {
+		return m.focus
 	}
-	return &m.history
+	if m.agentRuns() {
+		return &m.history
+	}
+	return &m.pipeline
+}
+
+// panes is the panes of the boxes shown, in the order tab moves through them.
+func (m *Model) panes() []*pane {
+	shown := []*pane{&m.pipeline}
+	if m.agentRuns() {
+		shown = append(shown, &m.history)
+	}
+	if m.agentRuns() && len(m.output) > 0 || !m.agentRuns() && m.running() {
+		shown = append(shown, &m.log)
+	}
+	return shown
 }
 
 // New is the screen of run label before its first frame, every node pending.
@@ -189,7 +211,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// key scrolls the focused box, or, on tab, focuses the other, or, on t, folds or unfolds every tool call,
+// key scrolls the focused box, or, on tab, focuses the next, or, on t, folds or unfolds every tool call,
 // on h, every thinking message and, on i, the issue's title.
 func (m *Model) key(k string) {
 	p := m.focused()
@@ -201,9 +223,8 @@ func (m *Model) key(k string) {
 	case "i":
 		m.unfoldTitle = !m.unfoldTitle
 	case "tab":
-		if m.agentRuns() {
-			m.pipelineFocus = !m.pipelineFocus
-		}
+		shown := m.panes()
+		m.focus = shown[(slices.Index(shown, p)+1)%len(shown)]
 	case "up":
 		p.scroll(-1)
 	case "down":
@@ -219,15 +240,16 @@ func (m *Model) key(k string) {
 	}
 }
 
-// wheel scrolls the box under the pointer: the ATM box, or the Agent box while it shows. A click on a row of
-// folded tool calls or thinking in the Agent box unfolds it, and on its first row once unfolded folds it again.
+// wheel scrolls the box under the pointer: the ATM box, or the Agent or Log box while it shows. A click on a row of
+// folded tool calls, thinking or command output unfolds it, and on its first row once unfolded folds it again.
 func (m *Model) wheel(msg tea.MouseMsg) {
-	var p *pane
-	if m.pipelineBounds.contains(msg.X, msg.Y) {
-		p = &m.pipeline
-	} else if m.historyBounds.contains(msg.X, msg.Y) {
-		p = &m.history
-	} else {
+	p, b := &m.pipeline, m.pipelineBounds
+	switch {
+	case m.historyBounds.contains(msg.X, msg.Y):
+		p, b = &m.history, m.historyBounds
+	case m.logBounds.contains(msg.X, msg.Y):
+		p, b = &m.log, m.logBounds
+	case !m.pipelineBounds.contains(msg.X, msg.Y):
 		return
 	}
 	switch msg.Button {
@@ -236,21 +258,25 @@ func (m *Model) wheel(msg tea.MouseMsg) {
 	case tea.MouseButtonWheelDown:
 		p.scroll(3)
 	case tea.MouseButtonLeft:
-		row := msg.Y - m.historyBounds.y - 1 // under the box's top border
-		if p == &m.history && msg.Action == tea.MouseActionPress && row >= 0 && row < len(m.toggles) &&
-			m.toggles[row] != "" {
+		row := msg.Y - b.y - 1 // under the box's top border
+		if msg.Action == tea.MouseActionPress && row >= 0 && row < len(p.toggles) && p.toggles[row] != "" {
 			if m.open == nil {
 				m.open = map[string]bool{}
 			}
-			m.open[m.toggles[row]] = !m.unfolded(m.toggles[row])
+			m.open[p.toggles[row]] = !m.unfolded(p.toggles[row])
 		}
 	}
 }
 
-// unfolded says whether the run of tool calls or the thinking message by key shows in full.
+// unfolded says whether the run of tool calls, the thinking message or the command output by key shows in full;
+// command output does while its command runs.
 func (m *Model) unfolded(key string) bool {
 	if open, ok := m.open[key]; ok {
 		return open
+	}
+	if command, ok := strings.CutPrefix(key, "log:"); ok {
+		step, check, _ := strings.Cut(command, "/")
+		return m.command(step, check).state == "running"
 	}
 	if strings.HasPrefix(key, "tools:") {
 		return m.unfold
@@ -294,7 +320,7 @@ func (m *Model) apply(f run.Frame) {
 	case e.Thinking != "" || e.Says != "":
 		m.agent = append(m.agent, &activity{thinking: e.Thinking, says: e.Says})
 	case e.Output != nil:
-		m.output = append(m.output[max(0, len(m.output)-199):], ansi.Strip(*e.Output))
+		m.output = append(m.output[max(0, len(m.output)-199):], logLine{e.Step, e.Check, ansi.Strip(*e.Output)})
 	case m.current(e.Step) == nil:
 		return
 	case e.Check != "":
@@ -342,13 +368,13 @@ func (m *Model) current(step string) *row {
 }
 
 func (m *Model) started(step string, at time.Time) {
-	m.state, m.output = "running", nil
+	m.state, m.output, m.log = "running", nil, pane{}
 	r := m.current(step)
 	if step == "agent" && r.state == "pending" {
 		r.label = "Agent · unit 1"
 	}
 	if step == "agent" || step == "ponytail" {
-		m.pipelineFocus = false
+		m.focus = nil
 		m.agent, m.history, m.open = nil, pane{}, nil
 	}
 	r.state, r.start = "running", at
@@ -408,6 +434,20 @@ func (m *Model) failedAt(r *row) string {
 		}
 	}
 	return r.label
+}
+
+// command is the command row under the current row of node step, else that row; nil for none.
+func (m *Model) command(step, check string) *row {
+	r := m.current(step)
+	for _, c := range m.rows[slices.Index(m.rows, r)+1:] {
+		if !c.check {
+			break
+		}
+		if c.label == check {
+			return c
+		}
+	}
+	return r
 }
 
 // checkRow is the command row under the current row of node step, added when new.
