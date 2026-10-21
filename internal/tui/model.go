@@ -80,7 +80,9 @@ type Model struct {
 	unfold                        bool            // t: every tool call of the Agent box on its own line
 	unfoldThink                   bool            // h: every thinking message of the Agent box in full
 	unfoldTitle                   bool            // i: every line of the issue's title
-	open                          map[string]bool // tool calls, thinking, output or report rows, by key, clicked open or closed
+	// tool calls, thinking, output or report rows, by key,
+	// clicked open or closed
+	open                          map[string]bool
 	clone                         string          // the run's clone, where the gate after Delivery is asked
 	gateSteps                     []gateStep      // the gate's steps, once the run delivered and the gate shows a run
 	typing, aborting              bool            // the footer takes a line for the gate, or asks to confirm its abort
