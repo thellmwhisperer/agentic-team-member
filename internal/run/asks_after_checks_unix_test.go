@@ -73,6 +73,62 @@ func TestRunDeliveryFixRechecks(t *testing.T) {
 	}
 }
 
+func TestRunDeliveryRepairResumeKeepsOriginalBase(t *testing.T) {
+	builtATM(t)
+	dir := t.TempDir()
+	delivered, order, lintOK := filepath.Join(dir, "delivered"), filepath.Join(dir, "order"), filepath.Join(dir, "lint-ok")
+	t.Setenv("ATM_TEST_LINT_OK", lintOK)
+	t.Setenv("FAKE_AGENT_ORDER", order)
+	work := deliveryCutWork(t, false, true)
+	t.Setenv("FAKE_AGENT_WORK", "if test -f first-turn; then touch repaired; echo kept > fix-work.txt; else "+
+		work+"; touch first-turn; fi")
+	lint := `test ! -f repaired || test -f "$ATM_TEST_LINT_OK" || { echo repair-check-finding; exit 1; }`
+	delivery := "test -f repaired || { git commit --allow-empty -qm delivery-commit || exit; " +
+		"echo delivery-finding; exit 1; }; cat fix-work.txt a.txt > " + delivered
+	top := gitT(t, repo(t, "local", atmSet(atmSet(atmYAML, "lint", lint), "delivery", delivery)),
+		"rev-parse", "--show-toplevel")
+	base := gitT(t, top, "rev-parse", "HEAD")
+	bin := followUpsServer(t, top)
+	clone, label := question(t, bin, top, "delivery-finding", 4, "run", "--follow", issueFile(t, issue))
+	assertDeliveryCommitBoundary(t, clone, base, e2eReport(t, top, label), true)
+	answerFailedCheck(t, bin, top, label, "fix", 1)
+	assertDeliveryRepairQuestion(t, bin, top, label, delivered, "repair-check-finding", e2eReport(t, top, label))
+	prior := e2eReport(t, top, label)
+	if !prior.Resumable || len(prior.Decisions) != 2 || prior.Decisions[0].Answer != "fix" ||
+		prior.Decisions[1].Answer != "stop" || !strings.Contains(prior.Decisions[0].Finding, "delivery-finding") {
+		t.Fatalf("stopped repair lost its work or decisions: %+v", prior)
+	}
+	assertLatestAttemptSaved(t, top, label, "lint", "")
+	writeFixture(t, lintOK, "ready")
+	evs := followedRun(t, bin, top, 0, "--resume", label)
+	if resumed := resumedLatestAttemptClone(t, evs); resumed == "" || resumed == clone {
+		t.Fatalf("resume did not restore a separate clone: %q", resumed)
+	}
+	assertResumedDeliveryBase(t, top, label, base, prior)
+	if workerCalls(t, order) != 2 || reader(t, dir)("delivered") != "kept\nfixed" ||
+		reader(t, clone)("fix-work.txt") != "kept" || reader(t, clone)("a.txt") != "fixed\nextra\nmore" {
+		t.Fatal("resume lost repair work, reran the worker, or skipped the Ponytail cut")
+	}
+}
+
+func assertResumedDeliveryBase(t *testing.T, top, label, base string, prior *verdict) {
+	t.Helper()
+	rep := e2eReport(t, top, lastRun(t, top, "passed"))
+	if len(rep.Units) != 1 || len(rep.Reproofs) != 1 || rep.Units[0].ResumedFrom != label {
+		t.Fatalf("resume lost its unit, provenance or cut reproof: %+v", rep)
+	}
+	for _, unit := range append(rep.Units, rep.Reproofs...) {
+		if unit.Base != base || unit.Result != "passed" {
+			t.Fatalf("resumed unit or reproof changed the original base: %+v, want %s", unit, base)
+		}
+	}
+	old := e2eReport(t, top, label)
+	if !slices.Equal(prior.Decisions, old.Decisions) || !slices.Equal(prior.Commands, old.Commands) ||
+		!slices.Equal(prior.node("delivery").Rows, old.node("delivery").Rows) {
+		t.Fatalf("resume rewrote the stopped run: before %+v; after %+v", prior, old)
+	}
+}
+
 func runDeliveryFixRecheck(t *testing.T, first, second bool, repair, finding string, commits bool) {
 	delivered, order := filepath.Join(t.TempDir(), "delivered"), filepath.Join(t.TempDir(), "order")
 	metadata := t.TempDir()

@@ -163,7 +163,7 @@ type proof struct {
 // agent. A failure of the checks or a step after asks the launcher; after a fix turn the checks run again.
 func (a agent) unit(r *verdict, root, dir, sha, text string, c config.Config, keep resumePoint,
 	from *resumePoint, after ...func(proof)) {
-	head := sha
+	checkHead := sha
 	var report map[string]any
 	test, resumed := "", ""
 	r.step("agent", func() (map[string]any, error) {
@@ -171,7 +171,7 @@ func (a agent) unit(r *verdict, root, dir, sha, text string, c config.Config, ke
 		var ev map[string]any
 		if from != nil {
 			resumed = from.run
-			head, ev, err = a.resumeUnit(r, root, dir, *from, &keep)
+			checkHead, ev, err = a.resumeUnit(r, root, dir, *from, &keep)
 		} else {
 			ev, err = a.runUnit(dir, text, &keep)
 		}
@@ -181,14 +181,13 @@ func (a agent) unit(r *verdict, root, dir, sha, text string, c config.Config, ke
 		test, _ = report["test_file"].(string)
 		return ev, err
 	})
-	checkHead := head
 	var p proof
 	steps := append([]func(proof){func(proof) {
 		r.step("checks", func() (map[string]any, error) {
 			var ev map[string]any
 			var err error
 			p, ev, err = checkUnit(a.dir, dir, checkHead, test, report, c)
-			p.base = head
+			p.base = sha
 			return ev, err
 		})
 	}}, after...)
@@ -219,7 +218,7 @@ func (a agent) unit(r *verdict, root, dir, sha, text string, c config.Config, ke
 		}
 		if n == 0 {
 			r.Units = nil // the checks of the last fix
-			r.recordUnit(1, head, test, resumed)
+			r.recordUnit(1, sha, test, resumed)
 		}
 		if answer == "stop" || r.err != nil {
 			break
