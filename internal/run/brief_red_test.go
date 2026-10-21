@@ -1,10 +1,7 @@
 package run
 
 import (
-	"bytes"
 	"io"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -38,16 +35,8 @@ func TestBriefRedRequiresExecution(t *testing.T) {
 			"2. Build it. The test passes.\n",
 	} {
 		t.Run(typ, func(t *testing.T) {
-			root := repo(t, "https://example.com/owner/repo.git", briefYAML)
-			if err := Run("t", []string{issueFile(t, "# Retry\nRetry once.\n\nType: "+typ+"\n")}, &bytes.Buffer{},
-				io.Discard); err != nil {
-				t.Fatal(err)
-			}
-			b, err := os.ReadFile(filepath.Join(root, ".atm", "runs", "t", "brief.md"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			_, acceptance, _ := strings.Cut(strings.ReplaceAll(string(b), "\r\n", "\n"), "## ACCEPTANCE\n")
+			_, acceptance, _ := strings.Cut(runBrief(t, "# Retry\nRetry once.\n\nType: "+typ+"\n", io.Discard),
+				"## ACCEPTANCE\n")
 			acceptance, _, _ = strings.Cut(acceptance, "\n## VERIFY\n")
 			if want := "1. Implement the issue and cover the changed behaviour with tests.\n" +
 				"2. Then every command in VERIFY passes.\n"; acceptance != want {
