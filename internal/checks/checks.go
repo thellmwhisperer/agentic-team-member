@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 
 	"github.com/thellmwhisperer/agentic-team-member/internal/config"
 )
@@ -22,8 +24,9 @@ type Tools[C any] struct {
 	Command func(name, line string, env ...string) (C, error)
 }
 
-// Run runs the configured commands on the completed work, preserving clone and test safeguards.
-func Run[C any](clone, runDir, sha, test string, missingReport bool, c config.Config,
+// Run runs the configured commands on the completed work, preserving clone and test safeguards. issue, when not
+// nil, is the issue's text: a changed test file must keep its tests but those it names (decision 8087).
+func Run[C any](clone, runDir, sha, test string, issue *string, missingReport bool, c config.Config,
 	t Tools[C]) (result map[string]any, err error) {
 	result = map[string]any{}
 	cover, err := coverageEnv(runDir, c.E2E)
@@ -56,7 +59,7 @@ func Run[C any](clone, runDir, sha, test string, missingReport bool, c config.Co
 	if err != nil {
 		return result, err
 	}
-	if err = checkChanges(t.Git, clone, missingReport); err == nil && test != "" {
+	if err = checkChanges(t.Git, clone, issue, c.TestPatterns, missingReport); err == nil && test != "" {
 		_, err = t.ReadTest(clone, test)
 	}
 	if err != nil {
@@ -71,8 +74,10 @@ func Run[C any](clone, runDir, sha, test string, missingReport bool, c config.Co
 	return result, t.Moved(clone, sha, "the commands")
 }
 
-// checkChanges rejects empty work when there is no report.
-func checkChanges(git func(dir string, args ...string) (string, error), clone string, missingReport bool) error {
+// checkChanges rejects empty work when there is no report and, when issue is not nil, a changed test file that
+// loses tests.
+func checkChanges(git func(dir string, args ...string) (string, error), clone string, issue *string,
+	tests []string, missingReport bool) error {
 	_, err := git(clone, "add", "-A")
 	if err == nil {
 		var out string
@@ -80,8 +85,45 @@ func checkChanges(git func(dir string, args ...string) (string, error), clone st
 		if err == nil && missingReport && out == "" {
 			err = errors.New("no change to prove")
 		}
+		if err == nil && issue != nil && len(tests) > 0 {
+			err = lost(git, clone, *issue, tests)
+		}
 		_, resetErr := git(clone, "reset", "-q")
 		err = errors.Join(err, resetErr)
+	}
+	return err
+}
+
+// testOrSubtest is a test function or a t.Run subtest, its name the first or second group when written out.
+var testOrSubtest = regexp.MustCompile(`(?m)^func (Test\w*)|t\.Run\((?:"([^"]*)")?`)
+
+// lost is an error naming the first staged test file, matched by tests, that has fewer tests than in HEAD, at the
+// path git's rename detection moves it to, those issue names left out.
+func lost(git func(dir string, args ...string) (string, error), clone, issue string, tests []string) error {
+	spec := []string{"diff", "--cached", "--name-status", "-M", "-z", "HEAD", "--"}
+	for _, g := range tests {
+		spec = append(spec, ":(glob)"+g)
+	}
+	out, err := git(clone, spec...)
+	count := func(rev string) int {
+		text, _ := git(clone, "show", rev) // a file that is not there has none
+		n := 0
+		for _, m := range testOrSubtest.FindAllStringSubmatch(text, -1) {
+			// ponytail: a name inside a longer one of the issue counts as named; match words if that bites.
+			if name := m[1] + m[2]; name == "" || !strings.Contains(issue, name) {
+				n++
+			}
+		}
+		return n
+	}
+	for f := strings.Split(out, "\x00"); err == nil && len(f) > 1; f = f[2:] {
+		was, is := f[1], f[1]
+		if f[0][0] == 'R' {
+			is, f = f[2], f[1:]
+		}
+		if before, after := count("HEAD:"+was), count(":"+is); after < before {
+			err = fmt.Errorf("the test file %s loses tests: %d before, %d after", was, before, after)
+		}
 	}
 	return err
 }

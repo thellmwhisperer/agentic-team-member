@@ -45,7 +45,7 @@ func TestChecksRestoresItsStash(t *testing.T) {
 	c := checksStashConfig(t, root)
 	done := make(chan error, 1)
 	go func() {
-		_, err := checks(dir, runDir, sha, "", false, c)
+		_, err := checks(dir, runDir, sha, "", nil, false, c)
 		done <- err
 	}()
 	defer func() {
@@ -100,7 +100,7 @@ func TestMissingReportKeepsAvailableProofs(t *testing.T) {
 			if tc.suite != "" {
 				c.Test = tc.suite
 			}
-			_, err := checks(dir, checksStashRunDir(t, root), sha, "", true, c)
+			_, err := checks(dir, checksStashRunDir(t, root), sha, "", nil, true, c)
 			if tc.want == "" && err != nil || tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)) {
 				t.Fatalf("missing report bypassed %s: %v", tc.name, err)
 			}

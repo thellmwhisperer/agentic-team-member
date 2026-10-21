@@ -20,10 +20,12 @@ import (
 	"github.com/thellmwhisperer/agentic-team-member/internal/config"
 )
 
-// checks runs Checks on the completed work in clone with what it shares with the run's other steps.
-func checks(clone, runDir, sha, test string, missingReport bool, c config.Config) (map[string]any, error) {
+// checks runs Checks on the completed work in clone with what it shares with the run's other steps, issue as
+// chk.Run takes it.
+func checks(clone, runDir, sha, test string, issue *string, missingReport bool, c config.Config) (map[string]any,
+	error) {
 	live := liveIn(clone)
-	return chk.Run(clone, runDir, sha, test, missingReport, c, chk.Tools[cmdResult]{
+	return chk.Run(clone, runDir, sha, test, issue, missingReport, c, chk.Tools[cmdResult]{
 		Git: git, Moved: moved, Unmade: unmade, ReadTest: readTest,
 		Command: func(name, line string, env ...string) (cmdResult, error) {
 			var tail string

@@ -221,7 +221,7 @@ func reprove(runDir, clone, base string, history []proof, c config.Config) (stri
 	last := history[len(history)-1]
 	var result map[string]any
 	var err error
-	s := timed(func() { result, err = checks(clone, runDir, base, last.test, last.missing, c) })
+	s := timed(func() { result, err = checks(clone, runDir, base, last.test, nil, last.missing, c) })
 	ran[len(ran)-1].Result, ran[len(ran)-1].span = outcome(err), s
 	cmds, _ := result["commands"].([]cmdResult)
 	if err != nil {
