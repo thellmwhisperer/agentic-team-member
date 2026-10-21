@@ -476,8 +476,12 @@ until it is unfolded to its full text. A running group has a spinner and
 its active tool's detail; a failed tool keeps its own row, including the first
 line of its error when available. Every row a click folds or unfolds starts
 with `▸` folded and `▾` unfolded, the arrow alone underlined like a link.
-The box omits empty thinking, user messages, skill text, full tool output
-and the JSON report at the end of the agent's final message. Its `N tools`
+The JSON report a message ends with is never shown raw: it becomes an
+`Informe` row, unfolded, with its summary's Markdown, tables in aligned
+columns, and four folded rows, `Ficheros cambiados (n)`,
+`Comandos ejecutados (n)`, `Test <file>` and `Hallazgos (n)`; unfolded,
+each item is a row, a finding with its severity first. The box omits empty
+thinking, user messages, skill text and full tool output. Its `N tools`
 note counts tool calls only.
 
 In both `atm run` and `atm attach`, press `t` to unfold all tool groups and
