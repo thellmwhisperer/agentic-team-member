@@ -31,7 +31,9 @@ func (w *screen) ask(r *verdict) string {
 	d := &r.Decisions[len(r.Decisions)-1]
 	r.emit("decision", map[string]any{"state": "waiting", "run": w.r.Run,
 		"finding": d.Finding, "choices": "approve, fix, stop", "resumable": r.Resumable,
-		"message": map[string]string{"checks": "Check", "agent": "Agent", "ponytail": "Ponytail", "delivery": "Delivery"}[r.FailedNode] + " failed: " + d.Finding +
+		"message": map[string]string{
+			"checks": "Check", "agent": "Agent", "ponytail": "Ponytail", "delivery": "Delivery",
+		}[r.FailedNode] + " failed: " + d.Finding +
 			"\nAnswer: atm answer " + w.r.Run + " approve|fix|stop"})
 	reply := <-ch
 	d.Answer = reply.answer
