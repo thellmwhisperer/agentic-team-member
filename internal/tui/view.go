@@ -78,6 +78,7 @@ func (m *Model) View() string {
 		if rightBox := m.right(width, rightHeight); rightBox != "" {
 			m.historyBounds.y = lipgloss.Height(atmBox)
 			m.historyBounds.height = m.historyHeight
+			m.logBounds.y, m.logBounds.width = m.historyBounds.y+lipgloss.Height(rightBox)-m.logBounds.height, width
 			panels = append(panels, rightBox)
 		}
 		return strings.Join(panels, "\n") + m.footer()
@@ -91,6 +92,7 @@ func (m *Model) View() string {
 	rightBox := m.right(rightWidth, available)
 	m.pipelineBounds.height = lipgloss.Height(leftBox)
 	m.historyBounds.height = m.historyHeight
+	m.logBounds.x, m.logBounds.y, m.logBounds.width = left+gap, lipgloss.Height(rightBox)-m.logBounds.height, rightWidth
 	return columns(leftBox, rightBox, left) + m.footer()
 }
 
@@ -277,13 +279,13 @@ func (m *Model) sidebar() bool {
 
 // right is, at width in height rows, the Agent box while an agent runs, else the Findings box when there are
 // findings, then the Log box while a node runs; "" for none. The Agent box takes every row the Log box, shown
-// with the agent's output, at most a third of them, leaves.
+// with the agent's output, at most a third of them, leaves. The Log box is the last box.
 func (m *Model) right(width, height int) string {
+	m.logBounds = bounds{}
 	top := ""
 	if m.agentRuns() {
 		if len(m.output) > 0 {
-			logLines := min(len(m.output), max(1, min(height/3-boxBorderRows, height-minimumBoxRows-boxBorderRows)))
-			logBox := m.logBox(width, logLines)
+			logBox := m.logBox(width, max(1, min(height/3-boxBorderRows, height-minimumBoxRows-boxBorderRows)))
 			top = m.agentBox(width, max(1, height-lipgloss.Height(logBox)-boxBorderRows))
 			return strings.Join([]string{top, logBox}, "\n")
 		}
@@ -297,8 +299,7 @@ func (m *Model) right(width, height int) string {
 		boxes = append(boxes, top)
 	}
 	if m.running() {
-		logLines := min(len(m.logLines()), max(1, height-lipgloss.Height(top)-boxBorderRows))
-		boxes = append(boxes, m.logBox(width, logLines))
+		boxes = append(boxes, m.logBox(width, max(1, height-lipgloss.Height(top)-boxBorderRows)))
 	}
 	return strings.Join(boxes, "\n")
 }
@@ -540,7 +541,7 @@ func (m *Model) agentBox(width, lines int) string {
 		// Thinking folds like a run of tool calls: one row, its first line, until clicked or h opens it.
 		key := fmt.Sprintf("activity:%p", a)
 		if !m.unfolded(key) {
-			out = append(out, paneLine{key: key, toggle: key, text: fold(false) + " ∴ " + oneLine(a.thinking)})
+			out = append(out, paneLine{key: key, toggle: key, text: fold(false) + " ∴ " + firstMarkdown(a.thinking)})
 			continue
 		}
 		for i, text := range agentTextRows(fold(true)+" ∴ ", a.thinking, width-2) {
@@ -558,10 +559,7 @@ func (m *Model) agentBox(width, lines int) string {
 	shown := m.history.show(out, lines)
 	pad := max(0, lines-len(shown))
 	shown = append(make([]string, pad), shown...)
-	m.toggles = make([]string, pad, lines)
-	for _, l := range out[m.history.top:min(len(out), m.history.top+lines)] {
-		m.toggles = append(m.toggles, l.toggle)
-	}
+	m.history.toggles = append(make([]string, pad), m.history.toggles...)
 	title := "Agent" + m.agentLabel
 	if m.focused() == &m.history {
 		title += "*"
@@ -651,6 +649,12 @@ func oneLine(s string) string {
 	return displayText(ansi.Strip(line))
 }
 
+// firstMarkdown is the first line of s, its Markdown rendered.
+func firstMarkdown(s string) string {
+	text, _, _ := markdown(oneLine(s))
+	return text
+}
+
 // findingsBox is the findings shown on the screen: a severity icon, a reference, the description below.
 func (m *Model) findingsBox(width int) string {
 	counts := map[string]int{}
@@ -675,22 +679,47 @@ func (m *Model) findingsBox(width int) string {
 	return box(title, strings.Join(out, "\n"), width, dim)
 }
 
-// logLines is the running node's output, or, until it has some, its name and how long it has run.
-func (m *Model) logLines() []string {
-	if len(m.output) > 0 {
-		return m.output
+// logRows is the running node's output: for each command, a header row with its row in the ATM box, then, unfolded,
+// its lines in Markdown as the Agent box has them; until it has some, the node's name and how long it has run.
+func (m *Model) logRows(width int) []paneLine {
+	if len(m.output) == 0 {
+		r := m.runningRow()
+		return []paneLine{{key: "starting", text: paint(dim, r.label+" · "+run.Human(m.now.Sub(r.start)))}}
 	}
-	r := m.runningRow()
-	return []string{r.label + " · " + run.Human(m.now.Sub(r.start))}
+	var out []paneLine
+	for i := 0; i < len(m.output); {
+		o, lines := m.output[i], []string(nil)
+		for ; i < len(m.output) && m.output[i].step == o.step && m.output[i].check == o.check; i++ {
+			lines = append(lines, m.output[i].text)
+		}
+		key := "log:" + o.step + "/" + o.check
+		if r := m.command(o.step, o.check); r != nil {
+			header, open := *r, m.unfolded(key)
+			header.check = false
+			if first := firstMarkdown(lines[0]); !open && first != "" {
+				header.label += " · " + first
+			}
+			out = append(out, paneLine{key: key, toggle: key, text: fold(open) + " " + m.row(&header, width-6)})
+			if !open {
+				continue
+			}
+		}
+		for _, l := range agentTextRows("  ", strings.Join(lines, "\n"), width) {
+			out = append(out, paneLine{key: key + ":lines", parent: key, text: l})
+		}
+	}
+	return out
 }
 
-// logBox is the last lines of logLines, dim.
+// logBox is the Log box, at most lines rows of logRows from its reading position.
 func (m *Model) logBox(width, lines int) string {
-	out := m.logLines()
-	out = out[max(0, len(out)-lines):]
-	styled := make([]string, len(out))
-	for i, l := range out {
-		styled[i] = paint(dim, l)
+	rows := m.logRows(width)
+	title := "Log"
+	if m.focused() == &m.log {
+		title += "*"
 	}
-	return box(bold(cyan, "Log"), strings.Join(styled, "\n"), width, dim)
+	shown := m.log.show(rows, min(len(rows), lines))
+	result := box(bold(cyan, title), strings.Join(shown, "\n"), width, m.border(&m.log))
+	m.logBounds.height = lipgloss.Height(result)
+	return result
 }
