@@ -47,11 +47,7 @@ func (a agent) ponytail(root, clone, sha string, proofs []proof, i Issue, c conf
 	if err != nil {
 		return nil, err
 	}
-	var found []finding
-	ev, err := a.run(clone, "ponytail", "ponytail-review", text, func(r map[string]any) (err error) {
-		found, err = findings(r, files)
-		return err
-	})
+	ev, reported, err := a.cutter(clone, text, files)
 	if err != nil {
 		return ev, err
 	}
@@ -62,7 +58,9 @@ func (a agent) ponytail(root, clone, sha string, proofs []proof, i Issue, c conf
 	if err != nil {
 		return ev, err
 	}
-	why, lines, found, rejectedFiles, err := judge(clone, sha, before, after, all, files, found, c.TestPatterns)
+	// judge and hold drop from the findings in place
+	why, lines, found, rejectedFiles, err := judge(clone, sha, before, after, all, files, slices.Clone(reported),
+		c.TestPatterns)
 	ev["rejected_files"] = rejectedFiles
 	if err != nil {
 		return ev, err
@@ -73,6 +71,7 @@ func (a agent) ponytail(root, clone, sha string, proofs []proof, i Issue, c conf
 			return ev, err
 		}
 	}
+	verdicts := judged(clone, reported, found, rejectedFiles, why)
 	if why == "" {
 		if why, found, err = hold(ev, a.dir, clone, sha, base, before, all, files, found, proofs, c); err != nil {
 			return ev, err
@@ -81,7 +80,7 @@ func (a agent) ponytail(root, clone, sha string, proofs []proof, i Issue, c conf
 	if err := moved(clone, base, "the commands"); err != nil {
 		return ev, err
 	}
-	ev["kept"] = why == ""
+	ev["kept"], ev["verdicts"] = why == "", settled(verdicts, reported, found, why == "")
 	if why != "" {
 		ev["reason"] = why
 		ev["rejected_files"], err = restoreCut(clone, all, why, ev["rejected_files"].([]rejectedFile))
@@ -89,6 +88,73 @@ func (a agent) ponytail(root, clone, sha string, proofs []proof, i Issue, c conf
 	}
 	ev["commits"], ev["tombstones"], err = commit(root, clone, before, i, found)
 	return ev, err
+}
+
+// ruling is what became of a finding the ponytail agent reported: kept, rejected and why, or discarded.
+type ruling struct{ File, Finding, Verdict string }
+
+// judged is the verdict on each of reported once judge kept those of kept, rejecting rejectedFiles, and why rejects
+// the whole cut; "" while the checks decide. It shows the judgement as a row of the screen of the run in clone.
+func judged(clone string, reported, kept []finding, rejectedFiles []rejectedFile, why string) []ruling {
+	verdicts, rejected := make([]ruling, len(reported)), []string{}
+	for n, f := range reported {
+		verdicts[n] = ruling{File: f.File, Finding: f.Finding}
+		reason := why
+		if reason == "" && !slices.Contains(kept, f) {
+			reason = sentenceFault(f)
+			for _, r := range rejectedFiles {
+				if r.Path == f.File && reason == "" {
+					reason = r.Reason
+				}
+			}
+		}
+		if reason != "" {
+			verdicts[n].Verdict = "rejected: " + gist(reason)
+			rejected = append(rejected, verdicts[n].Verdict)
+		}
+	}
+	note := fmt.Sprintf("%d kept", len(reported)-len(rejected))
+	if len(rejected) > 0 {
+		note += fmt.Sprintf(" · %d %s", len(rejected), rejected[0])
+	}
+	liveIn(clone)(map[string]any{"check": "judged", "state": "passed", "note": note})
+	return verdicts
+}
+
+// settled is verdicts once the checks decided on the cut of reported, kept when it holds: a finding still
+// undecided is kept when found keeps it, else discarded.
+func settled(verdicts []ruling, reported, found []finding, kept bool) []ruling {
+	for n, f := range reported {
+		if verdicts[n].Verdict == "" {
+			verdicts[n].Verdict = map[bool]string{true: "kept", false: "discarded: checks failed"}[kept &&
+				slices.Contains(found, f)]
+		}
+	}
+	return verdicts
+}
+
+// gist is a rule's reason for the screen: "adds code" for a file the cut adds, else the reason less "the cut ".
+func gist(why string) string {
+	if strings.HasPrefix(why, "the cut adds ") {
+		return "adds code"
+	}
+	return strings.TrimPrefix(why, "the cut ")
+}
+
+// cutter is the ponytail agent's run in clone on brief text and the findings it reports on files, each phase a row
+// of the run's screen.
+func (a agent) cutter(clone, text string, files []string) (ev map[string]any, found []finding, err error) {
+	live := liveIn(clone)
+	if _, err = row(live, "agent reading the diff", func() (err error) {
+		ev, err = a.run(clone, "ponytail", "ponytail-review", text, func(r map[string]any) (err error) {
+			found, err = findings(r, files)
+			return err
+		})
+		return err
+	}); err == nil {
+		live(map[string]any{"check": fmt.Sprintf("%d findings", len(found)), "state": "passed"})
+	}
+	return ev, found, err
 }
 
 // restoreCut puts the remaining cut back and records why, preserving each file's earlier rejection reason.
@@ -141,11 +207,21 @@ func hold(ev map[string]any, runDir, clone, sha, base, before, all string, files
 func undo(runDir, clone, base, all string, proofs []proof, c config.Config) (why string, ran []unitResult,
 	cmds []cmdResult, undone map[string]string, err error) {
 	undone = map[string]string{}
+	live, runs, took := liveIn(clone), 0, span{}
+	check := func() (why string, ran []unitResult, cmds []cmdResult, err error) {
+		runs++
+		live(map[string]any{"check": "checks", "state": "started", "note": fmt.Sprintf("run %d", runs)})
+		took = timed(func() { why, ran, cmds, err = reprove(runDir, clone, base, proofs, c) })
+		live(map[string]any{"check": "checks", "state": map[bool]string{true: "passed", false: "failed"}[why == ""],
+			"duration_ms": took.DurationMS,
+			"note":        fmt.Sprintf("run %d %s", runs, map[bool]string{true: "ok", false: "failed"}[why == ""])})
+		return why, ran, cmds, err
+	}
 	cut, err := whole(clone)
 	names, e := every(clone, "diff", "--name-only", "--no-renames", "-z", all, cut)
 	left := strings.Split(strings.TrimRight(names, "\x00"), "\x00")
 	for err = errors.Join(err, e); err == nil; {
-		if why, ran, cmds, err = reprove(runDir, clone, base, proofs, c); err != nil || why == "" {
+		if why, ran, cmds, err = check(); err != nil || why == "" {
 			return why, ran, cmds, undone, err
 		}
 		named := slices.DeleteFunc(slices.Clone(left), func(p string) bool {
@@ -155,8 +231,11 @@ func undo(runDir, clone, base, all string, proofs []proof, c config.Config) (why
 		if len(named) == 0 {
 			break
 		}
+		live(map[string]any{"check": "checks", "state": "failed", "duration_ms": took.DurationMS,
+			"note": fmt.Sprintf("run %d failed: %s", runs, strings.Join(named, ", "))})
 		for _, p := range named {
 			undone[p] = why
+			live(map[string]any{"check": "put back " + p, "state": "passed"})
 		}
 		left = slices.DeleteFunc(left, func(p string) bool { return undone[p] != "" })
 		if err = checkout(clone, all, named); err != nil || len(left) == 0 {
@@ -166,23 +245,24 @@ func undo(runDir, clone, base, all string, proofs []proof, c config.Config) (why
 	if len(left) == 1 || err != nil { // undoing it leaves no cut
 		return why, ran, cmds, undone, err
 	}
-	p, r, cm, err := alone(runDir, clone, base, all, cut, left, proofs, c)
+	p, r, cm, err := alone(clone, all, cut, left, check)
 	if p == "" || err != nil {
 		return why, ran, cmds, undone, err
 	}
 	undone[p] = why
+	live(map[string]any{"check": "put back " + p, "state": "passed"})
 	return "", r, cm, undone, nil
 }
 
 // alone puts back in clone each of left, the cut files, from tree all, once and on its own, and is the first
-// whose removal passes reprove, with that check result and its commands, "" when none does. Each file that does not
+// whose removal passes check, with that check result and its commands, "" when none does. Each file that does not
 // comes back from tree cut.
-func alone(runDir, clone, base, all, cut string, left []string, proofs []proof, c config.Config) (p string,
+func alone(clone, all, cut string, left []string, check func() (string, []unitResult, []cmdResult, error)) (p string,
 	ran []unitResult, cmds []cmdResult, err error) {
 	for i := 0; err == nil && i < len(left); i++ {
 		why := ""
 		if err = checkout(clone, all, left[i:i+1]); err == nil {
-			why, ran, cmds, err = reprove(runDir, clone, base, proofs, c)
+			why, ran, cmds, err = check()
 		}
 		if err != nil || why == "" {
 			return left[i], ran, cmds, err
@@ -454,8 +534,12 @@ func added(clone, sha, tree string) (int, error) {
 
 // commit commits in clone, on HEAD, the run's unit, tree unit, then the cut, the
 // working tree with a tombstone per finding, under the git identity of the repository at root, and returns
-// both commits and the tombstones.
+// both commits and the tombstones, and shows the commit as a row of the run's screen.
 func commit(root, clone, unit string, i Issue, found []finding) (commits, tombs []string, err error) {
+	defer func() {
+		liveIn(clone)(map[string]any{"check": "commit", "state": outcome(err),
+			"note": fmt.Sprintf("ponytail: %d cuts", len(found))})
+	}()
 	id, err := identity(root)
 	if err != nil {
 		return nil, nil, err
