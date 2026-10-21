@@ -47,30 +47,55 @@ func TestRunAsksAfterChecks(t *testing.T) {
 
 func TestRunDeliveryFixRechecks(t *testing.T) {
 	builtATM(t)
-	for _, cuts := range []bool{false, true} {
+	for _, cuts := range []struct {
+		name          string
+		first, second bool
+	}{
+		{"without cuts", false, false},
+		{"with cuts", true, true},
+		{"first cut only", true, false},
+		{"second cut only", false, true},
+	} {
 		for _, tc := range []struct{ name, repair, finding string }{
 			{"passes", "touch repaired", ""},
 			{"check fails", "touch repaired broken-check", "repair-check-finding"},
 			{"agent commits", "touch repaired; git add -A; git commit -qm agent-commit", "the agent made commits"},
 		} {
-			t.Run(map[bool]string{false: "without cuts/", true: "with cuts/"}[cuts]+tc.name, func(t *testing.T) {
+			t.Run(cuts.name+"/"+tc.name, func(t *testing.T) {
 				delivered, order := filepath.Join(t.TempDir(), "delivered"), filepath.Join(t.TempDir(), "order")
+				metadata := t.TempDir()
+				t.Setenv("ATM_TEST_METADATA", metadata)
 				cfg := atmSet(atmSet(atmYAML, "lint",
 					"test ! -f broken-check || { echo repair-check-finding; exit 1; }"), "delivery",
-					"test -f repaired || { echo delivery-finding; exit 1; }; cat a.txt > "+delivered)
+					`test -f repaired && attempt=second || attempt=first; `+
+						`for field in ATM_PONYTAIL ATM_INTENT ATM_ISSUE_TEXT; do `+
+						`printenv "$field" > "$ATM_TEST_METADATA/$attempt-$field"; done; `+
+						`git ls-files .slop/tombstones > "$ATM_TEST_METADATA/$attempt-tombs"; `+
+						"test -f repaired || { echo delivery-finding; exit 1; }; cat a.txt > "+delivered)
 				top := gitT(t, repo(t, "local", cfg), "rev-parse", "--show-toplevel")
 				base := gitT(t, top, "rev-parse", "HEAD")
 				work := fixWork
-				if cuts {
+				if cuts.first || cuts.second {
 					work = "printf 'fixed\\nextra\\nmore\\n' > a.txt" + fixTest
-					t.Setenv("FAKE_PONYTAIL_WORK", "if test -f repaired; then echo fixed > a.txt; "+
-						"else printf 'fixed\\nextra\\n' > a.txt; fi")
+					first, second := ":", ":"
+					if cuts.first {
+						first = "printf 'fixed\\nextra\\n' > a.txt"
+					}
+					if cuts.second {
+						second = "echo fixed > a.txt"
+					}
+					t.Setenv("FAKE_PONYTAIL_WORK", "if test -f repaired; then "+second+"; else "+first+"; fi")
 					t.Setenv("FAKE_PONYTAIL_REPORT", cut)
 				}
 				t.Setenv("FAKE_AGENT_ORDER", order)
-				t.Setenv("FAKE_AGENT_WORK", "if test -f first-turn; then "+tc.repair+"; else "+work+"; touch first-turn; fi")
+				repair := tc.repair
+				if cuts.first && cuts.second {
+					repair = "sleep 1; " + repair
+				}
+				t.Setenv("FAKE_AGENT_WORK", "if test -f first-turn; then "+repair+"; else "+work+"; touch first-turn; fi")
 				bin := followUpsServer(t, top)
 				clone, label := question(t, bin, top, "delivery-finding", 4, "run", "--follow", issueFile(t, issue))
+				assertDeliveryCutMetadata(t, metadata, "first", map[bool]int{true: 1}[cuts.first])
 				before := e2eReport(t, top, label)
 				if before.HeadSHA == base || before.HeadSHA != gitT(t, clone, "rev-parse", "HEAD") {
 					t.Fatalf("delivery did not record ATM's commits: %+v", before)
@@ -101,13 +126,46 @@ func TestRunDeliveryFixRechecks(t *testing.T) {
 				if calls, err := os.ReadFile(order); err != nil || string(calls) != "worker\nponytail\nworker\nponytail\n" {
 					t.Fatalf("repair did not rerun ponytail after its single fix turn: %q, %v", calls, err)
 				}
-				if data, err := os.ReadFile(delivered); err != nil || string(data) != "fixed\n" {
+				assertDeliveryCutMetadata(t, metadata, "second", map[bool]int{true: 1}[cuts.first]+map[bool]int{true: 1}[cuts.second])
+				want := "fixed\n"
+				if cuts.first && !cuts.second {
+					want += "extra\n"
+				}
+				if data, err := os.ReadFile(delivered); err != nil || string(data) != want {
 					t.Fatalf("delivery lost the repair or the second cut of committed work: %q, %v", data, err)
 				}
-				if cuts && (len(rep.Reproofs) != 1 || rep.Reproofs[0].Base != base || rep.Reproofs[0].Result != "passed") {
+				if cuts.second && (len(rep.Reproofs) != 1 || rep.Reproofs[0].Base != base || rep.Reproofs[0].Result != "passed") {
 					t.Fatalf("second cut lost its proof against the original base: %+v", rep.Reproofs)
 				}
 			})
+		}
+	}
+}
+
+func assertDeliveryCutMetadata(t *testing.T, dir, attempt string, cuts int) {
+	t.Helper()
+	read := reader(t, dir)
+	ponytail, intent, issue := read(attempt+"-ATM_PONYTAIL"), read(attempt+"-ATM_INTENT"), read(attempt+"-ATM_ISSUE_TEXT")
+	want := strings.TrimSpace(strings.Repeat("- a.txt: dropped two lines (speculative_feature)\n", cuts))
+	if ponytail != want {
+		t.Fatalf("%s delivery findings = %q, want %q", attempt, ponytail, want)
+	}
+	tombs := strings.Fields(read(attempt + "-tombs"))
+	if len(tombs) != cuts {
+		t.Fatalf("%s delivery has %d tombstones, want %d: %v", attempt, len(tombs), cuts, tombs)
+	}
+	if cuts == 0 {
+		if intent != issue {
+			t.Fatalf("%s delivery without cuts changed the issue: %q", attempt, intent)
+		}
+		return
+	}
+	if !strings.HasPrefix(intent, issue+"\n\n## Files ATM adds\n") {
+		t.Fatalf("%s delivery lost its issue or ATM file section: %q", attempt, intent)
+	}
+	for _, tomb := range tombs {
+		if strings.Count(intent, "`"+tomb+"`") != 1 {
+			t.Fatalf("%s delivery intent must name tombstone %s exactly once: %q", attempt, tomb, intent)
 		}
 	}
 }
