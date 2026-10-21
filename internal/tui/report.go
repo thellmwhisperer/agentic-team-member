@@ -23,7 +23,6 @@ func (m *Model) restoreReport(path string, outcome run.Outcome) {
 	for _, r := range m.rows {
 		r.state = "unknown"
 	}
-	m.current("agent").label = "Agent"
 	if path == "" {
 		return
 	}

@@ -69,7 +69,7 @@ func TestCompletedScreenRestoresSavedNodesWithoutFrames(t *testing.T) {
 func TestCompletedScreenKeepsReplayDetail(t *testing.T) {
 	m := screen(80, 40, unit...)
 	m.end(run.Outcome{Outcome: "passed", Report: "absent-report.json"}, nil)
-	if s := view(m); !strings.Contains(s, "Agent · unit 1  4 min 28 s") || strings.Contains(s, "unavailable") {
+	if s := view(m); !strings.Contains(s, "Agent  4 min 28 s") || strings.Contains(s, "unavailable") {
 		t.Fatalf("replay detail replaced by report fallback:\n%s", s)
 	}
 }

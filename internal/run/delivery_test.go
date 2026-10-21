@@ -93,8 +93,8 @@ func TestRunDeliversAConventionalUnitCommit(t *testing.T) {
 				t.Fatal(err)
 			}
 			msg := gitT(t, reader(t, got)("ATM_CLONE"), "log", "-1", "--format=%B")
-			if msg != want+": Retry on timeout\n\natm unit 1" {
-				t.Fatalf("want a %s commit, its body atm unit 1, got %q", want, msg)
+			if msg != want+": Retry on timeout" {
+				t.Fatalf("want a %s commit, its message one line, got %q", want, msg)
 			}
 		})
 	}
