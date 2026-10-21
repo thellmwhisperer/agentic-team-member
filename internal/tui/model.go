@@ -78,6 +78,7 @@ type Model struct {
 	focus                         *pane // the box tab moved to, while it shows
 	pipelineBounds, historyBounds bounds
 	logBounds, findingsBounds     bounds
+	titleArrow                    bounds
 	unfold                        bool // t: every tool call of the Agent box on its own line
 	unfoldThink                   bool // h: every thinking message of the Agent box in full
 	unfoldTitle                   bool // i: every line of the issue's title
@@ -281,8 +282,7 @@ func (m *Model) key(k string) {
 }
 
 // wheel scrolls the box under the pointer: ATM, Agent, Findings or Log while each shows. A click on a row of
-// folded tool calls, thinking, command output or report unfolds it, and on its first row once unfolded folds it again;
-// one on the ATM box's first row folds or unfolds the issue's title.
+// folded tool calls, thinking, command output or report unfolds it, and on its first row once unfolded folds it again.
 func (m *Model) wheel(msg tea.MouseMsg) {
 	p, b := &m.pipeline, m.pipelineBounds
 	switch {
@@ -301,22 +301,16 @@ func (m *Model) wheel(msg tea.MouseMsg) {
 	case tea.MouseButtonWheelDown:
 		p.scroll(3)
 	case tea.MouseButtonLeft:
-		if msg.Action == tea.MouseActionPress {
-			m.click(p, msg.Y-b.y-1) // under the box's top border
+		if msg.Action == tea.MouseActionPress && p == &m.pipeline && m.titleArrow.contains(msg.X-b.x, msg.Y-b.y) {
+			m.unfoldTitle = !m.unfoldTitle
 		}
-	}
-}
-
-// click folds or unfolds what row of pane p shows; the ATM box's first row is the issue's title, its arrow first.
-func (m *Model) click(p *pane, row int) {
-	if p == &m.pipeline && row == 0 {
-		m.unfoldTitle = !m.unfoldTitle
-	}
-	if row >= 0 && row < len(p.toggles) && p.toggles[row] != "" {
-		if m.open == nil {
-			m.open = map[string]bool{}
+		row := msg.Y - b.y - 1 // under the box's top border
+		if msg.Action == tea.MouseActionPress && row >= 0 && row < len(p.toggles) && p.toggles[row] != "" {
+			if m.open == nil {
+				m.open = map[string]bool{}
+			}
+			m.open[p.toggles[row]] = !m.unfolded(p.toggles[row])
 		}
-		m.open[p.toggles[row]] = !m.unfolded(p.toggles[row])
 	}
 }
 

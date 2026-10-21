@@ -107,10 +107,43 @@ func TestRealScreenFoldsTheTitle(t *testing.T) {
 	a.sees(unfolded)
 	a.key(arrow)
 	a.sees(folded.MatchString)
+	a.send(`{"step":"contract","state":"started"}`)
+	a.sees(runningContract.MatchString)
+	for _, pos := range [][2]int{{55, 2}, {12, 2}, {2, 2}, {4, 2}, {3, 1}, {3, 3}} {
+		t.Logf("ignore click %d,%d, folded and unfolded", pos[0], pos[1])
+		click := fmt.Sprintf("\x1b[<0;%d;%dM\x1b[<0;%d;%dm", pos[0], pos[1], pos[0], pos[1])
+		a.key(click + "i\t")
+		a.sees(func(s string) bool { return strings.Contains(s, "Log*") && unfolded(s) })
+		a.key(click + "i\t")
+		a.sees(func(s string) bool { return strings.Contains(s, "ATM*") && folded.MatchString(s) })
+	}
 	if shown := ansi.Strip(a.raw.String()); strings.Contains(shown, "unfold title") {
 		t.Fatalf("the screen names the fold:\n%s", shown)
 	}
 	a.end()
+	for _, cols := range []uint16{60, 120} {
+		t.Run(fmt.Sprintf("no arrow at %d columns", cols), func(t *testing.T) {
+			b := liveAttach(t, cols, 40)
+			b.send(`{"step":"issue","state":"started"}`)
+			b.send(`{"step":"issue","state":"passed","title":"` + title + `","number":467}`)
+			b.send(`{"step":"contract","state":"started"}`)
+			b.sees(func(s string) bool { return strings.Contains(s, "▸ #467") && runningContract.MatchString(s) })
+			b.send(`{"step":"issue","state":"passed","title":"Short title","number":467}`)
+			s := b.sees(func(s string) bool { return strings.Contains(s, "#467 Short title") && runningContract.MatchString(s) })
+			if line := strings.Split(s, "\n")[rowOf(s, "#467 Short title")]; strings.ContainsAny(line, "▸▾…") {
+				t.Fatalf("a short title has an arrow:\n%s", s)
+			}
+			b.key(arrow + "\t")
+			b.sees(func(s string) bool { return strings.Contains(s, "Log*") })
+			b.send(`{"step":"issue","state":"passed","title":"` + title + `","number":467}`)
+			b.sees(func(s string) bool { return strings.Contains(s, "▸ #467") })
+			b.key(arrow)
+			b.sees(func(s string) bool { return strings.Contains(s, "▾ #467") && strings.Contains(s, "unfolds it") })
+			b.key(arrow)
+			b.sees(func(s string) bool { return strings.Contains(s, "▸ #467") })
+			b.end()
+		})
+	}
 }
 
 // The real atm attach folds the issue's title to one line: whole when it fits, else behind ▸ until i shows every
