@@ -150,14 +150,19 @@ func (m *Model) ask(g gate, wait time.Duration) tea.Cmd {
 func (m *Model) gateKey(k tea.KeyMsg) (cmd tea.Cmd, ok bool) {
 	switch {
 	case m.typing:
-		return m.typed(k), true
+		switch k.Type {
+		case tea.KeyEnter, tea.KeyEsc, tea.KeyBackspace, tea.KeyRunes, tea.KeySpace:
+			return m.typed(k), true
+		}
+		return nil, false
 	case m.aborting:
 		m.aborting = false
 		if k.String() == "y" {
 			return m.respond("abort"), true
 		}
-		return nil, true
+		return nil, false
 	}
+	m.fixSelected = false
 	waiting := m.waiting() != nil
 	switch s := k.String(); {
 	case s == "x" && m.gateSteps != nil:
@@ -167,7 +172,7 @@ func (m *Model) gateKey(k tea.KeyMsg) (cmd tea.Cmd, ok bool) {
 	case waiting && (s == "a" || s == "s"):
 		return m.respond("respond", "--action", map[string]string{"a": "approve", "s": "skip"}[s]), true
 	case waiting && s == "f":
-		return m.fix(""), true
+		m.fixSelected = true
 	default:
 		return nil, false
 	}
@@ -198,6 +203,8 @@ func (m *Model) gateKeys() string {
 	switch {
 	case m.aborting:
 		return key("y", "abort the gate")
+	case m.fixSelected:
+		return key("enter", "fix with a line")
 	case m.question() != "":
 		return key("enter", "answer") + key("x", "abort")
 	case m.waiting() != nil:
@@ -223,7 +230,7 @@ func (m *Model) waiting() *gateStep {
 func (m *Model) question() string {
 	for _, s := range m.gateSteps {
 		for _, f := range s.findings {
-			if strings.HasPrefix(f["id"], "question-") {
+			if strings.HasPrefix(f["id"], "question-") && !slices.Contains(m.answered, f["id"]) {
 				return f["id"]
 			}
 		}
@@ -231,10 +238,18 @@ func (m *Model) question() string {
 	return ""
 }
 
+type gateAnswer string
+
 // send answers the reviewer's question with line while one shows, and else fixes with line.
 func (m *Model) send(line string) tea.Cmd {
 	if q := m.question(); q != "" {
-		return m.respond("answer", "--question", q, "--answer", line)
+		clone := m.clone
+		return func() tea.Msg {
+			if _, _, err := axi(clone, "answer", "--question", q, "--answer", line); err == nil {
+				return gateAnswer(q)
+			}
+			return nil
+		}
 	}
 	return m.fix(line)
 }

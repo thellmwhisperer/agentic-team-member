@@ -73,7 +73,9 @@ type Model struct {
 	clone                         string          // the run's clone, where the gate after Delivery is asked
 	gateSteps                     []gateStep      // the gate's steps, once the run delivered and the gate shows a run
 	typing, aborting              bool            // the footer takes a line for the gate, or asks to confirm its abort
-	text                          string          // the line typed for the gate so far
+	fixSelected                   bool
+	answered                      []string
+	text                          string // the line typed for the gate so far
 }
 
 type bounds struct{ x, y, width, height int }
@@ -223,6 +225,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.end(msg.o, msg.err)
 		// The run ended, or attach failed: Show leaves the last screen on the terminal, unless the gate goes on.
 		return m, m.ask(gate{ok: m.clone != "" && m.current("delivery").state == "passed"}, 0)
+	case gateAnswer:
+		m.answered = append(m.answered, string(msg))
 	case gate:
 		m.gate(msg)
 		return m, m.ask(msg, time.Second)

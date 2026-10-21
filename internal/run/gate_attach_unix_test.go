@@ -35,6 +35,16 @@ case "$*" in
 "axi logs --step review --full")
 	cat "$FAKE_NM/review.toon" ;;
 "axi respond "*|"axi answer "*|"axi abort")
+	if [ "$2" = respond ]; then
+		[ ! -f "$FAKE_NM/fixing" ] || exit 1
+		touch "$FAKE_NM/fixing"
+	fi
+	if [ "$2" = answer ]; then
+		if [ "$6" = rejected ]; then printf "  Answer refused\n" >>"$FAKE_NM/review.toon"; exit 1; fi
+		[ ! -f "$FAKE_NM/$4" ] || exit 1
+		touch "$FAKE_NM/$4"
+		[ "$4" != question-q2 ] || touch "$FAKE_NM/fixing"
+	fi
 	printf '  "%s"\n' "$(for a; do printf '{%s}' "$a"; done)" >>"$FAKE_NM/review.toon"
 	[ "$2" != abort ] || touch "$FAKE_NM/done" ;;
 *) exit 2 ;;
