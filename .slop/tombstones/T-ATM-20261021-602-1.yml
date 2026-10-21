@@ -1,0 +1,19 @@
+schema: 1
+id: T-ATM-20261021-602-1
+status: accepted
+category: duplication
+title: Preserve rename-cut ATM fixture setup
+created_at: 2026-10-21
+incident:
+  pattern: Lost-test and rename-cut real-ATM tests repeat committed fixture setup.
+  what_went_wrong: Preserving complete independent regressions repeats seven setup lines.
+  root_cause: Both scenarios need isolated clones with a committed test file.
+  rule_established: Preserve both test bodies and assertions; accept only this exact clone.
+  evidence:
+    - family: clone_fingerprint
+      example: lost_tests_unix_test.go:99-105 and rename_test_cuts_unix_test.go:28-34
+      artifact: internal/run/lost_tests_unix_test.go
+match:
+  family: clone_fingerprint
+  scope: go_tests
+  fingerprint: c532719e4b05e46acb01c68415bafa3d7cdcc5938f56269334ecb14ecf25dfa5
