@@ -160,7 +160,8 @@ func (m *Model) gateBox(width, lines int) string {
 		if !open && len(log) > 0 {
 			log = log[:1]
 		}
-		for _, text := range agentTextRows("  ", strings.Join(log, "\n"), width) {
+		texts, _, _ := agentTextRows("  ", strings.Join(log, "\n"), width, codeFence{})
+		for _, text := range texts {
 			out = append(out, paneLine{key: key, text: text})
 		}
 		for _, f := range s.findings {
