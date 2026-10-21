@@ -23,14 +23,31 @@ func TestRunAsksAtTheAgent(t *testing.T) {
 				t.Setenv("FAKE_AGENT_STREAM", bashEvent("claude", "printf x > "+filepath.Join(t.TempDir(), "out"), ""))
 			}
 			bin := followUpsServer(t, top)
-			clone, label := question(t, bin, top, tc.finding, "run", "--follow", issueFile(t, issue))
+			clone, label := question(t, bin, top, tc.finding, 1, "run", "--follow", issueFile(t, issue))
 			assertQuestionNextStep(t, top, label, false)
 			if _, err := os.Stat(clone); err != nil {
 				t.Fatalf("paused run lost its clone: %v", err)
 			}
 			answerFailedCheck(t, bin, top, label, tc.answer, map[string]int{"agent": 1, "ponytail": 2}[tc.failed])
 			rep := e2eReport(t, top, label)
-			if len(rep.Decisions) != 1 || rep.Decisions[0].Answer != tc.answer ||
+			decisions := 1
+			if tc.name == "outside" {
+				if len(rep.Decisions) != 2 || rep.Decisions[0].Answer != "approve" ||
+					!strings.Contains(rep.Decisions[0].Finding, tc.finding) ||
+					rep.node("checks").Result != "passed" || rep.FailedNode != "ponytail" ||
+					rep.Decisions[1].Answer != "" || !strings.Contains(rep.Decisions[1].Finding, tc.finding) {
+					t.Fatalf("agent approval did not reach the separate ponytail question: %+v", rep)
+				}
+				assertQuestionNextStep(t, top, label, true)
+				answerFailedCheck(t, bin, top, label, "stop", 2)
+				rep = e2eReport(t, top, label)
+				decisions = 2
+				if len(rep.Decisions) != 2 || rep.Decisions[1].Answer != "stop" ||
+					!strings.Contains(rep.Decisions[1].Finding, tc.finding) {
+					t.Fatalf("ponytail stop not recorded with finding: %+v", rep.Decisions)
+				}
+			}
+			if len(rep.Decisions) != decisions || rep.Decisions[0].Answer != tc.answer ||
 				!strings.Contains(rep.Decisions[0].Finding, tc.finding) {
 				t.Fatalf("answer not recorded with finding: %+v", rep.Decisions)
 			}
@@ -112,7 +129,7 @@ printf '%s\n' '{"type":"result","result":"{\"test_file\":\"a_test.sh\"}"}'
 			_, label := question(t, bin, top, map[string]string{
 				"outside": "the agent reached outside its clone",
 				"exit":    "exit code 3",
-			}[tc.name],
+			}[tc.name], 1,
 				"run", "--follow", "--harness", "claude", issueFile(t, issue))
 			assertQuestionNextStep(t, top, label, false)
 			answerFailedCheck(t, bin, top, label, "fix", 0)
