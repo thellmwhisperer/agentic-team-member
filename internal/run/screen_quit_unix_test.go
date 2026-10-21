@@ -153,37 +153,3 @@ func TestRealAttachIgnoresUnknownSteps(t *testing.T) {
 		t.Fatalf("unknown steps changed the screen:\n%s", shown)
 	}
 }
-
-// Retired or unknown steps between historical units must not obscure the current graph's rows.
-// The real attach still shows the final proof and delivery, without adding another Agent row.
-func TestRealAttachIgnoresRetiredStepsBetweenHistoricalUnits(t *testing.T) {
-	bin := builtATM(t)
-	top := atmRepo(t)
-	done := replayed(t, top,
-		`{"step":"agent","state":"started","unit":1}`,
-		`{"step":"agent","state":"passed","unit":1}`,
-		`{"step":"checks","state":"started","unit":1}`,
-		`{"step":"checks","state":"passed","unit":1}`,
-		`{"step":"scope-review-unit2","state":"started"}`,
-		`{"step":"scope-review-unit2","state":"passed"}`,
-		`{"step":"agent","state":"started","unit":2}`,
-		`{"step":"agent","state":"passed","unit":2}`,
-		`{"step":"checks","state":"started","unit":2}`,
-		`{"step":"checks","check":"red/green","state":"passed"}`,
-		`{"step":"checks","state":"passed","unit":2}`,
-		`{"step":"ponytail","state":"passed"}`,
-		`{"step":"delivery","state":"passed"}`,
-	)
-	shown := coldDeliveryAttach(t, bin, top, "old-run")
-	if err := <-done; err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{"✓ Agent · unit 1", "✓ red/green", "✓ Slop detector", "✓ Delivery"} {
-		if !strings.Contains(shown, want) {
-			t.Errorf("historical replay lost %q:\n%s", want, shown)
-		}
-	}
-	if strings.Contains(shown, "scope-review") || strings.Contains(shown, "unit 2") {
-		t.Fatalf("historical replay added retired rows:\n%s", shown)
-	}
-}

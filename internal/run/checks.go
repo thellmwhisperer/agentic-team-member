@@ -91,33 +91,23 @@ func before(clone string) error {
 func unmade(clone string) error {
 	err := prunes(clone)
 	if err == nil {
-		err = putBackIgnored(clone)
+		var changed string
+		changed, err = every(clone, "diff", "--name-only", "--no-renames", "-z", "--diff-filter=DMT",
+			"refs/atm-before", "--", ".", ":(exclude).atm") // hideATM's
+		if err == nil && changed != "" {
+			var ignored string
+			ignored, err = commandIn(strings.NewReader(changed), clone, "git", "check-ignore", "-z", "--stdin")
+			if exit := (*exec.ExitError)(nil); errors.As(err, &exit) && exit.ExitCode() == 1 {
+				err = nil // none is ignored
+			} else if err == nil {
+				_, err = commandIn(strings.NewReader(ignored), clone, "git", "--literal-pathspecs",
+					"--git-dir=.git/atm-files", "--work-tree=.", "checkout", "refs/atm-before",
+					"--pathspec-from-file=-", "--pathspec-file-nul")
+			}
+		}
 	}
 	if err == nil {
 		err = putBackNested(clone)
-	}
-	return err
-}
-
-// putBackIgnored puts back, byte for byte, each ignored file before recorded that the agent changed or deleted.
-func putBackIgnored(clone string) error {
-	now, err := whole(clone)
-	if err != nil {
-		return err
-	}
-	changed, err := every(clone, "diff", "--name-only", "--no-renames", "-z", "--diff-filter=DMT",
-		"refs/atm-before", now, "--", ".", ":(exclude).atm") // hideATM's
-	if err != nil || changed == "" {
-		return err
-	}
-	ignored, err := commandIn(strings.NewReader(changed), clone, "git", "check-ignore", "-z", "--stdin")
-	if exit := (*exec.ExitError)(nil); errors.As(err, &exit) && exit.ExitCode() == 1 {
-		return nil // none is ignored
-	}
-	if err == nil {
-		_, err = commandIn(strings.NewReader(ignored), clone, "git", "--literal-pathspecs",
-			"--git-dir=.git/atm-files", "--work-tree=.", "checkout", "refs/atm-before",
-			"--pathspec-from-file=-", "--pathspec-file-nul")
 	}
 	return err
 }

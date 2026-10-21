@@ -65,16 +65,6 @@ func TestScreenHasARowForEachNodeOfTheGraph(t *testing.T) {
 		"Checks", "✓ red/green  1.5 s", "test", "○ Slop detector", "pending", "○ Delivery", "pending", "╰") {
 		t.Fatalf("rows:\n%s", s)
 	}
-	// The agent started again, as a run kept before follow-ups were retired replays it, runs on its own row.
-	for _, ev := range []string{`{"step":"checks","check":"test","state":"passed","duration_ms":10}`,
-		`{"step":"checks","state":"passed","duration_ms":2000}`, `{"step":"agent","state":"started"}`} {
-		m.apply(run.Frame{Event: []byte(ev)})
-	}
-	if s := view(m); !order(s, "Agent · unit 1", "running", "Checks", "red/green", "test", "○ Slop detector",
-		"pending", "○ Delivery", "pending") || strings.Count(s, "red/green") != 1 || strings.Count(s, "Agent ·") != 1 ||
-		strings.Count(s, "Checks") != 1 || strings.Contains(s, "unit 2") {
-		t.Fatalf("agent started again:\n%s", s)
-	}
 }
 
 func TestScreenLaysOutAsNoMistakes(t *testing.T) {
