@@ -203,8 +203,6 @@ func (a agent) run(clone, name, skill, brief string, check func(map[string]any) 
 // askError is an agent failure the launcher answers: a write outside the clone, or an exit with an error.
 type askError struct{ error }
 
-func (e askError) Unwrap() error { return e.error }
-
 // reportError is why an agent step failed when the agent ended cleanly but left its report missing or invalid.
 type reportError struct{ error }
 
