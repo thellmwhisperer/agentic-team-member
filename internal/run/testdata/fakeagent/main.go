@@ -19,6 +19,12 @@ import (
 )
 
 func main() {
+	if len(os.Args) == 4 && os.Args[1] == "--quiet-work" {
+		if err := quietWork(os.Args[2], os.Args[3]); err != nil {
+			os.Exit(1)
+		}
+		return
+	}
 	ownSession()
 	os.Exit(fakeAgent(filepath.Base(os.Args[0])))
 }
@@ -52,7 +58,9 @@ const fixWork = "echo fixed > a.txt" + fixTest
 // line, <clone> in it its working directory. With $FAKE_AGENT_PARTIAL naming a file that says stdout or stderr, it
 // writes a dot there every 500ms for 3s, then ends the line, starting no process meanwhile.
 func fakeAgent(name string) int {
-	go watchFakeAgentOwner()
+	if os.Getenv("FAKE_AGENT") != "grandchild" {
+		go watchFakeAgentOwner()
+	}
 	if script := os.Getenv("REJECTION_SCRIPT"); script != "" {
 		cmd := exec.Command("sh", script)
 		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr

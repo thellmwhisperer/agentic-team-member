@@ -4,7 +4,9 @@ package run
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -133,5 +135,89 @@ func TestPartialOutputIsNotSilence(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(filepath.Join(top, ".atm", "serve.log")); strings.Count(string(b), "atm serve pid:") != 1 {
 		t.Fatalf("want one background process for both runs, got %s", b)
+	}
+}
+
+func TestLowCPUChildIsNotCut(t *testing.T) {
+	sharedATM(t, hangBuild)
+	for _, mode := range []string{"cpu", "io"} {
+		t.Run(mode, func(t *testing.T) {
+			receipt := filepath.Join(t.TempDir(), "receipt")
+			t.Setenv("FAKE_AGENT_WORK", fmt.Sprintf("%q --quiet-work %s %q; ", filepath.Join(fakes, "fakeagent"), mode, receipt)+fixWork)
+			top := gitT(t, repo(t, "local", atmYAML), "rev-parse", "--show-toplevel")
+			events := followedRun(t, versionServer(t, top, hangBuild), top, 0, issueFile(t, issue))
+			for _, ev := range events {
+				if ev["step"] == "decision" {
+					t.Fatalf("working child caused a question: %v", ev)
+				}
+			}
+			lastRun(t, top, "passed")
+			var proof struct {
+				Elapsed int64 `json:"elapsed_ns"`
+				Samples []struct {
+					PID   int
+					CPU   int64 `json:"cpu_ns"`
+					Bytes int
+				}
+			}
+			b, err := os.ReadFile(receipt)
+			if err != nil || json.Unmarshal(b, &proof) != nil || proof.Elapsed < int64(5*time.Second) || len(proof.Samples) != 25 {
+				t.Fatalf("child did not complete five seconds of work: %s, %v", b, err)
+			}
+			first, last := proof.Samples[0], proof.Samples[24]
+			if last.CPU <= first.CPU || last.CPU >= int64(time.Second) {
+				t.Fatalf("want cumulative positive subsecond CPU: %s", b)
+			}
+			for i, sample := range proof.Samples {
+				if sample.PID != first.PID || sample.PID <= 0 {
+					t.Fatalf("child PID changed: %s", b)
+				}
+				if mode == "cpu" && i > 0 && sample.CPU <= proof.Samples[i-1].CPU {
+					t.Fatalf("child did not use CPU at every sample: %s", b)
+				}
+				if mode == "io" && sample.Bytes != (i+1)*2*1024*1024 {
+					t.Fatalf("child did not transfer bytes at every sample: %s", b)
+				}
+			}
+		})
+	}
+}
+
+func TestActivityObservationFailureIsReported(t *testing.T) {
+	sharedATM(t, hangBuild)
+	ps, err := exec.LookPath("ps")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct{ name, script, reason string }{
+		{"ps", "exit 42", "exit status 42"},
+		{"native", `if test -s "$FAKE_AGENT_PID" && test ! -f "$ATM_ACTIVITY_USED"; then
+: > "$ATM_ACTIVITY_USED"
+printf '1 '
+cat "$FAKE_AGENT_PID"
+printf '\n'
+else
+exec ` + fmt.Sprintf("%q", ps) + ` "$@"
+fi`, "pid 1:"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if c.name == "native" && os.Geteuid() == 0 {
+				t.Skip("root can read PID 1 activity")
+			}
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "ps"), []byte("#!/bin/sh\n"+c.script+"\n"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+			t.Setenv("FAKE_AGENT", "silent")
+			t.Setenv("FAKE_AGENT_PID", filepath.Join(dir, "pid"))
+			t.Setenv("ATM_ACTIVITY_USED", filepath.Join(dir, "used"))
+			top := gitT(t, repo(t, "local", atmYAML), "rev-parse", "--show-toplevel")
+			followedRun(t, versionServer(t, top, hangBuild), top, 1, issueFile(t, issue))
+			rep := readReport(t, filepath.Join(runDir(top, lastRun(t, top, "failed")), "report.json"))
+			if reason, _ := rep["reason"].(string); !strings.Contains(reason, "observe agent activity: "+c.reason) {
+				t.Fatalf("observation failure was hidden: %v", rep)
+			}
+		})
 	}
 }
