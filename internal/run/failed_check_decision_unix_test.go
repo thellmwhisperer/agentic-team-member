@@ -329,4 +329,5 @@ func assertQuestionNextStep(t *testing.T, top, label string, resumable bool) {
 	if end.Run != label || end.NextStep != want || e2eReport(t, top, label).Resumable != resumable {
 		t.Fatalf("run %s next_step = %q, want %q with resumable=%t", end.Run, end.NextStep, want, resumable)
 	}
+	t.Logf("atm attach next_step: %s (resumable=%t)", end.NextStep, resumable)
 }

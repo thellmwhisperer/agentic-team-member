@@ -8,7 +8,7 @@ set before a run is in [Configuration](configuration.md).
 ## Following one run
 
 `atm run <issue> --follow` starts the run and prints one JSON object per run
-event on standard output until the run ends or awaits a Checks answer. The flag
+event on standard output until the run ends or awaits the launcher's answer. The flag
 goes before or after the issue and works on a pipe or a terminal. It also works
 with `--resume`.
 The events are the run's own step starts, results and live activity, with
@@ -41,8 +41,9 @@ A resumed clone still starts at its saved base commit.
 
 ## The steps
 
-A failed step stops the run before later steps, except a post-agent Checks
-failure, which waits for the launcher's answer; see [Checks](#checks).
+A failed step stops the run before later steps, except an Agent exit with an
+error, a write outside its clone and scratch directory, or a post-agent Checks
+failure. Those wait for the launcher's answer; see [Checks](#checks).
 
 | Step | Does | Failure condition |
 |------|------|--------------------|
@@ -157,7 +158,9 @@ calls fail without returning the report.
 
 ## Checks
 
-When a post-agent check fails, the background run asks its launcher:
+When the Agent writes outside its clone and scratch directory, its process
+exits with an error, or a post-agent check fails, the background run asks its
+launcher:
 
 ```sh
 atm answer <run> approve
@@ -165,13 +168,16 @@ atm answer <run> fix
 atm answer <run> stop
 ```
 
-The `decision` event carries the finding and these three choices. The clone and
-its work stay in place while the launcher decides. `approve` records the finding
-and approval, then continues through the remaining steps to delivery. `fix`
-gives the worker one turn with the finding, reusing its session when supported,
-then runs Checks again. Another
-failure asks again. `stop` ends the run and keeps its work. Answers are recorded
-before the run continues; a second answer to the same question is rejected.
+The `decision` event carries the finding, these three choices and whether the
+run is `resumable`. The clone and its work stay in place while the launcher
+decides. `approve` records the finding and approval. After an Agent failure it
+runs Checks on the current work; after a Checks failure it continues to the
+next step. `fix` gives the worker one turn with the finding, reusing its session
+when supported, then runs Checks. Another Agent exit error, forbidden write
+or Checks failure asks again. `stop` ends the run and keeps its work.
+See [Resuming a failed run](configuration.md#resuming-a-failed-run) for recovery
+after `stop`. Answers are recorded before the run continues; a second answer
+to the same question is rejected.
 `atm run --follow` and an attached screen return with exit 1 at the question;
 the background run remains waiting. `atm attach <run>` shows the question
 again or follows the continuation after an answer.
@@ -311,7 +317,7 @@ it is on disk before delivery reads it.
 | `units` | The unit's number (`1`), base commit, reported test file, result, `started_at` and `duration_ms` |
 | `reproofs` | Each rechecked unit's number, base commit, reported test file, result, `started_at` and `duration_ms` after a cut; configured commands are in `commands` |
 | `commands` | Every configured command that ran, the clone's `install` included, with its result, last 60 lines, `started_at` and `duration_ms` |
-| `decisions` | Each post-agent Checks finding and the launcher's `approve`, `fix` or `stop` answer; the answer is empty while the question is pending |
+| `decisions` | Each Agent exit error, forbidden write or post-agent Checks finding and the launcher's `approve`, `fix` or `stop` answer; the answer is empty while the question is pending |
 | `head_sha` | The delivered branch's final commit |
 | `serve` | The version of the `atm serve` process that executed the run, from `buildinfo.String()`, for example `vA (aaa1111) 2026-10-15` |
 

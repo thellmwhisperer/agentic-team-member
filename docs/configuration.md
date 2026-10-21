@@ -253,7 +253,7 @@ Flags go before or after the issue. A second issue is an error.
 | `--effort <effort>` | from the layers | The agent's effort |
 | `--harness-arg <arg>` | none | One argument for the agent CLI, before the brief. Repeatable |
 | `--env KEY=VALUE` | none | One variable in the agent's environment. Repeatable |
-| `--resume <run>` | none | Runs `<run>`'s issue again from its agent's work, in place of an issue |
+| `--resume <run>` | none | Runs a resumable run's issue again from its agent's work, in place of an issue |
 
 ### Resuming a failed run
 
@@ -265,9 +265,11 @@ settings) and `work.bundle` (the failed unit's uncommitted work, new and
 binary files included, ignored files left out, on its base).
 Its `report.json` says `"resumable": true` and names the unit in
 `resumable_unit`. The failed row and `e2e` output come from the latest Checks
-attempt. While a Checks answer is pending, `next_step` names `atm answer`;
-after `stop`, it names `atm run --resume <label>`. A run
-that failed before or in the agent is not resumable.
+attempt. While an answer is pending, `next_step` names `atm answer` and offers
+`atm run --resume <label>` as recovery only when `resumable` is true. After
+`stop`, a resumable run's `next_step` names `atm run --resume <label>`.
+A run that failed before or in the agent is not resumable, including an Agent
+failure awaiting an answer or stopped by one.
 
 A run kept before follow-ups were retired may have stopped at a later unit.
 `atm run --resume` refuses it before restoring anything, saying follow-ups

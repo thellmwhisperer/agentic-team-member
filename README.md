@@ -101,7 +101,7 @@ atm run 280 --follow
 ```
 
 `--follow` prints the run's events as JSON lines until it ends or awaits a
-Checks answer. Omit the flag for the terminal screen. A run can also take an issue file, such as
+the launcher's answer. Omit the flag for the terminal screen. A run can also take an issue file, such as
 `plans/retry.md`.
 
 `.atm.yaml` declares the repository's `install`, `test`, optional `e2e`,
@@ -115,8 +115,8 @@ agent, model and effort. Both are in [Configuration](docs/configuration.md).
 | `atm doctor` | Checks local prerequisites; see [preflight](docs/how-a-run-flows.md#before-the-run) for launch checks |
 | `atm skill`, `atm skill install` | See [ATM's driving skill](docs/configuration.md#skill) |
 | `atm run [flags] <issue>` | Runs an issue: a GitHub number or a file with a title and body |
-| `atm run --resume <run>` | Runs a failed run's issue again from its agent's work; see [Resuming a failed run](docs/configuration.md#resuming-a-failed-run) |
-| `atm answer <run> <choice>` | Answers a failed post-agent check; see [Checks](docs/how-a-run-flows.md#checks) |
+| `atm run --resume <run>` | Runs a resumable failed run's issue again from its agent's work; see [Resuming a failed run](docs/configuration.md#resuming-a-failed-run) |
+| `atm answer <run> <choice>` | Answers a failure that asks the launcher; see [Checks](docs/how-a-run-flows.md#checks) |
 | `atm status` | The runs going |
 | `atm attach [run]` | A run's [screen and tool-call controls](docs/how-a-run-flows.md#the-screen); it quits when the run ends, or on q or Ctrl+C |
 | `atm runs` | Every retained run and its report |
@@ -131,7 +131,7 @@ For `atm run`, including `--follow`, and `atm axi run`:
 | Exit | Meaning |
 |------|---------|
 | `0` | The unit passed and Delivery passed or was skipped; see [Delivery](docs/how-a-run-flows.md#delivery) |
-| `1` | The unit failed or awaits a Checks answer; nothing is delivered yet |
+| `1` | The unit failed or awaits the launcher's answer; nothing is delivered yet |
 | `2` | [preflight](docs/how-a-run-flows.md#before-the-run), [serve build check](docs/how-a-run-flows.md#the-screen), issue, clone or contract failed |
 | `4` | The unit passed, but Delivery failed |
 

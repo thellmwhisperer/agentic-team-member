@@ -79,3 +79,46 @@ printf '%s\n' '{"type":"result","result":"{\"test_file\":\"a_test.sh\"}"}'
 		})
 	}
 }
+
+func TestRunFixesAgentFailure(t *testing.T) {
+	builtATM(t)
+	for _, tc := range []struct{ name, event string }{
+		{"outside", "outside"},
+		{"exit", "exit"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			top := gitT(t, repo(t, "local", atmYAML), "rev-parse", "--show-toplevel")
+			script := filepath.Join(t.TempDir(), "agent.sh")
+			writeFixture(t, script, `brief=$(cat)
+case "$brief" in *ponytail-review*)
+  printf '%s\n' '{"type":"result","result":"{\"findings\":[],\"summary\":\"Lean already.\"}"}'
+  exit 0
+esac
+if test ! -f first-turn; then
+  touch first-turn
+  if test "$ATM_TEST_FAILURE" = outside; then
+    printf '%s\n' "$ATM_TEST_FAILURE_EVENT"
+    exit 0
+  fi
+  exit 3
+fi
+`+fixWork+`
+printf '%s\n' '{"type":"result","result":"{\"test_file\":\"a_test.sh\"}"}'
+`)
+			t.Setenv("REJECTION_SCRIPT", script)
+			t.Setenv("ATM_TEST_FAILURE", tc.event)
+			t.Setenv("ATM_TEST_FAILURE_EVENT", bashEvent("claude", "printf x > "+filepath.Join(t.TempDir(), "out"), ""))
+			bin := followUpsServer(t, top)
+			_, label := question(t, bin, top, map[string]string{"outside": "the agent reached outside its clone", "exit": "exit code 3"}[tc.name],
+				"run", "--follow", "--harness", "claude", issueFile(t, issue))
+			assertQuestionNextStep(t, top, label, false)
+			answerFailedCheck(t, bin, top, label, "fix", 0)
+			rep := e2eReport(t, top, label)
+			if rep.FailedNode != "" || len(rep.Decisions) != 1 || rep.Decisions[0].Answer != "fix" ||
+				rep.node("checks").Result != "passed" {
+				t.Fatalf("fix did not finish the run: %+v", rep)
+			}
+			t.Logf("agent failure answered %s; checks %s", rep.Decisions[0].Answer, rep.node("checks").Result)
+		})
+	}
+}
