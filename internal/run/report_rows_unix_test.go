@@ -129,6 +129,8 @@ func TestRealScreenReportScopeAndMarkdown(t *testing.T) {
 	}{
 		{"split-blocks-escaped-pipe", "claude", "Split summary.\n\n| Value | Change |\n|---|---|\n| a\\|b | **fixed** |",
 			[]string{`Split summary\.`, `Value +Change`, `a\|b +fixed`}, []string{`a\|b`, "|---|", "**"}},
+		{"code-span-escaped-pipes", "claude", "Code cells.\n\n| `a\\|b` | Change |\n|---|---|\n| `a\\|b` | **fixed** |",
+			[]string{`a\|b +Change`, `a\|b +fixed`}, []string{"`", `a\|b`, "|---|", "**"}},
 		{"optional-outer-pipes", "codex", "Optional pipes.\n\nFichero | Cambio\n--- | ---\na.txt | fixed",
 			[]string{`Optional pipes\.`, `Fichero +Cambio`, `a\.txt +fixed`}, []string{"Fichero | Cambio", "--- | ---"}},
 		{"fenced-table", "opencode", "Literal table.\n\n```\n| Literal | Code |\n|---|---|\n| a\\|b | **fixed** |\n```\n\nAfter **code**.\n\n| Real | Table |\n|---|---|\n| yes | rendered |",
@@ -231,4 +233,94 @@ func TestRealScreenReportScopeAndMarkdown(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRealScreenFinalReportKeyboardScrollDuringChecks(t *testing.T) {
+	bin := builtATM(t)
+	checks := filepath.Join(t.TempDir(), "checks")
+	cfg := atmSet(atmYAML, "typecheck", fmt.Sprintf(`cat "%s" >/dev/null`, checks))
+	top := gitT(t, repo(t, "https://example.com/o/r.git", cfg), "rev-parse", "--show-toplevel")
+	stopServing(t, top)
+	held(t, checks)
+	var files, summary []string
+	for i := 1; i <= 32; i++ {
+		files = append(files, fmt.Sprintf("file-%02d.txt", i))
+		if i <= 16 {
+			summary = append(summary, fmt.Sprintf("summary-row-%02d", i))
+		}
+	}
+	report, _ := json.Marshal(obj{"test_file": "a_test.sh", "changed_files": files,
+		"summary": strings.Join(summary, "\n\n"), "commands_run": []string{"sh a_test.sh"}})
+	t.Setenv("FAKE_AGENT_WORK", fixWork+"; mkdir -p .atm; cat > .atm/fake-report.json <<'REPORT'\n"+string(report)+"\nREPORT\n")
+	t.Setenv("TERM", "xterm-256color")
+	t.Setenv("NO_COLOR", "")
+	a := &attached{t: t, cmd: exec.Command(bin, "run", issueFile(t, issue)), chunks: make(chan string, 64), rows: 24}
+	a.cmd.Dir = top
+	var err error
+	if a.p, err = pty.StartWithSize(a.cmd, &pty.Winsize{Cols: 120, Rows: 24}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = a.cmd.Process.Kill(); _ = a.p.Close() })
+	go a.read()
+	s := a.drawn(func(s string) bool { return strings.Contains(s, "Hallazgos (0)") && typecheckRuns.MatchString(s) })
+	if strings.Contains(s, "summary-row-01") || strings.Contains(s, "▾ Informe") {
+		t.Fatalf("report must overflow the constrained terminal:\n%s", s)
+	}
+	a.key("\t")
+	a.drawn(func(s string) bool { return strings.Contains(s, "Log*") })
+	a.key("\t")
+	a.drawn(func(s string) bool { return strings.Contains(s, "ATM*") })
+	a.key("\t")
+	s = a.drawn(func(s string) bool { return strings.Contains(s, "Agent · claude default*") })
+	a.click(rowOf(s, "▸ Ficheros cambiados (32)"))
+	s = a.drawn(func(s string) bool { return strings.Contains(s, "file-32.txt") })
+	if strings.Contains(s, "file-01.txt") {
+		t.Fatalf("expanded files must overflow the constrained terminal:\n%s", s)
+	}
+	visible := regexp.MustCompile(`summary-row-\d+|file-\d+\.txt|▾ Informe|Hallazgos \(0\)`)
+	seen := map[string]bool{}
+	record := func(s string) {
+		for _, item := range append(append([]string{}, files...), summary...) {
+			if strings.Contains(s, item) {
+				seen[item] = true
+			}
+		}
+	}
+	record(s)
+	for i := 0; i < 20 && !strings.Contains(s, "▾ Informe"); i++ {
+		before := strings.Join(visible.FindAllString(s, -1), "\n")
+		a.key("\x1b[5~")
+		s = a.drawn(func(s string) bool {
+			return strings.Join(visible.FindAllString(s, -1), "\n") != before && strings.Contains(s, "Agent · claude default*")
+		})
+		record(s)
+	}
+	if !strings.Contains(s, "▾ Informe") || !strings.Contains(s, "summary-row-01") {
+		t.Fatalf("PageUp cannot reach the report's beginning:\n%s", s)
+	}
+	for _, item := range append(append([]string{}, files...), summary...) {
+		if !seen[item] {
+			t.Errorf("PageUp skipped report content %q", item)
+		}
+	}
+	clear(seen)
+	record(s)
+	for i := 0; i < 20 && !strings.Contains(s, "Hallazgos (0)"); i++ {
+		before := strings.Join(visible.FindAllString(s, -1), "\n")
+		a.key("\x1b[6~")
+		s = a.drawn(func(s string) bool {
+			return strings.Join(visible.FindAllString(s, -1), "\n") != before && strings.Contains(s, "Agent · claude default*")
+		})
+		record(s)
+	}
+	if !strings.Contains(s, "file-32.txt") || !strings.Contains(s, "Hallazgos (0)") {
+		t.Fatalf("PageDown cannot reach the report's end:\n%s", s)
+	}
+	for _, item := range append(append([]string{}, files...), summary...) {
+		if !seen[item] {
+			t.Errorf("PageDown skipped report content %q", item)
+		}
+	}
+	free(t, checks)
+	a.exits()
 }
