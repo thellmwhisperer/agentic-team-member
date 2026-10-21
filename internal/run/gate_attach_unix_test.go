@@ -3,6 +3,7 @@
 package run
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -15,7 +16,7 @@ import (
 
 // gateNM answers like no-mistakes for the screen: axi status, in the run's clone, shows its branch's run, review
 // running on its first call and then waiting with one finding, until $FAKE_NM/done makes the run complete; axi
-// logs --step review shows review's log and, once it waits, its finding. With $FAKE_NM/none the branch has no run.
+// logs --step review shows review's log and finding. With $FAKE_NM/none the branch has no run.
 const gateNM = `#!/bin/sh
 echo "$PWD $*" >>"$FAKE_NM/log"
 case "$*" in
@@ -25,14 +26,12 @@ case "$*" in
 	echo "$n" >"$FAKE_NM/n"
 	run=running step=awaiting_approval
 	[ "$n" -gt 1 ] || step=running
+	[ ! -f "$FAKE_NM/fixing" ] || step=fixing
 	[ ! -f "$FAKE_NM/done" ] || run=completed step=completed
 	printf 'run:\n  id: "01M5D0SWRMZ44NM79H2NNC3YZ8"\n  branch: atm/the-unit\n  status: %s\n' "$run"
-	printf '  steps[2]{step,status,findings,duration_ms}:\n    review,%s,1,1200\n    test,pending,0,0\n' "$step" ;;
-"axi logs --step review")
-	printf 'step: review\nlog: "**Reviewing the diff**\\nreading internal/run/run.go\\nchecking the delivery"\n'
-	[ "$(cat "$FAKE_NM/n")" -lt 2 ] ||
-		printf 'findings[1]{risk,file,line,description}:\n  high,internal/run/run.go,42,%s\n' \
-			'"Delivery drops the \"gate\", verdict and all."' ;;
+	printf '  steps[3]{step,status,findings,duration_ms}:\n    review,%s,1,1200\n    test,pending,0,0\n    lint,skipped,0,0\n' "$step" ;;
+"axi logs --step review --full")
+	cat "$FAKE_NM/review.toon" ;;
 *) exit 2 ;;
 esac
 `
@@ -42,6 +41,13 @@ func gateFake(t *testing.T) string {
 	t.Helper()
 	tools, nm := t.TempDir(), t.TempDir()
 	if err := os.WriteFile(filepath.Join(tools, "no-mistakes"), []byte(gateNM), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fixture, err := os.ReadFile("testdata/gate-review.toon")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nm, "review.toon"), fixture, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", tools+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -67,8 +73,8 @@ func TestRealAttachPaintsTheGate(t *testing.T) {
 	nm, clone := gateFake(t), t.TempDir()
 	a := liveAttach(t, 120, 40)
 	a.delivered(clone)
-	finding := `high internal/run/run.go:42 Delivery drops the "gate", verdict and all.`
-	folded := a.sees(func(s string) bool { return strings.Contains(s, finding) })
+	finding := `error internal/run/run.go Delivery drops the "gate", verdict and all.`
+	folded := a.sees(func(s string) bool { return strings.Contains(s, finding) && strings.Contains(s, "▸ ⏸ review") })
 	for _, want := range []string{`│ ⏸ review .*waiting │`, `│ ○ test .*pending │`, `│ ▸ ⏸ review +│`,
 		`│   Reviewing the diff +│`} {
 		if !regexp.MustCompile(want).MatchString(folded) {
@@ -84,6 +90,16 @@ func TestRealAttachPaintsTheGate(t *testing.T) {
 		return strings.Contains(s, "▾ ⏸ review") && strings.Contains(s, "reading internal/run/run.go") &&
 			strings.Contains(s, "checking the delivery") && strings.Contains(s, finding)
 	})
+	if err := os.WriteFile(filepath.Join(nm, "fixing"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fixing := a.sees(func(s string) bool {
+		return regexp.MustCompile(`│ [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] review .*running │`).MatchString(s) &&
+			regexp.MustCompile(`│ ▾ [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] review +│`).MatchString(s)
+	})
+	if !strings.Contains(fixing, finding) || strings.Contains(fixing, "internal/run/run.go:") {
+		t.Fatalf("fixing lost or invented a finding position:\n%s", fixing)
+	}
 	if err := os.WriteFile(filepath.Join(nm, "done"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -98,6 +114,94 @@ func TestRealAttachPaintsTheGate(t *testing.T) {
 	if !strings.HasPrefix(string(log), clone+" axi status\n") {
 		t.Fatalf("the screen did not ask no-mistakes in the run's clone:\n%s", log)
 	}
+}
+
+func TestRealAttachScrollsTheFullGateLog(t *testing.T) {
+	nm := gateFake(t)
+	fixture, err := os.ReadFile(filepath.Join(nm, "review.toon"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	long := strings.ReplaceAll(string(fixture), "3 total", "83 total")
+	long = strings.ReplaceAll(long, "log[3]", "log[83]")
+	want := []string{"Reviewing the diff", "reading internal/run/run.go", "checking the delivery"}
+	for i := 0; i < 80; i++ {
+		line := fmt.Sprintf("review-line-%02d", i)
+		want = append(want, line)
+		long += "  " + line + "\n"
+	}
+	if err := os.WriteFile(filepath.Join(nm, "review.toon"), []byte(long), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a := liveAttach(t, 120, 12)
+	a.delivered(t.TempDir())
+	folded := a.sees(func(s string) bool {
+		return strings.Contains(s, "▸ ⏸ review") && strings.Contains(s, "Reviewing the diff")
+	})
+	if strings.Contains(folded, "review-line-") || strings.Contains(a.raw.String(), "**") ||
+		!strings.Contains(a.raw.String(), "\x1b[1mReviewing the diff") {
+		t.Fatalf("the full log lost its original folded first line:\n%s", folded)
+	}
+	unfoldedFrom := a.raw.Len()
+	a.key("\x1b[<0;45;2M\x1b[<0;45;2m")
+	rows := append([]string{"▾ ⏸ review"}, want...)
+	rows = append(rows, `error internal/run/run.go Delivery drops the "gate", verdict and all.`)
+	page := func(top int) {
+		a.sees(func(s string) bool {
+			for _, line := range rows[top : top+7] {
+				if !strings.Contains(s, line) {
+					return false
+				}
+			}
+			return true
+		})
+	}
+	top := len(rows) - 7
+	page(top)
+	a.key("\t\x1b[H")
+	pipeline := a.sees(func(s string) bool { return strings.Contains(s, "– Issue") })
+	if !strings.Contains(pipeline, "review-line-79") {
+		t.Fatalf("Tab and Home scrolled Gate instead of ATM:\n%s", pipeline)
+	}
+	a.key("\t")
+	for top > 0 {
+		top = max(0, top-6)
+		a.key("\x1b[5~")
+		page(top)
+	}
+	unfolded := a.raw.String()[unfoldedFrom:]
+	if strings.Contains(unfolded, "**") || !strings.Contains(unfolded, "\x1b[1mReviewing the diff") {
+		t.Fatalf("the unfolded first line lost Markdown rendering:\n%q", unfolded)
+	}
+	a.key("\x1b[F")
+	a.sees(func(s string) bool { return strings.Contains(s, "review-line-79") })
+	if err := os.WriteFile(filepath.Join(nm, "done"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a.exits()
+}
+
+func TestRealAttachShowsGateFindingsWithoutLogLines(t *testing.T) {
+	nm := gateFake(t)
+	fixture, err := os.ReadFile(filepath.Join(nm, "review.toon"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	header, _, _ := strings.Cut(string(fixture), "lines:")
+	if err := os.WriteFile(filepath.Join(nm, "review.toon"), []byte(header+"lines: 0 total\nlog[0]{line}:\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a := liveAttach(t, 120, 40)
+	a.delivered(t.TempDir())
+	a.sees(func(s string) bool {
+		return strings.Contains(s, "▸ ⏸ review") && strings.Contains(s, `error internal/run/run.go Delivery drops the "gate", verdict and all.`)
+	})
+	a.key("\x1b[<0;45;2M\x1b[<0;45;2m")
+	a.sees(func(s string) bool { return strings.Contains(s, "▾ ⏸ review") })
+	if err := os.WriteFile(filepath.Join(nm, "done"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a.exits()
 }
 
 // With no gate run on the delivered branch, the real atm attach quits once the run ends, as it did.

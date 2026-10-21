@@ -418,11 +418,14 @@ shows `Delivery skipped` without sub-rows.
 
 Once a run ends with Delivery passed, the screen goes on with the gate: it
 asks `no-mistakes axi status`, in the run's clone, for the run of the
-delivered branch, and `no-mistakes axi logs --step` for each step it started,
+delivered branch, and `no-mistakes axi logs --step <step> --full` for each step it started,
 every second. The gate's steps get rows below Delivery in the ATM box, and
 the Gate box in the right column has a header row per started step, its log
 rendered as the Agent box renders Markdown, folded to its first line like
-thinking, and one line per finding: risk, `file:line` and its description.
+thinking, and one line per finding: severity, file and its description.
+The public findings table does not expose a source line number; the screen
+shows the supplied file without inventing a line. Tab switches between the
+ATM and Gate boxes; arrows, PageUp, PageDown, Home and End scroll the focused box.
 The screen quits when the gate's run ends, and at once when no-mistakes shows
 no run there. The run writes nothing of the gate.
 The Agent box renders the agent's Markdown prose within the panel width as

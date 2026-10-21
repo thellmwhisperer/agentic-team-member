@@ -1,0 +1,9 @@
+step: review
+run: "01M5E06NTDTW76BKYYXQ2ND5YX"
+findings[1]{id,severity,file,action,description}:
+  delivery,error,internal/run/run.go,auto-fix,"Delivery drops the \"gate\", verdict and all."
+lines: 3 total
+log[3]{line}:
+  **Reviewing the diff**
+  reading internal/run/run.go
+  checking the delivery
