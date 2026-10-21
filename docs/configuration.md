@@ -276,7 +276,7 @@ and `work.bundle` stay as they are. Retired fields in a first unit's
 label. It uses the saved original issue for its brief; it never
 re-reads the live issue. It reads `.atm.yaml` again from the base ref,
 so a fixed config committed there counts, clones the saved base commit and puts the work back.
-Its Agent row reads `resumed from <label>`, also as `resumed_from` on its unit
+Its Agent row notes `resumed from <label>`, also as `resumed_from` on its unit
 in `report.json`. If the failed row was `e2e` and the saved harness can resume
 the saved session, ATM gives that agent exactly one turn in the restored
 clone before Checks. The prompt begins:
