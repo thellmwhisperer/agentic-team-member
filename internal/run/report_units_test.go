@@ -198,7 +198,7 @@ func checkProofScreenSpans(t *testing.T, rep obj, events []obj) {
 func checkCommandScreenSpans(t *testing.T, rep obj, events []obj) {
 	t.Helper()
 	commands := rep["commands"].([]any)
-	rows := append([]obj{cloneInstallEvent(events)}, configuredCommandEvents(events)...)
+	rows := append([]obj{cloneInstallEvent(events)}, configuredCommandEvents(events, commands)...)
 	checkReportedCommandSpans(t, commands[:len(commands)-1], rows)
 	checkDeliverySpan(t, commands[len(commands)-1].(obj), events)
 }
@@ -212,10 +212,15 @@ func cloneInstallEvent(events []obj) obj {
 	return nil
 }
 
-func configuredCommandEvents(events []obj) []obj {
+// configuredCommandEvents is the screen rows of commands, not the slop detector's phases beside them.
+func configuredCommandEvents(events []obj, commands []any) []obj {
+	names := map[any]bool{}
+	for _, c := range commands {
+		names[c.(obj)["name"]] = true
+	}
 	var commandRows []obj
 	for _, ev := range events {
-		if isConfiguredCommandEvent(ev) {
+		if isConfiguredCommandEvent(ev) && names[ev["check"]] {
 			commandRows = append(commandRows, ev)
 		}
 	}

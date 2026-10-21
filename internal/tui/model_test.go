@@ -125,11 +125,12 @@ func TestScreenGivesAFailedNodeAndTheSlopCutsAFindingsBox(t *testing.T) {
 		t.Fatalf("an ended run has no footer:\n%s", s)
 	}
 	cut := `{"step":"ponytail","state":"passed","kept":true,"report":{"findings":[` +
-		`{"file":"a.go","family":"speculative_feature","finding":"dropped two lines"}]}}`
+		`{"file":"a.go","family":"speculative_feature","finding":"dropped two lines"}]},` +
+		`"verdicts":[{"file":"a.go","finding":"dropped two lines","verdict":"kept"}]}`
 	m = screen(80, 40, `{"step":"ponytail","state":"started"}`, cut)
 	m.end(run.Outcome{Outcome: "passed"}, nil)
 	if s := view(m); !order(s, "✓ passed", "✓ Slop detector", "1 cuts · passed", "– Delivery", "skipped",
-		"╭─ Findings - W 1", "W a.go · speculative_feature", "dropped two lines") {
+		"╭─ Findings - W 1", "W kept · a.go", "dropped two lines") {
 		t.Fatalf("slop cuts:\n%s", s)
 	}
 }
