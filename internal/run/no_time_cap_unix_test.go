@@ -104,10 +104,30 @@ func TestRunChecksHaveNoTimeCap(t *testing.T) {
 	t.Setenv("FAKE_AGENT_WORK", "printf 'fixed\\nextra\\nmore\\n' > a.txt"+fixTest)
 	t.Setenv("FAKE_PONYTAIL_WORK", "echo fixed > a.txt")
 	t.Setenv("FAKE_PONYTAIL_REPORT", cut)
-	cfg := atmSet(atmSet(atmYAML, "test", busy+"sh a_test.sh"), "delivery", "cat a.txt > "+delivered)
+	cfg := atmYAML + "e2e: '" + busy + "true'\n"
+	for _, name := range []string{"install", "test", "typecheck", "lint"} {
+		command := busy + "true"
+		if name == "test" {
+			command = busy + "sh a_test.sh"
+		}
+		cfg = atmSet(cfg, name, command)
+	}
+	cfg = atmSet(cfg, "delivery", "cat a.txt > "+delivered)
 	top := gitT(t, repo(t, "local", cfg+"check_timeout: 2s\n"), "rev-parse", "--show-toplevel")
 	followedRun(t, followUpsServer(t, top), top, 0, issueFile(t, issue))
 	rep := readReport(t, filepath.Join(runDir(top, lastRun(t, top, "passed")), "report.json"))
+	passed := map[string]int{}
+	for _, raw := range rep["commands"].([]any) {
+		command := raw.(obj)
+		if command["result"] == "passed" {
+			passed[command["name"].(string)]++
+		}
+	}
+	for _, name := range []string{"install", "test", "e2e", "typecheck", "lint"} {
+		if passed[name] < 2 {
+			t.Fatalf("want %s to finish in both Checks passes: %v", name, rep["commands"])
+		}
+	}
 	if reportNode(t, rep, "ponytail")["kept"] != true {
 		t.Fatalf("want the cut kept after its Checks, got %v", rep)
 	}

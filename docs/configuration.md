@@ -158,9 +158,8 @@ Checks and exports it to `test` and `e2e` only. `scripts/test.sh` does
 not create it. With no counters, `scripts/cover-diff.sh` fails in the `e2e`
 row with its no-coverage-data diagnostic. Counters remain in the run directory.
 
-ATM puts no time cap on the checks commands or the agent; a hung agent is
-stopped as [Hung agents](how-a-run-flows.md#hung-agents) says. The retired
-`check_timeout` and `agent_timeout` keys still load and limit nothing.
+The retired `check_timeout` and `agent_timeout` keys still load and limit
+nothing. See [Time limits](how-a-run-flows.md#time-limits) for run behavior.
 
 ## Commands
 
