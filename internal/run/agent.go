@@ -378,7 +378,7 @@ func ended(ctx context.Context, p *os.ProcessState) (exit, cause string) {
 
 // report is the agent's report, the last JSON object of its final message, which check accepts.
 func report(final string, check func(map[string]any) error) (map[string]any, error) {
-	r, _ := LastObject(final)
+	r, _ := lastObject(final)
 	if r == nil {
 		return nil, errors.New("agent left no report: no JSON object in its final message")
 	}
@@ -442,6 +442,7 @@ type stream struct {
 	live    func(map[string]any)
 	started func(pid int) // called once the agent runs
 	heard   heard
+	pending string
 	thought string   // cursor's thinking deltas until completed
 	failure string   // cursor's error result or pi's unrecovered model error, even when the process exits 0
 	tail    []string // the last 20 lines the agent wrote
@@ -604,6 +605,9 @@ func (s *stream) see(harness string, line []byte) {
 			}
 		}
 	}
+	if s.pending != "" {
+		s.flush(e.Type == "result" && (harness == "claude" && ends || harness == "cursor"))
+	}
 	s.reach = cmp.Or(s.reach, outside(e.calls(harness), s.clone, s.scratch))
 	s.show(e.activity(harness))
 }
@@ -643,10 +647,24 @@ func (s *stream) noteSession(line []byte) {
 	}
 }
 
-// show tells the screen evs; the screen draws a report in what the agent says as its rows.
+// show tells the screen evs, what the agent says once the stream knows whether it ends with a report.
 func (s *stream) show(evs []map[string]any) {
 	for _, ev := range evs {
-		s.live(ev)
+		if says, ok := ev["says"].(string); ok {
+			if s.pending != "" {
+				s.flush(false)
+			}
+			if _, at := lastObject(says); at < 0 {
+				s.live(ev)
+			} else {
+				s.pending = says
+			}
+		} else {
+			if s.pending != "" {
+				s.flush(false)
+			}
+			s.live(ev)
+		}
 	}
 }
 
@@ -669,6 +687,23 @@ func (s *stream) cursorState(e *event) {
 
 func (s *stream) finish() {
 	s.show(s.chunkEnd())
+	s.flush(true)
+}
+
+func (s *stream) flush(report bool) {
+	if s.pending == "" {
+		return
+	}
+	text := s.pending
+	if report && strings.HasSuffix(strings.TrimSpace(s.final), strings.TrimSpace(text)) {
+		if _, at := lastObject(text); at >= 0 {
+			text = strings.TrimSpace(text[:at])
+		}
+	}
+	s.pending = ""
+	if text != "" {
+		s.live(map[string]any{"says": text})
+	}
 }
 
 // final is the final message e ends, if it ends one; codex's is in its -o file instead.
@@ -693,8 +728,8 @@ func (e event) final(harness string) (string, bool) {
 	return "", false
 }
 
-// LastObject is the last top-level JSON object in text and where it starts, nil and -1 when there is none.
-func LastObject(text string) (map[string]any, int) {
+// lastObject is the last top-level JSON object in text and where it starts, nil and -1 when there is none.
+func lastObject(text string) (map[string]any, int) {
 	var last map[string]any
 	at := -1
 	for i := 0; i < len(text); i++ {
@@ -805,7 +840,7 @@ func (e event) blocks() (evs []map[string]any) {
 	return evs
 }
 
-// says is the agent saying text.
+// says is the agent saying text, before the stream knows whether it ends with a report.
 func says(text string) []map[string]any {
 	if text = strings.TrimSpace(text); text == "" {
 		return nil

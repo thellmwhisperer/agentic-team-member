@@ -146,6 +146,9 @@ func fakeAgentCLI(name string) int {
 	if name == "codex" {
 		_ = os.WriteFile(after(args, "-o"), []byte(text), 0o600)
 	}
+	if call == "" {
+		fmt.Print(os.Getenv("FAKE_AGENT_FINAL_STREAM"))
+	}
 	for _, ev := range map[string][]obj{
 		"claude":   {{"type": "result", "result": text}},
 		"codex":    {{"type": "item.completed", "item": obj{"type": "agent_message", "text": "not the -o file"}}},

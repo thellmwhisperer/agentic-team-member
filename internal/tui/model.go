@@ -37,21 +37,7 @@ type report struct {
 	TestFile     string   `json:"test_file"`
 	ChangedFiles []string `json:"changed_files"`
 	CommandsRun  []string `json:"commands_run"`
-	Findings     []struct{ Severity, File, Finding, Description string }
-}
-
-// said is what the agent says or thinks; the last JSON object of what it says, when it has a summary, is its report,
-// cut from what it says.
-func said(thinking, says string) *activity {
-	a := &activity{thinking: thinking, says: says}
-	obj, at := run.LastObject(says)
-	if _, ok := obj["summary"]; ok {
-		b, _ := json.Marshal(obj)
-		a.report = &report{}
-		_ = json.Unmarshal(b, a.report)
-		a.says = strings.TrimSpace(says[:at])
-	}
-	return a
+	Findings     []struct{ Severity, File, Description string }
 }
 
 // logLine is a line of the Log box: what the command check, or else node step, printed.
@@ -350,9 +336,7 @@ type event struct {
 	DurationMS                                       int64 `json:"duration_ms"`
 	Kept                                             bool
 	Agent                                            *run.AgentSettings
-	Report                                           struct {
-		Findings []struct{ File, Family, Finding string }
-	}
+	Report                                           json.RawMessage
 }
 
 // apply reads frame f, when it carries an event: a node's start or end, or what happens inside it.
@@ -369,7 +353,7 @@ func (m *Model) apply(f run.Frame) {
 	case e.ID != "" || e.Tool != "":
 		m.tool(e)
 	case e.Thinking != "" || e.Says != "":
-		m.agent = append(m.agent, said(e.Thinking, e.Says))
+		m.agent = append(m.agent, &activity{thinking: e.Thinking, says: e.Says})
 	case e.Output != nil:
 		m.appendOutput(e)
 	case m.current(e.Step) == nil:
@@ -465,13 +449,21 @@ func (m *Model) ended(e event) {
 	case "clone":
 		r.note, m.clone = e.SHA[:min(8, len(e.SHA))], e.Clone
 	case "agent":
+		var report *report
+		if json.Unmarshal(e.Report, &report) == nil && report != nil {
+			m.agent = append(m.agent, &activity{report: report})
+		}
 		r.note = fmt.Sprintf("%d tools", m.tools())
 		if e.ResumedFrom != "" { // its agent's work, picked up: no agent call
 			r.note = "resumed from " + e.ResumedFrom
 		}
 	case "ponytail":
-		r.note = map[bool]string{true: fmt.Sprintf("%d cuts", len(e.Report.Findings)), false: "no cut"}[e.Kept]
-		for _, f := range e.Report.Findings {
+		var report struct {
+			Findings []struct{ File, Family, Finding string }
+		}
+		_ = json.Unmarshal(e.Report, &report)
+		r.note = map[bool]string{true: fmt.Sprintf("%d cuts", len(report.Findings)), false: "no cut"}[e.Kept]
+		for _, f := range report.Findings {
 			if e.Kept {
 				m.findings = append(m.findings, finding{"warning", f.File + " · " + f.Family, f.Finding})
 			}
