@@ -41,9 +41,9 @@ A resumed clone still starts at its saved base commit.
 
 ## The steps
 
-A failed step stops the run before later steps, except an Agent exit with an
-error, a write outside its clone and scratch directory, or a post-agent Checks
-failure. Those wait for the launcher's answer; see [Checks](#checks).
+A failed step stops the run before later steps. An Agent exit with an error,
+a write outside its clone and scratch directory, or a Checks, slop detector or
+Delivery failure waits for the launcher's answer; see [Checks](#checks).
 
 | Step | Does | Failure condition |
 |------|------|--------------------|
@@ -159,8 +159,8 @@ calls fail without returning the report.
 ## Checks
 
 When the Agent writes outside its clone and scratch directory, its process
-exits with an error, or a post-agent check fails, the background run asks its
-launcher:
+exits with an error, or Checks, the slop detector or Delivery fails, the
+background run asks its launcher:
 
 ```sh
 atm answer <run> approve
@@ -171,16 +171,17 @@ atm answer <run> stop
 The `decision` event carries the finding, these three choices and whether the
 run is `resumable`. The clone and its work stay in place while the launcher
 decides. `approve` records the finding and approval. After an Agent failure it
-runs Checks on the current work; after a Checks failure it continues to the
+runs Checks on the current work; after a later step fails it continues to the
 next step. `fix` gives the worker one turn with the finding, reusing its session
-when supported, then runs Checks. Another Agent exit error, forbidden write
-or Checks failure asks again. `stop` ends the run and keeps its work.
+when supported, then runs Checks and the slop detector before Delivery. A new
+failure in any of these steps asks again. `stop` ends the run and keeps its work.
 See [Resuming a failed run](configuration.md#resuming-a-failed-run) for recovery
 after `stop`. Answers are recorded before the run continues; a second answer
 to the same question is rejected.
-`atm run --follow` and an attached screen return with exit 1 at the question;
-the background run remains waiting. `atm attach <run>` shows the question
-again or follows the continuation after an answer.
+`atm run --follow` and an attached screen return with the failed step's exit
+code at the question: 1 for Agent or Checks, 2 for the slop detector and 4 for
+Delivery. The background run remains waiting. `atm attach <run>` shows the
+question again or follows the continuation after an answer.
 
 The agent must not have committed. ATM records the clone's paths before the
 agent starts, including contents of ignored nested repositories. Before
@@ -222,8 +223,9 @@ Checks run the configured suite on the completed work, followed by `e2e`,
 
 ## Unit commit
 
-A unit commit uses `chore: <title>` and the body `atm unit 1` for every
-issue. ATM does not infer a release type from issue metadata.
+A unit commit uses `chore: <title>` and the body `atm unit <n>`. The first
+is unit 1; a Delivery repair can produce another commit. ATM does not infer
+a release type from issue metadata.
 
 ## Slop detector
 
@@ -262,12 +264,13 @@ an email ending in `@localhost`, fails the run.
 
 ## Delivery
 
-When `delivery` is set, the clone goes on a new branch
+When `delivery` is set, the clone goes on a branch
 `atm/<title slug>-<timestamp>`, whatever is left uncommitted is committed as
-the next unit commit, and the clone's `origin` becomes the repository's. Every
-commit after the base must carry the repository's git identity.
+the next unit commit, and the clone's `origin` becomes the repository's. A
+repair retries Delivery on the same branch after Checks and the slop detector.
+Every commit after the base must carry the repository's git identity.
 
-The command runs once with `sh -c` in the clone, without
+The command runs once per attempt with `sh -c` in the clone, without
 a time limit, with these variables:
 
 | Variable | Value |
@@ -275,18 +278,18 @@ a time limit, with these variables:
 | `ATM_TITLE` | The issue's title |
 | `ATM_ISSUE` | The issue number; empty for a file |
 | `ATM_ISSUE_TEXT` | The whole issue, title and body |
-| `ATM_INTENT` | `ATM_ISSUE_TEXT`, then, when the slop detector committed tombstones, a `## Files ATM adds` section naming them as ATM's own record, not the issue's scope |
+| `ATM_INTENT` | `ATM_ISSUE_TEXT`, then, when the slop detector committed tombstones, a `## Files ATM adds` section naming all retained tombstones as ATM's own record, not the issue's scope |
 | `ATM_BRANCH` | The branch |
 | `ATM_CLONE` | The clone's path |
 | `ATM_REPORT` | The path of `report.json` |
-| `ATM_PONYTAIL` | The kept cut's findings, one a line, or empty |
+| `ATM_PONYTAIL` | The findings of all retained cuts, one a line, or empty |
 
 The command's output goes to the screen and to `delivery-output.txt`.
 ATM executes the configured command without recognizing its name or parsing
-its output. Exit zero passes Delivery; a nonzero exit fails Delivery. The
-run ends when the command ends. Publishing, review decisions and PR tracking
+its output. Exit zero passes Delivery; a nonzero exit asks the launcher before
+the run can continue or stop. Publishing, review decisions and PR tracking
 belong to that command or its launcher. The attached screen observes the gate
-after the run ends, as described below.
+after Delivery passes and the run ends, as described below.
 
 ## Time limits
 
@@ -318,8 +321,8 @@ it is on disk before delivery reads it.
 | `units` | The unit's number (`1`), base commit, reported test file, result, `started_at` and `duration_ms` |
 | `reproofs` | Each rechecked unit's number, base commit, reported test file, result, `started_at` and `duration_ms` after a cut; configured commands are in `commands` |
 | `commands` | Every configured command that ran, the clone's `install` included, with its result, last 60 lines, `started_at` and `duration_ms` |
-| `decisions` | Each Agent exit error, forbidden write or post-agent Checks finding and the launcher's `approve`, `fix` or `stop` answer; the answer is empty while the question is pending |
-| `head_sha` | The delivered branch's final commit |
+| `decisions` | Each Agent exit error, forbidden write, Checks, slop detector or Delivery finding and the launcher's `approve`, `fix` or `stop` answer; the answer is empty while the question is pending |
+| `head_sha` | The latest commit prepared for Delivery; a repair may update it |
 | `serve` | The version of the `atm serve` process that executed the run, from `buildinfo.String()`, for example `vA (aaa1111) 2026-10-15` |
 
 The Agent and `ponytail` nodes also have `agent_model`: the first model named
