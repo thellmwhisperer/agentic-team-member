@@ -139,7 +139,9 @@ func (m *Model) footer() string {
 		gap = "\n  "
 	}
 	if m.typing {
-		return gap + map[bool]string{true: "answer", false: "fix"}[m.question() != ""] + " › " + m.text + "█"
+		prompt := map[bool]string{true: "answer", false: "fix"}[m.question() != ""] + " › "
+		text := ansi.TruncateLeft(m.text, max(0, ansi.StringWidth(m.text)-(m.width-2-ansi.StringWidth(prompt)-1)), "")
+		return gap + prompt + text + "█"
 	}
 	keys := lipgloss.NewStyle().Bold(true).Render("q") + " " + paint(dim, action)
 	if m.agentRuns() {
