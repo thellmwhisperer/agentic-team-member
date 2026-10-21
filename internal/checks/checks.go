@@ -29,8 +29,8 @@ type Tools[C any] struct {
 	Command func(name, line string, env ...string) (C, error)
 }
 
-// Run runs the configured commands on the completed work, preserving clone and test safeguards. issue, when not
-// nil, is the issue's text: a changed test file must keep its tests but those it names (decision 8087).
+// Run runs the configured commands on the completed work, preserving clone and test safeguards. A nil issue
+// disables the test-loss check during ponytail reproof; later Checks uses cuts to retain only accepted reductions.
 func Run[C any](clone, runDir, sha, base, test string, issue *string, missingReport bool, c config.Config,
 	t Tools[C], cuts ...string) (result map[string]any, err error) {
 	result = map[string]any{}

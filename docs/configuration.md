@@ -254,10 +254,11 @@ Flags go before or after the issue. A second issue is an error.
 
 A run that fails at the checks, the slop detector or the delivery keeps its
 agent's work in `.atm/runs/<label>/resume/`: `resume.json` (the issue argument
-and original issue text, the base commit, the failed unit's number, its agent
-report, the failed row, its `e2e` output, and the agent's session and
-settings) and `work.bundle` (the saved work tree and any commits since the
-original base, with new and binary files included and ignored files left out).
+and original issue text, the base commit, accepted ponytail cut commits, the
+failed unit's number, its agent report, the failed row, its `e2e` output,
+and the agent's session and settings) and `work.bundle` (the saved work tree
+and any commits since the original base, with new and binary files included
+and ignored files left out).
 Its `report.json` says `"resumable": true` and names the unit in
 `resumable_unit`. The failed row and `e2e` output come from the latest Checks
 attempt. While an answer is pending, `next_step` names `atm answer` and offers
