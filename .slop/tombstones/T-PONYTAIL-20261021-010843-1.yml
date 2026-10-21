@@ -1,0 +1,18 @@
+schema: 1
+id: T-PONYTAIL-20261021-010843-1
+status: accepted
+category: alien_code
+title: "Deleted the askError Unwrap method; nothing is replacing it. The only reader is errors.As(r.err, new(askError)), which matches the askError value directly. Every error inside an askError is a plain fmt.Errorf string, so no caller ever needs to unwrap it."
+created_at: 2026-10-21
+incident:
+  pattern: "Deleted the askError Unwrap method; nothing is replacing it. The only reader is errors.As(r.err, new(askError)), which matches the askError value directly. Every error inside an askError is a plain fmt.Errorf string, so no caller ever needs to unwrap it."
+  what_went_wrong: "A coding agent wrote it and the ponytail pass cut it before delivery."
+  root_cause: "The coding agent wrote more than the issue needed."
+  rule_established: "Cut by the ponytail pass; it does not come back."
+  evidence:
+    - family: speculative_feature
+      example: "Deleted the askError Unwrap method; nothing is replacing it. The only reader is errors.As(r.err, new(askError)), which matches the askError value directly. Every error inside an askError is a plain fmt.Errorf string, so no caller ever needs to unwrap it."
+      artifact: "internal/run/agent.go"
+match:
+  family: speculative_feature
+  artifact: "internal/run/agent.go"
