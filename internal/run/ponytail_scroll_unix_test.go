@@ -14,6 +14,7 @@ import (
 	"github.com/creack/pty"
 )
 
+//nolint:gocyclo,funlen // Keep the complete keyboard, wheel, and close checks in the real PTY scenario.
 func TestRealScreenScrollsEverySlopFinding(t *testing.T) {
 	builtATM(t)
 	for _, cols := range []uint16{100, 80} {
