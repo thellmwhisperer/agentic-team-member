@@ -109,7 +109,10 @@ printf '%s\n' '{"type":"result","result":"{\"test_file\":\"a_test.sh\"}"}'
 			t.Setenv("ATM_TEST_FAILURE", tc.event)
 			t.Setenv("ATM_TEST_FAILURE_EVENT", bashEvent("claude", "printf x > "+filepath.Join(t.TempDir(), "out"), ""))
 			bin := followUpsServer(t, top)
-			_, label := question(t, bin, top, map[string]string{"outside": "the agent reached outside its clone", "exit": "exit code 3"}[tc.name],
+			_, label := question(t, bin, top, map[string]string{
+				"outside": "the agent reached outside its clone",
+				"exit":    "exit code 3",
+			}[tc.name],
 				"run", "--follow", "--harness", "claude", issueFile(t, issue))
 			assertQuestionNextStep(t, top, label, false)
 			answerFailedCheck(t, bin, top, label, "fix", 0)
