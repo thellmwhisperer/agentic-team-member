@@ -72,6 +72,7 @@ func TestRunFailsChecksWhenATestFileLosesTests(t *testing.T) {
 			}
 			followedRun(t, bin, top, code, issueFile(t, text))
 			rep := readReport(t, filepath.Join(runDir(top, lastRun(t, top, outcome)), "report.json"))
+			t.Logf("atm report: outcome=%s failed_node=%v reason=%v", outcome, rep["failed_node"], rep["reason"])
 			if c.why != "" && (rep["failed_node"] != "checks" || !strings.Contains(rep["reason"].(string), c.why)) {
 				t.Fatalf("want Checks to fail naming %q, got %v", c.why, rep)
 			}
@@ -104,4 +105,5 @@ func TestRunLostTestsAfterDeliveryCommitAndResume(t *testing.T) {
 	if rep.FailedNode != "checks" || !strings.Contains(rep.Reason, why) || len(rep.Units) != 1 || rep.Units[0].Base != base {
 		t.Fatalf("resume lost original base or missed committed deletion: %+v", rep)
 	}
+	t.Logf("resumed atm report: failed_node=%s reason=%s original_base=%s", rep.FailedNode, rep.Reason, rep.Units[0].Base)
 }
