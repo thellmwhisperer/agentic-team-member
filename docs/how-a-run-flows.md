@@ -411,7 +411,7 @@ the ATM box, a row per step with its icon (`○`
 pending, a spinner running, `⏸` waiting, `✓` passed, `✗` failed, `–` skipped), duration and
 note, and beside it, from 100 columns, the Agent box while an agent works or
 its report remains visible during checks, the Findings box with a failure or
-the slop detector's cuts, and the Log box.
+the slop detector's findings, and the Log box.
 The ATM box's Agent row reads `Agent`; Log headers and Findings references for
 that agent retain `Agent · unit 1`.
 Above the rows, the issue's title wraps: up to three lines show whole; a
