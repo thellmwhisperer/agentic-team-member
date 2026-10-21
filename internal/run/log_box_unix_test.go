@@ -97,6 +97,85 @@ func TestRealATMLogScrollHoldsAcrossEviction(t *testing.T) {
 	}
 }
 
+func TestRealATMLogFenceContextSurvivesEviction(t *testing.T) {
+	for _, tc := range []struct {
+		name, opening, closing string
+		cols                   uint16
+	}{
+		{"backticks", "```go", "```", 120},
+		{"tildes", "~~~~text", "~~~~", 80},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := liveAttach(t, tc.cols, 40)
+			a.send(`{"step":"checks","state":"started"}`)
+			a.send(`{"step":"checks","check":"test","state":"started"}`)
+			output := func(text string) {
+				a.send(fmt.Sprintf(`{"step":"checks","check":"test","output":%q}`, text))
+			}
+			output(tc.opening)
+			for i := 1; i < 200; i++ {
+				output(fmt.Sprintf("**literal-%03d**", i))
+			}
+			a.drawn(func(s string) bool { return strings.Contains(s, "literal-199") })
+			a.key("\t")
+			a.drawn(func(s string) bool { return strings.Contains(s, "Log*") })
+			a.key("\x1b[A")
+			a.drawn(func(s string) bool { return !strings.Contains(s, "literal-199") })
+			codeRows := func() []string {
+				t.Helper()
+				styled := a.styled()
+				plain := ansi.Strip(styled)
+				literals := regexp.MustCompile(`literal-\d+`).FindAllString(plain, -1)
+				code := regexp.MustCompile("\x1b\\[33m"+`\*\*literal-\d+\*\*`).FindAllString(styled, -1)
+				if len(literals) == 0 || len(code) != len(literals) {
+					t.Fatalf("fenced output must keep literal asterisks and code styling:\n%q", styled)
+				}
+				return code
+			}
+			held := codeRows()
+			for i := 200; i < 250; i++ {
+				output(fmt.Sprintf("**literal-%03d**", i))
+			}
+			a.send(`{"step":"checks","check":"appended","state":"started"}`)
+			a.drawn(func(s string) bool { return strings.Contains(s, "appended") })
+			if got := codeRows(); !slices.Equal(got, held) {
+				t.Fatalf("eviction changed retained text or styling: before %q; after %q", held, got)
+			}
+			a.send(`{"step":"checks","check":"test","state":"passed"}`)
+			s := a.drawn(func(s string) bool { return strings.Contains(s, "▸ ") && strings.Contains(s, "literal-050") })
+			if got := codeRows(); len(got) != 1 {
+				t.Fatalf("folded Log must show one literal code preview: %q", got)
+			}
+			a.click(rowOf(s, "▸ "))
+			a.drawn(func(s string) bool { return strings.Contains(s, "literal-249") })
+			codeRows()
+			a.key("\x1b[H")
+			a.drawn(func(s string) bool { return strings.Contains(s, "▾ ") && strings.Contains(s, "literal-050") })
+			codeRows()
+			a.key("\x1b[F")
+			a.drawn(func(s string) bool { return strings.Contains(s, "literal-249") })
+			codeRows()
+			for _, wrong := range []string{"~~~", "``", tc.closing + "info"} {
+				output(wrong)
+			}
+			output("**literal-250**")
+			a.drawn(func(s string) bool { return strings.Contains(s, "literal-250") })
+			codeRows()
+			output(tc.closing)
+			output("**after fence**")
+			a.drawn(func(s string) bool { return strings.Contains(s, "after fence") })
+			if !strings.Contains(a.styled(), "\x1b[1mafter fence") || strings.Contains(ansi.Strip(a.styled()), "**after fence**") {
+				t.Fatalf("closing the retained fence must restore Markdown:\n%q", a.styled())
+			}
+			output(tc.opening)
+			a.send(`{"step":"checks","check":"next","state":"started"}`)
+			a.send(`{"step":"checks","check":"next","output":"**Running tests**"}`)
+			a.boldRow(a.drawn(func(s string) bool { return strings.Contains(s, "Running tests") }), "│ ", "the next command")
+			a.end()
+		})
+	}
+}
+
 var stackedLog = regexp.MustCompile(`(?m)^╭─ Log\* `)
 
 // The real atm run on a terminal: the folded thinking row of the Agent box and the folded header of the Log box
