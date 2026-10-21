@@ -142,7 +142,33 @@ func lost(git func(dir string, args ...string) (string, error), clone, base, iss
 	return err
 }
 
-var removal = regexp.MustCompile("(?im)(?:^[ \t]*(?:[-*][ \t]+)?|[.!?][ \t]+|[ \t]+and[ \t]+)(?:remove|delete)[ \t]+(?:the[ \t]+)?(?:(?:test|subtest)[ \t]+)?(?:`([^`]+)`|\"([^\"]+)\"|([[:alnum:]_/-]+))([.!](?:[ \t]|$)|[ \t]*$)")
+var removal = regexp.MustCompile("(?im)(?:^[ \t]*(?:[-*][ \t]+)?|[.!?][ \t]+|[ \t]+and[ \t]+)" +
+	"(?:remove|delete)[ \t]+(?:the[ \t]+)?(?:(?:test|subtest)[ \t]+)?" +
+	"(?:`([^`]+)`|\"([^\"]+)\"|([[:alnum:]_/-]+))([.!](?:[ \t]|$)|[ \t]*$)")
+
+func testIdentity(node ast.Node) (string, ast.Node) {
+	switch v := node.(type) {
+	case *ast.FuncDecl:
+		if v.Recv == nil && v.Body != nil && strings.HasPrefix(v.Name.Name, "Test") {
+			return v.Name.Name, v.Body
+		}
+	case *ast.CallExpr:
+		sel, ok := v.Fun.(*ast.SelectorExpr)
+		if !ok || sel.Sel.Name != "Run" || len(v.Args) != 2 {
+			break
+		}
+		receiver, ok := sel.X.(*ast.Ident)
+		if !ok || receiver.Name != "t" {
+			break
+		}
+		name := ""
+		if literal, ok := v.Args[0].(*ast.BasicLit); ok && literal.Kind == token.STRING {
+			name, _ = strconv.Unquote(literal.Value)
+		}
+		return name, v.Args[1]
+	}
+	return "", nil
+}
 
 func countTests(text string, removed map[string]bool) (int, error) {
 	f, err := parser.ParseFile(token.NewFileSet(), "", text, 0)
@@ -153,22 +179,7 @@ func countTests(text string, removed map[string]bool) (int, error) {
 	var walk func(ast.Node, string)
 	walk = func(root ast.Node, parent string) {
 		ast.Inspect(root, func(node ast.Node) bool {
-			name, body := "", ast.Node(nil)
-			switch v := node.(type) {
-			case *ast.FuncDecl:
-				if v.Recv == nil && v.Body != nil && strings.HasPrefix(v.Name.Name, "Test") {
-					name, body = v.Name.Name, v.Body
-				}
-			case *ast.CallExpr:
-				if sel, ok := v.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "Run" {
-					if receiver, ok := sel.X.(*ast.Ident); ok && receiver.Name == "t" && len(v.Args) == 2 {
-						body = v.Args[1]
-						if literal, ok := v.Args[0].(*ast.BasicLit); ok && literal.Kind == token.STRING {
-							name, _ = strconv.Unquote(literal.Value)
-						}
-					}
-				}
-			}
+			name, body := testIdentity(node)
 			if body == nil {
 				return true
 			}
