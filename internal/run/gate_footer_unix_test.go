@@ -184,3 +184,33 @@ func TestRealAttachFooterKeepsNavigation(t *testing.T) {
 		})
 	}
 }
+
+func TestRealAttachFooterAnswersStatusQuestions(t *testing.T) {
+	nm := gateFake(t)
+	if err := os.WriteFile(filepath.Join(nm, "status.toon"), []byte(`gate:
+  step: review
+  findings[3]{id,severity,file,action,description}:
+    delivery,error,internal/run/run.go,auto-fix,Status copy
+    question-q1,warning,,ask,Keep the old name?
+    question-q2,warning,,ask,Keep the old layout?
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a := liveAttach(t, 200, 40)
+	a.delivered(t.TempDir())
+	s := a.sees(func(s string) bool {
+		return strings.Contains(s, "question-q1") && strings.Contains(s, "question-q2") && strings.Contains(s, "enter answer")
+	})
+	if strings.Count(s, "delivery error internal/run/run.go") != 1 || strings.Contains(s, "Status copy") {
+		t.Fatalf("status must preserve log findings without duplicating IDs: %s", s)
+	}
+	a.key("\x1b[<0;60;2M\x1b[<0;60;2m")
+	a.sees(func(s string) bool { return strings.Contains(s, "▾ ⏸ review") })
+	a.footer("answer › keep name█", "\r", "keep name")
+	a.answers(`\{axi\}\{answer\}\{--question\}\{question-q1\}\{--answer\}\{keep name\} `, "\r")
+	a.footer("answer › keep layout█", "\r", "keep layout")
+	a.answers(`\{axi\}\{answer\}\{--question\}\{question-q2\}\{--answer\}\{keep layout\} `, "\r")
+	a.sees(func(s string) bool { return !strings.Contains(s, "enter answer") && !strings.Contains(s, "a approve") })
+	a.key("q")
+	a.exits()
+}

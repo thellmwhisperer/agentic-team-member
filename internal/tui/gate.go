@@ -47,6 +47,13 @@ func askGate(clone string) tea.Msg {
 			}
 			step.findings = tables["findings"]
 		}
+		if step.name == run["gate.step"] {
+			for _, f := range tables["gate.findings"] {
+				if !slices.ContainsFunc(step.findings, func(shown map[string]string) bool { return shown["id"] == f["id"] }) {
+					step.findings = append(step.findings, f)
+				}
+			}
+		}
 		g.steps = append(g.steps, step)
 	}
 	return g

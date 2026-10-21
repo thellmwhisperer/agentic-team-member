@@ -31,7 +31,8 @@ case "$*" in
 	[ ! -f "$FAKE_NM/done" ] || run=completed step=completed
 	printf 'run:\n  id: "01M5D0SWRMZ44NM79H2NNC3YZ8"\n  branch: atm/the-unit\n  status: %s\n' "$run"
 	printf '  steps[3]{step,status,findings,duration_ms}:\n'
-	printf '    review,%s,1,1200\n    test,pending,0,0\n    lint,skipped,0,0\n' "$step" ;;
+	printf '    review,%s,1,1200\n    test,pending,0,0\n    lint,skipped,0,0\n' "$step"
+	[ ! -f "$FAKE_NM/status.toon" ] || cat "$FAKE_NM/status.toon" ;;
 "axi logs --step review --full")
 	cat "$FAKE_NM/review.toon" ;;
 "axi respond "*|"axi answer "*|"axi abort")
