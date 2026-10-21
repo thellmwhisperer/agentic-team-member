@@ -40,6 +40,9 @@ func TestRealATMLogHeaderAndFoldWithThirtyCheckLines(t *testing.T) {
 	live.send(`{"step":"agent","output":"**Running tests**"}`)
 	live.boldRow(live.drawn(func(s string) bool { return regexp.MustCompile(`▾ \S Agent · unit 1`).MatchString(s) }),
 		"│   ", "the agent's output")
+	live.send(`{"step":"agent","says":"**Running tests**"}`)
+	live.boldRow(live.drawn(func(s string) bool { return strings.Contains(s, "✎ Running tests") }),
+		"✎ ", "the agent's speech")
 	live.end()
 }
 
