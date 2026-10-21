@@ -17,7 +17,8 @@ import (
 )
 
 // runCmd hands the run to the repository's background process, so closing the terminal leaves it going.
-// Without --follow, a terminal shows the run's screen until the run ends or the user closes it.
+// Without --follow, a terminal shows the screen until the run ends, or after passed Delivery until the gate ends,
+// unless the user closes it first.
 func runCmd() *cobra.Command {
 	c := &cobra.Command{Use: "run", Short: "Fix an issue: " + run.Usage,
 		Long: "Without --follow, on a terminal the screen shows until the run ends or q or Ctrl+C.\n" +
@@ -59,7 +60,8 @@ func screen(w io.Writer) (*os.File, bool) {
 	return f, ok && terminal(f) && os.Getenv("NO_COLOR") == "" && os.Getenv("TERM") != "dumb"
 }
 
-// attach shows run label's screen on w until the run ends or the user closes it and returns how it ended.
+// attach shows run label's screen on w until the run ends, or after passed Delivery until the gate ends,
+// unless the user closes it first, and returns how the run ended.
 // Leaving leaves it going.
 func attach(root, label string, w io.Writer) error {
 	f, ok := screen(w)

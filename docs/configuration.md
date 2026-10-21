@@ -55,10 +55,10 @@ model: claude-opus-5-5
 effort: high
 ```
 
-ATM opens no terminal tab or split and reports to no terminal multiplexer: a
-tab per run, a split for the delivery and agent reporting are the launcher's
-job, outside ATM. The screen quits when its run ends, so a pane whose root
-process is `exec atm attach <run>` exits with the run.
+ATM opens no terminal tab or split and reports to no terminal multiplexer;
+the launcher owns any tab or pane management. A pane whose root process is
+`exec atm attach <run>` exits when [the screen](how-a-run-flows.md#the-screen)
+closes.
 
 ### Cursor
 
@@ -176,9 +176,9 @@ Run repository commands from inside the repository they work on.
 | `atm init` | Writes a commented `.atm.yaml` with every required key empty and no `e2e` key, unless `.atm.yaml` is already there, and adds `/.atm/` to `.gitignore` unless it is there. Run twice, it changes nothing |
 | `atm doctor [--agent]` | Checks git, the configured agent CLI on `PATH`, `gh` when `origin` is on GitHub, `.atm.yaml`. One `ok` or `fail` line per prerequisite; every check runs, and any prerequisite failure exits non-zero. It also reports the advisory [skill status](#skill). Its last line says `run atm doctor --agent to say hello to <harness>`: it makes no model call. With `--agent` it says hello instead, see [saying hello to the agent](#saying-hello-to-the-agent) |
 | `atm skill`, `atm skill install [--dir <path>] [--force]` | See [Skill](#skill) |
-| `atm run [flags] <issue>` | Starts a run. On a terminal it shows the run's screen until the run ends or q or Ctrl+C, then exits with the run's code; off one it prints the run's label and returns. See [resuming a failed run](#resuming-a-failed-run) |
+| `atm run [flags] <issue>` | Starts a run. On a terminal it shows [the screen](how-a-run-flows.md#the-screen), then exits with the run's code; off one it prints the run's label and returns. See [resuming a failed run](#resuming-a-failed-run) |
 | `atm status [--json]` | Each run going; text shows label, step, duration, agent and issue, or `nothing runs` |
-| `atm attach [run]` | The run's screen, the last one going by default; it quits when the run ends, or after Delivery when the gate's run ends, or on q or Ctrl+C |
+| `atm attach [run]` | The last run going by default; see [the screen](how-a-run-flows.md#the-screen) |
 | `atm runs [--json]` | Retained runs; text shows label, `running`, `passed` or `failed at <step>`, duration, agent, issue, report when present, and `serve` last |
 | `atm axi run [--json] [flags] <issue>` | Waits for the run to end, prints its outcome and exits with its code |
 | `atm axi status [--json]`, `atm axi runs [--json]` | The runs going, or retained runs, as a table |

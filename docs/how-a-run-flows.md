@@ -426,8 +426,8 @@ thinking, and one line per finding: severity, file and its description.
 The public findings table does not expose a source line number; the screen
 shows the supplied file without inventing a line. Tab switches between the
 ATM and Gate boxes; arrows, PageUp, PageDown, Home and End scroll the focused box.
-The screen quits when the gate's run ends, and at once when no-mistakes shows
-no run there. The run writes nothing of the gate.
+The run writes nothing of the gate.
+
 The Agent box renders the agent's Markdown prose within the panel width as
 `✎` lines; non-empty thinking appears as `∴` lines. By default, consecutive
 successful or running tool calls are folded into one dim line below them,
@@ -456,26 +456,29 @@ or `t hide tool use`, and `h show thinking` or `h hide thinking`, beside
 `q detach` while the Agent box is visible. Fold choices are not saved across
 attaches.
 
-The ATM box and the Agent box each keep every line. The Log box keeps up to
-200 output events from the current step. All three boxes scroll on their own.
+The ATM, Agent and Gate boxes each keep every line. The Log box keeps up to
+200 output events from the current step. All boxes scroll on their own.
 The mouse wheel scrolls the box under the pointer. The keys scroll the box
-with the `*` marker in its title: the Agent box while it shows, then the Log
-box and the ATM box on successive `Tab` presses. `↑` and `↓` move by a line,
-`PgUp` and `PgDn` by a page, and `Home` and `End` go to the first and the last
-lines. A box scrolled above its last line stays where it is as new lines come
-while those lines remain available; back at its last line it follows them
-again. Folding or unfolding preserves the reading position; a call hidden by
-folding anchors to its group header. Stacked under 100 columns, the ATM box
-takes at most two thirds of the space left after the footer and panel gap.
+with the `*` marker in its title. `Tab` cycles through the visible boxes:
+ATM, Agent and Log while the agent runs, or ATM and Gate after Delivery.
+`↑` and `↓` move by a line, `PgUp` and `PgDn` by a page, and `Home` and `End`
+go to the first and the last lines. A box scrolled above its last line stays
+where it is as new lines come while those lines remain available; back at its
+last line it follows them again. Folding or unfolding preserves the reading
+position; a call hidden by folding anchors to its group header. Stacked under
+100 columns, the ATM box takes at most two thirds of the space left after the
+footer and panel gap.
 On Linux and macOS, and on Windows through WSL, ATM keeps its screen live
 while the delivery command is silent. From the command's first output until
 it ends, ATM gives it the attached terminal
 and its keys. The delivery command can draw its own screen and receive
 input there. ATM's screen comes back when the command ends, showing the
 Delivery result and duration.
-When the run ends, the ATM screen quits and leaves its last view on the
-terminal; `q` or Ctrl+C closes it before. Off-terminal output also returns
-when the run ends.
+On a terminal, the screen quits when the run ends unless Delivery passed and
+no-mistakes finds a gate run in the clone; then it quits when the gate ends.
+If no gate run is found or the query fails, it quits at once. It leaves its
+last view on the terminal; `q` or Ctrl+C closes it before. Off-terminal output
+returns when the ATM run ends.
 
 Off a terminal, or with `NO_COLOR` or `TERM=dumb`, the screen is plain lines:
 one per step start and end, then the delivery's output and the summary. Every

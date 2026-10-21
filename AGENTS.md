@@ -5,8 +5,8 @@ decision, the newer one wins and the old rule is removed.
 
 ## Non-negotiable
 
-- The binary knows nothing about the gate or the terminal it runs in.
-  Conveniences for one setup live in scripts outside it.
+- The ATM run writes no gate events or report fields; only the attach screen
+  reads the gate. Conveniences for one setup live in scripts outside the binary.
 - Every decision ATM takes is written to the run, not only to the screen.
 - A changed line that no real `atm` end-to-end test executes fails. There are
   two ways out, in this order: delete the line, or write the end-to-end test
