@@ -289,9 +289,8 @@ func (m *Model) sidebar() bool {
 }
 
 // right is, at width in height rows, the Gate box once the gate after Delivery shows its run, else the Agent
-// box while an agent runs, else the Findings box when there are
-// findings, then the Log box while a node runs; "" for none. The Agent box takes every row the Log box, shown
-// with the agent's output, at most a third of them, leaves. The Log box is the last box.
+// box while an agent runs or its report remains visible, else the Findings box when there are findings, then
+// the Log box while a node runs; "" for none. The Agent box takes the space left above the Log box.
 func (m *Model) right(width, height int) string {
 	m.logBounds = bounds{}
 	top := ""
@@ -548,8 +547,8 @@ func agentTextRows(prefix, text string, width int, code codeFence) ([]string, []
 	return rows, sources, code
 }
 
-// agentBox is what the agent says and thinks, and the tool calls between two of those, in lines rows ending with
-// its latest. What it says wraps in full; what it thinks and the tool calls fold to one row until opened.
+// agentBox shows what the agent says and thinks, its tool calls and final report, ending with the latest activity.
+// What it says wraps in full; what it thinks and the tool calls fold to one row until opened.
 func (m *Model) agentBox(width, lines int) string {
 	var out []paneLine
 	var calls []*activity
