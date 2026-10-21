@@ -362,8 +362,6 @@ func ended(ctx context.Context, p *os.ProcessState) (exit, cause string) {
 	switch {
 	case errors.Is(context.Cause(ctx), errHung):
 		exit = "hung: no output and no child process working for " + hangAfter
-	case errors.Is(context.Cause(ctx), errActivity):
-		exit = context.Cause(ctx).Error()
 	case ctx.Err() != nil:
 		exit = "interrupted"
 	case p == nil:

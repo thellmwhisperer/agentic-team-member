@@ -87,7 +87,6 @@ func detach(cmd *exec.Cmd) {
 var hangAfter = "10m"
 
 var errHung = errors.New("hung")
-var errActivity = errors.New("observe agent activity")
 
 // watchHang cancels ctx with errHung once, for hangAfter, the agent pid has written no byte to stdout or stderr
 // (out) and no descendant of it has started, ended, used CPU time or transferred bytes.
@@ -103,11 +102,7 @@ func watchHang(ctx context.Context, cancel context.CancelCauseFunc, pid int, out
 		case <-tick.C:
 		}
 		activity, err := working(pid)
-		if err != nil {
-			cancel(fmt.Errorf("%w: %w", errActivity, err))
-			return
-		}
-		if now := fmt.Sprint(atomic.LoadInt64((*int64)(out)), activity); now != was {
+		if now := fmt.Sprint(atomic.LoadInt64((*int64)(out)), activity); err != nil || now != was {
 			was, quiet = now, time.Now()
 		} else if time.Since(quiet) >= limit {
 			cancel(errHung)
@@ -118,26 +113,23 @@ func watchHang(ctx context.Context, cancel context.CancelCauseFunc, pid int, out
 
 func working(pid int) (string, error) {
 	out, err := exec.Command("ps", "-A", "-o", "pid=,ppid=").Output()
-	if err != nil {
-		return "", err
-	}
 	tree, activity := map[int]bool{pid: true}, map[int]string{}
 	for grew := true; grew; {
 		grew = false
 		for line := range strings.Lines(string(out)) {
 			var p, parent int
-			if _, err := fmt.Sscan(line, &p, &parent); err == nil && tree[parent] && !tree[p] {
+			if _, scanErr := fmt.Sscan(line, &p, &parent); scanErr == nil && tree[parent] && !tree[p] {
 				tree[p], grew = true, true
-				value, err := processActivity(p)
-				if errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ESRCH) {
+				value, sampleErr := processActivity(p)
+				if value == "" && (errors.Is(sampleErr, os.ErrNotExist) || errors.Is(sampleErr, syscall.ESRCH)) {
 					continue
 				}
-				if err != nil {
-					return "", fmt.Errorf("pid %d: %w", p, err)
+				if sampleErr != nil {
+					err = sampleErr
 				}
 				activity[p] = value
 			}
 		}
 	}
-	return fmt.Sprint(activity), nil
+	return fmt.Sprint(activity), err
 }

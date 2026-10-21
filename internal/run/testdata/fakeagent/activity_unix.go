@@ -20,7 +20,7 @@ func quietWork(mode, receipt string) error {
 	start := time.Now()
 	var transferred int
 	for range 25 {
-		if mode == "cpu" {
+		if mode == "cpu" || mode == "private" {
 			for end := time.Now().Add(5 * time.Millisecond); time.Now().Before(end); {
 			}
 		} else {
