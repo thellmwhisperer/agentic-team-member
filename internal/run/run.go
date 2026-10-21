@@ -202,8 +202,13 @@ func (a agent) unit(r *verdict, root, dir, sha, text string, c config.Config, ke
 		failed := r.FailedNode
 		answer := a.checkDecision(r)
 		if answer == "fix" {
-			if failed == "delivery" && r.HeadSHA != "" {
-				checkHead = r.HeadSHA
+			if failed == "delivery" {
+				checkHead, r.err = git(dir, "--git-dir=.git", "rev-parse", "--verify", "HEAD^{commit}")
+				if r.err != nil {
+					r.FailedNode, r.Reason = failed, r.err.Error()
+					r.emit(failed, map[string]any{"state": "failed", "error": r.Reason})
+					break
+				}
 			}
 			if next := a.fixCheck(r, dir, text, &keep); next != nil {
 				report = next
