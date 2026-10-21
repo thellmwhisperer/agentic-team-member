@@ -22,8 +22,8 @@ import (
 
 // checks runs Checks on the completed work in clone with what it shares with the run's other steps, issue as
 // chk.Run takes it.
-func checks(clone, runDir, sha, base, test string, issue *string, missingReport bool, c config.Config) (map[string]any,
-	error) {
+func checks(clone, runDir, sha, base, test string, issue *string, missingReport bool, c config.Config,
+	cuts ...string) (map[string]any, error) {
 	live := liveIn(clone)
 	return chk.Run(clone, runDir, sha, base, test, issue, missingReport, c, chk.Tools[cmdResult]{
 		Git: git, Moved: moved, Unmade: unmade, ReadTest: readTest,
@@ -34,7 +34,7 @@ func checks(clone, runDir, sha, base, test string, issue *string, missingReport 
 				return err
 			})
 			return cmdResult{name, line, outcome(err), tail, s}, wrap(err, name)
-		}})
+		}}, cuts...)
 }
 
 // readTest confines every report and saved-history test read to the clone, including symlinks.

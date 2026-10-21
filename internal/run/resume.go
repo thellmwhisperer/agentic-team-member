@@ -16,6 +16,7 @@ import (
 // --resume: its issue, as given and as first read, base ref and base commit, the unit it failed at with its
 // agent's report, and work.bundle: the unit's work as one commit on the base.
 type resumePoint struct {
+	Cuts      []string       `json:"cuts,omitempty"`
 	Issue     string         `json:"issue"`
 	Original  *Issue         `json:"original"`
 	BaseRef   string         `json:"base_ref"`

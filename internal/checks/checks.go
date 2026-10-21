@@ -31,7 +31,7 @@ type Tools[C any] struct {
 // Run runs the configured commands on the completed work, preserving clone and test safeguards. issue, when not
 // nil, is the issue's text: a changed test file must keep its tests but those it names (decision 8087).
 func Run[C any](clone, runDir, sha, base, test string, issue *string, missingReport bool, c config.Config,
-	t Tools[C]) (result map[string]any, err error) {
+	t Tools[C], cuts ...string) (result map[string]any, err error) {
 	result = map[string]any{}
 	cover, err := coverageEnv(runDir, c.E2E)
 	var ran []C
@@ -63,7 +63,7 @@ func Run[C any](clone, runDir, sha, base, test string, issue *string, missingRep
 	if err != nil {
 		return result, err
 	}
-	if err = checkChanges(t.Git, clone, base, issue, c.TestPatterns, missingReport); err == nil && test != "" {
+	if err = checkChanges(t.Git, clone, base, issue, c.TestPatterns, missingReport, cuts); err == nil && test != "" {
 		_, err = t.ReadTest(clone, test)
 	}
 	if err != nil {
@@ -81,7 +81,7 @@ func Run[C any](clone, runDir, sha, base, test string, issue *string, missingRep
 // checkChanges rejects empty work when there is no report and, when issue is not nil, a changed test file that
 // loses tests.
 func checkChanges(git func(dir string, args ...string) (string, error), clone, base string, issue *string,
-	tests []string, missingReport bool) error {
+	tests []string, missingReport bool, cuts []string) error {
 	_, err := git(clone, "add", "-A")
 	if err == nil {
 		var out string
@@ -90,7 +90,7 @@ func checkChanges(git func(dir string, args ...string) (string, error), clone, b
 			err = errors.New("no change to prove")
 		}
 		if err == nil && issue != nil && len(tests) > 0 {
-			err = lost(git, clone, base, *issue, tests)
+			err = lost(git, clone, base, *issue, tests, cuts)
 		}
 		_, resetErr := git(clone, "reset", "-q")
 		err = errors.Join(err, resetErr)
@@ -98,12 +98,7 @@ func checkChanges(git func(dir string, args ...string) (string, error), clone, b
 	return err
 }
 
-func lost(git func(dir string, args ...string) (string, error), clone, base, issue string, tests []string) error {
-	spec := []string{"diff", "--cached", "--name-status", "-M", "-z", base, "--"}
-	for _, g := range tests {
-		spec = append(spec, ":(glob)"+g)
-	}
-	out, err := git(clone, spec...)
+func lost(git func(dir string, args ...string) (string, error), clone, base, issue string, tests, cuts []string) error {
 	removed := map[string]bool{}
 	for text := issue; ; {
 		m := removal.FindStringSubmatchIndex(text)
@@ -117,6 +112,40 @@ func lost(git func(dir string, args ...string) (string, error), clone, base, iss
 		}
 		text = text[m[8]:]
 	}
+	current, err := inventories(git, clone, base, "", tests, removed)
+	allowed := map[string]int{}
+	for _, cut := range cuts {
+		before, beforeErr := inventories(git, clone, base, cut+"^", tests, removed)
+		after, afterErr := inventories(git, clone, base, cut, tests, removed)
+		err = errors.Join(err, beforeErr, afterErr)
+		for file, counts := range after {
+			prior := counts[0]
+			if pair, ok := before[file]; ok {
+				prior = pair[1]
+			}
+			allowed[file] += max(0, min(counts[0]-allowed[file], prior)-counts[1])
+		}
+	}
+	for file, counts := range current {
+		if before := counts[0] - allowed[file]; err == nil && counts[1] < before {
+			err = fmt.Errorf("the test file %s loses tests: %d before, %d after", file, before, counts[1])
+		}
+	}
+	return err
+}
+
+func inventories(git func(dir string, args ...string) (string, error), clone, base, rev string,
+	tests []string, removed map[string]bool) (map[string][2]int, error) {
+	arg := rev
+	if arg == "" {
+		arg = "--cached"
+	}
+	spec := []string{"diff", "--name-status", "-M", "-z", base, arg, "--"}
+	for _, g := range tests {
+		spec = append(spec, ":(glob)"+g)
+	}
+	out, err := git(clone, spec...)
+	counts := map[string][2]int{}
 	count := func(rev, path string, absent bool) (int, error) {
 		if absent || filepath.Ext(path) != ".go" {
 			return 0, nil
@@ -131,15 +160,13 @@ func lost(git func(dir string, args ...string) (string, error), clone, base, iss
 			is, f = f[2], f[1:]
 		}
 		before, beforeErr := count(base, was, f[0] == "A")
-		after, afterErr := count("", is, f[0] == "D")
+		after, afterErr := count(rev, is, f[0] == "D")
 		if err = errors.Join(beforeErr, afterErr); err != nil {
-			return fmt.Errorf("count tests in %s: %w", was, err)
+			return counts, fmt.Errorf("count tests in %s: %w", was, err)
 		}
-		if after < before {
-			err = fmt.Errorf("the test file %s loses tests: %d before, %d after", was, before, after)
-		}
+		counts[was] = [2]int{before, after}
 	}
-	return err
+	return counts, err
 }
 
 var removal = regexp.MustCompile("(?im)(?:^[ \t]*(?:[-*][ \t]+)?|[.!?][ \t]+|[ \t]+and[ \t]+)" +
