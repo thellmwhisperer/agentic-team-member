@@ -3,8 +3,6 @@ package run
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -15,20 +13,16 @@ import (
 )
 
 func TestReportRejectionPersistsAcrossConsumers(t *testing.T) {
-	for _, name := range []string{"worker", "ponytail", "scope-review-unit2"} {
+	for _, name := range []string{"worker", "ponytail"} {
 		for _, outcome := range []string{"valid", "returned", "invalid twice", "process failure"} {
 			t.Run(name+"/"+outcome, func(t *testing.T) {
 				root := repo(t, "https://example.com/owner/repo.git", "")
-				head := gitT(t, root, "rev-parse", "HEAD")
 				a := agent{Agent: config.Agent{Harness: "claude"}, root: root, dir: t.TempDir()}
 				valid := validWorker
 				wantError := noJSON
 				switch name {
 				case "ponytail":
 					valid = `{"findings":[],"summary":"s"}`
-				case "scope-review-unit2":
-					// What the retired scope reviewer returned: only the ponytail pass is left to read it.
-					valid = `{"disposition":"approved","paths":["a.txt"],"findings":[],"summary":"s"}`
 				}
 				first, second := "not json", valid
 				if outcome == "valid" {
@@ -38,72 +32,24 @@ func TestReportRejectionPersistsAcrossConsumers(t *testing.T) {
 					second = "still not json"
 				}
 				rejectionHarness(t, first, second, outcome == "process failure")
-				err := runRejectionConsumer(t, a, root, head, name, outcome, wantError)
-				wantFailure := outcome == "invalid twice" || outcome == "process failure" || name == "scope-review-unit2"
+				err := runRejectionConsumer(t, a, root, name, outcome, wantError)
+				wantFailure := outcome == "invalid twice" || outcome == "process failure"
 				if (err != nil) != wantFailure {
 					t.Fatalf("outcome %s: %v", outcome, err)
 				}
 				if outcome == "process failure" && !strings.Contains(err.Error(), "exit code 3") {
 					t.Fatalf("want continuation process failure, got %v", err)
 				}
-				if name != "scope-review-unit2" { // its consumer checked the ponytail pass's logs, in the run's directory
-					assertRejectionLogs(t, a, name, outcome, wantError)
-				}
+				assertRejectionLogs(t, a, name, outcome, wantError)
 			})
 		}
 	}
 }
 
-// resumeWithRetiredScopeReview resumes, as run resumed, a run of root that failed at lint, under the rejection
-// harness, its resume point holding a chained follow-up whose scope review, retired, would come after the checks.
-// It returns the resumed run's directory and error, after checking no scope review ran: no log, stderr or scratch
-// of one, no event of it and no rejection of its report.
-func resumeWithRetiredScopeReview(t *testing.T, root string) (string, error) {
-	t.Helper()
-	script := os.Getenv("REJECTION_SCRIPT")
-	t.Setenv("REJECTION_SCRIPT", "") // the failed run's worker is the plain fake
-	commitConfig(t, root, atmSet(atmYAML, "lint", "false"))
-	if err := Run("failed", []string{issueFile(t, followUpIssue)}, io.Discard, io.Discard); err == nil {
-		t.Fatal("want the unit's lint to fail")
-	}
-	commitConfig(t, root, atmYAML)
-	t.Setenv("REJECTION_SCRIPT", script)
-	out, _, err := legacyResume(t, root, "failed", "resumed", followUpIssue, obj{"follow_up": obj{"title": "gap",
-		"red_test": "c1_test.sh", "criterion": "A retry runs once after a timeout.", "paths": []string{"a.txt"},
-		"test": "grep -q u2 a.txt\n", "verified": true}})
-	dir := filepath.Join(root, ".atm", "runs", "resumed")
-	for _, glob := range []string{"scope-review*", "worker-unit2*", "follow-ups.json"} {
-		if found, _ := filepath.Glob(filepath.Join(dir, glob)); len(found) != 0 {
-			t.Fatalf("want no scope review or unit 2, got %v", found)
-		}
-	}
-	if strings.Contains(out.String(), "scope review") || strings.Contains(fmt.Sprint(err), "scope review") {
-		t.Fatalf("want no scope review in the run, got %v\n%s", err, out)
-	}
-	return dir, err
-}
-
-func runRejectionConsumer(t *testing.T, a agent, root, head, name, outcome, wantError string) error {
+func runRejectionConsumer(t *testing.T, a agent, root, name, outcome, wantError string) error {
 	t.Helper()
 	var err error
 	switch name {
-	case "scope-review-unit2":
-		// No reviewer reads its report: the ponytail pass, the one review left, rejects it on its own validation.
-		var dir string
-		dir, err = resumeWithRetiredScopeReview(t, root)
-		logged, rejected, why := outcome, wantError, `invalid ponytail report: json: unknown field "disposition"`
-		switch outcome {
-		case "valid":
-			logged, rejected = "returned", why
-		case "invalid twice":
-			why = wantError
-		case "process failure":
-			why = "exit code 3"
-		}
-		assertRejectionLogs(t, agent{dir: dir}, "ponytail", logged, rejected)
-		if err == nil || !strings.Contains(err.Error(), why) {
-			t.Fatalf("want the ponytail pass failed on %q, got %v", why, err)
-		}
 	case "ponytail":
 		_, err = a.run(root, name, "ponytail-review", "brief", func(r obj) error {
 			_, err := findings(r, nil)

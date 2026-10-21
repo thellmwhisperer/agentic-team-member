@@ -639,13 +639,8 @@ func appendToolGroup(m *Model, out []paneLine, calls []*activity) []paneLine {
 // callLine is call a on one row: its state's icon and word, its tool, its detail and, after " · ", the first line
 // of its output, without terminal controls.
 func (m *Model) callLine(a *activity, run string) paneLine {
-	state, word := "running", "running"
-	switch a.result {
-	case "passed":
-		state, word = "passed", "ok"
-	case "failed":
-		state, word = "failed", "failed"
-	}
+	state := cmp.Or(map[string]string{"passed": "passed", "failed": "failed"}[a.result], "running")
+	word := cmp.Or(map[string]string{"passed": "ok"}[state], state)
 	line := a.tool + " " + oneLine(a.detail)
 	if summary := oneLine(a.summary); summary != "" {
 		line += " · " + summary

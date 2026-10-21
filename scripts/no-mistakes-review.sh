@@ -14,7 +14,7 @@ printf '%s\n' "$commits" |
     END {
       if (head == "") { print "could not read the head of the PR" > "/dev/stderr"; exit 1 }
       if (total !~ /^[0-9]+$/ || listed != total + 0) {
-        print "commit list is incomplete: saw " listed + 0 " of " total " commits" > "/dev/stderr"
+        print "commit list is incomplete: saw " listed " of " total " commits" > "/dev/stderr"
         exit 1
       }
       print head, (nm ? "found" : "none")

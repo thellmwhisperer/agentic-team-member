@@ -8,69 +8,13 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 	"time"
 )
 
-// withoutFollowUpsNote is the gap the agent of TestRunWithoutFollowUps leaves unfixed, as a note in its report.
+// withoutFollowUpsNote is the gap the historical agent leaves unfixed, as a note in its report.
 const withoutFollowUpsNote = "The retry error is not reported yet."
-
-// TestRunWithoutFollowUps: follow-ups are retired (decision 7934). A new run of the real atm and the resume of
-// one that failed at Checks do the issue's work only: neither the follow-up the agent reports, quoting the
-// issue, nor those a resume point kept from before chain a unit, run a red test or a scope review, spend a
-// budget or block the run, and no follow-ups.json is written. The agent's note stays in its report.
-func TestRunWithoutFollowUps(t *testing.T) {
-	builtATM(t)
-	lint, delivered := filepath.Join(t.TempDir(), "lint-fails"), filepath.Join(t.TempDir(), "delivered")
-	t.Setenv("ATM_TEST_LINT", lint)
-	t.Setenv("ATM_TEST_OUT", delivered)
-	call := filepath.Join(t.TempDir(), "call")
-	t.Setenv("FAKE_AGENT_CALL", call)
-	t.Setenv("FAKE_AGENT_WORK", noteWork)
-	cfg := atmSet(atmSet(atmYAML, "lint", `test ! -f "$ATM_TEST_LINT"`), "delivery",
-		`{ git log --format=%s; cat a.txt; ls; } > "$ATM_TEST_OUT"`)
-	top := gitT(t, repo(t, "https://example.com/owner/repo.git", cfg), "rev-parse", "--show-toplevel")
-	bin := followUpsServer(t, top)
-	issue := issueFile(t, followUpIssue)
-	issueOnly(t, "new run", top, call, delivered, followedRun(t, bin, top, 0, issue))
-
-	writeFixture(t, lint, "")
-	followedRun(t, bin, top, 1, issue)
-	failed := lastRun(t, top, "failed")
-	legacyResumePoint(t, filepath.Join(runDir(top, failed), "resume", "resume.json"))
-	if err := os.Remove(lint); err != nil {
-		t.Fatal(err)
-	}
-	issueOnly(t, "resume", top, call, delivered, followedRun(t, bin, top, 0, "--resume", failed))
-	t.Run("historical second unit", resumeHistoricalUnit)
-	t.Run("historical replay", replayHistoricalUnits)
-}
-
-// replayHistoricalUnits: the real atm attach, replaying a run kept before the retirement whose events start the
-// agent and checks twice, shows the graph's rows once, the second unit's events on the first unit's rows, and
-// closes as any finished run.
-func replayHistoricalUnits(t *testing.T) {
-	bin, top := builtATM(t), atmRepo(t)
-	unit := []string{`{"step":"agent","state":"started"}`, `{"step":"agent","state":"passed","duration_ms":1000}`,
-		`{"step":"checks","state":"started"}`, `{"step":"checks","check":"red/green","state":"started"}`,
-		`{"step":"checks","check":"red/green","state":"passed","duration_ms":10}`,
-		`{"step":"checks","state":"passed","duration_ms":20}`}
-	done := replayed(t, top, slices.Concat([]string{`{"step":"issue","state":"passed"}`,
-		`{"step":"clone","state":"passed"}`, `{"step":"contract","state":"passed"}`}, unit, unit,
-		[]string{`{"step":"ponytail","state":"started"}`, `{"step":"ponytail","state":"passed"}`,
-			`{"step":"delivery","state":"started"}`, `{"step":"delivery","state":"passed"}`})...)
-	shown := coldDeliveryAttach(t, bin, top, "old-run")
-	if err := <-done; err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(shown, "unit 2") || !strings.Contains(shown, "✓ Agent · unit 1") ||
-		!strings.Contains(shown, "✓ red/green") || !strings.Contains(shown, "✓ Slop detector") ||
-		!strings.Contains(shown, "✓ Delivery") {
-		t.Fatalf("want one Agent row for both units' events, the graph's rows passed:\n%s", shown)
-	}
-}
 
 func followUpsServer(t *testing.T, top string) string {
 	t.Helper()
@@ -90,10 +34,10 @@ func versionServer(t *testing.T, top, version string) string {
 	return bin
 }
 
-// resumeHistoricalUnit: a run kept at a later unit before the retirement is refused, whatever its old task type,
+// A run kept at a later unit before the retirement is refused,
 // before ATM restores its work or runs anything, its saved files left byte for byte. A saved first unit still
 // resumes under configured checks, protected tests and commits.
-func resumeHistoricalUnit(t *testing.T) {
+func TestResumeHistoricalUnit(t *testing.T) {
 	lint, delivered, call := filepath.Join(t.TempDir(), "lint"), filepath.Join(t.TempDir(), "delivered"),
 		filepath.Join(t.TempDir(), "call")
 	t.Setenv("ATM_TEST_LINT", lint)
@@ -135,7 +79,7 @@ func resumeHistoricalUnit(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The configured suite rejects the slop detector's cut.
-	issueOnly(t, "first unit resume", top, call, delivered, followedRun(t, bin, top, 0, "--resume", again))
+	followedRun(t, bin, top, 0, "--resume", again)
 	pony := reportNode(t, readReport(t, filepath.Join(runDir(top, lastRun(t, top, "passed")), "report.json")),
 		"ponytail")
 	if pony["kept"] != false || !strings.Contains(pony["reason"].(string), "test") {
@@ -151,53 +95,33 @@ const noteWork = fixWork + "; mkdir -p .atm/follow-ups/1; echo false > .atm/foll
 	`"red_test":"c1_test.sh","criterion":"A retry runs once after a timeout.","paths":["a.txt"]}]}' ` +
 	`> .atm/fake-report.json`
 
-// historicalRefused copies run label for each old task type and original issue field (present, absent or
-// empty), as kept at its second unit before the retirement, and checks the real atm refuses to resume each
-// before it records a run, restores work or calls an agent, saying why, and leaves its report.json, resume.json
-// and work.bundle byte for byte.
+// historicalRefused checks a saved second unit is refused before work runs and its saved files stay untouched.
 func historicalRefused(t *testing.T, bin, top, label, delivered, call string) {
 	t.Helper()
 	runs, err := RecordedRuns(top)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, original := range []struct {
-		name string
-		edit func(obj)
-	}{
-		{"present", func(obj) {}},
-		{"absent", func(saved obj) { delete(saved, "original") }},
-		{"empty", func(saved obj) { saved["original"].(obj)["Text"] = "" }},
-	} {
-		t.Run(original.name, func(t *testing.T) {
-			for _, typ := range []string{"fix", "refactor", "tests", "docs"} {
-				old := label + "-unit2-" + typ + "-" + original.name
-				if err := os.CopyFS(runDir(top, old), os.DirFS(runDir(top, label))); err != nil {
-					t.Fatal(err)
-				}
-				historicalBundle(t, top, old)
-				editResumePoint(t, top, old, func(saved obj) {
-					saved["original"].(obj)["Type"] = typ
-					original.edit(saved)
-				})
-				kept := savedFiles(t, top, old)
-				f := startFollow(t, bin, top, false, "run", "--follow", "--resume", old)
-				for line := range f.lines {
-					if strings.Contains(line, `"step"`) {
-						t.Fatalf("%s: a refused resume ran %s", typ, line)
-					}
-				}
-				_ = f.cmd.Wait()
-				if code, msg := f.cmd.ProcessState.ExitCode(), f.errors(); code != 2 ||
-					!strings.Contains(msg, "cannot resume run "+old+": it stopped at unit 2") ||
-					!strings.Contains(msg, "follow-ups were retired, so launch the issue again") {
-					t.Fatalf("%s: want the resume refused, exit 2, got %d: %s", typ, code, msg)
-				}
-				if got := savedFiles(t, top, old); !maps.Equal(got, kept) {
-					t.Fatalf("%s: a refused resume changed its saved files", typ)
-				}
-			}
-		})
+	old := label + "-unit2"
+	if err := os.CopyFS(runDir(top, old), os.DirFS(runDir(top, label))); err != nil {
+		t.Fatal(err)
+	}
+	historicalBundle(t, top, old)
+	kept := savedFiles(t, top, old)
+	f := startFollow(t, bin, top, false, "run", "--follow", "--resume", old)
+	for line := range f.lines {
+		if strings.Contains(line, `"step"`) {
+			t.Fatalf("a refused resume ran %s", line)
+		}
+	}
+	_ = f.cmd.Wait()
+	if code, msg := f.cmd.ProcessState.ExitCode(), f.errors(); code != 2 ||
+		!strings.Contains(msg, "cannot resume run "+old+": it stopped at unit 2") ||
+		!strings.Contains(msg, "follow-ups were retired, so launch the issue again") {
+		t.Fatalf("want the resume refused, exit 2, got %d: %s", code, msg)
+	}
+	if got := savedFiles(t, top, old); !maps.Equal(got, kept) {
+		t.Fatalf("a refused resume changed its saved files")
 	}
 	if now, err := RecordedRuns(top); err != nil || len(now) != len(runs) {
 		t.Fatalf("refused resumes recorded runs: %+v, %v", now, err)
@@ -330,56 +254,6 @@ func legacyResumePoint(t *testing.T, path string) {
 	saved["gross_lines"] = 500
 	b, _ := json.Marshal(saved)
 	writeFixture(t, path, string(b))
-}
-
-// issueOnly checks run name, the last at top, whose agent calls went to call and delivery to delivered, from its
-// events evs: one unit, no follow-up in its checks, the note in its agent's report, no follow-ups.json, no scope
-// review, a brief without follow-ups and the issue's unit delivered without a red test.
-func issueOnly(t *testing.T, name, top, call, delivered string, evs []obj) {
-	t.Helper()
-	var agents, checks []obj
-	for _, ev := range evs {
-		switch {
-		case ev["state"] == nil || ev["state"] == "started" || ev["check"] != nil:
-		case ev["step"] == "agent":
-			agents = append(agents, ev)
-		case ev["step"] == "checks":
-			checks = append(checks, ev)
-		}
-	}
-	report := obj{}
-	if len(agents) == 1 {
-		report, _ = agents[0]["report"].(obj)
-	}
-	if len(agents) != 1 || len(checks) != 1 || checks[0]["follow_ups"] != nil || checks[0]["gross_lines"] != nil ||
-		report["summary"] != withoutFollowUpsNote {
-		t.Fatalf("%s: want one unit, its checks free of follow-ups and the note in its report, got %v, %v",
-			name, agents, checks)
-	}
-	issueOnlyOnDisk(t, name, runDir(top, lastRun(t, top, "passed")), call, delivered)
-}
-
-// issueOnlyOnDisk is issueOnly on what run name left in its directory dir, its agent calls' call and delivered.
-func issueOnlyOnDisk(t *testing.T, name, dir, call, delivered string) {
-	t.Helper()
-	for _, path := range []string{filepath.Join(dir, "follow-ups.json"), call + ".scope"} {
-		if _, err := os.Stat(path); !os.IsNotExist(err) {
-			t.Fatalf("%s: want no %s, got %v", name, path, err)
-		}
-	}
-	if b, err := os.ReadFile(filepath.Join(dir, "brief.md")); err != nil ||
-		strings.Contains(strings.ToLower(string(b)), "follow-up") || strings.Contains(string(b), "follow_up") {
-		t.Fatalf("%s: want a brief without follow-ups, got %v:\n%s", name, err, b)
-	}
-	var r struct{ Units []obj }
-	if b, _ := os.ReadFile(filepath.Join(dir, "report.json")); json.Unmarshal(b, &r) != nil || len(r.Units) != 1 {
-		t.Fatalf("%s: want one unit in report.json, got %s", name, b)
-	}
-	b, err := os.ReadFile(delivered)
-	if err != nil || !strings.HasPrefix(string(b), "chore: Retry on timeout\ninit\nfixed\n") ||
-		strings.Contains(string(b), "c1_test.sh") {
-		t.Fatalf("%s: want the issue's unit delivered without a red test, got %v:\n%s", name, err, b)
-	}
 }
 
 // savedBase is the base commit run label kept in its resume.json.

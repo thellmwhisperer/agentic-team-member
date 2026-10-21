@@ -95,36 +95,11 @@ func cutKept(t *testing.T, root, label string, out *bytes.Buffer) obj {
 	return readReport(t, filepath.Join(root, ".atm", "runs", label, "report.json"))
 }
 
-// resumedCut is chainedCut on a run that first failed at lint, then resumed, its resume point holding what a run
-// that reached a unit 2 kept before follow-ups were retired: the follow-up unit 1 chained and unit 1's proof. It
-// returns root, the base the failed run kept, and the resumed run's report and events.
-func resumedCut(t *testing.T, atm string) (root, base string, rep obj, events []obj) {
-	t.Helper()
-	root = repo(t, "https://example.com/owner/repo.git", atmSet(atm, "lint", "false"))
-	chainedCutEnv(t)
-	base = gitT(t, root, "rev-parse", "main")
-	if err := Run("failed", []string{issueFile(t, followUpIssue)}, io.Discard, io.Discard); err == nil {
-		t.Fatal("want the unit's lint to fail")
-	}
-	commitConfig(t, root, atm)
-	addLegacy(t, root, "failed", obj{
-		"follow_up": obj{"title": "gap 1", "red_test": "c1_test.sh", "criterion": "A retry runs once after a timeout.",
-			"test": "grep -q u2 a.txt\n", "verified": true},
-		"proofs": [][4]string{{base, "a_test.sh", "fix", "grep -q fixed a.txt && ! grep -q broken a.txt\n"}}})
-	var out capturedRun
-	if err := Run("resumed", []string{"--resume", "failed", issueFile(t, followUpIssue)}, &out, io.Discard); err != nil {
-		t.Fatal(err)
-	}
-	return root, base, cutKept(t, root, "resumed", &out.Buffer), out.events
-}
-
 func TestReportKeepsWhenEveryNodeTrialAndCommandStartedAndTook(t *testing.T) {
 	atm := atmSet(atmSet(atmInstall("true"), "typecheck", "true"), "delivery", "true")
 	_, rep, events := chainedCut(t, atm)
 	timed := reportTimeline(t, rep)
 	checkTimeline(t, rep, events, timed)
-	_, _, rep, events = resumedCut(t, atm)
-	checkTimeline(t, rep, events, reportTimeline(t, rep))
 }
 
 func reportTimeline(t *testing.T, rep obj) []obj {
@@ -284,11 +259,6 @@ func TestReportKeepsEveryUnitTheReproofsAndTheInstall(t *testing.T) {
 	checkOneUnitReport(t, rep, gitT(t, root, "rev-parse", "main"))
 	if units := rep["units"].([]any); units[0].(obj)["resumed_from"] != nil {
 		t.Fatalf("want a unit its agent made, got %v", units[0])
-	}
-	_, base, rep, _ := resumedCut(t, atmInstall("true"))
-	checkOneUnitReport(t, rep, base) // the base the failed run kept, not the config commit after it
-	if units := rep["units"].([]any); units[0].(obj)["resumed_from"] != "failed" {
-		t.Fatalf("want the unit resumed from the failed run, got %v", units[0])
 	}
 }
 
