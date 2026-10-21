@@ -40,7 +40,8 @@ func TestRealAttachShowsEveryRunningStep(t *testing.T) {
 	a.send(`{"step":"agent","state":"passed"}`)
 	a.send(`{"step":"ponytail","state":"started"}`)
 	a.send(`{"step":"ponytail","state":"passed","kept":true,` +
-		`"report":{"findings":[{"file":"a.go","family":"dead code","finding":"unused helper"}]}}`)
+		`"report":{"findings":[{"file":"a.go","family":"dead code","finding":"unused helper"}]},` +
+		`"verdicts":[{"file":"a.go","finding":"unused helper","verdict":"kept"}]}`)
 	a.until(`Findings - W 1`)
 	a.send(`{"step":"delivery","state":"started"}`)
 	a.until(`Delivery · [0-9.]+ s`)

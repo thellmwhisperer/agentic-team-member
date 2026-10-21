@@ -5,7 +5,6 @@ package run
 import (
 	"fmt"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -20,12 +19,9 @@ func TestRealScreenShowsAFailedToolCall(t *testing.T) {
 		`{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"failed-call",`+
 		`"is_error":true,"content":"exit status 1"}]}}`+"\n")
 	t.Setenv("FAKE_AGENT_WORK", fmt.Sprintf(`cat %q >/dev/null; `, barrier)+fixWork)
-	t.Setenv("TERM", "xterm-256color")
-	t.Setenv("NO_COLOR", "")
-	f := startFollow(t, versionServer(t, top, "follow-test"), top, true, "run", issueFile(t, issue))
-	var shown strings.Builder
-	untilShown(t, f, &shown, "Agent")
-	untilShown(t, f, &shown, "failed Bash false · exit status 1")
+	f, shown := realScreen(t, top)
+	untilShown(t, f, shown, "Agent")
+	untilShown(t, f, shown, "failed Bash false · exit status 1")
 	free(t, barrier)
 	f.exit(0)
 }

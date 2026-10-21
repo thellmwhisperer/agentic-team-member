@@ -331,7 +331,7 @@ func (b bounds) contains(x, y int) bool {
 type event struct {
 	Step, State, Error, TS, Title, Type, SHA, Branch string
 	Check, ID, Tool, Detail, Result, Summary         string
-	Thinking, Says, Message, Clone                   string
+	Thinking, Says, Message, Clone, Note             string
 	ResumedFrom                                      string `json:"resumed_from"`
 	Output                                           *string
 	Number                                           int
@@ -339,6 +339,7 @@ type event struct {
 	Kept                                             bool
 	Agent                                            *run.AgentSettings
 	Report                                           json.RawMessage
+	Verdicts []struct{ File, Finding, Verdict string } // each finding of the slop detector, kept or not
 }
 
 // apply reads frame f, when it carries an event: a node's start or end, or what happens inside it.
@@ -363,6 +364,7 @@ func (m *Model) apply(f run.Frame) {
 	case e.Check != "":
 		r := m.checkRow(e.Step, e.Check)
 		r.state, r.took, r.start, r.hasDuration = e.State, time.Duration(e.DurationMS)*time.Millisecond, at, true
+		r.note = e.Note
 		if e.State == "started" {
 			r.state = "running"
 		}
@@ -465,10 +467,8 @@ func (m *Model) ended(e event) {
 		}
 		_ = json.Unmarshal(e.Report, &report)
 		r.note = map[bool]string{true: fmt.Sprintf("%d cuts", len(report.Findings)), false: "no cut"}[e.Kept]
-		for _, f := range report.Findings {
-			if e.Kept {
-				m.findings = append(m.findings, finding{"warning", f.File + " · " + f.Family, f.Finding})
-			}
+		for _, f := range e.Verdicts {
+			m.findings = append(m.findings, finding{"warning", f.Verdict + " · " + f.File, f.Finding})
 		}
 	case "delivery":
 		r.note = e.Branch
