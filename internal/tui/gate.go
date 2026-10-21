@@ -20,10 +20,9 @@ type gate struct {
 	ok, over bool
 }
 
-// gateStep is a step of the gate: its state as the screen names it, how long it took, its log and its findings.
+// gateStep is a step of the gate: its state as the screen names it, its log and its findings.
 type gateStep struct {
 	name, state string
-	took        time.Duration
 	log         []string
 	findings    []map[string]string
 }
@@ -41,9 +40,7 @@ func askGate(clone string) tea.Msg {
 	}
 	g := gate{ok: true, over: slices.Contains([]string{"completed", "failed", "cancelled"}, run["run.status"])}
 	for _, s := range tables["run.steps"] {
-		ms, _ := strconv.Atoi(s["duration_ms"])
-		step := gateStep{name: s["step"], state: cmp.Or(gateStates[s["status"]], "unknown"),
-			took: time.Duration(ms) * time.Millisecond}
+		step := gateStep{name: s["step"], state: cmp.Or(gateStates[s["status"]], "unknown")}
 		if step.state != "pending" && step.state != "skipped" {
 			logs, found, _ := axi(clone, "logs", "--step", step.name)
 			step.log, step.findings = strings.Split(logs["log"], "\n"), found["findings"]
@@ -132,7 +129,7 @@ func (m *Model) gate(g gate) {
 			r = &row{step: "gate:" + s.name, label: s.name}
 			m.rows = append(m.rows, r)
 		}
-		r.state, r.took, r.hasDuration = s.state, s.took, s.state != "pending"
+		r.state = s.state
 	}
 }
 

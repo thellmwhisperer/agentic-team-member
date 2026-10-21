@@ -1,0 +1,18 @@
+schema: 1
+id: T-PONYTAIL-20261021-021123-1
+status: accepted
+category: alien_code
+title: "Cut the gate step's duration: the gateStep.took field, the strconv.Atoi parse of duration_ms, and the r.took/r.hasDuration assignment. The gate's row now sets only its state, so it shows its icon, name and state."
+created_at: 2026-10-21
+incident:
+  pattern: "Cut the gate step's duration: the gateStep.took field, the strconv.Atoi parse of duration_ms, and the r.took/r.hasDuration assignment. The gate's row now sets only its state, so it shows its icon, name and state."
+  what_went_wrong: "A coding agent wrote it and the ponytail pass cut it before delivery."
+  root_cause: "The coding agent wrote more than the issue needed."
+  rule_established: "Cut by the ponytail pass; it does not come back."
+  evidence:
+    - family: speculative_feature
+      example: "Cut the gate step's duration: the gateStep.took field, the strconv.Atoi parse of duration_ms, and the r.took/r.hasDuration assignment. The gate's row now sets only its state, so it shows its icon, name and state."
+      artifact: "internal/tui/gate.go"
+match:
+  family: speculative_feature
+  artifact: "internal/tui/gate.go"
