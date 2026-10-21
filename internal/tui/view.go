@@ -694,15 +694,21 @@ func summaryRows(text string, width int) []string {
 				start = row.Pos() + len(strings.SplitN(text[row.Pos():], "\n", 2)[0])
 			}
 		}
-		for _, cells := range cells {
-			var row string
-			for j, cell := range cells {
-				row += cell + strings.Repeat(" ", widths[j]-ansi.StringWidth(cell)+2)
-			}
-			rows = append(rows, "  "+strings.TrimRight(row, " "))
-		}
+		rows = append(rows, summaryTableRows(cells, widths)...)
 	}
 	prose(len(text))
+	return rows
+}
+
+func summaryTableRows(cells [][]string, widths []int) []string {
+	var rows []string
+	for _, cells := range cells {
+		var row string
+		for j, cell := range cells {
+			row += cell + strings.Repeat(" ", widths[j]-ansi.StringWidth(cell)+2)
+		}
+		rows = append(rows, "  "+strings.TrimRight(row, " "))
+	}
 	return rows
 }
 

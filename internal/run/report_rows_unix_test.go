@@ -18,6 +18,8 @@ import (
 // The real atm run on a terminal: the report the agent's message ends with shows in the Agent box as an open
 // Informe row, its summary's Markdown table rendered, and four folded rows with their counts, never as JSON; a click
 // unfolds the findings, one row each, its severity first, and one on Informe folds it all.
+//
+//nolint:gocyclo,funlen // Preserve the complete real-terminal sequence and every screen assertion.
 func TestRealScreenShowsTheReportAsRows(t *testing.T) {
 	bin := builtATM(t)
 	checks := filepath.Join(t.TempDir(), "checks")
@@ -56,7 +58,8 @@ func TestRealScreenShowsTheReportAsRows(t *testing.T) {
 	}
 	free(t, agent)
 	s := a.drawn(func(s string) bool {
-		return strings.Contains(s, "Hallazgos (1)") && strings.Contains(s, "▸ · 1 tool: Skill") && typecheckRuns.MatchString(s)
+		return strings.Contains(s, "Hallazgos (1)") &&
+			strings.Contains(s, "▸ · 1 tool: Skill") && typecheckRuns.MatchString(s)
 	})
 	for _, want := range []string{`✎ Hecho\.`, `▾ Informe`, `Arreglo de a\.txt\.`, `Fichero +Cambio`, `a\.txt +fixed`,
 		`▸ Ficheros cambiados \(3\)`, `▸ Comandos ejecutados \(1\)`, `▸ Test a_test\.sh`, `▸ Hallazgos \(1\)`} {
@@ -65,7 +68,10 @@ func TestRealScreenShowsTheReportAsRows(t *testing.T) {
 		}
 	}
 	previous := -1
-	for _, title := range []string{"▸ · 1 tool: Skill", "✎ Hecho.", "▾ Informe", "Arreglo de a.txt.", "Ficheros cambiados (3)", "Comandos ejecutados (1)", "Test a_test.sh", "Hallazgos (1)"} {
+	for _, title := range []string{
+		"▸ · 1 tool: Skill", "✎ Hecho.", "▾ Informe", "Arreglo de a.txt.",
+		"Ficheros cambiados (3)", "Comandos ejecutados (1)", "Test a_test.sh", "Hallazgos (1)",
+	} {
 		at := strings.Index(s, title)
 		if at <= previous || strings.Count(s, title) != 1 {
 			t.Fatalf("final report rows are duplicated or out of order at %q:\n%s", title, s)
@@ -122,6 +128,7 @@ func TestRealScreenShowsTheReportAsRows(t *testing.T) {
 	}
 }
 
+//nolint:gocyclo,funlen // Keep each harness, Markdown case, and screen assertion in the real ATM test.
 func TestRealScreenReportScopeAndMarkdown(t *testing.T) {
 	for _, tc := range []struct {
 		name, harness, summary string
@@ -133,8 +140,10 @@ func TestRealScreenReportScopeAndMarkdown(t *testing.T) {
 			[]string{`a\|b +Change`, `a\|b +fixed`}, []string{"`", `a\|b`, "|---|", "**"}},
 		{"optional-outer-pipes", "codex", "Optional pipes.\n\nFichero | Cambio\n--- | ---\na.txt | fixed",
 			[]string{`Optional pipes\.`, `Fichero +Cambio`, `a\.txt +fixed`}, []string{"Fichero | Cambio", "--- | ---"}},
-		{"fenced-table", "opencode", "Literal table.\n\n```\n| Literal | Code |\n|---|---|\n| a\\|b | **fixed** |\n```\n\nAfter **code**.\n\n| Real | Table |\n|---|---|\n| yes | rendered |",
-			[]string{`\| Literal \| Code \|`, `\|---\|---\|`, `\| a\\\|b \| \*\*fixed\*\* \|`, `After code\.`, `Real +Table`, `yes +rendered`}, []string{"```", "| Real | Table |"}},
+		{"fenced-table", "opencode", "Literal table.\n\n```\n| Literal | Code |\n|---|---|\n" +
+			"| a\\|b | **fixed** |\n```\n\nAfter **code**.\n\n| Real | Table |\n|---|---|\n| yes | rendered |",
+			[]string{`\| Literal \| Code \|`, `\|---\|---\|`, `\| a\\\|b \| \*\*fixed\*\* \|`,
+				`After code\.`, `Real +Table`, `yes +rendered`}, []string{"```", "| Real | Table |"}},
 		{"empty-table", "pi", "| Header | Empty |\n|---|---|",
 			[]string{`Header +Empty`}, []string{"| Header | Empty |", "|---|---|"}},
 		{"prose", "cursor", "Only **prose**.", []string{`Only prose\.`}, []string{"**"}},
@@ -142,7 +151,9 @@ func TestRealScreenReportScopeAndMarkdown(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			bin := builtATM(t)
 			dir := t.TempDir()
-			checks, worker, ponytail := filepath.Join(dir, "checks"), filepath.Join(dir, "worker"), filepath.Join(dir, "ponytail")
+			checks := filepath.Join(dir, "checks")
+			worker := filepath.Join(dir, "worker")
+			ponytail := filepath.Join(dir, "ponytail")
 			cfg := atmSet(atmYAML, "typecheck", fmt.Sprintf(`cat "%s" >/dev/null`, checks))
 			top := gitT(t, repo(t, "https://example.com/o/r.git", cfg), "rev-parse", "--show-toplevel")
 			stopServing(t, top)
@@ -164,9 +175,11 @@ func TestRealScreenReportScopeAndMarkdown(t *testing.T) {
 				case "opencode":
 					ev = obj{"type": "text", "part": obj{"text": text}}
 				case "pi":
-					ev = obj{"type": "message_end", "message": obj{"role": "assistant", "content": []obj{{"type": "text", "text": text}}}}
+					ev = obj{"type": "message_end", "message": obj{"role": "assistant",
+						"content": []obj{{"type": "text", "text": text}}}}
 				default:
-					ev = obj{"type": "assistant", "message": obj{"role": "assistant", "content": []obj{{"type": "text", "text": text}}}}
+					ev = obj{"type": "assistant", "message": obj{"role": "assistant",
+						"content": []obj{{"type": "text", "text": text}}}}
 				}
 				b, _ := json.Marshal(ev)
 				return string(b) + "\n"
@@ -182,7 +195,10 @@ func TestRealScreenReportScopeAndMarkdown(t *testing.T) {
 			}
 			t.Setenv("TERM", "xterm-256color")
 			t.Setenv("NO_COLOR", "")
-			a := &attached{t: t, cmd: exec.Command(bin, "run", "--harness", tc.harness, issueFile(t, issue)), chunks: make(chan string, 64), rows: 60}
+			a := &attached{
+				t: t, cmd: exec.Command(bin, "run", "--harness", tc.harness, issueFile(t, issue)),
+				chunks: make(chan string, 64), rows: 60,
+			}
 			a.cmd.Dir = top
 			var err error
 			if a.p, err = pty.StartWithSize(a.cmd, &pty.Winsize{Cols: 180, Rows: 60}); err != nil {
@@ -214,9 +230,11 @@ func TestRealScreenReportScopeAndMarkdown(t *testing.T) {
 			}
 			free(t, checks)
 			s = a.drawn(func(s string) bool {
-				return strings.Contains(s, "Slop detector") && strings.Contains(s, ponytailReport) && !strings.Contains(s, "Informe")
+				return strings.Contains(s, "Slop detector") && strings.Contains(s, ponytailReport) &&
+					!strings.Contains(s, "Informe")
 			})
-			if strings.Contains(s, "Ficheros cambiados") || strings.Contains(s, "Comandos ejecutados") || strings.Contains(s, "Hallazgos") {
+			if strings.Contains(s, "Ficheros cambiados") || strings.Contains(s, "Comandos ejecutados") ||
+				strings.Contains(s, "Hallazgos") {
 				t.Fatalf("ponytail received worker report rows:\n%s", s)
 			}
 			free(t, ponytail)
@@ -235,6 +253,7 @@ func TestRealScreenReportScopeAndMarkdown(t *testing.T) {
 	}
 }
 
+//nolint:gocyclo,funlen // Preserve all PageUp and PageDown checks in the real-terminal scenario.
 func TestRealScreenFinalReportKeyboardScrollDuringChecks(t *testing.T) {
 	bin := builtATM(t)
 	checks := filepath.Join(t.TempDir(), "checks")
@@ -251,7 +270,8 @@ func TestRealScreenFinalReportKeyboardScrollDuringChecks(t *testing.T) {
 	}
 	report, _ := json.Marshal(obj{"test_file": "a_test.sh", "changed_files": files,
 		"summary": strings.Join(summary, "\n\n"), "commands_run": []string{"sh a_test.sh"}})
-	t.Setenv("FAKE_AGENT_WORK", fixWork+"; mkdir -p .atm; cat > .atm/fake-report.json <<'REPORT'\n"+string(report)+"\nREPORT\n")
+	t.Setenv("FAKE_AGENT_WORK", fixWork+"; mkdir -p .atm; cat > .atm/fake-report.json <<'REPORT'\n"+
+		string(report)+"\nREPORT\n")
 	t.Setenv("TERM", "xterm-256color")
 	t.Setenv("NO_COLOR", "")
 	a := &attached{t: t, cmd: exec.Command(bin, "run", issueFile(t, issue)), chunks: make(chan string, 64), rows: 24}
