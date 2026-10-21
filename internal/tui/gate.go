@@ -2,7 +2,6 @@ package tui
 
 import (
 	"cmp"
-	"fmt"
 	"os/exec"
 	"slices"
 	"strconv"
@@ -29,7 +28,7 @@ type gateStep struct {
 
 // gateStates is each no-mistakes step status as the screen names it; any other is unknown.
 var gateStates = map[string]string{"pending": "pending", "running": "running", "awaiting_approval": "waiting",
-	"completed": "passed", "failed": "failed", "skipped": "skipped"}
+	"fixing": "running", "completed": "passed", "failed": "failed", "skipped": "skipped"}
 
 // askGate asks no-mistakes, in clone, for the run of its branch, and for the log of each step it started.
 // ponytail: every started step's log on every ask, one no-mistakes call each; ask only the changed ones if it lags.
@@ -42,8 +41,11 @@ func askGate(clone string) tea.Msg {
 	for _, s := range tables["run.steps"] {
 		step := gateStep{name: s["step"], state: cmp.Or(gateStates[s["status"]], "unknown")}
 		if step.state != "pending" && step.state != "skipped" {
-			logs, found, _ := axi(clone, "logs", "--step", step.name)
-			step.log, step.findings = strings.Split(logs["log"], "\n"), found["findings"]
+			_, tables, _ := axi(clone, "logs", "--step", step.name, "--full")
+			for _, l := range tables["log"] {
+				step.log = append(step.log, l["line"])
+			}
+			step.findings = tables["findings"]
 		}
 		g.steps = append(g.steps, step)
 	}
@@ -60,7 +62,6 @@ func axi(dir string, args ...string) (map[string]string, map[string][]map[string
 }
 
 // toon reads a TOON document: each value by its dotted path, and each table's rows by column.
-// ponytail: axi logs is read as a top-level log string and findings[N]{risk,file,line,description} table.
 func toon(doc string) (map[string]string, map[string][]map[string]string) {
 	values, tables := map[string]string{}, map[string][]map[string]string{}
 	var path, cols []string
@@ -149,22 +150,22 @@ func (m *Model) ask(g gate, wait time.Duration) tea.Cmd {
 func (m *Model) gateBox(width, lines int) string {
 	var out []paneLine
 	for _, s := range m.gateSteps {
-		if s.log == nil {
+		if s.state == "pending" || s.state == "skipped" {
 			continue
 		}
 		key := "gate:" + s.name
 		open := m.unfolded(key)
 		out = append(out, paneLine{key: key, toggle: key, text: fold(open) + " " + m.icon(s.state) + " " + s.name})
 		log := s.log
-		if !open {
+		if !open && len(log) > 0 {
 			log = log[:1]
 		}
 		for _, text := range agentTextRows("  ", strings.Join(log, "\n"), width) {
 			out = append(out, paneLine{key: key, text: text})
 		}
 		for _, f := range s.findings {
-			out = append(out, paneLine{key: key, text: "  " + paint(yellow, f["risk"]) + " " +
-				fmt.Sprintf("%s:%s ", f["file"], f["line"]) + paint(dim, oneLine(f["description"]))})
+			out = append(out, paneLine{key: key, text: "  " + paint(yellow, f["severity"]) + " " +
+				f["file"] + " " + paint(dim, oneLine(f["description"]))})
 		}
 	}
 	shown := m.history.show(out, lines)
