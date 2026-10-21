@@ -247,7 +247,8 @@ func (r *verdict) recordUnit(n int, head, test, resumed string) {
 
 // checkUnit runs configured checks with issue exemptions and accepted cut history, and records the reported
 // test for the ponytail guard.
-func checkUnit(runDir, dir, head, base, test, issue string, report map[string]any, c config.Config, cuts ...string) (proof,
+func checkUnit(runDir, dir, head, base, test, issue string, report map[string]any,
+	c config.Config, cuts ...string) (proof,
 	map[string]any, error) {
 	ev := map[string]any{"unit": 1}
 	missing := report == nil && test == ""
