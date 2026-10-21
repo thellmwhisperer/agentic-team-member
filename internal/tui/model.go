@@ -74,9 +74,10 @@ type Model struct {
 	outcome                       run.Outcome
 	err                           error
 	pipeline, history, log        pane
+	findingsPane                  pane
 	focus                         *pane // the box tab moved to, while it shows
 	pipelineBounds, historyBounds bounds
-	logBounds                     bounds
+	logBounds, findingsBounds     bounds
 	unfold                        bool            // t: every tool call of the Agent box on its own line
 	unfoldThink                   bool            // h: every thinking message of the Agent box in full
 	unfoldTitle                   bool            // i: every line of the issue's title
@@ -177,6 +178,9 @@ func (m *Model) panes() []*pane {
 	shown := []*pane{&m.pipeline}
 	if m.agentVisible() || m.gateSteps != nil {
 		shown = append(shown, &m.history)
+	}
+	if m.gateSteps == nil && !m.agentRuns() && len(m.findings) > 0 {
+		shown = append(shown, &m.findingsPane)
 	}
 	if m.gateSteps == nil && (m.agentRuns() && len(m.output) > 0 || !m.agentRuns() && m.running()) {
 		shown = append(shown, &m.log)
@@ -281,6 +285,8 @@ func (m *Model) key(k string) {
 func (m *Model) wheel(msg tea.MouseMsg) {
 	p, b := &m.pipeline, m.pipelineBounds
 	switch {
+	case m.findingsBounds.contains(msg.X, msg.Y):
+		p, b = &m.findingsPane, m.findingsBounds
 	case m.historyBounds.contains(msg.X, msg.Y):
 		p, b = &m.history, m.historyBounds
 	case m.logBounds.contains(msg.X, msg.Y):

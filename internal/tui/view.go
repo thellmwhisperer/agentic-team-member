@@ -80,6 +80,7 @@ func (m *Model) View() string {
 		if rightBox := m.right(width, rightHeight); rightBox != "" {
 			m.historyBounds.y = lipgloss.Height(atmBox)
 			m.historyBounds.height = m.historyHeight
+			m.findingsBounds.y, m.findingsBounds.width = m.historyBounds.y, width
 			m.logBounds.y, m.logBounds.width = m.historyBounds.y+lipgloss.Height(rightBox)-m.logBounds.height, width
 			panels = append(panels, rightBox)
 		}
@@ -94,6 +95,7 @@ func (m *Model) View() string {
 	rightBox := m.right(rightWidth, available)
 	m.pipelineBounds.height = lipgloss.Height(leftBox)
 	m.historyBounds.height = m.historyHeight
+	m.findingsBounds.x, m.findingsBounds.width = left+gap, rightWidth
 	m.logBounds.x, m.logBounds.y, m.logBounds.width = left+gap, lipgloss.Height(rightBox)-m.logBounds.height, rightWidth
 	return columns(leftBox, rightBox, left) + m.footer()
 }
@@ -123,7 +125,8 @@ func (m *Model) rightMinimum(width int) int {
 	}
 	top := 0
 	if len(m.findings) > 0 {
-		top = lipgloss.Height(m.findingsBox(width))
+		_, rows := m.findingsRows(width)
+		top = len(rows) + boxBorderRows
 	}
 	if m.running() {
 		return top + minimumBoxRows
@@ -309,7 +312,7 @@ func (m *Model) sidebar() bool {
 // box while an agent runs or its report remains visible, else the Findings box when there are findings, then
 // the Log box while a node runs; "" for none. The Agent box takes the space left above the Log box.
 func (m *Model) right(width, height int) string {
-	m.logBounds = bounds{}
+	m.logBounds, m.findingsBounds = bounds{}, bounds{}
 	top := ""
 	if m.gateSteps != nil {
 		return m.gateBox(width, max(1, height-boxBorderRows))
@@ -327,7 +330,17 @@ func (m *Model) right(width, height int) string {
 		return m.agentBox(width, max(1, height-boxBorderRows))
 	}
 	if len(m.findings) > 0 {
-		top = m.findingsBox(width)
+		limit := height
+		if m.running() {
+			limit -= minimumBoxRows
+		}
+		title, rows := m.findingsRows(width)
+		if m.focused() == &m.findingsPane {
+			title += "*"
+		}
+		top = box(title, strings.Join(m.findingsPane.show(rows, max(1, limit-boxBorderRows)), "\n"),
+			width, m.border(&m.findingsPane))
+		m.findingsBounds.height = lipgloss.Height(top)
 	}
 	var boxes []string
 	if top != "" {
@@ -809,11 +822,12 @@ func firstMarkdown(s string) string {
 	return text
 }
 
-// findingsBox is the findings shown on the screen: a severity icon, a reference, the description below.
-func (m *Model) findingsBox(width int) string {
+// findingsRows is the findings shown on the screen: a severity icon, a reference, the description below.
+func (m *Model) findingsRows(width int) (string, []paneLine) {
 	counts := map[string]int{}
-	var out []string
+	var rows []paneLine
 	for i, f := range m.findings {
+		var out []string
 		counts[f.severity]++
 		if i > 0 {
 			out = append(out, "")
@@ -827,6 +841,9 @@ func (m *Model) findingsBox(width int) string {
 		for _, l := range strings.Split(lipgloss.NewStyle().Width(max(10, width-8)).Render(f.text), "\n") {
 			out = append(out, "    "+paint(dim, strings.TrimRight(l, " ")))
 		}
+		for _, line := range out {
+			rows = append(rows, paneLine{key: fmt.Sprintf("finding:%d", i), text: line})
+		}
 	}
 	title := bold(cyan, "Findings -")
 	for _, sev := range []string{"error", "warning"} {
@@ -834,7 +851,7 @@ func (m *Model) findingsBox(width int) string {
 			title += " " + paint(severities[sev][1], fmt.Sprintf("%s %d", severities[sev][0], counts[sev]))
 		}
 	}
-	return box(title, strings.Join(out, "\n"), width, dim)
+	return title, rows
 }
 
 // logRows is the running node's output: for each command, a header row with its row in the ATM box, then, unfolded,
