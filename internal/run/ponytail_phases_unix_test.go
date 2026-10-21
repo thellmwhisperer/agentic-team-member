@@ -31,7 +31,8 @@ func TestRealScreenShowsSlopDetectorPhases(t *testing.T) {
 	f, shown := realScreen(t, top)
 	// The required phase values stay readable in the real 100-column terminal.
 	for _, want := range []string{"✓ agent reading", "✓ 2 findings", "✓ judged", "1 kept", "✓ checks", "run 1",
-		"✓ commit", "1 kept · 1 rejected: adds code", "run 1 ok", "ponytail: 1 cuts", "kept · a.txt", "cut a.txt", "rejected: adds code · old.txt", "cut old.txt"} {
+		"✓ commit", "1 kept · 1 rejected: adds code", "run 1 ok", "ponytail: 1 cuts", "kept · a.txt", "cut a.txt",
+		"rejected: adds code · old.txt", "cut old.txt"} {
 		untilShown(t, f, shown, want)
 	}
 	if !regexp.MustCompile(`agent reading the diff +[0-9.]+ s`).MatchString(ansi.Strip(shown.String())) {
@@ -86,6 +87,8 @@ func TestRealScreenPreservesSpecificSlopRejection(t *testing.T) {
 }
 
 // Issue 586 requires truthful put-back rows for each restored file, including full restoration after checks.
+//
+//nolint:gocyclo,funlen // The full restoration scenarios and their assertions must stay together.
 func TestRealScreenShowsFullSlopRestoration(t *testing.T) {
 	builtATM(t)
 	for _, c := range []struct {
@@ -113,7 +116,8 @@ func TestRealScreenShowsFullSlopRestoration(t *testing.T) {
 			t.Setenv("FAKE_AGENT_WORK", "printf 'fixed\\nextra\\nmore\\n' > a.txt"+fixTest+c.seed)
 			t.Setenv("FAKE_PONYTAIL_WORK", c.work)
 			t.Setenv("FAKE_PONYTAIL_REPORT", dependentCuts(c.files...))
-			cfg := atmSet(atmSet(atmYAML, "lint", c.lint), "delivery", `cat a.txt > "$ATM_TEST_OUT"; if test -f b.txt; then cat b.txt >> "$ATM_TEST_OUT"; fi`)
+			cfg := atmSet(atmSet(atmYAML, "lint", c.lint), "delivery",
+				`cat a.txt > "$ATM_TEST_OUT"; if test -f b.txt; then cat b.txt >> "$ATM_TEST_OUT"; fi`)
 			top := gitT(t, repo(t, "https://example.com/owner/repo.git", cfg), "rev-parse", "--show-toplevel")
 			f, shown := realScreen(t, top)
 			untilShown(t, f, shown, c.checks)
@@ -140,7 +144,8 @@ func TestRealScreenShowsFullSlopRestoration(t *testing.T) {
 			putBack := map[string]int{}
 			_, err = Follow(top, runs[0].Run, nil, nil, func(f Frame) {
 				var ev struct{ Step, Check, State string }
-				if len(f.Event) != 0 && json.Unmarshal(f.Event, &ev) == nil && ev.Step == "ponytail" && ev.State == "passed" && strings.HasPrefix(ev.Check, "put back ") {
+				if len(f.Event) != 0 && json.Unmarshal(f.Event, &ev) == nil && ev.Step == "ponytail" &&
+					ev.State == "passed" && strings.HasPrefix(ev.Check, "put back ") {
 					putBack[strings.TrimPrefix(ev.Check, "put back ")]++
 				}
 			})
@@ -156,6 +161,7 @@ func TestRealScreenShowsFullSlopRestoration(t *testing.T) {
 	}
 }
 
+//nolint:funlen // Each restoration path needs its complete real-terminal assertions.
 func TestRealScreenShowsCompleteSlopReferences(t *testing.T) {
 	builtATM(t)
 	const path = "internal/run/ponytail.go"

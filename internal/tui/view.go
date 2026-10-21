@@ -243,23 +243,7 @@ func (m *Model) atm(width, height int) string {
 			key := fmt.Sprintf("row:%p", r)
 			rows = append(rows, paneLine{key: "connector:" + key, parent: key, text: paint(dim, "│")})
 		}
-		key := fmt.Sprintf("row:%p", r)
-		display := *r
-		if r.step == "agent" && !r.check {
-			display.label = "Agent"
-		}
-		if r.step == "ponytail" && r.check {
-			display.note = ""
-		}
-		for _, line := range strings.Split(m.row(&display, inner), "\n") {
-			rows = append(rows, paneLine{key: key, text: line})
-		}
-		if r.step == "ponytail" && r.check && r.note != "" {
-			for n, line := range strings.Split(ansi.Wrap(r.note, max(1, inner-2), ""), "\n") {
-				rows = append(rows, paneLine{key: fmt.Sprintf("%s:note:%d", key, n), parent: key,
-					text: "  " + paint(dim, line)})
-			}
-		}
+		rows = m.atmRow(rows, r, inner)
 	}
 	lines = append(lines, m.pipeline.show(rows, max(1, height-2-len(lines)))...)
 	title := "ATM"
@@ -267,6 +251,28 @@ func (m *Model) atm(width, height int) string {
 		title += "*"
 	}
 	return box(bold(cyan, title), strings.Join(lines, "\n"), width, m.border(&m.pipeline))
+}
+
+// atmRow appends a node row and the wrapped note of a Slop detector phase.
+func (m *Model) atmRow(rows []paneLine, r *row, inner int) []paneLine {
+	key := fmt.Sprintf("row:%p", r)
+	display := *r
+	if r.step == "agent" && !r.check {
+		display.label = "Agent"
+	}
+	if r.step == "ponytail" && r.check {
+		display.note = ""
+	}
+	for _, line := range strings.Split(m.row(&display, inner), "\n") {
+		rows = append(rows, paneLine{key: key, text: line})
+	}
+	if r.step == "ponytail" && r.check && r.note != "" {
+		for n, line := range strings.Split(ansi.Wrap(r.note, max(1, inner-2), ""), "\n") {
+			rows = append(rows, paneLine{key: fmt.Sprintf("%s:note:%d", key, n), parent: key,
+				text: "  " + paint(dim, line)})
+		}
+	}
+	return rows
 }
 
 // row is r's line: its icon, its label and how long it took, then, right-aligned, its note and its state.
