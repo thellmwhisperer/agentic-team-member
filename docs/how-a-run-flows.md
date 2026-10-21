@@ -240,9 +240,9 @@ Checks run the configured suite on the completed work, followed by `e2e`,
 
 ## Unit commit
 
-A unit commit uses `chore: <title>` and the body `atm unit <n>`. The first
-is unit 1; a Delivery repair can produce another commit. ATM does not infer
-a release type from issue metadata.
+A unit commit has the single-line message `chore: <title>`. A Delivery repair
+can produce another unit commit. ATM does not infer a release type from issue
+metadata.
 
 ## Slop detector
 
@@ -411,6 +411,8 @@ the ATM box, a row per step with its icon (`○`
 pending, a spinner running, `⏸` waiting, `✓` passed, `✗` failed, `–` skipped), duration and
 note, and beside it, from 100 columns, the Agent box while an agent works,
 the Findings box with a failure or the slop detector's cuts, and the Log box.
+The ATM box's Agent row reads `Agent`; Log headers and Findings references for
+that agent retain `Agent · unit 1`.
 Above the rows, the issue's title wraps: up to three lines show whole; a
 longer one shows three lines and `… i unfold title`, and `i` shows or folds
 every line. The title stays above the rows while it leaves them a line; when
