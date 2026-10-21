@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.1](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.7.0...v1.7.1) (2026-10-21)
+
+
+### Bug Fixes
+
+* detect hung agents by activity and uncap Checks ([2a711b8](https://github.com/thellmwhisperer/agentic-team-member/commit/2a711b85b315101d07cd8e220eb67b7fb8d9b5a1))
+
 ## [1.7.0](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.6.0...v1.7.0) (2026-10-20)
 
 
