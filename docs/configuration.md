@@ -178,7 +178,7 @@ Run repository commands from inside the repository they work on.
 | `atm skill`, `atm skill install [--dir <path>] [--force]` | See [Skill](#skill) |
 | `atm run [flags] <issue>` | Starts a run. On a terminal it shows the run's screen until the run ends or q or Ctrl+C, then exits with the run's code; off one it prints the run's label and returns. See [resuming a failed run](#resuming-a-failed-run) |
 | `atm status [--json]` | Each run going; text shows label, step, duration, agent and issue, or `nothing runs` |
-| `atm attach [run]` | The run's screen, the last one going by default; it quits when the run ends, or on q or Ctrl+C |
+| `atm attach [run]` | The run's screen, the last one going by default; it quits when the run ends, or after Delivery when the gate's run ends, or on q or Ctrl+C |
 | `atm runs [--json]` | Retained runs; text shows label, `running`, `passed` or `failed at <step>`, duration, agent, issue, report when present, and `serve` last |
 | `atm axi run [--json] [flags] <issue>` | Waits for the run to end, prints its outcome and exits with its code |
 | `atm axi status [--json]`, `atm axi runs [--json]` | The runs going, or retained runs, as a table |

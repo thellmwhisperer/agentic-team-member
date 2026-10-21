@@ -415,6 +415,16 @@ command row carries state and time only and does not repeat the command's
 output. The Delivery row becomes passed or failed when the command exits.
 An empty delivery command
 shows `Delivery skipped` without sub-rows.
+
+Once a run ends with Delivery passed, the screen goes on with the gate: it
+asks `no-mistakes axi status`, in the run's clone, for the run of the
+delivered branch, and `no-mistakes axi logs --step` for each step it started,
+every second. The gate's steps get rows below Delivery in the ATM box, and
+the Gate box in the right column has a header row per started step, its log
+rendered as the Agent box renders Markdown, folded to its first line like
+thinking, and one line per finding: risk, `file:line` and its description.
+The screen quits when the gate's run ends, and at once when no-mistakes shows
+no run there. The run writes nothing of the gate.
 The Agent box renders the agent's Markdown prose within the panel width as
 `✎` lines; non-empty thinking appears as `∴` lines. By default, consecutive
 successful or running tool calls are folded into one dim line below them,

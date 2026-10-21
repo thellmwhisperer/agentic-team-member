@@ -274,15 +274,19 @@ func (m *Model) row(r *row, width int) string {
 
 // sidebar says whether there is a box beside the ATM box to show.
 func (m *Model) sidebar() bool {
-	return m.agentRuns() || len(m.findings) > 0 || m.running()
+	return m.agentRuns() || len(m.findings) > 0 || m.running() || m.gateSteps != nil
 }
 
-// right is, at width in height rows, the Agent box while an agent runs, else the Findings box when there are
+// right is, at width in height rows, the Gate box once the gate after Delivery shows its run, else the Agent
+// box while an agent runs, else the Findings box when there are
 // findings, then the Log box while a node runs; "" for none. The Agent box takes every row the Log box, shown
 // with the agent's output, at most a third of them, leaves. The Log box is the last box.
 func (m *Model) right(width, height int) string {
 	m.logBounds = bounds{}
 	top := ""
+	if m.gateSteps != nil {
+		return m.gateBox(width, max(1, height-boxBorderRows))
+	}
 	if m.agentRuns() {
 		if len(m.output) > 0 {
 			logBox := m.logBox(width, max(1, min(height/3-boxBorderRows, height-minimumBoxRows-boxBorderRows)))
