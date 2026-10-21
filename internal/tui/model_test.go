@@ -61,7 +61,7 @@ func TestScreenHasARowForEachNodeOfTheGraph(t *testing.T) {
 	m := screen(80, 40, unit...)
 	s := view(m)
 	if !order(s, "╭─ ATM* ", "#7 Retry on timeout", "✓ Issue  0.1 s", "fix · passed",
-		"✓ Clone  0.9 s", "01234567 · passed", "✓ Contract", "✓ Agent · unit 1  4 min 28 s", "1 tools · passed",
+		"✓ Clone  0.9 s", "01234567 · passed", "✓ Contract", "✓ Agent  4 min 28 s", "1 tools · passed",
 		"Checks", "✓ red/green  1.5 s", "test", "○ Slop detector", "pending", "○ Delivery", "pending", "╰") {
 		t.Fatalf("rows:\n%s", s)
 	}
@@ -150,7 +150,7 @@ func TestScreenCutsARowsNoteBeforeItsName(t *testing.T) {
 	m := screen(138, 40, evs...)
 	m.end(run.Outcome{Outcome: "passed"}, nil)
 	s := view(m)
-	for _, want := range []string{`✓ Agent · unit 1  11 min 16 s .* passed │`, `✓ Slop detector  11 min 35 s .*passed │`,
+	for _, want := range []string{`✓ Agent  11 min 16 s .* passed │`, `✓ Slop detector  11 min 35 s .*passed │`,
 		`✓ Delivery  22 min 59 s .*passed │`} {
 		if !regexp.MustCompile(want).MatchString(s) {
 			t.Fatalf("want %q whole on its row:\n%s", want, s)

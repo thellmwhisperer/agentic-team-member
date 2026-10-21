@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -88,7 +87,7 @@ func (a agent) ponytail(root, clone, sha string, proofs []proof, i Issue, c conf
 		ev["rejected_files"], err = restoreCut(clone, all, why, ev["rejected_files"].([]rejectedFile))
 		return ev, err
 	}
-	ev["commits"], ev["tombstones"], err = commit(root, clone, sha, before, i, found)
+	ev["commits"], ev["tombstones"], err = commit(root, clone, before, i, found)
 	return ev, err
 }
 
@@ -453,20 +452,15 @@ func added(clone, sha, tree string) (int, error) {
 	return n, err
 }
 
-// commit commits in clone, on HEAD, the run's unit from base commit sha, tree unit, then the cut, the
+// commit commits in clone, on HEAD, the run's unit, tree unit, then the cut, the
 // working tree with a tombstone per finding, under the git identity of the repository at root, and returns
 // both commits and the tombstones.
-func commit(root, clone, sha, unit string, i Issue, found []finding) (commits, tombs []string, err error) {
+func commit(root, clone, unit string, i Issue, found []finding) (commits, tombs []string, err error) {
 	id, err := identity(root)
 	if err != nil {
 		return nil, nil, err
 	}
 	parent := "HEAD"
-	units, err := git(clone, "rev-list", "--count", sha+"..HEAD") // the commits before the unit's
-	if err != nil {
-		return nil, nil, err
-	}
-	n, _ := strconv.Atoi(units)
 	if tombs, err = tombstones(clone, unit, found); err != nil {
 		return nil, tombs, err
 	}
@@ -478,7 +472,7 @@ func commit(root, clone, sha, unit string, i Issue, found []finding) (commits, t
 	for _, f := range found {
 		msg += fmt.Sprintf("\n- %s: %s (%s)", f.File, f.Finding, f.Family)
 	}
-	for _, c := range [][2]string{{unit, unitMessage(i, n+1)}, {cut, msg}} {
+	for _, c := range [][2]string{{unit, unitMessage(i)}, {cut, msg}} {
 		if parent, err = git(clone, append(id, "commit-tree", c[0], "-p", parent, "-m", c[1])...); err != nil {
 			return commits, tombs, err
 		}
