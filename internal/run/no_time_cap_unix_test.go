@@ -170,47 +170,61 @@ func TestLowCPUChildIsNotCut(t *testing.T) {
 			receipt := filepath.Join(t.TempDir(), "receipt")
 			work := fmt.Sprintf("%q --quiet-work %s %q", filepath.Join(fakes, "fakeagent"), mode, receipt)
 			if mode == "private" {
-				work += fmt.Sprintf(` & child=$!; while test ! -s %q; do kill -0 "$child" || exit 1; sleep 0.01; done; `, receipt+".pid") +
+				work += fmt.Sprintf(
+					` & child=$!; while test ! -s %q; do kill -0 "$child" || exit 1; sleep 0.01; done; `,
+					receipt+".pid",
+				) +
 					fmt.Sprintf(`cat /proc/$child/stat >/dev/null && ! LC_ALL=C cat /proc/$child/io >/dev/null 2>%q || exit 1; `+
 						`grep -q 'Permission denied' %q || exit 1; wait "$child"`, receipt+".error", receipt+".error")
 			}
 			t.Setenv("FAKE_AGENT_WORK", work+" || exit 1; "+fixWork)
 			top := gitT(t, repo(t, "local", atmYAML), "rev-parse", "--show-toplevel")
 			events := followedRun(t, versionServer(t, top, hangBuild), top, 0, issueFile(t, issue))
-			for _, ev := range events {
-				if ev["step"] == "decision" {
-					t.Fatalf("working child caused a question: %v", ev)
-				}
-			}
+			assertNoWorkingChildQuestion(t, events)
 			lastRun(t, top, "passed")
-			var proof struct {
-				Elapsed int64 `json:"elapsed_ns"`
-				Samples []struct {
-					PID   int
-					CPU   int64 `json:"cpu_ns"`
-					Bytes int
-				}
-			}
-			b, err := os.ReadFile(receipt)
-			if err != nil || json.Unmarshal(b, &proof) != nil || proof.Elapsed < int64(5*time.Second) || len(proof.Samples) != 25 {
-				t.Fatalf("child did not complete five seconds of work: %s, %v", b, err)
-			}
-			first, last := proof.Samples[0], proof.Samples[24]
-			if last.CPU <= first.CPU || last.CPU >= int64(time.Second) {
-				t.Fatalf("want cumulative positive subsecond CPU: %s", b)
-			}
-			for i, sample := range proof.Samples {
-				if sample.PID != first.PID || sample.PID <= 0 {
-					t.Fatalf("child PID changed: %s", b)
-				}
-				if mode != "io" && i > 0 && sample.CPU <= proof.Samples[i-1].CPU {
-					t.Fatalf("child did not use CPU at every sample: %s", b)
-				}
-				if mode == "io" && sample.Bytes != (i+1)*2*1024*1024 {
-					t.Fatalf("child did not transfer bytes at every sample: %s", b)
-				}
-			}
+			verifyLowCPUChildProof(t, mode, receipt)
 		})
+	}
+}
+
+func assertNoWorkingChildQuestion(t *testing.T, events []obj) {
+	t.Helper()
+	for _, ev := range events {
+		if ev["step"] == "decision" {
+			t.Fatalf("working child caused a question: %v", ev)
+		}
+	}
+}
+
+func verifyLowCPUChildProof(t *testing.T, mode, receipt string) {
+	t.Helper()
+	var proof struct {
+		Elapsed int64 `json:"elapsed_ns"`
+		Samples []struct {
+			PID   int
+			CPU   int64 `json:"cpu_ns"`
+			Bytes int
+		}
+	}
+	b, err := os.ReadFile(receipt)
+	if err != nil || json.Unmarshal(b, &proof) != nil ||
+		proof.Elapsed < int64(5*time.Second) || len(proof.Samples) != 25 {
+		t.Fatalf("child did not complete five seconds of work: %s, %v", b, err)
+	}
+	first, last := proof.Samples[0], proof.Samples[24]
+	if last.CPU <= first.CPU || last.CPU >= int64(time.Second) {
+		t.Fatalf("want cumulative positive subsecond CPU: %s", b)
+	}
+	for i, sample := range proof.Samples {
+		if sample.PID != first.PID || sample.PID <= 0 {
+			t.Fatalf("child PID changed: %s", b)
+		}
+		if mode != "io" && i > 0 && sample.CPU <= proof.Samples[i-1].CPU {
+			t.Fatalf("child did not use CPU at every sample: %s", b)
+		}
+		if mode == "io" && sample.Bytes != (i+1)*2*1024*1024 {
+			t.Fatalf("child did not transfer bytes at every sample: %s", b)
+		}
 	}
 }
 
