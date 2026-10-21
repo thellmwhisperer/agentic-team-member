@@ -264,7 +264,8 @@ func (m *Model) key(k string) {
 }
 
 // wheel scrolls the box under the pointer: the ATM box, or the Agent or Log box while it shows. A click on a row of
-// folded tool calls, thinking or command output unfolds it, and on its first row once unfolded folds it again.
+// folded tool calls, thinking, command output or the issue's title unfolds it, and on its first row once unfolded
+// folds it again.
 func (m *Model) wheel(msg tea.MouseMsg) {
 	p, b := &m.pipeline, m.pipelineBounds
 	switch {
@@ -282,7 +283,12 @@ func (m *Model) wheel(msg tea.MouseMsg) {
 		p.scroll(3)
 	case tea.MouseButtonLeft:
 		row := msg.Y - b.y - 1 // under the box's top border
-		if msg.Action == tea.MouseActionPress && row >= 0 && row < len(p.toggles) && p.toggles[row] != "" {
+		if msg.Action != tea.MouseActionPress || row < 0 || row >= len(p.toggles) || p.toggles[row] == "" {
+			return
+		}
+		if p.toggles[row] == "title" {
+			m.unfoldTitle = !m.unfoldTitle
+		} else {
 			if m.open == nil {
 				m.open = map[string]bool{}
 			}

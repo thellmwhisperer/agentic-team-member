@@ -210,17 +210,18 @@ func (m *Model) atm(width, height int) string {
 		}
 	}
 	state := m.icon(m.state) + " " + bold(states[m.state][1], m.state)
-	// The title wraps beside the state: three lines and a hint until i shows them all.
-	head := strings.Split(ansi.Wrap(issue, max(1, inner-lipgloss.Width(state)-1), ""), "\n")
-	for i, l := range head {
-		head[i] = paint(dim, l)
-	}
-	if len(head) > 3 {
-		i := lipgloss.NewStyle().Bold(true).Render("i")
-		if m.unfoldTitle {
-			head = append(head, i+" "+paint(dim, "fold title"))
-		} else {
-			head = append(head[:3], paint(dim, "… ")+i+" "+paint(dim, "unfold title"))
+	// A title wider than its line beside the state folds to it behind the arrow, cut with an ellipsis, until i or a
+	// click on it wraps it whole.
+	room := max(1, inner-lipgloss.Width(state)-1)
+	folds := ansi.StringWidth(issue) > room
+	head := []string{paint(dim, issue)}
+	if folds && !m.unfoldTitle {
+		head[0] = fold(false) + " " + paint(dim, ansi.Truncate(issue, max(1, room-2), "…"))
+	} else if folds {
+		head = strings.Split(ansi.Wrap(issue, max(1, room-2), ""), "\n")
+		lead := fold(true)
+		for i, l := range head {
+			head[i], lead = lead+" "+paint(dim, l), " "
 		}
 	}
 	head[0] = spread(head[0], state, inner)
@@ -240,7 +241,12 @@ func (m *Model) atm(width, height int) string {
 		}
 		rows = append(rows, paneLine{key: fmt.Sprintf("row:%p", r), text: m.row(r, inner)})
 	}
-	lines = append(lines, m.pipeline.show(rows, max(1, height-2-len(lines)))...)
+	shown := m.pipeline.show(rows, max(1, height-2-len(lines)))
+	m.pipeline.toggles = append(make([]string, len(lines)), m.pipeline.toggles...)
+	if folds {
+		m.pipeline.toggles[0] = "title"
+	}
+	lines = append(lines, shown...)
 	title := "ATM"
 	if m.focused() == &m.pipeline {
 		title += "*"
