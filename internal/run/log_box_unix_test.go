@@ -203,8 +203,17 @@ func TestRealATMFoldedRowsRenderMarkdown(t *testing.T) {
 	})
 	a.boldRow(s, "∴ ", "the folded thinking row")
 	a.click(rowOf(s, "▸ ∴ "))
-	a.boldRow(a.drawn(func(s string) bool { return strings.Contains(s, "▾ ∴ Running tests") }), "▾ ∴ ",
-		"the unfolded thinking")
+	s = a.drawn(func(s string) bool {
+		return strings.Contains(s, "▾ ∴ Running tests") && strings.Contains(s, "the agent thinks on")
+	})
+	a.boldRow(s, "▾ ∴ ", "the unfolded thinking")
+	first, last := rowOf(s, "▾ ∴ Running tests"), rowOf(s, "the agent thinks on")
+	if last != first+2 || rowOf(s, "1 tool: Skill") != last+1 {
+		t.Fatalf("unfolded thinking must keep the paragraph break and end immediately before the tool row:\n%s", s)
+	}
+	if row := logColumn(strings.Split(s, "\n")[first+1]); strings.TrimSpace(strings.Trim(row, "│")) != "" {
+		t.Fatalf("the blank line between thinking paragraphs was lost: %q", row)
+	}
 	agentDone()
 	a.unfold(a.foldedLog())
 	runDone()
@@ -227,7 +236,7 @@ func markdownRun(t *testing.T, holdAgent bool) (a *attached, agentDone, runDone 
 	agentDone = func() {}
 	if holdAgent {
 		t.Setenv("FAKE_AGENT_STREAM", `{"type":"assistant","message":{"role":"assistant","content":[`+
-			`{"type":"thinking","thinking":"**Running tests**\n\nthe agent thinks on"}]}}`+"\n")
+			`{"type":"thinking","thinking":"**Running tests**\n\nthe agent thinks on\n\n"}]}}`+"\n")
 		t.Setenv("FAKE_AGENT_WORK", fmt.Sprintf(`cat "%s" >/dev/null; `, agent)+fixWork)
 		agentDone = func() { free(t, agent) }
 	}

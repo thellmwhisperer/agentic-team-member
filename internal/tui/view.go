@@ -612,7 +612,7 @@ func (m *Model) agentBox(width, lines int) string {
 			out = append(out, paneLine{key: key, toggle: key, text: fold(false) + " ∴ " + firstMarkdown(a.thinking)})
 			continue
 		}
-		texts, _, _ := agentTextRows(fold(true)+" ∴ ", a.thinking, width-2, codeFence{})
+		texts, _, _ := agentTextRows(fold(true)+" ∴ ", strings.TrimRight(a.thinking, "\n"), width-2, codeFence{})
 		for i, text := range texts {
 			line := paneLine{key: key, text: text}
 			if i == 0 {

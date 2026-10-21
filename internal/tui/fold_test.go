@@ -66,6 +66,20 @@ func TestThinkingFoldsLikeToolCalls(t *testing.T) {
 	}
 }
 
+func TestUnfoldedThinkingHasNoTrailingBlankRows(t *testing.T) {
+	m := screen(160, 40, `{"step":"agent","state":"started"}`,
+		`{"step":"agent","thinking":"First thought.\n\nLast thought.\n\n"}`)
+	click(t, m, "∴ First thought.")
+	rows := strings.Split(ansi.Strip(m.agentBox(160, 3)), "\n")
+	var got []string
+	for _, row := range rows[1 : len(rows)-1] {
+		got = append(got, strings.TrimSpace(strings.Trim(row, "│")))
+	}
+	if want := []string{"▾ ∴ First thought.", "", "Last thought."}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("unfolded thinking must keep the paragraph break and end on its last text line:\n%q\nwant:\n%q", got, want)
+	}
+}
+
 func TestFooterHintsFollowShowAndHide(t *testing.T) {
 	m := screen(160, 40, `{"step":"agent","state":"started"}`,
 		`{"step":"agent","thinking":"A thought."}`)
