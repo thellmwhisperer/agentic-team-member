@@ -130,10 +130,10 @@ For `atm run`, including `--follow`, and `atm axi run`:
 
 | Exit | Meaning |
 |------|---------|
-| `0` | The unit passed and Delivery passed or was skipped; see [Delivery](docs/how-a-run-flows.md#delivery) |
-| `1` | The unit failed or awaits the launcher's answer; nothing is delivered yet |
-| `2` | [preflight](docs/how-a-run-flows.md#before-the-run), [serve build check](docs/how-a-run-flows.md#the-screen), issue, clone or contract failed |
-| `4` | The unit passed, but Delivery failed |
+| `0` | The run completed; Delivery passed, was skipped, or its failure was approved; see [Delivery](docs/how-a-run-flows.md#delivery) |
+| `1` | Agent or Checks failed or awaits the launcher's answer; nothing is delivered yet |
+| `2` | [preflight](docs/how-a-run-flows.md#before-the-run), [serve build check](docs/how-a-run-flows.md#the-screen), issue, clone, contract or slop detector failed or awaits an answer |
+| `4` | Delivery failed or awaits the launcher's answer |
 
 ## Read more
 
