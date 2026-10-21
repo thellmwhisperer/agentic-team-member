@@ -221,9 +221,11 @@ func undo(runDir, clone, base, all string, proofs []proof, c config.Config) (why
 	live, runs, took := liveIn(clone), 0, span{}
 	check := func() (why string, ran []unitResult, cmds []cmdResult, err error) {
 		runs++
-		live(map[string]any{"check": "checks", "state": "started", "note": fmt.Sprintf("run %d", runs)})
+		live(map[string]any{"check": fmt.Sprintf("checks run %d", runs), "state": "started",
+			"note": fmt.Sprintf("run %d", runs)})
 		took = timed(func() { why, ran, cmds, err = reprove(runDir, clone, base, proofs, c) })
-		live(map[string]any{"check": "checks", "state": map[bool]string{true: "passed", false: "failed"}[why == ""],
+		live(map[string]any{"check": fmt.Sprintf("checks run %d", runs),
+			"state":       map[bool]string{true: "passed", false: "failed"}[why == ""],
 			"duration_ms": took.DurationMS,
 			"note":        fmt.Sprintf("run %d %s", runs, map[bool]string{true: "ok", false: "failed"}[why == ""])})
 		return why, ran, cmds, err
@@ -242,7 +244,7 @@ func undo(runDir, clone, base, all string, proofs []proof, c config.Config) (why
 		if len(named) == 0 {
 			break
 		}
-		live(map[string]any{"check": "checks", "state": "failed", "duration_ms": took.DurationMS,
+		live(map[string]any{"check": fmt.Sprintf("checks run %d", runs), "state": "failed", "duration_ms": took.DurationMS,
 			"note": fmt.Sprintf("run %d failed: %s", runs, strings.Join(named, ", "))})
 		for _, p := range named {
 			undone[p] = why
