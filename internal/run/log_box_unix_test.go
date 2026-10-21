@@ -8,11 +8,14 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/creack/pty"
 )
 
@@ -38,6 +41,60 @@ func TestRealATMLogHeaderAndFoldWithThirtyCheckLines(t *testing.T) {
 	live.boldRow(live.drawn(func(s string) bool { return regexp.MustCompile(`▾ \S Agent · unit 1`).MatchString(s) }),
 		"│   ", "the agent's output")
 	live.end()
+}
+
+func TestRealATMLogScrollHoldsAcrossEviction(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		initial int
+		cols    uint16
+		text    string
+	}{
+		{"60-to-110", 60, 120, "log line %03d"},
+		{"200-to-250", 200, 120, "log line %03d"},
+		{"wrapped-stacked", 200, 80, "log line %03d " + strings.Repeat("word ", 30) + "\n**continuation**"},
+		{"fenced", 200, 120, "```\nlog line %03d\n```"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := liveAttach(t, tc.cols, 40)
+			a.send(`{"step":"checks","state":"started"}`)
+			a.send(`{"step":"checks","check":"test","state":"started"}`)
+			output := func(i int) {
+				a.send(fmt.Sprintf(`{"step":"checks","check":"test","output":%q}`, fmt.Sprintf(tc.text, i)))
+			}
+			for i := range tc.initial {
+				output(i)
+			}
+			tail := fmt.Sprintf("log line %03d", tc.initial-1)
+			a.drawn(func(s string) bool { return strings.Contains(s, tail) })
+			a.key("\t")
+			a.drawn(func(s string) bool { return strings.Contains(s, "Log*") })
+			key := "\x1b[A"
+			if tc.name == "wrapped-stacked" {
+				key = "\x1b[5~"
+			}
+			a.key(key)
+			s := a.drawn(func(s string) bool { return strings.Contains(s, "Log*") && !strings.Contains(s, tail) })
+			lines := regexp.MustCompile(`log line \d+`)
+			held := lines.FindAllString(s, -1)
+			if len(held) == 0 {
+				t.Fatalf("scrolling left no Log lines:\n%s", s)
+			}
+			for i := tc.initial; i < tc.initial+50; i++ {
+				output(i)
+			}
+			a.send(`{"step":"checks","check":"appended","state":"started"}`)
+			s = a.drawn(func(s string) bool { return strings.Contains(s, "appended") })
+			if got := lines.FindAllString(s, -1); !slices.Equal(got, held) {
+				t.Fatalf("50 new lines moved the Log from %v to %v:\n%s", held, got, s)
+			}
+			a.key("\x1b[F")
+			a.drawn(func(s string) bool { return strings.Contains(s, fmt.Sprintf("log line %03d", tc.initial+49)) })
+			output(tc.initial + 50)
+			a.drawn(func(s string) bool { return strings.Contains(s, fmt.Sprintf("log line %03d", tc.initial+50)) })
+			a.end()
+		})
+	}
 }
 
 var stackedLog = regexp.MustCompile(`(?m)^╭─ Log\* `)
@@ -133,7 +190,22 @@ var frameEnd = regexp.MustCompile(`\x1b\[\d+;\d*H$`)
 // drawn reads the screen until a whole frame of it matches ok, and returns it.
 func (a *attached) drawn(ok func(screen string) bool) string {
 	a.t.Helper()
-	return a.sees(func(s string) bool { return frameEnd.MatchString(a.raw.String()) && ok(s) })
+	timeout := time.After(time.Minute)
+	for {
+		s := ansi.Strip(a.styled())
+		if frameEnd.MatchString(a.raw.String()) && ok(s) {
+			return s
+		}
+		select {
+		case c, open := <-a.chunks:
+			if !open {
+				a.t.Fatalf("atm ended before the screen showed what was awaited:\n%s", s)
+			}
+			a.raw.WriteString(c)
+		case <-timeout:
+			a.t.Fatalf("the screen never showed what was awaited:\n%s", s)
+		}
+	}
 }
 
 var typecheckRuns = regexp.MustCompile(`typecheck[^│]*running`)
@@ -217,4 +289,45 @@ func (a *attached) boldRow(s, mark, what string) {
 	if !found {
 		a.t.Fatalf("%s does not show Running tests:\n%s", what, s)
 	}
+}
+
+func (a *attached) read() {
+	defer close(a.chunks)
+	b := make([]byte, 4096)
+	for {
+		n, err := a.p.Read(b)
+		if n > 0 {
+			a.chunks <- string(b[:n])
+		}
+		if err != nil {
+			return
+		}
+	}
+}
+
+func (a *attached) styled() string {
+	rows := make([]string, a.rows)
+	raw, at, last := a.raw.String(), 0, 0
+	write := func(s string) {
+		if s = strings.ReplaceAll(s, "\r", ""); ansi.Strip(s) != "" || strings.Contains(s, ansi.EraseLineRight) {
+			rows[at] = s
+		}
+	}
+	for _, m := range cursorMoves.FindAllStringSubmatchIndex(raw, -1) {
+		write(raw[last:m[0]])
+		last = m[1]
+		switch {
+		case m[4] < 0:
+			at = min(at+1, len(rows)-1)
+		case raw[m[4]] == 'H':
+			n, _ := strconv.Atoi(raw[m[2]:m[3]])
+			at = min(max(n-1, 0), len(rows)-1)
+		case raw[m[2]:m[3]] == "2":
+			clear(rows)
+		default:
+			clear(rows[at+1:])
+		}
+	}
+	write(raw[last:])
+	return strings.Join(rows, "\n")
 }

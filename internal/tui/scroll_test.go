@@ -156,22 +156,26 @@ func TestTheWheelScrollsTheBoxUnderThePointer(t *testing.T) {
 
 // The Log box, focused with tab, holds what is being read while its command prints; end shows the tail.
 func TestLogBoxScrollHoldsWhileLinesArrive(t *testing.T) {
-	lines := regexp.MustCompile(`log line \d+`)
-	m := screen(120, 24, unit...)
-	for i := range 60 {
-		feed(m, fmt.Sprintf(`{"step":"checks","check":"test","output":"log line %03d"}`, i))
-	}
-	press(m, tea.KeyTab, tea.KeyUp)
-	held := shownOf(m, lines)
-	for i := 60; i < 110; i++ {
-		feed(m, fmt.Sprintf(`{"step":"checks","check":"test","output":"log line %03d"}`, i))
-	}
-	if got := shownOf(m, lines); len(held) == 0 || !slices.Equal(got, held) {
-		t.Fatalf("after up, new lines moved the Log box from %v:\n%s", held, view(m))
-	}
-	press(m, tea.KeyEnd)
-	if got := shownOf(m, lines); len(got) == 0 || got[len(got)-1] != "log line 109" {
-		t.Fatalf("end shows the Log box's tail:\n%s", view(m))
+	for _, initial := range []int{60, 200} {
+		t.Run(fmt.Sprint(initial), func(t *testing.T) {
+			lines := regexp.MustCompile(`log line \d+`)
+			m := screen(120, 24, unit...)
+			for i := range initial {
+				feed(m, fmt.Sprintf(`{"step":"checks","check":"test","output":"log line %03d"}`, i))
+			}
+			press(m, tea.KeyTab, tea.KeyUp)
+			held := shownOf(m, lines)
+			for i := initial; i < initial+50; i++ {
+				feed(m, fmt.Sprintf(`{"step":"checks","check":"test","output":"log line %03d"}`, i))
+			}
+			if got := shownOf(m, lines); len(held) == 0 || !slices.Equal(got, held) {
+				t.Fatalf("after up, new lines moved the Log box from %v:\n%s", held, view(m))
+			}
+			press(m, tea.KeyEnd)
+			if got := shownOf(m, lines); len(got) == 0 || got[len(got)-1] != fmt.Sprintf("log line %03d", initial+49) {
+				t.Fatalf("end shows the Log box's tail:\n%s", view(m))
+			}
+		})
 	}
 }
 

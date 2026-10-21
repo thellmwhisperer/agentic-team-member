@@ -45,7 +45,7 @@ type Model struct {
 	number                        int
 	rows                          []*row
 	agent                         []*activity
-	output                        []logLine
+	output                        []*logLine
 	findings                      []finding
 	width, height, spin           int
 	historyHeight                 int
@@ -320,7 +320,7 @@ func (m *Model) apply(f run.Frame) {
 	case e.Thinking != "" || e.Says != "":
 		m.agent = append(m.agent, &activity{thinking: e.Thinking, says: e.Says})
 	case e.Output != nil:
-		m.output = append(m.output[max(0, len(m.output)-199):], logLine{e.Step, e.Check, ansi.Strip(*e.Output)})
+		m.output = append(m.output[max(0, len(m.output)-199):], &logLine{e.Step, e.Check, ansi.Strip(*e.Output)})
 	case m.current(e.Step) == nil:
 		return
 	case e.Check != "":
