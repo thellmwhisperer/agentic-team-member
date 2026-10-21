@@ -183,7 +183,9 @@ code at the question: 1 for Agent or Checks, 2 for the slop detector and 4 for
 Delivery. The background run remains waiting. `atm attach <run>` shows the
 question again or follows the continuation after an answer.
 
-The agent must not have committed. ATM records the clone's paths before the
+The Agent and a worker fixing a failure must not commit. A Delivery command
+may commit before failing; Checks use the commit left by Delivery as the
+starting point for the fix turn. ATM records the clone's paths before the
 agent starts, including contents of ignored nested repositories. Before
 `install`, Checks removes newly made ignored files and directories,
 including read-only cache trees and new contents within retained directories.
@@ -256,10 +258,10 @@ requirements fails, ATM restores the whole clone byte for byte and discards
 the entire cut.
 
 A kept cut is its own commit, `ponytail: <n> cuts`, one line per surviving finding,
-after the unit commit, with one slopslint tombstone per surviving finding under
+after a unit commit, with one slopslint tombstone per surviving finding under
 `.slop/tombstones/`. For a deleted test, the tombstone embeds its path and
 pre-cut content and references that record as the evidence artifact.
-Both commits use the repository's git identity; none, or
+ATM's commits use the repository's git identity; none, or
 an email ending in `@localhost`, fails the run.
 
 ## Delivery
@@ -317,7 +319,7 @@ it is on disk before delivery reads it.
 |-------|-------|
 | `failed_node`, `reason` | The step that failed, if any, and the reason for failure |
 | `agent` | The effective requested `harness`, `model`, `effort` and ordered `harness_args`, after global config, `.atm.yaml` and flags. Unset model and effort stay `""`; no extra arguments is `[]` |
-| `nodes` | Each step's `result` (`passed`, `failed`, `running`, `skipped` or `not run`), `started_at` (UTC, RFC 3339 with milliseconds) when its start is known, and `duration_ms` when it ends; the agent node also has `exit` and `tail` when the agent ran but its step failed, and `"report": "missing"` when the worker's report never came ([Rejected reports](#rejected-reports)). Checks includes an `e2e` row in `rows` when that command ran, passed or failed, with `name`, `result`, `started_at` and `duration_ms`. Delivery has `rows`, each with `name`, `result` (`running`, `passed` or `failed`), `started_at` and `duration_ms`, for each part that has started. |
+| `nodes` | Each step's `result` (`passed`, `failed`, `running`, `skipped` or `not run`), `started_at` (UTC, RFC 3339 with milliseconds) when its start is known, and `duration_ms` when it ends; the agent node also has `exit` and `tail` when the agent ran but its step failed, and `"report": "missing"` when the worker's report never came ([Rejected reports](#rejected-reports)). Checks includes an `e2e` row in `rows` when that command ran, passed or failed, with `name`, `result`, `started_at` and `duration_ms`. Delivery has `rows`, each with `name`, `result` (`running`, `passed` or `failed`), `started_at` and `duration_ms`, for each commit or command attempt; earlier attempts keep their result and duration. |
 | `units` | The unit's number (`1`), base commit, reported test file, result, `started_at` and `duration_ms` |
 | `reproofs` | Each rechecked unit's number, base commit, reported test file, result, `started_at` and `duration_ms` after a cut; configured commands are in `commands` |
 | `commands` | Every configured command that ran, the clone's `install` included, with its result, last 60 lines, `started_at` and `duration_ms` |
