@@ -127,6 +127,14 @@ func ownDeliveryWaits(t *testing.T, bin, conf, gate, outcome string, states []st
 		t.Fatalf("delivery does not follow the one run it launched to its end:\n%s", calls)
 	}
 	t.Logf("no-mistakes calls:\n%s\ndelivery output:\n%s", calls, shown)
+	if outcome == "failed" { // a failed delivery waits for the launcher's answer
+		if err := Answer(top, label, "stop"); err != nil {
+			t.Fatal(err)
+		}
+		if end, _ := Attach(top, label, io.Discard); end.Outcome != "failed" || end.FailedNode != "delivery" {
+			t.Fatalf("stop after a failed delivery ended %+v", end)
+		}
+	}
 	endDeliveryServer(t, server, top)
 }
 
