@@ -1,0 +1,22 @@
+schema: 1
+id: T-PONYTAIL-20261021-586-1
+status: accepted
+category: duplication
+title: Preserve independent Slop detector restoration scenarios
+created_at: 2026-10-21
+incident:
+  pattern: Two real ATM terminal scenarios share a short fixture setup.
+  what_went_wrong: The restoration tests repeat setup while proving different outcomes.
+  root_cause: Each test keeps its complete setup and assertions under the no-shortening decision.
+  rule_established: Accept only this clone; keep both scenarios and their assertions intact.
+  evidence:
+    - family: clone_fingerprint
+      example: Full restoration setup at lines 111-116.
+      artifact: internal/run/ponytail_phases_unix_test.go
+    - family: clone_fingerprint
+      example: Complete-reference setup at lines 179-185.
+      artifact: internal/run/ponytail_phases_unix_test.go
+match:
+  family: clone_fingerprint
+  scope: go_tests
+  fingerprint: 1d5adab59384791a1265bb4eedbbf2ce4245c49029d86ea71dd750907a655b04
