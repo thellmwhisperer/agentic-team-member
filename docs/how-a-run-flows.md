@@ -442,10 +442,11 @@ An empty delivery command
 shows `Delivery skipped` without sub-rows.
 
 The Slop detector unfolds into `agent reading the diff`, `N findings`, `judged`,
-`checks`, `put back <file>`, and, when a cut is kept, `commit` rows. The `judged`
+`checks run n`, `put back <file>`, and, when a cut is kept, `commit` rows. The `judged`
 row shows the number of findings accepted for checks, the number rejected and
-the first rejection reason. The `checks` row shows the latest attempt's number
-and result; a failed attempt can name the files it implicated. Phase rows show
+the first rejection reason. Each `checks run n` row retains its attempt's result
+and elapsed time; a failed attempt can name the files it implicated. Earlier
+attempts remain available by scrolling after later attempts finish. Phase rows show
 elapsed time where available. The Findings box shows every finding the agent
 reported, including rejected and discarded cuts. Each entry starts with
 `kept`, `rejected: <reason>`, or `discarded: checks failed`, followed by its
