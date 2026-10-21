@@ -49,7 +49,7 @@ func checkAgentBox(t *testing.T, events, want []string, tools int) {
 		t.Fatalf("Agent box lines:\n%q\nwant:\n%q", got, want)
 	}
 	m.apply(run.Frame{Event: []byte(`{"step":"agent","state":"passed","unit":1,"duration_ms":1000}`)})
-	if got := view(m); !strings.Contains(got, "Agent · unit 1") ||
+	if got := view(m); !strings.Contains(got, "✓ Agent  1.0 s") ||
 		!strings.Contains(got, fmt.Sprintf("%d tools · passed", tools)) {
 		t.Fatalf("Agent tool count note:\n%s", got)
 	}

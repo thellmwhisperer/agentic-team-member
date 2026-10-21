@@ -351,8 +351,8 @@ func prepareDelivery(r *verdict, root, clone, sha string, i Issue) (branch, cuts
 }
 
 // unitMessage uses one conventional prefix for every issue, without classifying it.
-func unitMessage(i Issue, n int) string {
-	return fmt.Sprintf("chore: %s\n\natm unit %d", i.Title, n)
+func unitMessage(i Issue) string {
+	return "chore: " + i.Title
 }
 
 // onBranch puts clone, at base commit sha, on a new branch name, what is left uncommitted committed as the
@@ -383,18 +383,9 @@ func onBranch(root, clone, sha, name string, i Issue) (cuts, tombs string, err e
 		if id, err = identity(root); err == nil {
 			_, err = git(clone, "add", "-A")
 		}
-		var n int
-		if err == nil {
-			commits, e := git(clone, "rev-list", "--count", sha+"..HEAD")
-			if e != nil {
-				err = e
-			} else {
-				n, err = strconv.Atoi(commits)
-			}
-		}
 		if err == nil {
 			_, err = git(clone, append(id, "commit", "-q", "--no-verify", "--cleanup=verbatim", "-m",
-				unitMessage(i, n+1))...)
+				unitMessage(i))...)
 		}
 	}
 	if err == nil {
