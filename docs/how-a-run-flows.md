@@ -161,6 +161,8 @@ calls fail without returning the report.
 An agent call is hung after 10 minutes with no output while no process under
 it starts, ends, uses CPU time or transfers bytes. Activity uses cumulative
 subsecond CPU counters and I/O byte counters on Linux and macOS.
+An incomplete observation cannot establish inactivity: readable counters and
+output are retained, and the inactivity interval starts again.
 ATM kills it with every process it started,
 and its step fails with `hung: no output and no child process working for 10m`.
 An agent that is silent while a child works, such as a test pass, is never

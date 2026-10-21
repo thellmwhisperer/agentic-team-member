@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"testing"
@@ -140,10 +141,20 @@ func TestPartialOutputIsNotSilence(t *testing.T) {
 
 func TestLowCPUChildIsNotCut(t *testing.T) {
 	sharedATM(t, hangBuild)
-	for _, mode := range []string{"cpu", "io"} {
+	modes := []string{"cpu", "io"}
+	if runtime.GOOS == "linux" && os.Geteuid() != 0 {
+		modes = append(modes, "private")
+	}
+	for _, mode := range modes {
 		t.Run(mode, func(t *testing.T) {
 			receipt := filepath.Join(t.TempDir(), "receipt")
-			t.Setenv("FAKE_AGENT_WORK", fmt.Sprintf("%q --quiet-work %s %q; ", filepath.Join(fakes, "fakeagent"), mode, receipt)+fixWork)
+			work := fmt.Sprintf("%q --quiet-work %s %q", filepath.Join(fakes, "fakeagent"), mode, receipt)
+			if mode == "private" {
+				work += fmt.Sprintf(` & child=$!; while test ! -s %q; do kill -0 "$child" || exit 1; sleep 0.01; done; `, receipt+".pid") +
+					fmt.Sprintf(`cat /proc/$child/stat >/dev/null && ! LC_ALL=C cat /proc/$child/io >/dev/null 2>%q || exit 1; `+
+						`grep -q 'Permission denied' %q || exit 1; wait "$child"`, receipt+".error", receipt+".error")
+			}
+			t.Setenv("FAKE_AGENT_WORK", work+" || exit 1; "+fixWork)
 			top := gitT(t, repo(t, "local", atmYAML), "rev-parse", "--show-toplevel")
 			events := followedRun(t, versionServer(t, top, hangBuild), top, 0, issueFile(t, issue))
 			for _, ev := range events {
@@ -172,7 +183,7 @@ func TestLowCPUChildIsNotCut(t *testing.T) {
 				if sample.PID != first.PID || sample.PID <= 0 {
 					t.Fatalf("child PID changed: %s", b)
 				}
-				if mode == "cpu" && i > 0 && sample.CPU <= proof.Samples[i-1].CPU {
+				if mode != "io" && i > 0 && sample.CPU <= proof.Samples[i-1].CPU {
 					t.Fatalf("child did not use CPU at every sample: %s", b)
 				}
 				if mode == "io" && sample.Bytes != (i+1)*2*1024*1024 {
@@ -183,22 +194,25 @@ func TestLowCPUChildIsNotCut(t *testing.T) {
 	}
 }
 
-func TestActivityObservationFailureIsReported(t *testing.T) {
+func TestActivityObservationFailuresDoNotStopWork(t *testing.T) {
 	sharedATM(t, hangBuild)
 	ps, err := exec.LookPath("ps")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, c := range []struct{ name, script, reason string }{
-		{"ps", "exit 42", "exit status 42"},
+	for _, c := range []struct{ name, script, stream, work string }{
+		{"ps stdout", "exit 42", "stdout", ""},
+		{"ps stderr", "exit 42", "stderr", ""},
+		{"ps silent", "exit 42", "", "sleep 4; "},
 		{"native", `if test -s "$FAKE_AGENT_PID" && test ! -f "$ATM_ACTIVITY_USED"; then
 : > "$ATM_ACTIVITY_USED"
 printf '1 '
 cat "$FAKE_AGENT_PID"
 printf '\n'
+` + fmt.Sprintf("%q", ps) + ` "$@"
 else
 exec ` + fmt.Sprintf("%q", ps) + ` "$@"
-fi`, "pid 1:"},
+fi`, "", `echo "$PPID" > "$FAKE_AGENT_PID"; ` + busy},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			if c.name == "native" && os.Geteuid() == 0 {
@@ -209,14 +223,29 @@ fi`, "pid 1:"},
 				t.Fatal(err)
 			}
 			t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-			t.Setenv("FAKE_AGENT", "silent")
+			t.Setenv("FAKE_AGENT_WORK", c.work+fixWork)
+			if c.stream != "" {
+				partial := filepath.Join(dir, "partial")
+				writeFixture(t, partial, c.stream)
+				t.Setenv("FAKE_AGENT_PARTIAL", partial)
+			}
 			t.Setenv("FAKE_AGENT_PID", filepath.Join(dir, "pid"))
 			t.Setenv("ATM_ACTIVITY_USED", filepath.Join(dir, "used"))
 			top := gitT(t, repo(t, "local", atmYAML), "rev-parse", "--show-toplevel")
-			followedRun(t, versionServer(t, top, hangBuild), top, 1, issueFile(t, issue))
-			rep := readReport(t, filepath.Join(runDir(top, lastRun(t, top, "failed")), "report.json"))
-			if reason, _ := rep["reason"].(string); !strings.Contains(reason, "observe agent activity: "+c.reason) {
-				t.Fatalf("observation failure was hidden: %v", rep)
+			events := followedRun(t, versionServer(t, top, hangBuild), top, 0, issueFile(t, issue))
+			for _, ev := range events {
+				if ev["step"] == "decision" {
+					t.Fatalf("missing observation caused a question: %v", ev)
+				}
+			}
+			rep := readReport(t, filepath.Join(runDir(top, lastRun(t, top, "passed")), "report.json"))
+			if reportNode(t, rep, "checks")["result"] != "passed" {
+				t.Fatalf("observation failure stopped the work: %v", rep)
+			}
+			if c.name == "native" {
+				if _, err := os.Stat(filepath.Join(dir, "used")); err != nil {
+					t.Fatal("native observation failure was not exercised", err)
+				}
 			}
 		})
 	}
