@@ -158,9 +158,10 @@ calls fail without returning the report.
 
 ### Hung agents
 
-An agent call is hung after 10 minutes with no output and no observed child
-activity. ATM samples descendants for process starts and exits, cumulative
-subsecond CPU time, and I/O byte transfers on Linux and macOS.
+An agent call is hung when a periodic sample finds at least 10 minutes with no
+output and no observed child activity. ATM samples descendants for process
+starts and exits, cumulative subsecond CPU time, and I/O byte transfers on
+Linux and macOS.
 An incomplete observation cannot establish inactivity: readable counters and
 output are retained, and the inactivity interval starts again.
 ATM kills it with every process it started,
