@@ -58,16 +58,24 @@ func TestRunWritesTheContractForTheTaskType(t *testing.T) {
 		"chore":      "Implement the issue",
 	} {
 		t.Run(typ, func(t *testing.T) {
+			root := repo(t, "https://example.com/owner/repo.git", briefYAML)
 			issue := "Retry once on timeout."
 			if typ != "" {
 				issue += "\n\nType: " + typ
 			}
 			var out bytes.Buffer
-			got := runBrief(t, "# Retry\n"+issue+"\n", &out)
+			if err := Run("t", []string{issueFile(t, "# Retry\n"+issue+"\n")}, &out, io.Discard); err != nil {
+				t.Fatal(err)
+			}
 			evs := events(t, &out)
 			if evs[5]["step"] != "contract" || evs[5]["state"] != "passed" {
 				t.Fatalf("want the contract step passed, got %v", evs)
 			}
+			b, err := os.ReadFile(filepath.Join(root, ".atm", "runs", "t", "brief.md"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := strings.ReplaceAll(string(b), "\r\n", "\n")
 			first, _, _ := strings.Cut(got, "\n")
 			if !strings.Contains(first, "`AGENTS.md`") || !strings.Contains(first, "this brief wins") {
 				t.Errorf("first line does not point to AGENTS.md: %q", first)
