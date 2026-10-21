@@ -75,9 +75,17 @@ func failedCheckQuestion(t *testing.T, bin, top string, args ...string) (string,
 	return question(t, bin, top, "failed-check-finding", args...)
 }
 
-// question starts args and returns the run's clone and label once it asks about a finding containing finding.
-func question(t *testing.T, bin, top, finding string, args ...string) (string, string) {
+// question accepts the existing agent/check calls and the later-step calls with an explicit exit code.
+// It returns the run's clone and label once the matching finding is published.
+func question(t *testing.T, first string, second any, third string, args ...string) (string, string) {
 	t.Helper()
+	var bin, top, want string
+	code := 1
+	if exit, ok := second.(int); ok {
+		want, code, bin, top, args = first, exit, third, args[0], args[1:]
+	} else {
+		bin, top, want = first, second.(string), third
+	}
 	f := startFollow(t, bin, top, false, args...)
 	var clone, label string
 	timer := time.NewTimer(30 * time.Second)
@@ -98,7 +106,7 @@ func question(t *testing.T, bin, top, finding string, args ...string) (string, s
 			}
 			if ev["step"] == "decision" && ev["state"] == "waiting" {
 				label, _ = ev["run"].(string)
-				if !strings.Contains(ev["finding"].(string), finding) ||
+				if !strings.Contains(ev["finding"].(string), want) ||
 					ev["choices"] != "approve, fix, stop" {
 					t.Fatalf("missing finding or choices: %v", ev)
 				}
@@ -107,7 +115,7 @@ func question(t *testing.T, bin, top, finding string, args ...string) (string, s
 			t.Fatal("no question after failed check")
 		}
 	}
-	f.exit(1)
+	f.exit(code)
 	return clone, label
 }
 

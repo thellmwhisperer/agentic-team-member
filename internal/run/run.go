@@ -79,14 +79,16 @@ func runAt(label, ref string, args []string, out, summary io.Writer) (err error)
 	})
 	byClone.Store(dir, r)
 	defer byClone.Delete(dir)
-	proofs := a.unit(r, root, dir, sha, text, c,
-		resumePoint{Issue: args[len(args)-1], Original: &i, BaseRef: *base, Base: sha}, from)
-	r.step("ponytail", func() (map[string]any, error) {
-		ev, err := a.ponytail(root, dir, sha, proofs, i, c)
-		r.Reproofs, _ = ev["reproofs"].([]unitResult)
-		return ev, err
-	})
-	deliver(r, root, dir, sha, *base, c.Delivery, i, summary)
+	a.unit(r, root, dir, sha, text, c,
+		resumePoint{Issue: args[len(args)-1], Original: &i, BaseRef: *base, Base: sha}, from,
+		func(p proof) {
+			r.step("ponytail", func() (map[string]any, error) {
+				ev, err := a.ponytail(root, dir, sha, []proof{p}, i, c)
+				r.Reproofs, _ = ev["reproofs"].([]unitResult)
+				return ev, err
+			})
+		},
+		func(proof) { deliver(r, root, dir, sha, *base, c.Delivery, i, summary) })
 	return r.err
 }
 
@@ -155,11 +157,13 @@ type proof struct {
 	missing                 bool
 }
 
-// unit runs the run's one unit in clone dir, from base commit sha, under config c, on brief text,
-// and returns its proof. The unit goes to the report, and its agent's work to keep, for atm run --resume. A run
-// that resumes from puts the work it kept back in dir, in place of its unit's agent.
+// unit runs the run's one unit in clone dir, from base commit sha, under config c, on brief text, then its
+// checks and the steps after, each given the checks' proof. The unit goes to the report, and its agent's work to
+// keep, for atm run --resume. A run that resumes from puts the work it kept back in dir, in place of its unit's
+// agent. A failure of the checks or a step after asks the launcher; after a fix turn the checks run again, or
+// the delivery alone when it failed.
 func (a agent) unit(r *verdict, root, dir, sha, text string, c config.Config, keep resumePoint,
-	from *resumePoint) []proof {
+	from *resumePoint, after ...func(proof)) {
 	head := sha
 	var report map[string]any
 	test, resumed := "", ""
@@ -179,27 +183,42 @@ func (a agent) unit(r *verdict, root, dir, sha, text string, c config.Config, ke
 		return ev, err
 	})
 	var p proof
-	var ev map[string]any
-	for {
-		r.keep(a.dir, dir, keep, 1, report)
+	steps := append([]func(proof){func(proof) {
 		r.step("checks", func() (map[string]any, error) {
+			var ev map[string]any
 			var err error
 			p, ev, err = checkUnit(a.dir, dir, head, test, report, c)
 			return ev, err
 		})
-		atAgent := r.FailedNode == "agent" // approved, the agent's work goes on to Checks
+	}}, after...)
+	for n := 0; n < len(steps); n++ {
+		if r.err == nil {
+			if n == 0 {
+				r.keep(a.dir, dir, keep, 1, report)
+			}
+			steps[n](p)
+		}
+		failed := r.FailedNode
 		answer := a.checkDecision(r)
 		if answer == "fix" {
 			if next := a.fixCheck(r, dir, text, &keep); next != nil {
 				report = next
 				test, _ = report["test_file"].(string)
 			}
-		} else if answer != "approve" || !atAgent {
+			n = -1 // repaired work must pass Checks and Ponytail before delivery
+			continue
+		}
+		if n == 0 {
+			r.Units = nil // the checks of the last fix
+			r.recordUnit(1, head, test, resumed)
+		}
+		if answer == "stop" || r.err != nil {
 			break
 		}
+		if failed == "agent" { // approved agent failure still needs Checks
+			n = -1
+		}
 	}
-	r.recordUnit(1, head, test, resumed)
-	return []proof{p}
 }
 
 func (r *verdict) recordUnit(n int, head, test, resumed string) {
@@ -337,7 +356,7 @@ func onBranch(root, clone, sha, name string, i Issue) (cuts, tombs string, err e
 		tombs, err = git(clone, "show", "--name-only", "--format=", "HEAD", "--", ".slop/tombstones/")
 	}
 	if err == nil {
-		_, err = git(clone, "checkout", "-q", "-b", name)
+		_, err = git(clone, "checkout", "-q", "-B", name) // again after a fix
 	}
 	var left string
 	if err == nil {
