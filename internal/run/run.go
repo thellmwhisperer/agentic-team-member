@@ -201,13 +201,8 @@ func (a agent) unit(r *verdict, root, dir, sha, text string, c config.Config, ke
 		failed := r.FailedNode
 		answer := a.checkDecision(r)
 		if answer == "fix" {
-			if failed == "delivery" {
-				checkHead, r.err = git(dir, "--git-dir=.git", "rev-parse", "--verify", "HEAD^{commit}")
-				if r.err != nil {
-					r.FailedNode, r.Reason = failed, r.err.Error()
-					r.emit(failed, map[string]any{"state": "failed", "error": r.Reason})
-					break
-				}
+			if failed == "delivery" && !r.captureDeliveryHead(dir, &checkHead) {
+				break
 			}
 			if next := a.fixCheck(r, dir, text, &keep); next != nil {
 				report = next
@@ -227,6 +222,18 @@ func (a agent) unit(r *verdict, root, dir, sha, text string, c config.Config, ke
 			n = -1
 		}
 	}
+}
+
+func (r *verdict) captureDeliveryHead(dir string, head *string) bool {
+	var err error
+	*head, err = git(dir, "--git-dir=.git", "rev-parse", "--verify", "HEAD^{commit}")
+	if err == nil {
+		return true
+	}
+	r.err = err
+	r.FailedNode, r.Reason = "delivery", err.Error()
+	r.emit("delivery", map[string]any{"state": "failed", "error": r.Reason})
+	return false
 }
 
 func (r *verdict) recordUnit(n int, head, test, resumed string) {

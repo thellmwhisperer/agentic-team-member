@@ -210,6 +210,18 @@ func assertDeliveryAttemptHistory(t *testing.T, top, label string, before, after
 		!slices.Equal(before.node("delivery").Rows, rows[:2]) {
 		t.Fatalf("delivery retry rewrote its first attempt: before %+v; after %+v", before.node("delivery").Rows, rows)
 	}
+	emitted := deliveryAttemptEvents(t, top, label)
+	for i, result := range []string{"passed", "failed", "passed", "passed"} {
+		name := []string{"commit", "command"}[i%2]
+		if rows[i].Name != name || rows[i].Result != result || emitted[i].Name != name ||
+			emitted[i].Result != result || rows[i].DurationMS != emitted[i].DurationMS || rows[i].StartedAt == "" {
+			t.Fatalf("delivery attempt %d: saved %+v, emitted %+v, want %s %s", i, rows[i], emitted[i], name, result)
+		}
+	}
+}
+
+func deliveryAttemptEvents(t *testing.T, top, label string) []partResult {
+	t.Helper()
 	var emitted []partResult
 	end, err := Follow(top, label, nil, nil, func(f Frame) {
 		if len(f.Event) == 0 {
@@ -230,13 +242,7 @@ func assertDeliveryAttemptHistory(t *testing.T, top, label string, before, after
 	if err != nil || end.Outcome != "passed" || len(emitted) != 4 {
 		t.Fatalf("delivery attempt events: %+v, %v, %+v", end, err, emitted)
 	}
-	for i, result := range []string{"passed", "failed", "passed", "passed"} {
-		name := []string{"commit", "command"}[i%2]
-		if rows[i].Name != name || rows[i].Result != result || emitted[i].Name != name ||
-			emitted[i].Result != result || rows[i].DurationMS != emitted[i].DurationMS || rows[i].StartedAt == "" {
-			t.Fatalf("delivery attempt %d: saved %+v, emitted %+v, want %s %s", i, rows[i], emitted[i], name, result)
-		}
-	}
+	return emitted
 }
 
 func TestRunDeliveryFixRequiresHead(t *testing.T) {
