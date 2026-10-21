@@ -11,8 +11,8 @@ incident:
   rule_established: Keep the complete PTY scenarios; accept only this exact lifecycle clone.
   evidence:
     - family: clone_fingerprint
-      example: internal/run/report_rows_unix_test.go:280-285 and :49-209
+      example: internal/run/report_rows_unix_test.go:280-285 and :204-209
 match:
   family: clone_fingerprint
   scope: go_tests
-  fingerprint: 36e6394c52aa5ffd133855ef82fc0b6f6f1bda450c2de13286c547d27a648656
+  fingerprint: 83731cf52b4ab6295c24946742b9509f2dfbf36f6f85388b53a5f779e983cee0
