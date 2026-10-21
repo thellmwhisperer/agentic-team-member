@@ -245,8 +245,8 @@ func (r *verdict) recordUnit(n int, head, test, resumed string) {
 		AgentModel: r.node("agent").AgentModel})
 }
 
-// checkUnit runs configured checks, keeping the tests of changed test files issue does not name, and records
-// the reported test for the ponytail guard.
+// checkUnit runs configured checks with issue exemptions and accepted cut history, and records the reported
+// test for the ponytail guard.
 func checkUnit(runDir, dir, head, base, test, issue string, report map[string]any, c config.Config, cuts ...string) (proof,
 	map[string]any, error) {
 	ev := map[string]any{"unit": 1}
