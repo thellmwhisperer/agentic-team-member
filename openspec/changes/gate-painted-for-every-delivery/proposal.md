@@ -9,10 +9,9 @@ project whose delivery command opens the no-mistakes screen itself, with
 `r.step("delivery", …)`, which runs the command through `tee` on the attached
 terminal) ends `failed` with `signal: terminated`, the screen keeps `Delivery pending`
 while the gate is in fact running in CI, and the gate's text lands in
-`delivery-output.txt` instead of the screen. The operator cannot tell from ATM's
-screen that the gate exists.
+`delivery-output.txt` instead of the screen. ATM's screen says nothing of the gate.
 
-Who asked: Javi, 24-oct-2026 ~17:45 BST, decision 8158, literal: "atm dentro de su
+Who asked: Javi, 24-oct-2026 ~17:45 BST, decision 8161, literal: "atm dentro de su
 tui deberia leer los eventos del binario de no mistakes e integrarlo en su tui, no
 coartar la tui de atm y sacar la de nm". Decisions 7609 and 7685 say the same: the
 gate belongs in ATM's screen, read from the no-mistakes binary, for every project.

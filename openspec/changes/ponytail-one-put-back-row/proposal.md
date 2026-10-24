@@ -8,7 +8,7 @@ thousands of files there, so the left box fills with thousands of `put back …`
 and the pipeline's steps disappear below them. The operator cannot see which step the
 run is in.
 
-Who asked: Javi, 24-oct-2026 ~17:24 BST, decision 8158, on the screenshot of run 550:
+Who asked: Javi, 24-oct-2026 ~17:24 BST, decision 8161, on the screenshot of run 550:
 the left box is the pipeline. One row per step and per check, never one row per file.
 
 Proof: run 550-5 of la-roca, 24-oct-2026 ~17:24 BST, `atm attach 550-5`: the left box
