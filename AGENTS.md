@@ -15,6 +15,15 @@ decision, the newer one wins and the old rule is removed.
 
 ## Issues
 
+- This project follows OpenSpec. Every change starts as an OpenSpec change in
+  `openspec/changes/`, written with the OpenSpec skills and valid under
+  `openspec validate --strict`. `openspec/specs/` says how ATM behaves today;
+  `openspec/config.yaml` holds the rules for each artifact.
+- The issue comes from the change. Its body opens with `Type:` and
+  `Where: binario|lanzador`, then `## Why` ending in Proof, `## Scenarios`
+  copied from the spec's WHEN/THEN, `## Done when` naming the `TestReal*`
+  end-to-end tests under `internal/run` that execute them, and `## Not touched`
+  from Impact. After the merge, the change is archived into `openspec/specs/`.
 - An issue answers three questions: what breaks, with proof; which test says
   it is done; what is not touched. An issue never grows.
 - Acceptance runs inside the clone. Checks that only the operator can do after
