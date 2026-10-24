@@ -11,8 +11,7 @@ nothing, because codex's final message lives in its `-o` file. So with Codex the
 `agent_message`, which is the report, is flushed as plain prose: braces, quoted keys
 and escaped quotes on the screen, and then the `Informe` row under it.
 
-Who asked: Javi, 24-oct-2026 ~18:30 BST, decision 8161, literal: "la solucion es
-pintarlo sin json". The screen paints what the binary gives it, as text; JSON is a
+Who asked: Javi, 24-oct-2026 ~18:30 BST, decision 8162: the report is painted as text, without JSON. The screen paints what the binary gives it, as text; JSON is a
 transport between the worker and ATM, never something the operator reads.
 
 Proof: run 551-8 of la-roca, 24-oct-2026 ~18:25 BST, worker codex gpt-6.1-sol over
