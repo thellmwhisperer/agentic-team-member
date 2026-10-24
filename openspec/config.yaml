@@ -1,0 +1,15 @@
+schema: spec-driven
+
+context: |
+  Each change becomes one GitHub issue: Why with proof, the WHEN/THEN scenarios,
+  Done when, Not touched. The end-to-end test is a real `atm` on a pty: the
+  `TestReal*` tests under internal/run drive the real binary and read its
+  screen, and `make check` runs them (AGENTS.md, CONTRIBUTING.md).
+
+rules:
+  proposal:
+    - "Why ends with `Proof:` and a run id, a log line or the command that reproduces the problem. No proof, no change."
+    - "Why says, per requirement, who asked for it: Javi's literal sentence with its date and La Roca decision id, or `proposal`."
+    - "Impact names the end-to-end tests that run the change (`TestReal*` under internal/run, run by `make check`), or the ones to write, and what is not touched."
+  specs:
+    - "Every scenario is something the real `atm` binary shows on its screen or writes to the run, checkable by a `TestReal*` test."

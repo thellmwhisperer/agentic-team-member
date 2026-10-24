@@ -19,6 +19,10 @@ it:
 
 An issue names the existing acceptance test to extend, or the new one to write.
 
+Maintainers write the issue from an OpenSpec change under `openspec/changes/`
+(`openspec validate --strict`): Why with proof, the scenarios of its spec, Done
+when, Not touched. See [AGENTS.md](AGENTS.md#issues).
+
 ## Development setup
 
 ```bash
