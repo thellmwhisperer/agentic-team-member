@@ -171,26 +171,18 @@ codex exited pid=2 status=success`,
 			[]string{"✎", "Informe"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			nm := gateFake(t)
-			t.Setenv("FAKE_NM_STEP", tc.name)
-			fixture, err := os.ReadFile(filepath.Join(nm, "review.toon"))
+			fixture, err := os.ReadFile("testdata/gate-review.toon")
 			if err != nil {
 				t.Fatal(err)
 			}
 			header, _, _ := strings.Cut(string(fixture), "lines:")
 			lines := strings.Split(tc.log, "\n")
-			fixture = []byte(header + fmt.Sprintf("lines: %d total\nlog[%d]{line}:\n", len(lines), len(lines)))
+			log := header + fmt.Sprintf("lines: %d total\nlog[%d]{line}:\n", len(lines), len(lines))
 			for _, line := range lines {
-				fixture = append(fixture, []byte(fmt.Sprintf("  %q\n", line))...)
+				log += fmt.Sprintf("  %q\n", line)
 			}
-			if err := os.WriteFile(filepath.Join(nm, "review.toon"), fixture, 0o600); err != nil {
-				t.Fatal(err)
-			}
-			a := liveAttach(t, 120, 40)
-			a.delivered(t.TempDir())
-			a.drawn(func(s string) bool { return strings.Contains(s, "▸ ⏸ "+tc.name) })
-			a.click(1)
-			s := a.drawn(func(s string) bool { return strings.Contains(s, "▾ ⏸ "+tc.name) })
+			a, nm := stepAttach(t, tc.name, log, 40)
+			s := a.openStep(tc.name)
 			for _, want := range tc.want {
 				if !strings.Contains(s, want) {
 					t.Fatalf("the gate lacks %q:\n%s", want, s)
@@ -201,10 +193,7 @@ codex exited pid=2 status=success`,
 					t.Fatalf("the gate unexpectedly paints %q:\n%s", absent, s)
 				}
 			}
-			if err := os.WriteFile(filepath.Join(nm, "done"), nil, 0o600); err != nil {
-				t.Fatal(err)
-			}
-			a.exits()
+			a.gateDone(nm)
 		})
 	}
 }
@@ -221,8 +210,6 @@ func TestRealAttachKeepsGateFindingPaths(t *testing.T) {
 	}
 	for _, step := range []string{"review", "fix"} {
 		t.Run(step, func(t *testing.T) {
-			nm := gateFake(t)
-			t.Setenv("FAKE_NM_STEP", step)
 			var findings []map[string]any
 			var reviewed []string
 			for _, p := range paths {
@@ -234,15 +221,8 @@ func TestRealAttachKeepsGateFindingPaths(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			fixture := fmt.Sprintf("lines: 1 total\nlog[1]{line}:\n  %q\n", string(log))
-			if err := os.WriteFile(filepath.Join(nm, "review.toon"), []byte(fixture), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			a := liveAttach(t, 120, 40)
-			a.delivered(t.TempDir())
-			a.drawn(func(s string) bool { return strings.Contains(s, "▸ ⏸ "+step) })
-			a.click(1)
-			s := a.drawn(func(s string) bool { return strings.Contains(s, "▾ ⏸ "+step) })
+			a, nm := stepAttach(t, step, fmt.Sprintf("lines: 1 total\nlog[1]{line}:\n  %q\n", string(log)), 40)
+			s := a.openStep(step)
 			for _, p := range paths {
 				if !strings.Contains(s, p.want) {
 					t.Fatalf("gate finding changed the literal path in %q:\n%s", p.want, s)
@@ -255,10 +235,7 @@ func TestRealAttachKeepsGateFindingPaths(t *testing.T) {
 					t.Fatalf("reviewed files changed the literal path %q:\n%s", p.file, s)
 				}
 			}
-			if err := os.WriteFile(filepath.Join(nm, "done"), nil, 0o600); err != nil {
-				t.Fatal(err)
-			}
-			a.exits()
+			a.gateDone(nm)
 		})
 	}
 }
@@ -273,14 +250,7 @@ const gateReportFixture = "step: %s\nlines: 3 total\nlog[3]{line}:\n" +
 func TestRealAttachFoldsGateReports(t *testing.T) {
 	for _, step := range []string{"review", "fix"} {
 		t.Run(step, func(t *testing.T) {
-			nm := gateFake(t)
-			t.Setenv("FAKE_NM_STEP", step)
-			fixture := fmt.Sprintf(gateReportFixture, step, gateReportLog)
-			if err := os.WriteFile(filepath.Join(nm, "review.toon"), []byte(fixture), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			a := liveAttach(t, 120, 40)
-			a.delivered(t.TempDir())
+			a, nm := stepAttach(t, step, fmt.Sprintf(gateReportFixture, step, gateReportLog), 40)
 			assertHidden := func(s string) {
 				t.Helper()
 				for _, absent := range []string{"Report completed.", "warning gate.go:17", "Keep the gate visible.",
@@ -295,8 +265,7 @@ func TestRealAttachFoldsGateReports(t *testing.T) {
 				t.Fatalf("folded step must preview one report row:\n%s", s)
 			}
 			assertHidden(s)
-			a.click(1)
-			s = a.drawn(func(s string) bool { return strings.Contains(s, "▾ ⏸ "+step) })
+			s = a.openStep(step)
 			for _, want := range []string{"▾ Informe", "Report completed.", "warning gate.go:17 Keep the gate visible.",
 				"Riesgo: low", "▸ Ficheros revisados (1)"} {
 				if !strings.Contains(s, want) {
@@ -314,21 +283,46 @@ func TestRealAttachFoldsGateReports(t *testing.T) {
 			s = a.drawn(func(s string) bool { return strings.Contains(s, "▸ Informe") })
 			assertHidden(s)
 			a.click(1)
-			a.drawn(func(s string) bool { return strings.Contains(s, "▸ ⏸ "+step) })
-			a.click(1)
-			s = a.drawn(func(s string) bool { return strings.Contains(s, "▾ ⏸ "+step) })
+			s = a.openStep(step)
 			if !strings.Contains(s, "▸ Informe") {
 				t.Fatalf("opening the step lost the report's fold:\n%s", s)
 			}
 			assertHidden(s)
 			a.click(rowOf(s, "▸ Informe"))
 			a.drawn(func(s string) bool { return strings.Contains(s, "reviewed.go") })
-			if err := os.WriteFile(filepath.Join(nm, "done"), nil, 0o600); err != nil {
-				t.Fatal(err)
-			}
-			a.exits()
+			a.gateDone(nm)
 		})
 	}
+}
+
+// stepAttach attaches to a gate whose agent step is step and whose log serves fixture, on a screen of rows.
+func stepAttach(t *testing.T, step, fixture string, rows uint16) (*attached, string) {
+	t.Helper()
+	nm := gateFake(t)
+	t.Setenv("FAKE_NM_STEP", step)
+	if err := os.WriteFile(filepath.Join(nm, "review.toon"), []byte(fixture), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a := liveAttach(t, 120, rows)
+	a.delivered(t.TempDir())
+	return a, nm
+}
+
+// openStep waits for step folded, clicks its header and returns the screen with it open.
+func (a *attached) openStep(step string) string {
+	a.t.Helper()
+	a.drawn(func(s string) bool { return strings.Contains(s, "▸ ⏸ "+step) })
+	a.click(1)
+	return a.drawn(func(s string) bool { return strings.Contains(s, "▾ ⏸ "+step) })
+}
+
+// gateDone completes the gate's run and waits for attach to exit.
+func (a *attached) gateDone(nm string) {
+	a.t.Helper()
+	if err := os.WriteFile(filepath.Join(nm, "done"), nil, 0o600); err != nil {
+		a.t.Fatal(err)
+	}
+	a.exits()
 }
 
 func assertGateFolded(t *testing.T, a *attached, folded string) {
@@ -410,8 +404,6 @@ func TestRealAttachScrollsTheFullGateLog(t *testing.T) {
 func TestRealAttachKeepsGateLogPosition(t *testing.T) {
 	for _, step := range []string{"review", "fix"} {
 		t.Run(step, func(t *testing.T) {
-			nm := gateFake(t)
-			t.Setenv("FAKE_NM_STEP", step)
 			fixture := "findings[12]{id,severity,file,action,description}:\n"
 			for i := range 12 {
 				fixture += fmt.Sprintf("  finding-%02d,warning,gate.go,auto-fix,Finding %02d\n", i, i)
@@ -423,11 +415,7 @@ func TestRealAttachKeepsGateLogPosition(t *testing.T) {
 			for _, line := range log {
 				fixture += fmt.Sprintf("  %q\n", line)
 			}
-			if err := os.WriteFile(filepath.Join(nm, "review.toon"), []byte(fixture), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			a := liveAttach(t, 120, 12)
-			a.delivered(t.TempDir())
+			a, nm := stepAttach(t, step, fixture, 12)
 			a.drawn(func(s string) bool { return strings.Contains(s, "waiting") })
 			top := func(s string) string { return logColumn(strings.Split(s, "\n")[1]) }
 			a.key("\x1b[H")
@@ -458,10 +446,7 @@ func TestRealAttachKeepsGateLogPosition(t *testing.T) {
 					t.Fatalf("gate update moved the reading position from %q:\n%s", target.text, s)
 				}
 			}
-			if err := os.WriteFile(filepath.Join(nm, "done"), nil, 0o600); err != nil {
-				t.Fatal(err)
-			}
-			a.exits()
+			a.gateDone(nm)
 		})
 	}
 }
