@@ -485,6 +485,11 @@ level, its rationale and the testing summary, with the reviewed paths in a
 folded `Ficheros revisados (n)` row. Findings
 from status also show for the current gate step when its log has not shown them;
 an ID already in the log is shown only once.
+Before that, from the first frame of a run whose base ref's `.atm.yaml` has a
+delivery, the ATM box shows a pending row below Delivery for each of `intent`,
+`rebase`, `review`, `test`, `document`, `lint`, `push`, `pr` and `ci`; they stay
+pending when ATM's run ends, and the steps no-mistakes reports replace them.
+A run with no delivery shows no gate rows.
 The public findings table does not expose a source line number; the screen
 shows the supplied file without inventing a line. Tab switches between the
 ATM and Gate boxes; arrows, PageUp, PageDown, Home and End scroll the focused box.
