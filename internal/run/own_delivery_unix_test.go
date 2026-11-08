@@ -5,203 +5,201 @@ package run
 import (
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
-	"syscall"
 	"testing"
 
+	"github.com/creack/pty"
 	"gopkg.in/yaml.v3"
 )
 
-// ownDeliveryNM answers like no-mistakes for ATM's own delivery line: init passes, the branch has no run, axi run
-// prints the receipt binding FAKE_NM_RUN to its nonce and generation and returns, as at a gate, and axi status --run
-// FAKE_NM_RUN prints the next document in $FAKE_NM. Anything else, another run among them, exits 2.
+const ownDeliveryScript = `#!/bin/sh
+# ATM's delivery: every run works in a fresh clone, so no-mistakes is initialised there first.
+no-mistakes init || exit 1
+exec no-mistakes axi run --intent "$ATM_INTENT"
+`
+
+// ownDeliveryNM returns from axi run at review; gateNM below answers the screen's queries afterwards.
 const ownDeliveryNM = `#!/bin/sh
-echo "$*" >>"$FAKE_NM/log"
-case "$*" in
-init) ;;
-"axi status") printf 'current_branch: atm/the-unit\nruns_on_current_branch: 0\n' ;;
-"axi run --launch-nonce "*" --validation-generation "*" --intent "*)
-	printf 'launch_receipt:\n  run_id: "%s"\n  disposition: claimed\n  launch_nonce: "%s"\n' "$FAKE_NM_RUN" "$4"
-	printf '  validation_generation: "%s"\n' "$6" ;;
-"axi status --run $FAKE_NM_RUN")
-	n=$(($(cat "$FAKE_NM/n") + 1))
-	echo "$n" >"$FAKE_NM/n"
-	cat "$FAKE_NM/$n" ;;
-*) exit 2 ;;
+case "$1 $2" in
+"init ")
+	printf 'init\n' >>"$FAKE_NM/delivery-calls"
+	exit "${FAKE_NM_INIT_EXIT:-0}" ;;
+"axi run")
+	[ "$#" = 4 ] && [ "$3" = --intent ] || exit 2
+	printf 'axi run --intent\n' >>"$FAKE_NM/delivery-calls"
+	printf '%s' "$4" >"$FAKE_NM/intent"
+	echo 'review awaiting_approval'
+	exit 0 ;;
 esac
 `
 
-// ownDeliverySleep stands in for sleep: it returns at once, except while the last document shown awaits a decision,
-// when it waits for the external operator's answer on $FAKE_NM/answer.
-const ownDeliverySleep = `#!/bin/sh
-echo "sleep $*" >>"$FAKE_NM/log"
-if grep -q '^gate:' "$FAKE_NM/$(cat "$FAKE_NM/n")"; then read -r _ <"$FAKE_NM/answer"; fi
-`
-
-// ownRun is the run the fake no-mistakes binds.
-const ownRun = "01M5D0SWRMZ44NM79H2NNC3YZ8"
-
-// ownStatus is axi status of ownRun in status, awaiting a decision at gate when set, with outcome once it ended.
-func ownStatus(status, gate, outcome string) string {
-	doc := "run:\n  id: \"" + ownRun + "\"\n  branch: atm/the-unit\n  status: " + status + "\n"
-	if gate != "" {
-		doc += "gate:\n  step: " + gate + "\n  status: awaiting_approval\n"
-	}
-	if outcome != "" {
-		doc += "outcome: " + outcome + "\n"
-	}
-	return doc
-}
-
-// A real atm run with ATM's own delivery line keeps its delivery on the same receipt-bound no-mistakes run while a
-// gate awaits its operator's answer, and ends only on that run's terminal result.
-func TestOwnDeliveryLineWaitsForApprovalThroughRealBinary(t *testing.T) {
+func TestOwnDeliveryLineLaunchesTheGate(t *testing.T) {
 	bin := builtATM(t)
-	// go test runs in the package directory: ATM's own .atm.yaml is two levels up.
+	t.Run("init", func(t *testing.T) { ownDeliveryInit(t, bin) })
+	t.Run("init errors", func(t *testing.T) { ownDeliveryInitErrors(t, bin) })
 	b, err := os.ReadFile("../../.atm.yaml")
-	var own, atm map[string]any
-	if err == nil {
-		err = yaml.Unmarshal(b, &own)
-	}
-	if err == nil {
-		err = yaml.Unmarshal([]byte(atmYAML), &atm)
-	}
-	delivery, ok := own["delivery"].(string)
-	if err != nil || !ok || delivery == "" {
-		t.Fatalf("want ATM's .atm.yaml with its delivery line, got %q, %v", delivery, err)
-	}
-	atm["delivery"] = delivery
-	conf, err := yaml.Marshal(atm)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, c := range []struct {
-		name, gate, outcome string
-		states              []string
-	}{
-		{"a review decision, answered, then the run passes", "review", "passed", []string{
-			ownStatus("running", "", ""), ownStatus("running", "review", ""), ownStatus("running", "", ""),
-			ownStatus("completed", "", "passed")}},
-		{"a document decision, answered, then the run fails", "document", "failed", []string{
-			ownStatus("running", "", ""), ownStatus("running", "document", ""), ownStatus("failed", "", "failed")}},
-	} {
-		t.Run(c.name, func(t *testing.T) { ownDeliveryWaits(t, bin, string(conf), c.gate, c.outcome, c.states) })
+	var own struct{ Delivery string }
+	if err := yaml.Unmarshal(b, &own); err != nil {
+		t.Fatal(err)
+	}
+	script, err := os.ReadFile("../../scripts/deliver.sh")
+	if err != nil || string(script) != ownDeliveryScript || own.Delivery != "sh scripts/deliver.sh" {
+		t.Fatalf("repository delivery = %q, script = %q, %v", own.Delivery, script, err)
+	}
+	for _, failInit := range []bool{false, true} {
+		name := "review gate"
+		if failInit {
+			name = "init fails"
+		}
+		t.Run(name, func(t *testing.T) { ownDeliveryLaunch(t, bin, own.Delivery, string(script), failInit) })
 	}
 }
 
-// ownDeliveryWaits runs one issue through bin with the delivery of conf against the fake no-mistakes showing states,
-// answers its gate once ATM is seen waiting on it, and checks the run ends with outcome, its delivery having followed
-// the one run it launched.
-func ownDeliveryWaits(t *testing.T, bin, conf, gate, outcome string, states []string) {
-	top := gitT(t, repo(t, t.TempDir(), conf), "rev-parse", "--show-toplevel")
+func ownDeliveryInit(t *testing.T, bin string) {
+	t.Helper()
+	for _, existing := range []string{"", ".atm.yaml", "scripts/deliver.sh", "both"} {
+		t.Run("preserve "+existing, func(t *testing.T) {
+			top := t.TempDir()
+			gitT(t, top, "init", "-q")
+			want := map[string]string{".atm.yaml": "", "scripts/deliver.sh": ownDeliveryScript}
+			for name := range want {
+				if existing == name || existing == "both" {
+					if err := os.MkdirAll(filepath.Dir(filepath.Join(top, name)), 0o755); err != nil {
+						t.Fatal(err)
+					}
+					want[name] = "existing " + name + "\n"
+					writeFixture(t, filepath.Join(top, name), want[name])
+				}
+			}
+			for range 2 {
+				cmd := exec.Command(bin, "init")
+				cmd.Dir = top
+				if out, err := cmd.CombinedOutput(); err != nil {
+					t.Fatalf("atm init: %v\n%s", err, out)
+				}
+				for name, text := range want {
+					got, err := os.ReadFile(filepath.Join(top, name))
+					if err != nil || text != "" && string(got) != text {
+						t.Fatalf("atm init %s = %q, want %q, %v", name, got, text, err)
+					}
+					if name == ".atm.yaml" && text == "" &&
+						!strings.Contains(string(got), "\ndelivery: sh scripts/deliver.sh\n") {
+						t.Fatalf("atm init has no default delivery:\n%s", got)
+					}
+				}
+			}
+		})
+	}
+}
+
+func ownDeliveryLaunch(t *testing.T, bin, delivery, script string, failInit bool) {
+	t.Helper()
+	nm := gateFake(t)
+	top := gitT(t, repo(t, t.TempDir(), atmSet(atmYAML, "delivery", delivery)), "rev-parse", "--show-toplevel")
+	for _, dir := range []string{"scripts", ".atm"} {
+		if err := os.Mkdir(filepath.Join(top, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFixture(t, filepath.Join(top, "scripts", "deliver.sh"), script)
+	gitT(t, top, "add", "scripts/deliver.sh")
+	gitT(t, top, "commit", "-q", "--amend", "--no-edit")
 	t.Setenv("FAKE_AGENT_CALL", filepath.Join(t.TempDir(), "call.json"))
-	nm := ownDeliveryFakes(t, top, states)
+	fake, err := exec.LookPath("no-mistakes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFixture(t, fake, ownDeliveryNM+gateNM, 0o755)
+	if failInit {
+		t.Setenv("FAKE_NM_INIT_EXIT", "7")
+	}
 	server := startVersionServe(t, bin, top)
 	out, err := versionLaunch(bin, top, issueFile(t, issue))
 	label := strings.TrimSpace(string(out))
 	if err != nil || label == "" {
 		t.Fatalf("atm run: %v\n%s", err, out)
 	}
-	runDir := filepath.Join(top, ".atm", "runs", label)
-	ended := make(chan Outcome, 1)
-	go func() { end, _ := Attach(top, label, io.Discard); ended <- end }()
-	reply := ownDeliveryAtGate(t, nm, runDir, gate, ended)
-	if _, err := reply.WriteString("answered\n"); err != nil {
-		t.Fatal(err)
-	}
-	_ = reply.Close()
-	end := <-ended
-	log, _ := os.ReadFile(filepath.Join(nm, "log"))
-	if end.Outcome != outcome || (outcome == "failed") != (end.FailedNode == "delivery") {
-		t.Fatalf("run ended %+v, want its no-mistakes run's %s\nno-mistakes calls:\n%s", end, outcome, log)
-	}
-	shown, _ := os.ReadFile(filepath.Join(runDir, "delivery-output.txt"))
-	if !strings.Contains(string(shown), "outcome: "+outcome) {
-		t.Fatalf("delivery does not show its run's outcome %s:\n%s", outcome, shown)
-	}
-	calls := string(log)
-	if strings.Count(calls, "axi run") != 1 || strings.Count(calls, "axi status --run "+ownRun+"\n") != len(states) ||
-		strings.Count(calls, "axi status") != len(states)+1 {
-		t.Fatalf("delivery does not follow the one run it launched to its end:\n%s", calls)
-	}
-	t.Logf("no-mistakes calls:\n%s\ndelivery output:\n%s", calls, shown)
-	if outcome == "failed" { // a failed delivery waits for the launcher's answer
-		if err := Answer(top, label, "stop"); err != nil {
-			t.Fatal(err)
-		}
-		if end, _ := Attach(top, label, io.Discard); end.Outcome != "failed" || end.FailedNode != "delivery" {
-			t.Fatalf("stop after a failed delivery ended %+v", end)
-		}
+	end, err := Attach(top, label, io.Discard)
+	calls, _ := os.ReadFile(filepath.Join(nm, "delivery-calls"))
+	if failInit {
+		ownDeliveryInitFailed(t, top, label, end, err, string(calls))
+	} else {
+		ownDeliveryAtReview(t, bin, top, label, nm, end, err, string(calls))
 	}
 	endDeliveryServer(t, server, top)
 }
 
-// ownDeliveryFakes puts the fake no-mistakes and sleep first on PATH, with states as the documents axi status --run
-// shows in order, makes top's .atm for its serve, and returns their directory, where the operator's answer is a FIFO.
-func ownDeliveryFakes(t *testing.T, top string, states []string) string {
+func ownDeliveryInitFailed(t *testing.T, top, label string, end Outcome, err error, calls string) {
 	t.Helper()
-	if err := os.MkdirAll(filepath.Join(top, ".atm"), 0o755); err != nil {
+	if err != nil || end.Outcome != "failed" || end.FailedNode != "delivery" || calls != "init\n" {
+		t.Fatalf("failed init: %+v, %v, calls %q", end, err, calls)
+	}
+	if err := Answer(top, label, "stop"); err != nil {
 		t.Fatal(err)
 	}
-	tools, nm := t.TempDir(), t.TempDir()
-	for name, body := range map[string]string{"no-mistakes": ownDeliveryNM, "sleep": ownDeliverySleep} {
-		if err := os.WriteFile(filepath.Join(tools, name), []byte(body), 0o755); err != nil {
-			t.Fatal(err)
-		}
+	if end, err := Attach(top, label, io.Discard); err != nil || end.Outcome != "failed" {
+		t.Fatalf("stop after failed init: %+v, %v", end, err)
 	}
-	files := map[string]string{"n": "0"}
-	for i, doc := range states {
-		files[strconv.Itoa(i+1)] = doc
-	}
-	for name, doc := range files {
-		if err := os.WriteFile(filepath.Join(nm, name), []byte(doc), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := syscall.Mkfifo(filepath.Join(nm, "answer"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", tools+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("FAKE_NM", nm)
-	t.Setenv("FAKE_NM_RUN", ownRun)
-	return nm
 }
 
-// ownDeliveryAtGate waits until the delivery of the run in runDir waits on the operator's answer in nm, its gate
-// pending, failing t when the run ended first, checks the run is still delivering and shows that gate, and returns
-// the answer to write.
-func ownDeliveryAtGate(t *testing.T, nm, runDir, gate string, ended <-chan Outcome) *os.File {
+func ownDeliveryAtReview(t *testing.T, bin, top, label, nm string, end Outcome, err error, calls string) {
 	t.Helper()
-	// Opening the answer for writing returns once the delivery waits on it, the gate still pending.
-	waiting := make(chan *os.File, 1)
-	go func() {
-		if f, err := os.OpenFile(filepath.Join(nm, "answer"), os.O_WRONLY, 0); err == nil {
-			waiting <- f
-		}
-	}()
-	var reply *os.File
-	select {
-	case end := <-ended:
-		log, _ := os.ReadFile(filepath.Join(nm, "log"))
-		shown, _ := os.ReadFile(filepath.Join(runDir, "delivery-output.txt"))
-		t.Fatalf("ATM ended delivery at a pending %s gate: %+v\nno-mistakes calls:\n%s\ndelivery output:\n%s", gate,
-			end, log, shown)
-	case reply = <-waiting:
+	intent, readErr := os.ReadFile(filepath.Join(nm, "intent"))
+	if err != nil || end.Outcome != "passed" || calls != "init\naxi run --intent\n" ||
+		readErr != nil || string(intent) != issue {
+		t.Fatalf("delivery: %+v, %v; calls %q; intent %q, %v", end, err, calls, intent, readErr)
 	}
-	report := readReport(t, filepath.Join(runDir, "report.json"))
-	if node := reportNode(t, report, "delivery"); node["result"] != "running" {
-		t.Fatalf("delivery is %v while its %s gate awaits an answer, want running", node["result"], gate)
+	report := readReport(t, filepath.Join(top, ".atm", "runs", label, "report.json"))
+	if node := reportNode(t, report, "delivery"); node["result"] != "passed" {
+		t.Fatalf("delivery did not pass at the review gate: %v", node)
 	}
-	until(t, "the pending gate shown to its operator", func() bool {
-		shown, _ := os.ReadFile(filepath.Join(runDir, "delivery-output.txt"))
-		return strings.Contains(string(shown), "gate:\n  step: "+gate+"\n  status: awaiting_approval")
+	t.Setenv("TERM", "xterm-256color")
+	t.Setenv("NO_COLOR", "")
+	cmd := exec.Command(bin, "attach", label)
+	cmd.Dir = top
+	terminal, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: 120, Rows: 40})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &attached{t: t, cmd: cmd, p: terminal, chunks: make(chan string, 64), rows: 40}
+	t.Cleanup(func() { _ = a.cmd.Process.Kill(); _ = a.p.Close() })
+	go a.read()
+	shown := a.sees(func(s string) bool {
+		return strings.Contains(s, "│ ⏸ review") && strings.Contains(s, "✓ Delivery")
 	})
-	select {
-	case end := <-ended:
-		t.Fatalf("ATM ended while its %s gate awaits an answer: %+v", gate, end)
-	default:
+	if strings.Index(shown, "✓ Delivery") >= strings.Index(shown, "│ ⏸ review") {
+		t.Fatalf("review is not below Delivery:\n%s", shown)
 	}
-	return reply
+	t.Logf("atm attach at review:\n%s", shown)
+	writeFixture(t, filepath.Join(nm, "done"), "")
+	a.exits()
+}
+
+func ownDeliveryInitErrors(t *testing.T, bin string) {
+	t.Helper()
+	for _, blocked := range []string{"scripts is a file", "scripts is read-only"} {
+		t.Run(blocked, func(t *testing.T) {
+			top := t.TempDir()
+			gitT(t, top, "init", "-q")
+			path := filepath.Join(top, "scripts")
+			if blocked == "scripts is a file" {
+				writeFixture(t, path, "keep this file\n")
+			} else {
+				if err := os.Mkdir(path, 0o555); err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = os.Chmod(path, 0o755) })
+			}
+			cmd := exec.Command(bin, "init")
+			cmd.Dir = top
+			if out, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(out), "scripts") {
+				t.Fatalf("atm init with %s = %q, %v", blocked, out, err)
+			}
+		})
+	}
 }
