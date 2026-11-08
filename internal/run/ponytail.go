@@ -177,12 +177,10 @@ func restoreCut(clone, tree, why string, rejectedFiles []rejectedFile) ([]reject
 	}
 	slices.SortFunc(rejectedFiles, func(a, b rejectedFile) int { return strings.Compare(a.Path, b.Path) })
 	err = restore(clone, tree)
-	if err == nil {
-		for _, path := range strings.Split(changed, "\x00") {
-			if path != "" {
-				liveIn(clone)(map[string]any{"check": "put back " + path, "state": "passed"})
-			}
-		}
+	if err == nil && changed != "" {
+		files := strings.Split(strings.TrimSuffix(changed, "\x00"), "\x00")
+		liveIn(clone)(map[string]any{"check": fmt.Sprintf("put back %d files", len(files)),
+			"state": "passed", "files": files})
 	}
 	return rejectedFiles, err
 }
