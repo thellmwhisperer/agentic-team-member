@@ -83,19 +83,24 @@ func ownDeliveryInit(t *testing.T, bin string) {
 					t.Fatalf("atm init: %v\n%s", err, out)
 				}
 				for name, text := range want {
-					got, err := os.ReadFile(filepath.Join(top, name))
-					if err != nil || text != "" && string(got) != text {
-						t.Fatalf("atm init %s = %q, want %q, %v", name, got, text, err)
-					}
-					if name == ".atm.yaml" && text == "" {
-						var generated struct{ Delivery string }
-						if err := yaml.Unmarshal(got, &generated); err != nil || generated.Delivery != "sh scripts/deliver.sh" {
-							t.Fatalf("atm init delivery = %q, want sh scripts/deliver.sh, %v", generated.Delivery, err)
-						}
-					}
+					ownDeliveryInitFile(t, top, name, text)
 				}
 			}
 		})
+	}
+}
+
+func ownDeliveryInitFile(t *testing.T, top, name, text string) {
+	t.Helper()
+	got, err := os.ReadFile(filepath.Join(top, name))
+	if err != nil || text != "" && string(got) != text {
+		t.Fatalf("atm init %s = %q, want %q, %v", name, got, text, err)
+	}
+	if name == ".atm.yaml" && text == "" {
+		var generated struct{ Delivery string }
+		if err := yaml.Unmarshal(got, &generated); err != nil || generated.Delivery != "sh scripts/deliver.sh" {
+			t.Fatalf("atm init delivery = %q, want sh scripts/deliver.sh, %v", generated.Delivery, err)
+		}
 	}
 }
 
