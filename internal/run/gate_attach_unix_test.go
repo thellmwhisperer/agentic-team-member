@@ -263,13 +263,19 @@ func TestRealAttachKeepsGateFindingPaths(t *testing.T) {
 	}
 }
 
+const gateReportLog = `{"summary":"Report completed.",` +
+	`"findings":[{"severity":"warning","file":"gate.go","line":17,"description":"Keep the gate visible."}],` +
+	`"risk_level":"low","reviewed_paths":["reviewed.go"]}`
+
+const gateReportFixture = "step: %s\nlines: 3 total\nlog[3]{line}:\n" +
+	"  codex started pid=1\n  %q\n  codex exited pid=1 status=success\n"
+
 func TestRealAttachFoldsGateReports(t *testing.T) {
 	for _, step := range []string{"review", "fix"} {
 		t.Run(step, func(t *testing.T) {
 			nm := gateFake(t)
 			t.Setenv("FAKE_NM_STEP", step)
-			log := `{"summary":"Report completed.","findings":[{"severity":"warning","file":"gate.go","line":17,"description":"Keep the gate visible."}],"risk_level":"low","reviewed_paths":["reviewed.go"]}`
-			fixture := fmt.Sprintf("step: %s\nlines: 3 total\nlog[3]{line}:\n  codex started pid=1\n  %q\n  codex exited pid=1 status=success\n", step, log)
+			fixture := fmt.Sprintf(gateReportFixture, step, gateReportLog)
 			if err := os.WriteFile(filepath.Join(nm, "review.toon"), []byte(fixture), 0o600); err != nil {
 				t.Fatal(err)
 			}
