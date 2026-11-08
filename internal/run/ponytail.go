@@ -81,6 +81,13 @@ func (a agent) ponytail(root, clone, sha string, proofs []proof, i Issue, c conf
 		return ev, err
 	}
 	ev["kept"], ev["verdicts"] = why == "", settled(verdicts, reported, found, why == "")
+	return ev, conclude(ev, root, clone, before, all, why, i, found)
+}
+
+// conclude records in ev the end of the cut in clone: put back to all when why rejects it, else committed on
+// before with a tombstone per finding of found. It shows the files put back as one row of the screen.
+func conclude(ev map[string]any, root, clone, before, all, why string, i Issue,
+	found []finding) (err error) {
 	if why != "" {
 		ev["reason"] = why
 		ev["rejected_files"], err = restoreCut(clone, all, why, ev["rejected_files"].([]rejectedFile))
@@ -90,7 +97,7 @@ func (a agent) ponytail(root, clone, sha string, proofs []proof, i Issue, c conf
 	if count := len(ev["rejected_files"].([]rejectedFile)); err == nil && count > 0 {
 		liveIn(clone)(map[string]any{"check": fmt.Sprintf("put back %d files", count), "state": "passed"})
 	}
-	return ev, err
+	return err
 }
 
 // ruling is what became of a finding the ponytail agent reported: kept, rejected and why, or discarded.

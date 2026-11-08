@@ -208,41 +208,14 @@ func TestRealScreenShowsCompleteSlopReferences(t *testing.T) {
 			t.Setenv("FAKE_PONYTAIL_REPORT", dependentCuts(files...))
 			cfg := atmSet(atmSet(atmYAML, "lint", c.lint), "delivery", "cat "+path+` > "$ATM_TEST_OUT"`)
 			top := gitT(t, repo(t, "https://example.com/owner/repo.git", cfg), "rev-parse", "--show-toplevel")
-			f, shown := realScreen(t, top)
-			deadline := time.After(2 * time.Minute)
-			open := true
-			for open {
-				select {
-				case line, more := <-f.lines:
-					open = more
-					shown.WriteString(line + "\n")
-				case <-deadline:
-					t.Fatal("the real terminal did not finish")
-				}
-			}
-			f.exit(0)
-			screen := ansi.Strip(shown.String())
-			start := strings.LastIndex(screen, "╭─ ATM")
-			if start < 0 {
-				t.Fatalf("missing final terminal view:\n%s", screen)
-			}
-			var left, right []string
-			for _, line := range strings.Split(screen[start:], "\n") {
-				cells := strings.Split(line, "│")
-				if len(cells) >= 3 {
-					left = append(left, cells[1])
-				}
-				if len(cells) == 5 {
-					right = append(right, cells[3])
-				}
-			}
+			view, left, right := finalBoxes(t, top)
 			want := "W " + c.verdict + " · " + path + " cut " + path
 			if got := strings.Join(strings.Fields(strings.Join(right, "\n")), " "); !strings.Contains(got, want) {
-				t.Fatalf("issue 586 requires the complete verdict, then file and finding, want %q:\n%s", want, screen[start:])
+				t.Fatalf("issue 586 requires the complete verdict, then file and finding, want %q:\n%s", want, view)
 			}
 			panel := strings.Join(left, "\n")
 			if !strings.Contains(panel, "✓ put back 1 files") || strings.Count(panel, "put back ") != 1 {
-				t.Fatalf("want one restoration row without a single path:\n%s", screen[start:])
+				t.Fatalf("want one restoration row without a single path:\n%s", view)
 			}
 			label := lastRun(t, top, "passed")
 			assertRestoreEvents(t, top, label, 1)
@@ -257,4 +230,38 @@ func TestRealScreenShowsCompleteSlopReferences(t *testing.T) {
 			}
 		})
 	}
+}
+
+// finalBoxes is the last view real ATM's run in top painted once its terminal closed, with the cells of its left
+// and right boxes.
+func finalBoxes(t *testing.T, top string) (view string, left, right []string) {
+	t.Helper()
+	f, shown := realScreen(t, top)
+	deadline := time.After(2 * time.Minute)
+	open := true
+	for open {
+		select {
+		case line, more := <-f.lines:
+			open = more
+			shown.WriteString(line + "\n")
+		case <-deadline:
+			t.Fatal("the real terminal did not finish")
+		}
+	}
+	f.exit(0)
+	screen := ansi.Strip(shown.String())
+	start := strings.LastIndex(screen, "╭─ ATM")
+	if start < 0 {
+		t.Fatalf("missing final terminal view:\n%s", screen)
+	}
+	for _, line := range strings.Split(screen[start:], "\n") {
+		cells := strings.Split(line, "│")
+		if len(cells) >= 3 {
+			left = append(left, cells[1])
+		}
+		if len(cells) == 5 {
+			right = append(right, cells[3])
+		}
+	}
+	return screen[start:], left, right
 }
