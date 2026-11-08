@@ -16,6 +16,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+	"mvdan.cc/sh/v3/expand"
+	"mvdan.cc/sh/v3/syntax"
 )
 
 // Agent is the agent selection shared by configuration layers. Empty model or effort: the harness's default.
@@ -114,9 +116,35 @@ func load(project, home string, flags Agent, decodeProject func(*Config) (map[st
 	if c.TestFile != "" && !strings.Contains(c.TestFile, "{file}") && !strings.Contains(c.TestFile, "{dir}") {
 		return c, fmt.Errorf("test_file %q: want {file} or {dir} in it", c.TestFile)
 	}
+	if err := deliveryError(project, c.Delivery); err != nil {
+		return c, err
+	}
 	c.Harness, c.Model, c.Effort = cmp.Or(flags.Harness, c.Harness), cmp.Or(flags.Model, c.Model),
 		cmp.Or(flags.Effort, c.Effort)
 	return c, harnessError(c.Agent)
+}
+
+// deliveryError rejects a second gate screen; comments and arguments naming it are ordinary shell text.
+func deliveryError(project, line string) error {
+	file, err := syntax.NewParser().Parse(strings.NewReader(line), "")
+	if err != nil {
+		return nil // Shell syntax errors still belong to delivery's shell.
+	}
+	var refusal error
+	syntax.Walk(file, func(node syntax.Node) bool {
+		call, ok := node.(*syntax.CallExpr)
+		if !ok || len(call.Args) < 2 {
+			return true
+		}
+		command, _ := expand.Literal(nil, call.Args[0])
+		subcommand, _ := expand.Literal(nil, call.Args[1])
+		if filepath.Base(command) == "no-mistakes" && subcommand == "attach" {
+			refusal = fmt.Errorf("%s: delivery: no-mistakes attach opens a second screen; "+
+				"replace it with no-mistakes axi run to launch the run; ATM paints the gate", project)
+		}
+		return true
+	})
+	return refusal
 }
 
 // harnessError is why a's harness cannot run as a sets it, nil when it can.
