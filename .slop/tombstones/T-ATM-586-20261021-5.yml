@@ -14,9 +14,9 @@ incident:
       example: Slop findings PTY lifecycle at lines 43-48.
       artifact: internal/run/ponytail_scroll_unix_test.go
     - family: clone_fingerprint
-      example: Report rows PTY lifecycle at lines 49-55.
+      example: Report rows PTY lifecycle at lines 58-64.
       artifact: internal/run/report_rows_unix_test.go
 match:
   family: clone_fingerprint
   scope: go_tests
-  fingerprint: 2ec7259207a41b8b17708736150bf556f8d6639e2b3478ec9960b636a4038d38
+  fingerprint: 06105f4fe5c270a6fc79b0e0e30120832d5eae148aa6d0eefc444fd03189145c

@@ -21,110 +21,136 @@ import (
 //
 //nolint:gocyclo,funlen // Preserve the complete real-terminal sequence and every screen assertion.
 func TestRealScreenShowsTheReportAsRows(t *testing.T) {
-	bin := builtATM(t)
-	checks := filepath.Join(t.TempDir(), "checks")
-	cfg := atmSet(atmYAML, "typecheck", fmt.Sprintf(`cat "%s" >/dev/null`, checks))
-	top := gitT(t, repo(t, "https://example.com/o/r.git", cfg), "rev-parse", "--show-toplevel")
-	stopServing(t, top)
-	agent := filepath.Join(t.TempDir(), "agent")
-	held(t, agent)
-	held(t, checks)
-	call := filepath.Join(t.TempDir(), "call")
-	t.Setenv("FAKE_AGENT_CALL", call)
-	report, _ := json.Marshal(obj{"test_file": "a_test.sh", "changed_files": []string{"a.txt", "b.txt", "c.txt"},
-		"summary":      "Arreglo de **a.txt**.\n\n| Fichero | Cambio |\n|---|---|\n| `a.txt` | **fixed** |",
-		"commands_run": []string{"sh a_test.sh"},
-		"findings":     []obj{{"severity": "warning", "file": "a.txt", "description": "rompe si falta"}}})
-	says, _ := json.Marshal(obj{"type": "assistant", "message": obj{"role": "assistant",
-		"content": []obj{{"type": "text", "text": "Hecho.\n" + string(report)}}}})
-	t.Setenv("FAKE_AGENT_FINAL_STREAM", string(says)+"\n")
-	final := "Hecho.\n" + string(report)
-	t.Setenv("FAKE_AGENT_WORK", fmt.Sprintf(`cat "%s" >/dev/null; `, agent)+fixWork+
-		"; mkdir -p .atm; cat > .atm/fake-report.json <<'REPORT'\n"+final+"\nREPORT\n")
-	t.Setenv("TERM", "xterm-256color")
-	t.Setenv("NO_COLOR", "")
-	a := &attached{t: t, cmd: exec.Command(bin, "run", issueFile(t, issue)), chunks: make(chan string, 64), rows: 50}
-	a.cmd.Dir = top
-	var err error
-	if a.p, err = pty.StartWithSize(a.cmd, &pty.Winsize{Cols: 120, Rows: 50}); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = a.cmd.Process.Kill(); _ = a.p.Close() })
-	go a.read()
-
-	a.drawn(func(s string) bool { return strings.Contains(s, "▸ · 1 tool: Skill") })
-	if brief := agentCall(t, call).Stdin; !strings.Contains(brief, "Write `summary` in Markdown, not HTML.") {
-		t.Fatalf("the delivered worker brief does not require Markdown: %s", brief)
-	}
-	free(t, agent)
-	s := a.drawn(func(s string) bool {
-		return strings.Contains(s, "Hallazgos (1)") &&
-			strings.Contains(s, "▸ · 1 tool: Skill") && typecheckRuns.MatchString(s)
-	})
-	for _, want := range []string{`✎ Hecho\.`, `▾ Informe`, `Arreglo de a\.txt\.`, `Fichero +Cambio`, `a\.txt +fixed`,
-		`▸ Ficheros cambiados \(3\)`, `▸ Comandos ejecutados \(1\)`, `▸ Test a_test\.sh`, `▸ Hallazgos \(1\)`} {
-		if !regexp.MustCompile(want).MatchString(s) {
-			t.Fatalf("the Agent box lacks %s:\n%s", want, s)
-		}
-	}
-	previous := -1
-	for _, title := range []string{
-		"▸ · 1 tool: Skill", "✎ Hecho.", "▾ Informe", "Arreglo de a.txt.",
-		"Ficheros cambiados (3)", "Comandos ejecutados (1)", "Test a_test.sh", "Hallazgos (1)",
+	for _, tc := range []struct{ name, harness, prose string }{
+		{"claude", "claude", "Hecho."},
+		{"codex", "codex", "Hecho."},
+		{"codex-report-only", "codex", ""},
 	} {
-		at := strings.Index(s, title)
-		if at <= previous || strings.Count(s, title) != 1 {
-			t.Fatalf("final report rows are duplicated or out of order at %q:\n%s", title, s)
-		}
-		previous = at
-	}
-	for _, raw := range []string{"{", `"summary"`, `"test_file"`, "|", "---", "**"} {
-		if strings.Contains(s, raw) {
-			t.Fatalf("the Agent box shows %q of the raw report:\n%s", raw, s)
-		}
-	}
-	a.click(rowOf(s, "▸ Hallazgos"))
-	s = a.drawn(regexp.MustCompile(`▾ Hallazgos \(1\) +│\n +│ {7}warning a\.txt rompe si falta`).MatchString)
-	a.click(rowOf(s, "▾ Informe"))
-	a.drawn(func(s string) bool { return strings.Contains(s, "▸ Informe") && !strings.Contains(s, "Hallazgos") })
+		t.Run(tc.name, func(t *testing.T) {
+			bin := builtATM(t)
+			checks := filepath.Join(t.TempDir(), "checks")
+			cfg := atmSet(atmYAML, "typecheck", fmt.Sprintf(`cat "%s" >/dev/null`, checks))
+			top := gitT(t, repo(t, "https://example.com/o/r.git", cfg), "rev-parse", "--show-toplevel")
+			stopServing(t, top)
+			agent := filepath.Join(t.TempDir(), "agent")
+			held(t, agent)
+			held(t, checks)
+			call := filepath.Join(t.TempDir(), "call")
+			t.Setenv("FAKE_AGENT_CALL", call)
+			report, _ := json.Marshal(obj{"test_file": "a_test.sh", "changed_files": []string{"a.txt", "b.txt", "c.txt"},
+				"summary":      "Arreglo de **a.txt**. \"Listo\".\n\n| Fichero | Cambio |\n|---|---|\n| `a.txt` | **fixed** |",
+				"commands_run": []string{"sh a_test.sh"},
+				"findings":     []obj{{"severity": "warning", "file": "a.txt", "description": "rompe si falta"}}})
+			final := strings.TrimSpace(tc.prose + "\n" + string(report))
+			says, _ := json.Marshal(obj{"type": "assistant", "message": obj{"role": "assistant",
+				"content": []obj{{"type": "text", "text": final}}}})
+			if tc.harness == "claude" {
+				t.Setenv("FAKE_AGENT_FINAL_STREAM", string(says)+"\n")
+			}
+			t.Setenv("FAKE_AGENT_WORK", fmt.Sprintf(`cat "%s" >/dev/null; `, agent)+fixWork+
+				"; mkdir -p .atm; cat > .atm/fake-report.json <<'REPORT'\n"+final+"\nREPORT\n")
+			t.Setenv("TERM", "xterm-256color")
+			t.Setenv("NO_COLOR", "")
+			a := &attached{t: t, cmd: exec.Command(bin, "run", issueFile(t, issue)), chunks: make(chan string, 64), rows: 50}
+			a.cmd.Args = append(a.cmd.Args, "--harness", tc.harness)
+			a.cmd.Dir = top
+			var err error
+			if a.p, err = pty.StartWithSize(a.cmd, &pty.Winsize{Cols: 120, Rows: 50}); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = a.cmd.Process.Kill(); _ = a.p.Close() })
+			go a.read()
 
-	for _, title := range []string{"Ficheros cambiados", "Comandos ejecutados", "Test a_test.sh"} {
-		a.click(rowOf(a.drawn(func(s string) bool { return strings.Contains(s, "▸ Informe") }), "▸ Informe"))
-		s = a.drawn(func(s string) bool { return strings.Contains(s, "▸ "+title) })
-		a.click(rowOf(s, "▸ "+title))
-		s = a.drawn(func(s string) bool { return strings.Contains(s, "▾ "+title) })
-		a.click(rowOf(s, "▾ Informe"))
-	}
-	paths, err := filepath.Glob(filepath.Join(top, ".atm", "runs", "*", "worker.jsonl"))
-	if err != nil || len(paths) != 1 {
-		t.Fatalf("worker final message paths = %v, %v", paths, err)
-	}
-	var gotFinal string
-	for _, line := range logLines(t, paths[0]) {
-		var ev event
-		_ = json.Unmarshal([]byte(line), &ev)
-		if text, ends := ev.final("claude"); ends {
-			gotFinal = strings.TrimSpace(text)
-		}
-	}
-	if gotFinal != final {
-		t.Fatalf("worker final message = %s; want %s", gotFinal, final)
-	}
-	if err := pty.Setsize(a.p, &pty.Winsize{Cols: 80, Rows: 50}); err != nil {
-		t.Fatal(err)
-	}
-	a.drawn(func(s string) bool { return strings.Contains(s, "▸ Informe") && strings.Contains(s, "Log") })
-	free(t, checks)
-	timeout := time.After(2 * time.Minute)
-	for open := true; open; {
-		select {
-		case _, open = <-a.chunks:
-		case <-timeout:
-			t.Fatal("atm run stayed open after the agent ended")
-		}
-	}
-	if err := a.cmd.Wait(); err != nil {
-		t.Fatalf("atm run: %v", err)
+			skillRow := "▸ · 1 tool: " + map[string]string{"claude": "Skill", "codex": "shell"}[tc.harness]
+			a.drawn(func(s string) bool { return strings.Contains(s, skillRow) })
+			brief := sentPrompt(tc.harness, agentCall(t, call))
+			if !strings.Contains(brief, "Write `summary` in Markdown, not HTML.") {
+				t.Fatalf("the delivered worker brief does not require Markdown: %s", brief)
+			}
+			free(t, agent)
+			s := a.drawn(func(s string) bool {
+				return strings.Contains(s, "Hallazgos (1)") &&
+					strings.Contains(s, skillRow) && typecheckRuns.MatchString(s)
+			})
+			if tc.prose != "" && !regexp.MustCompile(`✎ Hecho\. +│`).MatchString(s) ||
+				tc.prose == "" && strings.Contains(s, "✎") {
+				t.Fatalf("the Agent box must show only the final prose as a message:\n%s", s)
+			}
+			for _, want := range []string{`▾ Informe`, `Arreglo de a\.txt\.`, `Fichero +Cambio`, `a\.txt +fixed`,
+				`▸ Ficheros cambiados \(3\)`, `▸ Comandos ejecutados \(1\)`, `▸ Test a_test\.sh`, `▸ Hallazgos \(1\)`} {
+				if !regexp.MustCompile(want).MatchString(s) {
+					t.Fatalf("the Agent box lacks %s:\n%s", want, s)
+				}
+			}
+			previous := -1
+			titles := []string{skillRow}
+			if tc.prose != "" {
+				titles = append(titles, "✎ "+tc.prose)
+			}
+			for _, title := range append(titles, "▾ Informe", "Arreglo de a.txt.",
+				"Ficheros cambiados (3)", "Comandos ejecutados (1)", "Test a_test.sh", "Hallazgos (1)",
+			) {
+				at := strings.Index(s, title)
+				if at <= previous || strings.Count(s, title) != 1 {
+					t.Fatalf("final report rows are duplicated or out of order at %q:\n%s", title, s)
+				}
+				previous = at
+			}
+			for _, raw := range []string{"{", `"summary"`, `"test_file"`, `\"`, "|", "---", "**"} {
+				if strings.Contains(s, raw) {
+					t.Fatalf("the Agent box shows %q of the raw report:\n%s", raw, s)
+				}
+			}
+			a.click(rowOf(s, "▸ Hallazgos"))
+			s = a.drawn(regexp.MustCompile(`▾ Hallazgos \(1\) +│\n +│ {7}warning a\.txt rompe si falta`).MatchString)
+			a.click(rowOf(s, "▾ Informe"))
+			a.drawn(func(s string) bool { return strings.Contains(s, "▸ Informe") && !strings.Contains(s, "Hallazgos") })
+
+			for _, title := range []string{"Ficheros cambiados", "Comandos ejecutados", "Test a_test.sh"} {
+				a.click(rowOf(a.drawn(func(s string) bool { return strings.Contains(s, "▸ Informe") }), "▸ Informe"))
+				s = a.drawn(func(s string) bool { return strings.Contains(s, "▸ "+title) })
+				a.click(rowOf(s, "▸ "+title))
+				s = a.drawn(func(s string) bool { return strings.Contains(s, "▾ "+title) })
+				a.click(rowOf(s, "▾ Informe"))
+			}
+			paths, err := filepath.Glob(filepath.Join(top, ".atm", "runs", "*", "worker.jsonl"))
+			if err != nil || len(paths) != 1 {
+				t.Fatalf("worker final message paths = %v, %v", paths, err)
+			}
+			var gotFinal string
+			lines := logLines(t, paths[0])
+			for _, line := range lines {
+				var ev event
+				_ = json.Unmarshal([]byte(line), &ev)
+				if tc.harness == "codex" && ev.Type == "item.completed" && ev.Item.Type == "agent_message" {
+					gotFinal = strings.TrimSpace(ev.Item.Text)
+				} else if text, ends := ev.final(tc.harness); ends {
+					gotFinal = strings.TrimSpace(text)
+				}
+			}
+			if tc.harness == "codex" && !strings.Contains(lines[len(lines)-1], `"turn.completed"`) {
+				t.Fatal("codex's stream did not end with turn.completed")
+			}
+			if gotFinal != final {
+				t.Fatalf("worker final message = %s; want %s", gotFinal, final)
+			}
+			if err := pty.Setsize(a.p, &pty.Winsize{Cols: 80, Rows: 50}); err != nil {
+				t.Fatal(err)
+			}
+			a.drawn(func(s string) bool { return strings.Contains(s, "▸ Informe") && strings.Contains(s, "Log") })
+			free(t, checks)
+			timeout := time.After(2 * time.Minute)
+			for open := true; open; {
+				select {
+				case _, open = <-a.chunks:
+				case <-timeout:
+					t.Fatal("atm run stayed open after the agent ended")
+				}
+			}
+			if err := a.cmd.Wait(); err != nil {
+				t.Fatalf("atm run: %v", err)
+			}
+		})
 	}
 }
 

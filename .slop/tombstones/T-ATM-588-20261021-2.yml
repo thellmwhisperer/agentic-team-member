@@ -11,8 +11,8 @@ incident:
   rule_established: Retain both full scenarios and accept only their exact shared setup clone.
   evidence:
     - family: clone_fingerprint
-      example: internal/run/report_rows_unix_test.go:23-29 and :257-263
+      example: internal/run/report_rows_unix_test.go:29-35 and :283-289
 match:
   family: clone_fingerprint
   scope: go_tests
-  fingerprint: 8fd71e872d11f6840c90cab890d1b7f00ec10e44a707be0a00cfdeb991dfc1cb
+  fingerprint: 98fbd5cf3e83d399ba9882bf6c72a01edd8998b91a293bbe00385e0e4c52045b

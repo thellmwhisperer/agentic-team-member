@@ -605,7 +605,7 @@ func (s *stream) see(harness string, line []byte) {
 			}
 		}
 	}
-	if s.pending != "" {
+	if s.pending != "" && (harness != "codex" || e.Type != "turn.completed") {
 		s.flush(e.Type == "result" && (harness == "claude" && ends || harness == "cursor"))
 	}
 	s.reach = cmp.Or(s.reach, outside(e.calls(harness), s.clone, s.scratch))
