@@ -23,18 +23,8 @@ it.
    [delivery gate](how-a-run-flows.md#delivery).
 4. **The gate.** The green branch goes through the
    [configured delivery line](configuration.md#atmyaml).
-   It saves the attempt's nonce beside `report.json` and uses the report
-   directory's name as its validation generation. On recovery, the same attempt
-   replays the run bound by its saved launch receipt, including after an
-   interrupted launch or a replay that failed before another receipt. The
-   command follows that run with `axi status --run` until a terminal result;
-   a PR ready to merge or a decision is not a terminal result. It prints each
-   new gate and keeps following the same run while its operator answers. It
-   passes only on `completed` with outcome `passed`, `passed-with-override` or
-   `passed-with-skips`, and prints that result. A failure, cancellation,
-   missing outcome or query error fails delivery. An active run
-   the attempt cannot prove its own is left untouched, and delivery fails
-   without launching another run.
+   It launches the no-mistakes run and returns at the gate's first stop;
+   [the screen](how-a-run-flows.md#the-screen) then follows the gate.
    Review, targeted test, lint and document run as fenced model steps. The reviewer
    only reports (`auto_fix.review: 0`); whoever launched the run answers each
    finding, fixing real defects and dismissing guesses.
