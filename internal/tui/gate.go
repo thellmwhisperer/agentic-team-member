@@ -152,7 +152,10 @@ func (m *Model) gate(g gate) {
 	m.gateSteps = g.steps
 }
 
-var gateProcessLine = regexp.MustCompile(`^\S+ (started|exited) pid=\d+( status=\S+)?$`)
+var (
+	gateProcessLine         = regexp.MustCompile(`^\S+ (started|exited) pid=\d+( status=\S+)?$`)
+	gateMarkdownPunctuation = regexp.MustCompile(`[[:punct:]]`)
+)
 
 // gateActivities reads agent prose and final objects without changing the gate's log on disk.
 func gateActivities(log []map[string]string) (out []*activity) {
@@ -207,7 +210,7 @@ func (r gateReport) readable() *report {
 		if f.Line > 0 {
 			file += fmt.Sprintf(":%d", f.Line)
 		}
-		parts = append(parts, f.Severity+" "+file+" "+f.Description)
+		parts = append(parts, f.Severity+" "+gateMarkdownPunctuation.ReplaceAllString(file, `\$0`)+" "+f.Description)
 	}
 	if r.RiskLevel != "" {
 		parts = append(parts, "Riesgo: "+r.RiskLevel)
