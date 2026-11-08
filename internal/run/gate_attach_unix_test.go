@@ -20,6 +20,7 @@ import (
 // and abort add their arguments, each in braces, to review's log, and abort makes the run complete.
 const gateNM = `#!/bin/sh
 echo "$PWD $*" >>"$FAKE_NM/log"
+agent_step=${FAKE_NM_STEP:-review}
 case "$*" in
 "axi status")
 	if [ -f "$FAKE_NM/none" ]; then printf 'current_branch: atm/the-unit\nruns_on_current_branch: 0\n'; exit 0; fi
@@ -31,9 +32,9 @@ case "$*" in
 	[ ! -f "$FAKE_NM/done" ] || run=completed step=completed
 	printf 'run:\n  id: "01M5D0SWRMZ44NM79H2NNC3YZ8"\n  branch: atm/the-unit\n  status: %s\n' "$run"
 	printf '  steps[3]{step,status,findings,duration_ms}:\n'
-	printf '    review,%s,1,1200\n    test,pending,0,0\n    lint,skipped,0,0\n' "$step"
+	printf '    %s,%s,1,1200\n    test,pending,0,0\n    lint,skipped,0,0\n' "$agent_step" "$step"
 	[ ! -f "$FAKE_NM/status.toon" ] || cat "$FAKE_NM/status.toon" ;;
-"axi logs --step review --full")
+"axi logs --step "*" --full")
 	cat "$FAKE_NM/review.toon" ;;
 "axi respond "*|"axi answer "*|"axi abort")
 	if [ "$2" = respond ]; then
@@ -97,15 +98,19 @@ func TestRealAttachPaintsTheGate(t *testing.T) {
 		return strings.Contains(s, "▾ ⏸ review") && strings.Contains(s, "reading internal/run/run.go") &&
 			strings.Contains(s, "checking the delivery") && strings.Contains(s, finding)
 	})
+	assertGateReport(t, a)
 	if err := os.WriteFile(filepath.Join(nm, "fixing"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	fixing := a.sees(func(s string) bool {
+	fixing := a.drawn(func(s string) bool {
 		return regexp.MustCompile(`│ [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] review  1\.2 s +running │`).MatchString(s) &&
 			regexp.MustCompile(`│ ▾ [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] review +│`).MatchString(s)
 	})
 	if !strings.Contains(fixing, finding) || strings.Contains(fixing, "internal/run/run.go:") {
 		t.Fatalf("fixing lost or invented a finding position:\n%s", fixing)
+	}
+	if !strings.Contains(fixing, "▾ Ficheros revisados (2)") {
+		t.Fatalf("polling lost the open reviewed paths:\n%s", fixing)
 	}
 	if err := os.WriteFile(filepath.Join(nm, "done"), nil, 0o600); err != nil {
 		t.Fatal(err)
@@ -118,10 +123,95 @@ func TestRealAttachPaintsTheGate(t *testing.T) {
 	}
 }
 
+func assertGateReport(t *testing.T, a *attached) {
+	t.Helper()
+	s := a.drawn(func(s string) bool { return strings.Contains(s, "checking the delivery") })
+	for _, raw := range []string{"{", `"findings"`, `"risk_level"`, `\"`, "pid="} {
+		if strings.Contains(s, raw) {
+			t.Fatalf("the gate paints raw agent output %q:\n%s", raw, s)
+		}
+	}
+	for _, want := range []string{"✎ Reviewing the diff", "▾ Informe", "Review completed.",
+		`warning internal/tui/gate.go:17 Keep "gate" visible.`, "Riesgo: low", "Only the screen changes.",
+		"Gate tests pass.", "▸ Ficheros revisados (2)"} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("the gate lacks readable report content %q:\n%s", want, s)
+		}
+	}
+	if strings.Contains(s, "internal/run/gate_attach_unix_test.go") {
+		t.Fatalf("reviewed paths are not folded:\n%s", s)
+	}
+	a.click(rowOf(s, "▸ Ficheros revisados"))
+	s = a.drawn(func(s string) bool { return strings.Contains(s, "internal/run/gate_attach_unix_test.go") })
+	a.click(rowOf(s, "▾ Informe"))
+	s = a.drawn(func(s string) bool { return strings.Contains(s, "▸ Informe") })
+	if strings.Contains(s, "Riesgo: low") || strings.Contains(s, "Ficheros revisados") {
+		t.Fatalf("folding Informe left its content visible:\n%s", s)
+	}
+	a.click(rowOf(s, "▸ Informe"))
+	a.drawn(func(s string) bool { return strings.Contains(s, "▾ Ficheros revisados (2)") })
+}
+
+func TestRealAttachReadsGateFixAndCheckLogs(t *testing.T) {
+	for _, tc := range []struct {
+		name, log    string
+		want, absent []string
+	}{
+		{"fix", `codex started pid=2
+Fixing **the gate**
+{"summary":"Fixed the gate."}
+{"findings":[{"severity":"error","file":"gate.go","description":"No position given."}]}
+Fix complete
+codex exited pid=2 status=success`,
+			[]string{"✎ Fixing the gate", "▾ Informe", "Fixed the gate.", "error gate.go No position given.", "✎ Fix complete"},
+			[]string{"{", "pid=", "gate.go:", "Ficheros revisados", "Comandos ejecutados", "Test "}},
+		{"typecheck", "Checking packages\n{not a report}\n{\"packages\":3}\nChecks passed",
+			[]string{"Checking packages", "{not a report}", `{"packages":3}`, "Checks passed"},
+			[]string{"✎", "Informe"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			nm := gateFake(t)
+			t.Setenv("FAKE_NM_STEP", tc.name)
+			fixture, err := os.ReadFile(filepath.Join(nm, "review.toon"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			header, _, _ := strings.Cut(string(fixture), "lines:")
+			lines := strings.Split(tc.log, "\n")
+			fixture = []byte(header + fmt.Sprintf("lines: %d total\nlog[%d]{line}:\n", len(lines), len(lines)))
+			for _, line := range lines {
+				fixture = append(fixture, []byte(fmt.Sprintf("  %q\n", line))...)
+			}
+			if err := os.WriteFile(filepath.Join(nm, "review.toon"), fixture, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			a := liveAttach(t, 120, 40)
+			a.delivered(t.TempDir())
+			a.drawn(func(s string) bool { return strings.Contains(s, "▸ ⏸ "+tc.name) })
+			a.click(1)
+			s := a.drawn(func(s string) bool { return strings.Contains(s, "▾ ⏸ "+tc.name) })
+			for _, want := range tc.want {
+				if !strings.Contains(s, want) {
+					t.Fatalf("the gate lacks %q:\n%s", want, s)
+				}
+			}
+			for _, absent := range tc.absent {
+				if strings.Contains(s, absent) {
+					t.Fatalf("the gate unexpectedly paints %q:\n%s", absent, s)
+				}
+			}
+			if err := os.WriteFile(filepath.Join(nm, "done"), nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			a.exits()
+		})
+	}
+}
+
 func assertGateFolded(t *testing.T, a *attached, folded string) {
 	t.Helper()
 	for _, want := range []string{`│ ⏸ review  1\.2 s +waiting │`, `│ ○ test +pending │`, `│ – lint +skipped │`,
-		`│ ▸ ⏸ review +│`, `│   Reviewing the diff +│`} {
+		`│ ▸ ⏸ review +│`, `│ ✎ Reviewing the diff +│`} {
 		if !regexp.MustCompile(want).MatchString(folded) {
 			t.Fatalf("the gate's screen lacks %q:\n%s", want, folded)
 		}
@@ -200,8 +290,9 @@ func longGateLog(t *testing.T, nm string) []string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	long := strings.ReplaceAll(string(fixture), "3 total", "83 total")
-	long = strings.ReplaceAll(long, "log[3]", "log[83]")
+	header, _, _ := strings.Cut(string(fixture), "lines:")
+	long := header + "lines: 83 total\nlog[83]{line}:\n" +
+		"  **Reviewing the diff**\n  reading internal/run/run.go\n  checking the delivery\n"
 	want := []string{"Reviewing the diff", "reading internal/run/run.go", "checking the delivery"}
 	for i := 0; i < 80; i++ {
 		line := fmt.Sprintf("review-line-%02d", i)

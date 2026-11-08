@@ -10,10 +10,14 @@ the issue 509 acceptance example. The public table is
 `findings[N]{id,severity,file,action,description}`. It has no source line
 column, even when the underlying agent log contains JSON findings with
 `line` values. The screen must not infer positions from agent prose or add
-the former fixture's invented `:42`. The risk shown is the public severity,
-`error`, rather than an invented `risk` field.
+the former fixture's invented `:42` to the public finding.
+
+The gate-log acceptance extends the log with agent start/exit lines and a
+reviewer JSON object. Its finding's `line`, `risk_level`, `risk_rationale`, `reviewed_paths`
+and `testing_summary` belong to that log object, not the public findings
+table. The screen renders their contents and folds the reviewed paths.
 
 Logs are `log[N]{line}` rows. Without `--full`, the same command reported
 `lines: 40 of 75 total (tail)` and `log[40]{line}`. The long-log acceptance
-extends this three-line fixture beyond that tail and checks the original
-first line and every subsequent line through the real attach screen.
+uses the three original prose lines followed by 80 more lines, beyond that
+tail, and checks every line through the real attach screen.
