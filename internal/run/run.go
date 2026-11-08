@@ -100,7 +100,7 @@ func configureAgent(root, ref, label string, a *agent) (config.Config, error) {
 	if err != nil {
 		return config.Config{}, err
 	}
-	c, _, err := baseConfig(root, ref, home, a.Agent) // the steps after the issue take the config from here
+	c, _, err := BaseConfig(root, ref, home, a.Agent) // the steps after the issue take the config from here
 	if err != nil {
 		return config.Config{}, err
 	}

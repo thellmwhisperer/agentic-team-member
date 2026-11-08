@@ -34,11 +34,18 @@ func Show(root, label string, in, out *os.File) (o run.Outcome, detached bool, e
 	}
 	keys := make(chan run.Input, 64)
 	m := New(label, w, h)
-	c, _ := config.Load(root, os.Getenv("HOME"), config.Agent{})
-	if c.Delivery != "" {
-		for _, name := range []string{"intent", "rebase", "review", "test", "document", "lint", "push", "pr", "ci"} {
-			m.rows = append(m.rows, &row{step: "gate:" + name, label: name, state: "pending"})
+	runs, _ := run.RecordedRuns(root)
+	for _, r := range runs {
+		if r.Run != label || r.BaseSHA == "" {
+			continue
 		}
+		c, _, _ := run.BaseConfig(root, r.BaseSHA, os.Getenv("HOME"), config.Agent{})
+		if c.Delivery != "" {
+			for _, name := range []string{"intent", "rebase", "review", "test", "document", "lint", "push", "pr", "ci"} {
+				m.rows = append(m.rows, &row{step: "gate:" + name, label: name, state: "pending"})
+			}
+		}
+		break
 	}
 	m.keys = keys
 	p := tea.NewProgram(m, tea.WithInput(in), tea.WithOutput(out), tea.WithAltScreen(), tea.WithMouseCellMotion())

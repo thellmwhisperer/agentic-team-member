@@ -256,6 +256,13 @@ func liveAttach(t *testing.T, cols, rows uint16, delivery ...string) *attached {
 	top := atmRepo(t)
 	if len(delivery) > 0 {
 		writeFixture(t, filepath.Join(top, ".atm.yaml"), atmSet(atmYAML, "delivery", delivery[0]))
+		gitT(t, top, "add", ".atm.yaml")
+		gitT(t, top, "commit", "-qm", "Configure delivery")
+		recorded, err := json.Marshal(Outcome{Run: "live-run", BaseSHA: gitT(t, top, "rev-parse", "HEAD")})
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeFixture(t, filepath.Join(top, ".atm", "runs.jsonl"), string(recorded)+"\n")
 	}
 	listener, err := net.Listen("unix", short(socket(top)))
 	if err != nil {

@@ -46,7 +46,7 @@ func preflight(root, ref, workerBase string, a agent, args []string) (string, er
 			}
 			var b string
 			if err == nil {
-				c, b, err = baseConfig(root, sha, home, a.Agent)
+				c, b, err = BaseConfig(root, sha, home, a.Agent)
 			}
 			if wt, _ := os.ReadFile(filepath.Join(root, ".atm.yaml")); err == nil && string(wt) != b {
 				fmt.Fprintf(os.Stderr, "preflight: config: warning: the working tree's .atm.yaml differs from %s's, "+
@@ -95,9 +95,9 @@ func deliveryWord(line string) string {
 	return first.String()
 }
 
-// baseConfig is the configuration of the repository at root with .atm.yaml as base ref ref has it, whatever
+// BaseConfig is the configuration of the repository at root with .atm.yaml as base ref ref has it, whatever
 // the working tree's says, and that file.
-func baseConfig(root, ref, home string, flags config.Agent) (config.Config, string, error) {
+func BaseConfig(root, ref, home string, flags config.Agent) (config.Config, string, error) {
 	b, err := gitRaw(root, "show", ref+":.atm.yaml")
 	if err != nil {
 		return config.Config{}, "", fmt.Errorf("base ref %q: %w", ref, err)
