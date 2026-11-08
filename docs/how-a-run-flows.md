@@ -456,7 +456,8 @@ An empty delivery command
 shows `Delivery skipped` without sub-rows.
 
 The Slop detector unfolds into `agent reading the diff`, `N findings`, `judged`,
-`checks run n`, `put back <file>`, and, when a cut is kept, `commit` rows. The `judged`
+`checks run n`, when a cut is kept, `commit`, and, when files were put back,
+one `put back N files` row; `rejected_files` names each of them. The `judged`
 row shows the number of findings accepted for checks, the number rejected and
 the first rejection reason. Each `checks run n` row retains its attempt's result
 and elapsed time; a failed attempt can name the files it implicated. Earlier
