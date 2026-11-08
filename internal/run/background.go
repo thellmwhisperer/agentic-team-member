@@ -30,6 +30,7 @@ import (
 type Outcome struct {
 	Outcome    string         `json:"outcome"` // running, passed or failed
 	Run        string         `json:"run"`     // its label: the issue's name and the run's number in the repository
+	BaseSHA    string         `json:"base_sha,omitempty"`
 	FailedNode string         `json:"failed_node"`
 	Reason     string         `json:"reason"`
 	Report     string         `json:"report"` // report.json, none when the run failed before its first node
@@ -370,8 +371,8 @@ func (s *server) start(args []string, baseSHA string) (Outcome, error) {
 		max(entry.Name())
 	}
 	r := &bgRun{more: make(chan struct{}),
-		Outcome: Outcome{Outcome: "running", Issue: issue, Started: time.Now(), Serve: buildinfo.String(),
-			Run: cmp.Or(strings.Trim(name, "-"), "run") + "-" + strconv.Itoa(n+1)}}
+		Outcome: Outcome{Outcome: "running", Issue: issue, BaseSHA: baseSHA, Started: time.Now(),
+			Serve: buildinfo.String(), Run: cmp.Or(strings.Trim(name, "-"), "run") + "-" + strconv.Itoa(n+1)}}
 	r.Report = filepath.Join(runDir(s.root, r.Run), "report.json")
 	if err := os.MkdirAll(filepath.Dir(r.Report), 0o755); err != nil {
 		return Outcome{}, err
