@@ -5,13 +5,10 @@ package run
 import (
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
-
-	"github.com/creack/pty"
 )
 
 func TestRealScreenShowsTheWholePipelineFromTheStart(t *testing.T) {
@@ -109,15 +106,8 @@ func screenRunDeliveryConfig(t *testing.T, bin, base, working string) {
 	wait()
 	gitT(t, top, "add", ".atm.yaml")
 	gitT(t, top, "commit", "-qm", "Change delivery after launch")
-	t.Setenv("TERM", "xterm-256color")
-	t.Setenv("NO_COLOR", "")
-	a := &attached{t: t, cmd: exec.Command(bin, "attach"), chunks: make(chan string, 64), rows: 50}
-	a.cmd.Dir = top
-	if a.p, err = pty.StartWithSize(a.cmd, &pty.Winsize{Cols: 120, Rows: 50}); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = a.cmd.Process.Kill(); _ = a.p.Close() })
-	go a.read()
+	a := &attached{t: t, chunks: make(chan string, 64), rows: 50}
+	a.attach(bin, top, 120, 50)
 	first := a.sees(func(s string) bool { return strings.Contains(s, "q detach") })
 	agent := a.sees(func(s string) bool { return strings.Contains(s, "╭─ Agent") })
 	for _, screen := range []string{first, agent} {

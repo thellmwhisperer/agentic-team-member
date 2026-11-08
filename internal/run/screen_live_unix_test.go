@@ -272,28 +272,23 @@ func liveAttach(t *testing.T, cols, rows uint16, delivery ...string) *attached {
 	a := &attached{t: t, events: make(chan string, 64), served: make(chan error, 1), chunks: make(chan string, 64),
 		rows: int(rows)}
 	go func() { a.served <- serveLive(listener, a.events) }()
-	t.Setenv("TERM", "xterm-256color")
-	t.Setenv("NO_COLOR", "")
-	a.cmd = exec.Command(bin, "attach", "live-run")
-	a.cmd.Dir = top
-	if a.p, err = pty.StartWithSize(a.cmd, &pty.Winsize{Cols: cols, Rows: rows}); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = a.cmd.Process.Kill(); _ = a.p.Close() })
-	go func() {
-		defer close(a.chunks)
-		b := make([]byte, 4096)
-		for {
-			n, err := a.p.Read(b)
-			if n > 0 {
-				a.chunks <- string(b[:n])
-			}
-			if err != nil {
-				return
-			}
-		}
-	}()
+	a.attach(bin, top, cols, rows, "live-run")
 	return a
+}
+
+// attach starts atm attach in top on a cols x rows terminal and reads its screen into a.chunks.
+func (a *attached) attach(bin, top string, cols, rows uint16, args ...string) {
+	a.t.Helper()
+	a.t.Setenv("TERM", "xterm-256color")
+	a.t.Setenv("NO_COLOR", "")
+	a.cmd = exec.Command(bin, append([]string{"attach"}, args...)...)
+	a.cmd.Dir = top
+	var err error
+	if a.p, err = pty.StartWithSize(a.cmd, &pty.Winsize{Cols: cols, Rows: rows}); err != nil {
+		a.t.Fatal(err)
+	}
+	a.t.Cleanup(func() { _ = a.cmd.Process.Kill(); _ = a.p.Close() })
+	go a.read()
 }
 
 // serveLive answers one attach with events, as frames, and, once events is closed, the run's end.
