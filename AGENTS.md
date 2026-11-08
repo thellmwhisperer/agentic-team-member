@@ -25,6 +25,11 @@ decision, the newer one wins and the old rule is removed.
 - Several small fixes in one area go in one batch issue, with one acceptance
   line per fix.
 - Every point of a brief quotes the requester or is marked as a proposal.
+- No issue is closed as done, or as superseded, without proof on a real
+  screen: a real `atm` run, and a capture of its screen when the issue is about
+  what the operator sees. An issue whose proof only the operator can give stays
+  open until that proof is shown, and is reopened if the merge closes it.
+- Superseding an issue needs the requester's own sentence saying so.
 
 ## Delivery
 
