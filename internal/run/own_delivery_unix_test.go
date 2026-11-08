@@ -87,9 +87,11 @@ func ownDeliveryInit(t *testing.T, bin string) {
 					if err != nil || text != "" && string(got) != text {
 						t.Fatalf("atm init %s = %q, want %q, %v", name, got, text, err)
 					}
-					if name == ".atm.yaml" && text == "" &&
-						!strings.Contains(string(got), "\ndelivery: sh scripts/deliver.sh\n") {
-						t.Fatalf("atm init has no default delivery:\n%s", got)
+					if name == ".atm.yaml" && text == "" {
+						var generated struct{ Delivery string }
+						if err := yaml.Unmarshal(got, &generated); err != nil || generated.Delivery != "sh scripts/deliver.sh" {
+							t.Fatalf("atm init delivery = %q, want sh scripts/deliver.sh, %v", generated.Delivery, err)
+						}
 					}
 				}
 			}
