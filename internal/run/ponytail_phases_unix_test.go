@@ -86,7 +86,7 @@ func TestRealScreenPreservesSpecificSlopRejection(t *testing.T) {
 	}
 }
 
-// Issue 586 requires truthful put-back rows for each restored file, including full restoration after checks.
+// Restoration rows identify individual backtracking and summarize full restoration after checks.
 //
 //nolint:gocyclo,funlen // The full restoration scenarios and their assertions must stay together.
 func TestRealScreenShowsFullSlopRestoration(t *testing.T) {
@@ -125,7 +125,7 @@ func TestRealScreenShowsFullSlopRestoration(t *testing.T) {
 				untilShown(t, f, shown, "run 1 failed: b.txt")
 			}
 			for _, path := range c.files {
-				untilShown(t, f, shown, "✓ put back "+path)
+				untilShown(t, f, shown, "✓ put back "+restoredRow(c.name, path))
 				untilShown(t, f, shown, "discarded: checks failed · "+path)
 			}
 			f.exit(0)
@@ -143,10 +143,10 @@ func TestRealScreenShowsFullSlopRestoration(t *testing.T) {
 			}
 			putBack := map[string]int{}
 			_, err = Follow(top, runs[0].Run, nil, nil, func(f Frame) {
-				var ev struct{ Step, Check, State string }
+				var ev restoreEvent
 				if len(f.Event) != 0 && json.Unmarshal(f.Event, &ev) == nil && ev.Step == "ponytail" &&
 					ev.State == "passed" && strings.HasPrefix(ev.Check, "put back ") {
-					putBack[strings.TrimPrefix(ev.Check, "put back ")]++
+					ev.count(putBack)
 				}
 			})
 			if err != nil || len(putBack) != len(c.files) {
@@ -224,8 +224,12 @@ func TestRealScreenShowsCompleteSlopReferences(t *testing.T) {
 			if got := strings.Join(strings.Fields(strings.Join(right, "\n")), " "); !strings.Contains(got, want) {
 				t.Fatalf("issue 586 requires the complete verdict, then file and finding, want %q:\n%s", want, screen[start:])
 			}
-			if !regexp.MustCompile(`✓ put back\s*\n\s*internal/run/ponytail\.go`).MatchString(strings.Join(left, "\n")) {
-				t.Fatalf("issue 586 requires the complete restored path on its continuation row:\n%s", screen[start:])
+			wantRow := `✓ put back\s*\n\s*internal/run/ponytail\.go`
+			if !c.pair {
+				wantRow = `✓ put back 1 files`
+			}
+			if !regexp.MustCompile(wantRow).MatchString(strings.Join(left, "\n")) {
+				t.Fatalf("missing restoration row %q:\n%s", wantRow, screen[start:])
 			}
 			got, err := os.ReadFile(delivered)
 			if err != nil || string(got) != "keep\nextra\n" {
