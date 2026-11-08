@@ -150,8 +150,9 @@ func fakeAgentCLI(name string) int {
 		fmt.Print(os.Getenv("FAKE_AGENT_FINAL_STREAM"))
 	}
 	for _, ev := range map[string][]obj{
-		"claude":   {{"type": "result", "result": text}},
-		"codex":    {{"type": "item.completed", "item": obj{"type": "agent_message", "text": "not the -o file"}}},
+		"claude": {{"type": "result", "result": text}},
+		"codex": {{"type": "item.completed", "item": obj{"type": "agent_message", "text": text}},
+			{"type": "turn.completed"}},
 		"opencode": {{"type": "text", "part": obj{"text": text}}},
 		"pi": {{"type": "message_end", "message": obj{"role": "assistant",
 			"content": []obj{{"type": "text", "text": text}}}}},

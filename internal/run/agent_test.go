@@ -95,7 +95,7 @@ func TestRunDrivesTheAgent(t *testing.T) {
 				t.Fatalf("env: want ATM_FAKE and no CLAUDE_CODE_CHILD_SESSION, got %v", got.Env)
 			}
 			lines := logLines(t, log)
-			if want := map[string]int{"claude": 5, "pi": 5, "cursor": 6}[harness]; len(lines) != cmp.Or(want, 4) {
+			if want := map[string]int{"claude": 5, "codex": 5, "pi": 5, "cursor": 6}[harness]; len(lines) != cmp.Or(want, 4) {
 				t.Fatalf("want every line of the agent in the log, got %q", lines)
 			}
 			if left := clones(t, root); len(left) != 0 {

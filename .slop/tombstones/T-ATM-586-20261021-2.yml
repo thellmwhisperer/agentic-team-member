@@ -14,9 +14,9 @@ incident:
       example: Slop findings screen setup at lines 37-43.
       artifact: internal/run/ponytail_scroll_unix_test.go
     - family: clone_fingerprint
-      example: Report overflow screen setup at lines 274-280.
+      example: Report overflow screen setup at lines 300-306.
       artifact: internal/run/report_rows_unix_test.go
 match:
   family: clone_fingerprint
   scope: go_tests
-  fingerprint: 6591e876e0590f3d74dcff873961e96d7e918f97ffa682e68c765372d8fddcd9
+  fingerprint: d105c1c0e734b13be2ac0a4347e9073bac852a6a7c56ca6860186df2136c4f3f
