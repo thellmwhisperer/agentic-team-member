@@ -23,13 +23,13 @@ func TestRealAttachFooterAnswersTheGate(t *testing.T) {
 		`  gate,warning,internal/tui/gate.go,auto-fix,"The footer lacks the gate's keys."`+"\n")
 	a := liveAttach(t, 200, 40)
 	a.delivered(clone)
-	a.sees(func(s string) bool { return strings.Contains(s, "x abort") && !strings.Contains(s, "a approve") })
-	a.sees(func(s string) bool {
+	a.drawn(func(s string) bool { return strings.Contains(s, "x abort") && !strings.Contains(s, "a approve") })
+	a.drawn(func(s string) bool {
 		return strings.Contains(s, "delivery error internal/run/run.go") &&
 			strings.Contains(s, "gate warning internal/tui/gate.go") && strings.Contains(s, "a approve")
 	})
 	a.key("\x1b[<0;60;2M\x1b[<0;60;2m") // a click on review's header, to see what the fake records in its log
-	a.sees(func(s string) bool { return strings.Contains(s, "▾ ⏸ review") })
+	a.drawn(func(s string) bool { return strings.Contains(s, "▾ ⏸ review") })
 	a.answers(`\{axi\}\{respond\}\{--action\}\{approve\} `, "a")
 	a.awaitingAgain(nm)
 	a.answers(`\{axi\}\{respond\}\{--action\}\{fix\}\{--findings\}\{delivery,gate\} `, "f", "\r", "\r")
@@ -74,7 +74,7 @@ func answerQuestionsAndAbort(t *testing.T, a *attached, nm string) {
 		`  question-q2,warning,,ask,"Keep the old layout?"`+"\n"+
 		`  delivery,error,internal/run/run.go,auto-fix,"Delivery drops the \"gate\", verdict and all."`+"\n"+
 		`  gate,warning,internal/tui/gate.go,auto-fix,"The footer lacks the gate's keys."`+"\n")
-	a.sees(func(s string) bool { return strings.Contains(s, "question-q1") && strings.Contains(s, "enter answer") })
+	a.drawn(func(s string) bool { return strings.Contains(s, "question-q1") && strings.Contains(s, "enter answer") })
 	a.footer("answer › rejected█", "\r", "rejected")
 	a.answers("Answer refused", "\r")
 	a.footer("answer › keep it█", "\r", "keep it")
@@ -83,7 +83,7 @@ func answerQuestionsAndAbort(t *testing.T, a *attached, nm string) {
 	a.footer("enter answer", "n")
 	a.footer("answer › keep layout█", "\r", "keep layout")
 	a.answers(`\{axi\}\{answer\}\{--question\}\{question-q2\}\{--answer\}\{keep layout\} `, "\r")
-	a.sees(func(s string) bool { return !strings.Contains(s, "enter answer") && !strings.Contains(s, "a approve") })
+	a.drawn(func(s string) bool { return !strings.Contains(s, "enter answer") && !strings.Contains(s, "a approve") })
 	a.footer("y abort the gate", "x")
 	a.key("y")
 	a.exits()
@@ -125,7 +125,7 @@ func (a *attached) answers(want string, keys ...string) {
 		a.key(k)
 	}
 	recorded := regexp.MustCompile(want)
-	a.sees(recorded.MatchString)
+	a.drawn(recorded.MatchString)
 }
 
 // footer types each of keys and reads the screen until its footer shows want.
@@ -134,16 +134,16 @@ func (a *attached) footer(want string, keys ...string) {
 	for _, k := range keys {
 		a.key(k)
 	}
-	a.sees(func(s string) bool { return strings.Contains(s, want) })
+	a.drawn(func(s string) bool { return strings.Contains(s, want) })
 }
 
 func (a *attached) awaitingAgain(nm string) {
 	a.t.Helper()
-	a.sees(func(s string) bool { return !strings.Contains(s, "a approve") && !strings.Contains(s, "fix ›") })
+	a.drawn(func(s string) bool { return !strings.Contains(s, "a approve") && !strings.Contains(s, "fix ›") })
 	if err := os.Remove(filepath.Join(nm, "fixing")); err != nil {
 		a.t.Fatal(err)
 	}
-	a.sees(func(s string) bool { return strings.Contains(s, "a approve") })
+	a.drawn(func(s string) bool { return strings.Contains(s, "a approve") })
 }
 
 func TestRealAttachFooterKeepsNavigation(t *testing.T) {
@@ -162,7 +162,7 @@ func TestRealAttachFooterKeepsNavigation(t *testing.T) {
 				a.footer("fix › thq█", "\r", "thq")
 			}
 			a.key("\t\x1b[H")
-			s := a.sees(func(s string) bool { return strings.Contains(s, "– Issue") })
+			s := a.drawn(func(s string) bool { return strings.Contains(s, "– Issue") })
 			if !strings.Contains(s, "review-line-79") {
 				t.Fatalf("Tab and Home must scroll ATM: %s", s)
 			}
@@ -171,7 +171,7 @@ func TestRealAttachFooterKeepsNavigation(t *testing.T) {
 				a.footer("y abort the gate", "x")
 			}
 			a.key("\x1b[A")
-			a.sees(func(s string) bool {
+			a.drawn(func(s string) bool {
 				return !strings.Contains(s, "delivery error") && strings.Contains(s, "review-line-79")
 			})
 			if mode == "abort" {
@@ -208,19 +208,19 @@ func TestRealAttachFooterAnswersStatusQuestions(t *testing.T) {
 	}
 	a := liveAttach(t, 200, 40)
 	a.delivered(t.TempDir())
-	s := a.sees(func(s string) bool {
+	s := a.drawn(func(s string) bool {
 		return strings.Contains(s, "question-q1") && strings.Contains(s, "question-q2") && strings.Contains(s, "enter answer")
 	})
 	if strings.Count(s, "delivery error internal/run/run.go") != 1 || strings.Contains(s, "Status copy") {
 		t.Fatalf("status must preserve log findings without duplicating IDs: %s", s)
 	}
 	a.key("\x1b[<0;60;2M\x1b[<0;60;2m")
-	a.sees(func(s string) bool { return strings.Contains(s, "▾ ⏸ review") })
+	a.drawn(func(s string) bool { return strings.Contains(s, "▾ ⏸ review") })
 	a.footer("answer › keep name█", "\r", "keep name")
 	a.answers(`\{axi\}\{answer\}\{--question\}\{question-q1\}\{--answer\}\{keep name\} `, "\r")
 	a.footer("answer › keep layout█", "\r", "keep layout")
 	a.answers(`\{axi\}\{answer\}\{--question\}\{question-q2\}\{--answer\}\{keep layout\} `, "\r")
-	a.sees(func(s string) bool { return !strings.Contains(s, "enter answer") && !strings.Contains(s, "a approve") })
+	a.drawn(func(s string) bool { return !strings.Contains(s, "enter answer") && !strings.Contains(s, "a approve") })
 	a.key("q")
 	a.exits()
 }

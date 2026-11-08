@@ -2,7 +2,10 @@ package tui
 
 import (
 	"cmp"
+	"encoding/json"
+	"fmt"
 	"os/exec"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -23,7 +26,7 @@ type gate struct {
 type gateStep struct {
 	name, state string
 	took        time.Duration
-	log         []string
+	log         []*activity
 	findings    []map[string]string
 }
 
@@ -44,9 +47,7 @@ func askGate(clone string) tea.Msg {
 		step.took, _ = time.ParseDuration(s["duration_ms"] + "ms")
 		if step.state != "pending" && step.state != "skipped" {
 			_, tables, _ := axi(clone, "logs", "--step", step.name, "--full")
-			for _, l := range tables["log"] {
-				step.log = append(step.log, l["line"])
-			}
+			step.log = gateActivities(tables["log"])
 			step.findings = tables["findings"]
 		}
 		if step.name == run["gate.step"] {
@@ -132,8 +133,15 @@ func unquote(v string) string {
 
 // gate puts the gate's steps in the ATM box, below ATM's, and keeps what they emit for the right column.
 func (m *Model) gate(g gate) {
-	m.gateSteps = g.steps
 	for _, s := range g.steps {
+		for _, old := range m.gateSteps {
+			if old.name == s.name {
+				for i := range min(len(old.log), len(s.log)) {
+					*old.log[i] = *s.log[i]
+					s.log[i] = old.log[i] // Keep report folds across polls.
+				}
+			}
+		}
 		r := m.current("gate:" + s.name)
 		if r == nil {
 			r = &row{step: "gate:" + s.name, label: s.name}
@@ -141,6 +149,72 @@ func (m *Model) gate(g gate) {
 		}
 		r.state, r.took, r.hasDuration = s.state, s.took, s.took > 0
 	}
+	m.gateSteps = g.steps
+}
+
+var gateProcessLine = regexp.MustCompile(`^\S+ (started|exited) pid=\d+( status=\S+)?$`)
+
+// gateActivities reads agent prose and final objects without changing the gate's log on disk.
+func gateActivities(log []map[string]string) (out []*activity) {
+	var lines []string
+	for _, l := range log {
+		if !gateProcessLine.MatchString(strings.TrimSpace(l["line"])) {
+			lines = append(lines, l["line"])
+		}
+	}
+	prose := ""
+	flush := func() {
+		if prose != "" {
+			out = append(out, &activity{says: strings.TrimSuffix(prose, "\n")})
+			prose = ""
+		}
+	}
+	for i := 0; i < len(lines); i++ {
+		if strings.HasPrefix(strings.TrimSpace(lines[i]), "{") {
+			text := strings.Join(lines[i:], "\n")
+			decoder := json.NewDecoder(strings.NewReader(text))
+			var r gateReport
+			if decoder.Decode(&r) == nil && (r.Summary != "" || r.Findings != nil || r.RiskLevel != "" ||
+				r.ReviewedPaths != nil || r.TestingSummary != "") {
+				flush()
+				out = append(out, &activity{report: r.readable()})
+				i += strings.Count(text[:decoder.InputOffset()], "\n")
+				continue
+			}
+		}
+		prose += lines[i] + "\n"
+	}
+	flush()
+	return out
+}
+
+type gateReport struct {
+	Summary  string
+	Findings []struct {
+		Severity, File, Description string
+		Line                        int
+	}
+	RiskLevel      string   `json:"risk_level"`
+	RiskRationale  string   `json:"risk_rationale"`
+	ReviewedPaths  []string `json:"reviewed_paths"`
+	TestingSummary string   `json:"testing_summary"`
+}
+
+func (r gateReport) readable() *report {
+	parts := []string{r.Summary}
+	for _, f := range r.Findings {
+		file := f.File
+		if f.Line > 0 {
+			file += fmt.Sprintf(":%d", f.Line)
+		}
+		parts = append(parts, f.Severity+" "+file+" "+f.Description)
+	}
+	if r.RiskLevel != "" {
+		parts = append(parts, "Riesgo: "+r.RiskLevel)
+	}
+	parts = append(parts, r.RiskRationale, r.TestingSummary)
+	parts = slices.DeleteFunc(parts, func(s string) bool { return s == "" })
+	return &report{Summary: strings.Join(parts, "\n\n"), ChangedFiles: r.ReviewedPaths}
 }
 
 // ask asks the gate again after wait while g shows it goes on, and else ends the screen.
@@ -305,7 +379,7 @@ func (m *Model) respond(args ...string) tea.Cmd {
 }
 
 // gateBox is what the gate's started steps emit, in lines rows: a header row for each, a click folding it as
-// thinking folds, then its log rendered as the Agent box renders Markdown, its first line only while folded,
+// thinking folds, then its prose and reports as the Agent box renders them, its first line only while folded,
 // then its findings, one line each.
 func (m *Model) gateBox(width, lines int) string {
 	var out []paneLine
@@ -316,14 +390,7 @@ func (m *Model) gateBox(width, lines int) string {
 		key := "gate:" + s.name
 		open := m.unfolded(key)
 		out = append(out, paneLine{key: key, toggle: key, text: fold(open) + " " + m.icon(s.state) + " " + s.name})
-		log := s.log
-		if !open && len(log) > 0 {
-			log = log[:1]
-		}
-		texts, _, _ := agentTextRows("  ", strings.Join(log, "\n"), width, codeFence{})
-		for _, text := range texts {
-			out = append(out, paneLine{key: key, text: text})
-		}
+		out = m.gateLogLines(out, s, width, open)
 		for _, f := range s.findings {
 			out = append(out, paneLine{key: key, text: "  " + f["id"] + " " + paint(yellow, f["severity"]) + " " +
 				f["file"] + " " + paint(dim, oneLine(f["description"]))})
@@ -333,4 +400,44 @@ func (m *Model) gateBox(width, lines int) string {
 	result := box(bold(cyan, "Gate"), strings.Join(shown, "\n"), width, m.border(&m.history))
 	m.historyHeight = lipgloss.Height(result)
 	return result
+}
+
+func (m *Model) gateLogLines(out []paneLine, s gateStep, width int, open bool) []paneLine {
+	log := s.log
+	if !open && len(log) > 0 {
+		log = log[:1]
+	}
+	for _, a := range log {
+		if a.report != nil {
+			out = m.gateReportLines(out, a, width)
+			continue
+		}
+		text, prefix := a.says, "  "
+		if !open {
+			text, _, _ = strings.Cut(text, "\n")
+		}
+		if s.name == "review" || s.name == "fix" {
+			prefix = "✎ "
+		}
+		texts, _, _ := agentTextRows(prefix, text, width, codeFence{})
+		for _, text := range texts {
+			out = append(out, paneLine{key: "gate:" + s.name, text: text})
+		}
+	}
+	return out
+}
+
+// Reuse Informe and its summary and file folds; the gate reports reviewed files, not worker commands or tests.
+func (m *Model) gateReportLines(out []paneLine, a *activity, width int) []paneLine {
+	key := fmt.Sprintf("report:%p", a)
+	for _, line := range m.reportLines(nil, a, width) {
+		if line.key == key || line.key == key+":summary" ||
+			(len(a.report.ChangedFiles) > 0 && (line.key == key+":0" || line.parent == key+":0")) {
+			if line.key == key+":0" {
+				line.text = strings.Replace(line.text, "Ficheros cambiados", "Ficheros revisados", 1)
+			}
+			out = append(out, line)
+		}
+	}
+	return out
 }
