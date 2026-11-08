@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -249,10 +250,13 @@ type attached struct {
 	rows   int
 }
 
-func liveAttach(t *testing.T, cols, rows uint16) *attached {
+func liveAttach(t *testing.T, cols, rows uint16, delivery ...string) *attached {
 	t.Helper()
 	bin := builtATM(t)
 	top := atmRepo(t)
+	if len(delivery) > 0 {
+		writeFixture(t, filepath.Join(top, ".atm.yaml"), atmSet(atmYAML, "delivery", delivery[0]))
+	}
 	listener, err := net.Listen("unix", short(socket(top)))
 	if err != nil {
 		t.Fatal(err)
