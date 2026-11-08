@@ -125,9 +125,7 @@ func TestRealScreenShowsFullSlopRestoration(t *testing.T) {
 			files: []string{"a.txt", "b.txt"}, checks: "run 2 failed"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			delivered := filepath.Join(t.TempDir(), "delivered")
-			t.Setenv("ATM_TEST_OUT", delivered)
-			t.Setenv("FAKE_AGENT_WORK", "printf 'fixed\\nextra\\nmore\\n' > a.txt"+fixTest+c.seed)
+			delivered := deliverTo(t, c.seed)
 			t.Setenv("FAKE_PONYTAIL_WORK", c.work)
 			t.Setenv("FAKE_PONYTAIL_REPORT", dependentCuts(c.files...))
 			cfg := atmSet(atmSet(atmYAML, "lint", c.lint), "delivery",
@@ -195,10 +193,7 @@ func TestRealScreenShowsCompleteSlopReferences(t *testing.T) {
 			lint: "grep -q extra " + path + " || { echo failed; exit 1; }", verdict: "discarded: checks failed"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			delivered := filepath.Join(t.TempDir(), "delivered")
-			t.Setenv("ATM_TEST_OUT", delivered)
-			t.Setenv("FAKE_AGENT_WORK", "printf 'fixed\\nextra\\nmore\\n' > a.txt"+fixTest+
-				"; mkdir -p internal/run; printf 'keep\\nextra\\n' > "+path)
+			delivered := deliverTo(t, "; mkdir -p internal/run; printf 'keep\\nextra\\n' > "+path)
 			work, files := c.work, []string{path}
 			if c.pair {
 				work += "; echo fixed > a.txt"
@@ -230,6 +225,15 @@ func TestRealScreenShowsCompleteSlopReferences(t *testing.T) {
 			}
 		})
 	}
+}
+
+// deliverTo points real ATM's delivery at a file it returns and has the fake agent fix a.txt, then run work.
+func deliverTo(t *testing.T, work string) string {
+	t.Helper()
+	delivered := filepath.Join(t.TempDir(), "delivered")
+	t.Setenv("ATM_TEST_OUT", delivered)
+	t.Setenv("FAKE_AGENT_WORK", "printf 'fixed\\nextra\\nmore\\n' > a.txt"+fixTest+work)
+	return delivered
 }
 
 // finalBoxes is the last view real ATM's run in top painted once its terminal closed, with the cells of its left
