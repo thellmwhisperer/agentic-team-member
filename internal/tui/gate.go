@@ -392,8 +392,9 @@ func (m *Model) gateBox(width, lines int) string {
 		out = append(out, paneLine{key: key, toggle: key, text: fold(open) + " " + m.icon(s.state) + " " + s.name})
 		out = m.gateLogLines(out, s, width, open)
 		for _, f := range s.findings {
-			out = append(out, paneLine{key: key, text: "  " + f["id"] + " " + paint(yellow, f["severity"]) + " " +
-				f["file"] + " " + paint(dim, oneLine(f["description"]))})
+			out = append(out, paneLine{key: key + ":finding:" + f["id"], parent: key,
+				text: "  " + f["id"] + " " + paint(yellow, f["severity"]) + " " +
+					f["file"] + " " + paint(dim, oneLine(f["description"]))})
 		}
 	}
 	shown := m.history.show(out, lines)
@@ -425,7 +426,7 @@ func (m *Model) gateLogLines(out []paneLine, s gateStep, width int, open bool) [
 		}
 		texts, _, _ := agentTextRows(prefix, text, width, codeFence{})
 		for _, text := range texts {
-			out = append(out, paneLine{key: "gate:" + s.name, text: text})
+			out = append(out, paneLine{key: fmt.Sprintf("activity:%p", a), parent: "gate:" + s.name, text: text})
 		}
 	}
 	return out

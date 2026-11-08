@@ -346,6 +346,65 @@ func TestRealAttachScrollsTheFullGateLog(t *testing.T) {
 	a.exits()
 }
 
+func TestRealAttachKeepsGateLogPosition(t *testing.T) {
+	for _, step := range []string{"review", "fix"} {
+		t.Run(step, func(t *testing.T) {
+			nm := gateFake(t)
+			t.Setenv("FAKE_NM_STEP", step)
+			fixture := "findings[12]{id,severity,file,action,description}:\n"
+			for i := range 12 {
+				fixture += fmt.Sprintf("  finding-%02d,warning,gate.go,auto-fix,Finding %02d\n", i, i)
+			}
+			log := []string{"Before report", `{"summary":"First report."}`, "After first report",
+				"Continuation after first report", `{"summary":"Second report."}`, "After second report",
+				"Continuation after second report"}
+			fixture += fmt.Sprintf("lines: %d total\nlog[%d]{line}:\n", len(log), len(log))
+			for _, line := range log {
+				fixture += fmt.Sprintf("  %q\n", line)
+			}
+			if err := os.WriteFile(filepath.Join(nm, "review.toon"), []byte(fixture), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			a := liveAttach(t, 120, 12)
+			a.delivered(t.TempDir())
+			a.drawn(func(s string) bool { return strings.Contains(s, "waiting") })
+			top := func(s string) string { return logColumn(strings.Split(s, "\n")[1]) }
+			a.key("\x1b[H")
+			a.drawn(func(s string) bool { return strings.Contains(top(s), "▸ ⏸ "+step) })
+			a.click(1)
+			a.drawn(func(s string) bool { return strings.Contains(top(s), "▾ ⏸ "+step) })
+			for i, target := range []struct {
+				row  int
+				text string
+			}{{1, "✎ Before report"}, {4, "✎ After first report"}, {5, "Continuation after first report"},
+				{8, "✎ After second report"}, {10, "finding-00"}, {11, "finding-01"}} {
+				a.key("\x1b[H" + strings.Repeat("\x1b[B", target.row))
+				a.drawn(func(s string) bool { return strings.Contains(top(s), target.text) })
+				state := "running"
+				if i%2 == 0 {
+					if err := os.WriteFile(filepath.Join(nm, "fixing"), nil, 0o600); err != nil {
+						t.Fatal(err)
+					}
+				} else {
+					state = "waiting"
+					if err := os.Remove(filepath.Join(nm, "fixing")); err != nil {
+						t.Fatal(err)
+					}
+				}
+				updated := regexp.MustCompile(step + `  1\.2 s +` + state)
+				s := a.drawn(updated.MatchString)
+				if !strings.Contains(top(s), target.text) {
+					t.Fatalf("gate update moved the reading position from %q:\n%s", target.text, s)
+				}
+			}
+			if err := os.WriteFile(filepath.Join(nm, "done"), nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			a.exits()
+		})
+	}
+}
+
 func longGateLog(t *testing.T, nm string) []string {
 	t.Helper()
 	fixture, err := os.ReadFile(filepath.Join(nm, "review.toon"))
