@@ -22,6 +22,7 @@ import (
 const gateNM = `#!/bin/sh
 echo "$PWD $*" >>"$FAKE_NM/log"
 agent_step=${FAKE_NM_STEP:-review}
+[ ! -p "$FAKE_NM/wait-$2" ] || read -r _ <"$FAKE_NM/wait-$2"
 case "$*" in
 "axi status")
 	if [ -f "$FAKE_NM/none" ]; then printf 'current_branch: atm/the-unit\nruns_on_current_branch: 0\n'; exit 0; fi
