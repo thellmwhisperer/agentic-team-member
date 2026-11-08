@@ -3,6 +3,7 @@
 package run
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -198,6 +199,60 @@ codex exited pid=2 status=success`,
 			for _, absent := range tc.absent {
 				if strings.Contains(s, absent) {
 					t.Fatalf("the gate unexpectedly paints %q:\n%s", absent, s)
+				}
+			}
+			if err := os.WriteFile(filepath.Join(nm, "done"), nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			a.exits()
+		})
+	}
+}
+
+func TestRealAttachKeepsGateFindingPaths(t *testing.T) {
+	paths := []struct {
+		file string
+		line int
+		want string
+	}{
+		{"pkg/__init__.py", 17, "warning pkg/__init__.py:17 Keep path literal."},
+		{"pkg/[a]*(b)`~\\c!.go", 0, "warning pkg/[a]*(b)`~\\c!.go Keep path literal."},
+		{"pkg/a|b &copy; <c>.go", 5, "warning pkg/a|b &copy; <c>.go:5 Keep path literal."},
+	}
+	for _, step := range []string{"review", "fix"} {
+		t.Run(step, func(t *testing.T) {
+			nm := gateFake(t)
+			t.Setenv("FAKE_NM_STEP", step)
+			var findings []map[string]any
+			var reviewed []string
+			for _, p := range paths {
+				findings = append(findings, map[string]any{"severity": "warning", "file": p.file,
+					"line": p.line, "description": "Keep **path** literal."})
+				reviewed = append(reviewed, p.file)
+			}
+			log, err := json.Marshal(map[string]any{"findings": findings, "reviewed_paths": reviewed})
+			if err != nil {
+				t.Fatal(err)
+			}
+			fixture := fmt.Sprintf("lines: 1 total\nlog[1]{line}:\n  %q\n", string(log))
+			if err := os.WriteFile(filepath.Join(nm, "review.toon"), []byte(fixture), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			a := liveAttach(t, 120, 40)
+			a.delivered(t.TempDir())
+			a.drawn(func(s string) bool { return strings.Contains(s, "▸ ⏸ "+step) })
+			a.click(1)
+			s := a.drawn(func(s string) bool { return strings.Contains(s, "▾ ⏸ "+step) })
+			for _, p := range paths {
+				if !strings.Contains(s, p.want) {
+					t.Fatalf("gate finding changed the literal path in %q:\n%s", p.want, s)
+				}
+			}
+			a.click(rowOf(s, "▸ Ficheros revisados"))
+			s = a.drawn(func(s string) bool { return strings.Contains(s, "▾ Ficheros revisados (3)") })
+			for _, p := range paths {
+				if !strings.Contains(s, "      "+p.file) {
+					t.Fatalf("reviewed files changed the literal path %q:\n%s", p.file, s)
 				}
 			}
 			if err := os.WriteFile(filepath.Join(nm, "done"), nil, 0o600); err != nil {
