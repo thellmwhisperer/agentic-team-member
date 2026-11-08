@@ -475,7 +475,13 @@ every second. The gate's steps get rows below Delivery in the ATM box, each
 with its `duration_ms` as a duration once it is above 0, and
 the Gate box in the right column has a header row per started step, its log
 rendered as the Agent box renders Markdown, folded to its first line like
-thinking, and one line per finding: ID, severity, file and description. Findings
+thinking, and one line per finding: ID, severity, file and description. Agent
+start and exit lines (`… started pid=…`, `… exited pid=… status=…`) are not
+shown. Review and fix prose shows as `✎` lines, and a reviewer or fixer JSON
+object is never shown raw: it becomes an `Informe` row whose summary lists
+each finding's severity, file, line and description, `Riesgo:` with the risk
+level, its rationale and the testing summary, with the reviewed paths in a
+folded `Ficheros revisados (n)` row. Findings
 from status also show for the current gate step when its log has not shown them;
 an ID already in the log is shown only once.
 The public findings table does not expose a source line number; the screen
