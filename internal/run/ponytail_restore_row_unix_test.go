@@ -11,30 +11,6 @@ import (
 	"testing"
 )
 
-type restoreEvent struct {
-	Step, Check, State string
-	Files              []string
-}
-
-func (ev restoreEvent) count(paths map[string]int) {
-	if len(ev.Files) == 0 {
-		ev.Files = []string{strings.TrimPrefix(ev.Check, "put back ")}
-	}
-	for _, path := range ev.Files {
-		paths[path]++
-	}
-}
-
-func restoredRow(scenario, path string) string {
-	if scenario == "no individual restoration holds" {
-		return "2 files"
-	}
-	if path == "a.txt" {
-		return "1 files"
-	}
-	return path
-}
-
 // A rejected cut restores build files in one pipeline row, with every path kept in the run.
 func TestRealPonytailRestorationIsOneRow(t *testing.T) {
 	builtATM(t)
@@ -111,24 +87,30 @@ func assertRestorePaths(t *testing.T, top, label string, want []string) {
 	if !slices.Equal(paths, want) {
 		t.Fatalf("report lost restored paths: got %v, want %v", paths, want)
 	}
-	assertRestoreEvents(t, top, label, want)
+	assertRestoreEvents(t, top, label, len(want))
 }
 
-func assertRestoreEvents(t *testing.T, top, label string, want []string) {
+func assertRestoreEvents(t *testing.T, top, label string, count int) {
 	t.Helper()
 	rows := 0
 	_, err := Follow(top, label, nil, nil, func(f Frame) {
-		var ev restoreEvent
-		if len(f.Event) == 0 || json.Unmarshal(f.Event, &ev) != nil || !strings.HasPrefix(ev.Check, "put back ") {
+		var ev map[string]any
+		if len(f.Event) == 0 || json.Unmarshal(f.Event, &ev) != nil {
+			return
+		}
+		check, _ := ev["check"].(string)
+		if !strings.HasPrefix(check, "put back ") {
 			return
 		}
 		rows++
-		if ev.Step != "ponytail" || ev.State != "passed" || ev.Check != fmt.Sprintf("put back %d files", len(want)) ||
-			!slices.Equal(ev.Files, want) {
-			t.Errorf("restoration event lost its state, count or paths: %+v", ev)
+		if ev["step"] != "ponytail" || ev["state"] != "passed" || check != fmt.Sprintf("put back %d files", count) {
+			t.Errorf("restoration event lost its step, state or count: %+v", ev)
+		}
+		if _, ok := ev["files"]; ok {
+			t.Errorf("restored paths belong in report.json: %+v", ev)
 		}
 	})
-	if err != nil || len(want) == 0 && rows != 0 || len(want) > 0 && rows != 1 {
+	if err != nil || count == 0 && rows != 0 || count > 0 && rows != 1 {
 		t.Fatalf("want one event only when files were restored, got %d, %v", rows, err)
 	}
 }

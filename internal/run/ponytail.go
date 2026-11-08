@@ -84,9 +84,12 @@ func (a agent) ponytail(root, clone, sha string, proofs []proof, i Issue, c conf
 	if why != "" {
 		ev["reason"] = why
 		ev["rejected_files"], err = restoreCut(clone, all, why, ev["rejected_files"].([]rejectedFile))
-		return ev, err
+	} else {
+		ev["commits"], ev["tombstones"], err = commit(root, clone, before, i, found)
 	}
-	ev["commits"], ev["tombstones"], err = commit(root, clone, before, i, found)
+	if count := len(ev["rejected_files"].([]rejectedFile)); err == nil && count > 0 {
+		liveIn(clone)(map[string]any{"check": fmt.Sprintf("put back %d files", count), "state": "passed"})
+	}
 	return ev, err
 }
 
@@ -177,11 +180,6 @@ func restoreCut(clone, tree, why string, rejectedFiles []rejectedFile) ([]reject
 	}
 	slices.SortFunc(rejectedFiles, func(a, b rejectedFile) int { return strings.Compare(a.Path, b.Path) })
 	err = restore(clone, tree)
-	if err == nil && changed != "" {
-		files := strings.Split(strings.TrimSuffix(changed, "\x00"), "\x00")
-		liveIn(clone)(map[string]any{"check": fmt.Sprintf("put back %d files", len(files)),
-			"state": "passed", "files": files})
-	}
 	return rejectedFiles, err
 }
 
@@ -249,11 +247,6 @@ func undo(runDir, clone, base, all string, proofs []proof, c config.Config) (why
 		}
 		left = slices.DeleteFunc(left, func(p string) bool { return undone[p] != "" })
 		err = checkout(clone, all, named)
-		if err == nil {
-			for _, p := range named {
-				live(map[string]any{"check": "put back " + p, "state": "passed"})
-			}
-		}
 		if err != nil || len(left) == 0 {
 			return why, ran, cmds, undone, err
 		}
@@ -266,7 +259,6 @@ func undo(runDir, clone, base, all string, proofs []proof, c config.Config) (why
 		return why, ran, cmds, undone, err
 	}
 	undone[p] = why
-	live(map[string]any{"check": "put back " + p, "state": "passed"})
 	return "", r, cm, undone, nil
 }
 
