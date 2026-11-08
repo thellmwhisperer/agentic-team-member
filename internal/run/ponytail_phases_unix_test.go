@@ -4,6 +4,7 @@ package run
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -32,13 +33,20 @@ func TestRealScreenShowsSlopDetectorPhases(t *testing.T) {
 	// The required phase values stay readable in the real 100-column terminal.
 	for _, want := range []string{"✓ agent reading", "✓ 2 findings", "✓ judged", "1 kept", "✓ checks", "run 1",
 		"✓ commit", "1 kept · 1 rejected: adds code", "run 1 ok", "ponytail: 1 cuts", "kept · a.txt", "cut a.txt",
-		"rejected: adds code · old.txt", "cut old.txt"} {
+		"rejected: adds code · old.txt", "cut old.txt", "✓ put back 1 files"} {
 		untilShown(t, f, shown, want)
 	}
 	if !regexp.MustCompile(`agent reading the diff +[0-9.]+ s`).MatchString(ansi.Strip(shown.String())) {
 		t.Fatalf("the agent reading phase did not show its elapsed time:\n%s", ansi.Strip(shown.String()))
 	}
 	f.exit(0)
+	label := lastRun(t, top, "passed")
+	assertRestoreEvents(t, top, label, 1)
+	n := reportNode(t, readReport(t, filepath.Join(runDir(top, label), "report.json")), "ponytail")
+	files := n["rejected_files"].([]any)
+	if n["kept"] != true || len(files) != 1 || files[0].(map[string]any)["path"] != "old.txt" {
+		t.Fatalf("partial restoration lost its path in report.json: %v", n)
+	}
 }
 
 // realScreen is real ATM's run of issue in top on a 100-column terminal, and what the terminal showed so far.
@@ -86,8 +94,6 @@ func TestRealScreenPreservesSpecificSlopRejection(t *testing.T) {
 	}
 }
 
-// Restoration rows identify individual backtracking and summarize full restoration after checks.
-//
 //nolint:gocyclo,funlen // The full restoration scenarios and their assertions must stay together.
 func TestRealScreenShowsFullSlopRestoration(t *testing.T) {
 	builtATM(t)
@@ -101,6 +107,14 @@ func TestRealScreenShowsFullSlopRestoration(t *testing.T) {
 		{name: "single named failure", seed: "; printf 'keep\\nextra\\n' > b.txt",
 			work: "echo keep > b.txt", lint: "grep -q extra b.txt || { echo b.txt; exit 1; }",
 			files: []string{"b.txt"}, checks: "run 1 failed: b.txt"},
+		{name: "multiple named failure", seed: "; printf 'keep\\nextra\\n' > b.txt",
+			work:  "echo fixed > a.txt; echo keep > b.txt",
+			lint:  "{ grep -q extra a.txt && grep -q extra b.txt; } || { echo a.txt b.txt; exit 1; }",
+			files: []string{"a.txt", "b.txt"}, checks: "run 1 failed: a.txt, b.txt"},
+		{name: "successive named failures", seed: "; printf 'keep\\nextra\\n' > b.txt",
+			work:  "echo fixed > a.txt; echo keep > b.txt",
+			lint:  "grep -q extra b.txt || { echo b.txt; exit 1; }; grep -q extra a.txt || { echo a.txt; exit 1; }",
+			files: []string{"a.txt", "b.txt"}, checks: "run 2 failed: a.txt"},
 		{name: "no individual restoration holds", seed: "; printf 'keep\\nextra\\n' > b.txt",
 			work:  "echo fixed > a.txt; echo keep > b.txt",
 			lint:  "{ grep -q extra a.txt && grep -q extra b.txt; } || { echo failed; exit 1; }",
@@ -124,8 +138,8 @@ func TestRealScreenShowsFullSlopRestoration(t *testing.T) {
 			if c.name == "single named failure" {
 				untilShown(t, f, shown, "run 1 failed: b.txt")
 			}
+			untilShown(t, f, shown, fmt.Sprintf("✓ put back %d files", len(c.files)))
 			for _, path := range c.files {
-				untilShown(t, f, shown, "✓ put back "+restoredRow(c.name, path))
 				untilShown(t, f, shown, "discarded: checks failed · "+path)
 			}
 			f.exit(0)
@@ -141,16 +155,18 @@ func TestRealScreenShowsFullSlopRestoration(t *testing.T) {
 			if err != nil || len(runs) != 1 {
 				t.Fatalf("want one run, got %+v, %v", runs, err)
 			}
+			assertRestoreEvents(t, top, runs[0].Run, len(c.files))
+			n := reportNode(t, readReport(t, filepath.Join(runDir(top, runs[0].Run), "report.json")), "ponytail")
 			putBack := map[string]int{}
-			_, err = Follow(top, runs[0].Run, nil, nil, func(f Frame) {
-				var ev restoreEvent
-				if len(f.Event) != 0 && json.Unmarshal(f.Event, &ev) == nil && ev.Step == "ponytail" &&
-					ev.State == "passed" && strings.HasPrefix(ev.Check, "put back ") {
-					ev.count(putBack)
+			for _, entry := range n["rejected_files"].([]any) {
+				file := entry.(map[string]any)
+				putBack[file["path"].(string)]++
+				if reason, _ := file["reason"].(string); reason == "" {
+					t.Fatalf("restoration lost its rejection reason: %v", file)
 				}
-			})
-			if err != nil || len(putBack) != len(c.files) {
-				t.Fatalf("restoration events: %v, %v", putBack, err)
+			}
+			if n["kept"] != false || len(putBack) != len(c.files) {
+				t.Fatalf("restoration report: %v", n)
 			}
 			for _, path := range c.files {
 				if putBack[path] != 1 {
@@ -224,12 +240,16 @@ func TestRealScreenShowsCompleteSlopReferences(t *testing.T) {
 			if got := strings.Join(strings.Fields(strings.Join(right, "\n")), " "); !strings.Contains(got, want) {
 				t.Fatalf("issue 586 requires the complete verdict, then file and finding, want %q:\n%s", want, screen[start:])
 			}
-			wantRow := `✓ put back\s*\n\s*internal/run/ponytail\.go`
-			if !c.pair {
-				wantRow = `✓ put back 1 files`
+			panel := strings.Join(left, "\n")
+			if !strings.Contains(panel, "✓ put back 1 files") || strings.Count(panel, "put back ") != 1 {
+				t.Fatalf("want one restoration row without a single path:\n%s", screen[start:])
 			}
-			if !regexp.MustCompile(wantRow).MatchString(strings.Join(left, "\n")) {
-				t.Fatalf("missing restoration row %q:\n%s", wantRow, screen[start:])
+			label := lastRun(t, top, "passed")
+			assertRestoreEvents(t, top, label, 1)
+			n := reportNode(t, readReport(t, filepath.Join(runDir(top, label), "report.json")), "ponytail")
+			rejected := n["rejected_files"].([]any)
+			if n["kept"] != c.pair || len(rejected) != 1 || rejected[0].(map[string]any)["path"] != path {
+				t.Fatalf("restoration lost its path in report.json: %v", n)
 			}
 			got, err := os.ReadFile(delivered)
 			if err != nil || string(got) != "keep\nextra\n" {
