@@ -137,9 +137,13 @@ delivery: ''
 ```
 
 Set `delivery` to the shell command that handles the branch, or leave it empty
-to skip delivery. This repository's [configured command](../.atm.yaml) hands
-the branch to [no-mistakes](https://github.com/kunchenguid/no-mistakes); see
-[the gate](self-maintenance.md#the-loop) for its completion and recovery rules.
+to skip delivery. `atm init` sets it to `sh scripts/deliver.sh` and writes
+[that script](../scripts/deliver.sh), which this repository uses too: it runs
+`no-mistakes init` in the clone, then
+`exec no-mistakes axi run --intent "$ATM_INTENT"` to launch the
+[no-mistakes](https://github.com/kunchenguid/no-mistakes) gate. Delivery passes
+when that command returns at the gate's first stop; the screen then paints the
+gate.
 
 A project's delivery only launches the no-mistakes run with `no-mistakes axi run`;
 ATM reads and paints the gate in its own screen. A delivery that runs
@@ -173,7 +177,7 @@ Run repository commands from inside the repository they work on.
 
 | Command | Does |
 |---------|------|
-| `atm init` | Writes a commented `.atm.yaml` with every required key empty and no `e2e` key, unless `.atm.yaml` is already there, and adds `/.atm/` to `.gitignore` unless it is there. Run twice, it changes nothing |
+| `atm init` | Writes a commented `.atm.yaml` with every required key empty except `delivery: sh scripts/deliver.sh`, and no `e2e` key, unless `.atm.yaml` is already there; writes `scripts/deliver.sh` unless it is already there; and adds `/.atm/` to `.gitignore` unless it is there. Run twice, it changes nothing |
 | `atm doctor [--agent]` | Checks git, the configured agent CLI on `PATH`, `gh` when `origin` is on GitHub, `.atm.yaml`. One `ok` or `fail` line per prerequisite; every check runs, and any prerequisite failure exits non-zero. It also reports the advisory [skill status](#skill). Its last line says `run atm doctor --agent to say hello to <harness>`: it makes no model call. With `--agent` it says hello instead, see [saying hello to the agent](#saying-hello-to-the-agent) |
 | `atm skill`, `atm skill install [--dir <path>] [--force]` | See [Skill](#skill) |
 | `atm run [flags] <issue>` | Starts a run. On a terminal it shows [the screen](how-a-run-flows.md#the-screen), then exits with the run's code; off one it prints the run's label and returns. See [resuming a failed run](#resuming-a-failed-run) |
@@ -341,7 +345,7 @@ ignores.
 
 | Path | Holds | Kept |
 |------|-------|------|
-| `.atm/runs/<label>/` | `report.json`, the briefs, the agent logs, the worker's scratch directory, `delivery-output.txt`, this repository's gate files (`delivery.nonce`, `delivery.out` and `delivery.run` when bound), and `resume/` when the run is resumable | Always |
+| `.atm/runs/<label>/` | `report.json`, the briefs, the agent logs, the worker's scratch directory, `delivery-output.txt`, and `resume/` when the run is resumable | Always |
 | `.atm/clones/atm-run-<timestamp>/` | The run's isolated clone | Removed after the run when no longer needed and cleanup can verify its identity |
 | `.atm/runs.jsonl` | The last state of each retained run, so `atm runs` survives the background process | Every run going and the newest 200 that ended |
 | `.atm/atm.sock`, `.atm/atm.lock`, `.atm/serve.log` | The background process | While it runs; the log stays |

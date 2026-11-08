@@ -111,7 +111,7 @@ agent, model and effort. Both are in [Configuration](docs/configuration.md).
 
 | Command | Does |
 |---------|------|
-| `atm init` | Writes a commented `.atm.yaml` and ignores `.atm/` |
+| `atm init` | Writes a commented `.atm.yaml` and `scripts/deliver.sh`, and ignores `.atm/` |
 | `atm doctor` | Checks local prerequisites; see [preflight](docs/how-a-run-flows.md#before-the-run) for launch checks |
 | `atm skill`, `atm skill install` | See [ATM's driving skill](docs/configuration.md#skill) |
 | `atm run [flags] <issue>` | Runs an issue: a GitHub number or a file with a title and body |
