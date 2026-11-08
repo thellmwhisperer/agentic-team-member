@@ -409,7 +409,11 @@ func (m *Model) gateLogLines(out []paneLine, s gateStep, width int, open bool) [
 	}
 	for _, a := range log {
 		if a.report != nil {
-			out = m.gateReportLines(out, a, width)
+			lines := m.gateReportLines(nil, a, width)
+			if !open {
+				lines = lines[:1]
+			}
+			out = append(out, lines...)
 			continue
 		}
 		text, prefix := a.says, "  "

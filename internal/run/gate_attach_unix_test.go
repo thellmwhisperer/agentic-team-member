@@ -208,6 +208,68 @@ codex exited pid=2 status=success`,
 	}
 }
 
+func TestRealAttachFoldsGateReports(t *testing.T) {
+	for _, step := range []string{"review", "fix"} {
+		t.Run(step, func(t *testing.T) {
+			nm := gateFake(t)
+			t.Setenv("FAKE_NM_STEP", step)
+			log := `{"summary":"Report completed.","findings":[{"severity":"warning","file":"gate.go","line":17,"description":"Keep the gate visible."}],"risk_level":"low","reviewed_paths":["reviewed.go"]}`
+			fixture := fmt.Sprintf("step: %s\nlines: 3 total\nlog[3]{line}:\n  codex started pid=1\n  %q\n  codex exited pid=1 status=success\n", step, log)
+			if err := os.WriteFile(filepath.Join(nm, "review.toon"), []byte(fixture), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			a := liveAttach(t, 120, 40)
+			a.delivered(t.TempDir())
+			assertHidden := func(s string) {
+				t.Helper()
+				for _, absent := range []string{"Report completed.", "warning gate.go:17", "Keep the gate visible.",
+					"Riesgo: low", "Ficheros revisados", "reviewed.go", "pid=", "{"} {
+					if strings.Contains(s, absent) {
+						t.Fatalf("folded gate report paints %q:\n%s", absent, s)
+					}
+				}
+			}
+			s := a.drawn(func(s string) bool { return strings.Contains(s, "▸ ⏸ "+step) })
+			if strings.Count(s, "Informe") != 1 {
+				t.Fatalf("folded step must preview one report row:\n%s", s)
+			}
+			assertHidden(s)
+			a.click(1)
+			s = a.drawn(func(s string) bool { return strings.Contains(s, "▾ ⏸ "+step) })
+			for _, want := range []string{"▾ Informe", "Report completed.", "warning gate.go:17 Keep the gate visible.",
+				"Riesgo: low", "▸ Ficheros revisados (1)"} {
+				if !strings.Contains(s, want) {
+					t.Fatalf("open gate report lacks %q:\n%s", want, s)
+				}
+			}
+			a.click(rowOf(s, "▸ Ficheros revisados"))
+			a.drawn(func(s string) bool { return strings.Contains(s, "reviewed.go") })
+			a.click(1)
+			s = a.drawn(func(s string) bool { return strings.Contains(s, "▸ ⏸ "+step) })
+			assertHidden(s)
+			a.click(1)
+			s = a.drawn(func(s string) bool { return strings.Contains(s, "reviewed.go") })
+			a.click(rowOf(s, "▾ Informe"))
+			s = a.drawn(func(s string) bool { return strings.Contains(s, "▸ Informe") })
+			assertHidden(s)
+			a.click(1)
+			a.drawn(func(s string) bool { return strings.Contains(s, "▸ ⏸ "+step) })
+			a.click(1)
+			s = a.drawn(func(s string) bool { return strings.Contains(s, "▾ ⏸ "+step) })
+			if !strings.Contains(s, "▸ Informe") {
+				t.Fatalf("opening the step lost the report's fold:\n%s", s)
+			}
+			assertHidden(s)
+			a.click(rowOf(s, "▸ Informe"))
+			a.drawn(func(s string) bool { return strings.Contains(s, "reviewed.go") })
+			if err := os.WriteFile(filepath.Join(nm, "done"), nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			a.exits()
+		})
+	}
+}
+
 func assertGateFolded(t *testing.T, a *attached, folded string) {
 	t.Helper()
 	for _, want := range []string{`│ ⏸ review  1\.2 s +waiting │`, `│ ○ test +pending │`, `│ – lint +skipped │`,
