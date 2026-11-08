@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/json"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/thellmwhisperer/agentic-team-member/internal/run"
@@ -21,7 +22,9 @@ type savedNode struct {
 // the last Agent/Checks timings, not every unit's events, so it must not invent per-unit rows or tool counts.
 func (m *Model) restoreReport(path string, outcome run.Outcome) {
 	for _, r := range m.rows {
-		r.state = "unknown"
+		if !strings.HasPrefix(r.step, "gate:") {
+			r.state = "unknown"
+		}
 	}
 	if path == "" {
 		return

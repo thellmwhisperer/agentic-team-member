@@ -554,7 +554,7 @@ func (m *Model) end(o run.Outcome, err error) {
 	m.done, m.outcome, m.err = true, o, err
 	m.state = map[bool]string{true: "failed", false: o.Outcome}[err != nil || o.Outcome != "passed"]
 	for _, r := range m.rows {
-		if r.state == "pending" {
+		if r.state == "pending" && !strings.HasPrefix(r.step, "gate:") {
 			r.state = map[bool]string{true: "skipped", false: "not run"}[o.Outcome == "passed"]
 		}
 	}

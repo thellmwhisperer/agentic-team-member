@@ -18,6 +18,9 @@ func TestRealScreenShowsTheWholePipelineFromTheStart(t *testing.T) {
 	t.Run("delivery configured", func(t *testing.T) {
 		nm := gateFake(t)
 		writeFixture(t, filepath.Join(nm, "none"), "")
+		for _, command := range []string{"status", "logs"} {
+			held(t, filepath.Join(nm, "wait-"+command))
+		}
 		a := liveAttach(t, 120, 50, "echo delivered")
 		first := a.sees(func(s string) bool {
 			return strings.Contains(s, "○ Delivery") && strings.Contains(s, "q detach")
@@ -36,6 +39,7 @@ func TestRealScreenShowsTheWholePipelineFromTheStart(t *testing.T) {
 		}
 		a.send(`{"step":"agent","state":"passed"}`)
 		a.delivered(t.TempDir())
+		assertGatePendingWhileAnswering(t, a, nm)
 		gate := a.sees(func(s string) bool {
 			return regexp.MustCompile(`(?m)^│ ⏸ review  1\.2 s +waiting │`).MatchString(s) &&
 				strings.Contains(s, "– lint") && !strings.Contains(s, "○ ci")
@@ -58,6 +62,24 @@ func TestRealScreenShowsTheWholePipelineFromTheStart(t *testing.T) {
 		assertNoGatePipeline(t, s)
 		a.end()
 	})
+}
+
+func assertGatePendingWhileAnswering(t *testing.T, a *attached, nm string) {
+	t.Helper()
+	for _, command := range []string{"status", "logs"} {
+		until(t, "the gate's "+command+" request", func() bool {
+			log, _ := os.ReadFile(filepath.Join(nm, "log"))
+			return strings.Contains(string(log), " axi "+command)
+		})
+		waiting := a.drawn(func(s string) bool { return strings.Contains(s, "q close") })
+		assertPendingGatePipeline(t, waiting)
+		t.Logf("screen while %s answers:\n%s", command, waiting)
+		path := filepath.Join(nm, "wait-"+command)
+		free(t, path)
+		if err := os.Remove(path); err != nil {
+			t.Fatal(err)
+		}
+	}
 }
 
 func TestRealScreenUsesRunDeliveryConfig(t *testing.T) {
@@ -131,8 +153,9 @@ func assertPendingGatePipeline(t *testing.T, screen string) {
 	for _, row := range rows {
 		got = append(got, row[1])
 	}
+	delivery := regexp.MustCompile(`(?m)^│ \S+ Delivery\b`).FindStringIndex(screen)
 	if strings.Join(got, " ") != "intent rebase review test document lint push pr ci" ||
-		strings.Index(screen, "○ Delivery") > strings.Index(screen, "○ intent") {
+		delivery == nil || delivery[0] > strings.Index(screen, "○ intent") {
 		t.Fatalf("the screen lacks the whole pending gate pipeline below Delivery:\n%s", screen)
 	}
 }
