@@ -11,7 +11,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// template is .atm.yaml with every key config requires, empty for the project to fill.
+// template is .atm.yaml with every key config requires and the default delivery.
 const template = `# ATM's configuration for this repository.
 # Every key is required; an empty value is a deliberate "none".
 # harness, model and effort may go here too, over ~/.config/atm/config.yaml.
@@ -31,11 +31,17 @@ test_file: ""
 test_patterns: []
 # Globs of the documentation files, e.g. ["**/*.md"]
 docs_patterns: []
-# Shell line that delivers the run's branch from its clone, e.g. a push and a PR
-delivery: ""
+# Launches the gate; ATM's screen paints its steps and log.
+delivery: sh scripts/deliver.sh
 `
 
-// initCmd is atm init: .atm.yaml from template unless there is one, and /.atm/ in .gitignore unless it is.
+const deliveryScript = `#!/bin/sh
+# ATM's delivery: every run works in a fresh clone, so no-mistakes is initialised there first.
+no-mistakes init || exit 1
+exec no-mistakes axi run --intent "$ATM_INTENT"
+`
+
+// initCmd writes the default config and delivery unless they exist, and ignores /.atm/.
 func initCmd() *cobra.Command {
 	return &cobra.Command{Use: "init", Short: "Write .atm.yaml to fill and ignore .atm/", Args: cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {
@@ -43,13 +49,21 @@ func initCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			f, err := os.OpenFile(filepath.Join(root, ".atm.yaml"), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
-			if err == nil {
-				_, err = f.WriteString(template)
-				err = errors.Join(err, f.Close())
-			}
-			if err != nil && !errors.Is(err, fs.ErrExist) {
-				return err
+			for _, file := range []struct{ name, text string }{
+				{".atm.yaml", template}, {"scripts/deliver.sh", deliveryScript},
+			} {
+				path := filepath.Join(root, file.name)
+				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+					return err
+				}
+				f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+				if err == nil {
+					_, err = f.WriteString(file.text)
+					err = errors.Join(err, f.Close())
+				}
+				if err != nil && !errors.Is(err, fs.ErrExist) {
+					return err
+				}
 			}
 			return ignore(filepath.Join(root, ".gitignore"), "/.atm/")
 		}}
