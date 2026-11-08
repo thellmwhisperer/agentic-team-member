@@ -22,8 +22,6 @@ global_ignore:
   - "**/.workspace/**"
   - "**/__pycache__/**"
   - "**/.claude/**"
-  # OpenSpec change and spec markdown is process material, not public docs.
-  - "openspec/**"
   - "targets/**"
 
 scopes:
