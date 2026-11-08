@@ -141,6 +141,12 @@ to skip delivery. This repository's [configured command](../.atm.yaml) hands
 the branch to [no-mistakes](https://github.com/kunchenguid/no-mistakes); see
 [the gate](self-maintenance.md#the-loop) for its completion and recovery rules.
 
+A project's delivery only launches the no-mistakes run with `no-mistakes axi run`;
+ATM reads and paints the gate in its own screen. A delivery that runs
+`no-mistakes attach` is refused by `atm run` before creating a clone or run
+directory. The error names `.atm.yaml`'s `delivery` line and the replacement:
+launch the run with `no-mistakes axi run` and let ATM paint the gate.
+
 The `Go` workflow of this repository keeps, for every push to `main`, the
 end-to-end coverage profile of that commit as the artifact `cover-main-<sha>`
 of the run (`cover-main.profile`, `cover-main.func.txt`). To answer "which
