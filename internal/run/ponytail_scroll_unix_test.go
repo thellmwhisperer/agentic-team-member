@@ -45,7 +45,7 @@ func TestRealScreenScrollsEverySlopFinding(t *testing.T) {
 			}
 			t.Cleanup(func() { _ = a.cmd.Process.Kill(); _ = a.p.Close() })
 			go a.read()
-			a.drawn(func(s string) bool { return strings.Contains(s, "Findings - W 6") && strings.Contains(s, "command") })
+			a.drawn(func(s string) bool { return strings.Contains(s, "Findings - W 6") && strings.Contains(s, "Log") })
 			a.key("\t")
 			focused := a.drawn(func(s string) bool { return strings.Contains(s, "Findings - W 6*") })
 			seen := map[string]bool{}

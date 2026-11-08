@@ -133,6 +133,9 @@ func unquote(v string) string {
 
 // gate puts the gate's steps in the ATM box, below ATM's, and keeps what they emit for the right column.
 func (m *Model) gate(g gate) {
+	if m.gateSteps == nil {
+		m.rows = slices.DeleteFunc(m.rows, func(r *row) bool { return strings.HasPrefix(r.step, "gate:") })
+	}
 	for _, s := range g.steps {
 		for _, old := range m.gateSteps {
 			if old.name == s.name {
