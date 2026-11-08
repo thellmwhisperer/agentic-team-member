@@ -101,7 +101,7 @@ func TestRealAttachPaintsTheGate(t *testing.T) {
 		t.Fatal(err)
 	}
 	fixing := a.sees(func(s string) bool {
-		return regexp.MustCompile(`│ [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] review .*running │`).MatchString(s) &&
+		return regexp.MustCompile(`│ [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] review  1\.2 s +running │`).MatchString(s) &&
 			regexp.MustCompile(`│ ▾ [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] review +│`).MatchString(s)
 	})
 	if !strings.Contains(fixing, finding) || strings.Contains(fixing, "internal/run/run.go:") {
@@ -120,8 +120,8 @@ func TestRealAttachPaintsTheGate(t *testing.T) {
 
 func assertGateFolded(t *testing.T, a *attached, folded string) {
 	t.Helper()
-	for _, want := range []string{`│ ⏸ review .*waiting │`, `│ ○ test .*pending │`, `│ ▸ ⏸ review +│`,
-		`│   Reviewing the diff +│`} {
+	for _, want := range []string{`│ ⏸ review  1\.2 s +waiting │`, `│ ○ test +pending │`, `│ – lint +skipped │`,
+		`│ ▸ ⏸ review +│`, `│   Reviewing the diff +│`} {
 		if !regexp.MustCompile(want).MatchString(folded) {
 			t.Fatalf("the gate's screen lacks %q:\n%s", want, folded)
 		}
@@ -137,7 +137,8 @@ func assertGateLast(t *testing.T, a *attached) {
 	last := a.raw.String()
 	last = last[strings.LastIndex(last, "\x1b[?1049l"):]
 	if !strings.Contains(last, "\x1b[1mReviewing the diff") || strings.Contains(last, "**") ||
-		!strings.Contains(last, "checking the delivery") || !strings.Contains(ansi.Strip(last), "▾ ✓ review") {
+		!strings.Contains(last, "checking the delivery") || !strings.Contains(ansi.Strip(last), "▾ ✓ review") ||
+		!regexp.MustCompile(`│ ✓ review  1\.2 s +passed │`).MatchString(ansi.Strip(last)) {
 		t.Fatalf("the gate's last screen lacks review, passed and unfolded in bold:\n%q", last)
 	}
 }
