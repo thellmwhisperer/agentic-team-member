@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.7.3](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.7.2...v1.7.3) (2026-11-09)
+
+
+### Bug Fixes
+
+* **tui:** a decision shows what failed and how to answer, and a gate over offers no abort ([a9c0cbd](https://github.com/thellmwhisperer/agentic-team-member/commit/a9c0cbdc2713641927bfea576c169e03389344a2))
+* **tui:** a gate step that runs shows the time it has run, also on a screen opened after it started ([a294835](https://github.com/thellmwhisperer/agentic-team-member/commit/a294835654752af20277b86feff7fca5494244b4))
+* **tui:** Delivery shows running while its gate goes on, and a decision keeps the screen ([a796dc6](https://github.com/thellmwhisperer/agentic-team-member/commit/a796dc66314e4111662b6e38d0b078b332c35cba))
+* **tui:** the delivery command's output never shows, and Delivery never flickers failed before the gate answers ([c8f7f3d](https://github.com/thellmwhisperer/agentic-team-member/commit/c8f7f3d61cbc7feeff7b5a40c6d0ec29b54670a6))
+* **tui:** the screen keeps the terminal through Delivery and shows the gate from Delivery's start ([648253c](https://github.com/thellmwhisperer/agentic-team-member/commit/648253c1958d770a52505930b3d16258aca3aff1))
+
 ## [1.7.2](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.7.1...v1.7.2) (2026-11-09)
 
 
