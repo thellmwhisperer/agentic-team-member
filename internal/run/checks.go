@@ -417,18 +417,13 @@ func teeRun(ctx context.Context, w io.Writer, dir, line string, limit time.Durat
 	cmd.Dir, cmd.Env, cmd.WaitDelay = dir, append(os.Environ(), env...), time.Second
 	cmd.Stdout = io.MultiWriter(&out, w, log)
 	cmd.Stderr = cmd.Stdout
-	attach, closeGroup, err := ownGroup(cmd)
+	_, closeGroup, err := ownGroup(cmd) // its attach does nothing on unix, the only systems ATM builds for
 	if err != nil {
 		return "", "", err
 	}
 	defer closeGroup()
 	if err = cmd.Start(); err == nil {
-		if err = attach(); err != nil {
-			_ = cmd.Cancel()
-			err = errors.Join(err, cmd.Wait())
-		} else {
-			err = cmd.Wait()
-		}
+		err = cmd.Wait()
 	}
 	log.flush()
 	switch {
