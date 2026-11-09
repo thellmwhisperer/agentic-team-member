@@ -14,17 +14,7 @@ import (
 )
 
 func TestRealApprovedCheckShowsWhoApproved(t *testing.T) {
-	bin := builtATM(t)
-	cfg := atmSet(atmYAML, "test", "echo failed-check-finding; exit 2")
-	top := gitT(t, repo(t, "local", cfg), "rev-parse", "--show-toplevel")
-	t.Setenv("FAKE_AGENT_WORK", fixWork)
-	t.Setenv("TERM", "xterm-256color")
-	t.Setenv("NO_COLOR", "")
-	if err := os.MkdirAll(filepath.Join(top, ".atm"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	server := startVersionServe(t, bin, top)
-	_, label := failedCheckQuestion(t, bin, top, "run", "--follow", issueFile(t, issue))
+	bin, top, server, label := failedCheckRun(t, atmSet(atmYAML, "test", "echo failed-check-finding; exit 2"))
 	failed := readReport(t, filepath.Join(runDir(top, label), "report.json"))
 	rejectAnonymousApproval(t, bin, top, label)
 	before := time.Now()
@@ -64,18 +54,8 @@ func TestRealApprovedCheckShowsWhoApproved(t *testing.T) {
 }
 
 func TestRealApprovedCheckRestoresItsOwnApprover(t *testing.T) {
-	bin := builtATM(t)
-	cfg := atmSet(atmYAML, "delivery", "echo delivery-finding; exit 1") +
-		"e2e: 'echo failed-check-finding; exit 2'\n"
-	top := gitT(t, repo(t, "local", cfg), "rev-parse", "--show-toplevel")
-	t.Setenv("FAKE_AGENT_WORK", fixWork)
-	t.Setenv("TERM", "xterm-256color")
-	t.Setenv("NO_COLOR", "")
-	if err := os.MkdirAll(filepath.Join(top, ".atm"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	server := startVersionServe(t, bin, top)
-	_, label := failedCheckQuestion(t, bin, top, "run", "--follow", issueFile(t, issue))
+	bin, top, server, label := failedCheckRun(t, atmSet(atmYAML, "delivery", "echo delivery-finding; exit 1")+
+		"e2e: 'echo failed-check-finding; exit 2'\n")
 	answerFailedCheck(t, bin, top, label, "fix", 1)
 	answerFailedCheck(t, bin, top, label, "approve", 4)
 	cmd := exec.Command(bin, "answer", label, "approve", "--by", "publisher")
@@ -93,6 +73,21 @@ func TestRealApprovedCheckRestoresItsOwnApprover(t *testing.T) {
 	}
 	t.Logf("atm screen after separate Checks and Delivery approvals:\n%s", shown)
 	endDeliveryServer(t, server, top)
+}
+
+func failedCheckRun(t *testing.T, cfg string) (bin, top string, server *exec.Cmd, label string) {
+	t.Helper()
+	bin = builtATM(t)
+	top = gitT(t, repo(t, "local", cfg), "rev-parse", "--show-toplevel")
+	t.Setenv("FAKE_AGENT_WORK", fixWork)
+	t.Setenv("TERM", "xterm-256color")
+	t.Setenv("NO_COLOR", "")
+	if err := os.MkdirAll(filepath.Join(top, ".atm"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	server = startVersionServe(t, bin, top)
+	_, label = failedCheckQuestion(t, bin, top, "run", "--follow", issueFile(t, issue))
+	return bin, top, server, label
 }
 
 func assertApprovedDecision(t *testing.T, rep obj, before, after time.Time) obj {
