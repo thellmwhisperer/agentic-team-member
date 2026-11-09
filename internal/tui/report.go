@@ -49,32 +49,43 @@ func (m *Model) restoreReport(path string, outcome run.Outcome) {
 			continue
 		}
 		seen[n.Name] = true
-		var approval *run.Decision
-		if n.Name == "checks" && n.Result == "failed" &&
-			consistentResult(n.Name, "passed", outcome) {
-			for i := len(report.Decisions) - 1; i >= 0; i-- {
-				d := &report.Decisions[i]
-				if d.Node == n.Name {
-					if d.Answer == "approve" {
-						approval = d
-					}
-					break
-				}
-			}
-		}
+		approval := savedApproval(n, report.Decisions, outcome)
 		if approval == nil && !validSavedNode(n, outcome) {
 			continue
 		}
 		r.state = n.Result
-		if n.DurationMS != nil && *n.DurationMS >= 0 && *n.DurationMS <= maxDurationMS &&
-			(n.Result == "passed" || n.Result == "failed") {
-			r.took, r.hasDuration = time.Duration(*n.DurationMS)*time.Millisecond, true
+		if n.Result == "passed" || n.Result == "failed" {
+			r.took, r.hasDuration = savedDuration(n.DurationMS)
 		}
 		m.restoreRows(n)
 		if approval != nil {
 			m.approveChecks(approval.By)
 		}
 	}
+}
+
+// savedApproval returns the last answer to a failed Checks node of a passed run when it was an approve.
+func savedApproval(n savedNode, decisions []run.Decision, outcome run.Outcome) *run.Decision {
+	if n.Name != "checks" || n.Result != "failed" || !consistentResult(n.Name, "passed", outcome) {
+		return nil
+	}
+	for i := len(decisions) - 1; i >= 0; i-- {
+		d := &decisions[i]
+		if d.Node == n.Name {
+			if d.Answer == "approve" {
+				return d
+			}
+			return nil
+		}
+	}
+	return nil
+}
+
+func savedDuration(ms *int64) (time.Duration, bool) {
+	if ms != nil && *ms >= 0 && *ms <= maxDurationMS {
+		return time.Duration(*ms) * time.Millisecond, true
+	}
+	return 0, false
 }
 
 func (m *Model) restoreRows(n savedNode) {
