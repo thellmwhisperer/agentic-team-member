@@ -178,14 +178,19 @@ exits with an error, or Checks, the slop detector or Delivery fails, the
 background run asks its launcher:
 
 ```sh
-atm answer <run> approve
-atm answer <run> fix
-atm answer <run> stop
+atm answer <run> approve --by <who>
+atm answer <run> fix --by <who>
+atm answer <run> stop --by <who>
 ```
+
+`--by` names who answers; without it `atm answer` fails and the run keeps
+waiting.
 
 The `decision` event carries the finding, these three choices and whether the
 run is `resumable`. The clone and its work stay in place while the launcher
-decides. `approve` records the finding and approval. After an Agent failure it
+decides. `approve` records the finding and approval. On the screen, approved
+Checks rows show `✓` and `approved`, and the Checks row names who approved
+it; the failure stays in `report.json`. After an Agent failure, `approve`
 runs Checks on the current work; after a later step fails it continues to the
 next step. `fix` gives the worker one turn with the finding, reusing its session
 when supported, then runs Checks and the slop detector before Delivery. A new
@@ -355,7 +360,7 @@ it is on disk before delivery reads it.
 | `units` | The unit's number (`1`), base commit, reported test file, result, `started_at` and `duration_ms` |
 | `reproofs` | Each rechecked unit's number, base commit, reported test file, result, `started_at` and `duration_ms` after a cut; configured commands are in `commands` |
 | `commands` | Every configured command that ran, the clone's `install` included, with its result, last 60 lines, `started_at` and `duration_ms` |
-| `decisions` | Each Agent exit error, forbidden write, Checks, slop detector or Delivery finding and the launcher's `approve`, `fix` or `stop` answer; the answer is empty while the question is pending |
+| `decisions` | Each Agent exit error, forbidden write, Checks, slop detector or Delivery finding with its `node`, the launcher's `approve`, `fix` or `stop` `answer`, who answered in `by` and the answer's time in `at` (UTC); the answer is empty while the question is pending |
 | `head_sha` | The latest commit prepared for Delivery; a repair may update it |
 | `serve` | The version of the `atm serve` process that executed the run, from `buildinfo.String()`, for example `vA (aaa1111) 2026-10-15` |
 
@@ -425,7 +430,7 @@ take the run.
 Without `--follow`, `atm run` attaches the screen on a terminal; see
 [Following one run](#following-one-run) for that flag's output. The screen is
 the ATM box, a row per step with its icon (`○`
-pending, a spinner running, `⏸` waiting, `✓` passed, `✗` failed, `–` skipped), duration and
+pending, a spinner running, `⏸` waiting, `✓` passed or approved, `✗` failed, `–` skipped), duration and
 note, and beside it, from 100 columns, the Agent box while an agent works or
 its report remains visible during checks, the Findings box with a failure or
 the slop detector's findings, and the Log box.
