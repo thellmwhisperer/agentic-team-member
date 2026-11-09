@@ -31,6 +31,7 @@ func TestRealRunKeepsItsScreenWhileDeliveryHoldsTheGate(t *testing.T) {
 	delivering := regexp.MustCompile(`Delivery  \d+\.\d s +running`)
 	until := func(ok func(string) bool) {
 		t.Helper()
+		deadline := time.After(2 * time.Minute)
 		for !ok(ansi.Strip(shown.String())) {
 			select {
 			case l, open := <-f.lines:
@@ -39,7 +40,7 @@ func TestRealRunKeepsItsScreenWhileDeliveryHoldsTheGate(t *testing.T) {
 						ansi.Strip(shown.String()))
 				}
 				shown.WriteString(l + "\n")
-			case <-time.After(2 * time.Minute):
+			case <-deadline:
 				t.Fatalf("the screen never showed it:\n%s", ansi.Strip(shown.String()))
 			}
 		}

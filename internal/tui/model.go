@@ -88,7 +88,8 @@ type Model struct {
 	gateSteps        []gateStep // the gate's steps, once the run delivered and the gate shows a run
 	gateLive         bool       // the gate goes on after the run's end, so the screen's clock keeps ticking
 	asking           bool       // the screen asks no-mistakes for the gate, from Delivery's start until it ends
-	typing, aborting bool       // the footer takes a line for the gate, or asks to confirm its abort
+	gateGeneration   int
+	typing, aborting bool // the footer takes a line for the gate, or asks to confirm its abort
 	fixSelected      bool
 	answered         []string
 	text             string // the line typed for the gate so far
@@ -260,19 +261,19 @@ func (m *Model) frame(f run.Frame) tea.Cmd {
 // runEnded ends the run, or attach failed: Show leaves the last screen on the terminal, unless the gate goes on.
 func (m *Model) runEnded(e ended) tea.Cmd {
 	m.end(e.o, e.err)
-	if m.asking && m.gateLive {
-		return nil // the gate is asked already
-	}
+	m.gateGeneration++
 	return m.ask(gate{ok: m.gateLive}, 0)
 }
 
 // gateShown shows g and asks again; while the run goes on, a gate with no run yet is Delivery starting it.
 func (m *Model) gateShown(g gate) tea.Cmd {
+	if g.generation != m.gateGeneration {
+		return nil
+	}
 	if !g.ok && !m.done {
 		return m.ask(gate{ok: true}, time.Second)
 	}
 	m.gate(g)
-	m.asking = !g.over
 	return m.ask(g, time.Second)
 }
 

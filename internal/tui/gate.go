@@ -18,8 +18,9 @@ import (
 // gate is what no-mistakes, the gate after Delivery, shows of the run of the delivered branch: its steps, and
 // whether it ended; not ok when it shows no run.
 type gate struct {
-	steps    []gateStep
-	ok, over bool
+	steps      []gateStep
+	ok, over   bool
+	generation int
 }
 
 // gateStep is a step of the gate: its state as the screen names it, its log and its findings.
@@ -36,7 +37,7 @@ var gateStates = map[string]string{"pending": "pending", "running": "running", "
 
 // askGate asks no-mistakes, in clone, for the run of its branch, and for the log of each step it started.
 // ponytail: every started step's log on every ask, one no-mistakes call each; ask only the changed ones if it lags.
-func askGate(clone string) tea.Msg {
+func askGate(clone string) gate {
 	run, tables, err := axi(clone, "status")
 	if err != nil || run["run.status"] == "" {
 		return gate{}
@@ -240,8 +241,12 @@ func (m *Model) ask(g gate, wait time.Duration) tea.Cmd {
 	if g.over {
 		return nil
 	}
-	clone := m.clone
-	return tea.Tick(wait, func(time.Time) tea.Msg { return askGate(clone) })
+	clone, generation := m.clone, m.gateGeneration
+	return tea.Tick(wait, func(time.Time) tea.Msg {
+		g := askGate(clone)
+		g.generation = generation
+		return g
+	})
 }
 
 // gateKey answers the gate from the footer, through no-mistakes' own commands in the clone: a and s approve
