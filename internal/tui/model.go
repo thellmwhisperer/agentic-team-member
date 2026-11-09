@@ -85,7 +85,7 @@ type Model struct {
 	// clicked open or closed
 	open             map[string]bool
 	clone            string     // the run's clone, where the gate after Delivery is asked
-	gateSteps        []gateStep // the gate's steps, once the run delivered and the gate shows a run
+	gateSteps        []gateStep // the gate's steps, once the gate shows a run
 	gateLive         bool       // the gate goes on after the run's end, so the screen's clock keeps ticking
 	asking           bool       // the screen asks no-mistakes for the gate until the screen closes
 	typing, aborting bool       // the footer takes a line for the gate, or asks to confirm its abort
