@@ -247,14 +247,19 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// frame applies f and, from Delivery's start, asks for the gate: it shows in the pipeline while the delivery
-// command runs below the screen.
+// frame applies f and starts a new gate query loop for each Delivery attempt. The gate shows in the pipeline
+// while the delivery command runs below the screen.
 func (m *Model) frame(f run.Frame) tea.Cmd {
 	m.apply(f)
-	if d := m.current("delivery"); m.asking || m.clone == "" || d == nil || d.state != "running" {
+	if d := m.current("delivery"); d == nil || d.state != "running" {
+		m.asking = false
+		return nil
+	}
+	if m.asking || m.clone == "" {
 		return nil
 	}
 	m.asking = true
+	m.gateGeneration++
 	return m.ask(gate{ok: true}, 0)
 }
 
@@ -265,12 +270,13 @@ func (m *Model) runEnded(e ended) tea.Cmd {
 	return m.ask(gate{ok: m.gateLive}, 0)
 }
 
-// gateShown shows g and asks again; while the run goes on, a gate with no run yet is Delivery starting it.
+// gateShown ignores older loops, shows g and asks again. A missing answer keeps the previous screen while
+// ATM runs or a gate has already been shown.
 func (m *Model) gateShown(g gate) tea.Cmd {
 	if g.generation != m.gateGeneration {
 		return nil
 	}
-	if !g.ok && !m.done {
+	if !g.ok && (!m.done || m.gateSteps != nil) {
 		return m.ask(gate{ok: true}, time.Second)
 	}
 	m.gate(g)
@@ -570,14 +576,14 @@ func (m *Model) tool(e event) {
 	}
 }
 
-// end keeps how the run ended on screen until the user closes it.
+// end records ATM's result and keeps a delivered or previously shown gate live for another query.
 func (m *Model) end(o run.Outcome, err error) {
 	cold := !slices.ContainsFunc(m.rows, func(r *row) bool { return r.state != "pending" })
 	if cold {
 		m.restoreReport(o.Report, o)
 	}
 	m.done, m.outcome, m.err = true, o, err
-	m.gateLive = m.clone != "" && m.current("delivery").state == "passed" // the gate after Delivery may go on
+	m.gateLive = m.clone != "" && (m.current("delivery").state == "passed" || m.gateSteps != nil)
 	m.state = map[bool]string{true: "failed", false: o.Outcome}[err != nil || o.Outcome != "passed"]
 	for _, r := range m.rows {
 		if r.state == "pending" && !strings.HasPrefix(r.step, "gate:") {
