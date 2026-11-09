@@ -562,10 +562,10 @@ and its keys. The delivery command can draw its own screen and receive
 input there. ATM's screen comes back when the command ends, showing the
 Delivery result and duration.
 On a terminal, the screen quits when the run ends unless Delivery passed and
-no-mistakes finds a gate run in the clone; then it quits when the gate ends.
-If no gate run is found or the query fails, it quits at once. It leaves its
-last view on the terminal; `q` or Ctrl+C closes it before. Off-terminal output
-returns when the ATM run ends.
+no-mistakes finds a gate run in the clone; then, once the gate ends, it stays
+open with every step's duration until `q` or Ctrl+C closes it. If no gate run is
+found or a query fails, it quits at once. It leaves its last view on the
+terminal. Off-terminal output returns when the ATM run ends.
 
 Off a terminal, or with `NO_COLOR` or `TERM=dumb`, the screen is plain lines:
 one per step start and end, then the delivery's output and the summary. Every
