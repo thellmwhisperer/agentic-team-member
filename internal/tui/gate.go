@@ -42,9 +42,16 @@ func askGate(clone string) gate {
 		return gate{}
 	}
 	g := gate{ok: true, over: slices.Contains([]string{"completed", "failed", "cancelled"}, run["run.status"])}
+	active := map[string]string{} // how long each running step has run: its duration_ms is 0 until it ends
+	for _, a := range tables["run.active_steps"] {
+		active[a["step"]] = a["active_for"]
+	}
 	for _, s := range tables["run.steps"] {
 		step := gateStep{name: s["step"], state: cmp.Or(gateStates[s["status"]], "unknown")}
 		step.took, _ = time.ParseDuration(s["duration_ms"] + "ms")
+		if took, err := time.ParseDuration(active[step.name]); err == nil && step.state == "running" {
+			step.took = took
+		}
 		if step.state != "pending" && step.state != "skipped" {
 			_, tables, _ := axi(clone, "logs", "--step", step.name, "--full")
 			step.log = gateActivities(tables["log"])
