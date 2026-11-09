@@ -87,9 +87,8 @@ type Model struct {
 	clone            string     // the run's clone, where the gate after Delivery is asked
 	gateSteps        []gateStep // the gate's steps, once the run delivered and the gate shows a run
 	gateLive         bool       // the gate goes on after the run's end, so the screen's clock keeps ticking
-	asking           bool       // the screen asks no-mistakes for the gate, from Delivery's start until it ends
-	gateGeneration   int
-	typing, aborting bool // the footer takes a line for the gate, or asks to confirm its abort
+	asking           bool       // the screen asks no-mistakes for the gate until the screen closes
+	typing, aborting bool       // the footer takes a line for the gate, or asks to confirm its abort
 	fixSelected      bool
 	answered         []string
 	text             string // the line typed for the gate so far
@@ -231,8 +230,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseMsg:
 		m.wheel(msg)
 	case tick:
-		m.now, m.spin = time.Time(msg), m.spin+1
 		if !m.done || m.gateLive {
+			m.now, m.spin = time.Time(msg), m.spin+1
+		}
+		if !m.done || m.asking {
 			return m, next()
 		}
 	case run.Frame:
@@ -247,40 +248,36 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// frame applies f and starts a new gate query loop for each Delivery attempt. The gate shows in the pipeline
-// while the delivery command runs below the screen.
 func (m *Model) frame(f run.Frame) tea.Cmd {
 	m.apply(f)
-	if d := m.current("delivery"); d == nil || d.state != "running" {
-		m.asking = false
-		return nil
-	}
-	if m.asking || m.clone == "" {
+	if d := m.current("delivery"); m.asking || m.clone == "" || d == nil || d.state != "running" {
 		return nil
 	}
 	m.asking = true
-	m.gateGeneration++
-	return m.ask(gate{ok: true}, 0)
+	return m.ask(0)
 }
 
-// runEnded ends the run, or attach failed: Show leaves the last screen on the terminal, unless the gate goes on.
 func (m *Model) runEnded(e ended) tea.Cmd {
+	d := m.current("delivery")
+	attempted := d != nil && d.state != "pending" && d.state != "skipped"
 	m.end(e.o, e.err)
-	m.gateGeneration++
-	return m.ask(gate{ok: m.gateLive}, 0)
-}
-
-// gateShown ignores older loops, shows g and asks again. A missing answer keeps the previous screen while
-// ATM runs or a gate has already been shown.
-func (m *Model) gateShown(g gate) tea.Cmd {
-	if g.generation != m.gateGeneration {
+	if m.asking {
 		return nil
 	}
-	if !g.ok && (!m.done || m.gateSteps != nil) {
-		return m.ask(gate{ok: true}, time.Second)
+	if m.clone == "" || !attempted {
+		return tea.Quit
 	}
-	m.gate(g)
-	return m.ask(g, time.Second)
+	m.asking = true
+	return m.ask(0)
+}
+
+func (m *Model) gateShown(g gate) tea.Cmd {
+	if g.ok {
+		m.gate(g)
+	} else if g.afterEnd && m.gateSteps == nil {
+		return tea.Quit
+	}
+	return m.ask(time.Second)
 }
 
 // key scrolls the focused box, or, on tab, focuses the next, or, on t, folds or unfolds every tool call,
@@ -576,14 +573,12 @@ func (m *Model) tool(e event) {
 	}
 }
 
-// end records ATM's result and keeps a delivered or previously shown gate live for another query.
 func (m *Model) end(o run.Outcome, err error) {
 	cold := !slices.ContainsFunc(m.rows, func(r *row) bool { return r.state != "pending" })
 	if cold {
 		m.restoreReport(o.Report, o)
 	}
 	m.done, m.outcome, m.err = true, o, err
-	m.gateLive = m.clone != "" && (m.current("delivery").state == "passed" || m.gateSteps != nil)
 	m.state = map[bool]string{true: "failed", false: o.Outcome}[err != nil || o.Outcome != "passed"]
 	for _, r := range m.rows {
 		if r.state == "pending" && !strings.HasPrefix(r.step, "gate:") {
