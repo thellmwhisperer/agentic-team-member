@@ -149,7 +149,7 @@ func endServe(bin, top string, server *exec.Cmd) {
 			return
 		}
 		_ = c.SetDeadline(time.Now().Add(time.Second))
-		_, _ = exchange(c, request{Cmd: "answer", Run: r.Run, Answer: "stop"}, nil, func(reply) {})
+		_, _ = exchange(c, request{Cmd: "answer", Run: r.Run, Answer: "stop", By: "test cleanup"}, nil, func(reply) {})
 		_ = c.Close()
 	}
 	later := time.Now().Add(time.Hour)
@@ -167,7 +167,7 @@ func endServe(bin, top string, server *exec.Cmd) {
 
 func stopCheckRun(t *testing.T, top, label string) Outcome {
 	t.Helper()
-	if err := Answer(top, label, "stop"); err != nil {
+	if err := Answer(top, label, "stop", "operator"); err != nil {
 		t.Fatalf("stop pending check in %s: %v", label, err)
 	}
 	end, err := Attach(top, label, io.Discard)

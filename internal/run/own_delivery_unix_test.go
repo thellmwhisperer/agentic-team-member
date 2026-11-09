@@ -148,7 +148,7 @@ func ownDeliveryInitFailed(t *testing.T, top, label string, end Outcome, err err
 	if err != nil || end.Outcome != "failed" || end.FailedNode != "delivery" || calls != "init\n" {
 		t.Fatalf("failed init: %+v, %v, calls %q", end, err, calls)
 	}
-	if err := Answer(top, label, "stop"); err != nil {
+	if err := Answer(top, label, "stop", "operator"); err != nil {
 		t.Fatal(err)
 	}
 	if end, err := Attach(top, label, io.Discard); err != nil || end.Outcome != "failed" {

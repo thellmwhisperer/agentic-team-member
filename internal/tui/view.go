@@ -42,7 +42,8 @@ var spinner = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "
 
 // states is each state's icon and colour; its word is its name. Running's icon is the spinner.
 var states = map[string][2]string{"pending": {"○", dim}, "running": {"", blue}, "waiting": {"⏸", yellow},
-	"passed": {"✓", green}, "failed": {"✗", red}, "skipped": {"–", dim}, "not run": {"○", dim}, "unknown": {"?", yellow}}
+	"approved": {"✓", green},
+	"passed":   {"✓", green}, "failed": {"✗", red}, "skipped": {"–", dim}, "not run": {"○", dim}, "unknown": {"?", yellow}}
 
 // icon is state's icon in its colour.
 func (m *Model) icon(state string) string {
@@ -298,12 +299,15 @@ func (m *Model) row(r *row, width int) string {
 		suffix = "  " + paint(dim, run.Human(took))
 	}
 	status := bold(states[word][1], word)
+	if word == "approved" {
+		status = bold(states[word][1], strings.TrimSpace(word+" "+r.by))
+	}
 	if r.step == "ponytail" && r.check {
 		indent := strings.Repeat(" ", lipgloss.Width(prefix))
 		return prefix + strings.ReplaceAll(ansi.Wrap(r.label+suffix+" "+status,
 			max(1, width-lipgloss.Width(prefix)), ""), "\n", "\n"+indent)
 	}
-	if r.note != "" {
+	if r.note != "" && word != "approved" {
 		// The note gives way before the label: it gets only what the label, the duration and the state leave.
 		room := width - lipgloss.Width(prefix) - lipgloss.Width(r.label) - lipgloss.Width(suffix) - lipgloss.Width(status) - 4
 		if room > 0 {

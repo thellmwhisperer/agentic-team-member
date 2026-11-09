@@ -6,14 +6,17 @@ import (
 )
 
 func answerCmd() *cobra.Command {
-	return &cobra.Command{Use: "answer <run> <approve|fix|stop>",
+	var by string
+	cmd := &cobra.Command{Use: "answer <run> <approve|fix|stop> --by <who>",
 		Short: "Answer a failed check: approve delivery, give the agent one fix turn, or stop",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(_ *cobra.Command, args []string) error {
 			root, err := toplevel()
 			if err == nil {
-				err = run.Answer(root, args[0], args[1])
+				err = run.Answer(root, args[0], args[1], by)
 			}
 			return err
 		}}
+	cmd.Flags().StringVar(&by, "by", "", "Who is answering the finding (required)")
+	return cmd
 }

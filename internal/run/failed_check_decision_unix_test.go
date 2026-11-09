@@ -36,13 +36,13 @@ func TestRunAsksOnAFailedCheck(t *testing.T) {
 				t.Fatalf("delivered before answer: %v", err)
 			}
 			for _, args := range [][]string{{label, "skip"}, {"missing", "approve"}, {label}} {
-				bad := exec.Command(bin, append([]string{"answer"}, args...)...)
+				bad := exec.Command(bin, append([]string{"answer", "--by", "operator"}, args...)...)
 				bad.Dir = top
 				if out, err := bad.CombinedOutput(); err == nil {
 					t.Fatalf("accepted invalid answer: %s", out)
 				}
 			}
-			cmd := exec.Command(bin, "answer", label, answer)
+			cmd := exec.Command(bin, "answer", label, answer, "--by", "operator")
 			cmd.Dir = top
 			if out, err := cmd.CombinedOutput(); err != nil {
 				t.Fatalf("answer: %v\n%s", err, out)
@@ -54,7 +54,7 @@ func TestRunAsksOnAFailedCheck(t *testing.T) {
 			}
 			next.exit(code)
 			assertCheckAnswer(t, top, label, clone, delivery, answer)
-			duplicate := exec.Command(bin, "answer", label, answer)
+			duplicate := exec.Command(bin, "answer", label, answer, "--by", "operator")
 			duplicate.Dir = top
 			if out, err := duplicate.CombinedOutput(); err == nil {
 				t.Fatalf("accepted duplicate answer: %s", out)
@@ -196,7 +196,7 @@ func TestRunAsksOnAFailedCheckKeepsQuestionInHistory(t *testing.T) {
 			t.Fatalf("history run: %v %s", err, out)
 		}
 	}
-	cmd := exec.Command(bin, "answer", label, "stop")
+	cmd := exec.Command(bin, "answer", label, "stop", "--by", "operator")
 	cmd.Dir = top
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("history discarded the question: %v %s", err, out)
@@ -214,7 +214,7 @@ func assertCheckWaiting(t *testing.T, top, label string) {
 
 func answerFailedCheck(t *testing.T, bin, top, label, answer string, code int) {
 	t.Helper()
-	cmd := exec.Command(bin, "answer", label, answer)
+	cmd := exec.Command(bin, "answer", label, answer, "--by", "operator")
 	cmd.Dir = top
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("%s: %v %s", answer, err, out)
@@ -235,7 +235,7 @@ func TestRunAsksOnAFailedCheckResumesSavedWorker(t *testing.T) {
 	_, original := failedCheckQuestion(t, bin, top, "run", "--follow", "--harness", "claude", "--model", "saved-model",
 		"--effort", "high", "--harness-arg=--verbose", "--env", "ATM_SAVED_WORKER=yes", issueFile(t, issue))
 	assertQuestionNextStep(t, top, original, true)
-	stop := exec.Command(bin, "answer", original, "stop")
+	stop := exec.Command(bin, "answer", original, "stop", "--by", "operator")
 	stop.Dir = top
 	if out, err := stop.CombinedOutput(); err != nil {
 		t.Fatalf("stop original: %v %s", err, out)
@@ -304,7 +304,7 @@ func TestRunAsksOnAFailedCheckDuringBinaryReplacement(t *testing.T) {
 			if trigger == "tick" {
 				time.Sleep(2 * tick)
 			}
-			cmd := exec.Command(bin, "answer", label, "fix")
+			cmd := exec.Command(bin, "answer", label, "fix", "--by", "operator")
 			cmd.Dir = top
 			if out, err := cmd.CombinedOutput(); err != nil {
 				t.Fatalf("replacement lost pending question: %v %s", err, out)
@@ -321,7 +321,7 @@ func assertQuestionNextStep(t *testing.T, top, label string, resumable bool) {
 	if err != nil {
 		t.Fatalf("read next_step: %v", err)
 	}
-	want := "atm answer " + label + " approve|fix|stop"
+	want := "atm answer " + label + " approve|fix|stop --by <who>"
 	if resumable {
 		want += "; recovery: atm run --resume " + label
 	}
