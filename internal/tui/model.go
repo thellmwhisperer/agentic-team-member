@@ -87,7 +87,7 @@ type Model struct {
 	clone            string     // the run's clone, where the gate after Delivery is asked
 	gateSteps        []gateStep // the gate's steps, once the gate shows a run
 	gateLive         bool       // the gate goes on after the run's end, so the screen's clock keeps ticking
-	asking           bool       // the screen asks no-mistakes for the gate until the screen closes
+	asking           bool       // the screen asks no-mistakes for the gate, until a gate over after the run's end
 	typing, aborting bool       // the footer takes a line for the gate, or asks to confirm its abort
 	fixSelected      bool
 	answered         []string
@@ -230,12 +230,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseMsg:
 		m.wheel(msg)
 	case tick:
-		if !m.done || m.gateLive {
-			m.now, m.spin = time.Time(msg), m.spin+1
-		}
-		if !m.done || m.asking {
-			return m, next()
-		}
+		return m, m.tick(msg)
 	case run.Frame:
 		return m, m.frame(msg)
 	case ended:
@@ -248,6 +243,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// tick advances the clock while the run or the gate goes on, and ticks again while the run goes on or the screen asks.
+func (m *Model) tick(t tick) tea.Cmd {
+	if !m.done || m.gateLive {
+		m.now, m.spin = time.Time(t), m.spin+1
+	}
+	if !m.done || m.asking {
+		return next()
+	}
+	return nil
+}
+
+// frame reads frame f and starts asking for the gate the first time Delivery runs with the clone known.
 func (m *Model) frame(f run.Frame) tea.Cmd {
 	m.apply(f)
 	if d := m.current("delivery"); m.asking || m.clone == "" || d == nil || d.state != "running" {
@@ -257,6 +264,8 @@ func (m *Model) frame(f run.Frame) tea.Cmd {
 	return m.ask(0)
 }
 
+// runEnded keeps the run's end on screen and quits if the run never reached Delivery, else starts asking for the
+// gate when the screen has not yet.
 func (m *Model) runEnded(e ended) tea.Cmd {
 	d := m.current("delivery")
 	attempted := d != nil && d.state != "pending" && d.state != "skipped"
@@ -271,9 +280,15 @@ func (m *Model) runEnded(e ended) tea.Cmd {
 	return m.ask(0)
 }
 
+// gateShown shows answer g and asks again after a second, unless g, asked after the run's end, shows a gate over,
+// which stops asking, or no gate run when none ever showed, which quits.
 func (m *Model) gateShown(g gate) tea.Cmd {
 	if g.ok {
 		m.gate(g)
+		if g.over && g.afterEnd {
+			m.asking = false
+			return nil
+		}
 	} else if g.afterEnd && m.gateSteps == nil {
 		return tea.Quit
 	}
@@ -573,6 +588,7 @@ func (m *Model) tool(e event) {
 	}
 }
 
+// end keeps how the run ended on screen until the user closes it.
 func (m *Model) end(o run.Outcome, err error) {
 	cold := !slices.ContainsFunc(m.rows, func(r *row) bool { return r.state != "pending" })
 	if cold {
