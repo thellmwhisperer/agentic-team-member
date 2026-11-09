@@ -87,6 +87,7 @@ type Model struct {
 	open             map[string]bool
 	clone            string     // the run's clone, where the gate after Delivery is asked
 	gateSteps        []gateStep // the gate's steps, once the run delivered and the gate shows a run
+	gateLive         bool       // the gate goes on after the run's end, so the screen's clock keeps ticking
 	typing, aborting bool       // the footer takes a line for the gate, or asks to confirm its abort
 	fixSelected      bool
 	answered         []string
@@ -234,7 +235,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.wheel(msg)
 	case tick:
 		m.now, m.spin = time.Time(msg), m.spin+1
-		if !m.done {
+		if !m.done || m.gateLive {
 			return m, next()
 		}
 	case run.Frame:
@@ -242,7 +243,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ended:
 		m.end(msg.o, msg.err)
 		// The run ended, or attach failed: Show leaves the last screen on the terminal, unless the gate goes on.
-		return m, m.ask(gate{ok: m.clone != "" && m.current("delivery").state == "passed"}, 0)
+		return m, m.ask(gate{ok: m.gateLive}, 0)
 	case gateAnswer:
 		m.answered = append(m.answered, string(msg))
 	case gate:
@@ -552,6 +553,7 @@ func (m *Model) end(o run.Outcome, err error) {
 		m.restoreReport(o.Report, o)
 	}
 	m.done, m.outcome, m.err = true, o, err
+	m.gateLive = m.clone != "" && m.current("delivery").state == "passed" // the gate after Delivery may go on
 	m.state = map[bool]string{true: "failed", false: o.Outcome}[err != nil || o.Outcome != "passed"]
 	for _, r := range m.rows {
 		if r.state == "pending" && !strings.HasPrefix(r.step, "gate:") {
