@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.7.2](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.7.1...v1.7.2) (2026-11-09)
+
+
+### Bug Fixes
+
+* **tui:** keep the attach screen open once the gate is over, until q ([8d20b23](https://github.com/thellmwhisperer/agentic-team-member/commit/8d20b236468dec011afdcf9fb60c3dd2504c8856))
+* **tui:** the Gate box leaves out the empty lines no-mistakes writes between log entries ([da89e08](https://github.com/thellmwhisperer/agentic-team-member/commit/da89e08223bb6558b25c3c51f446da9baf151ad1)), closes [#621](https://github.com/thellmwhisperer/agentic-team-member/issues/621)
+* **tui:** the gate's running step turns and counts in real time after the run's end ([c8c126b](https://github.com/thellmwhisperer/agentic-team-member/commit/c8c126b04bddad74c3ce5376a828620b6c1bbe54)), closes [#621](https://github.com/thellmwhisperer/agentic-team-member/issues/621)
+
 ## [1.7.1](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.7.0...v1.7.1) (2026-10-21)
 
 
