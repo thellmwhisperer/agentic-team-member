@@ -21,11 +21,11 @@ func StartFollowing(ctx context.Context, root string, args []string, w io.Writer
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	in := make(chan Input)
-	stop := context.AfterFunc(ctx, func() { close(in) })
+	leave := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() { close(leave) })
 	defer stop()
 	var writeErr error
-	end, err := Follow(root, o.Run, nil, in, func(f Frame) {
+	end, err := Follow(root, o.Run, leave, func(f Frame) {
 		if f.Event != nil && writeErr == nil {
 			_, writeErr = fmt.Fprintln(w, string(f.Event))
 			if writeErr != nil {

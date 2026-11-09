@@ -69,7 +69,6 @@ type Model struct {
 	width, height, spin           int
 	historyHeight                 int
 	now                           time.Time
-	keys                          chan<- run.Input // where the terminal's size goes, for the delivery command
 	done, detached                bool
 	outcome                       run.Outcome
 	err                           error
@@ -88,6 +87,7 @@ type Model struct {
 	clone            string     // the run's clone, where the gate after Delivery is asked
 	gateSteps        []gateStep // the gate's steps, once the run delivered and the gate shows a run
 	gateLive         bool       // the gate goes on after the run's end, so the screen's clock keeps ticking
+	asking           bool       // the screen asks no-mistakes for the gate, from Delivery's start until it ends
 	typing, aborting bool       // the footer takes a line for the gate, or asks to confirm its abort
 	fixSelected      bool
 	answered         []string
@@ -218,10 +218,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
-		select {
-		case m.keys <- run.Input{Size: &[2]int{msg.Width, msg.Height}}:
-		default: // ponytail: a size dropped while the queue is full; the next one gets through
-		}
 	case tea.KeyMsg:
 		if cmd, ok := m.gateKey(msg); ok {
 			return m, cmd
@@ -239,18 +235,45 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, next()
 		}
 	case run.Frame:
-		m.apply(msg)
+		return m, m.frame(msg)
 	case ended:
-		m.end(msg.o, msg.err)
-		// The run ended, or attach failed: Show leaves the last screen on the terminal, unless the gate goes on.
-		return m, m.ask(gate{ok: m.gateLive}, 0)
+		return m, m.runEnded(msg)
 	case gateAnswer:
 		m.answered = append(m.answered, string(msg))
 	case gate:
-		m.gate(msg)
-		return m, m.ask(msg, time.Second)
+		return m, m.gateShown(msg)
 	}
 	return m, nil
+}
+
+// frame applies f and, from Delivery's start, asks for the gate: it shows in the pipeline while the delivery
+// command runs below the screen.
+func (m *Model) frame(f run.Frame) tea.Cmd {
+	m.apply(f)
+	if d := m.current("delivery"); m.asking || m.clone == "" || d == nil || d.state != "running" {
+		return nil
+	}
+	m.asking = true
+	return m.ask(gate{ok: true}, 0)
+}
+
+// runEnded ends the run, or attach failed: Show leaves the last screen on the terminal, unless the gate goes on.
+func (m *Model) runEnded(e ended) tea.Cmd {
+	m.end(e.o, e.err)
+	if m.asking && m.gateLive {
+		return nil // the gate is asked already
+	}
+	return m.ask(gate{ok: m.gateLive}, 0)
+}
+
+// gateShown shows g and asks again; while the run goes on, a gate with no run yet is Delivery starting it.
+func (m *Model) gateShown(g gate) tea.Cmd {
+	if !g.ok && !m.done {
+		return m.ask(gate{ok: true}, time.Second)
+	}
+	m.gate(g)
+	m.asking = !g.over
+	return m.ask(g, time.Second)
 }
 
 // key scrolls the focused box, or, on tab, focuses the next, or, on t, folds or unfolds every tool call,

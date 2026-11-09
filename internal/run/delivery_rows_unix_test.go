@@ -16,20 +16,22 @@ import (
 	"github.com/creack/pty"
 )
 
-func TestDeliveryCommandOutputIsNotDuplicatedOnTerminal(t *testing.T) {
-	repo(t, t.TempDir(), atmSet(atmYAML, "delivery", "test -t 1 && echo delivery-output-once"))
-	r := &bgRun{ttys: 1, size: [2]int{60, 40}, more: make(chan struct{})}
-	terminal := &screen{s: &server{}, r: r}
+// The delivery command runs below the screen, never on a terminal: its output reaches the screen once, as lines.
+func TestDeliveryCommandRunsBelowTheScreen(t *testing.T) {
+	repo(t, t.TempDir(), atmSet(atmYAML, "delivery", "test -t 1 || echo delivery-below-the-screen"))
+	r := &bgRun{more: make(chan struct{})}
 	var w watched
-	if err := Run("t", []string{issueFile(t, issue)}, &w, terminal); err != nil {
+	if err := Run("t", []string{issueFile(t, issue)}, &w, &screen{s: &server{}, r: r}); err != nil {
 		t.Fatal(err)
 	}
-	var raw bytes.Buffer
+	var lines []string
 	for _, f := range r.frames {
-		raw.Write(f.Raw)
+		if f.Line != nil {
+			lines = append(lines, *f.Line)
+		}
 	}
-	if strings.Count(raw.String(), "delivery-output-once") != 1 {
-		t.Fatalf("attached terminal output = %q, want one copy", raw.String())
+	if n := strings.Count(strings.Join(lines, "\n"), "delivery-below-the-screen"); n != 1 {
+		t.Fatalf("screen lines = %q, want the delivery's output once", lines)
 	}
 	for _, ev := range w.live {
 		if ev["check"] == "command" && ev["output"] != nil {
@@ -59,7 +61,7 @@ func TestDeliveryRowsThroughRealBinaryAndColdAttach(t *testing.T) {
 	}
 	label := strings.TrimSpace(string(out))
 	var emitted bytes.Buffer
-	end, err := Follow(top, label, nil, nil, func(f Frame) {
+	end, err := Follow(top, label, nil, func(f Frame) {
 		if len(f.Event) > 0 {
 			emitted.Write(f.Event)
 			emitted.WriteByte('\n')

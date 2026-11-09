@@ -317,13 +317,12 @@ func deliver(r *verdict, root, clone, sha, base, line string, i Issue, screen io
 		if i.Number != 0 {
 			issue = strconv.Itoa(i.Number)
 		}
-		t, _ := screen.(terminal)
 		var tail string
-		// Delivery owns the attached terminal. Its row carries state and time only:
-		// emitting the command's output in a nested check event would duplicate it.
+		// The screen keeps the terminal: the command runs below it, its output on the Delivery row's own lines.
+		// Its sub-row carries state and time only: emitting the output in a nested check event would duplicate it.
 		r.live(map[string]any{"check": "command", "state": "started"})
 		took := timed(func() {
-			tail, err = tee(ctx, t, io.MultiWriter(f, screen), clone, line, "ATM_TITLE="+i.Title, "ATM_ISSUE="+issue,
+			tail, err = tee(ctx, io.MultiWriter(f, screen), clone, line, "ATM_TITLE="+i.Title, "ATM_ISSUE="+issue,
 				"ATM_ISSUE_TEXT="+i.Text, "ATM_INTENT="+intent(i.Text, tombs), "ATM_BRANCH="+branch,
 				"ATM_CLONE="+clone, "ATM_REPORT="+r.path, "ATM_PONYTAIL="+cuts)
 		})

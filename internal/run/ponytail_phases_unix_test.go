@@ -79,7 +79,7 @@ func TestRealScreenPreservesSpecificSlopRejection(t *testing.T) {
 		t.Fatalf("want one run, got %+v, %v", runs, err)
 	}
 	var verdicts []ruling
-	_, err = Follow(top, runs[0].Run, nil, nil, func(f Frame) {
+	_, err = Follow(top, runs[0].Run, nil, func(f Frame) {
 		var ev struct {
 			Step, State string
 			Verdicts    []ruling

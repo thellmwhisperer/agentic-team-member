@@ -30,7 +30,7 @@ func checks(clone, runDir, sha, base, test string, issue *string, missingReport 
 		Command: func(name, line string, env ...string) (cmdResult, error) {
 			var tail string
 			s, err := row(live, name, func() (err error) {
-				tail, _, err = teeRun(context.Background(), nil, io.Discard, clone, line, 0, env...)
+				tail, _, err = teeRun(context.Background(), io.Discard, clone, line, 0, env...)
 				return err
 			})
 			return cmdResult{name, line, outcome(err), tail, s}, wrap(err, name)
@@ -398,23 +398,17 @@ func sh(dir, line string, env ...string) (tail string, err error) {
 func shOutput(dir, line string, limit time.Duration, env ...string) (tail, output string, err error) {
 	ctx, cancel := context.WithTimeout(context.Background(), limit)
 	defer cancel()
-	return teeRun(ctx, nil, io.Discard, dir, line, limit, env...)
-}
-
-// terminal is the run's screen when a terminal can be attached to it: run runs cmd on the attached one, if
-// one is, and says whether it did.
-type terminal interface {
-	run(cmd *exec.Cmd) (bool, error)
+	return teeRun(ctx, io.Discard, dir, line, limit, env...)
 }
 
 // tee is sh killed when ctx ends rather than past timeout, its output copied to w as it comes and, a line at a
-// time, to the screen of the run in dir. It runs on t's terminal when one is attached.
-func tee(ctx context.Context, t terminal, w io.Writer, dir, line string, env ...string) (tail string, err error) {
-	tail, _, err = teeRun(ctx, t, w, dir, line, timeout, env...)
+// time, to the screen of the run in dir.
+func tee(ctx context.Context, w io.Writer, dir, line string, env ...string) (tail string, err error) {
+	tail, _, err = teeRun(ctx, w, dir, line, timeout, env...)
 	return tail, err
 }
 
-func teeRun(ctx context.Context, t terminal, w io.Writer, dir, line string, limit time.Duration,
+func teeRun(ctx context.Context, w io.Writer, dir, line string, limit time.Duration,
 	env ...string) (tail, output string, err error) {
 	cmd := exec.CommandContext(ctx, "sh", "-c", line)
 	var out bytes.Buffer
@@ -428,18 +422,12 @@ func teeRun(ctx context.Context, t terminal, w io.Writer, dir, line string, limi
 		return "", "", err
 	}
 	defer closeGroup()
-	ran := false
-	if t != nil {
-		ran, err = t.run(cmd)
-	}
-	if !ran {
-		if err = cmd.Start(); err == nil {
-			if err = attach(); err != nil {
-				_ = cmd.Cancel()
-				err = errors.Join(err, cmd.Wait())
-			} else {
-				err = cmd.Wait()
-			}
+	if err = cmd.Start(); err == nil {
+		if err = attach(); err != nil {
+			_ = cmd.Cancel()
+			err = errors.Join(err, cmd.Wait())
+		} else {
+			err = cmd.Wait()
 		}
 	}
 	log.flush()

@@ -223,7 +223,7 @@ func assertDeliveryAttemptHistory(t *testing.T, top, label string, before, after
 func deliveryAttemptEvents(t *testing.T, top, label string) []partResult {
 	t.Helper()
 	var emitted []partResult
-	end, err := Follow(top, label, nil, nil, func(f Frame) {
+	end, err := Follow(top, label, nil, func(f Frame) {
 		if len(f.Event) == 0 {
 			return
 		}
