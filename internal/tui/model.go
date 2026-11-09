@@ -88,6 +88,7 @@ type Model struct {
 	gateSteps        []gateStep // the gate's steps, once the gate shows a run
 	gateLive         bool       // the gate goes on after the run's end, so the screen's clock keeps ticking
 	asking           bool       // the screen asks no-mistakes for the gate, until a gate over after the run's end
+	gateAnswered     bool       // no-mistakes has answered the screen's first question about the gate
 	typing, aborting bool       // the footer takes a line for the gate, or asks to confirm its abort
 	fixSelected      bool
 	answered         []string
@@ -279,6 +280,7 @@ func (m *Model) runEnded(e ended) tea.Cmd {
 // gateShown shows answer g and asks again after a second, unless g, asked after the run's end, shows a gate over,
 // which stops asking, or no gate run when none ever showed, which quits.
 func (m *Model) gateShown(g gate) tea.Cmd {
+	m.gateAnswered = true
 	if g.ok {
 		m.gate(g)
 		if g.over && g.afterEnd {
@@ -427,8 +429,13 @@ func (m *Model) apply(f run.Frame) {
 	}
 }
 
+// appendOutput adds a line of a node's output to the Log box; the delivery command's stays in the run's log, off
+// the screen.
 func (m *Model) appendOutput(e event) {
-	line := &logLine{step: e.Step, check: e.Check, text: ansi.Strip(*e.Output)}
+	if e.Step == "delivery" {
+		return
+	}
+	line :=&logLine{step: e.Step, check: e.Check, text: ansi.Strip(*e.Output)}
 	if len(m.output) > 0 {
 		previous := m.output[len(m.output)-1]
 		if previous.step == line.step && previous.check == line.check {
