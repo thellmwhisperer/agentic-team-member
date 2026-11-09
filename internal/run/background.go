@@ -538,7 +538,7 @@ func history(root string) ([]*bgRun, error) {
 	var runs []*bgRun
 	for _, o := range all {
 		if o.Waits() {
-			o.Outcome = "failed"
+			o.Outcome, o.Ended = "failed", modified
 			o.Reason = "the background process ended while the run waited for an answer"
 			_, recovery, _ := strings.Cut(o.NextStep, "; recovery: ")
 			o.NextStep = cmp.Or(recovery, "run it again: atm run "+o.Issue)

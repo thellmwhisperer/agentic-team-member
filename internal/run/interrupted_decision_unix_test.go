@@ -5,7 +5,11 @@ package run
 import (
 	"os/exec"
 	"strings"
+	"syscall"
 	"testing"
+
+	"github.com/charmbracelet/x/ansi"
+	"github.com/creack/pty"
 )
 
 func TestRealAttachEndsAfterDecisionServerDies(t *testing.T) {
@@ -28,22 +32,30 @@ func TestRealAttachEndsAfterDecisionServerDies(t *testing.T) {
 			if strings.Contains(waiting.NextStep, "recovery:") != resumable {
 				t.Fatalf("wrong recovery at decision: %+v", waiting)
 			}
+			t.Setenv("TERM", "xterm-256color")
+			t.Setenv("NO_COLOR", "")
+			open := &screenRead{f: startFollow(t, bin, top, true, "attach", label)}
+			open.until(func(s string) bool {
+				return strings.Contains(s, "⏸ waiting") && strings.Contains(s, "approve|fix|stop")
+			})
 			killServeProcesses(t, top)
 			waitForDeadServer(t, top)
 			recovered := followUpsServer(t, top)
-			t.Setenv("TERM", "xterm-256color")
-			t.Setenv("NO_COLOR", "")
 			shown := decisionTerminal(t, startFollow(t, recovered, top, true, "attach", label), 1)
 			const reason = "the background process ended while the run waited for an answer"
 			if !strings.Contains(shown, "the background process ended") || strings.Contains(shown, "approve|fix|stop") {
 				t.Fatalf("interrupted decision still waits:\n%s", shown)
+			}
+			shown = decisionTerminal(t, open.f, 1)
+			if strings.Count(shown, "the background process ended") != 1 || strings.Contains(shown, "approve|fix|stop") {
+				t.Fatalf("open screen kept the interrupted decision:\n%s", shown)
 			}
 			want := "run it again: atm run " + issue
 			if resumable {
 				want = "atm run --resume " + label
 			}
 			runs, err := Runs(top)
-			if err != nil || len(runs) != 1 || runs[0].Outcome != "failed" || runs[0].Waits() ||
+			if err != nil || len(runs) != 1 || runs[0].Outcome != "failed" || runs[0].Waits() || runs[0].Ended.IsZero() ||
 				runs[0].Reason != reason || runs[0].NextStep != want {
 				t.Fatalf("interrupted outcome: %+v, %v", runs, err)
 			}
@@ -54,5 +66,47 @@ func TestRealAttachEndsAfterDecisionServerDies(t *testing.T) {
 				t.Fatalf("atm runs recovery: %v\n%s", err, out)
 			}
 		})
+	}
+}
+
+func TestRealAttachClearsInterruptedDeliveryDecision(t *testing.T) {
+	bin := builtATM(t)
+	gateFake(t)
+	top := gitT(t, repo(t, "local", atmSet(atmYAML, "delivery", "exit 1")), "rev-parse", "--show-toplevel")
+	stopServing(t, top)
+	_, label := question(t, bin, top, "", 4, "run", "--follow", issueFile(t, issue))
+	t.Setenv("TERM", "xterm-256color")
+	t.Setenv("NO_COLOR", "")
+	sc := &screenRead{f: startFollow(t, bin, top, true, "attach", label)}
+	sc.until(func(s string) bool {
+		return strings.Contains(s, "⏸ waiting") && strings.Contains(s, "approve|fix|stop") && strings.Contains(s, "╭─ Gate")
+	})
+	killServeProcesses(t, top)
+	waitForDeadServer(t, top)
+	followUpsServer(t, top)
+	sc.until(func(s string) bool {
+		return strings.Contains(s, "✗ failed") && strings.Contains(s, "the background process ended")
+	})
+	for _, cols := range []uint16{80, 100} {
+		if err := pty.Setsize(sc.f.term, &pty.Winsize{Rows: 36, Cols: cols}); err != nil {
+			t.Fatal(err)
+		}
+		if err := sc.f.cmd.Process.Signal(syscall.SIGWINCH); err != nil {
+			t.Fatal(err)
+		}
+		sc.until(func(s string) bool {
+			header, _, _ := strings.Cut(s, "\n")
+			return ansi.StringWidth(header) == int(cols) && strings.Contains(s, "✗ failed") &&
+				strings.Contains(s, "the background process ended") && strings.Contains(s, "╭─ Gate") &&
+				!strings.Contains(s, "approve|fix|stop")
+		})
+	}
+	if _, err := sc.f.term.Write([]byte("q")); err != nil {
+		t.Fatal(err)
+	}
+	shown := decisionTerminal(t, sc.f, 4)
+	if !strings.Contains(shown, "the background process ended") || strings.Contains(shown, "approve|fix|stop") ||
+		!strings.Contains(shown, "╭─ Gate") {
+		t.Fatalf("final screen lost the interruption or the gate:\n%s", shown)
 	}
 }

@@ -125,7 +125,7 @@ func (m *Model) rightMinimum(width int) int {
 		return minimumBoxRows
 	}
 	top := 0
-	if len(m.findings) > 0 && (m.gateSteps == nil || m.hasDecision()) {
+	if len(m.findings) > 0 && (m.gateSteps == nil || m.showRunFindings()) {
 		_, rows := m.findingsRows(width)
 		top = len(rows) + boxBorderRows
 	}
@@ -327,7 +327,7 @@ func (m *Model) sidebar() bool {
 func (m *Model) right(width, height int) string {
 	m.logBounds, m.findingsBounds = bounds{}, bounds{}
 	top := ""
-	if m.gateSteps != nil && !m.hasDecision() {
+	if m.gateSteps != nil && !m.showRunFindings() {
 		return m.gateBox(width, max(1, height-boxBorderRows))
 	}
 	if m.gateSteps == nil && m.agentVisible() {
