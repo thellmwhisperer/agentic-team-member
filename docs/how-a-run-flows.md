@@ -193,10 +193,14 @@ failure in any of these steps asks again. `stop` ends the run and keeps its work
 See [Resuming a failed run](configuration.md#resuming-a-failed-run) for recovery
 after `stop`. Answers are recorded before the run continues; a second answer
 to the same question is rejected.
-`atm run --follow` and an attached screen return with the failed step's exit
-code at the question: 1 for Agent or Checks, 2 for the slop detector and 4 for
-Delivery. The background run remains waiting. `atm attach <run>` shows the
-question again or follows the continuation after an answer.
+`atm run --follow` returns with the failed step's exit code at the question:
+1 for Agent or Checks, 2 for the slop detector and 4 for Delivery. The
+background run remains waiting. An attached screen stays open at the question
+and follows the continuation after an answer; see [the screen](#the-screen).
+If the background process ends while the run waits, the run is recorded as
+failed with `the background process ended while the run waited for an answer`,
+and its `next_step` names `atm run --resume <run>` when it was resumable, else
+`atm run <issue>` again.
 
 The Agent and a worker fixing a failure must not commit. A Delivery command
 may commit before failing; Checks use the commit left by Delivery as the
@@ -561,8 +565,10 @@ footer and panel gap.
 ATM keeps the terminal for its screen while the delivery command runs, however
 long it holds: the command runs below the screen, never on a terminal, and its
 output goes to the Log box until the gate shows.
-While the run waits for its launcher's answer to a decision it is not over: the screen stays, and once
-the answer comes it follows the run again from where it was.
+While the run waits for its launcher's answer to a decision it is not over: the screen stays, its
+title shows `⏸ waiting`, and once the answer comes it follows the run again from where it was. While
+the gate shows, the pending decision shows in the Findings box above the Gate box. When the run ends,
+a decision still pending leaves the screen and the failure's reason shows in its place.
 On a terminal, the screen quits at the run's end if Delivery never ran with a
 known clone. Otherwise it started querying the gate once, when Delivery first
 ran with a known clone. It keeps
