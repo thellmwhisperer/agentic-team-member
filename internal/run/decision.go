@@ -13,6 +13,7 @@ import (
 
 // Decision keeps the finding and the launcher's answer in report.json. An empty answer is pending.
 type Decision struct {
+	Node    string    `json:"node"`
 	Finding string    `json:"finding"`
 	Answer  string    `json:"answer"`
 	By      string    `json:"by"`
@@ -31,7 +32,7 @@ func (w *screen) ask(r *verdict) string {
 	w.s.Lock()
 	w.r.answer = ch
 	w.s.Unlock()
-	r.Decisions = append(r.Decisions, Decision{Finding: r.Reason})
+	r.Decisions = append(r.Decisions, Decision{Node: r.FailedNode, Finding: r.Reason})
 	d := &r.Decisions[len(r.Decisions)-1]
 	r.emit("decision", map[string]any{"state": "waiting", "run": w.r.Run,
 		"finding": d.Finding, "choices": "approve, fix, stop", "resumable": r.Resumable,
@@ -47,7 +48,7 @@ func (w *screen) ask(r *verdict) string {
 	if err == nil {
 		answer = d.Answer
 		r.emit("decision", map[string]any{"state": "answered", "answer": d.Answer, "finding": d.Finding,
-			"by": d.By, "at": d.At, "node": r.FailedNode,
+			"by": d.By, "at": d.At, "node": d.Node,
 			"message": "Answer: " + d.Answer})
 	}
 	reply.saved <- err
