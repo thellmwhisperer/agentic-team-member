@@ -12,7 +12,7 @@ import (
 
 // A delivery that holds no-mistakes until its gate ends, as axi run --wait 2h does, writing as it goes. The real
 // atm run keeps its screen all along: the pipeline shows the gate's steps below Delivery while Delivery runs, and
-// the delivery's own text never takes the terminal.
+// the delivery's own text never shows, neither on the terminal nor in a box.
 func TestRealRunKeepsItsScreenWhileDeliveryHoldsTheGate(t *testing.T) {
 	nm := gateFake(t)
 	_, sc := screenRun(t, `printf "run: running\n  review: running\n"; until [ -f "$FAKE_NM/done" ]; do sleep 0.1; `+
@@ -23,8 +23,8 @@ func TestRealRunKeepsItsScreenWhileDeliveryHoldsTheGate(t *testing.T) {
 		t.Fatalf("the screen gave the terminal away during Delivery:\n%q", sc.shown.String())
 	}
 	sc.gateEnds(nm)
-	if s := ansi.Strip(sc.shown.String()); !strings.Contains(s, "✓ Delivery") {
-		t.Fatalf("Delivery never showed passed:\n%s", s)
+	if s := ansi.Strip(sc.shown.String()); !strings.Contains(s, "✓ Delivery") || strings.Contains(s, "run: running") {
+		t.Fatalf("Delivery never showed passed, or the screen showed the delivery command's output:\n%s", s)
 	}
 	if n := strings.Count(sc.shown.String(), "\x1b[?1049l"); n != 1 {
 		t.Fatalf("the screen left the terminal %d times, want once at its close:\n%q", n, sc.shown.String())

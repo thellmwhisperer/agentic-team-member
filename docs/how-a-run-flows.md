@@ -565,7 +565,8 @@ position; a call hidden by folding anchors to its group header. Stacked under
 footer and panel gap.
 ATM keeps the terminal for its screen while the delivery command runs, however
 long it holds: the command runs below the screen, never on a terminal, and its
-output goes to the Log box until the gate shows.
+output stays in the run's log, out of the screen: the Log box shows none of it
+until the gate shows.
 While the run waits for its launcher's answer to a decision it is not over: the screen stays, its
 title shows `⏸ waiting`, and once the answer comes it follows the run again from where it was. While
 the gate shows, the pending decision shows in the Findings box above the Gate box. The decision's

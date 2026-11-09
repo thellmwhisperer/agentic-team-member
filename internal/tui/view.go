@@ -373,9 +373,12 @@ func (m *Model) findingsBox(width, height int) string {
 
 func (m *Model) running() bool { return m.runningRow() != nil }
 
-// gateHoldsDelivery says whether the gate the delivery command started goes on: the screen then shows Delivery
-// running, even when the command already ended, as no-mistakes axi run does when its hold elapses.
-func (m *Model) gateHoldsDelivery() bool { return m.gateLive && m.gateSteps != nil }
+// gateHoldsDelivery says whether the gate the delivery command started goes on, or may, while no-mistakes has not
+// yet answered the screen's first question: the screen then shows Delivery running, even when the command already
+// ended, as no-mistakes axi run does when its hold elapses.
+func (m *Model) gateHoldsDelivery() bool {
+	return m.gateLive && m.gateSteps != nil || m.asking && !m.gateAnswered
+}
 
 // runningRow is the row of the node that runs, nil when none does.
 func (m *Model) runningRow() *row {
