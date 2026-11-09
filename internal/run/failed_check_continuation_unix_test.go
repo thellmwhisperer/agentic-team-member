@@ -117,7 +117,7 @@ func TestRunAsksOnAFailedCheckOnTerminal(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	bin := followUpsServer(t, top)
 	for _, args := range [][]string{{"run", issueFile(t, issue)}, {"attach", "issue-1"}} {
-		shown := decisionTerminal(t, startFollow(t, bin, top, true, args...), 1)
+		shown := leftAtDecision(t, startFollow(t, bin, top, true, args...))
 		for _, want := range []string{"Decision", "failed-check-finding", "Answer: atm answer issue-1", "approve|fix|stop"} {
 			if !strings.Contains(shown, want) {
 				t.Fatalf("%s omitted %q:\n%s", args[0], want, shown)
@@ -133,6 +133,27 @@ func TestRunAsksOnAFailedCheckOnTerminal(t *testing.T) {
 	if strings.Contains(shown, "Decision") || strings.Contains(shown, "approve|fix|stop") {
 		t.Fatalf("answered question still asks for an answer:\n%s", shown)
 	}
+}
+
+// leftAtDecision is the screen f leaves on its terminal once it shows the run waiting for an answer, which keeps
+// the screen open, and q detaches from it.
+func leftAtDecision(t *testing.T, f *followed) string {
+	t.Helper()
+	sc := &screenRead{f: f}
+	sc.until(func(s string) bool { return strings.Contains(s, "approve|fix|stop") })
+	sc.during(time.Second) // a screen that ends at the run's wait would end now
+	if _, err := f.term.Write([]byte("q")); err != nil {
+		t.Fatal(err)
+	}
+	for l := range f.lines {
+		sc.shown.WriteString(l + "\n")
+	}
+	_ = f.cmd.Wait()
+	_, final, _ := strings.Cut(sc.shown.String(), "\x1b[?1049l")
+	if code := f.cmd.ProcessState.ExitCode(); code != 0 || !strings.Contains(final, "the run goes on") {
+		t.Fatalf("the screen ended at the run's wait for an answer, exit %d:\n%s", code, ansi.Strip(sc.shown.String()))
+	}
+	return ansi.Strip(final)
 }
 
 func decisionTerminal(t *testing.T, f *followed, code int) string {

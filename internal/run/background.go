@@ -59,6 +59,9 @@ func (o Outcome) AgentLabel() string {
 	return o.Agent.Harness + " " + cmp.Or(o.Agent.Model, "default")
 }
 
+// Waits says whether the run waits for its launcher's answer to a decision: it goes on once answered.
+func (o Outcome) Waits() bool { return strings.HasPrefix(o.NextStep, "atm answer ") }
+
 // ServeLabel is that version, or - when the run was recorded before it.
 func (o Outcome) ServeLabel() string { return cmp.Or(o.Serve, "-") }
 
@@ -81,6 +84,7 @@ type request struct {
 	Cmd     string   `json:"cmd"` // run, attach or runs
 	Args    []string `json:"args,omitempty"`
 	Run     string   `json:"run,omitempty"`
+	From    int      `json:"from,omitempty"` // attach: the first frame to send, after those a screen already has
 }
 
 // Frame is a piece of a run's screen.
@@ -419,7 +423,10 @@ func (s *server) attach(req request, enc *json.Encoder) {
 		_ = enc.Encode(reply{Error: msg})
 		return
 	}
-	for i := 0; ; {
+	s.Lock()
+	i := min(max(req.From, 0), len(r.frames))
+	s.Unlock()
+	for {
 		s.Lock()
 		frames, more, o := r.frames[i:], r.more, r.Outcome
 		s.Unlock()
@@ -645,8 +652,13 @@ func Attach(root, label string, w io.Writer) (Outcome, error) {
 // Follow hands fn each frame of the screen of run label, as Attach, until it ends or leave closes, and returns
 // how it ended.
 func Follow(root, label string, leave <-chan struct{}, fn func(Frame)) (Outcome, error) {
+	return FollowFrom(root, label, 0, leave, fn)
+}
+
+// FollowFrom is Follow from frame from on, for a screen that already has the frames before it.
+func FollowFrom(root, label string, from int, leave <-chan struct{}, fn func(Frame)) (Outcome, error) {
 	var o Outcome
-	err := call(root, request{Cmd: "attach", Run: label}, leave, func(r reply) {
+	err := call(root, request{Cmd: "attach", Run: label, From: from}, leave, func(r reply) {
 		if r.Line != nil || r.Event != nil {
 			fn(r.Frame)
 		}

@@ -140,10 +140,13 @@ Set `delivery` to the shell command that handles the branch, or leave it empty
 to skip delivery. `atm init` sets it to `sh scripts/deliver.sh` and writes
 [that script](../scripts/deliver.sh), which this repository uses too: it runs
 `no-mistakes init` in the clone, then
-`exec no-mistakes axi run --intent "$ATM_INTENT"` to launch the
+`exec no-mistakes axi run --intent "$ATM_INTENT" --wait 24h` to launch the
 [no-mistakes](https://github.com/kunchenguid/no-mistakes) gate. Delivery passes
-when that command returns at the gate's first stop; the screen then paints the
-gate.
+when that command returns at the gate's first stop or at its end; the screen
+paints the gate from Delivery's start. Without `--wait`, `axi run` returns with
+exit 1 once its 8 minute hold elapses while the gate goes on, and the run takes
+Delivery as failed. While a gate goes on, the screen shows Delivery running
+whatever its command's exit said.
 
 A project's delivery only launches the no-mistakes run with `no-mistakes axi run`;
 ATM reads and paints the gate in its own screen. A delivery that runs

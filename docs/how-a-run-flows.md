@@ -561,9 +561,11 @@ footer and panel gap.
 ATM keeps the terminal for its screen while the delivery command runs, however
 long it holds: the command runs below the screen, never on a terminal, and its
 output goes to the Log box until the gate shows.
-On a terminal, the screen quits at the run's end if it never reached Delivery.
-Otherwise it starts querying the gate once, when Delivery first runs with a
-known clone, or at the run's end if it has not started querying yet. It keeps
+While the run waits for its launcher's answer to a decision it is not over: the screen stays, and once
+the answer comes it follows the run again from where it was.
+On a terminal, the screen quits at the run's end if Delivery never ran with a
+known clone. Otherwise it started querying the gate once, when Delivery first
+ran with a known clone. It keeps
 querying every second, even if no gate run is found or a query fails, and before
 the ATM run ends even if the gate ended; it stops querying once a query asked
 after the ATM run ended finds the gate over. It closes on its own only if a query

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"golang.org/x/term"
@@ -13,7 +14,7 @@ import (
 	"github.com/thellmwhisperer/agentic-team-member/internal/run"
 )
 
-var follow = run.Follow // tests follow a run of their own
+var follow = run.FollowFrom // tests follow a run of their own
 
 // Show shows the screen of run label, of the repository at root, on the terminal in and out until the user
 // closes it or the run ends; after passed Delivery with a gate, until the user closes it, also once the gate
@@ -48,8 +49,20 @@ func Show(root, label string, in, out *os.File) (o run.Outcome, detached bool, e
 	leave, done := make(chan struct{}), make(chan struct{})
 	go func() {
 		defer close(done)
-		o, err := follow(root, label, leave, func(f run.Frame) { p.Send(f) })
-		p.Send(ended{o, err})
+		// A run that waits for its launcher's answer is not over: the screen follows it again, from the frame
+		// after the last it has, once a second, until it goes on or ends.
+		for seen := 0; ; {
+			o, err := follow(root, label, seen, leave, func(f run.Frame) { seen++; p.Send(f) })
+			if err != nil || !o.Waits() {
+				p.Send(ended{o, err})
+				return
+			}
+			select {
+			case <-leave:
+				return
+			case <-time.After(time.Second):
+			}
+		}
 	}()
 	_, err = p.Run()
 	close(leave)
