@@ -8,6 +8,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 	"golang.org/x/term"
 
 	"github.com/thellmwhisperer/agentic-team-member/internal/config"
@@ -65,7 +66,11 @@ func Show(root, label string, in, out *os.File) (o run.Outcome, detached bool, e
 			}
 		}
 	}()
+	// A terminal can give a grapheme more columns than the renderer does. Do not let
+	// its automatic wrap move later rows and leave an earlier footer on screen.
+	_, _ = fmt.Fprint(out, ansi.ResetAutoWrapMode)
 	_, err = p.Run()
+	_, _ = fmt.Fprint(out, ansi.SetAutoWrapMode)
 	close(leave)
 	<-done
 	if err != nil {
