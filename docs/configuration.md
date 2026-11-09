@@ -186,7 +186,7 @@ Run repository commands from inside the repository they work on.
 | `atm run [flags] <issue>` | Starts a run. On a terminal it shows [the screen](how-a-run-flows.md#the-screen), then exits with the run's code; off one it prints the run's label and returns. See [resuming a failed run](#resuming-a-failed-run) |
 | `atm status [--json]` | Each run going; text shows label, step, duration, agent and issue, or `nothing runs` |
 | `atm attach [run]` | The last run going by default; see [the screen](how-a-run-flows.md#the-screen) |
-| `atm runs [--json]` | Retained runs; text shows label, `running`, `passed` or `failed at <step>`, duration, agent, issue, report when present, and `serve` last |
+| `atm runs [--json]` | Retained runs; text shows label, `running`, `passed` or `failed at <step>`, duration, agent, issue, next step and report when present, and `serve` last |
 | `atm axi run [--json] [flags] <issue>` | Waits for the run to end, prints its outcome and exits with its code |
 | `atm axi status [--json]`, `atm axi runs [--json]` | The runs going, or retained runs, as a table |
 | `atm axi plan [--json] [--follow] <plan.json>` | Which tickets of a plan can launch now; see [following a plan](#following-a-plan) |

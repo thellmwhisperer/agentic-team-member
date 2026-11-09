@@ -78,10 +78,10 @@ func (m *Model) View() string {
 		m.historyHeight = 0
 		panels := []string{atmBox}
 		if rightBox := m.right(width, rightHeight); rightBox != "" {
-			m.historyBounds.y = lipgloss.Height(atmBox)
+			m.historyBounds.y = lipgloss.Height(atmBox) + m.findingsBounds.height
 			m.historyBounds.height = m.historyHeight
-			m.findingsBounds.y, m.findingsBounds.width = m.historyBounds.y, width
-			m.logBounds.y, m.logBounds.width = m.historyBounds.y+lipgloss.Height(rightBox)-m.logBounds.height, width
+			m.findingsBounds.y, m.findingsBounds.width = lipgloss.Height(atmBox), width
+			m.logBounds.y, m.logBounds.width = lipgloss.Height(atmBox)+lipgloss.Height(rightBox)-m.logBounds.height, width
 			panels = append(panels, rightBox)
 		}
 		return strings.Join(panels, "\n") + m.footer()
@@ -94,6 +94,7 @@ func (m *Model) View() string {
 	leftBox := m.atm(left, available)
 	rightBox := m.right(rightWidth, available)
 	m.pipelineBounds.height = lipgloss.Height(leftBox)
+	m.historyBounds.y = m.findingsBounds.height
 	m.historyBounds.height = m.historyHeight
 	m.findingsBounds.x, m.findingsBounds.width = left+gap, rightWidth
 	m.logBounds.x, m.logBounds.y, m.logBounds.width = left+gap, lipgloss.Height(rightBox)-m.logBounds.height, rightWidth
@@ -117,18 +118,18 @@ func stackedHeights(available, rightMinimum int) (int, int) {
 }
 
 func (m *Model) rightMinimum(width int) int {
-	if m.agentVisible() {
+	if m.gateSteps == nil && m.agentVisible() {
 		if len(m.output) > 0 || !m.agentRuns() && m.running() {
 			return minimumBoxRows * 2
 		}
 		return minimumBoxRows
 	}
 	top := 0
-	if len(m.findings) > 0 {
+	if len(m.findings) > 0 && (m.gateSteps == nil || m.hasDecision()) {
 		_, rows := m.findingsRows(width)
 		top = len(rows) + boxBorderRows
 	}
-	if m.running() {
+	if m.running() || m.gateSteps != nil {
 		return top + minimumBoxRows
 	}
 	return top
@@ -326,10 +327,10 @@ func (m *Model) sidebar() bool {
 func (m *Model) right(width, height int) string {
 	m.logBounds, m.findingsBounds = bounds{}, bounds{}
 	top := ""
-	if m.gateSteps != nil {
+	if m.gateSteps != nil && !m.hasDecision() {
 		return m.gateBox(width, max(1, height-boxBorderRows))
 	}
-	if m.agentVisible() {
+	if m.gateSteps == nil && m.agentVisible() {
 		if len(m.output) > 0 || !m.agentRuns() && m.running() {
 			logHeight := min(height/3-boxBorderRows, height-minimumBoxRows-boxBorderRows)
 			if !m.agentRuns() {
@@ -343,25 +344,31 @@ func (m *Model) right(width, height int) string {
 	}
 	if len(m.findings) > 0 {
 		limit := height
-		if m.running() {
+		if m.running() || m.gateSteps != nil {
 			limit -= minimumBoxRows
 		}
-		title, rows := m.findingsRows(width)
-		if m.focused() == &m.findingsPane {
-			title += "*"
-		}
-		top = box(title, strings.Join(m.findingsPane.show(rows, max(1, limit-boxBorderRows)), "\n"),
-			width, m.border(&m.findingsPane))
-		m.findingsBounds.height = lipgloss.Height(top)
+		top = m.findingsBox(width, max(1, limit-boxBorderRows))
 	}
 	var boxes []string
 	if top != "" {
 		boxes = append(boxes, top)
 	}
-	if m.running() {
+	if m.gateSteps != nil {
+		boxes = append(boxes, m.gateBox(width, max(1, height-lipgloss.Height(top)-boxBorderRows)))
+	} else if m.running() {
 		boxes = append(boxes, m.logBox(width, max(1, height-lipgloss.Height(top)-boxBorderRows)))
 	}
 	return strings.Join(boxes, "\n")
+}
+
+func (m *Model) findingsBox(width, height int) string {
+	title, rows := m.findingsRows(width)
+	if m.focused() == &m.findingsPane {
+		title += "*"
+	}
+	result := box(title, strings.Join(m.findingsPane.show(rows, height), "\n"), width, m.border(&m.findingsPane))
+	m.findingsBounds.height = lipgloss.Height(result)
+	return result
 }
 
 func (m *Model) running() bool { return m.runningRow() != nil }

@@ -181,7 +181,7 @@ func (m *Model) panes() []*pane {
 	if m.agentVisible() || m.gateSteps != nil {
 		shown = append(shown, &m.history)
 	}
-	if m.gateSteps == nil && !m.agentRuns() && len(m.findings) > 0 {
+	if m.hasDecision() || m.gateSteps == nil && !m.agentRuns() && len(m.findings) > 0 {
 		shown = append(shown, &m.findingsPane)
 	}
 	if m.gateSteps == nil && (m.agentRuns() && len(m.output) > 0 || !m.agentRuns() && m.running()) {
@@ -222,7 +222,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmd, ok := m.gateKey(msg); ok {
 			return m, cmd
 		}
-		if s := msg.String(); s == "q" || s == "ctrl+c" {
+		if slices.Contains([]string{"q", "ctrl+c"}, msg.String()) {
 			m.detached = !m.done
 			return m, tea.Quit
 		}
@@ -233,6 +233,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.tick(msg)
 	case run.Frame:
 		return m, m.frame(msg)
+	case run.Outcome:
+		m.state = "waiting"
 	case ended:
 		return m, m.runEnded(msg)
 	case gateAnswer:
@@ -441,6 +443,10 @@ func (m *Model) decision(e event) {
 	if e.State == "waiting" {
 		m.findings = append(m.findings, finding{"warning", "Decision", e.Message})
 	}
+}
+
+func (m *Model) hasDecision() bool {
+	return slices.ContainsFunc(m.findings, func(f finding) bool { return f.ref == "Decision" })
 }
 
 // settings names agent a, when the event carries it, in the Agent box's title.
