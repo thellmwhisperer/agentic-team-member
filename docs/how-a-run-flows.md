@@ -473,7 +473,8 @@ Once a run ends with Delivery passed, the screen goes on with the gate: it
 asks `no-mistakes axi status`, in the run's clone, for the run of the
 delivered branch, and `no-mistakes axi logs --step <step> --full` for each step it started,
 every second. The gate's steps get rows below Delivery in the ATM box, each
-with its `duration_ms` as a duration once it is above 0, and
+with its `duration_ms` as a duration once it is above 0; a running step's
+spinner turns and its duration counts on between polls, as ATM's steps do, and
 the Gate box in the right column has a header row per started step, its log
 rendered as the Agent box renders Markdown, folded to its first line like
 thinking, and one line per finding: ID, severity, file and description. Agent
