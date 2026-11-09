@@ -8,12 +8,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
-
-	"github.com/charmbracelet/x/ansi"
-	"github.com/creack/pty"
 )
 
 // A delivery command that ends with exit 1 while its gate goes on, as no-mistakes axi run does once its default
@@ -28,32 +24,17 @@ func TestRealRunScreenKeepsDeliveryRunningWhileItsGateGoesOn(t *testing.T) {
 	delivering := regexp.MustCompile(`Delivery  \d+\.\d s +running`)
 	sc.until(func(s string) bool { return delivering.MatchString(s) && strings.Contains(s, "review") })
 	runs := waitingRuns(t, top)
-	sc.until(func(s string) bool {
-		return strings.Contains(s, "⏸ waiting") && strings.Contains(s, "atm answer") &&
-			strings.Contains(s, "approve|fix|stop") && strings.Contains(s, "╭─ Gate")
-	})
+	sc.until(func(s string) bool { return waitsForAnswer(s) && strings.Contains(s, "╭─ Gate") })
 	sc.during(2 * time.Second) // the screen draws the run's wait for its answer
-	failed := regexp.MustCompile(`Delivery  \d+\.\d s +failed`)
-	if s := sc.last(); strings.Contains(s, "✗ Delivery") || failed.MatchString(s) {
-		t.Fatalf("Delivery showed failed while its gate goes on:\n%s", s)
-	}
+	sc.deliveryNotFailed()
 	if _, err := sc.f.term.Write([]byte("\t")); err != nil {
 		t.Fatal(err)
 	}
 	focused := regexp.MustCompile(`Findings[^\n]*\*`)
 	sc.until(focused.MatchString)
 	for _, cols := range []uint16{80, 100} {
-		if err := pty.Setsize(sc.f.term, &pty.Winsize{Rows: 36, Cols: cols}); err != nil {
-			t.Fatal(err)
-		}
-		if err := sc.f.cmd.Process.Signal(syscall.SIGWINCH); err != nil {
-			t.Fatal(err)
-		}
-		sc.until(func(s string) bool {
-			header, _, _ := strings.Cut(s, "\n")
-			return ansi.StringWidth(header) == int(cols) && strings.Contains(s, "⏸ waiting") &&
-				strings.Contains(s, "atm answer") && strings.Contains(s, "approve|fix|stop") &&
-				strings.Index(s, "Findings") < strings.Index(s, "╭─ Gate")
+		sc.resized(cols, func(s string) bool {
+			return waitsForAnswer(s) && strings.Index(s, "Findings") < strings.Index(s, "╭─ Gate")
 		})
 	}
 	answer := exec.Command(sc.f.cmd.Path, "answer", runs[0].Run, "approve")
@@ -62,9 +43,30 @@ func TestRealRunScreenKeepsDeliveryRunningWhileItsGateGoesOn(t *testing.T) {
 		t.Fatalf("atm answer: %v\n%s", err, out)
 	}
 	sc.gateEnds(nm)
+	sc.gateNotHidden()
+}
+
+// waitsForAnswer says screen s shows the run waiting for its launcher's answer.
+func waitsForAnswer(s string) bool {
+	return strings.Contains(s, "⏸ waiting") && strings.Contains(s, "atm answer") &&
+		strings.Contains(s, "approve|fix|stop")
+}
+
+// deliveryNotFailed fails the test when the last screen shows the Delivery row failed.
+func (sc *screenRead) deliveryNotFailed() {
+	sc.f.t.Helper()
+	failed := regexp.MustCompile(`Delivery  \d+\.\d s +failed`)
+	if s := sc.last(); strings.Contains(s, "✗ Delivery") || failed.MatchString(s) {
+		sc.f.t.Fatalf("Delivery showed failed while its gate goes on:\n%s", s)
+	}
+}
+
+// gateNotHidden fails the test when the last screen still shows the answered decision instead of the Gate box.
+func (sc *screenRead) gateNotHidden() {
+	sc.f.t.Helper()
 	if s := sc.last(); strings.Contains(s, "Findings") || strings.Contains(s, "atm answer") ||
 		!strings.Contains(s, "╭─ Gate") {
-		t.Fatalf("answered decision still hides the gate:\n%s", s)
+		sc.f.t.Fatalf("answered decision still hides the gate:\n%s", s)
 	}
 }
 

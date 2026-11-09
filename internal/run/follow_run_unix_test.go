@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -320,6 +321,21 @@ func (sc *screenRead) during(d time.Duration) {
 			return
 		}
 	}
+}
+
+// resized resizes the terminal to cols columns and reads it until its header fills them and ok holds.
+func (sc *screenRead) resized(cols uint16, ok func(string) bool) {
+	sc.f.t.Helper()
+	if err := pty.Setsize(sc.f.term, &pty.Winsize{Rows: 36, Cols: cols}); err != nil {
+		sc.f.t.Fatal(err)
+	}
+	if err := sc.f.cmd.Process.Signal(syscall.SIGWINCH); err != nil {
+		sc.f.t.Fatal(err)
+	}
+	sc.until(func(s string) bool {
+		header, _, _ := strings.Cut(s, "\n")
+		return ansi.StringWidth(header) == int(cols) && ok(s)
+	})
 }
 
 // close types q on a screen that shows the run's end, and waits for atm run to exit 0 with q close shown.
