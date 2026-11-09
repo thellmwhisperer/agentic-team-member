@@ -18,9 +18,8 @@ import (
 // gate is what no-mistakes, the gate after Delivery, shows of the run of the delivered branch: its steps, and
 // whether it ended; not ok when it shows no run.
 type gate struct {
-	steps      []gateStep
-	ok, over   bool
-	generation int
+	steps              []gateStep
+	ok, over, afterEnd bool
 }
 
 // gateStep is a step of the gate: its state as the screen names it, its log and its findings.
@@ -231,20 +230,11 @@ func (r gateReport) readable() *report {
 	return &report{Summary: strings.Join(parts, "\n\n"), ChangedFiles: r.ReviewedPaths}
 }
 
-// ask asks the gate again after wait while g shows it goes on. A gate over leaves its last screen open until
-// the operator closes it with q; no gate ends the screen.
-// ponytail: one failed ask ends the screen, as a run's end does; ask again first if the gate stutters.
-func (m *Model) ask(g gate, wait time.Duration) tea.Cmd {
-	if !g.ok {
-		return tea.Quit
-	}
-	if g.over {
-		return nil
-	}
-	clone, generation := m.clone, m.gateGeneration
+func (m *Model) ask(wait time.Duration) tea.Cmd {
+	clone, afterEnd := m.clone, m.done
 	return tea.Tick(wait, func(time.Time) tea.Msg {
 		g := askGate(clone)
-		g.generation = generation
+		g.afterEnd = afterEnd
 		return g
 	})
 }

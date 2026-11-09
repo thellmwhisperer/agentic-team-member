@@ -559,11 +559,16 @@ footer and panel gap.
 ATM keeps the terminal for its screen while the delivery command runs, however
 long it holds: the command runs below the screen, never on a terminal, and its
 output goes to the Log box until the gate shows.
-On a terminal, the screen quits when the run ends unless Delivery passed and
-no-mistakes finds a gate run in the clone; then, once the gate ends, it stays
-open with every step's duration until `q` or Ctrl+C closes it. If no gate run is
-found or a query fails, it quits at once. It leaves its last view on the
-terminal. Off-terminal output returns when the ATM run ends.
+On a terminal, the screen quits at the run's end if it never reached Delivery.
+Otherwise it starts querying the gate once, when Delivery first runs with a
+known clone, or at the run's end if it has not started querying yet. It keeps
+querying every second while the screen is open, even if the gate ended, no gate
+run is found or a query fails. It closes on its own only if a query asked after
+the ATM run ended finds no gate run and no gate has ever been shown. Otherwise
+it stays open until `q` or Ctrl+C, including after a gate ends and across Delivery
+retries. Gate spinners and times advance while the last gate answer showed a
+running gate. The last view stays on the terminal. Off-terminal output returns
+when the ATM run ends.
 
 Off a terminal, or with `NO_COLOR` or `TERM=dumb`, the screen is plain lines:
 one per step start and end, then the delivery's output and the summary. Every
