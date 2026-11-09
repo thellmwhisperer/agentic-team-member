@@ -455,7 +455,10 @@ Like Checks, Delivery shows a sub-row per part that runs: `commit`, and
 elapsed time. Completed runs restore these rows from `report.json` when
 attached. The
 command row carries state and time only and does not repeat the command's
-output. The Delivery row becomes passed or failed when the command exits.
+output. The Delivery row becomes passed or failed when the command exits,
+except on the screen while the gate it launched goes on, or while the screen
+has asked no-mistakes about the gate and had no answer yet: the row then shows
+running whatever the command's exit said.
 An empty delivery command
 shows `Delivery skipped` without sub-rows.
 
