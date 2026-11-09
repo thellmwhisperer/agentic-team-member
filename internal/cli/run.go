@@ -132,7 +132,7 @@ func listCmd(going bool) *cobra.Command {
 			n++
 			report := ""
 			if !going && o.Report != "" {
-				report = "\t" + o.Report
+				report = "\t" + o.NextStep + "\t" + o.Report
 			}
 			serve := ""
 			if !going {

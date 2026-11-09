@@ -57,6 +57,7 @@ func Show(root, label string, in, out *os.File) (o run.Outcome, detached bool, e
 				p.Send(ended{o, err})
 				return
 			}
+			p.Send(o)
 			select {
 			case <-leave:
 				return

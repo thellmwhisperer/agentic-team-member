@@ -537,7 +537,12 @@ func history(root string) ([]*bgRun, error) {
 	all, modified, err := recordedRuns(root)
 	var runs []*bgRun
 	for _, o := range all {
-		if o.Ended.IsZero() {
+		if o.Waits() {
+			o.Outcome = "failed"
+			o.Reason = "the background process ended while the run waited for an answer"
+			_, recovery, _ := strings.Cut(o.NextStep, "; recovery: ")
+			o.NextStep = cmp.Or(recovery, "run it again: atm run "+o.Issue)
+		} else if o.Ended.IsZero() {
 			o.Outcome, o.FailedNode, o.Ended = "failed", o.Step, modified
 			o.Reason = "the background process ended before the run did"
 			o.NextStep = "run it again: atm run " + o.Issue
