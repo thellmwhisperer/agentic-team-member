@@ -469,8 +469,8 @@ repository-relative file path. The finding's one-line text appears below the
 reference. Long entries wrap; scroll the Findings box to read entries outside
 its visible height.
 
-Once a run ends with Delivery passed, the screen goes on with the gate: it
-asks `no-mistakes axi status`, in the run's clone, for the run of the
+From Delivery's start, and after the run ends with Delivery passed, the screen
+shows the gate: it asks `no-mistakes axi status`, in the run's clone, for the run of the
 delivered branch, and `no-mistakes axi logs --step <step> --full` for each step it started,
 every second. The gate's steps get rows below Delivery in the ATM box, each
 with its `duration_ms` as a duration once it is above 0; a running step's
@@ -556,12 +556,9 @@ last line it follows them again. Folding or unfolding preserves the reading
 position; a call hidden by folding anchors to its group header. Stacked under
 100 columns, the ATM box takes at most two thirds of the space left after the
 footer and panel gap.
-On Linux and macOS, and on Windows through WSL, ATM keeps its screen live
-while the delivery command is silent. From the command's first output until
-it ends, ATM gives it the attached terminal
-and its keys. The delivery command can draw its own screen and receive
-input there. ATM's screen comes back when the command ends, showing the
-Delivery result and duration.
+ATM keeps the terminal for its screen while the delivery command runs, however
+long it holds: the command runs below the screen, never on a terminal, and its
+output goes to the Log box until the gate shows.
 On a terminal, the screen quits when the run ends unless Delivery passed and
 no-mistakes finds a gate run in the clone; then, once the gate ends, it stays
 open with every step's duration until `q` or Ctrl+C closes it. If no gate run is
