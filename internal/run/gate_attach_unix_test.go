@@ -130,12 +130,8 @@ func TestRealAttachPaintsTheGate(t *testing.T) {
 // While a gate step runs, the real atm attach turns its spinner and counts its time on every frame, as it does
 // for ATM's steps, even when no-mistakes has nothing new to say.
 func TestRealAttachMovesTheRunningGateStepInRealTime(t *testing.T) {
-	nm, clone := gateFake(t), t.TempDir()
-	if err := os.WriteFile(filepath.Join(nm, "fixing"), nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	a := liveAttach(t, 120, 40)
-	a.delivered(clone)
+	nm := gateFake(t)
+	a := fixingAttach(t, nm, "")
 	row := regexp.MustCompile(`│ ([⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]) review  (\d+\.\d) s +running │`)
 	a.drawn(row.MatchString)
 	quiet := filepath.Join(nm, "wait-status") // no-mistakes answers no more status until the test says so
@@ -195,6 +191,31 @@ func assertGateReport(t *testing.T, a *attached) {
 	}
 	a.click(rowOf(s, "▸ Informe"))
 	a.drawn(func(s string) bool { return strings.Contains(s, "▾ Ficheros revisados (2)") })
+}
+
+// A screen attached while a gate step runs shows the time it has run, as no-mistakes counts it in active_steps,
+// not the time since the screen opened.
+func TestRealAttachShowsARunningGateStepsTimeSoFar(t *testing.T) {
+	nm := gateFake(t)
+	a := fixingAttach(t, nm, "  active_steps[1]{step,status,active_for,round_active_for,last_activity,agent_pid,round}:\n"+
+		"    review,fixing,5m3s,1m2s,\"\",\"\",fix 1/3\n")
+	a.drawn(regexp.MustCompile(`│ [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] review  5 min 0\d s +running │`).MatchString)
+	a.gateDone(nm)
+}
+
+// fixingAttach is the real atm attach of a delivered run whose gate, from nm, is fixing review; status, when not
+// empty, is added to no-mistakes' status.
+func fixingAttach(t *testing.T, nm, status string) *attached {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(nm, "fixing"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nm, "status.toon"), []byte(status), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a := liveAttach(t, 120, 40)
+	a.delivered(t.TempDir())
+	return a
 }
 
 func TestRealAttachReadsGateFixAndCheckLogs(t *testing.T) {
