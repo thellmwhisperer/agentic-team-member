@@ -133,6 +133,7 @@ func unquote(v string) string {
 
 // gate puts the gate's steps in the ATM box, below ATM's, and keeps what they emit for the right column.
 func (m *Model) gate(g gate) {
+	m.gateLive = g.ok && !g.over
 	if m.gateSteps == nil {
 		m.rows = slices.DeleteFunc(m.rows, func(r *row) bool { return strings.HasPrefix(r.step, "gate:") })
 	}
@@ -149,6 +150,11 @@ func (m *Model) gate(g gate) {
 		if r == nil {
 			r = &row{step: "gate:" + s.name, label: s.name}
 			m.rows = append(m.rows, r)
+		}
+		if s.state != "running" {
+			r.start = time.Time{}
+		} else if r.state != "running" {
+			r.start = time.Now().Add(-s.took) // A running step counts on with the screen's clock, as ATM's steps do.
 		}
 		r.state, r.took, r.hasDuration = s.state, s.took, s.took > 0
 	}

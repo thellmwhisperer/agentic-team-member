@@ -8,7 +8,9 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -105,7 +107,7 @@ func TestRealAttachPaintsTheGate(t *testing.T) {
 		t.Fatal(err)
 	}
 	fixing := a.drawn(func(s string) bool {
-		return regexp.MustCompile(`│ [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] review  1\.2 s +running │`).MatchString(s) &&
+		return regexp.MustCompile(`│ [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] review  \d+\.\d s +running │`).MatchString(s) &&
 			regexp.MustCompile(`│ ▾ [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] review +│`).MatchString(s)
 	})
 	if !strings.Contains(fixing, finding) || strings.Contains(fixing, "internal/run/run.go:") {
@@ -123,6 +125,47 @@ func TestRealAttachPaintsTheGate(t *testing.T) {
 	if !strings.HasPrefix(string(log), clone+" axi status\n") {
 		t.Fatalf("the screen did not ask no-mistakes in the run's clone:\n%s", log)
 	}
+}
+
+// While a gate step runs, the real atm attach turns its spinner and counts its time on every frame, as it does
+// for ATM's steps, even when no-mistakes has nothing new to say.
+func TestRealAttachMovesTheRunningGateStepInRealTime(t *testing.T) {
+	nm, clone := gateFake(t), t.TempDir()
+	if err := os.WriteFile(filepath.Join(nm, "fixing"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a := liveAttach(t, 120, 40)
+	a.delivered(clone)
+	row := regexp.MustCompile(`│ ([⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]) review  (\d+\.\d) s +running │`)
+	a.drawn(row.MatchString)
+	quiet := filepath.Join(nm, "wait-status") // no-mistakes answers no more status until the test says so
+	if err := syscall.Mkfifo(quiet, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	frames := map[string]bool{}
+	a.drawn(func(s string) bool {
+		m := row.FindStringSubmatch(s)
+		if m == nil {
+			return false
+		}
+		frames[m[1]] = true
+		took, _ := strconv.ParseFloat(m[2], 64)
+		return len(frames) > 3 && took >= 2.5
+	})
+	w, err := os.OpenFile(quiet, os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(quiet); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fmt.Fprintln(w); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	a.gateDone(nm)
 }
 
 func assertGateReport(t *testing.T, a *attached) {
@@ -443,7 +486,7 @@ func TestRealAttachKeepsGateLogPosition(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				updated := regexp.MustCompile(step + `  1\.2 s +` + state)
+				updated := regexp.MustCompile(step + `  \d+\.\d s +` + state)
 				s := a.drawn(updated.MatchString)
 				if !strings.Contains(top(s), target.text) {
 					t.Fatalf("gate update moved the reading position from %q:\n%s", target.text, s)
