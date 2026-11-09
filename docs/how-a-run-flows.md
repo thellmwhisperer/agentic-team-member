@@ -469,7 +469,7 @@ repository-relative file path. The finding's one-line text appears below the
 reference. Long entries wrap; scroll the Findings box to read entries outside
 its visible height.
 
-From Delivery's start, and after the run ends with Delivery passed, the screen
+From Delivery's start, or from the run's end when Delivery ran, the screen
 shows the gate: it asks `no-mistakes axi status`, in the run's clone, for the run of the
 delivered branch, and `no-mistakes axi logs --step <step> --full` for each step it started,
 every second. The gate's steps get rows below Delivery in the ATM box, each
