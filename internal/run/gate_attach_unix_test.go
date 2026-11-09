@@ -201,7 +201,13 @@ func TestRealAttachReadsGateFixAndCheckLogs(t *testing.T) {
 	for _, tc := range []struct {
 		name, log    string
 		want, absent []string
+		next         []string // rows drawn one right below the other
 	}{
+		{"document", "updating documentation...\n\nclaude started pid=7\n\nclaude exited pid=7 status=success\n\n" +
+			"no agent changes to commit\n\ndocument findings: 0 unresolved items",
+			[]string{"updating documentation...", "no agent changes to commit", "document findings: 0 unresolved items"},
+			[]string{"pid="},
+			[]string{"updating documentation...", "no agent changes to commit", "document findings: 0 unresolved items"}},
 		{"fix", `codex started pid=2
 Fixing **the gate**
 {"summary":"Fixed the gate."}
@@ -209,10 +215,10 @@ Fixing **the gate**
 Fix complete
 codex exited pid=2 status=success`,
 			[]string{"✎ Fixing the gate", "▾ Informe", "Fixed the gate.", "error gate.go No position given.", "✎ Fix complete"},
-			[]string{"{", "pid=", "gate.go:", "Ficheros revisados", "Comandos ejecutados", "Test "}},
+			[]string{"{", "pid=", "gate.go:", "Ficheros revisados", "Comandos ejecutados", "Test "}, nil},
 		{"typecheck", "Checking packages\n{not a report}\n{\"packages\":3}\nChecks passed",
 			[]string{"Checking packages", "{not a report}", `{"packages":3}`, "Checks passed"},
-			[]string{"✎", "Informe"}},
+			[]string{"✎", "Informe"}, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fixture, err := os.ReadFile("testdata/gate-review.toon")
@@ -235,6 +241,12 @@ codex exited pid=2 status=success`,
 			for _, absent := range tc.absent {
 				if strings.Contains(s, absent) {
 					t.Fatalf("the gate unexpectedly paints %q:\n%s", absent, s)
+				}
+			}
+			rows := strings.Split(s, "\n")
+			for i := 1; i < len(tc.next); i++ {
+				if r := rowOf(s, tc.next[i-1]); r+1 >= len(rows) || !strings.Contains(rows[r+1], tc.next[i]) {
+					t.Fatalf("the gate leaves a gap between %q and %q:\n%s", tc.next[i-1], tc.next[i], s)
 				}
 			}
 			a.gateDone(nm)
