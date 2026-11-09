@@ -181,7 +181,7 @@ func (m *Model) panes() []*pane {
 	if m.agentVisible() || m.gateSteps != nil {
 		shown = append(shown, &m.history)
 	}
-	if m.hasDecision() || m.gateSteps == nil && !m.agentRuns() && len(m.findings) > 0 {
+	if m.showRunFindings() || m.gateSteps == nil && !m.agentRuns() && len(m.findings) > 0 {
 		shown = append(shown, &m.findingsPane)
 	}
 	if m.gateSteps == nil && (m.agentRuns() && len(m.output) > 0 || !m.agentRuns() && m.running()) {
@@ -445,8 +445,9 @@ func (m *Model) decision(e event) {
 	}
 }
 
-func (m *Model) hasDecision() bool {
-	return slices.ContainsFunc(m.findings, func(f finding) bool { return f.ref == "Decision" })
+func (m *Model) showRunFindings() bool {
+	return m.done && m.outcome.Outcome == "failed" && m.outcome.Reason != "" ||
+		slices.ContainsFunc(m.findings, func(f finding) bool { return f.ref == "Decision" })
 }
 
 // settings names agent a, when the event carries it, in the Agent box's title.
@@ -590,6 +591,7 @@ func (m *Model) tool(e event) {
 
 // end keeps how the run ended on screen until the user closes it.
 func (m *Model) end(o run.Outcome, err error) {
+	m.decision(event{})
 	cold := !slices.ContainsFunc(m.rows, func(r *row) bool { return r.state != "pending" })
 	if cold {
 		m.restoreReport(o.Report, o)
@@ -602,7 +604,7 @@ func (m *Model) end(o run.Outcome, err error) {
 		}
 	}
 	if why := o.Reason; o.Outcome == "failed" && why != "" {
-		if cold || o.FailedNode == "" {
+		if !slices.ContainsFunc(m.findings, func(f finding) bool { return f.severity == "error" && f.text == why }) {
 			m.findings = append(m.findings, finding{"error", "atm run " + o.Issue, why})
 		}
 	}

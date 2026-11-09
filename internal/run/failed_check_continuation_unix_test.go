@@ -130,7 +130,8 @@ func TestRunAsksOnAFailedCheckOnTerminal(t *testing.T) {
 		t.Fatalf("stop: %v %s", err, out)
 	}
 	shown := decisionTerminal(t, startFollow(t, bin, top, true, "attach", "issue-1"), 1)
-	if strings.Contains(shown, "Decision") || strings.Contains(shown, "approve|fix|stop") {
+	if strings.Contains(shown, "Decision") || strings.Contains(shown, "approve|fix|stop") ||
+		strings.Count(shown, "lint: exit status 1") != 1 {
 		t.Fatalf("answered question still asks for an answer:\n%s", shown)
 	}
 }
