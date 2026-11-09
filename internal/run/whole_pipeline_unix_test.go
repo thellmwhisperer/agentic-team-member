@@ -49,7 +49,7 @@ func TestRealScreenShowsTheWholePipelineFromTheStart(t *testing.T) {
 		}
 		t.Logf("gate screen:\n%s", gate)
 		writeFixture(t, filepath.Join(nm, "done"), "")
-		a.exits()
+		assertEndedGatePipeline(t, a.closes())
 	})
 	t.Run("no delivery", func(t *testing.T) {
 		a := liveAttach(t, 120, 50)
@@ -59,6 +59,19 @@ func TestRealScreenShowsTheWholePipelineFromTheStart(t *testing.T) {
 		assertNoGatePipeline(t, s)
 		a.end()
 	})
+}
+
+// assertEndedGatePipeline checks the ended gate's last screen keeps Delivery and the gate's final rows, review
+// passed with its time.
+func assertEndedGatePipeline(t *testing.T, last string) {
+	t.Helper()
+	for _, want := range []string{`(?m)^│ ✓ Delivery\b`, `(?m)^│ ✓ review  1\.2 s +passed │`,
+		`(?m)^│ ○ test +pending │`, `(?m)^│ – lint +skipped │`} {
+		if !regexp.MustCompile(want).MatchString(last) {
+			t.Fatalf("the ended gate's screen lacks %q:\n%s", want, last)
+		}
+	}
+	t.Logf("ended gate screen:\n%s", last)
 }
 
 func assertGatePendingWhileAnswering(t *testing.T, a *attached, nm string) {

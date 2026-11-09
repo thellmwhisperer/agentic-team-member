@@ -86,7 +86,7 @@ func answerQuestionsAndAbort(t *testing.T, a *attached, nm string) {
 	a.drawn(func(s string) bool { return !strings.Contains(s, "enter answer") && !strings.Contains(s, "a approve") })
 	a.footer("y abort the gate", "x")
 	a.key("y")
-	a.exits()
+	a.closes()
 }
 
 func assertGateResponses(t *testing.T, nm, clone, long string) {

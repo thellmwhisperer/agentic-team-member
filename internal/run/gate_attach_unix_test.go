@@ -117,7 +117,7 @@ func TestRealAttachPaintsTheGate(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(nm, "done"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	a.exits()
+	a.closes()
 	assertGateLast(t, a)
 	log, _ := os.ReadFile(filepath.Join(nm, "log"))
 	if !strings.HasPrefix(string(log), clone+" axi status\n") {
@@ -317,13 +317,13 @@ func (a *attached) openStep(step string) string {
 	return a.drawn(func(s string) bool { return strings.Contains(s, "▾ ⏸ "+step) })
 }
 
-// gateDone completes the gate's run and waits for attach to exit.
+// gateDone completes the gate's run, checks attach keeps its last screen open and closes it with q.
 func (a *attached) gateDone(nm string) {
 	a.t.Helper()
 	if err := os.WriteFile(filepath.Join(nm, "done"), nil, 0o600); err != nil {
 		a.t.Fatal(err)
 	}
-	a.exits()
+	a.closes()
 }
 
 func assertGateFolded(t *testing.T, a *attached, folded string) {
@@ -396,10 +396,12 @@ func TestRealAttachScrollsTheFullGateLog(t *testing.T) {
 	}
 	a.key("\x1b[F")
 	a.sees(func(s string) bool { return strings.Contains(s, "review-line-79") })
+	a.key("\t\x1b[F") // the ATM box's end, where the gate's rows show on this short screen
+	a.sees(func(s string) bool { return strings.Contains(s, "⏸ review  1.2 s") })
 	if err := os.WriteFile(filepath.Join(nm, "done"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	a.exits()
+	a.closes()
 }
 
 func TestRealAttachKeepsGateLogPosition(t *testing.T) {
@@ -495,7 +497,7 @@ func TestRealAttachShowsGateFindingsWithoutLogLines(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(nm, "done"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	a.exits()
+	a.closes()
 }
 
 // With no gate run on the delivered branch, the real atm attach quits once the run ends, as it did.
@@ -512,7 +514,34 @@ func TestRealAttachWithoutAGateQuitsAtTheEnd(t *testing.T) {
 	}
 }
 
-// exits reads the screen until atm attach quits by itself.
+var gatePassed = regexp.MustCompile(`│ ✓ \S+  1\.2 s +passed │`)
+
+// closes waits for the ended gate's last screen, its agent step passed with its time, checks atm attach keeps it
+// open, still drawn, until q, and closes it with q. It returns that screen.
+func (a *attached) closes() string {
+	a.t.Helper()
+	last := a.drawn(gatePassed.MatchString)
+	stay := time.After(3 * time.Second)
+	for stayed := false; !stayed; {
+		select {
+		case c, open := <-a.chunks:
+			if !open {
+				a.t.Fatalf("atm attach closed by itself once the gate ended:\n%s", last)
+			}
+			a.raw.WriteString(c)
+		case <-stay:
+			stayed = true
+		}
+	}
+	if s := ansi.Strip(a.styled()); !gatePassed.MatchString(s) || !strings.Contains(s, "q close") {
+		a.t.Fatalf("the ended gate's screen lost its passed row or its q close:\n%s", s)
+	}
+	a.key("q")
+	a.exits()
+	return last
+}
+
+// exits reads the screen until atm attach quits.
 func (a *attached) exits() {
 	a.t.Helper()
 	timeout := time.After(time.Minute)
