@@ -274,14 +274,22 @@ func screenRun(t *testing.T, delivery string) (string, *screenRead) {
 	return top, &screenRead{f: startFollow(t, bin, top, true, "run", issueFile(t, issue))}
 }
 
-// gateEnds ends the fake gate of directory nm, waits until the screen shows the run passed and closes it.
+// gateEnds ends the fake gate of directory nm, waits until the screen shows the run passed, gives the screen's
+// next gate query time to find the gate over, and closes it.
 func (sc *screenRead) gateEnds(nm string) {
 	sc.f.t.Helper()
 	if err := os.WriteFile(filepath.Join(nm, "done"), nil, 0o600); err != nil {
 		sc.f.t.Fatal(err)
 	}
 	sc.until(func(s string) bool { return strings.Contains(s, "✓ passed") })
+	sc.during(2 * time.Second)
 	sc.close()
+}
+
+// final is the view atm leaves on the terminal once its screen closes.
+func (sc *screenRead) final() string {
+	_, view, _ := strings.Cut(sc.shown.String(), "\x1b[?1049l")
+	return ansi.Strip(view)
 }
 
 // last is the terminal's text from its last ATM box on.

@@ -438,10 +438,17 @@ func (m *Model) appendOutput(e event) {
 	m.output = append(m.output[max(0, len(m.output)-199):], line)
 }
 
+// decision shows a run waiting for its launcher's answer as one finding: what failed, in its first line, and how
+// to answer, in its last; the failed command's output stays in the run's report.
 func (m *Model) decision(e event) {
 	m.findings = slices.DeleteFunc(m.findings, func(f finding) bool { return f.ref == "Decision" })
 	if e.State == "waiting" {
-		m.findings = append(m.findings, finding{"warning", "Decision", e.Message})
+		lines := strings.Split(e.Message, "\n")
+		text := lines[0]
+		if len(lines) > 1 {
+			text += "\n" + lines[len(lines)-1]
+		}
+		m.findings = append(m.findings, finding{"warning", "Decision", text})
 	}
 }
 

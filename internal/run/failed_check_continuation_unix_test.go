@@ -118,10 +118,14 @@ func TestRunAsksOnAFailedCheckOnTerminal(t *testing.T) {
 	bin := followUpsServer(t, top)
 	for _, args := range [][]string{{"run", issueFile(t, issue)}, {"attach", "issue-1"}} {
 		shown := leftAtDecision(t, startFollow(t, bin, top, true, args...))
-		for _, want := range []string{"Decision", "failed-check-finding", "Answer: atm answer issue-1", "approve|fix|stop"} {
+		for _, want := range []string{"Decision", "Check failed: lint: exit status 1", "Answer: atm answer issue-1",
+			"approve|fix|stop"} {
 			if !strings.Contains(shown, want) {
 				t.Fatalf("%s omitted %q:\n%s", args[0], want, shown)
 			}
+		}
+		if strings.Contains(shown, "failed-check-finding") { // the failed command's output stays in the report
+			t.Fatalf("%s showed the failed command's output:\n%s", args[0], shown)
 		}
 	}
 	cmd := exec.Command(bin, "answer", "issue-1", "stop")

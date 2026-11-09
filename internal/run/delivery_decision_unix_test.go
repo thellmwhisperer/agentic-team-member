@@ -27,6 +27,7 @@ func TestRealRunScreenKeepsDeliveryRunningWhileItsGateGoesOn(t *testing.T) {
 	sc.until(func(s string) bool { return waitsForAnswer(s) && strings.Contains(s, "╭─ Gate") })
 	sc.during(2 * time.Second) // the screen draws the run's wait for its answer
 	sc.deliveryNotFailed()
+	sc.without("wait of 8m0s", "the delivery command's output")
 	if _, err := sc.f.term.Write([]byte("\t")); err != nil {
 		t.Fatal(err)
 	}
@@ -44,6 +45,23 @@ func TestRealRunScreenKeepsDeliveryRunningWhileItsGateGoesOn(t *testing.T) {
 	}
 	sc.gateEnds(nm)
 	sc.gateNotHidden()
+	sc.noAbortOnceOver()
+}
+
+// noAbortOnceOver fails the test when the last view, of a run and a gate both over, offers to abort the gate.
+func (sc *screenRead) noAbortOnceOver() {
+	sc.f.t.Helper()
+	if s := sc.final(); !strings.Contains(s, "q close") || strings.Contains(s, "x abort") {
+		sc.f.t.Fatalf("the last view offers to abort a gate over:\n%s", s)
+	}
+}
+
+// without fails the test when the last screen shows text, which is what.
+func (sc *screenRead) without(text, what string) {
+	sc.f.t.Helper()
+	if s := sc.last(); strings.Contains(s, text) {
+		sc.f.t.Fatalf("the screen showed %s:\n%s", what, s)
+	}
 }
 
 // waitsForAnswer says screen s shows the run waiting for its launcher's answer.

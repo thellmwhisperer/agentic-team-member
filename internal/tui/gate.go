@@ -268,7 +268,7 @@ func (m *Model) gateKey(k tea.KeyMsg) (cmd tea.Cmd, ok bool) {
 	m.fixSelected = false
 	waiting := m.waiting() != nil
 	switch s := k.String(); {
-	case s == "x" && m.gateSteps != nil:
+	case s == "x" && m.gateLive:
 		m.aborting = true
 	case s == "enter" && (waiting || m.question() != ""):
 		m.typing, m.text = true, ""
@@ -313,7 +313,7 @@ func (m *Model) gateKeys() string {
 	case m.waiting() != nil:
 		return key("a", "approve") + key("f", "fix") + key("s", "skip") + key("x", "abort") +
 			key("enter", "fix with a line")
-	case m.gateSteps != nil:
+	case m.gateLive: // a gate over has nothing left to abort
 		return key("x", "abort")
 	}
 	return ""
