@@ -223,11 +223,15 @@ func (r gateReport) readable() *report {
 	return &report{Summary: strings.Join(parts, "\n\n"), ChangedFiles: r.ReviewedPaths}
 }
 
-// ask asks the gate again after wait while g shows it goes on, and else ends the screen.
+// ask asks the gate again after wait while g shows it goes on. A gate over leaves its last screen open until
+// the operator closes it with q; no gate ends the screen.
 // ponytail: one failed ask ends the screen, as a run's end does; ask again first if the gate stutters.
 func (m *Model) ask(g gate, wait time.Duration) tea.Cmd {
-	if !g.ok || g.over {
+	if !g.ok {
 		return tea.Quit
+	}
+	if g.over {
+		return nil
 	}
 	clone := m.clone
 	return tea.Tick(wait, func(time.Time) tea.Msg { return askGate(clone) })

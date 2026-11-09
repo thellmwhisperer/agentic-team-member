@@ -184,7 +184,7 @@ func ownDeliveryAtReview(t *testing.T, bin, top, label, nm string, end Outcome, 
 	}
 	t.Logf("atm attach at review:\n%s", shown)
 	writeFixture(t, filepath.Join(nm, "done"), "")
-	a.exits()
+	a.closes()
 }
 
 func ownDeliveryInitErrors(t *testing.T, bin string) {
