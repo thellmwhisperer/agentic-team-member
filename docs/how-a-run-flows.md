@@ -478,8 +478,8 @@ spinner turns and its duration counts on between polls, as ATM's steps do, and
 the Gate box in the right column has a header row per started step, its log
 rendered as the Agent box renders Markdown, folded to its first line like
 thinking, and one line per finding: ID, severity, file and description. Agent
-start and exit lines (`… started pid=…`, `… exited pid=… status=…`) are not
-shown. Review and fix prose shows as `✎` lines, and a reviewer or fixer JSON
+start and exit lines (`… started pid=…`, `… exited pid=… status=…`) and the empty lines no-mistakes writes
+between log entries are not shown. Review and fix prose shows as `✎` lines, and a reviewer or fixer JSON
 object is never shown raw: it becomes an `Informe` row whose summary lists
 each finding's severity, file, line and description, `Riesgo:` with the risk
 level, its rationale and the testing summary, with the reviewed paths in a
