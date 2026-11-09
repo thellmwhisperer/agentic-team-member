@@ -141,6 +141,7 @@ func unquote(v string) string {
 // gate puts the gate's steps in the ATM box, below ATM's, and keeps what they emit for the right column.
 func (m *Model) gate(g gate) {
 	m.gateLive = g.ok && !g.over
+	m.aborting = m.aborting && m.gateLive
 	if m.gateSteps == nil {
 		m.rows = slices.DeleteFunc(m.rows, func(r *row) bool { return strings.HasPrefix(r.step, "gate:") })
 	}
@@ -260,7 +261,7 @@ func (m *Model) gateKey(k tea.KeyMsg) (cmd tea.Cmd, ok bool) {
 		return nil, false
 	case m.aborting:
 		m.aborting = false
-		if k.String() == "y" {
+		if k.String() == "y" && m.gateLive {
 			return m.respond("abort"), true
 		}
 		return nil, false
@@ -272,7 +273,7 @@ func (m *Model) gateKey(k tea.KeyMsg) (cmd tea.Cmd, ok bool) {
 		m.aborting = true
 	case s == "enter" && (waiting || m.question() != ""):
 		m.typing, m.text = true, ""
-	case waiting && (s == "a" || s == "s"):
+	case waiting && slices.Contains([]string{"a", "s"}, s):
 		return m.respond("respond", "--action", map[string]string{"a": "approve", "s": "skip"}[s]), true
 	case waiting && s == "f":
 		m.fixSelected = true
@@ -300,6 +301,9 @@ func (m *Model) typed(k tea.KeyMsg) tea.Cmd {
 
 // gateKeys is the footer's keys for the gate while it shows.
 func (m *Model) gateKeys() string {
+	if !m.gateLive {
+		return ""
+	}
 	key := func(k, what string) string {
 		return "  " + lipgloss.NewStyle().Bold(true).Render(k) + " " + paint(dim, what)
 	}
@@ -313,10 +317,9 @@ func (m *Model) gateKeys() string {
 	case m.waiting() != nil:
 		return key("a", "approve") + key("f", "fix") + key("s", "skip") + key("x", "abort") +
 			key("enter", "fix with a line")
-	case m.gateLive: // a gate over has nothing left to abort
+	default:
 		return key("x", "abort")
 	}
-	return ""
 }
 
 // waiting is the gate's step waiting for an answer, nil for none.

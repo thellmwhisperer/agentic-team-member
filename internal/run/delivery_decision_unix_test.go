@@ -43,6 +43,10 @@ func TestRealRunScreenKeepsDeliveryRunningWhileItsGateGoesOn(t *testing.T) {
 	if out, err := answer.CombinedOutput(); err != nil {
 		t.Fatalf("atm answer: %v\n%s", err, out)
 	}
+	if _, err := sc.f.term.Write([]byte("x")); err != nil {
+		t.Fatal(err)
+	}
+	sc.until(func(s string) bool { return strings.Contains(s, "y abort the gate") })
 	sc.gateEnds(nm)
 	sc.gateNotHidden()
 	sc.noAbortOnceOver()
@@ -51,7 +55,8 @@ func TestRealRunScreenKeepsDeliveryRunningWhileItsGateGoesOn(t *testing.T) {
 // noAbortOnceOver fails the test when the last view, of a run and a gate both over, offers to abort the gate.
 func (sc *screenRead) noAbortOnceOver() {
 	sc.f.t.Helper()
-	if s := sc.final(); !strings.Contains(s, "q close") || strings.Contains(s, "x abort") {
+	if s := sc.final(); !strings.Contains(s, "q close") || strings.Contains(s, "x abort") ||
+		strings.Contains(s, "y abort the gate") {
 		sc.f.t.Fatalf("the last view offers to abort a gate over:\n%s", s)
 	}
 }
