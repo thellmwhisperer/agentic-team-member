@@ -30,7 +30,8 @@ func (m *Model) restoreReport(path string, outcome run.Outcome) {
 		return
 	}
 	var report struct {
-		Nodes []savedNode
+		Nodes     []savedNode
+		Decisions []run.Decision
 	}
 	b, err := os.ReadFile(path)
 	if err == nil {
@@ -48,7 +49,20 @@ func (m *Model) restoreReport(path string, outcome run.Outcome) {
 			continue
 		}
 		seen[n.Name] = true
-		if !validSavedNode(n, outcome) {
+		var approval *run.Decision
+		if n.Name == "checks" && n.Result == "failed" &&
+			consistentResult(n.Name, "passed", outcome) {
+			for i := len(report.Decisions) - 1; i >= 0; i-- {
+				d := &report.Decisions[i]
+				if d.Node == n.Name {
+					if d.Answer == "approve" {
+						approval = d
+					}
+					break
+				}
+			}
+		}
+		if approval == nil && !validSavedNode(n, outcome) {
 			continue
 		}
 		r.state = n.Result
@@ -57,6 +71,9 @@ func (m *Model) restoreReport(path string, outcome run.Outcome) {
 			r.took, r.hasDuration = time.Duration(*n.DurationMS)*time.Millisecond, true
 		}
 		m.restoreRows(n)
+		if approval != nil {
+			m.approveChecks(approval.By)
+		}
 	}
 }
 

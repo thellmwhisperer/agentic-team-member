@@ -437,7 +437,7 @@ func (m *Model) appendOutput(e event) {
 	if e.Step == "delivery" {
 		return
 	}
-	line :=&logLine{step: e.Step, check: e.Check, text: ansi.Strip(*e.Output)}
+	line := &logLine{step: e.Step, check: e.Check, text: ansi.Strip(*e.Output)}
 	if len(m.output) > 0 {
 		previous := m.output[len(m.output)-1]
 		if previous.step == line.step && previous.check == line.check {
@@ -452,18 +452,7 @@ func (m *Model) appendOutput(e event) {
 func (m *Model) decision(e event) {
 	m.findings = slices.DeleteFunc(m.findings, func(f finding) bool { return f.ref == "Decision" })
 	if e.State == "answered" && e.Answer == "approve" && e.Node == "checks" {
-		for _, r := range m.rows {
-			if r.step == "checks" && r.state == "failed" {
-				if !r.check {
-					ref := m.failedAt(r)
-					m.findings = slices.DeleteFunc(m.findings, func(f finding) bool {
-						return f.severity == "error" && f.ref == ref
-					})
-					r.by = "by " + e.By
-				}
-				r.state = "approved"
-			}
-		}
+		m.approveChecks(e.By)
 	}
 	if e.State == "waiting" {
 		lines := strings.Split(e.Message, "\n")
@@ -472,6 +461,21 @@ func (m *Model) decision(e event) {
 			text += "\n" + lines[len(lines)-1]
 		}
 		m.findings = append(m.findings, finding{"warning", "Decision", text})
+	}
+}
+
+func (m *Model) approveChecks(by string) {
+	for _, r := range m.rows {
+		if r.step == "checks" && r.state == "failed" {
+			if !r.check {
+				ref := m.failedAt(r)
+				m.findings = slices.DeleteFunc(m.findings, func(f finding) bool {
+					return f.severity == "error" && f.ref == ref
+				})
+				r.by = "by " + by
+			}
+			r.state = "approved"
+		}
 	}
 }
 
