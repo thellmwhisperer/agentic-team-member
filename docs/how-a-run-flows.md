@@ -512,8 +512,9 @@ line for its answer instead; Enter submits it. Questions are answered in order
 during the current attachment.
 Answered questions are remembered only until the screen closes: if you detach
 between questions while the gate still lists both, reattaching can target the
-first question again. Press `x`, then `y`, to abort the gate; any other key
-cancels the confirmation. These actions use no-mistakes' commands in the run's
+first question again. While the gate goes on, press `x`, then `y`, to abort
+it; any other key cancels the confirmation. Once the gate is over, the footer
+offers no abort and a pending confirmation is dropped. These actions use no-mistakes' commands in the run's
 clone. `q` or Ctrl+C still detaches without aborting.
 
 The Agent box renders the agent's Markdown prose within the panel width as
@@ -567,7 +568,8 @@ long it holds: the command runs below the screen, never on a terminal, and its
 output goes to the Log box until the gate shows.
 While the run waits for its launcher's answer to a decision it is not over: the screen stays, its
 title shows `⏸ waiting`, and once the answer comes it follows the run again from where it was. While
-the gate shows, the pending decision shows in the Findings box above the Gate box. When the run ends,
+the gate shows, the pending decision shows in the Findings box above the Gate box. The decision's
+finding keeps only what failed and how to answer; the failed command's output stays in the report. When the run ends,
 a decision still pending leaves the screen and the failure's reason shows in its place.
 On a terminal, the screen quits at the run's end if Delivery never ran with a
 known clone. Otherwise it started querying the gate once, when Delivery first
