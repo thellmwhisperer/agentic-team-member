@@ -3,45 +3,17 @@
 package tui
 
 import (
-	"bytes"
 	"io"
 	"os"
-	"regexp"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/creack/pty"
 	"github.com/thellmwhisperer/agentic-team-member/internal/run"
-	"golang.org/x/term"
 )
-
-func TestDeliveryTakesTheTerminalAtItsFirstOutput(t *testing.T) {
-	in, out, err := pty.Open()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = in.Close() }()
-	defer func() { _ = out.Close() }()
-	p := tea.NewProgram(New("issue-1", 80, 24), tea.WithInput(in), tea.WithOutput(out))
-	d := &delivery{p: p, in: in, out: &bytes.Buffer{}, keys: make(chan run.Input, 1)}
-	d.frame(run.Frame{PTY: true})
-	if d.read != nil {
-		t.Fatal("the delivery's terminal took terminal input before its first output")
-	}
-	d.frame(run.Frame{Raw: []byte("hi")})
-	if d.read == nil {
-		t.Fatal("the delivery's first output did not transfer terminal input")
-	}
-	d.keyed.Cancel()
-	<-d.read
-	if d.state != nil {
-		_ = term.Restore(int(d.in.Fd()), d.state)
-	}
-}
 
 // shown is what a terminal showed so far; more says it showed more.
 type shown struct {
@@ -80,13 +52,9 @@ func (s *shown) until(i int, ok func(string) bool) bool {
 	return true
 }
 
-// deliveryRuns is Delivery's row, running with its time.
-var deliveryRuns = regexp.MustCompile(`Delivery  \d+\.\d s +running`)
 
 const exitAltScreen = "\x1b[?1049l"
 
-// mouseOn and mouseOff turn the terminal's mouse reports on and off.
-const mouseOn, mouseOff = "\x1b[?1002h", "\x1b[?1002l"
 
 func waitShowToOpen(t *testing.T, shown *shown) {
 	t.Helper()
@@ -104,113 +72,12 @@ func waitShowReturn(t *testing.T, done <-chan struct{}) {
 	}
 }
 
-// A delivery that writes nothing leaves ATM's screen live on the terminal; from its first output to its end,
-// the terminal and its keys are the delivery's, and ATM's screen comes back after.
-func TestDeliveryGetsTheTerminalFromItsFirstOutput(t *testing.T) {
-	t.Setenv("TERM", "xterm-256color")
-	for _, silent := range []bool{true, false} {
-		t.Run(map[bool]string{true: "silent for a while", false: "writes at once"}[silent], func(t *testing.T) {
-			p, tty, err := pty.Open()
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer func() { _ = p.Close() }()
-			if err := pty.Setsize(tty, &pty.Winsize{Cols: 120, Rows: 40}); err != nil {
-				t.Fatal(err)
-			}
-			s, read := readTerminal(p)
-			defer func(f func(string, string, *[2]int, <-chan run.Input, func(run.Frame)) (run.Outcome, error)) {
-				follow = f
-			}(follow)
-			delivered := make(chan struct{})
-			deliver := deliveryRun(t, s, p, silent)
-			follow = func(root, label string, size *[2]int, in <-chan run.Input, fn func(run.Frame)) (run.Outcome, error) {
-				defer close(delivered)
-				return deliver(root, label, size, in, fn)
-			}
-			closed := make(chan struct{})
-			go func() {
-				defer close(closed)
-				<-delivered
-				if !s.until(0, func(v string) bool { return strings.Contains(ansi.Strip(v), "q close") }) {
-					t.Error("completed delivery did not stay on the native screen")
-				}
-				_, _ = p.Write([]byte("q"))
-			}()
-			o, _, err := Show("", "issue-1", tty, tty)
-			<-closed
-			_ = tty.Close()
-			<-read
-			if err != nil || o.Outcome != "passed" {
-				t.Fatalf("Show = %+v, %v", o, err)
-			}
-			v := s.since(0)
-			last := ansi.Strip(v[strings.LastIndex(v, exitAltScreen):])
-			// The mouse is the screen's, not the delivery command's while it has the terminal.
-			if !order(v, mouseOn, mouseOff, "delivery-says-hi", mouseOn) ||
-				strings.Contains(v[strings.Index(v, mouseOff):strings.Index(v, "delivery-says-hi")], mouseOn) {
-				t.Fatalf("want the mouse off while delivery has the terminal, the terminal showed %q", v)
-			}
-			if !order(v, "delivery-says-hi", "\x1b[?1049h") || !order(last, "✓ Delivery", "fix/7 · passed") {
-				t.Fatalf("ATM's screen did not come back after delivery, the terminal showed %q", v)
-			}
-		})
-	}
-}
-
-// deliveryRun follows a run that gets to Delivery, whose command is silent for a while, when silent, then
-// writes, gets the key k typed on keys, and passes: s is what the attached terminal showed.
-func deliveryRun(t *testing.T, s *shown, keys io.Writer, silent bool) func(string, string, *[2]int, <-chan run.Input,
-	func(run.Frame)) (run.Outcome, error) {
-	return func(_, _ string, _ *[2]int, in <-chan run.Input, fn func(run.Frame)) (run.Outcome, error) {
-		now := `"ts":"` + time.Now().UTC().Format(time.RFC3339Nano) + `"`
-		for _, ev := range append(unit[:12:12], `{"step":"checks","state":"passed","duration_ms":2}`,
-			`{"step":"ponytail","state":"started"}`, `{"step":"ponytail","state":"passed","duration_ms":5}`,
-			`{"step":"delivery","state":"started",`+now+`}`) {
-			fn(run.Frame{Event: []byte(ev)})
-		}
-		if !s.until(0, func(v string) bool { return deliveryRuns.MatchString(ansi.Strip(v)) }) {
-			t.Error("ATM's screen never showed Delivery running")
-		}
-		mark := len(s.since(0))
-		fn(run.Frame{PTY: true})
-		if silent {
-			live := s.until(mark, func(v string) bool {
-				return len(deliveryRuns.FindAllString(ansi.Strip(v), -1)) >= 3
-			})
-			if v := s.since(mark); !live || strings.Contains(v, exitAltScreen) {
-				t.Errorf("while delivery wrote nothing, the terminal showed %q", v)
-			}
-		}
-		fn(run.Frame{Raw: []byte("delivery-says-hi\r\n")})
-		if !s.until(mark, func(v string) bool { return strings.Contains(v, "delivery-says-hi") }) ||
-			!order(s.since(mark), exitAltScreen, "delivery-says-hi") {
-			t.Errorf("delivery's output did not get the terminal: %q", s.since(mark))
-		}
-		// Navigation input belongs to delivery while it owns the terminal. These are the
-		// bytes a terminal sends for focus, scrolling and an SGR wheel event.
-		navigation := []byte("\t\x1b[A\x1b[5~\x1b[<64;10;10M")
-		_, _ = keys.Write(navigation)
-		var received []byte
-		for !bytes.Contains(received, navigation) {
-			select {
-			case i := <-in:
-				received = append(received, i.Keys...)
-			case <-time.After(5 * time.Second):
-				t.Fatalf("delivery did not receive navigation bytes %q; received %q", navigation, received)
-			}
-		}
-		fn(run.Frame{Event: []byte(`{"step":"delivery","state":"passed","branch":"fix/7","duration_ms":9}`)})
-		return run.Outcome{Outcome: "passed", Ended: time.Now()}, nil
-	}
-}
-
 func TestShowColdCompletedRunQuitsLeavingItsScreen(t *testing.T) {
 	t.Setenv("TERM", "xterm-256color")
 	master, tty := testTerminal(t, 69, 39)
 	path := savedReport(t, completedReport)
 	old := follow
-	follow = func(_, _ string, _ *[2]int, _ <-chan run.Input, _ func(run.Frame)) (run.Outcome, error) {
+	follow = func(_, _ string, _ <-chan struct{}, _ func(run.Frame)) (run.Outcome, error) {
 		return run.Outcome{Run: "297-65", Outcome: "passed", Ended: time.Now(), Report: path}, nil
 	}
 	defer func() { follow = old }()

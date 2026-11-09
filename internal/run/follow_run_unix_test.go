@@ -23,6 +23,7 @@ type followed struct {
 	cmd    *exec.Cmd
 	lines  chan string
 	stderr string
+	term   *os.File // the terminal's other end, where keys are typed, when it runs on one
 }
 
 // startFollow starts the real binary with stdout on a pipe or a terminal, stdin and stdout.
@@ -48,7 +49,7 @@ func startFollow(t *testing.T, bin, top string, tty bool, args ...string) *follo
 		if err := pty.Setsize(tt, &pty.Winsize{Rows: 24, Cols: 100}); err != nil {
 			t.Fatal(err)
 		}
-		f.cmd.Stdin, f.cmd.Stdout, out = tt, tt, p
+		f.cmd.Stdin, f.cmd.Stdout, out, f.term = tt, tt, p, p
 	} else {
 		r, err := f.cmd.StdoutPipe()
 		if err != nil {

@@ -93,7 +93,7 @@ func assertRestorePaths(t *testing.T, top, label string, want []string) {
 func assertRestoreEvents(t *testing.T, top, label string, count int) {
 	t.Helper()
 	rows := 0
-	_, err := Follow(top, label, nil, nil, func(f Frame) {
+	_, err := Follow(top, label, nil, func(f Frame) {
 		var ev map[string]any
 		if len(f.Event) == 0 || json.Unmarshal(f.Event, &ev) != nil {
 			return

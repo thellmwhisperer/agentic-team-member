@@ -2,7 +2,6 @@ package run
 
 import (
 	"bufio"
-	"bytes"
 	"cmp"
 	"encoding/json"
 	"errors"
@@ -82,22 +81,12 @@ type request struct {
 	Cmd     string   `json:"cmd"` // run, attach or runs
 	Args    []string `json:"args,omitempty"`
 	Run     string   `json:"run,omitempty"`
-	Size    *[2]int  `json:"size,omitempty"` // the columns and rows of the terminal that attaches, if one does
 }
 
 // Frame is a piece of a run's screen.
 type Frame struct {
 	Line  *string         `json:"line,omitempty"`  // a line of its plain screen
 	Event json.RawMessage `json:"event,omitempty"` // a node's start or end, or a live event inside it
-	Raw   []byte          `json:"raw,omitempty"`   // the delivery command's output on the attached terminal
-	PTY   bool            `json:"pty,omitempty"`   // the delivery command's terminal has started
-}
-
-// Input is what an attached terminal sends after its request: keys, and its new size, for the delivery
-// command that runs on it.
-type Input struct {
-	Keys []byte  `json:"keys,omitempty"`
-	Size *[2]int `json:"size,omitempty"`
 }
 
 type reply struct {
@@ -179,15 +168,11 @@ type server struct {
 }
 
 // bgRun is a run of the background process: its outcome, its screen so far, and more, closed and replaced
-// at each frame of its screen and closed for good at its end. ttys terminals of size, the last one's, are
-// attached to it; pty is the terminal its delivery command runs on, while it does.
+// at each frame of its screen and closed for good at its end.
 type bgRun struct {
 	Outcome
 	frames []Frame
 	more   chan struct{}
-	ttys   int
-	size   [2]int
-	pty    *os.File
 	answer chan decisionAnswer
 }
 
@@ -332,7 +317,7 @@ func (s *server) handle(c net.Conn) {
 		s.Unlock()
 		_ = enc.Encode(reply{Runs: runs})
 	case "attach":
-		s.attach(req, dec, enc)
+		s.attach(req, enc)
 	default:
 		_ = enc.Encode(reply{Error: "unknown request " + strconv.Quote(req.Cmd)})
 	}
@@ -422,8 +407,8 @@ func (s *server) run(r *bgRun, args []string, baseSHA string) {
 }
 
 // attach sends the screen of run req.Run, the last one that runs when it is "", or else the last one, as it
-// grows, and then how it ended. A terminal's input, from dec, goes to the run's delivery command.
-func (s *server) attach(req request, dec *json.Decoder, enc *json.Encoder) {
+// grows, and then how it ended.
+func (s *server) attach(req request, enc *json.Encoder) {
 	label := req.Run
 	r := s.find(label)
 	if r == nil {
@@ -433,13 +418,6 @@ func (s *server) attach(req request, dec *json.Decoder, enc *json.Encoder) {
 		}
 		_ = enc.Encode(reply{Error: msg})
 		return
-	}
-	if req.Size != nil { // a terminal, until it leaves
-		s.Lock()
-		r.ttys, r.size = r.ttys+1, *req.Size
-		s.Unlock()
-		defer func() { s.Lock(); r.ttys--; s.Unlock() }()
-		go s.input(r, dec)
 	}
 	for i := 0; ; {
 		s.Lock()
@@ -474,32 +452,8 @@ func (s *server) find(label string) *bgRun {
 	return nil
 }
 
-// input hands the keys and sizes an attached terminal sends from dec to r's delivery command on a terminal,
-// while it runs, until the terminal leaves.
-func (s *server) input(r *bgRun, dec *json.Decoder) {
-	for {
-		var in Input
-		if dec.Decode(&in) != nil {
-			return
-		}
-		s.Lock()
-		if in.Size != nil {
-			r.size = *in.Size
-		}
-		p := r.pty
-		s.Unlock()
-		if p != nil && in.Size != nil {
-			resize(p, *in.Size)
-		}
-		if p != nil && len(in.Keys) > 0 {
-			_, _ = p.Write(in.Keys) // its command may just have ended
-		}
-	}
-}
-
 // screen is a run's screen: what Run writes, a line at a time, its node events, when events, as a line each
-// with the event behind it, and the live events Run has it watch. Output written while the delivery command
-// runs on a terminal goes as it is.
+// with the event behind it, and the live events Run has it watch.
 type screen struct {
 	s      *server
 	r      *bgRun
@@ -508,15 +462,6 @@ type screen struct {
 }
 
 func (w *screen) Write(p []byte) (int, error) {
-	w.s.Lock()
-	raw := !w.events && w.r.pty != nil
-	if raw {
-		w.r.add(Frame{Raw: bytes.Clone(p)})
-	}
-	w.s.Unlock()
-	if raw {
-		return len(p), nil
-	}
 	if w.lines.fn == nil {
 		w.lines.fn = w.line
 	}
@@ -690,20 +635,19 @@ func Start(root string, args []string) (Outcome, error) {
 // Attach copies the plain screen of run label, the last one that runs when label is "", to w until it ends,
 // and returns how it ended. Leaving leaves the run going.
 func Attach(root, label string, w io.Writer) (Outcome, error) {
-	return Follow(root, label, nil, nil, func(f Frame) {
+	return Follow(root, label, nil, func(f Frame) {
 		if f.Line != nil {
 			_, _ = fmt.Fprintln(w, *f.Line)
 		}
-		_, _ = w.Write(f.Raw)
 	})
 }
 
-// Follow hands fn each frame of the screen of run label, as Attach, until it ends, and returns how it ended.
-// A terminal of size, its columns and rows, gets the delivery command: the input from in goes to it.
-func Follow(root, label string, size *[2]int, in <-chan Input, fn func(Frame)) (Outcome, error) {
+// Follow hands fn each frame of the screen of run label, as Attach, until it ends or leave closes, and returns
+// how it ended.
+func Follow(root, label string, leave <-chan struct{}, fn func(Frame)) (Outcome, error) {
 	var o Outcome
-	err := call(root, request{Cmd: "attach", Run: label, Size: size}, in, func(r reply) {
-		if r.Line != nil || r.Event != nil || r.Raw != nil || r.PTY {
+	err := call(root, request{Cmd: "attach", Run: label}, leave, func(r reply) {
+		if r.Line != nil || r.Event != nil {
 			fn(r.Frame)
 		}
 		if r.Run != nil {
@@ -723,13 +667,13 @@ func Runs(root string) ([]Outcome, error) {
 	return runs, err
 }
 
-// call sends req to the background process of the repository at root, started if need be, then what comes
-// from in, and hands each reply to fn. One that ends before it replies, as one whose file changed does, gets
+// call sends req to the background process of the repository at root, started if need be, and hands each
+// reply to fn until leave closes. One that ends before it replies, as one whose file changed does, gets
 // req again from the next one.
-func call(root string, req request, in <-chan Input, fn func(reply)) error {
+func call(root string, req request, leave <-chan struct{}, fn func(reply)) error {
 	delay := 200 * time.Millisecond
 	for {
-		again, err := send(root, req, in, fn)
+		again, err := send(root, req, leave, fn)
 		if !again {
 			return err
 		}
@@ -739,7 +683,7 @@ func call(root string, req request, in <-chan Input, fn func(reply)) error {
 }
 
 // send is a try of call: again when the background process it reached ended before it replied.
-func send(root string, req request, in <-chan Input, fn func(reply)) (again bool, err error) {
+func send(root string, req request, leave <-chan struct{}, fn func(reply)) (again bool, err error) {
 	c, err := connect(root)
 	if err != nil {
 		return false, err
@@ -750,31 +694,21 @@ func send(root string, req request, in <-chan Input, fn func(reply)) (again bool
 			return again, err
 		}
 	}
-	return exchange(c, req, in, fn)
+	return exchange(c, req, leave, fn)
 }
 
-func exchange(c net.Conn, req request, in <-chan Input, fn func(reply)) (again bool, err error) {
-	enc := json.NewEncoder(c)
-	if err := enc.Encode(req); err != nil {
+func exchange(c net.Conn, req request, leave <-chan struct{}, fn func(reply)) (again bool, err error) {
+	if err := json.NewEncoder(c).Encode(req); err != nil {
 		return true, err
 	}
-	done, left := make(chan struct{}), make(chan struct{}) // left: in closed, the caller left
+	done, left := make(chan struct{}), make(chan struct{}) // left: leave closed, the caller left
 	defer close(done)
 	go func() {
-		for {
-			select {
-			case i, ok := <-in: // never, when in is nil
-				if !ok {
-					close(left)
-					_ = c.Close()
-					return
-				}
-				if enc.Encode(i) != nil {
-					return
-				}
-			case <-done:
-				return
-			}
+		select {
+		case <-leave: // never, when leave is nil
+			close(left)
+			_ = c.Close()
+		case <-done:
 		}
 	}()
 	dec := json.NewDecoder(c)
@@ -795,7 +729,7 @@ func exchange(c net.Conn, req request, in <-chan Input, fn func(reply)) (again b
 			return false, errors.New(r.Error)
 		}
 		fn(r)
-		// Attach's final Run is authoritative: closing with unread input can reset the socket on Linux.
+		// Attach's final Run is authoritative.
 		if req.Cmd != "attach" || r.Run != nil {
 			return false, nil
 		}
