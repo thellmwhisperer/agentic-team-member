@@ -145,8 +145,8 @@ to skip delivery. `atm init` sets it to `sh scripts/deliver.sh` and writes
 when that command returns at the gate's first stop or at its end; the screen
 paints the gate from Delivery's start. Without `--wait`, `axi run` returns with
 exit 1 once its 8 minute hold elapses while the gate goes on, and the run takes
-Delivery as failed. While a gate goes on, the screen shows Delivery running
-whatever its command's exit said.
+Delivery as failed. The screen still shows Delivery running while the gate goes
+on; see [the screen](how-a-run-flows.md#the-screen).
 
 A project's delivery only launches the no-mistakes run with `no-mistakes axi run`;
 ATM reads and paints the gate in its own screen. A delivery that runs
