@@ -230,6 +230,7 @@ func (r gateReport) readable() *report {
 	return &report{Summary: strings.Join(parts, "\n\n"), ChangedFiles: r.ReviewedPaths}
 }
 
+// ask asks no-mistakes for the gate after wait, noting whether the run had ended when it asked.
 func (m *Model) ask(wait time.Duration) tea.Cmd {
 	clone, afterEnd := m.clone, m.done
 	return tea.Tick(wait, func(time.Time) tea.Msg {
