@@ -128,7 +128,7 @@ func TestRunAsksOnAFailedCheckOnTerminal(t *testing.T) {
 			t.Fatalf("%s showed the failed command's output:\n%s", args[0], shown)
 		}
 	}
-	cmd := exec.Command(bin, "answer", "issue-1", "stop")
+	cmd := exec.Command(bin, "answer", "issue-1", "stop", "--by", "operator")
 	cmd.Dir = top
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("stop: %v %s", err, out)
@@ -200,7 +200,7 @@ func TestRunAsksOnAFailedCheckApprovalKeepsValidCut(t *testing.T) {
 	t.Setenv("FAKE_PONYTAIL_REPORT", cut)
 	bin := followUpsServer(t, top)
 	_, label := failedCheckQuestion(t, bin, top, "run", "--follow", issueFile(t, issue))
-	cmd := exec.Command(bin, "answer", label, "approve")
+	cmd := exec.Command(bin, "answer", label, "approve", "--by", "operator")
 	cmd.Dir = top
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("approve: %v %s", err, out)
@@ -320,6 +320,9 @@ func TestRunAsksOnAFailedCheckCleanupStopsPendingRun(t *testing.T) {
 	rep := e2eReport(t, top, label)
 	if len(rep.Decisions) != 1 || rep.Decisions[0].Answer != "stop" || len(rep.Units) != 1 || !rep.Resumable {
 		t.Fatalf("cleanup did not finish and retain the stopped run: %+v", rep)
+	}
+	if rep.Decisions[0].By != "test cleanup" || rep.Decisions[0].At.IsZero() {
+		t.Fatalf("cleanup answer lost its author or time: %+v", rep.Decisions[0])
 	}
 	if data, err := os.ReadFile(filepath.Join(clone, "a.txt")); err != nil || string(data) != "fixed\n" {
 		t.Fatalf("cleanup lost the stopped run's work: %q, %v", data, err)

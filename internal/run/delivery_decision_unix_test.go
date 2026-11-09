@@ -38,7 +38,7 @@ func TestRealRunScreenKeepsDeliveryRunningWhileItsGateGoesOn(t *testing.T) {
 			return waitsForAnswer(s) && strings.Index(s, "Findings") < strings.Index(s, "╭─ Gate")
 		})
 	}
-	answer := exec.Command(sc.f.cmd.Path, "answer", runs[0].Run, "approve")
+	answer := exec.Command(sc.f.cmd.Path, "answer", runs[0].Run, "approve", "--by", "operator")
 	answer.Dir = top
 	if out, err := answer.CombinedOutput(); err != nil {
 		t.Fatalf("atm answer: %v\n%s", err, out)

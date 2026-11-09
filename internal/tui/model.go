@@ -16,7 +16,8 @@ import (
 
 // row is a row of the ATM box: a node of the graph, or, when check, a command of the node before.
 type row struct {
-	step, label, state, note string // state: pending, running, waiting, passed, failed, skipped, not run or unknown
+	step, label, state, note string // state's icon and colour are in states
+	by                       string // approval attribution for the Checks row
 	check                    bool
 	start                    time.Time
 	took                     time.Duration
@@ -383,6 +384,7 @@ type event struct {
 	Step, State, Error, TS, Title, Type, SHA, Branch string
 	Check, ID, Tool, Detail, Result, Summary         string
 	Thinking, Says, Message, Clone, Note             string
+	Answer, By, Node                                 string
 	ResumedFrom                                      string `json:"resumed_from"`
 	Output                                           *string
 	Number                                           int
@@ -449,6 +451,20 @@ func (m *Model) appendOutput(e event) {
 // to answer, in its last; the failed command's output stays in the run's report.
 func (m *Model) decision(e event) {
 	m.findings = slices.DeleteFunc(m.findings, func(f finding) bool { return f.ref == "Decision" })
+	if e.State == "answered" && e.Answer == "approve" && e.Node == "checks" {
+		for _, r := range m.rows {
+			if r.step == "checks" && r.state == "failed" {
+				if !r.check {
+					ref := m.failedAt(r)
+					m.findings = slices.DeleteFunc(m.findings, func(f finding) bool {
+						return f.severity == "error" && f.ref == ref
+					})
+					r.by = "by " + e.By
+				}
+				r.state = "approved"
+			}
+		}
+	}
 	if e.State == "waiting" {
 		lines := strings.Split(e.Message, "\n")
 		text := lines[0]

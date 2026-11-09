@@ -13,12 +13,15 @@ import (
 
 // Decision keeps the finding and the launcher's answer in report.json. An empty answer is pending.
 type Decision struct {
-	Finding string `json:"finding"`
-	Answer  string `json:"answer"`
+	Finding string    `json:"finding"`
+	Answer  string    `json:"answer"`
+	By      string    `json:"by"`
+	At      time.Time `json:"at"`
 }
 
 type decisionAnswer struct {
 	answer string
+	by     string
 	saved  chan error
 }
 
@@ -35,14 +38,16 @@ func (w *screen) ask(r *verdict) string {
 		"message": map[string]string{
 			"checks": "Check", "agent": "Agent", "ponytail": "Ponytail", "delivery": "Delivery",
 		}[r.FailedNode] + " failed: " + d.Finding +
-			"\nAnswer: atm answer " + w.r.Run + " approve|fix|stop"})
+			"\nAnswer: atm answer " + w.r.Run + " approve|fix|stop --by <who>"})
 	reply := <-ch
 	d.Answer = reply.answer
+	d.By, d.At = reply.by, time.Now().UTC()
 	err := r.write()
 	answer := "stop"
 	if err == nil {
 		answer = d.Answer
 		r.emit("decision", map[string]any{"state": "answered", "answer": d.Answer, "finding": d.Finding,
+			"by": d.By, "at": d.At, "node": r.FailedNode,
 			"message": "Answer: " + d.Answer})
 	}
 	reply.saved <- err
@@ -59,7 +64,7 @@ func (r *bgRun) decision(line string) string {
 	if ev.State == "waiting" {
 		r.Outcome.Outcome, r.Ended = "failed", time.Now()
 		r.Reason = ev.Finding
-		r.NextStep = "atm answer " + r.Run + " approve|fix|stop"
+		r.NextStep = "atm answer " + r.Run + " approve|fix|stop --by <who>"
 		if ev.Resumable {
 			r.NextStep += "; recovery: atm run --resume " + r.Run
 		}
@@ -73,9 +78,13 @@ func (r *bgRun) decision(line string) string {
 	return ev.Message
 }
 
-func (s *server) answerRun(label, answer string) error {
+func (s *server) answerRun(label, answer, by string) error {
 	if answer != "approve" && answer != "fix" && answer != "stop" {
 		return errors.New("answer must be approve, fix or stop")
+	}
+	by = strings.TrimSpace(by)
+	if by == "" {
+		return errors.New("--by is required: name who is answering")
 	}
 	r := s.find(label)
 	s.Lock()
@@ -87,14 +96,14 @@ func (s *server) answerRun(label, answer string) error {
 	r.answer = nil        // only one caller can consume this question
 	r.Ended = time.Time{} // the continuation is active before another request can prune history
 	s.Unlock()
-	reply := decisionAnswer{answer: answer, saved: make(chan error)}
+	reply := decisionAnswer{answer: answer, by: by, saved: make(chan error)}
 	ch <- reply
 	return <-reply.saved
 }
 
 // Answer gives a waiting run its launcher's decision and waits until the answer is on disk.
-func Answer(root, label, answer string) error {
-	return call(root, request{Cmd: "answer", Run: label, Answer: answer}, nil, func(reply) {})
+func Answer(root, label, answer, by string) error {
+	return call(root, request{Cmd: "answer", Run: label, Answer: answer, By: by}, nil, func(reply) {})
 }
 
 // afterCheck gives the worker exactly one turn with the finding, using its session when supported.
