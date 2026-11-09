@@ -5,11 +5,7 @@ package run
 import (
 	"os/exec"
 	"strings"
-	"syscall"
 	"testing"
-
-	"github.com/charmbracelet/x/ansi"
-	"github.com/creack/pty"
 )
 
 func TestRealAttachEndsAfterDecisionServerDies(t *testing.T) {
@@ -54,18 +50,25 @@ func TestRealAttachEndsAfterDecisionServerDies(t *testing.T) {
 			if resumable {
 				want = "atm run --resume " + label
 			}
-			runs, err := Runs(top)
-			if err != nil || len(runs) != 1 || runs[0].Outcome != "failed" || runs[0].Waits() || runs[0].Ended.IsZero() ||
-				runs[0].Reason != reason || runs[0].NextStep != want {
-				t.Fatalf("interrupted outcome: %+v, %v", runs, err)
-			}
-			list := exec.Command(recovered, "runs")
-			list.Dir = top
-			if out, err := list.CombinedOutput(); err != nil || !strings.Contains(string(out), want) ||
-				strings.Contains(string(out), "atm answer ") {
-				t.Fatalf("atm runs recovery: %v\n%s", err, out)
-			}
+			recoveredRun(t, recovered, top, reason, want)
 		})
+	}
+}
+
+// recoveredRun fails the test unless top's only run, and atm runs of binary bin, show it failed with reason and
+// its next step want.
+func recoveredRun(t *testing.T, bin, top, reason, want string) {
+	t.Helper()
+	runs, err := Runs(top)
+	if err != nil || len(runs) != 1 || runs[0].Outcome != "failed" || runs[0].Waits() || runs[0].Ended.IsZero() ||
+		runs[0].Reason != reason || runs[0].NextStep != want {
+		t.Fatalf("interrupted outcome: %+v, %v", runs, err)
+	}
+	list := exec.Command(bin, "runs")
+	list.Dir = top
+	if out, err := list.CombinedOutput(); err != nil || !strings.Contains(string(out), want) ||
+		strings.Contains(string(out), "atm answer ") {
+		t.Fatalf("atm runs recovery: %v\n%s", err, out)
 	}
 }
 
@@ -88,17 +91,9 @@ func TestRealAttachClearsInterruptedDeliveryDecision(t *testing.T) {
 		return strings.Contains(s, "✗ failed") && strings.Contains(s, "the background process ended")
 	})
 	for _, cols := range []uint16{80, 100} {
-		if err := pty.Setsize(sc.f.term, &pty.Winsize{Rows: 36, Cols: cols}); err != nil {
-			t.Fatal(err)
-		}
-		if err := sc.f.cmd.Process.Signal(syscall.SIGWINCH); err != nil {
-			t.Fatal(err)
-		}
-		sc.until(func(s string) bool {
-			header, _, _ := strings.Cut(s, "\n")
-			return ansi.StringWidth(header) == int(cols) && strings.Contains(s, "✗ failed") &&
-				strings.Contains(s, "the background process ended") && strings.Contains(s, "╭─ Gate") &&
-				!strings.Contains(s, "approve|fix|stop")
+		sc.resized(cols, func(s string) bool {
+			return strings.Contains(s, "✗ failed") && strings.Contains(s, "the background process ended") &&
+				strings.Contains(s, "╭─ Gate") && !strings.Contains(s, "approve|fix|stop")
 		})
 	}
 	if _, err := sc.f.term.Write([]byte("q")); err != nil {
