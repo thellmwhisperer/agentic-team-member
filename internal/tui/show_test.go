@@ -77,7 +77,7 @@ func TestShowColdCompletedRunQuitsLeavingItsScreen(t *testing.T) {
 	master, tty := testTerminal(t, 69, 39)
 	path := savedReport(t, completedReport)
 	old := follow
-	follow = func(_, _ string, _ <-chan struct{}, _ func(run.Frame)) (run.Outcome, error) {
+	follow = func(_, _ string, _ int, _ <-chan struct{}, _ func(run.Frame)) (run.Outcome, error) {
 		return run.Outcome{Run: "297-65", Outcome: "passed", Ended: time.Now(), Report: path}, nil
 	}
 	defer func() { follow = old }()

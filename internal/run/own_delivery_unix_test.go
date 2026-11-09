@@ -16,8 +16,10 @@ import (
 
 const ownDeliveryScript = `#!/bin/sh
 # ATM's delivery: every run works in a fresh clone, so no-mistakes is initialised there first.
+# --wait 24h: axi run holds until the gate stops for an answer or ends; its default 8 minute hold would end this
+# command with exit 1 while the gate goes on, and the run would take Delivery as failed.
 no-mistakes init || exit 1
-exec no-mistakes axi run --intent "$ATM_INTENT"
+exec no-mistakes axi run --intent "$ATM_INTENT" --wait 24h
 `
 
 // ownDeliveryNM returns from axi run at review; gateNM below answers the screen's queries afterwards.
@@ -27,7 +29,7 @@ case "$1 $2" in
 	printf 'init\n' >>"$FAKE_NM/delivery-calls"
 	exit "${FAKE_NM_INIT_EXIT:-0}" ;;
 "axi run")
-	[ "$#" = 4 ] && [ "$3" = --intent ] || exit 2
+	[ "$#" = 6 ] && [ "$3" = --intent ] && [ "$5" = --wait ] && [ "$6" = 24h ] || exit 2
 	printf 'axi run --intent\n' >>"$FAKE_NM/delivery-calls"
 	printf '%s' "$4" >"$FAKE_NM/intent"
 	echo 'review awaiting_approval'

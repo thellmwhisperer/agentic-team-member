@@ -280,19 +280,22 @@ func (m *Model) atmRow(rows []paneLine, r *row, inner int) []paneLine {
 
 // row is r's line: its icon, its label and how long it took, then, right-aligned, its note and its state.
 func (m *Model) row(r *row, width int) string {
-	prefix := m.icon(r.state) + " "
+	word := r.state
+	if word == "failed" && r.step == "delivery" && m.gateHoldsDelivery() {
+		word = "running" // a gate that goes on is Delivery going on, whatever its command's exit said
+	}
+	prefix := m.icon(word) + " "
 	if r.check {
 		prefix = "  " + prefix
 	}
 	took := r.took
-	if r.state == "running" && !r.start.IsZero() {
+	if word == "running" && !r.start.IsZero() {
 		took = m.now.Sub(r.start)
 	}
 	suffix := ""
-	if r.hasDuration || r.state == "running" {
+	if r.hasDuration || word == "running" {
 		suffix = "  " + paint(dim, run.Human(took))
 	}
-	word := r.state
 	status := bold(states[word][1], word)
 	if r.step == "ponytail" && r.check {
 		indent := strings.Repeat(" ", lipgloss.Width(prefix))
@@ -362,6 +365,10 @@ func (m *Model) right(width, height int) string {
 }
 
 func (m *Model) running() bool { return m.runningRow() != nil }
+
+// gateHoldsDelivery says whether the gate the delivery command started goes on: the screen then shows Delivery
+// running, even when the command already ended, as no-mistakes axi run does when its hold elapses.
+func (m *Model) gateHoldsDelivery() bool { return m.gateLive && m.gateSteps != nil }
 
 // runningRow is the row of the node that runs, nil when none does.
 func (m *Model) runningRow() *row {

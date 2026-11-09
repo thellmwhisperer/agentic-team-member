@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/creack/pty"
 )
 
@@ -251,4 +252,89 @@ func heldFollow(t *testing.T) (string, *followed, func()) {
 	f := startFollow(t, bin, top, false, "run", "--follow", issueFile(t, issue))
 	wait()
 	return top, f, release
+}
+
+// screenRead keeps what the terminal of a followed atm run showed.
+type screenRead struct {
+	f     *followed
+	shown strings.Builder
+}
+
+// screenRun starts the real atm run, on a terminal, of a repository whose delivery command is delivery, and
+// returns its repository's top and its screen.
+func screenRun(t *testing.T, delivery string) (string, *screenRead) {
+	t.Helper()
+	bin := builtATM(t)
+	root := repo(t, "https://example.com/o/r.git", atmSet(atmYAML, "delivery", delivery))
+	top := gitT(t, root, "rev-parse", "--show-toplevel")
+	stopServing(t, top)
+	t.Setenv("TERM", "xterm-256color")
+	t.Setenv("NO_COLOR", "")
+	return top, &screenRead{f: startFollow(t, bin, top, true, "run", issueFile(t, issue))}
+}
+
+// gateEnds ends the fake gate of directory nm, waits until the screen shows the run passed and closes it.
+func (sc *screenRead) gateEnds(nm string) {
+	sc.f.t.Helper()
+	if err := os.WriteFile(filepath.Join(nm, "done"), nil, 0o600); err != nil {
+		sc.f.t.Fatal(err)
+	}
+	sc.until(func(s string) bool { return strings.Contains(s, "✓ passed") })
+	sc.close()
+}
+
+// last is the terminal's text from its last ATM box on.
+func (sc *screenRead) last() string {
+	s := ansi.Strip(sc.shown.String())
+	return s[max(0, strings.LastIndex(s, "╭─ ATM")):]
+}
+
+// until reads the terminal until ok holds on its last screen, 2 min at most.
+func (sc *screenRead) until(ok func(string) bool) {
+	sc.f.t.Helper()
+	deadline := time.After(2 * time.Minute)
+	for !ok(sc.last()) {
+		select {
+		case l, open := <-sc.f.lines:
+			if !open {
+				sc.f.t.Fatalf("atm run ended early; stderr:\n%s\nthe terminal showed:\n%s", sc.f.errors(), sc.last())
+			}
+			sc.shown.WriteString(l + "\n")
+		case <-deadline:
+			all := ansi.Strip(sc.shown.String())
+			sc.f.t.Fatalf("the screen never showed it:\n%s", all[max(0, len(all)-3000):])
+		}
+	}
+}
+
+// during reads the terminal for d, or until atm run ends.
+func (sc *screenRead) during(d time.Duration) {
+	for over := time.After(d); ; {
+		select {
+		case l, open := <-sc.f.lines:
+			if !open {
+				return
+			}
+			sc.shown.WriteString(l + "\n")
+		case <-over:
+			return
+		}
+	}
+}
+
+// close types q on a screen that shows the run's end, and waits for atm run to exit 0 with q close shown.
+func (sc *screenRead) close() {
+	sc.f.t.Helper()
+	if _, err := sc.f.term.Write([]byte("q")); err != nil {
+		sc.f.t.Fatal(err)
+	}
+	for l := range sc.f.lines { // the footer is the screen's last line: it ends with no newline until atm run exits
+		sc.shown.WriteString(l + "\n")
+	}
+	if err := sc.f.cmd.Wait(); err != nil {
+		sc.f.t.Fatalf("atm run: %v; stderr:\n%s", err, sc.f.errors())
+	}
+	if s := sc.last(); !strings.Contains(s, "q close") {
+		sc.f.t.Fatalf("q closed a screen that never showed the run's end:\n%s", s)
+	}
 }

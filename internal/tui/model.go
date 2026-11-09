@@ -264,20 +264,14 @@ func (m *Model) frame(f run.Frame) tea.Cmd {
 	return m.ask(0)
 }
 
-// runEnded keeps the run's end on screen and quits if the run never reached Delivery, else starts asking for the
-// gate when the screen has not yet.
+// runEnded keeps the run's end on screen and quits unless the screen asks for the gate, which it does from the
+// first frame of Delivery running with the clone known.
 func (m *Model) runEnded(e ended) tea.Cmd {
-	d := m.current("delivery")
-	attempted := d != nil && d.state != "pending" && d.state != "skipped"
 	m.end(e.o, e.err)
 	if m.asking {
 		return nil
 	}
-	if m.clone == "" || !attempted {
-		return tea.Quit
-	}
-	m.asking = true
-	return m.ask(0)
+	return tea.Quit
 }
 
 // gateShown shows answer g and asks again after a second, unless g, asked after the run's end, shows a gate over,
