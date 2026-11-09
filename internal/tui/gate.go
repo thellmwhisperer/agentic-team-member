@@ -166,11 +166,12 @@ var (
 	gateMarkdownPunctuation = regexp.MustCompile(`[[:punct:]]`)
 )
 
-// gateActivities reads agent prose and final objects without changing the gate's log on disk.
+// gateActivities reads agent prose and final objects without changing the gate's log on disk. The empty lines
+// no-mistakes writes between entries are left out, as the process lines are: the screen draws each line as a row.
 func gateActivities(log []map[string]string) (out []*activity) {
 	var lines []string
 	for _, l := range log {
-		if !gateProcessLine.MatchString(strings.TrimSpace(l["line"])) {
+		if s := strings.TrimSpace(l["line"]); s != "" && !gateProcessLine.MatchString(s) {
 			lines = append(lines, l["line"])
 		}
 	}
