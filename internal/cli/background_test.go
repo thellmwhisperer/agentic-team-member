@@ -165,20 +165,57 @@ func atmIn(t *testing.T, code int, args ...string) string {
 	return out
 }
 
+// serveGrace is how long a background process has to end by itself, once its socket is gone, before it is killed.
+var serveGrace = 7 * time.Second
+
+// servePIDs are the processes the serve.log text says served.
+func servePIDs(t *testing.T, log string) (pids []int) {
+	t.Helper()
+	for _, line := range strings.Split(log, "\n") {
+		if pid, ok := strings.CutPrefix(line, "atm serve pid: "); ok {
+			n, err := strconv.Atoi(pid)
+			if err != nil {
+				t.Fatalf("background process record %q: %v", line, err)
+			}
+			pids = append(pids, n)
+		}
+	}
+	return pids
+}
+
+// gone waits up to d for the process pid to be gone: only its process id says so, never a file.
+func gone(pid int, d time.Duration) bool {
+	for deadline := time.Now().Add(d); ; time.Sleep(20 * time.Millisecond) {
+		p, err := os.FindProcess(pid)
+		if err != nil || errors.Is(p.Signal(syscall.Signal(0)), os.ErrProcessDone) {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+	}
+}
+
 // The background process is this test binary, as atm serve, which ends once its socket is gone with the test.
+// The test ends when every process serve.log names is gone: one that outlives serveGrace is killed.
 func cleanBackgroundServer(t *testing.T, dir string) {
 	t.Helper()
 	t.Cleanup(func() {
 		if err := os.Remove(filepath.Join(dir, ".atm", "atm.sock")); err != nil && !os.IsNotExist(err) {
 			t.Error(err)
 		}
-		log := filepath.Join(dir, ".atm", "serve.log")
-		for deadline := time.Now().Add(7 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
-			if err := os.Remove(log); err == nil || os.IsNotExist(err) {
-				return
+		log, _ := os.ReadFile(filepath.Join(dir, ".atm", "serve.log")) // none: nothing was started
+		for _, pid := range servePIDs(t, string(log)) {
+			if gone(pid, serveGrace) {
+				continue
+			}
+			if p, err := os.FindProcess(pid); err == nil {
+				_ = p.Kill()
+			}
+			if !gone(pid, 5*time.Second) {
+				t.Errorf("background process %d is still alive", pid)
 			}
 		}
-		t.Errorf("background process still holds %s", log)
 	})
 }
 
@@ -305,16 +342,7 @@ func assertBothRunsServed(t *testing.T, dir, ready string) {
 
 func assertOneBackgroundProcess(t *testing.T, dir string) {
 	t.Helper()
-	var served []int
-	for _, line := range strings.Split(read(t, filepath.Join(dir, ".atm", "serve.log")), "\n") {
-		if pid, ok := strings.CutPrefix(line, "atm serve pid: "); ok {
-			n, err := strconv.Atoi(pid)
-			if err != nil {
-				t.Fatalf("background process record %q: %v", line, err)
-			}
-			served = append(served, n)
-		}
-	}
+	served := servePIDs(t, read(t, filepath.Join(dir, ".atm", "serve.log")))
 	if len(served) != 1 || served[0] <= 0 {
 		t.Fatalf("background process pids = %v, want one serving process", served)
 	}
