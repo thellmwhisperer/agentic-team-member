@@ -49,14 +49,21 @@ func brief(i Issue, c config.Config, scratch string) (string, error) {
 	return b.String(), err
 }
 
-// ponytailBrief is brief-ponytail.md for issue i, under the repository's config c, whose run made diff.
-func ponytailBrief(i Issue, c config.Config, diff string) (string, error) {
+// ponytailBrief is brief-ponytail.md for issue i, under the repository's config c, whose run made diff and proofs.
+func ponytailBrief(i Issue, c config.Config, diff string, proofs []proof) (string, error) {
+	var tests []string
+	for _, p := range proofs {
+		if p.test != "" {
+			tests = append(tests, p.test)
+		}
+	}
 	var b strings.Builder
 	err := ponytailTmpl.Execute(&b, struct {
 		Issue
 		config.Config
 		Diff     string
 		Families []string
-	}{i, c, diff, families})
+		Tests    []string
+	}{i, c, diff, families, tests})
 	return b.String(), err
 }

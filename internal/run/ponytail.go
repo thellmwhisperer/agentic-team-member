@@ -36,7 +36,7 @@ func (a agent) ponytail(root, clone, sha string, proofs []proof, i Issue, c conf
 	if err != nil {
 		return nil, err
 	}
-	before, files, text, err := review(a.dir, clone, sha, i, c)
+	before, files, text, err := review(a.dir, clone, sha, i, c, proofs)
 	if err != nil {
 		return nil, err
 	}
@@ -326,8 +326,9 @@ func reprove(runDir, clone, base string, history []proof, c config.Config) (stri
 }
 
 // review is the run's work in clone, at base commit sha, as a tree, the files it changes, and its
-// brief-ponytail.md for issue i under config c, written next to brief.md in the run's directory dir.
-func review(dir, clone, sha string, i Issue, c config.Config) (tree string, files []string, text string,
+// brief-ponytail.md for issue i under config c, naming the tests of proofs, written next to brief.md in the run's
+// directory dir.
+func review(dir, clone, sha string, i Issue, c config.Config, proofs []proof) (tree string, files []string, text string,
 	err error) {
 	if tree, err = snapshot(clone); err != nil {
 		return
@@ -341,7 +342,7 @@ func review(dir, clone, sha string, i Issue, c config.Config) (tree string, file
 		return
 	}
 	files = strings.Split(strings.TrimRight(names, "\x00"), "\x00")
-	if text, err = ponytailBrief(i, c, diff); err == nil {
+	if text, err = ponytailBrief(i, c, diff, proofs); err == nil {
 		err = os.WriteFile(filepath.Join(dir, "brief-ponytail.md"), []byte(text), 0o644)
 	}
 	return

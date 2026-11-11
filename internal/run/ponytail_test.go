@@ -644,3 +644,20 @@ func keptTogether(t *testing.T, clone string) {
 		t.Fatalf("dirty clone: %q", got)
 	}
 }
+
+func TestPonytailBriefNamesTheFrozenTest(t *testing.T) {
+	root := repo(t, "https://example.com/owner/repo.git", atmYAML)
+	t.Setenv("FAKE_AGENT_WORK", "echo fixed > a.txt"+reportTest("regression_test.sh"))
+	var out bytes.Buffer
+	if err := Run("t", []string{issueFile(t, issue)}, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(root, ".atm", "runs", "t", "brief-ponytail.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "- Do not change `regression_test.sh`: the test the worker reported as its proof stays byte for byte"
+	if !strings.Contains(strings.ReplaceAll(string(b), "\r\n", "\n"), want) {
+		t.Fatalf("brief-ponytail.md lacks %q:\n%s", want, b)
+	}
+}
