@@ -31,7 +31,7 @@ type Tools[C any] struct {
 
 // Run runs the configured commands on the completed work, preserving clone and test safeguards. A nil issue
 // disables the test-loss check during ponytail reproof; later Checks uses cuts to retain only accepted reductions.
-func Run[C any](clone, runDir, sha, base, test string, issue *string, missingReport bool, c config.Config,
+func Run[C any](clone, runDir, sha, base, test string, issue *string, needChange bool, c config.Config,
 	t Tools[C], cuts ...string) (result map[string]any, err error) {
 	result = map[string]any{}
 	cover, err := coverageEnv(runDir, c.E2E)
@@ -59,13 +59,13 @@ func Run[C any](clone, runDir, sha, base, test string, issue *string, missingRep
 		}
 	}
 	if err == nil {
-		err = run("install", c.Install)
+		err = checkChanges(t.Git, clone, base, issue, c.TestPatterns, needChange, cuts)
 	}
-	if err != nil {
-		return result, err
-	}
-	if err = checkChanges(t.Git, clone, base, issue, c.TestPatterns, missingReport, cuts); err == nil && test != "" {
+	if err == nil && test != "" {
 		_, err = t.ReadTest(clone, test)
+	}
+	if err == nil {
+		err = run("install", c.Install)
 	}
 	if err != nil {
 		return result, err
@@ -79,15 +79,15 @@ func Run[C any](clone, runDir, sha, base, test string, issue *string, missingRep
 	return result, t.Moved(clone, sha, "the commands")
 }
 
-// checkChanges rejects empty work when there is no report and, when issue is not nil, a changed test file that
+// checkChanges rejects empty work when needChange and, when issue is not nil, a changed test file that
 // loses tests.
 func checkChanges(git func(dir string, args ...string) (string, error), clone, base string, issue *string,
-	tests []string, missingReport bool, cuts []string) error {
+	tests []string, needChange bool, cuts []string) error {
 	_, err := git(clone, "add", "-A")
 	if err == nil {
 		var out string
-		out, err = git(clone, "diff", "--cached", "--name-only", "--no-renames", "-z", "HEAD")
-		if err == nil && missingReport && out == "" {
+		out, err = git(clone, "diff", "--cached", "--name-only", "--no-renames", "-z", base)
+		if err == nil && needChange && out == "" {
 			err = errors.New("no change to prove")
 		}
 		if err == nil && issue != nil && len(tests) > 0 {

@@ -309,7 +309,7 @@ func checkUnit(runDir, dir, head, base, test, issue string, report map[string]an
 	map[string]any, error) {
 	ev := map[string]any{"unit": 1}
 	missing := report == nil && test == ""
-	result, err := checks(dir, runDir, head, base, test, &issue, missing, c, cuts...)
+	result, err := checks(dir, runDir, head, base, test, &issue, true, c, cuts...)
 	for key, value := range result {
 		ev[key] = value
 	}
