@@ -189,8 +189,17 @@ func TestUpdateRefusesWhileARunGoes(t *testing.T) {
 	}
 	assertUntouched(t, target, "v0.1.0")
 	// a temp directory inside the repository whose run goes is not that repository
-	t.Setenv("TMPDIR", repoDir)
-	inside := installed(t, "v0.1.0")
+	insideDir, err := os.MkdirTemp(repoDir, "update-inside-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(insideDir) })
+	t.Setenv("GIT_CEILING_DIRECTORIES", repoDir)
+	t.Chdir(insideDir)
+	inside := filepath.Join(insideDir, "atm")
+	if err := os.WriteFile(inside, []byte(fakeAtm("v0.1.0")), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	if err := update(&out, "v0.1.0", inside); err != nil {
 		t.Fatalf("update from a temp directory inside a repository whose run goes: %v", err)
 	}
