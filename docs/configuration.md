@@ -106,7 +106,7 @@ error.
 ## `.atm.yaml`
 
 The repository declares every command a run needs. ATM detects nothing and
-defaults nothing per language. Every key in the table below except `e2e` is required: an
+defaults nothing per language. Every key in the table below except `e2e` and `compile` is required: an
 empty value is a deliberate "none", a missing key fails with
 `config incomplete`. `harness`, `model` and `effort` may go here too, over
 your machine's file.
@@ -116,6 +116,7 @@ your machine's file.
 | `install` | Installs dependencies in a fresh clone |
 | `test` | Runs the whole test suite. In this repository it is `scripts/test.sh`; see [contribution checks](../CONTRIBUTING.md#making-a-change) for its execution modes |
 | `e2e` | Optional command after `test` and before `typecheck`; absent or empty means no row. In this repository it is `scripts/cover-diff.sh`. A changed line inside a coverage block that no end-to-end run of the real `atm` binary executed fails; the check names those lines. Delete them, or write the end-to-end test that reaches them from a real `atm` command. Lines that no coverage block spans, `_test.go` files, files under `testdata/` and deletions do not fail it. It reads the diff and the coverage blocks, not the text of a line |
+| `compile` | Optional. A command [preflight](how-a-run-flows.md#before-the-run) runs on the base commit before any clone or agent, for example `go vet ./...` to compile the tests; non-zero stops the launch. Absent or empty means no check |
 | `typecheck` | Typechecks |
 | `lint` | Lints |
 | `test_file` | Legacy configuration key, required but not executed. An empty value is allowed; a non-empty value must contain `{file}` or `{dir}`. Tests run through the configured `test` suite. |
