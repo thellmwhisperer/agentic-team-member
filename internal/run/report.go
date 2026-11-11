@@ -37,7 +37,6 @@ type verdict struct {
 
 	checkCommands []cmdResult
 
-	ClonePath    string              `json:"clone,omitempty"`
 	CloneCleanup []map[string]string `json:"clone_cleanup,omitempty"`
 
 	// Resumable says atm run --resume picks the run up, from ResumableUnit's checks: it failed after its agent.
@@ -48,6 +47,7 @@ type verdict struct {
 
 type node struct {
 	Name       string  `json:"name"`
+	ClonePath  string  `json:"clone,omitempty"`
 	AgentModel *string `json:"agent_model,omitempty"`
 	Result     string  `json:"result"`
 	Exit       string  `json:"exit,omitempty"` // how its agent ended, when it failed after it ran
@@ -193,9 +193,6 @@ func (r *verdict) step(name string, fn func() (map[string]any, error)) {
 }
 
 func (r *verdict) emit(name string, ev map[string]any) {
-	if clone, ok := ev["clone"].(string); ok {
-		r.ClonePath = clone
-	}
 	if name == "issue" && ev["state"] == "started" {
 		ev["agent"] = r.Agent
 	}

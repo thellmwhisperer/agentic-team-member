@@ -80,14 +80,13 @@ func TestKeptCloneSweepPreservesPendingAndResumableDelivery(t *testing.T) {
 	keptCloneRun(t, bin, top, path, 0)
 	exist(t, pending, pending+".delivered", undelivered)
 	assertCloneCleanup(t, top, pending, "kept")
-	// A report from before clone paths were recorded still protects its delivered commit.
 	legacyPath := filepath.Join(runDir(top, label), "report.json")
 	b, err := os.ReadFile(legacyPath)
-	var legacy map[string]any
-	if err != nil || json.Unmarshal(b, &legacy) != nil || legacy["clone"] != pending {
+	var legacy verdict
+	if err != nil || json.Unmarshal(b, &legacy) != nil || legacy.node("clone").ClonePath != pending {
 		t.Fatalf("missing clone path in report: %s, %v", b, err)
 	}
-	delete(legacy, "clone")
+	legacy.node("clone").ClonePath = ""
 	b, err = json.Marshal(legacy)
 	if err != nil {
 		t.Fatal(err)
@@ -96,6 +95,98 @@ func TestKeptCloneSweepPreservesPendingAndResumableDelivery(t *testing.T) {
 	keptCloneRun(t, bin, top, path, 0)
 	exist(t, pending, pending+".delivered", undelivered)
 	assertCloneCleanup(t, top, pending, "kept")
+}
+
+func TestKeptCloneSweepRemovesResumedCloneWithoutRemovingOriginal(t *testing.T) {
+	t.Setenv("FAKE_AGENT_WORK", "if test -f first-turn; then touch repaired; else "+fixWork+"; touch first-turn; fi")
+	bin, top, path, prState := keptCloneRepo(t,
+		`if test -f "$ATM_TEST_SOURCE/fail-delivery" && ! test -f repaired; then `+
+			`git commit --allow-empty -qm delivery-commit || exit; echo delivery-finding; exit 1; fi`)
+	configPath := filepath.Join(top, ".atm.yaml")
+	cfg, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(t, configPath, atmSet(string(cfg), "lint", `test ! -f repaired || test -f "$ATM_TEST_SOURCE/resume-ready"`))
+	gitT(t, top, "add", ".atm.yaml")
+	gitT(t, top, "commit", "-qm", "configure resume check")
+	write(t, filepath.Join(top, "fail-delivery"), "")
+	original, label := question(t, bin, top, "delivery-finding", 4, "run", "--follow", path)
+	answerFailedCheck(t, bin, top, label, "fix", 1)
+	stopCheckRun(t, top, label)
+	prior := e2eReport(t, top, label)
+	if !prior.Resumable || prior.FailedNode != "checks" || len(prior.Decisions) != 2 ||
+		prior.Decisions[0].Answer != "fix" || prior.Decisions[1].Answer != "stop" ||
+		prior.node("clone").ClonePath != original || !filepath.IsAbs(prior.node("clone").ClonePath) {
+		t.Fatalf("repair did not keep a resumable clone with its absolute path: %+v", prior)
+	}
+	write(t, filepath.Join(top, "resume-ready"), "")
+	resumed := resumedLatestAttemptClone(t, followedRun(t, bin, top, 0, "--resume", label))
+	if resumed == "" || resumed == original {
+		t.Fatalf("resume did not create a separate clone: %q", resumed)
+	}
+	if r := e2eReport(t, top, lastRun(t, top, "passed")); r.node("clone").ClonePath != resumed {
+		t.Fatalf("resumed report does not identify its own clone: %+v", r)
+	}
+	gitT(t, resumed, "merge-base", "--is-ancestor", prior.HeadSHA, "HEAD")
+	exist(t, original, original+".delivered", resumed, resumed+".delivered")
+	write(t, prState, "CLOSED\n")
+	if err := os.Remove(filepath.Join(top, "fail-delivery")); err != nil {
+		t.Fatal(err)
+	}
+	keptCloneRun(t, bin, top, path, 0)
+	exist(t, original, original+".delivered", original+".lock")
+	for _, suffix := range []string{"", ".delivered", ".lock"} {
+		if _, err := os.Lstat(resumed + suffix); !os.IsNotExist(err) {
+			t.Fatalf("completed resumed clone remains after its PR closed: %s: %v", resumed+suffix, err)
+		}
+	}
+	assertCloneCleanup(t, top, original, "kept")
+	assertCloneCleanup(t, top, resumed, "removed")
+	if r := e2eReport(t, top, label); !r.Resumable || r.node("clone").ClonePath != original {
+		t.Fatalf("sweep changed the original resumable run: %+v", r)
+	}
+}
+
+func TestKeptCloneSweepPreservesUnidentifiedLegacyRun(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		resumable bool
+		answer    string
+		keep      bool
+	}{
+		{"resumable", true, "stop", true},
+		{"waiting", false, "", true},
+		{"stopped", false, "stop", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bin, top, path, prState := keptCloneRepo(t, "")
+			first := keptCloneRun(t, bin, top, path, 0)
+			legacy := verdict{FailedNode: "checks", Resumable: tc.resumable,
+				Nodes:     []*node{{Name: "clone", Result: "passed"}},
+				Decisions: []Decision{{Node: "checks", Answer: tc.answer}}}
+			b, err := json.Marshal(legacy)
+			if err != nil {
+				t.Fatal(err)
+			}
+			dir := runDir(top, "legacy")
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			write(t, filepath.Join(dir, "report.json"), string(b))
+			write(t, prState, "CLOSED\n")
+			keptCloneRun(t, bin, top, path, 0)
+			if tc.keep {
+				exist(t, first, first+".delivered", first+".lock")
+				assertCloneCleanup(t, top, first, "kept")
+			} else {
+				if _, err := os.Lstat(first); !os.IsNotExist(err) {
+					t.Fatalf("stopped legacy run blocked clone cleanup: %v", err)
+				}
+				assertCloneCleanup(t, top, first, "removed")
+			}
+		})
+	}
 }
 
 func TestKeptCloneSweepPreservesDeliveryThatStopsDuringSweep(t *testing.T) {
@@ -120,7 +211,7 @@ func TestKeptCloneSweepPreservesDeliveryThatStopsDuringSweep(t *testing.T) {
 			})
 			label := filepath.Base(filepath.Dir(strings.TrimSpace(string(report))))
 			prior := e2eReport(t, top, label)
-			pending := prior.ClonePath
+			pending := prior.node("clone").ClonePath
 			if pending == "" || prior.FailedNode != "" || prior.node("delivery").Result != "running" {
 				t.Fatalf("delivery was not active before the sweep: %+v", prior)
 			}
