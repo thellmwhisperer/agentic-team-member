@@ -357,8 +357,13 @@ A run's label is `<issue name>-<n>`, `n` counting the repository's runs; it is
 what `atm runs` shows. A run that delivered leaves `<clone>.delivered` with its
 branch and base. At its end, a run removes its own clone unless it kept
 resumable work or delivered a branch that is not merged and whose PR is
-still open or unknown. ATM does not sweep other runs' clones: abandoned
-clones and retained delivered clones remain for the owner to clean up.
+still open or unknown. Before making its clone and again at its end, a run
+also sweeps every other delivered clone that no live run is using and
+removes it under the same rule, so a kept clone goes once its PR is merged
+or closed. The sweep keeps a clone whose run's `report.json` names it and is
+resumable, failed or awaits an answer; a resumable or waiting report that
+names no clone keeps every delivered clone. Clones that never delivered
+remain for the owner to clean up.
 The cleanup lock is held only during removal; agents and delivery commands
 inherit no ownership of the clone. On Unix, cleanup keeps a clone if its
 original directory name now refers to a different directory. Cleanup
