@@ -36,7 +36,7 @@ same kind.
   integration tests can pass while the product is broken.
 - A changed line that no real `atm` run executes fails the run: it is either
   code to delete or a missing end-to-end test.
-- A run with no change from its base commit is red before Checks run commands.
+- A run that ends with no final report and no change is red.
 - Each new binary from `main` is used at once. Using it is the QA.
 
 ## The contract
