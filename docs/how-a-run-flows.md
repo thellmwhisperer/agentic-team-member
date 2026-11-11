@@ -600,10 +600,9 @@ On a terminal, the screen quits at the run's end if Delivery never ran with a
 known clone. Otherwise it started querying the gate once, when Delivery first
 ran with a known clone. It keeps
 querying every second, even if no gate run is found or a query fails, and before
-the ATM run ends even if the gate ended; it stops querying once a query asked
-after the ATM run ended finds the gate over. It closes on its own only if a query
-asked after the ATM run ended finds no gate run and no gate has ever been shown.
-Otherwise it stays open until `q` or Ctrl+C. Gate spinners and times advance while the last gate answer showed a
+the ATM run ends even if the gate ended. It closes on its own, with no key
+pressed, once a query asked after the ATM run ended finds the gate over, or finds
+no gate run when no gate has ever been shown. Until then, `q` or Ctrl+C detaches. Gate spinners and times advance while the last gate answer showed a
 running gate. The last view stays on the terminal. Off-terminal output returns
 when the ATM run ends.
 
