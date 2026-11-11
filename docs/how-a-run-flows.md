@@ -236,6 +236,13 @@ and the ways out, are under [`e2e`](configuration.md#atmyaml). The first
 failed command asks the launcher with its last 60 lines as the finding. A
 command that commits fails the checks too.
 
+A red `test` or `lint` row first resolves itself once a run, before any
+question. A red `test` row runs Checks once more with no agent turn; when the
+`test` row then passes, the first red's finding is recorded in `report.json`
+under `flaky`. A `test` row still red, or a red `lint` row, gives the worker
+the turn `fix` gives, with the finding, and Checks runs again. A red after that
+turn asks the launcher. Other rows ask at once.
+
 After `install` and before `test`, Checks track changed Go test files matching
 `test_patterns` from the run's original base commit through the current work,
 including file renames. They count `func Test...` declarations and `t.Run`
@@ -362,6 +369,7 @@ it is on disk before delivery reads it.
 | `units` | The unit's number (`1`), base commit, reported test file, result, `started_at` and `duration_ms` |
 | `reproofs` | Each rechecked unit's number, base commit, reported test file, result, `started_at` and `duration_ms` after a cut; configured commands are in `commands` |
 | `commands` | Every configured command that ran, the clone's `install` included, with its result, last 60 lines, `started_at` and `duration_ms` |
+| `flaky` | The finding of each red `test` row whose second run passed; absent when none |
 | `decisions` | Each Agent exit error, forbidden write, Checks, slop detector or Delivery finding with its `node`, the launcher's `approve`, `fix` or `stop` `answer`, who answered in `by` and the answer's time in `at` (UTC); the answer is empty while the question is pending |
 | `clone_cleanup` | Each delivered clone the run's sweeps looked at, with its `path`, `result` (`kept` or `removed`) and `error` when reading or removal failed; see [What a run leaves on disk](configuration.md#what-a-run-leaves-on-disk) |
 | `head_sha` | The latest commit prepared for Delivery; a repair may update it |
