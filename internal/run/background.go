@@ -522,8 +522,11 @@ func (r *bgRun) event(line string) string {
 	if ev.Agent != nil {
 		r.Agent = ev.Agent
 	}
-	if ev.State == "failed" {
+	switch ev.State {
+	case "failed":
 		r.FailedNode = ev.Step
+	case "started":
+		r.FailedNode = ""
 	}
 	line = fmt.Sprintf("%-9s %s", ev.Step, ev.State)
 	if ev.DurationMS != nil {
