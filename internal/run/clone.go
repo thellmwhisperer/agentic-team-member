@@ -1,7 +1,9 @@
 package run
 
 import (
+	"cmp"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -111,6 +113,10 @@ func claim(root string, now time.Time) (string, error) {
 
 // release ends the run's hold on its clone dir, removing it when eligible and safely selected.
 func release(dir, repo string) error {
+	return releaseClone(dir, repo, nil)
+}
+
+func releaseClone(dir, repo string, keptHeads map[string]bool) error {
 	if dir == "" {
 		return nil
 	}
@@ -118,16 +124,89 @@ func release(dir, repo string) error {
 	if err != nil || !locked {
 		return err
 	}
-	if kept(dir, repo, lock) {
+	if keptHeads[dir] || kept(dir, repo, lock, keptHeads) {
 		return closeClone(lock)
 	}
 	return remove(dir, lock)
 }
 
+// sweep revisits delivered clones only. Failed or resumable deliveries keep their work, as do live runs.
+// Its decisions go to this run's report without adding rows to the screen.
+func (r *verdict) sweep(root, repo string) {
+	keptHeads, err := cloneKeptHeads(root)
+	if err != nil {
+		r.CloneCleanup = append(r.CloneCleanup, map[string]string{"path": root, "error": err.Error()})
+		return
+	}
+	clones := filepath.Join(root, ".atm", "clones")
+	entries, err := os.ReadDir(clones)
+	if errors.Is(err, fs.ErrNotExist) {
+		return
+	}
+	if err != nil {
+		r.CloneCleanup = append(r.CloneCleanup, map[string]string{"path": clones, "error": err.Error()})
+		return
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), "atm-run-") {
+			continue
+		}
+		dir := filepath.Join(clones, entry.Name())
+		if _, active := byClone.Load(dir); active {
+			continue
+		}
+		if _, err := os.Stat(dir + ".delivered"); err != nil {
+			continue
+		}
+		decision := map[string]string{"path": dir, "result": "kept"}
+		err := releaseClone(dir, repo, keptHeads)
+		if _, stat := os.Lstat(dir); errors.Is(stat, fs.ErrNotExist) {
+			decision["result"] = "removed"
+		}
+		if err != nil {
+			decision["error"] = err.Error()
+		}
+		r.CloneCleanup = append(r.CloneCleanup, decision)
+	}
+}
+
+// cloneKeptHeads protects failed deliveries even after their background process ends.
+// Reports made before clone paths were recorded protect their delivered commit instead.
+// An unreadable report prevents the sweep from guessing which work can go.
+func cloneKeptHeads(root string) (map[string]bool, error) {
+	keptHeads := map[string]bool{}
+	runs := filepath.Join(root, ".atm", "runs")
+	entries, err := os.ReadDir(runs)
+	if err != nil {
+		return nil, err
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		path := filepath.Join(runs, entry.Name(), "report.json")
+		b, err := os.ReadFile(path)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		var prior verdict
+		if err == nil {
+			err = json.Unmarshal(b, &prior)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
+		if prior.Resumable || prior.FailedNode != "" {
+			keptHeads[cmp.Or(prior.ClonePath, prior.HeadSHA)] = true
+		}
+	}
+	return keptHeads, nil
+}
+
 // kept says whether the clone at dir delivered and its PR is still open: its branch is not merged into its
 // base, as fetched again from the source, and GitHub, when configured, does not say its PR is closed. The
 // clone lock selected, on Unix, is the one asked: its .delivered read beside it, git run in its open directory.
-func kept(dir, repo string, lock *os.File) bool {
+func kept(dir, repo string, lock *os.File, keptHeads map[string]bool) bool {
 	delivered := func() ([]byte, error) { return os.ReadFile(dir + ".delivered") }
 	gitIn, ghDir := func(args ...string) (string, error) { return git(dir, args...) }, dir
 	s, selectedClone := selected(lock)
@@ -138,6 +217,12 @@ func kept(dir, repo string, lock *os.File) bool {
 	b, err := delivered()
 	if err != nil {
 		return false
+	}
+	if len(keptHeads) > 0 {
+		head, err := gitIn("rev-parse", "HEAD")
+		if err != nil || keptHeads[head] {
+			return true
+		}
 	}
 	branch, base, _ := strings.Cut(strings.TrimSpace(string(b)), " ")
 	if _, err := gitIn("fetch", "-q", "origin", base); err == nil {
