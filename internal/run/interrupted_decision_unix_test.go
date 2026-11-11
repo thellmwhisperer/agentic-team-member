@@ -36,7 +36,9 @@ func TestRealAttachEndsAfterDecisionServerDies(t *testing.T) {
 			})
 			killServeProcesses(t, top)
 			waitForDeadServer(t, top)
-			recovered := followUpsServer(t, top)
+			// The open attach may have restarted serve already; use the normal client path.
+			recovered := bin
+			startFollow(t, recovered, top, false, "runs").exit(0)
 			shown := decisionTerminal(t, startFollow(t, recovered, top, true, "attach", label), 1)
 			const reason = "the background process ended while the run waited for an answer"
 			if !strings.Contains(shown, "the background process ended") || strings.Contains(shown, "approve|fix|stop") {
@@ -86,7 +88,7 @@ func TestRealAttachClearsInterruptedDeliveryDecision(t *testing.T) {
 	})
 	killServeProcesses(t, top)
 	waitForDeadServer(t, top)
-	followUpsServer(t, top)
+	startFollow(t, bin, top, false, "runs").exit(0)
 	sc.until(func(s string) bool {
 		return strings.Contains(s, "✗ failed") && strings.Contains(s, "the background process ended")
 	})
