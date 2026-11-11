@@ -309,7 +309,8 @@ func TestPonytailDiscardsACutThatDoesNotHold(t *testing.T) {
 		{name: "longer", work: "echo extra >> a.txt", report: cut, why: "shorten"},
 		{name: "no findings", work: "echo fixed > a.txt", why: "no finding"},
 		{name: "breaks a check", work: "echo broken > a.txt", report: cut, why: "test:"},
-		{name: "new ignored file", work: "echo fixed > a.txt" + inject, report: cut, why: "adds cache/injected.txt"},
+		{name: "new ignored file", work: "echo fixed > a.txt" + inject, report: cut,
+			why: ""}, // the cut stays and the file its commands wrote goes
 		{name: "longer with ignored files", work: "echo extra >> a.txt" + inject, report: cut, why: "shorten"},
 		{name: "deletes file", work: "rm a.txt", report: cut, why: "deletes a.txt"},
 		{name: "touches the issue", work: "echo fixed > a.txt", report: strings.Replace(cut, `"issue_sentence": ""`,
@@ -332,6 +333,9 @@ func TestPonytailDiscardsACutThatDoesNotHold(t *testing.T) {
 			before := state(t, clone)
 			ev, err := agent{Agent: cfg.Agent, dir: t.TempDir()}.ponytail(root, clone, sha,
 				[]proof{unitProof(t, clone, sha)}, fixIssue, cfg)
+			if _, err := os.Stat(filepath.Join(clone, "cache", "injected.txt")); !os.IsNotExist(err) {
+				t.Fatalf("the ignored file the cut added is still in the clone: %v", err)
+			}
 			if c.why == "" {
 				if err != nil || ev["kept"] != true {
 					t.Fatalf("want the cut kept, got %v, %v", err, ev)
@@ -345,9 +349,6 @@ func TestPonytailDiscardsACutThatDoesNotHold(t *testing.T) {
 			}
 			if after := state(t, clone); after != before {
 				t.Fatalf("the clone did not come back:\n%s\nwant\n%s", after, before)
-			}
-			if _, err := os.Stat(filepath.Join(clone, "cache", "injected.txt")); !os.IsNotExist(err) {
-				t.Fatalf("the ignored file the cut added is still in the clone: %v", err)
 			}
 			if b, err := os.ReadFile(filepath.Join(clone, "cache", "old.txt")); err != nil || !bytes.Equal(b, old) {
 				t.Fatalf("the ignored file the cut changed did not come back: %q, %v", b, err)
