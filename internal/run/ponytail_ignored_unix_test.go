@@ -22,7 +22,8 @@ func TestPonytailCutKeptWhenItsCommandsLeaveIgnoredFiles(t *testing.T) {
 		{name: "ignored repository", work: "echo fixed > a.txt; git init -q .tmp/llama.cpp; echo x > .tmp/llama.cpp/f; " +
 			"git -C .tmp/llama.cpp add f; git -C .tmp/llama.cpp -c user.name=a -c user.email=a@a commit -qm x",
 			left: "none\nfixed\n", rejected: []any{}},
-		{name: "read-only cache", work: "echo fixed > a.txt; mkdir -p .tmp/mod/m; echo x > .tmp/mod/m/f; chmod -R a-w .tmp/mod",
+		{name: "read-only cache",
+			work: "echo fixed > a.txt; mkdir -p .tmp/mod/m; echo x > .tmp/mod/m/f; chmod -R a-w .tmp/mod",
 			left: "none\nfixed\n", rejected: []any{}},
 		{name: "tracked file", work: "echo fixed > a.txt; echo new > c.txt", left: "none\nfixed\n",
 			rejected: []any{map[string]any{"path": "c.txt", "reason": "the cut adds c.txt"}}},
