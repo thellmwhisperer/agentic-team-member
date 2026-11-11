@@ -23,8 +23,8 @@ func TestPonytailDecisionPersistsInReport(t *testing.T) {
 			report: strings.Replace(cut, `"issue_sentence": ""`, `"issue_sentence": "Retry once."`, 1)}, // kept
 		{name: "touches test", work: "echo bad > a_test.sh", report: cut,
 			reason: "unit 1: test a_test.sh changed since it was recorded"},
-		{name: "fresh", work: "echo fixed > a.txt; mkdir -p .atm; echo injected > .atm/injected.txt", report: cut,
-			reason: "the cut adds .atm/injected.txt"},
+		{name: "ignored file", work: "echo fixed > a.txt; mkdir -p .atm; echo injected > .atm/injected.txt",
+			report: cut},
 		{name: "reprove", work: "echo broken > a.txt", report: cut,
 			reason: "test: exit status 1"},
 	} {

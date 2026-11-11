@@ -67,7 +67,7 @@ func (a agent) ponytail(root, clone, sha string, proofs []proof, i Issue, c conf
 	}
 	ev["net_lines"] = lines
 	if why == "" {
-		if why, err = fresh(clone, all); err != nil {
+		if err = sweep(clone, all); err != nil {
 			return ev, err
 		}
 	}
@@ -510,17 +510,17 @@ func snapshot(clone string) (string, error) {
 	return tree, errors.Join(err, e)
 }
 
-// fresh names the first file in clone, ignored or not, that tree, whole's before the cut, lacks: "" for none.
-func fresh(clone, tree string) (string, error) {
+// sweep removes from clone every file that tree, whole's before the cut, lacks: the ignored files the agent's
+// commands wrote. The ones git does not ignore were judged already.
+func sweep(clone, tree string) error {
 	now, err := whole(clone)
-	if err != nil {
-		return "", err
+	out, e := every(clone, "diff", "--name-only", "--diff-filter=A", "-z", tree, now) // fails when now is ""
+	for _, f := range strings.Split(out, "\x00") {
+		if f != "" {
+			err = errors.Join(err, os.Remove(filepath.Join(clone, filepath.FromSlash(f))))
+		}
 	}
-	out, err := every(clone, "diff", "--name-only", "--diff-filter=A", "-z", tree, now)
-	if f, _, _ := strings.Cut(out, "\x00"); f != "" {
-		return "the cut adds " + f, err
-	}
-	return "", err
+	return errors.Join(err, e)
 }
 
 // restore brings clone's working tree back to tree, whole's, new files gone, the ignored ones too, and its

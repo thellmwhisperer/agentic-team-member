@@ -780,9 +780,6 @@ var auditCases = []struct {
 		work: "echo 'if test -f state/seen; then exit 0; fi; mkdir -p state; touch state/seen; exit 1' > " +
 			"regression_test.sh; " + reportJSON("regression_test.sh"),
 		why: "test:", node: "checks", atm: atmSet(atmYAML, "test", suite)},
-	{name: "kept cut that creates an ignored file", delivered: uncut, base: map[string]string{".gitignore": "cache/\n"},
-		work: "printf 'fixed\\nextra\\nmore\\n' > a.txt" + fixTest, report: cut,
-		ponytail: "echo fixed > a.txt; mkdir cache; echo injected > cache/injected.txt", why: "adds cache/injected.txt"},
 	{name: "rejected cut that creates an ignored file", delivered: uncut,
 		base: map[string]string{".gitignore": "cache/\n"},
 		work: "printf 'fixed\\nextra\\nmore\\n' > a.txt" + fixTest, report: cut,
