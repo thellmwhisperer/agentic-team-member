@@ -68,7 +68,7 @@ func TestB(t *testing.T) {
 	t.Setenv("FAKE_PONYTAIL_REPORT", dependentCuts(file))
 	cfg := strings.Replace(atmYAML, `test_patterns: ["**/*_test.sh"]`,
 		`test_patterns: ["**/*_test.sh", "**/*_test.go"]`, 1)
-	cfg = atmSet(cfg, "lint", `test ! -f repaired || test -f "$ATM_TEST_READY" || { echo repair-lint; exit 1; }`)
+	cfg = atmSet(cfg, "typecheck", `test ! -f repaired || test -f "$ATM_TEST_READY" || { echo repair-lint; exit 1; }`)
 	cfg = atmSet(cfg, "delivery", "if test -f repaired && test -f repeat-cut; then rm repeat-cut; "+
 		"echo delivery-finding; exit 1; fi; test -f repaired || { "+delivery+"echo delivery-finding; exit 1; }; "+
 		`for f in $(git ls-files "*_test.go"); do cat "$f"; done > "$ATM_TEST_DELIVERED"`)

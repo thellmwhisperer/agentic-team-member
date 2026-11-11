@@ -44,10 +44,11 @@ func TestResumeHistoricalUnit(t *testing.T) {
 	t.Setenv("ATM_TEST_COMMIT", filepath.Join(t.TempDir(), "commit"))
 	t.Setenv("ATM_TEST_OUT", delivered)
 	t.Setenv("FAKE_AGENT_CALL", call)
-	t.Setenv("FAKE_AGENT_WORK", noteWork)
+	t.Setenv("ATM_TEST_STUCK", filepath.Join(t.TempDir(), "stuck"))
+	t.Setenv("FAKE_AGENT_WORK", `test -f "$ATM_TEST_STUCK" || { `+noteWork+`; }`)
 	t.Setenv("FAKE_PONYTAIL_WORK", ": > a.txt")
 	t.Setenv("FAKE_PONYTAIL_REPORT", cut)
-	cfg := atmSet(atmSet(atmYAML, "lint",
+	cfg := atmSet(atmSet(atmYAML, "typecheck",
 		`test ! -f "$ATM_TEST_LINT" && { test ! -f "$ATM_TEST_COMMIT" || git commit --allow-empty -qm lint; }`),
 		"delivery", `{ git log --format=%s; cat a.txt; ls; } > "$ATM_TEST_OUT"`)
 	top := gitT(t, repo(t, "https://example.com/owner/repo.git", cfg), "rev-parse", "--show-toplevel")
@@ -64,8 +65,8 @@ func TestResumeHistoricalUnit(t *testing.T) {
 	followedRun(t, bin, top, 1, "--resume", failed)
 	again := lastRun(t, top, "failed")
 	rep := readReport(t, filepath.Join(runDir(top, again), "report.json"))
-	if rep["failed_node"] != "checks" || !strings.Contains(rep["reason"].(string), "lint") {
-		t.Fatalf("want configured lint failure, got %v", rep)
+	if rep["failed_node"] != "checks" || !strings.Contains(rep["reason"].(string), "typecheck") {
+		t.Fatalf("want configured typecheck failure, got %v", rep)
 	}
 	u := rep["units"].([]any)[0].(obj)
 	if u["test_file"] != "a_test.sh" || u["base"] != savedBase(t, top, failed) ||
@@ -169,6 +170,7 @@ func firstUnitGuards(t *testing.T, bin, top, label, delivered string) {
 	if err := os.Remove(delivered); err != nil {
 		t.Fatal(err)
 	}
+	writeFixture(t, os.Getenv("ATM_TEST_STUCK"), "") // the agent's own turn after a red test repairs nothing
 	for _, c := range []struct {
 		name, reason string
 		change       func(work, label string)

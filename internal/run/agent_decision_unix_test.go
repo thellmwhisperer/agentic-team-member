@@ -71,7 +71,7 @@ func TestRunAsksAtTheAgentAfterFix(t *testing.T) {
 		{"exit", "exit code 3"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			top := gitT(t, repo(t, "local", atmSet(atmYAML, "lint", "echo failed-check-finding; exit 1")),
+			top := gitT(t, repo(t, "local", atmSet(atmYAML, "typecheck", "echo failed-check-finding; exit 1")),
 				"rev-parse", "--show-toplevel")
 			script := filepath.Join(t.TempDir(), "agent.sh")
 			writeFixture(t, script, `cat > /dev/null

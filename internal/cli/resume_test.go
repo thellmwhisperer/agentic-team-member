@@ -84,6 +84,14 @@ func axiRun(t *testing.T, code int, args ...string) map[string]string {
 	return o
 }
 
+// agentRuns fails the test unless the fake agent recorded in calls ran want times.
+func agentRuns(t *testing.T, calls string, want int) {
+	t.Helper()
+	if got := read(t, calls); got != strings.Repeat("agent\n", want) {
+		t.Fatalf("the agent ran %d times, want %d", strings.Count(got, "\n"), want)
+	}
+}
+
 // failsToResume says whether atm axi run --resume label fails with an error that says why.
 func failsToResume(t *testing.T, label, why string) bool {
 	t.Helper()
@@ -107,15 +115,14 @@ func TestResumePicksUpTheAgentsWorkFromChecks(t *testing.T) {
 		report.ResumableUnit != 1 {
 		t.Fatalf("report.json of the failed run: %+v, %v", report, err)
 	}
+	agentRuns(t, calls, 2) // the red test row runs once more, then the agent gets its one turn before the run asks
 
 	writeResumeConfig(t, dir, "", "test -f done.txt")
 	passed := axiRun(t, 0, "--resume", "chore-1")
 	if passed["run"] != "chore-2" || passed["outcome"] != "passed" {
 		t.Fatalf("the resumed run: %v", passed)
 	}
-	if got := read(t, calls); got != "agent\n" {
-		t.Fatalf("the agent ran %d times, want once", strings.Count(got, "\n"))
-	}
+	agentRuns(t, calls, 2) // the resume runs no agent
 	var resumed struct {
 		Units []struct {
 			ResumedFrom string `json:"resumed_from"`

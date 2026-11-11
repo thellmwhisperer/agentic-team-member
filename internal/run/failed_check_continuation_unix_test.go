@@ -37,8 +37,8 @@ func TestRunAsksOnAFailedCheckResumesLatestAttempt(t *testing.T) {
 	assertLatestAttemptCommands(t, prior, rep)
 	evs := followedRun(t, bin, top, 1, "--resume", label)
 	resumedClone := resumedLatestAttemptClone(t, evs)
-	if calls := workerCalls(t, order); calls != 2 {
-		t.Fatalf("want initial worker and one fix turn, got %d", calls)
+	if calls := workerCalls(t, order); calls != 4 { // the red test row gets its own turn in each run
+		t.Fatalf("want initial worker, one fix turn and each run's turn for the red test, got %d", calls)
 	}
 	resumed := lastRun(t, top, "failed")
 	assertLatestAttemptSaved(t, top, resumed, "test", "")
@@ -72,8 +72,9 @@ func assertLatestAttemptDecision(t *testing.T, rep *verdict) {
 
 func assertLatestAttemptCommands(t *testing.T, prior, rep *verdict) {
 	t.Helper()
+	// The red test row runs again, then once more after its turn.
 	if len(prior.Commands) != 2 || prior.Commands[1].Name != "e2e" || prior.Commands[1].Result != "failed" ||
-		prior.Commands[1].Tail != "failed-check-finding" || len(rep.Commands) != len(prior.Commands)+1 ||
+		prior.Commands[1].Tail != "failed-check-finding" || len(rep.Commands) != len(prior.Commands)+3 ||
 		rep.Commands[len(prior.Commands)].Name != "test" || rep.Commands[len(prior.Commands)].Result != "failed" {
 		t.Fatalf("command history lost or suite failure missing: before %+v, after %+v", prior.Commands, rep.Commands)
 	}
@@ -111,14 +112,14 @@ func assertLatestAttemptWork(t *testing.T, clone, resumedClone string) {
 
 func TestRunAsksOnAFailedCheckOnTerminal(t *testing.T) {
 	builtATM(t)
-	top := gitT(t, repo(t, "local", atmSet(atmYAML, "lint", "echo failed-check-finding; exit 1")),
+	top := gitT(t, repo(t, "local", atmSet(atmYAML, "typecheck", "echo failed-check-finding; exit 1")),
 		"rev-parse", "--show-toplevel")
 	t.Setenv("TERM", "xterm-256color")
 	t.Setenv("NO_COLOR", "")
 	bin := followUpsServer(t, top)
 	for _, args := range [][]string{{"run", issueFile(t, issue)}, {"attach", "issue-1"}} {
 		shown := leftAtDecision(t, startFollow(t, bin, top, true, args...))
-		for _, want := range []string{"Decision", "Check failed: lint: exit status 1", "Answer: atm answer issue-1",
+		for _, want := range []string{"Decision", "Check failed: typecheck: exit status 1", "Answer: atm answer issue-1",
 			"approve|fix|stop"} {
 			if !strings.Contains(shown, want) {
 				t.Fatalf("%s omitted %q:\n%s", args[0], want, shown)
@@ -135,7 +136,7 @@ func TestRunAsksOnAFailedCheckOnTerminal(t *testing.T) {
 	}
 	shown := decisionTerminal(t, startFollow(t, bin, top, true, "attach", "issue-1"), 1)
 	if strings.Contains(shown, "Decision") || strings.Contains(shown, "approve|fix|stop") ||
-		strings.Count(shown, "lint: exit status 1") != 1 {
+		strings.Count(shown, "typecheck: exit status 1") != 1 {
 		t.Fatalf("answered question still asks for an answer:\n%s", shown)
 	}
 }
@@ -192,7 +193,7 @@ func TestRunAsksOnAFailedCheckApprovalKeepsValidCut(t *testing.T) {
 	delivered, lintOK := filepath.Join(t.TempDir(), "delivered"), filepath.Join(t.TempDir(), "lint-ok")
 	t.Setenv("ATM_TEST_LINT_OK", lintOK)
 	lint := `test -f "$ATM_TEST_LINT_OK" || { touch "$ATM_TEST_LINT_OK"; echo failed-check-finding; exit 1; }`
-	cfg := atmSet(atmSet(atmYAML, "lint", lint),
+	cfg := atmSet(atmSet(atmYAML, "typecheck", lint),
 		"delivery", "cat a.txt > "+delivered)
 	top := gitT(t, repo(t, "local", cfg), "rev-parse", "--show-toplevel")
 	t.Setenv("FAKE_AGENT_WORK", "printf 'fixed\\nextra\\nmore\\n' > a.txt"+fixTest)
@@ -230,7 +231,7 @@ func TestRunAsksOnAFailedCheckFixWithoutReport(t *testing.T) {
 func assertFixWithoutReport(t *testing.T, report string, repair bool) {
 	t.Helper()
 	delivery := filepath.Join(t.TempDir(), "delivered")
-	cfg := atmSet(atmSet(atmYAML, "lint", "test -f repaired || { echo failed-check-finding; exit 1; }"),
+	cfg := atmSet(atmSet(atmYAML, "typecheck", "test -f repaired || { echo failed-check-finding; exit 1; }"),
 		"delivery", "pwd > "+delivery)
 	top := gitT(t, repo(t, "local", cfg), "rev-parse", "--show-toplevel")
 	order := filepath.Join(t.TempDir(), "order")

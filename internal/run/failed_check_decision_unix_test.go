@@ -19,7 +19,7 @@ func TestRunAsksOnAFailedCheck(t *testing.T) {
 	for _, answer := range []string{"approve", "fix", "stop"} {
 		t.Run(answer, func(t *testing.T) {
 			delivery := filepath.Join(t.TempDir(), "delivered")
-			cfg := atmSet(atmSet(atmYAML, "lint", "test -f repaired || { echo failed-check-finding; exit 1; }"),
+			cfg := atmSet(atmSet(atmYAML, "typecheck", "test -f repaired || { echo failed-check-finding; exit 1; }"),
 				"delivery", "pwd > "+delivery)
 			top := gitT(t, repo(t, "local", cfg), "rev-parse", "--show-toplevel")
 			call := filepath.Join(t.TempDir(), "call")
@@ -224,7 +224,7 @@ func answerFailedCheck(t *testing.T, bin, top, label, answer string, code int) {
 
 func TestRunAsksOnAFailedCheckResumesSavedWorker(t *testing.T) {
 	builtATM(t)
-	cfg := atmSet(atmYAML, "lint", "echo failed-check-finding; exit 1") + "harness: codex\n"
+	cfg := atmSet(atmYAML, "typecheck", "echo failed-check-finding; exit 1") + "harness: codex\n"
 	top := gitT(t, repo(t, "local", cfg), "rev-parse", "--show-toplevel")
 	call, order := filepath.Join(t.TempDir(), "call"), filepath.Join(t.TempDir(), "order")
 	t.Setenv("FAKE_AGENT_CALL", call)
@@ -290,7 +290,7 @@ func TestRunAsksOnAFailedCheckDuringBinaryReplacement(t *testing.T) {
 	for _, trigger := range []string{"connection", "tick"} {
 		t.Run(trigger, func(t *testing.T) {
 			delivery := filepath.Join(t.TempDir(), "delivered")
-			cfg := atmSet(atmSet(atmYAML, "lint", "test -f repaired || { echo failed-check-finding; exit 1; }"),
+			cfg := atmSet(atmSet(atmYAML, "typecheck", "test -f repaired || { echo failed-check-finding; exit 1; }"),
 				"delivery", "pwd > "+delivery)
 			top := gitT(t, repo(t, "local", cfg), "rev-parse", "--show-toplevel")
 			t.Setenv("FAKE_AGENT_WORK", "if test -f first-turn; then touch repaired; else "+fixWork+"; touch first-turn; fi")

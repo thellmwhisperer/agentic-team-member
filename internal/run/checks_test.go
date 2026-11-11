@@ -168,10 +168,15 @@ func waitForChecksStashHidden(t *testing.T, dir string) bool {
 func checksStep(t *testing.T, out *bytes.Buffer) obj {
 	t.Helper()
 	evs := events(t, out)
-	if len(evs) < 10 || evs[9]["state"] == "failed" && len(evs) != 10 || evs[7]["step"] != "agent" ||
-		evs[7]["state"] != "passed" || evs[8]["step"] != "checks" ||
+	// A red Checks resolves itself once before the run fails: the run ends on its last Checks.
+	last := evs[len(evs)-1]
+	if len(evs) < 10 || evs[9]["state"] == "failed" && (last["step"] != "checks" || last["state"] != "failed") ||
+		evs[7]["step"] != "agent" || evs[7]["state"] != "passed" || evs[8]["step"] != "checks" ||
 		evs[8]["state"] != "started" || evs[9]["step"] != "checks" {
 		t.Fatalf("want the agent step passed, then the checks step, got %v", evs)
+	}
+	if evs[9]["state"] == "failed" {
+		return last
 	}
 	return evs[9]
 }
