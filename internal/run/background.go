@@ -350,6 +350,12 @@ func (s *server) start(args []string, baseSHA string) (Outcome, error) {
 		}
 	}
 	for _, r := range s.runs {
+		if r.Issue == issue && r.answer != nil {
+			if _, _, resume, _, err := parseArgs(args); err == nil && *resume == "" {
+				return Outcome{}, fmt.Errorf("issue %s has run %s waiting for an answer; "+
+					"use atm answer %s approve|fix|stop --by <who>", issue, r.Run, r.Run)
+			}
+		}
 		max(r.Run)
 	}
 	runsDir := filepath.Join(s.root, ".atm", "runs")
