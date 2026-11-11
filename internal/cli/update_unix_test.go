@@ -188,23 +188,18 @@ func TestUpdateRefusesWhileARunGoes(t *testing.T) {
 		t.Fatalf("update while retry-1 runs: %v", err)
 	}
 	assertUntouched(t, target, "v0.1.0")
-	// a temp directory inside the repository whose run goes is not that repository
-	insideDir, err := os.MkdirTemp(repoDir, "update-inside-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(insideDir) })
-	t.Setenv("GIT_CEILING_DIRECTORIES", repoDir)
-	t.Chdir(insideDir)
-	inside := filepath.Join(insideDir, "atm")
-	if err := os.WriteFile(inside, []byte(fakeAtm("v0.1.0")), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := update(&out, "v0.1.0", inside); err != nil {
-		t.Fatalf("update from a temp directory inside a repository whose run goes: %v", err)
-	}
-	assertVersion(t, inside, "v0.2.0")
-	t.Chdir(repoDir)
+	t.Run("update from a temp directory inside the repository", func(t *testing.T) {
+		t.Setenv("TMPDIR", repoDir)
+		inside := installed(t, "v0.1.0")
+		rel, err := filepath.Rel(repoDir, filepath.Dir(inside))
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			t.Fatalf("update target directory %q is not inside repository %q", filepath.Dir(inside), repoDir)
+		}
+		if err := update(&out, "v0.1.0", inside); err != nil {
+			t.Fatalf("update from a temp directory inside a repository whose run goes: %v", err)
+		}
+		assertVersion(t, inside, "v0.2.0")
+	})
 	if err := os.WriteFile(release, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
