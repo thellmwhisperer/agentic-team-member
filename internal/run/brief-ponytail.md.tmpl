@@ -17,7 +17,9 @@ Use the `ponytail-review` skill, and make its cuts yourself: this brief wins ove
 - You may only cut: delete, shrink, or replace with the standard library or a helper that already exists in
   this repository.
 - Only files in the diff, no new files.
-- ATM runs every check again and throws the cut away if one fails or the diff does not get shorter:
+{{if .Tests}}- Do not change {{code .Tests}}: the test the worker reported as its proof stays byte for byte, and ATM throws the whole
+  cut away if it changes.
+{{end}}- ATM runs every check again and throws the cut away if one fails or the diff does not get shorter:
   - Test: {{cmd .Test}}
   - Typecheck: {{cmd .Typecheck}}
   - Lint: {{cmd .Lint}}
