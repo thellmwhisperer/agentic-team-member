@@ -18,6 +18,18 @@ against the issue before handing the branch to your configured command.
   <img alt="ATM pipeline: issue, isolated clone, contract, coding agent, checks. A failed check asks the launcher to approve, fix or stop. PASS goes to the slop detector, a code quality gate where a model may only cut, then to the delivery and code review gate. The documented example of that gate is no-mistakes, a graph of its own where review and document are models, test and PR are code with a model part, and rebase, lint and CI call a model only after a fix answer." src="docs/assets/pipeline-light.svg" width="1000">
 </picture>
 
+## The screen
+
+<img alt="The ATM screen in the middle of a run of issue 634. Left box, ATM: Issue, Clone and Contract passed with their times; Agent running for 12 min 34 s; Checks, Slop detector and Delivery pending; below them the nine steps of the delivery gate, intent, rebase, review, test, document, lint, push, pr and ci, pending. Right box, Agent, codex gpt-6-astra at high effort: what the agent says, and its tool calls folded in groups, each failed call on its own row. Footer: q detach, t show tool use, h show thinking." src="docs/assets/screen.svg" width="1000">
+
+`atm run 634` on this repository, with the agent at work. On the left is the
+graph: every step ATM's code walks and, below Delivery, the steps of the
+delivery gate. On the right is the one node that is a model, live: what it
+says and the tools it runs, with each failed call left in sight. The frame was
+painted by ATM's own screen code from the recorded agent events of run
+634-230; the elapsed time on the Agent row is illustrative.
+[The screen](docs/how-a-run-flows.md#the-screen) has every box and key.
+
 ## A real run
 
 Issue 218 of this repository, run 218-32 of the binary built from main at
