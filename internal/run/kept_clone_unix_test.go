@@ -58,6 +58,7 @@ func TestKeptCloneSweepPreservesPendingAndResumableDelivery(t *testing.T) {
 			`git commit --allow-empty -qm delivery-commit || exit; echo delivery-finding; exit 1; fi`)
 	write(t, filepath.Join(top, "fail-delivery"), "")
 	pending, label := question(t, bin, top, "delivery-finding", 4, "run", "--follow", path)
+	path = issueFile(t, issue) // atm run refuses the issue file whose run waits for an answer
 	write(t, prState, "CLOSED\n")
 	if err := os.Remove(filepath.Join(top, "fail-delivery")); err != nil {
 		t.Fatal(err)
