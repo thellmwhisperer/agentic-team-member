@@ -361,8 +361,11 @@ it is on disk before delivery reads it.
 | `reproofs` | Each rechecked unit's number, base commit, reported test file, result, `started_at` and `duration_ms` after a cut; configured commands are in `commands` |
 | `commands` | Every configured command that ran, the clone's `install` included, with its result, last 60 lines, `started_at` and `duration_ms` |
 | `decisions` | Each Agent exit error, forbidden write, Checks, slop detector or Delivery finding with its `node`, the launcher's `approve`, `fix` or `stop` `answer`, who answered in `by` and the answer's time in `at` (UTC); the answer is empty while the question is pending |
+| `clone_cleanup` | Each delivered clone the run's sweeps looked at, with its `path`, `result` (`kept` or `removed`) and `error` when reading or removal failed; see [What a run leaves on disk](configuration.md#what-a-run-leaves-on-disk) |
 | `head_sha` | The latest commit prepared for Delivery; a repair may update it |
 | `serve` | The version of the `atm serve` process that executed the run, from `buildinfo.String()`, for example `vA (aaa1111) 2026-10-15` |
+
+The clone node also has `clone`: the absolute path of the run's clone.
 
 The Agent and `ponytail` nodes also have `agent_model`: the first model named
 by that invocation's stream, or `""` when none is named. Claude and Cursor
