@@ -197,7 +197,9 @@ when supported, then runs Checks and the slop detector before Delivery. A new
 failure in any of these steps asks again. `stop` ends the run and keeps its work.
 See [Resuming a failed run](configuration.md#resuming-a-failed-run) for recovery
 after `stop`. Answers are recorded before the run continues; a second answer
-to the same question is rejected.
+to the same question is rejected. While a run waits for an answer, a new
+`atm run` of its issue without `--resume` is refused before any clone; the
+error names the waiting run and the `atm answer` command.
 `atm run --follow` returns with the failed step's exit code at the question:
 1 for Agent or Checks, 2 for the slop detector and 4 for Delivery. The
 background run remains waiting. An attached screen stays open at the question
