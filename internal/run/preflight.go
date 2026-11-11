@@ -84,14 +84,13 @@ func compile(root, sha, line string) error {
 		return nil
 	}
 	dir, err := os.MkdirTemp("", "atm-compile-")
-	if err != nil {
-		return err
+	if err == nil {
+		defer func() { _ = os.RemoveAll(dir) }()
+		_, err = command(root, "sh", "-c", `git archive "$1" | tar -x -C "$2"`, "sh", sha, dir)
 	}
-	defer func() { _ = os.RemoveAll(dir) }()
-	if _, err := command(root, "sh", "-c", `git archive "$1" | tar -x -C "$2"`, "sh", sha, dir); err != nil {
-		return err
+	if err == nil {
+		_, err = command(dir, "sh", "-c", `eval "$1" >&2`, "sh", line)
 	}
-	_, err = command(dir, "sh", "-c", `eval "$1" >&2`, "sh", line)
 	return err
 }
 
