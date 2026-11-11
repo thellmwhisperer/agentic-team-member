@@ -13,16 +13,23 @@ import (
 func TestChecksResolvesRedBeforeAsking(t *testing.T) {
 	builtATM(t)
 	const twoTurns = "if test -f first-turn; then touch repaired; else " + fixWork + "; touch first-turn; fi"
+	const lintRed = "test -f repaired || { echo failed-check-finding; exit 1; }"
+	const redThenGreen = `echo x >> "$ATM_TEST_RUNS"; test "$(wc -l < "$ATM_TEST_RUNS")" -gt 1 || ` +
+		`{ echo failed-check-finding; exit 1; }`
 	for _, c := range []resolveCase{
-		{"lint red once", "lint", "test -f repaired || { echo failed-check-finding; exit 1; }", twoTurns, false, 2, 0},
-		{"lint red after the turn", "lint", "echo failed-check-finding; exit 1", fixWork, true, 2, 0},
-		{"test red then green", "test",
-			`echo x >> "$ATM_TEST_RUNS"; test "$(wc -l < "$ATM_TEST_RUNS")" -gt 1 || { echo failed-check-finding; exit 1; }`,
-			fixWork, false, 1, 2},
-		{"test red twice", "test", `echo x >> "$ATM_TEST_RUNS"; echo failed-check-finding; exit 1`, fixWork, true, 2, 3},
+		{"lint red once", "lint", lintRed, "", twoTurns, false, 2, 0},
+		{"lint red after the turn", "lint", "echo failed-check-finding; exit 1", "", fixWork, true, 2, 0},
+		{"test red then green", "test", redThenGreen, "", fixWork, false, 1, 2},
+		{"test red then green with lint red", "test", redThenGreen, lintRed, twoTurns, false, 2, 3},
+		{"test red twice", "test", `echo x >> "$ATM_TEST_RUNS"; echo failed-check-finding; exit 1`, "", fixWork, true,
+			2, 3},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			top := gitT(t, repo(t, "local", atmSet(atmYAML, c.row, c.line)), "rev-parse", "--show-toplevel")
+			cfg := atmSet(atmYAML, c.row, c.line)
+			if c.lint != "" {
+				cfg = atmSet(cfg, "lint", c.lint)
+			}
+			top := gitT(t, repo(t, "local", cfg), "rev-parse", "--show-toplevel")
 			call, order, runs := filepath.Join(t.TempDir(), "call"), filepath.Join(t.TempDir(), "order"),
 				filepath.Join(t.TempDir(), "runs")
 			t.Setenv("FAKE_AGENT_CALL", call)
@@ -44,9 +51,9 @@ func TestChecksResolvesRedBeforeAsking(t *testing.T) {
 }
 
 type resolveCase struct {
-	name, row, line, work string
-	asks                  bool
-	workers, runs         int
+	name, row, line, lint, work string
+	asks                        bool
+	workers, runs               int
 }
 
 // assertResolved checks the run of c, its report rep in dir, asked or not, with the worker turns and runs of the
