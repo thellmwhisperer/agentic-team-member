@@ -21,7 +21,7 @@ const (
 	arm     = "scripts/arm-auto-merge.sh 7"
 	lowRisk = "## Risk Assessment\nLow\n"
 	high    = "## Risk Assessment\nHigh\n"
-	armed   = "pr merge 7 --auto --rebase --match-head-commit " + newHead + " --repo owner/repo"
+	armed   = "pr merge 7 --auto --squash --match-head-commit " + newHead + " --repo owner/repo"
 	disarm  = "pr merge 7 --disable-auto --repo owner/repo"
 )
 

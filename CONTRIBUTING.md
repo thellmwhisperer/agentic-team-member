@@ -85,7 +85,7 @@ they failed or were cancelled (`scripts/ci-summary.sh`). It is the
 required check on `main`; a path-filtered workflow that never starts would
 leave its check pending and block the merge.
 
-Subject to the no-mistakes review below, auto-merge by rebase is armed when
+Subject to the no-mistakes review below, auto-merge by squash is armed when
 the PR body's `## Risk Assessment` says Low or Medium, and GitHub merges once
 CI is green. High risk, or a level it cannot read, waits for the
 `risk-reviewed` label. A PR from `release-please--branches--main` that changes
