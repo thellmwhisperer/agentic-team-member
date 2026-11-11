@@ -33,6 +33,7 @@ type Config struct {
 	Install      string   `yaml:"install"`
 	Test         string   `yaml:"test"`
 	E2E          string   `yaml:"e2e"`
+	Compile      string   `yaml:"compile"` // optional: preflight runs it on the base tree; non-zero stops the launch
 	Typecheck    string   `yaml:"typecheck"`
 	Lint         string   `yaml:"lint"`
 	TestFile     string   `yaml:"test_file"` // legacy required key, validated but not executed

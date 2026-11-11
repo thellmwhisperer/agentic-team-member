@@ -38,6 +38,7 @@ A resumed clone still starts at its saved base commit.
 | `base green` | The latest completed CI run of each workflow on the base ref's head passed or was skipped, as one `gh run list --commit` call says. No completed run, or a `gh` that does not answer, fails. A repository whose origin is not on GitHub skips it with one line saying so |
 | `worker files` | `--settings` and `--skill` accept either a separate value or `=<value>`. Absolute paths are readable on disk; relative paths exist in the resolved base commit, or the run's recorded base commit on resume, relative to the clone root. Only `--settings` values starting with `{` are inline JSON |
 | `delivery` | The first word of `delivery` is a command `sh` finds, as `command -v` says: on `PATH`, or one of `sh`'s own, as `if` or `cd`. An empty `delivery` passes |
+| `compile` | The optional `compile` command of `.atm.yaml` exits 0 when `sh` runs it, on this machine, in a scratch copy of the resolved base commit that is removed after. Its output, on either stream, is the reason it fails. No key or an empty one passes |
 
 ## The steps
 

@@ -22,7 +22,8 @@ with no clone, no run directory and no agent:
                 skipped when origin is not on GitHub
   worker files  each file a --harness-arg flag names, as --settings or --skill, exists in the base tree
                 (saved base on resume) or is an absolute readable file
-  delivery      the first word of delivery is a command sh finds: on PATH, or sh's own, as if or cd`
+  delivery      the first word of delivery is a command sh finds: on PATH, or sh's own, as if or cd
+  compile       the compile command of .atm.yaml, if it has one, exits 0 on the base tree, on this machine`
 
 // fileFlags are the harness flags whose value is a file the agent reads. A value that starts with { is inline JSON.
 var fileFlags = []string{"--settings", "--skill"}
@@ -66,12 +67,31 @@ func preflight(root, ref, workerBase string, a agent, args []string) (string, er
 			}
 			return nil
 		}},
+		{"compile", func() error { return compile(root, sha, c.Compile) }},
 	} {
 		if err := check.fn(); err != nil {
 			return "", fmt.Errorf("preflight: %s: %w", check.name, err)
 		}
 	}
 	return sha, nil
+}
+
+// compile is why line, the repository's compile command, fails on commit sha's tree in a scratch directory
+// removed after: its output, whatever stream it writes to, is the reason. An empty line passes.
+func compile(root, sha, line string) error {
+	if strings.TrimSpace(line) == "" {
+		return nil
+	}
+	dir, err := os.MkdirTemp("", "atm-compile-")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+	if _, err := command(root, "sh", "-c", `git archive "$1" | tar -x -C "$2"`, "sh", sha, dir); err != nil {
+		return err
+	}
+	_, err = command(dir, "sh", "-c", `eval "$1" >&2`, "sh", line)
+	return err
 }
 
 func deliveryWord(line string) string {
