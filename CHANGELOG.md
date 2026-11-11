@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.8.0](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.7.3...v1.8.0) (2026-11-11)
+
+
+### Miscellaneous Chores
+
+* release 1.8.0 ([#669](https://github.com/thellmwhisperer/agentic-team-member/issues/669)) ([821521b](https://github.com/thellmwhisperer/agentic-team-member/commit/821521bb86d918b4a01f5fdcf3e39178510f17e0))
+
 ## [1.7.3](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.7.2...v1.7.3) (2026-11-09)
 
 
