@@ -28,8 +28,9 @@ it.
    Review, targeted test, lint and document run as fenced model steps. The reviewer
    only reports (`auto_fix.review: 0`); whoever launched the run answers each
    finding, fixing real defects and dismissing guesses.
-5. **The merge.** `auto-merge.yml` arms `gh pr merge --auto --rebase` after
-   any required review. GitHub merges when the checks pass, then closes the
+5. **The merge.** `auto-merge.yml` arms `gh pr merge --auto --squash` after
+   any required review. The one commit it leaves on main carries the PR title,
+   the conventional commit release-please reads. GitHub merges when the checks pass, then closes the
    issue and deletes the branch. See [the merge conditions](../CONTRIBUTING.md#ci)
    and [the no-mistakes review circuit](../skills/no-mistakes-review/SKILL.md).
 

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Arms GitHub auto-merge by rebase on PR $1 ($2 is the pull_request event action): GitHub merges
+# Arms GitHub auto-merge by squash on PR $1 ($2 is the pull_request event action): GitHub merges
 # it once main's required checks pass. Risk and release eligibility: CONTRIBUTING.md.
 # No-mistakes commits label it review-required and wait for review-completed, which any push
 # removes; pr-discarded never arms (skills/no-mistakes-review/SKILL.md).
@@ -65,4 +65,4 @@ case "$level" in
     fi
     ;;
 esac
-gh pr merge "$1" --auto --rebase --match-head-commit "${nm% *}" --repo "$GITHUB_REPOSITORY"
+gh pr merge "$1" --auto --squash --match-head-commit "${nm% *}" --repo "$GITHUB_REPOSITORY"
