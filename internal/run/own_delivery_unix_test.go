@@ -145,7 +145,7 @@ func ownDeliveryLaunch(t *testing.T, bin, delivery, script string, failInit bool
 
 func ownDeliveryInitFailed(t *testing.T, top, label string, end Outcome, err error, calls string) {
 	t.Helper()
-	if err != nil || end.Outcome != "failed" || end.FailedNode != "delivery" || calls != "init\n" {
+	if err != nil || end.Outcome != "waiting" || end.FailedNode != "delivery" || calls != "init\n" {
 		t.Fatalf("failed init: %+v, %v, calls %q", end, err, calls)
 	}
 	if err := Answer(top, label, "stop", "operator"); err != nil {

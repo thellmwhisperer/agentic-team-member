@@ -27,7 +27,7 @@ import (
 
 // Outcome is a run of the background process: running, or how it ended.
 type Outcome struct {
-	Outcome    string         `json:"outcome"` // running, passed or failed
+	Outcome    string         `json:"outcome"` // running, waiting, passed or failed
 	Run        string         `json:"run"`     // its label: the issue's name and the run's number in the repository
 	BaseSHA    string         `json:"base_sha,omitempty"`
 	FailedNode string         `json:"failed_node"`
@@ -443,7 +443,7 @@ func (s *server) attach(req request, enc *json.Encoder) {
 			}
 		}
 		i += len(frames)
-		if !o.Ended.IsZero() {
+		if !o.Ended.IsZero() || o.Outcome == "waiting" {
 			_ = enc.Encode(reply{Run: &o})
 			return
 		}
@@ -681,7 +681,7 @@ func FollowFrom(root, label string, from int, leave <-chan struct{}, fn func(Fra
 			o = *r.Run
 		}
 	})
-	if err == nil && o.Ended.IsZero() {
+	if err == nil && o.Ended.IsZero() && o.Outcome != "waiting" {
 		err = errors.New("the background process ended before the run did")
 	}
 	return o, err

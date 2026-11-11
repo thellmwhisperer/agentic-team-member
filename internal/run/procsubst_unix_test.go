@@ -97,7 +97,7 @@ func TestRealRunProcessSubstitutionKeepsCloneBoundary(t *testing.T) {
 			f := startFollow(t, bin, top, false, "run", "--follow", issueFile(t, issue))
 			f.exit(1)
 			runs, err := RecordedRuns(top)
-			if err != nil || len(runs) != 1 || runs[0].Outcome != "failed" || runs[0].FailedNode != "agent" ||
+			if err != nil || len(runs) != 1 || runs[0].Outcome != "waiting" || runs[0].FailedNode != "agent" ||
 				!strings.Contains(runs[0].Reason, "the agent reached outside its clone") {
 				t.Fatalf("clone boundary outcome: %+v, %v", runs, err)
 			}
