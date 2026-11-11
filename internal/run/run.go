@@ -66,8 +66,9 @@ func runAt(label, ref string, args []string, out, summary io.Writer) (err error)
 		return ev, err
 	})
 	var dir, sha string
-	defer func() { err = errors.Join(err, leave(r, dir, repo)) }()
+	defer func() { err = errors.Join(err, leave(r, root, dir, repo)) }()
 	r.step("clone", func() (ev map[string]any, err error) {
+		r.sweep(root, repo)
 		var install []cmdResult
 		dir, sha, install, err = clone(root, start, c.Install, repo, r.live)
 		return map[string]any{"clone": dir, "sha": sha, "commands": install}, err
@@ -117,7 +118,8 @@ func theIssue(from *resumePoint, arg, repo string) (Issue, error) {
 	return readIssue(arg, repo)
 }
 
-func leave(r *verdict, dir, repo string) error {
+func leave(r *verdict, root, dir, repo string) error {
+	defer r.sweep(root, repo)
 	if r.err != nil && len(r.Decisions) > 0 {
 		return nil
 	}
