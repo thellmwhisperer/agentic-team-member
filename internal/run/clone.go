@@ -133,11 +133,6 @@ func releaseClone(dir, repo string, keptHeads map[string]bool) error {
 // sweep revisits delivered clones only. Failed or resumable deliveries keep their work, as do live runs.
 // Its decisions go to this run's report without adding rows to the screen.
 func (r *verdict) sweep(root, repo string) {
-	keptHeads, err := cloneKeptHeads(root)
-	if err != nil {
-		r.CloneCleanup = append(r.CloneCleanup, map[string]string{"path": root, "error": err.Error()})
-		return
-	}
 	clones := filepath.Join(root, ".atm", "clones")
 	entries, err := os.ReadDir(clones)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -147,6 +142,7 @@ func (r *verdict) sweep(root, repo string) {
 		r.CloneCleanup = append(r.CloneCleanup, map[string]string{"path": clones, "error": err.Error()})
 		return
 	}
+	var candidates []string
 	for _, entry := range entries {
 		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), "atm-run-") {
 			continue
@@ -158,6 +154,14 @@ func (r *verdict) sweep(root, repo string) {
 		if _, err := os.Stat(dir + ".delivered"); err != nil {
 			continue
 		}
+		candidates = append(candidates, dir)
+	}
+	keptHeads, err := cloneKeptHeads(root)
+	if err != nil {
+		r.CloneCleanup = append(r.CloneCleanup, map[string]string{"path": root, "error": err.Error()})
+		return
+	}
+	for _, dir := range candidates {
 		decision := map[string]string{"path": dir, "result": "kept"}
 		err := releaseClone(dir, repo, keptHeads)
 		if _, stat := os.Lstat(dir); errors.Is(stat, fs.ErrNotExist) {
@@ -219,9 +223,14 @@ func kept(dir, repo string, lock *os.File, keptHeads map[string]bool) bool {
 		return false
 	}
 	if len(keptHeads) > 0 {
-		head, err := gitIn("rev-parse", "HEAD")
-		if err != nil || keptHeads[head] {
+		heads, err := gitIn("log", "--format=%H")
+		if err != nil {
 			return true
+		}
+		for _, head := range strings.Fields(heads) {
+			if keptHeads[head] {
+				return true
+			}
 		}
 	}
 	branch, base, _ := strings.Cut(strings.TrimSpace(string(b)), " ")

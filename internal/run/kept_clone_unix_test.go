@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -53,7 +54,7 @@ func TestKeptCloneIsRecheckedAtRunEnd(t *testing.T) {
 
 func TestKeptCloneSweepPreservesPendingAndResumableDelivery(t *testing.T) {
 	bin, top, path, prState := keptCloneRepo(t,
-		`if test -f "$ATM_TEST_SOURCE/fail-delivery"; then echo delivery-finding; exit 1; fi`)
+		`if test -f "$ATM_TEST_SOURCE/fail-delivery"; then git commit --allow-empty -qm delivery-commit || exit; echo delivery-finding; exit 1; fi`)
 	write(t, filepath.Join(top, "fail-delivery"), "")
 	pending, label := question(t, bin, top, "delivery-finding", 4, "run", "--follow", path)
 	write(t, prState, "CLOSED\n")
@@ -71,6 +72,10 @@ func TestKeptCloneSweepPreservesPendingAndResumableDelivery(t *testing.T) {
 	stopCheckRun(t, top, label)
 	if r := e2eReport(t, top, label); !r.Resumable {
 		t.Fatalf("stopped delivery is not resumable: %+v", r)
+	}
+	if r := e2eReport(t, top, label); r.HeadSHA == gitT(t, pending, "rev-parse", "HEAD") ||
+		r.HeadSHA != gitT(t, pending, "rev-parse", "HEAD^") {
+		t.Fatalf("delivery did not advance beyond its recorded commit: %+v", r)
 	}
 	keptCloneRun(t, bin, top, path, 0)
 	exist(t, pending, pending+".delivered", undelivered)
@@ -91,6 +96,89 @@ func TestKeptCloneSweepPreservesPendingAndResumableDelivery(t *testing.T) {
 	keptCloneRun(t, bin, top, path, 0)
 	exist(t, pending, pending+".delivered", undelivered)
 	assertCloneCleanup(t, top, pending, "kept")
+}
+
+func TestKeptCloneSweepPreservesDeliveryThatStopsDuringSweep(t *testing.T) {
+	for _, phase := range []string{"start", "end"} {
+		t.Run(phase, func(t *testing.T) {
+			bin, top, path, prState := keptCloneRepo(t,
+				`if test -f "$ATM_TEST_SOURCE/hold-delivery"; then `+
+					`rm "$ATM_TEST_SOURCE/hold-delivery"; echo "$ATM_REPORT" > "$ATM_TEST_SOURCE/delivery-report"; `+
+					`read answer < "$ATM_TEST_SOURCE/delivery-gate"; echo delivery-finding; exit 1; fi; `+
+					`if test -f "$ATM_TEST_SOURCE/block-sweep"; then `+
+					`mkfifo "$ATM_TEST_SOURCE/.atm/runs/zz-block/report.json"; fi`)
+			gate := filepath.Join(top, "delivery-gate")
+			if err := syscall.Mkfifo(gate, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			write(t, filepath.Join(top, "hold-delivery"), "")
+			held := startFollow(t, bin, top, false, "run", "--follow", path)
+			var report []byte
+			until(t, "held delivery", func() bool {
+				report, _ = os.ReadFile(filepath.Join(top, "delivery-report"))
+				return len(report) > 0
+			})
+			label := filepath.Base(filepath.Dir(strings.TrimSpace(string(report))))
+			prior := e2eReport(t, top, label)
+			pending := prior.ClonePath
+			if pending == "" || prior.FailedNode != "" || prior.node("delivery").Result != "running" {
+				t.Fatalf("delivery was not active before the sweep: %+v", prior)
+			}
+			write(t, prState, "CLOSED\n")
+			block := filepath.Join(top, ".atm", "runs", "zz-block", "report.json")
+			if err := os.MkdirAll(filepath.Dir(block), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if phase == "start" {
+				if err := syscall.Mkfifo(block, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				write(t, filepath.Join(top, "block-sweep"), "")
+			}
+			next := startFollow(t, bin, top, false, "run", "--follow", path)
+			var pipe *os.File
+			until(t, "sweep reading reports", func() bool {
+				fd, err := syscall.Open(block, syscall.O_WRONLY|syscall.O_NONBLOCK, 0)
+				if err == nil {
+					pipe = os.NewFile(uintptr(fd), block)
+				}
+				return err == nil
+			})
+			t.Cleanup(func() { _ = pipe.Close() })
+			if err := os.Remove(block); err != nil {
+				t.Fatal(err)
+			}
+			write(t, block, "{}")
+			fd, err := syscall.Open(gate, syscall.O_WRONLY|syscall.O_NONBLOCK, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			release := os.NewFile(uintptr(fd), gate)
+			if _, err := release.WriteString("stop\n"); err != nil {
+				t.Fatal(err)
+			}
+			if err := release.Close(); err != nil {
+				t.Fatal(err)
+			}
+			held.exit(4)
+			stopCheckRun(t, top, label)
+			if r := e2eReport(t, top, label); !r.Resumable {
+				t.Fatalf("stopped delivery is not resumable: %+v", r)
+			}
+			if _, err := pipe.WriteString("{}"); err != nil {
+				t.Fatal(err)
+			}
+			if err := pipe.Close(); err != nil {
+				t.Fatal(err)
+			}
+			next.exit(0)
+			exist(t, pending, pending+".delivered", pending+".lock")
+			if got := reader(t, pending)("a.txt"); got != "fixed" {
+				t.Fatalf("sweep lost stopped delivery's work: %q", got)
+			}
+		})
+	}
 }
 
 func TestKeptCloneSweepRecordsErrorsAndKeepsWork(t *testing.T) {

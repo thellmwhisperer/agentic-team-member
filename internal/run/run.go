@@ -55,7 +55,12 @@ func runAt(label, ref string, args []string, out, summary io.Writer) (err error)
 		return err
 	}
 	r := a.verdict(out)
-	defer func() { r.resumable(a.dir); err = r.finish(err, summary) }()
+	var dir, sha string
+	defer func() {
+		r.resumable(a.dir)
+		err = r.finish(err, summary)
+		byClone.Delete(dir)
+	}()
 	var i Issue
 	r.step("issue", func() (map[string]any, error) {
 		i, err = theIssue(from, args[len(args)-1], repo)
@@ -65,7 +70,6 @@ func runAt(label, ref string, args []string, out, summary io.Writer) (err error)
 		}
 		return ev, err
 	})
-	var dir, sha string
 	defer func() { err = errors.Join(err, leave(r, root, dir, repo)) }()
 	r.step("clone", func() (ev map[string]any, err error) {
 		r.sweep(root, repo)
@@ -79,7 +83,6 @@ func runAt(label, ref string, args []string, out, summary io.Writer) (err error)
 		return ev, err
 	})
 	byClone.Store(dir, r)
-	defer byClone.Delete(dir)
 	keep := resumePoint{Issue: args[len(args)-1], Original: &i, BaseRef: *base, Base: sha}
 	a.unit(r, root, dir, sha, text, c, &keep, from,
 		func(p proof) {
