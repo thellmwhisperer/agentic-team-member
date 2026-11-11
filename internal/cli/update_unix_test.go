@@ -70,8 +70,6 @@ func fakeRelease(t *testing.T, tag, binary string, wrongSum bool) {
 }
 
 // installed is an atm at tag in a new directory, outside any git repository, which is the working directory.
-// GIT_CEILING_DIRECTORIES keeps git from climbing out of it, so a TMPDIR inside a repository whose runs go
-// is not that repository.
 func installed(t *testing.T, tag string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -195,10 +193,11 @@ func TestUpdateRefusesWhileARunGoes(t *testing.T) {
 		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 			t.Fatalf("update target directory %q is not inside repository %q", filepath.Dir(inside), repoDir)
 		}
-		if err := update(&out, "v0.1.0", inside); err != nil {
+		t.Setenv("GIT_CEILING_DIRECTORIES", "")
+		if err := update(&out, "v0.1.0", inside); err == nil || !strings.Contains(err.Error(), "retry-1") {
 			t.Fatalf("update from a temp directory inside a repository whose run goes: %v", err)
 		}
-		assertVersion(t, inside, "v0.2.0")
+		assertUntouched(t, inside, "v0.1.0")
 	})
 	if err := os.WriteFile(release, nil, 0o600); err != nil {
 		t.Fatal(err)
