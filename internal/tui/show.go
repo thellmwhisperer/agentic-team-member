@@ -18,8 +18,8 @@ import (
 var follow = run.FollowFrom // tests follow a run of their own
 
 // Show shows the screen of run label, of the repository at root, on the terminal in and out until the user
-// closes it or the run ends; after passed Delivery with a gate, until the user closes it, also once the gate
-// ends; detached when the user left it going. The screen keeps the terminal all along: Delivery's command runs
+// closes it or the run and its gate end; detached when the user left it going.
+// The screen keeps the terminal all along: Delivery's command runs
 // below it, and the gate shows in its pipeline.
 func Show(root, label string, in, out *os.File) (o run.Outcome, detached bool, err error) {
 	label, err = resolve(root, label)

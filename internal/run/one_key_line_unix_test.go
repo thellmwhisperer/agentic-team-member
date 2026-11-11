@@ -40,10 +40,8 @@ func TestRealAttachShowsOneKeyLine(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(nm, "done"), nil, 0o600); err != nil {
 				t.Fatal(err)
 			}
-			a.drawn(gatePassed.MatchString)
+			a.closes()
 			assertOneKeyLine(t, a, int(cols), "q close")
-			a.key("q")
-			a.exits()
 			grid := assertOneKeyLine(t, a, int(cols), "q close")
 			if _, err := grid.Write([]byte("\x1b[H" + strings.Repeat(" ", int(cols)) + "wrap")); err != nil {
 				t.Fatal(err)

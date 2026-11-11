@@ -279,14 +279,14 @@ func (m *Model) runEnded(e ended) tea.Cmd {
 }
 
 // gateShown shows answer g and asks again after a second, unless g, asked after the run's end, shows a gate over,
-// which stops asking, or no gate run when none ever showed, which quits.
+// or no gate run when none ever showed; either quits.
 func (m *Model) gateShown(g gate) tea.Cmd {
 	m.gateAnswered = true
 	if g.ok {
 		m.gate(g)
 		if g.over && g.afterEnd {
 			m.asking = false
-			return nil
+			return tea.Quit
 		}
 	} else if g.afterEnd && m.gateSteps == nil {
 		return tea.Quit
@@ -623,7 +623,7 @@ func (m *Model) tool(e event) {
 	}
 }
 
-// end keeps how the run ended on screen until the user closes it.
+// end keeps how the run ended for the final view.
 func (m *Model) end(o run.Outcome, err error) {
 	m.decision(event{})
 	cold := !slices.ContainsFunc(m.rows, func(r *row) bool { return r.state != "pending" })
