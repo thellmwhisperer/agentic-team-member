@@ -257,7 +257,10 @@ func (a agent) resolve(r *verdict, dir, text string, keep *resumePoint, report *
 	if redRow(r, "test") {
 		flaky := r.Reason
 		r.err, r.FailedNode, r.Reason = nil, "", ""
-		if check(); r.err == nil {
+		check()
+		if slices.ContainsFunc(r.checkCommands, func(cmd cmdResult) bool {
+			return cmd.Name == "test" && cmd.Result == "passed"
+		}) {
 			r.Flaky = append(r.Flaky, flaky)
 		}
 	}
