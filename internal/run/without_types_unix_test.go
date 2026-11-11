@@ -231,3 +231,20 @@ func emptyUntypedWork(t *testing.T) {
 		t.Fatalf("missing report delivered empty work: %v, %s", err, out)
 	}
 }
+
+func TestRunWithNoChangeEndsAfterTheAgent(t *testing.T) {
+	builtATM(t)
+	marker := filepath.Join(t.TempDir(), "ran")
+	t.Setenv("ATM_TEST_MARKER", marker)
+	cfg := atmSet(atmYAML, "test", `touch "$ATM_TEST_MARKER"`)
+	top := gitT(t, repo(t, "local", cfg), "rev-parse", "--show-toplevel")
+	t.Setenv("FAKE_AGENT_WORK", reportJSON(""))
+	bin := followUpsServer(t, top)
+	out, err := exec.Command(bin, "run", "--follow", issueFile(t, issue)).CombinedOutput()
+	if err == nil || !bytes.Contains(out, []byte("no change to prove")) {
+		t.Fatalf("a report with no change was not rejected: %v, %s", err, out)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatalf("the test command ran on a run with no change: %s", out)
+	}
+}
