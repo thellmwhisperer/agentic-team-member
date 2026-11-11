@@ -23,7 +23,8 @@ with no clone, no run directory and no agent:
   worker files  each file a --harness-arg flag names, as --settings or --skill, exists in the base tree
                 (saved base on resume) or is an absolute readable file
   delivery      the first word of delivery is a command sh finds: on PATH, or sh's own, as if or cd
-  compile       the compile command of .atm.yaml, if it has one, exits 0 on the base tree, on this machine`
+  compile       the compile command of .atm.yaml, if it has one, exits 0 on the base tree
+                (saved base on resume), on this machine`
 
 // fileFlags are the harness flags whose value is a file the agent reads. A value that starts with { is inline JSON.
 var fileFlags = []string{"--settings", "--skill"}
@@ -67,7 +68,7 @@ func preflight(root, ref, workerBase string, a agent, args []string) (string, er
 			}
 			return nil
 		}},
-		{"compile", func() error { return compile(root, sha, c.Compile) }},
+		{"compile", func() error { return compile(root, cmp.Or(workerBase, sha), c.Compile) }},
 	} {
 		if err := check.fn(); err != nil {
 			return "", fmt.Errorf("preflight: %s: %w", check.name, err)
