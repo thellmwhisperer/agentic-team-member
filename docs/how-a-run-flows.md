@@ -296,8 +296,9 @@ There is no splitting within a file. If no file survives, the whole cut is
 discarded as before.
 
 The remaining cut must report a finding and lower the run's net added lines.
-ATM then checks for new files, including ignored files, preserves the reported
-test, and runs the configured checks on the completed cut. When those fail,
+ATM then removes the new ignored files and directories the agent's commands
+left, such as test caches, preserves the reported test, and runs the configured
+checks on the completed cut. When those fail,
 ATM puts back every cut
 file whose full repo path the failure names, as compiler and test output name a file,
 and checks again, while the failure names one. A failure that names none, with at least two files left:
