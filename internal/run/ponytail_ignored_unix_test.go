@@ -17,7 +17,12 @@ func TestPonytailCutKeptWhenItsCommandsLeaveIgnoredFiles(t *testing.T) {
 		name, work, left string
 		rejected         []any
 	}{
-		{name: "ignored file", work: "echo fixed > a.txt; mkdir -p .tmp/go-build; echo cache > .tmp/go-build/x",
+		{name: "ignored file", work: "echo fixed > a.txt; mkdir -p .tmp/go-build/00; echo cache > .tmp/go-build/00/x",
+			left: "none\nfixed\n", rejected: []any{}},
+		{name: "ignored repository", work: "echo fixed > a.txt; git init -q .tmp/llama.cpp; echo x > .tmp/llama.cpp/f; " +
+			"git -C .tmp/llama.cpp add f; git -C .tmp/llama.cpp -c user.name=a -c user.email=a@a commit -qm x",
+			left: "none\nfixed\n", rejected: []any{}},
+		{name: "read-only cache", work: "echo fixed > a.txt; mkdir -p .tmp/mod/m; echo x > .tmp/mod/m/f; chmod -R a-w .tmp/mod",
 			left: "none\nfixed\n", rejected: []any{}},
 		{name: "tracked file", work: "echo fixed > a.txt; echo new > c.txt", left: "none\nfixed\n",
 			rejected: []any{map[string]any{"path": "c.txt", "reason": "the cut adds c.txt"}}},
@@ -28,7 +33,7 @@ func TestPonytailCutKeptWhenItsCommandsLeaveIgnoredFiles(t *testing.T) {
 			t.Setenv("FAKE_AGENT_WORK", "printf 'fixed\\nextra\\nmore\\n' > a.txt"+fixTest)
 			t.Setenv("FAKE_PONYTAIL_WORK", c.work)
 			t.Setenv("FAKE_PONYTAIL_REPORT", cut)
-			cfg := atmSet(atmYAML, "delivery", `{ ls .tmp/go-build/x 2>/dev/null || echo none; ls c.txt 2>/dev/null; `+
+			cfg := atmSet(atmYAML, "delivery", `{ ls -A .tmp 2>/dev/null | grep . || echo none; ls c.txt 2>/dev/null; `+
 				`git show HEAD:a.txt; } > "$ATM_TEST_OUT"`)
 			top := gitT(t, repo(t, "https://example.com/owner/repo.git", cfg), "rev-parse", "--show-toplevel")
 			if err := os.WriteFile(filepath.Join(top, ".gitignore"), []byte("/.tmp/\n"), 0o600); err != nil {

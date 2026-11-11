@@ -510,17 +510,37 @@ func snapshot(clone string) (string, error) {
 	return tree, errors.Join(err, e)
 }
 
-// sweep removes from clone every file that tree, whole's before the cut, lacks: the ignored files the agent's
-// commands wrote. The ones git does not ignore were judged already.
+// sweep removes from clone every file that tree, whole's before the cut, lacks, and each directory it leaves
+// empty that tree lacks: the ignored files the agent's commands wrote. The ones git does not ignore were judged
+// already.
 func sweep(clone, tree string) error {
 	now, err := whole(clone)
-	out, e := every(clone, "diff", "--name-only", "--diff-filter=A", "-z", tree, now) // fails when now is ""
+	if err != nil {
+		return err
+	}
+	out, err := every(clone, "diff", "--name-only", "--no-renames", "--diff-filter=A", "-z", tree, now)
+	if err != nil || out == "" {
+		return err
+	}
+	was, err := every(clone, "ls-tree", "-r", "-t", "--name-only", "-z", tree)
+	if err != nil {
+		return err
+	}
+	had := map[string]bool{}
+	for _, p := range strings.Split(was, "\x00") {
+		had[p] = true
+	}
+	root, err := os.OpenRoot(clone)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
 	for _, f := range strings.Split(out, "\x00") {
-		if f != "" {
-			err = errors.Join(err, os.Remove(filepath.Join(clone, filepath.FromSlash(f))))
+		if err == nil && f != "" {
+			err = drop(root, f, had)
 		}
 	}
-	return errors.Join(err, e)
+	return err
 }
 
 // restore brings clone's working tree back to tree, whole's, new files gone, the ignored ones too, and its
