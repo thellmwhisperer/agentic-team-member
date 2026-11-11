@@ -275,7 +275,7 @@ func screenRun(t *testing.T, delivery string) (string, *screenRead) {
 }
 
 // gateEnds ends the fake gate of directory nm, waits until the screen shows the run passed, gives the screen's
-// next gate query time to find the gate over, and closes it.
+// next gate query time to find the gate over, and checks it exits by itself.
 func (sc *screenRead) gateEnds(nm string) {
 	sc.f.t.Helper()
 	if err := os.WriteFile(filepath.Join(nm, "done"), nil, 0o600); err != nil {
@@ -346,19 +346,26 @@ func (sc *screenRead) resized(cols uint16, ok func(string) bool) {
 	})
 }
 
-// close types q on a screen that shows the run's end, and waits for atm run to exit 0 with q close shown.
+// close waits for atm run to exit 0 by itself with q close shown in its final view.
 func (sc *screenRead) close() {
 	sc.f.t.Helper()
-	if _, err := sc.f.term.Write([]byte("q")); err != nil {
-		sc.f.t.Fatal(err)
-	}
-	for l := range sc.f.lines { // the footer is the screen's last line: it ends with no newline until atm run exits
-		sc.shown.WriteString(l + "\n")
+	deadline := time.NewTimer(5 * time.Second)
+	defer deadline.Stop()
+	for open := true; open; {
+		select {
+		case l, more := <-sc.f.lines:
+			open = more
+			if more {
+				sc.shown.WriteString(l + "\n")
+			}
+		case <-deadline.C:
+			sc.f.t.Fatal("atm run did not exit by itself after the gate ended")
+		}
 	}
 	if err := sc.f.cmd.Wait(); err != nil {
 		sc.f.t.Fatalf("atm run: %v; stderr:\n%s", err, sc.f.errors())
 	}
 	if s := sc.last(); !strings.Contains(s, "q close") {
-		sc.f.t.Fatalf("q closed a screen that never showed the run's end:\n%s", s)
+		sc.f.t.Fatalf("the screen closed without showing the run's end:\n%s", s)
 	}
 }

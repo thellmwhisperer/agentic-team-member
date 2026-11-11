@@ -393,7 +393,7 @@ func (a *attached) openStep(step string) string {
 	return a.drawn(func(s string) bool { return strings.Contains(s, "▾ ⏸ "+step) })
 }
 
-// gateDone completes the gate's run, checks attach keeps its last screen open and closes it with q.
+// gateDone completes the gate's run and checks attach quits with its last screen preserved.
 func (a *attached) gateDone(nm string) {
 	a.t.Helper()
 	if err := os.WriteFile(filepath.Join(nm, "done"), nil, 0o600); err != nil {
@@ -592,28 +592,16 @@ func TestRealAttachWithoutAGateQuitsAtTheEnd(t *testing.T) {
 
 var gatePassed = regexp.MustCompile(`│ ✓ \S+  1\.2 s +passed │`)
 
-// closes waits for the ended gate's last screen, its agent step passed with its time, checks atm attach keeps it
-// open, still drawn, until q, and closes it with q. It returns that screen.
+// closes waits for the ended gate's last screen, its agent step passed with its time, and checks atm attach
+// quits by itself, preserving that screen. It returns that screen.
 func (a *attached) closes() string {
 	a.t.Helper()
-	last := a.drawn(gatePassed.MatchString)
-	stay := time.After(3 * time.Second)
-	for stayed := false; !stayed; {
-		select {
-		case c, open := <-a.chunks:
-			if !open {
-				a.t.Fatalf("atm attach closed by itself once the gate ended:\n%s", last)
-			}
-			a.raw.WriteString(c)
-		case <-stay:
-			stayed = true
-		}
-	}
-	if s := ansi.Strip(a.styled()); !gatePassed.MatchString(s) || !strings.Contains(s, "q close") {
-		a.t.Fatalf("the ended gate's screen lost its passed row or its q close:\n%s", s)
-	}
-	a.key("q")
 	a.exits()
+	_, final, _ := strings.Cut(a.raw.String(), "\x1b[?1049l")
+	last := ansi.Strip(final)
+	if !gatePassed.MatchString(last) || !strings.Contains(last, "q close") {
+		a.t.Fatalf("the ended gate's screen lost its passed row or its q close:\n%s", last)
+	}
 	return last
 }
 
