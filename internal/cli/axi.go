@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"cmp"
 	"encoding/json"
 	"io"
 	"regexp"
@@ -143,6 +144,12 @@ func outcome(w io.Writer, asJSON bool, o run.Outcome) error {
 	return err
 }
 
+// step is the node a run goes in, or the question a run waiting for an answer asks: the first line of its reason.
+func step(o run.Outcome) string {
+	q, _, _ := strings.Cut(o.Reason, "\n")
+	return cmp.Or(map[bool]string{true: "waiting: " + q}[o.Outcome == "waiting"], o.Step)
+}
+
 // list prints runs as a table, runs: the runs going, when going, else every run.
 func list(w io.Writer, asJSON, going bool, runs []run.Outcome) error {
 	keys := []string{"run", "issue", "outcome", "failed_node", "duration", "report", "agent", "serve"}
@@ -152,8 +159,8 @@ func list(w io.Writer, asJSON, going bool, runs []run.Outcome) error {
 	var rows [][]string
 	for _, o := range runs {
 		switch {
-		case going && o.Outcome == "running":
-			rows = append(rows, []string{o.Run, o.Issue, o.Step, o.Duration(), o.AgentLabel()})
+		case going && (o.Outcome == "running" || o.Outcome == "waiting"):
+			rows = append(rows, []string{o.Run, o.Issue, step(o), o.Duration(), o.AgentLabel()})
 		case !going:
 			rows = append(rows, []string{o.Run, o.Issue, o.Outcome, o.FailedNode, o.Duration(), o.Report,
 				o.AgentLabel(), o.ServeLabel()})

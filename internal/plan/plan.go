@@ -158,11 +158,11 @@ func (r *reader) get(n int) Issue {
 
 func (r *reader) open(n int) bool { return r.get(n).State != "CLOSED" }
 
-// going is whether n is open and its last run running, or passed: delivered, the issue still open. A closed issue is
-// never going, since a run whose client was killed never records its end.
+// going is whether n is open and its last run running, waiting for an answer, or passed: delivered, the issue
+// still open. A closed issue is never going, since a run whose client was killed never records its end.
 func (r *reader) going(n int) bool {
 	l := r.last[strconv.Itoa(n)]
-	return (l == "running" || l == "passed") && r.open(n)
+	return (l == "running" || l == "waiting" || l == "passed") && r.open(n)
 }
 
 // blocked is whether t waits on an open dependency, in the plan or under its issue's Depends on, or conflicts

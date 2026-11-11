@@ -358,7 +358,7 @@ func assertBothRunsFinish(t *testing.T, release string) {
 		if err := json.Unmarshal([]byte(atmIn(t, 0, "axi", "runs", "--json")), &runs); err != nil {
 			t.Fatal(err)
 		}
-		if len(runs.Runs) == 2 && runs.Runs[0]["outcome"] == "failed" && runs.Runs[1]["outcome"] == "failed" {
+		if len(runs.Runs) == 2 && runs.Runs[0]["outcome"] == "waiting" && runs.Runs[1]["outcome"] == "waiting" {
 			return
 		}
 	}

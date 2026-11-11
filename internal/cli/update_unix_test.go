@@ -192,7 +192,7 @@ func TestUpdateRefusesWhileARunGoes(t *testing.T) {
 		if err := json.Unmarshal([]byte(atmIn(t, 0, "axi", "runs", "--json")), &runs); err != nil {
 			t.Fatal(err)
 		}
-		if len(runs.Runs) == 1 && runs.Runs[0]["outcome"] == "failed" {
+		if len(runs.Runs) == 1 && runs.Runs[0]["outcome"] == "waiting" {
 			return
 		}
 	}

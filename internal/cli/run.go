@@ -122,10 +122,10 @@ func listCmd(going bool) *cobra.Command {
 		for _, o := range runs {
 			how := o.Outcome
 			switch {
-			case going && how != "running":
+			case going && how != "running" && how != "waiting":
 				continue
 			case going:
-				how = o.Step
+				how = step(o)
 			case o.FailedNode != "":
 				how += " at " + o.FailedNode
 			}

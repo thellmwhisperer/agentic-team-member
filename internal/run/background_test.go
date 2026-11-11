@@ -363,7 +363,7 @@ func TestBackgroundKeepsLabelMonotonicWhenNewestIsPruned(t *testing.T) {
 	}
 	s.Lock()
 	run := s.runs[len(s.runs)-1]
-	for run.Ended.IsZero() {
+	for run.Ended.IsZero() && run.Outcome.Outcome != "waiting" {
 		more := run.more
 		s.Unlock()
 		<-more

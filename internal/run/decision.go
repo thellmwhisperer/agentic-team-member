@@ -63,7 +63,7 @@ func (r *bgRun) decision(line string) string {
 	}
 	_ = json.Unmarshal([]byte(line), &ev)
 	if ev.State == "waiting" {
-		r.Outcome.Outcome, r.Ended = "failed", time.Now()
+		r.Outcome.Outcome = "waiting"
 		r.Reason = ev.Finding
 		r.NextStep = "atm answer " + r.Run + " approve|fix|stop --by <who>"
 		if ev.Resumable {

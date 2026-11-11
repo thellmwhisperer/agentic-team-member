@@ -8,9 +8,10 @@ import (
 	"testing"
 )
 
-// TestAxiPlanSaysWhichTicketsCanLaunch reads testdata/plan.json against a fake gh, where issue 1 is closed and
-// every other open, and a runs.jsonl where 7 runs its agent.
-func TestAxiPlanSaysWhichTicketsCanLaunch(t *testing.T) {
+// planWith is testdata/plan.json's path, read against a fake gh, where issue 1 is closed and every other open, in a
+// repository whose runs.jsonl is runs.
+func planWith(t *testing.T, runs string) string {
+	t.Helper()
 	plan, err := filepath.Abs(filepath.Join("testdata", "plan.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -26,10 +27,16 @@ func TestAxiPlanSaysWhichTicketsCanLaunch(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, ".atm"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	runs := `{"outcome":"running","run":"7-1","issue":"7","step":"agent"}` + "\n"
 	if err := os.WriteFile(filepath.Join(dir, ".atm", "runs.jsonl"), []byte(runs), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	return plan
+}
+
+// TestAxiPlanSaysWhichTicketsCanLaunch reads testdata/plan.json against a fake gh, where issue 1 is closed and
+// every other open, and a runs.jsonl where 7 runs its agent.
+func TestAxiPlanSaysWhichTicketsCanLaunch(t *testing.T) {
+	plan := planWith(t, `{"outcome":"running","run":"7-1","issue":"7","step":"agent"}`+"\n")
 	for _, c := range []struct {
 		args []string
 		want string
@@ -42,5 +49,15 @@ func TestAxiPlanSaysWhichTicketsCanLaunch(t *testing.T) {
 		if out, err := atm(t, c.args...); err != nil || out != c.want {
 			t.Fatalf("atm %v: %v\n%s\nwant\n%s", c.args, err, out, c.want)
 		}
+	}
+}
+
+// TestAxiPlanCountsAWaitingRunAsWorking reads testdata/plan.json with issue 2's run waiting for an answer: the
+// issue is working, not ready to launch a second time.
+func TestAxiPlanCountsAWaitingRunAsWorking(t *testing.T) {
+	plan := planWith(t, `{"outcome":"waiting","run":"2-1","issue":"2","step":"checks"}`+"\n")
+	want := `{"open":[2,3,5,6,7,8],"ready":[7,8],"cos_holds":[5],"javi_holds":[6],"working":[2],"free":3}` + "\n"
+	if out, err := atm(t, "axi", "plan", "--json", plan); err != nil || out != want {
+		t.Fatalf("atm axi plan: %v\n%s\nwant\n%s", err, out, want)
 	}
 }
