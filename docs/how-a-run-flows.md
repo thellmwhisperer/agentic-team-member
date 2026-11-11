@@ -51,7 +51,7 @@ Delivery failure waits for the launcher's answer; see [Checks](#checks).
 | Clone | Clones the repository at the commit checked by preflight, or the saved base commit on resume into `.atm/clones/`, runs `install` | The ref, the clone or `install` fails |
 | Contract | Writes `brief.md`, the agent's contract | The brief cannot be written |
 | Agent | Runs the coding agent in the clone on the brief | It fails to complete successfully, times out or writes outside its clone and scratch directory. A missing or invalid report does not fail it: see [Rejected reports](#rejected-reports) |
-| Checks | Prepares the clone, then install, test, optional e2e, typecheck and lint; see [Checks](#checks) | Cleanup fails, a changed Go test file loses tests, the reported test file is invalid, a command fails, or HEAD moves |
+| Checks | Prepares the clone, rejects work with no changes, validates the reported test file, then runs install, test, optional e2e, typecheck and lint; see [Checks](#checks) | Cleanup fails, there are no changes from the base commit, a changed Go test file loses tests, the reported test file is invalid, a command fails, or HEAD moves |
 | Slop detector | Lets a model cut the diff; keeps the cut only if every check still passes | Its agent fails, fails [report validation](#rejected-reports), or anything commits |
 | Delivery | Commits the work on a branch and runs the `delivery` command | The branch or the command fails. Skipped when `delivery` is empty |
 
@@ -228,7 +228,10 @@ A cleanup or restoration error stops Checks before
 needs one fails. ATM moves `.atm/` out of the clone while Checks runs,
 including `install` and the other commands, then restores it even
 if a check fails. This keeps `.atm/` artefacts out of every check command. Checks
-then run `install` again (the agent may have changed dependencies), and run
+first stage the completed work and reject it with `no change to prove` when
+there are no changes from the run's base commit. They also validate the
+reported test file before running commands. Checks then run `install` again
+(the agent may have changed dependencies), and run
 `test`, `e2e`, `typecheck` and `lint`, empty ones skipped. In this repository
 `e2e` runs `scripts/cover-diff.sh` on the counters `test`
 wrote in ATM's fresh `GOCOVERDIR`. Which lines fail,
@@ -243,7 +246,7 @@ under `flaky`. A `test` row still red, or a red `lint` row, gives the worker
 the turn `fix` gives, with the finding, and Checks runs again. A red after that
 turn asks the launcher. Other rows ask at once.
 
-After `install` and before `test`, Checks track changed Go test files matching
+Before `install`, Checks track changed Go test files matching
 `test_patterns` from the run's original base commit through the current work,
 including file renames. They count `func Test...` declarations and `t.Run`
 subtests, including nested subtests. If the count falls, Checks fails and names
