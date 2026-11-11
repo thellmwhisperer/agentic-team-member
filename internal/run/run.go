@@ -85,19 +85,24 @@ func runAt(label, ref string, args []string, out, summary io.Writer) (err error)
 	})
 	byClone.Store(dir, r)
 	keep := resumePoint{Issue: args[len(args)-1], Original: &i, BaseRef: *base, Base: sha}
-	a.unit(r, root, dir, sha, text, c, &keep, from,
-		func(p proof) {
-			r.step("ponytail", func() (map[string]any, error) {
-				ev, err := a.ponytail(root, dir, sha, []proof{p}, i, c)
-				r.Reproofs, _ = ev["reproofs"].([]unitResult)
-				if commits, _ := ev["commits"].([]string); err == nil && len(commits) == 2 {
-					keep.Cuts = append(keep.Cuts, commits[1])
-				}
-				return ev, err
-			})
-		},
+	a.unit(r, root, dir, sha, text, c, &keep, from, a.ponytailStep(r, root, dir, sha, i, c, &keep),
 		func(proof) { deliver(r, root, dir, sha, *base, c.Delivery, i, summary) })
 	return r.err
+}
+
+// ponytailStep is the ponytail step of the run r, which records each cut it makes in keep.
+func (a *agent) ponytailStep(r *verdict, root, dir, sha string, i Issue, c config.Config,
+	keep *resumePoint) func(proof) {
+	return func(p proof) {
+		r.step("ponytail", func() (map[string]any, error) {
+			ev, err := a.ponytail(root, dir, sha, []proof{p}, i, c)
+			r.Reproofs, _ = ev["reproofs"].([]unitResult)
+			if commits, _ := ev["commits"].([]string); err == nil && len(commits) == 2 {
+				keep.Cuts = append(keep.Cuts, commits[1])
+			}
+			return ev, err
+		})
+	}
 }
 
 func configureAgent(root, ref, label string, a *agent) (config.Config, error) {

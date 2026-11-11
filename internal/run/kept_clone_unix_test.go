@@ -54,7 +54,8 @@ func TestKeptCloneIsRecheckedAtRunEnd(t *testing.T) {
 
 func TestKeptCloneSweepPreservesPendingAndResumableDelivery(t *testing.T) {
 	bin, top, path, prState := keptCloneRepo(t,
-		`if test -f "$ATM_TEST_SOURCE/fail-delivery"; then git commit --allow-empty -qm delivery-commit || exit; echo delivery-finding; exit 1; fi`)
+		`if test -f "$ATM_TEST_SOURCE/fail-delivery"; then `+
+			`git commit --allow-empty -qm delivery-commit || exit; echo delivery-finding; exit 1; fi`)
 	write(t, filepath.Join(top, "fail-delivery"), "")
 	pending, label := question(t, bin, top, "delivery-finding", 4, "run", "--follow", path)
 	write(t, prState, "CLOSED\n")
@@ -102,14 +103,7 @@ func TestKeptCloneSweepRemovesResumedCloneWithoutRemovingOriginal(t *testing.T) 
 	bin, top, path, prState := keptCloneRepo(t,
 		`if test -f "$ATM_TEST_SOURCE/fail-delivery" && ! test -f repaired; then `+
 			`git commit --allow-empty -qm delivery-commit || exit; echo delivery-finding; exit 1; fi`)
-	configPath := filepath.Join(top, ".atm.yaml")
-	cfg, err := os.ReadFile(configPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	write(t, configPath, atmSet(string(cfg), "lint", `test ! -f repaired || test -f "$ATM_TEST_SOURCE/resume-ready"`))
-	gitT(t, top, "add", ".atm.yaml")
-	gitT(t, top, "commit", "-qm", "configure resume check")
+	setLint(t, top, `test ! -f repaired || test -f "$ATM_TEST_SOURCE/resume-ready"`)
 	write(t, filepath.Join(top, "fail-delivery"), "")
 	original, label := question(t, bin, top, "delivery-finding", 4, "run", "--follow", path)
 	answerFailedCheck(t, bin, top, label, "fix", 1)
@@ -136,11 +130,7 @@ func TestKeptCloneSweepRemovesResumedCloneWithoutRemovingOriginal(t *testing.T) 
 	}
 	keptCloneRun(t, bin, top, path, 0)
 	exist(t, original, original+".delivered", original+".lock")
-	for _, suffix := range []string{"", ".delivered", ".lock"} {
-		if _, err := os.Lstat(resumed + suffix); !os.IsNotExist(err) {
-			t.Fatalf("completed resumed clone remains after its PR closed: %s: %v", resumed+suffix, err)
-		}
-	}
+	absentClone(t, resumed, "completed resumed clone remains after its PR closed")
 	assertCloneCleanup(t, top, original, "kept")
 	assertCloneCleanup(t, top, resumed, "removed")
 	if r := e2eReport(t, top, label); !r.Resumable || r.node("clone").ClonePath != original {
@@ -216,17 +206,7 @@ func TestKeptCloneSweepPreservesDeliveryThatStopsDuringSweep(t *testing.T) {
 				t.Fatalf("delivery was not active before the sweep: %+v", prior)
 			}
 			write(t, prState, "CLOSED\n")
-			block := filepath.Join(top, ".atm", "runs", "zz-block", "report.json")
-			if err := os.MkdirAll(filepath.Dir(block), 0o755); err != nil {
-				t.Fatal(err)
-			}
-			if phase == "start" {
-				if err := syscall.Mkfifo(block, 0o600); err != nil {
-					t.Fatal(err)
-				}
-			} else {
-				write(t, filepath.Join(top, "block-sweep"), "")
-			}
+			block := blockSweep(t, top, phase)
 			next := startFollow(t, bin, top, false, "run", "--follow", path)
 			var pipe *os.File
 			until(t, "sweep reading reports", func() bool {
@@ -241,17 +221,7 @@ func TestKeptCloneSweepPreservesDeliveryThatStopsDuringSweep(t *testing.T) {
 				t.Fatal(err)
 			}
 			write(t, block, "{}")
-			fd, err := syscall.Open(gate, syscall.O_WRONLY|syscall.O_NONBLOCK, 0)
-			if err != nil {
-				t.Fatal(err)
-			}
-			release := os.NewFile(uintptr(fd), gate)
-			if _, err := release.WriteString("stop\n"); err != nil {
-				t.Fatal(err)
-			}
-			if err := release.Close(); err != nil {
-				t.Fatal(err)
-			}
+			answerGate(t, gate, "stop")
 			held.exit(4)
 			stopCheckRun(t, top, label)
 			if r := e2eReport(t, top, label); !r.Resumable {
@@ -299,6 +269,63 @@ func TestKeptCloneSweepRecordsErrorsAndKeepsWork(t *testing.T) {
 			}
 			assertCloneCleanup(t, top, "", "error")
 		})
+	}
+}
+
+// setLint sets the lint check of top's .atm.yaml to check, committed.
+func setLint(t *testing.T, top, check string) {
+	t.Helper()
+	configPath := filepath.Join(top, ".atm.yaml")
+	cfg, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(t, configPath, atmSet(string(cfg), "lint", check))
+	gitT(t, top, "add", ".atm.yaml")
+	gitT(t, top, "commit", "-qm", "configure resume check")
+}
+
+// absentClone fails with msg when clone, its delivered mark or its lock remains.
+func absentClone(t *testing.T, clone, msg string) {
+	t.Helper()
+	for _, suffix := range []string{"", ".delivered", ".lock"} {
+		if _, err := os.Lstat(clone + suffix); !os.IsNotExist(err) {
+			t.Fatalf("%s: %s: %v", msg, clone+suffix, err)
+		}
+	}
+}
+
+// blockSweep makes the next sweep block on a report that is a FIFO: at its start, or, for phase "end", once
+// delivery makes it. It returns the report's path.
+func blockSweep(t *testing.T, top, phase string) string {
+	t.Helper()
+	block := filepath.Join(top, ".atm", "runs", "zz-block", "report.json")
+	if err := os.MkdirAll(filepath.Dir(block), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if phase == "start" {
+		if err := syscall.Mkfifo(block, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		write(t, filepath.Join(top, "block-sweep"), "")
+	}
+	return block
+}
+
+// answerGate writes answer to the FIFO gate that a held delivery reads.
+func answerGate(t *testing.T, gate, answer string) {
+	t.Helper()
+	fd, err := syscall.Open(gate, syscall.O_WRONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	release := os.NewFile(uintptr(fd), gate)
+	if _, err := release.WriteString(answer + "\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := release.Close(); err != nil {
+		t.Fatal(err)
 	}
 }
 
