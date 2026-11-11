@@ -44,6 +44,9 @@ func TestChecksResolvesRedBeforeAsking(t *testing.T) {
 			} else {
 				followedRun(t, bin, top, 0, issueFile(t, issue))
 				label = lastRun(t, top, "passed")
+				if runs, _ := RecordedRuns(top); runs[len(runs)-1].FailedNode != "" {
+					t.Fatalf("a passed run stopped at no node: %+v", runs[len(runs)-1])
+				}
 			}
 			assertResolved(t, c, e2eReport(t, top, label), runDir(top, label), call, order, runs)
 		})
