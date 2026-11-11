@@ -1,0 +1,18 @@
+schema: 1
+id: T-PONYTAIL-20261111-005703-1
+status: accepted
+category: alien_code
+title: "Reverted the `planWith` helper extraction and deleted `TestAxiPlanCountsAWaitingRunAsWorking`. This file now matches `main`. The same plan-counts-waiting-as-working behaviour is already tested with the real binary in `internal/run/status_waiting_unix_test.go` (`TestPlanCountsRunWaitingForAnswerAsWorking`)."
+created_at: 2026-11-11
+incident:
+  pattern: "Reverted the `planWith` helper extraction and deleted `TestAxiPlanCountsAWaitingRunAsWorking`. This file now matches `main`. The same plan-counts-waiting-as-working behaviour is already tested with the real binary in `internal/run/status_waiting_unix_test.go` (`TestPlanCountsRunWaitingForAnswerAsWorking`)."
+  what_went_wrong: "A coding agent wrote it and the ponytail pass cut it before delivery."
+  root_cause: "The coding agent wrote more than the issue needed."
+  rule_established: "Cut by the ponytail pass; it does not come back."
+  evidence:
+    - family: format_churn
+      example: "Reverted the `planWith` helper extraction and deleted `TestAxiPlanCountsAWaitingRunAsWorking`. This file now matches `main`. The same plan-counts-waiting-as-working behaviour is already tested with the real binary in `internal/run/status_waiting_unix_test.go` (`TestPlanCountsRunWaitingForAnswerAsWorking`).\nissue_sentence: The plan counts the issue of such a run as free, so the same issue can be launched a second time."
+      artifact: "internal/cli/plan_unix_test.go"
+match:
+  family: format_churn
+  artifact: "internal/cli/plan_unix_test.go"
