@@ -85,7 +85,7 @@ func TestRunDeliveryRepairResumeKeepsOriginalBase(t *testing.T) {
 	lint := `test ! -f repaired || test -f "$ATM_TEST_LINT_OK" || { echo repair-check-finding; exit 1; }`
 	delivery := "test -f repaired || { git commit --allow-empty -qm delivery-commit || exit; " +
 		"echo delivery-finding; exit 1; }; cat fix-work.txt a.txt > " + delivered
-	top := gitT(t, repo(t, "local", atmSet(atmSet(atmYAML, "lint", lint), "delivery", delivery)),
+	top := gitT(t, repo(t, "local", atmSet(atmSet(atmYAML, "typecheck", lint), "delivery", delivery)),
 		"rev-parse", "--show-toplevel")
 	base := gitT(t, top, "rev-parse", "HEAD")
 	bin := followUpsServer(t, top)
@@ -98,7 +98,7 @@ func TestRunDeliveryRepairResumeKeepsOriginalBase(t *testing.T) {
 		prior.Decisions[1].Answer != "stop" || !strings.Contains(prior.Decisions[0].Finding, "delivery-finding") {
 		t.Fatalf("stopped repair lost its work or decisions: %+v", prior)
 	}
-	assertLatestAttemptSaved(t, top, label, "lint", "")
+	assertLatestAttemptSaved(t, top, label, "typecheck", "")
 	writeFixture(t, lintOK, "ready")
 	evs := followedRun(t, bin, top, 0, "--resume", label)
 	if resumed := resumedLatestAttemptClone(t, evs); resumed == "" || resumed == clone {
@@ -137,7 +137,7 @@ func runDeliveryFixRecheck(t *testing.T, first, second bool, repair, finding str
 	if commits {
 		commit = "git commit --allow-empty -qm delivery-commit || exit; "
 	}
-	cfg := atmSet(atmSet(atmYAML, "lint",
+	cfg := atmSet(atmSet(atmYAML, "typecheck",
 		"test ! -f broken-check || { echo repair-check-finding; exit 1; }"), "delivery",
 		`test -f repaired && attempt=second || attempt=first; `+
 			`for field in ATM_PONYTAIL ATM_INTENT ATM_ISSUE_TEXT; do `+

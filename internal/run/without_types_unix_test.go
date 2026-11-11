@@ -108,7 +108,7 @@ func resumeWithoutType(t *testing.T) {
 		t.Fatalf("runs: %v, %v; output: %s", runs, err, out)
 	}
 	b, err := os.ReadFile(trace)
-	if err != nil || string(b) != "test\n" {
+	if err != nil || string(b) != "test\ntest\ntest\n" { // run again, then again after the agent's turn
 		t.Fatalf("failed suite delivered or ran proof: %q, %v", b, err)
 	}
 	saved := filepath.Join(filepath.Dir(runs[0].Report), "resume", "resume.json")
@@ -128,7 +128,7 @@ func resumeWithoutType(t *testing.T) {
 		t.Fatalf("legacy resume: %v, %s", err, out)
 	}
 	b, err = os.ReadFile(trace)
-	if err != nil || string(b) != "test\ntest\ntest\ndelivery\n" {
+	if err != nil || string(b) != "test\ntest\ntest\ntest\ntest\ndelivery\n" {
 		t.Fatalf("resume ran type proof: %q, %v", b, err)
 	}
 	if bytes.Contains(out, []byte(`"red":`)) || bytes.Contains(out, []byte(`"green":`)) {

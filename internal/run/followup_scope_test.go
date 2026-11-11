@@ -119,12 +119,12 @@ func TestFollowUpScopeResumeReviewsTheOriginalIssue(t *testing.T) {
 	root, runDir, call, out, err := scopeRun(t, original, "c1_test.sh", followUp, "FAKE_SCOPE", "issue")
 	noSecondWorker(t, err, root, runDir, call, out)
 	// A run that fails its unit's checks resumes from them.
-	commitConfig(t, root, atmSet(scopeATM, "lint", "false"))
+	commitConfig(t, root, atmSet(scopeATM, "typecheck", "false"))
 	var failed bytes.Buffer
 	if err := Run("failed", []string{issueFile(t, original)}, &failed, io.Discard); err == nil {
 		t.Fatal("want unit 1's checks failed")
 	}
-	failedUnit(t, root, "failed", &failed, "lint")
+	failedUnit(t, root, "failed", &failed, "typecheck")
 	commitConfig(t, root, scopeATM)
 	f := chained(t, followUp, obj{"scope": obj{"paths": []string{"a.txt", "b.txt", "c1_test.sh"}, "approved": false,
 		"reason": "b.txt is outside Scope: a.txt and c1_test.sh only."}})

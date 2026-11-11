@@ -81,9 +81,9 @@ func (f *followed) errors() string {
 func TestRunFollowStreamsEventsUntilRunEnds(t *testing.T) {
 	bin := builtATM(t)
 	for _, c := range []struct {
-		name, delivery, lint string
-		code                 int
-		tty                  bool
+		name, delivery, typecheck string
+		code                      int
+		tty                       bool
 	}{
 		{"no delivery", "", "", 0, false},
 		{"delivery", "echo delivered", "", 0, true},
@@ -91,7 +91,7 @@ func TestRunFollowStreamsEventsUntilRunEnds(t *testing.T) {
 		{"delivery fails", "echo rejected; exit 1", "", 4, false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			cfg := atmSet(atmSet(atmYAML, "delivery", c.delivery), "lint", c.lint)
+			cfg := atmSet(atmSet(atmYAML, "delivery", c.delivery), "typecheck", c.typecheck)
 			top := gitT(t, repo(t, "https://example.com/o/r.git", cfg), "rev-parse", "--show-toplevel")
 			stopServing(t, top)
 			wait, release := holdFakeAgents(t, 1)

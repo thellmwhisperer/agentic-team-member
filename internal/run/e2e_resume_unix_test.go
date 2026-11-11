@@ -230,6 +230,9 @@ func assertE2ETurn(t *testing.T, tc e2eResumeCase, call, order, screen, scratch 
 	wantCalls := 2
 	if tc.skip != "" {
 		wantCalls = 1
+		if redChecks[tc.row] > 1 { // the first run's and the resumed run's own turn
+			wantCalls = 3
+		}
 		if want := "resume: no agent turn (" + tc.skip + ")"; !strings.Contains(screen, want) {
 			t.Fatalf("screen missing %q: %s", want, screen)
 		}
@@ -310,7 +313,7 @@ func followE2EResume(t *testing.T, bin, top, label string, tc e2eResumeCase) str
 			t.Fatalf("missing skip message: %s", out)
 		}
 	}
-	if resumed == "" || turns != wantTurns || checks != 1 {
+	if resumed == "" || turns != wantTurns || checks != redChecks[tc.row] {
 		t.Fatalf("follow resume: %s; stderr: %s", out, &stderr)
 	}
 	return resumed
@@ -554,6 +557,10 @@ func removeE2EResumeFields(t *testing.T, top string) {
 	writeFixture(t, path, string(b))
 }
 
+// redChecks is how many times a run starts Checks on its red row: a red test row runs once more, then a red lint
+// or test row gets the agent's turn and Checks runs again.
+var redChecks = map[string]int{"": 1, "e2e": 1, "test": 3, "lint": 2}
+
 func e2eReport(t *testing.T, top, label string) *verdict {
 	t.Helper()
 	b, err := os.ReadFile(filepath.Join(runDir(top, label), "report.json"))
@@ -572,6 +579,10 @@ func e2eRows(t *testing.T, r *verdict, failed string, e2e bool) {
 	}
 	if failed != "" {
 		want = want[:slices.Index(want, failed)+1]
+	}
+	once := want
+	for range redChecks[failed] - 1 {
+		want = append(want, once...)
 	}
 	var got []string
 	for _, c := range r.Commands {

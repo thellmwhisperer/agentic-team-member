@@ -27,6 +27,7 @@ type verdict struct {
 	Reproofs   []unitResult   `json:"reproofs"`
 	Commands   []cmdResult    `json:"commands"`
 	Decisions  []Decision     `json:"decisions,omitempty"`
+	Flaky      []string       `json:"flaky,omitempty"`    // a red test row's finding that its second run passed
 	HeadSHA    string         `json:"head_sha,omitempty"` // the delivered branch's
 	Serve      string         `json:"serve,omitempty"`    // buildinfo.String() of the serve that wrote it
 	path       string
@@ -36,6 +37,7 @@ type verdict struct {
 	row        string    // the row that runs inside it, whose command prints the output events
 
 	checkCommands []cmdResult
+	retried       bool // Checks gave its own red its one turn
 
 	CloneCleanup []map[string]string `json:"clone_cleanup,omitempty"`
 

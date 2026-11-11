@@ -15,6 +15,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -197,12 +198,13 @@ func (a agent) unit(r *verdict, root, dir, sha, text string, c config.Config, ke
 	})
 	var p proof
 	steps := append([]func(proof){func(proof) {
-		r.step("checks", func() (map[string]any, error) {
-			var ev map[string]any
-			var err error
-			p, ev, err = checkUnit(a.dir, dir, checkHead, sha, test, keep.Original.Text, report, c, keep.Cuts...)
-			p.base = sha
-			return ev, err
+		a.resolve(r, dir, text, keep, &report, func() {
+			test, _ = report["test_file"].(string)
+			r.step("checks", func() (ev map[string]any, err error) {
+				p, ev, err = checkUnit(a.dir, dir, checkHead, sha, test, keep.Original.Text, report, c, keep.Cuts...)
+				p.base = sha
+				return ev, err
+			})
 		})
 	}}, after...)
 	for n := 0; n < len(steps); n++ {
@@ -235,6 +237,47 @@ func (a agent) unit(r *verdict, root, dir, sha, text string, c config.Config, ke
 		if failed == "agent" { // approved agent failure still needs Checks
 			n = -1
 		}
+	}
+}
+
+// redRow says whether Checks failed on one of rows.
+func redRow(r *verdict, rows ...string) bool {
+	return r.FailedNode == "checks" && slices.ContainsFunc(rows, func(row string) bool {
+		return strings.HasPrefix(r.Reason, row+": ")
+	})
+}
+
+// resolve runs check, Checks, and answers its own red once a run, before any question: a red test row runs once
+// more, then a red lint or test row gives the worker the turn fix gives, with its output, and Checks runs again.
+func (a agent) resolve(r *verdict, dir, text string, keep *resumePoint, report *map[string]any, check func()) {
+	if check(); r.retried || !redRow(r, "test", "lint") {
+		return
+	}
+	r.retried = true
+	if redRow(r, "test") {
+		flaky := r.Reason
+		r.err, r.FailedNode, r.Reason = nil, "", ""
+		if check(); r.err == nil {
+			r.Flaky = append(r.Flaky, flaky)
+		}
+	}
+	if finding := r.Reason; redRow(r, "test", "lint") {
+		r.err, r.FailedNode, r.Reason = nil, "", ""
+		a.Agent, a.args, a.env = keep.Agent, keep.Args, keep.Env
+		r.step("agent", func() (map[string]any, error) {
+			// What Checks left ignored is not the agent's: the turn's record of the clone must not keep it.
+			ev, err := map[string]any{}, unmade(dir)
+			if err == nil {
+				ev, err = a.afterCheck(dir, text, keep.Session, finding, 0) // worker-fix-0: a fix answer's are 1 on
+				keep.worker(a, ev)
+			}
+			if next, ok := ev["report"].(map[string]any); ok {
+				*report = next
+			}
+			return ev, err
+		})
+		r.keep(a.dir, dir, *keep, 1, *report)
+		check()
 	}
 }
 
