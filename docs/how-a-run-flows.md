@@ -270,8 +270,8 @@ metadata.
 
 ## Slop detector
 
-Once the unit passed, the same agent gets `brief-ponytail.md`, the issue and
-the run's diff, with the bundled `ponytail-review` skill. It may only cut: delete, shrink, or swap in the standard library or
+Once the unit passed, the same agent gets `brief-ponytail.md`, the issue,
+the run's diff and the reported test it must not change, with the bundled `ponytail-review` skill. It may only cut: delete, shrink, or swap in the standard library or
 an existing helper, in the diff's files. The required
 report format is in the [ponytail brief](../internal/run/brief-ponytail.md.tmpl).
 
