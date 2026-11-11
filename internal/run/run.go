@@ -75,6 +75,7 @@ func runAt(label, ref string, args []string, out, summary io.Writer) (err error)
 		r.sweep(root, repo)
 		var install []cmdResult
 		dir, sha, install, err = clone(root, start, c.Install, repo, r.live)
+		r.node("clone").ClonePath = dir
 		return map[string]any{"clone": dir, "sha": sha, "commands": install}, err
 	})
 	var text string

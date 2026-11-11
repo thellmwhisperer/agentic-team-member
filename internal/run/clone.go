@@ -1,7 +1,6 @@
 package run
 
 import (
-	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -113,10 +112,6 @@ func claim(root string, now time.Time) (string, error) {
 
 // release ends the run's hold on its clone dir, removing it when eligible and safely selected.
 func release(dir, repo string) error {
-	return releaseClone(dir, repo, nil)
-}
-
-func releaseClone(dir, repo string, keptHeads map[string]bool) error {
 	if dir == "" {
 		return nil
 	}
@@ -124,7 +119,7 @@ func releaseClone(dir, repo string, keptHeads map[string]bool) error {
 	if err != nil || !locked {
 		return err
 	}
-	if keptHeads[dir] || kept(dir, repo, lock, keptHeads) {
+	if kept(dir, repo, lock) {
 		return closeClone(lock)
 	}
 	return remove(dir, lock)
@@ -156,14 +151,17 @@ func (r *verdict) sweep(root, repo string) {
 		}
 		candidates = append(candidates, dir)
 	}
-	keptHeads, err := cloneKeptHeads(root)
+	keptPaths, keepAll, err := cloneKeptPaths(root)
 	if err != nil {
 		r.CloneCleanup = append(r.CloneCleanup, map[string]string{"path": root, "error": err.Error()})
 		return
 	}
 	for _, dir := range candidates {
 		decision := map[string]string{"path": dir, "result": "kept"}
-		err := releaseClone(dir, repo, keptHeads)
+		var err error
+		if !keepAll && !keptPaths[dir] {
+			err = release(dir, repo)
+		}
 		if _, stat := os.Lstat(dir); errors.Is(stat, fs.ErrNotExist) {
 			decision["result"] = "removed"
 		}
@@ -174,15 +172,13 @@ func (r *verdict) sweep(root, repo string) {
 	}
 }
 
-// cloneKeptHeads protects failed deliveries even after their background process ends.
-// Reports made before clone paths were recorded protect their delivered commit instead.
-// An unreadable report prevents the sweep from guessing which work can go.
-func cloneKeptHeads(root string) (map[string]bool, error) {
-	keptHeads := map[string]bool{}
+func cloneKeptPaths(root string) (map[string]bool, bool, error) {
+	keptPaths := map[string]bool{}
+	keepAll := false
 	runs := filepath.Join(root, ".atm", "runs")
 	entries, err := os.ReadDir(runs)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	for _, entry := range entries {
 		if !entry.IsDir() {
@@ -198,19 +194,34 @@ func cloneKeptHeads(root string) (map[string]bool, error) {
 			err = json.Unmarshal(b, &prior)
 		}
 		if err != nil {
-			return nil, fmt.Errorf("%s: %w", path, err)
+			return nil, false, fmt.Errorf("%s: %w", path, err)
 		}
-		if prior.Resumable || prior.FailedNode != "" {
-			keptHeads[cmp.Or(prior.ClonePath, prior.HeadSHA)] = true
+		protected := prior.Resumable
+		for _, decision := range prior.Decisions {
+			protected = protected || decision.Answer == ""
+		}
+		var clone string
+		for _, n := range prior.Nodes {
+			if n.Name == "clone" {
+				clone = n.ClonePath
+				break
+			}
+		}
+		if clone != "" {
+			if protected || prior.FailedNode != "" {
+				keptPaths[clone] = true
+			}
+		} else if protected {
+			keepAll = true
 		}
 	}
-	return keptHeads, nil
+	return keptPaths, keepAll, nil
 }
 
 // kept says whether the clone at dir delivered and its PR is still open: its branch is not merged into its
 // base, as fetched again from the source, and GitHub, when configured, does not say its PR is closed. The
 // clone lock selected, on Unix, is the one asked: its .delivered read beside it, git run in its open directory.
-func kept(dir, repo string, lock *os.File, keptHeads map[string]bool) bool {
+func kept(dir, repo string, lock *os.File) bool {
 	delivered := func() ([]byte, error) { return os.ReadFile(dir + ".delivered") }
 	gitIn, ghDir := func(args ...string) (string, error) { return git(dir, args...) }, dir
 	s, selectedClone := selected(lock)
@@ -221,17 +232,6 @@ func kept(dir, repo string, lock *os.File, keptHeads map[string]bool) bool {
 	b, err := delivered()
 	if err != nil {
 		return false
-	}
-	if len(keptHeads) > 0 {
-		heads, err := gitIn("log", "--format=%H")
-		if err != nil {
-			return true
-		}
-		for _, head := range strings.Fields(heads) {
-			if keptHeads[head] {
-				return true
-			}
-		}
 	}
 	branch, base, _ := strings.Cut(strings.TrimSpace(string(b)), " ")
 	if _, err := gitIn("fetch", "-q", "origin", base); err == nil {
