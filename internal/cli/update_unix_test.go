@@ -70,9 +70,13 @@ func fakeRelease(t *testing.T, tag, binary string, wrongSum bool) {
 }
 
 // installed is an atm at tag in a new directory, outside any git repository, which is the working directory.
+// GIT_CEILING_DIRECTORIES keeps git from climbing out of it, so a TMPDIR inside a repository whose runs go
+// is not that repository.
 func installed(t *testing.T, tag string) string {
 	t.Helper()
-	t.Chdir(t.TempDir())
+	dir := t.TempDir()
+	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(dir))
+	t.Chdir(dir)
 	target := filepath.Join(t.TempDir(), "atm")
 	if err := os.WriteFile(target, []byte(fakeAtm(tag)), 0o755); err != nil {
 		t.Fatal(err)
@@ -168,7 +172,7 @@ func TestUpdateRefusesADevBuild(t *testing.T) {
 }
 
 func TestUpdateRefusesWhileARunGoes(t *testing.T) {
-	setupConcurrentRunRepo(t)
+	repoDir := setupConcurrentRunRepo(t)
 
 	_, release := setupBarrierAgent(t)
 	if out := atmIn(t, 0, "run", "retry.md"); out != "retry-1\n" {
@@ -184,6 +188,14 @@ func TestUpdateRefusesWhileARunGoes(t *testing.T) {
 		t.Fatalf("update while retry-1 runs: %v", err)
 	}
 	assertUntouched(t, target, "v0.1.0")
+	// a temp directory inside the repository whose run goes is not that repository
+	t.Setenv("TMPDIR", repoDir)
+	inside := installed(t, "v0.1.0")
+	if err := update(&out, "v0.1.0", inside); err != nil {
+		t.Fatalf("update from a temp directory inside a repository whose run goes: %v", err)
+	}
+	assertVersion(t, inside, "v0.2.0")
+	t.Chdir(repoDir)
 	if err := os.WriteFile(release, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
