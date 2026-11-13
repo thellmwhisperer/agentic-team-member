@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.0](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.9.0...v1.10.0) (2026-11-13)
+
+
+### Features
+
+* **run:** add `ponytail: false` .atm.yaml key to skip the ponytail step ([#678](https://github.com/thellmwhisperer/agentic-team-member/issues/678)) ([a423fd4](https://github.com/thellmwhisperer/agentic-team-member/commit/a423fd47a2e29b36c38734f55d17d1a950c3a868))
+
 ## [1.9.0](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.8.0...v1.9.0) (2026-11-13)
 
 
