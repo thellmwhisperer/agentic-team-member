@@ -44,17 +44,32 @@ func TestWorkerGetsTheRunSystemPrompt(t *testing.T) {
 		out, code := preflightLaunch(t, bin, root, "--harness", "hermes", "--system-prompt", path, issueFile(t, issue))
 		assertStopped(t, root, out, code, "worker files", "--system-prompt: harness hermes takes no system prompt")
 	})
-	t.Run("resumed hermes", func(t *testing.T) {
-		root := repo(t, "local", atmYAML)
-		path := filepath.Join(t.TempDir(), "system.md")
-		writeFixture(t, path, "Keep this rule.")
-		keepResumable(t, filepath.Join(root, ".atm", "runs", "failed-1"), resumePoint{Issue: "7", BaseRef: "main",
-			Base: gitT(t, root, "rev-parse", "main"), Unit: 1, Agent: config.Agent{Harness: "hermes"},
-			Original: &Issue{Title: "Retry on timeout", Text: issue}})
-		out, code := preflightLaunch(t, bin, root, "--resume", "failed-1", "--system-prompt", path)
-		assertNoStartedRun(t, root, out, code, 1,
-			"preflight: worker files: --system-prompt: harness hermes takes no system prompt")
-	})
+	for _, tc := range []struct {
+		name, resumed string
+		args          []string
+		saved         *runSystemPrompt
+	}{
+		{"resumed hermes", "hermes", []string{"--system-prompt"}, nil},
+		{"resumed claude on hermes", "claude", []string{"--harness", "hermes", "--system-prompt"}, nil},
+		{"saved prompt on hermes", "claude", []string{"--harness", "hermes"},
+			&runSystemPrompt{File: "/saved.md", Text: "Keep this rule."}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := repo(t, "local", atmYAML)
+			path := filepath.Join(t.TempDir(), "system.md")
+			writeFixture(t, path, "Keep this rule.")
+			keepResumable(t, filepath.Join(root, ".atm", "runs", "failed-1"), resumePoint{Issue: "7", BaseRef: "main",
+				Base: gitT(t, root, "rev-parse", "main"), Unit: 1, Agent: config.Agent{Harness: tc.resumed},
+				SystemPrompt: tc.saved, Original: &Issue{Title: "Retry on timeout", Text: issue}})
+			args := append([]string{"--resume", "failed-1"}, tc.args...)
+			if tc.saved == nil {
+				args = append(args, path)
+			}
+			out, code := preflightLaunch(t, bin, root, args...)
+			assertNoStartedRun(t, root, out, code, 1,
+				"preflight: worker files: --system-prompt: harness hermes takes no system prompt")
+		})
+	}
 	t.Run("help", func(t *testing.T) {
 		root := repo(t, "local", atmYAML)
 		out, _ := preflightLaunch(t, bin, root, "--help")

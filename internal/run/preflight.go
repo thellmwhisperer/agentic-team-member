@@ -32,9 +32,9 @@ with no clone, no run directory and no agent:
 var fileFlags = []string{"--settings", "--skill"}
 
 // preflight checks, in the repository at root, what a run from base ref ref stands on, its agent a with the
-// harness arguments args, on harness resumed when it resumes a run that had one: the first check that fails is
-// the error, which names it.
-func preflight(root, ref, workerBase, resumed string, a *agent, args []string) (string, error) {
+// harness arguments args, and what the run it resumes, from, kept: the first check that fails is the error,
+// which names it.
+func preflight(root, ref string, from resumePoint, a *agent, args []string) (string, error) {
 	var c config.Config
 	var sha string
 	for _, check := range []struct {
@@ -61,12 +61,13 @@ func preflight(root, ref, workerBase, resumed string, a *agent, args []string) (
 		}},
 		{"base green", func() error { return baseGreen(sha) }},
 		{"worker files", func() error {
-			if err := workerFiles(root, cmp.Or(workerBase, sha), args); err != nil {
+			if err := workerFiles(root, cmp.Or(from.Base, sha), args); err != nil {
 				return err
 			}
-			harness := cmp.Or(resumed, c.Harness)
-			if _, ok := config.ACP[harness]; ok && a.systemPromptFile != "" {
-				return fmt.Errorf("--system-prompt: harness %s takes no system prompt", harness)
+			for _, harness := range []string{from.Agent.Harness, c.Harness} {
+				if _, ok := config.ACP[harness]; ok && (a.systemPromptFile != "" || from.SystemPrompt != nil) {
+					return fmt.Errorf("--system-prompt: harness %s takes no system prompt", harness)
+				}
 			}
 			return a.readSystemPrompt()
 		}},
@@ -80,7 +81,7 @@ func preflight(root, ref, workerBase, resumed string, a *agent, args []string) (
 			}
 			return nil
 		}},
-		{"compile", func() error { return compile(root, cmp.Or(workerBase, sha), c.Compile) }},
+		{"compile", func() error { return compile(root, cmp.Or(from.Base, sha), c.Compile) }},
 	} {
 		if err := check.fn(); err != nil {
 			return "", fmt.Errorf("preflight: %s: %w", check.name, err)
