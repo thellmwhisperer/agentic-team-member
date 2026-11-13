@@ -95,6 +95,10 @@ and put it in a parameterized model, for example `model: 'grok[effort=high]'`.
 A configured effort fails before cloning with
 `cursor has no effort flag: put it in the model, as '<model>[effort=<effort>]'`.
 
+OpenCode takes effort as the model's variant, `-m <provider/model>#<effort>`,
+so `effort` needs a `model` in some layer. An effort with no model fails before
+cloning with `opencode sets effort through the model: use '<provider/model>#<effort>'`.
+
 ### Hermes
 
 Hermes has no native headless mode ATM uses: ATM speaks ACP (Agent Client
