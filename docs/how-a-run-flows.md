@@ -99,9 +99,9 @@ agent call, including the slop detector. It overrides
 an inherited value or one passed with `--env`, so their turns wait for running
 commands to finish.
 
-For native agents, ATM writes the bundled `ponytail` skill into the clone, outside git; for Cursor at
-`.cursor/skills/<skill>/SKILL.md`. Hermes's skill delivery is described in
-[Hermes](configuration.md#hermes). Every line the agent writes
+The implementing agent gets no ATM skill: before each of its turns ATM removes
+any untracked `ponytail` or `ponytail-review` skill a slop detector pass left in
+the clone, and passes no `--skill` to `pi`. Every line the agent writes
 goes to `worker.jsonl`, and its stderr to `worker.stderr.txt` too, as it is
 written. Its report is the last JSON
 object of its final message and must include `test_file`, which may be empty.
@@ -281,8 +281,8 @@ metadata.
 
 ## Slop detector
 
-Once the unit passed, the same agent gets `brief-ponytail.md`, the issue,
-the run's diff and the reported test it must not change, with the bundled `ponytail-review` skill. It may only cut: delete, shrink, or swap in the standard library or
+This step runs unless `.atm.yaml` sets [`ponytail: false`](configuration.md#atmyaml). Once the unit passed, the same agent gets `brief-ponytail.md`, the issue,
+the run's diff and the reported test it must not change, with the bundled `ponytail-review` skill: for native agents ATM writes it into the clone, outside git (for Cursor at `.cursor/skills/<skill>/SKILL.md`); Hermes's skill delivery is described in [Hermes](configuration.md#hermes). It may only cut: delete, shrink, or swap in the standard library or
 an existing helper, in the diff's files. The required
 report format is in the [ponytail brief](../internal/run/brief-ponytail.md.tmpl).
 
