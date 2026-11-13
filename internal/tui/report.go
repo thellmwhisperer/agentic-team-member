@@ -44,9 +44,9 @@ func (m *Model) restoreReport(path string, outcome run.Outcome) {
 		m.findings = append(m.findings, finding{"warning", "report.json", "Node results unavailable: " + err.Error()})
 		return
 	}
+	m.skipPonytail(skippedByConfig(report.Nodes))
 	seen := make(map[string]bool, len(report.Nodes))
 	for _, n := range report.Nodes {
-		m.skipPonytail(n.Name == "ponytail" && n.Result == "skipped")
 		r := m.current(n.Name)
 		if r == nil || seen[n.Name] {
 			clearDuplicate(r, seen[n.Name])
@@ -69,6 +69,16 @@ func (m *Model) restoreReport(path string, outcome run.Outcome) {
 			m.approveChecks(approval.By)
 		}
 	}
+}
+
+// skippedByConfig reports whether the saved report marks the ponytail node as skipped.
+func skippedByConfig(nodes []savedNode) bool {
+	for _, n := range nodes {
+		if n.Name == "ponytail" && n.Result == "skipped" {
+			return true
+		}
+	}
+	return false
 }
 
 // savedApproval returns the last answer to a failed Checks node of a passed run when it was an approve.
