@@ -394,14 +394,19 @@ func testFile(r map[string]any) error {
 }
 
 // placeSkill puts skill where the harness finds it in clone, outside git, records the clone as the agent finds it,
-// and returns the skill's directory. With no skill, it removes the ponytail skills a step placed before.
+// and returns the skill's directory. With no skill, it removes the ponytail skills a step placed before, never one git tracks.
 func placeSkill(clone, harness, skill string) (string, error) {
 	if _, acp := config.ACP[harness]; acp { // its skill goes in its brief
 		return "", before(clone)
 	}
 	if skill == "" {
 		for _, name := range []string{"ponytail", "ponytail-review"} {
-			if err := os.RemoveAll(filepath.Join(clone, filepath.FromSlash(skillDirs[harness]+"/"+name))); err != nil {
+			rel := skillDirs[harness] + "/" + name
+			tracked, err := git(clone, "ls-files", "--", rel)
+			if err == nil && tracked == "" {
+				err = os.RemoveAll(filepath.Join(clone, filepath.FromSlash(rel)))
+			}
+			if err != nil {
 				return "", err
 			}
 		}

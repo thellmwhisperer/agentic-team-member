@@ -435,3 +435,31 @@ func TestReachAcceptsRelativePathsAfterACdInsideTheClone(t *testing.T) {
 	}
 	t.Logf("ATM agent step: %s; %s read clone-local", end["state"], command)
 }
+
+func TestPlaceSkillKeepsTrackedPonytail(t *testing.T) {
+	clone := t.TempDir()
+	gitT(t, clone, "init", "-q")
+	own := filepath.Join(clone, ".claude", "skills", "ponytail", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(own), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFixture(t, own, "the repository's own ponytail\n")
+	gitT(t, clone, "add", ".")
+	gitT(t, clone, "-c", "user.name=atm", "-c", "user.email=atm@example.com", "commit", "-qm", "own skill")
+	placed, err := placeSkill(clone, "claude", "ponytail-review")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := placeSkill(clone, "claude", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(placed); !os.IsNotExist(err) {
+		t.Fatalf("the placed ponytail-review skill is still in the clone: %v", err)
+	}
+	if b, err := os.ReadFile(own); err != nil || string(b) != "the repository's own ponytail\n" {
+		t.Fatalf("the tracked ponytail skill changed: %q, %v", b, err)
+	}
+	if status := gitT(t, clone, "status", "--porcelain"); status != "" {
+		t.Fatalf("the clone has changes: %s", status)
+	}
+}
