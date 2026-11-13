@@ -128,9 +128,12 @@ func fakeHermesWork(prompt string) (string, bool) {
 	report := `{"test_file": "a_test.sh", "changed_files": ["a.txt"], "summary": "s", ` +
 		`"commands_run": [], "follow_ups": []`
 	review := strings.Contains(prompt, "`ponytail-review`")
+	work := cmp.Or(os.Getenv("FAKE_AGENT_WORK"), fixWork)
 	if review {
 		report = `{"findings": [], "summary": "Lean already."`
-	} else if exec.Command("sh", "-c", fixWork).Run() != nil {
+		work = os.Getenv("FAKE_PONYTAIL_WORK")
+	}
+	if exec.Command("sh", "-c", work).Run() != nil {
 		report = "no work"
 	}
 	return report, review
@@ -229,8 +232,8 @@ func assertHermesConversation(t *testing.T, call obj, root, clone string) {
 	brief, _ := os.ReadFile(filepath.Join(root, ".atm", "runs", "t", "brief.md"))
 	prompt, _ := call["session/prompt"].(map[string]any)
 	if blocks, text := promptText(prompt); prompt["sessionId"] != "s1" || blocks != 1 ||
-		!strings.Contains(text, string(brief)) || !strings.Contains(text, "name: ponytail\n") {
-		t.Fatalf("session/prompt: want the brief and the ponytail skill as one text block, got %v", prompt)
+		!strings.Contains(text, string(brief)) || strings.Contains(text, "name: ponytail\n") {
+		t.Fatalf("session/prompt: want the brief without the ponytail skill as one text block, got %v", prompt)
 	}
 }
 

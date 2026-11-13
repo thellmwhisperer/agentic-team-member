@@ -52,7 +52,7 @@ func TestRunDrivesTheAgent(t *testing.T) {
 			`-c model="m" -c model_reasoning_effort="e" --x y <brief>`,
 		"opencode": "run --pure --format json --dir <clone> -m m --variant e --x y <brief>",
 		"pi": "-p --mode json --no-extensions --no-skills --no-prompt-templates --no-context-files " +
-			"--skill <clone>/.atm/skills/ponytail --append-system-prompt <system> --model m --thinking e --x y <brief>",
+			"--append-system-prompt <system> --model m --thinking e --x y <brief>",
 		"cursor": "-p --output-format stream-json --trust --force --workspace <clone> --model m --x y <brief>",
 	}
 	for harness, want := range cases {
@@ -95,7 +95,7 @@ func TestRunDrivesTheAgent(t *testing.T) {
 				t.Fatalf("env: want ATM_FAKE and no CLAUDE_CODE_CHILD_SESSION, got %v", got.Env)
 			}
 			lines := logLines(t, log)
-			if want := map[string]int{"claude": 5, "codex": 5, "pi": 5, "cursor": 6}[harness]; len(lines) != cmp.Or(want, 4) {
+			if want := map[string]int{"claude": 3, "codex": 4, "pi": 3, "cursor": 4}[harness]; len(lines) != cmp.Or(want, 3) {
 				t.Fatalf("want every line of the agent in the log, got %q", lines)
 			}
 			if left := clones(t, root); len(left) != 0 {
@@ -434,4 +434,32 @@ func TestReachAcceptsRelativePathsAfterACdInsideTheClone(t *testing.T) {
 		t.Fatalf("agent step: %v", end)
 	}
 	t.Logf("ATM agent step: %s; %s read clone-local", end["state"], command)
+}
+
+func TestPlaceSkillKeepsTrackedPonytail(t *testing.T) {
+	clone := t.TempDir()
+	gitT(t, clone, "init", "-q")
+	own := filepath.Join(clone, ".claude", "skills", "ponytail", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(own), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFixture(t, own, "the repository's own ponytail\n")
+	gitT(t, clone, "add", ".")
+	gitT(t, clone, "-c", "user.name=atm", "-c", "user.email=atm@example.com", "commit", "-qm", "own skill")
+	placed, err := placeSkill(clone, "claude", "ponytail-review")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := placeSkill(clone, "claude", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(placed); !os.IsNotExist(err) {
+		t.Fatalf("the placed ponytail-review skill is still in the clone: %v", err)
+	}
+	if b, err := os.ReadFile(own); err != nil || string(b) != "the repository's own ponytail\n" {
+		t.Fatalf("the tracked ponytail skill changed: %q, %v", b, err)
+	}
+	if status := gitT(t, clone, "status", "--porcelain"); status != "" {
+		t.Fatalf("the clone has changes: %s", status)
+	}
 }

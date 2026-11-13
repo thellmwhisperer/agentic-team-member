@@ -53,7 +53,7 @@ func TestRealScreenShowsTheReportAsRows(t *testing.T) {
 			t.Setenv("NO_COLOR", "")
 			a := &attached{t: t, cmd: exec.Command(bin, "run", issueFile(t, issue)), chunks: make(chan string, 64), rows: 50}
 			a.cmd.Args = append(a.cmd.Args, "--harness", tc.harness)
-			a.cmd.Dir = top
+			a.cmd.Dir, a.cmd.Env = top, append(a.cmd.Environ(), "FAKE_AGENT_STREAM="+reportToolCall(tc.harness))
 			var err error
 			if a.p, err = pty.StartWithSize(a.cmd, &pty.Winsize{Cols: 120, Rows: 50}); err != nil {
 				t.Fatal(err)
@@ -61,8 +61,8 @@ func TestRealScreenShowsTheReportAsRows(t *testing.T) {
 			t.Cleanup(func() { _ = a.cmd.Process.Kill(); _ = a.p.Close() })
 			go a.read()
 
-			skillRow := "▸ · 1 tool: " + map[string]string{"claude": "Skill", "codex": "shell"}[tc.harness]
-			a.drawn(func(s string) bool { return strings.Contains(s, skillRow) })
+			toolRow := "▸ · 1 tool: " + map[string]string{"claude": "Read", "codex": "shell"}[tc.harness]
+			a.drawn(func(s string) bool { return strings.Contains(s, toolRow) })
 			brief := sentPrompt(tc.harness, agentCall(t, call))
 			if !strings.Contains(brief, "Write `summary` in Markdown, not HTML.") {
 				t.Fatalf("the delivered worker brief does not require Markdown: %s", brief)
@@ -70,7 +70,7 @@ func TestRealScreenShowsTheReportAsRows(t *testing.T) {
 			free(t, agent)
 			s := a.drawn(func(s string) bool {
 				return strings.Contains(s, "Hallazgos (1)") &&
-					strings.Contains(s, skillRow) && typecheckRuns.MatchString(s)
+					strings.Contains(s, toolRow) && typecheckRuns.MatchString(s)
 			})
 			if tc.prose != "" && !regexp.MustCompile(`✎ Hecho\. +│`).MatchString(s) ||
 				tc.prose == "" && strings.Contains(s, "✎") {
@@ -83,7 +83,7 @@ func TestRealScreenShowsTheReportAsRows(t *testing.T) {
 				}
 			}
 			previous := -1
-			titles := []string{skillRow}
+			titles := []string{toolRow}
 			if tc.prose != "" {
 				titles = append(titles, "✎ "+tc.prose)
 			}
@@ -212,7 +212,7 @@ func TestRealScreenReportScopeAndMarkdown(t *testing.T) {
 			}
 			ponytailReport := `{"summary":"Lean already.","findings":[]}`
 			t.Setenv("FAKE_PONYTAIL_REPORT", ponytailReport)
-			t.Setenv("FAKE_AGENT_STREAM", intermediate(message)+intermediate(ponytailReport))
+			t.Setenv("FAKE_AGENT_STREAM", intermediate(message)+intermediate(ponytailReport)+reportToolCall(tc.harness))
 			if tc.harness == "claude" {
 				blocks, _ := json.Marshal(obj{"type": "assistant", "message": obj{"role": "assistant", "content": []obj{
 					{"type": "text", "text": "All green."}, {"type": "text", "text": string(report)},
@@ -369,4 +369,18 @@ func TestRealScreenFinalReportKeyboardScrollDuringChecks(t *testing.T) {
 	}
 	free(t, checks)
 	a.exits()
+}
+
+func reportToolCall(harness string) string {
+	switch harness {
+	case "claude":
+		return claudeEvent("Read", `{"file_path":"a.txt"}`) +
+			`{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"c1","is_error":false}]}}` + "\n"
+	case "codex":
+		return codexEvent(`"type":"command_execution","command":"cat a.txt","exit_code":0`)
+	case "cursor":
+		return cursorCall("read", "completed", "c1", obj{"path": "a.txt"}, obj{"success": obj{}})
+	default:
+		return bashEvent(harness, "cat a.txt", "")
+	}
 }

@@ -41,7 +41,7 @@ func TestLoadLayersEachOverrideTheOneBefore(t *testing.T) {
 	want := Config{
 		Agent:   Agent{Harness: "codex", Model: "gpt-6-mini", Effort: "low"},
 		Install: "npm ci", Test: "npm test", TestFile: "npx vitest run {file}",
-		TestPatterns: []string{"**/*.test.ts"}, DocsPatterns: []string{},
+		TestPatterns: []string{"**/*.test.ts"}, DocsPatterns: []string{}, Ponytail: true,
 	}
 	if !reflect.DeepEqual(c, want) {
 		t.Fatalf("got %+v\nwant %+v", c, want)

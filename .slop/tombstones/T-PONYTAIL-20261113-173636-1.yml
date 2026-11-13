@@ -1,0 +1,18 @@
+schema: 1
+id: T-PONYTAIL-20261113-173636-1
+status: accepted
+category: alien_code
+title: "Eliminada la salida duplicada para una skill vacía; se une a la condición existente para ACP."
+created_at: 2026-11-13
+incident:
+  pattern: "Eliminada la salida duplicada para una skill vacía; se une a la condición existente para ACP."
+  what_went_wrong: "A coding agent wrote it and the ponytail pass cut it before delivery."
+  root_cause: "The coding agent wrote more than the issue needed."
+  rule_established: "Cut by the ponytail pass; it does not come back."
+  evidence:
+    - family: speculative_hardening
+      example: "Eliminada la salida duplicada para una skill vacía; se une a la condición existente para ACP.\nissue_sentence: So: the worker brief carries no ponytail line, and no ponytail skill is in the clone or on the argv while the implementing agent runs."
+      artifact: "internal/run/agent.go"
+match:
+  family: speculative_hardening
+  artifact: "internal/run/agent.go"

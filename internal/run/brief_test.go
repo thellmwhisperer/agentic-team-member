@@ -83,14 +83,14 @@ func TestRunWritesTheContractForTheTaskType(t *testing.T) {
 			for _, want := range []string{"The issue, verbatim:", "### Retry\n\n" + issue + "\n", proof,
 				"`**/*_test.sh`", "`**/*.md`, `docs/**`",
 				"- Test: the tests of each package", "- Typecheck: `sh -n a_test.sh`",
-				"- Lint: none", "`ponytail` skill", "`git commit`, `git push`, `git rebase`, any `gh` command",
+				"- Lint: none", "`git commit`, `git push`, `git rebase`, any `gh` command",
 				"`sleep` in tests", `"test_file"`, "summary, as a note", workerReachScope, netScope} {
 				if !strings.Contains(got, want) {
 					t.Errorf("brief.md lacks %q:\n%s", want, got)
 				}
 			}
-			for _, unwanted := range []string{"CLAUDE.md", "Allowed paths", "{{", "`sh a_test.sh`", "follow_ups",
-				"FOLLOW-UPS", "Task type:", "red test"} {
+			for _, unwanted := range []string{"`ponytail` skill", "CLAUDE.md", "Allowed paths", "{{", "`sh a_test.sh`",
+				"follow_ups", "FOLLOW-UPS", "Task type:", "red test"} {
 				if strings.Contains(got, unwanted) {
 					t.Errorf("brief.md has %q:\n%s", unwanted, got)
 				}

@@ -88,6 +88,7 @@ func runScreen(root, label string, width, height int) *Model {
 			}
 		} else if r.BaseSHA != "" {
 			c, _, _ := run.BaseConfig(root, r.BaseSHA, os.Getenv("HOME"), config.Agent{})
+			m.skipPonytail(!c.Ponytail)
 			if c.Delivery != "" {
 				for _, name := range gateNames {
 					m.rows = append(m.rows, &row{step: "gate:" + name, label: name, state: "pending"})

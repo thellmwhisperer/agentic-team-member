@@ -75,9 +75,9 @@ func TestRunClonesBaseDetachedAndInstalls(t *testing.T) {
 			if err != nil {
 				t.Fatal("install did not run: ", err)
 			}
-			// Install runs again in the checks, after the agent, whose skill is the last line excluded.
+			// Install runs again in the checks, after the agent, which receives no skill.
 			saw := filepath.Base(dir) + "\n" + sha + "\ndetached\n"
-			if want := saw + "/.atm/\n" + saw + "/.claude/skills/ponytail/\n"; string(b) != want {
+			if want := saw + "/.atm/\n" + saw + "/.atm/\n"; string(b) != want {
 				t.Fatalf("install saw %q, want %q", b, want)
 			}
 			if left := clones(t, root); len(left) != 0 {

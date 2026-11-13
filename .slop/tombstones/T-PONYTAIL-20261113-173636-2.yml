@@ -1,0 +1,18 @@
+schema: 1
+id: T-PONYTAIL-20261113-173636-2
+status: accepted
+category: alien_code
+title: "Sustituidos los eventos falsos duplicados por reportToolCall(\"claude\"), que genera los mismos eventos."
+created_at: 2026-11-13
+incident:
+  pattern: "Sustituidos los eventos falsos duplicados por reportToolCall(\"claude\"), que genera los mismos eventos."
+  what_went_wrong: "A coding agent wrote it and the ponytail pass cut it before delivery."
+  root_cause: "The coding agent wrote more than the issue needed."
+  rule_established: "Cut by the ponytail pass; it does not come back."
+  evidence:
+    - family: mock_heavy_test
+      example: "Sustituidos los eventos falsos duplicados por reportToolCall(\"claude\"), que genera los mismos eventos."
+      artifact: "internal/run/log_box_unix_test.go"
+match:
+  family: mock_heavy_test
+  artifact: "internal/run/log_box_unix_test.go"

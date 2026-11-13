@@ -311,6 +311,9 @@ func (r *verdict) finish(err error, summary io.Writer) error {
 // print writes the summary to w: each node, how it ended and its duration, then the result.
 func (r *verdict) print(w io.Writer) {
 	for _, n := range r.Nodes {
+		if n.Name == "ponytail" && n.Result == "skipped" {
+			continue
+		}
 		mark, how := map[string]string{"passed": "✓", "failed": "✗"}[n.Result], n.Result
 		if mark != "" {
 			how = Human(time.Duration(n.DurationMS) * time.Millisecond)
