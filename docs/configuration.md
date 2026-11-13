@@ -43,9 +43,10 @@ a `.atm.yaml` key there still fails.
 the embedded `SYSTEM.md` in the worker's system instructions. The file is
 read from the launching directory when relative, or from its absolute path.
 A missing or unreadable file fails the `worker files` pre-run check with
-exit 2 and no run directory, as does `--system-prompt` with hermes, which
-takes no system prompt. `report.json` records the resolved path as
-`system_prompt_file` and the file bytes' SHA-256 as `system_prompt_sha256`.
+exit 2 and no run directory, as does a system prompt meeting hermes, which
+takes none: `--system-prompt` with hermes, or `--resume` of a run that saved
+one, when either the resumed agent's harness or the launch's is hermes.
+`report.json` records the resolved path as `system_prompt_file` and the file bytes' SHA-256 as `system_prompt_sha256`.
 `--resume` keeps the saved text even if the original file changes or disappears.
 
 Claude and pi receive `--append-system-prompt`; Codex receives
