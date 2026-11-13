@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.11.0](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.10.1...v1.11.0) (2026-11-13)
+
+
+### Features
+
+* **run:** add atm run --system-prompt for every worker harness ([#684](https://github.com/thellmwhisperer/agentic-team-member/issues/684)) ([73ccb45](https://github.com/thellmwhisperer/agentic-team-member/commit/73ccb45f53455eb34160807918c98aca7c5a8214))
+
 ## [1.10.1](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.10.0...v1.10.1) (2026-11-13)
 
 
