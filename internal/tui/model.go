@@ -71,6 +71,7 @@ type Model struct {
 	historyHeight                 int
 	now                           time.Time
 	done, detached                bool
+	keepScreen                    bool // screen: keep leaves the completed screen interactive until q or Ctrl+C
 	outcome                       run.Outcome
 	err                           error
 	pipeline, history, log        pane
@@ -212,7 +213,7 @@ type ended struct {
 
 func (m *Model) Init() tea.Cmd {
 	if m.done && m.gateSteps == nil {
-		return tea.Quit
+		return m.autoQuit()
 	}
 	if m.done && m.gateLive && m.clone != "" {
 		m.asking = true
@@ -277,30 +278,37 @@ func (m *Model) frame(f run.Frame) tea.Cmd {
 	return m.ask(0)
 }
 
-// runEnded keeps the run's end on screen and quits unless the screen asks for the gate, which it does from the
-// first frame of Delivery running with the clone known.
+// runEnded records the run's end, then applies the screen choice unless it is still asking for the gate.
 func (m *Model) runEnded(e ended) tea.Cmd {
 	m.end(e.o, e.err)
 	if m.asking {
 		return nil
 	}
-	return tea.Quit
+	return m.autoQuit()
 }
 
 // gateShown shows answer g and asks again after a second, unless g, asked after the run's end, shows a gate over,
-// or no gate run when none ever showed; either quits.
+// or no gate run when none ever showed; either applies the screen choice.
 func (m *Model) gateShown(g gate) tea.Cmd {
 	m.gateAnswered = true
 	if g.ok {
 		m.gate(g)
 		if g.over && g.afterEnd {
 			m.asking = false
-			return tea.Quit
+			return m.autoQuit()
 		}
 	} else if g.afterEnd && m.gateSteps == nil {
-		return tea.Quit
+		m.asking = false
+		return m.autoQuit()
 	}
 	return m.ask(time.Second)
+}
+
+func (m *Model) autoQuit() tea.Cmd {
+	if m.keepScreen {
+		return nil
+	}
+	return tea.Quit
 }
 
 // key scrolls the focused box, or, on tab, focuses the next, or, on t, folds or unfolds every tool call,

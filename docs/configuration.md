@@ -34,27 +34,33 @@ a `.atm.yaml` key there still fails.
 
 | Layer | Where | Sets |
 |-------|-------|------|
-| Built-in defaults | the binary | `harness: claude` |
-| Your machine | `~/.config/atm/config.yaml` | `harness`, `model`, `effort`, `repository_overrides` |
+| Built-in defaults | the binary | `harness: claude`, `screen: close` |
+| Your machine | `~/.config/atm/config.yaml` | `harness`, `model`, `effort`, `screen`, `repository_overrides` |
 | The repository | `.atm.yaml` at its root, as the base ref has it committed; otherwise the machine's matching `repository_overrides` entry | keys in [`.atm.yaml`](#atmyaml) below |
 | One run | `atm run` flags | [`--follow`](how-a-run-flows.md#following-one-run), `--base-ref`, `--harness`, `--model`, `--effort`, `--harness-arg`, `--env`, `--resume` |
 
 ## `~/.config/atm/config.yaml`
 
-Optional. It selects your agent and can supply configuration for repositories without a committed `.atm.yaml`.
+Optional. It selects your agent and screen behaviour and can supply configuration for repositories without a committed `.atm.yaml`.
 
 | Key | Meaning |
 |-----|---------|
 | `harness` | The coding agent CLI: `claude`, `codex`, `opencode`, `pi`, `cursor` or `hermes` (local models go through `pi`). Any other fails the run |
 | `model` | Its model; empty is the CLI's default |
 | `effort` | Its effort; empty is the CLI's default |
+| `screen` | `close` (default) closes the terminal screen when the run and its gate end. `keep` leaves the boxes and keys working until `q` or Ctrl+C. Any other value fails `atm doctor`, naming `screen`, `close` and `keep` |
 | `repository_overrides` | Map from `origin`'s `owner/name` to a complete repository configuration, used only when the base ref has no `.atm.yaml` |
 
 ```yaml
 harness: claude
 model: claude-opus-5-5
 effort: high
+screen: keep
 ```
+
+`screen` belongs only in this machine file. It affects the terminal screen of
+`atm run` and `atm attach`; `--follow` and plain output have no screen to keep.
+With `keep`, leaving the completed screen returns the run's exit code as usual.
 
 For a repository whose configuration must stay on your machine:
 
