@@ -101,8 +101,13 @@ func (a agent) argv(clone, skill, final, brief string) (argv []string, stdin str
 		argv = with(argv, a.Model, "-c", "model="+strconv.Quote(a.Model))
 		argv = with(argv, a.Effort, "-c", "model_reasoning_effort="+strconv.Quote(a.Effort))
 	case "opencode":
-		argv = []string{"opencode", "run", "--pure", "--format", "json", "--dir", clone}
-		argv = with(with(argv, a.Model, "-m", a.Model), a.Effort, "--variant", a.Effort)
+		argv = []string{"opencode", "--standalone", "run", "--format", "json"}
+		model := a.Model
+		if a.Effort != "" {
+			model, _, _ = strings.Cut(model, "#")
+			model += "#" + a.Effort
+		}
+		argv = with(argv, model, "-m", model)
 	case "cursor":
 		argv = []string{"cursor-agent", "-p", "--output-format", "stream-json", "--trust", "--force", "--workspace", clone}
 		argv = with(argv, a.Model, "--model", a.Model)

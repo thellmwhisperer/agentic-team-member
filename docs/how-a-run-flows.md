@@ -90,7 +90,7 @@ For Hermes's ACP invocation and completion rules, see
 |---------|---------|-----------------|
 | `claude` | `claude -p --setting-sources project --strict-mcp-config --thinking-display summarized`, tools `Read,Edit,Write,Bash,Glob,Grep,Skill` only; `--harness-arg`s follow this default | on stdin |
 | `codex` | `codex exec`, which still loads your skills | as its last argument |
-| `opencode` | `opencode run --pure`, which still loads your skills | as its last argument |
+| `opencode` | `opencode --standalone run --format json`, in the clone; model and effort use `-m provider/model#variant` | as its last argument |
 | `pi` | `pi -p --no-extensions --no-skills --no-prompt-templates --no-context-files` | as its last argument |
 | `cursor` | `cursor-agent -p --output-format stream-json --trust --force --workspace <clone>`, then `--model <model>` when set and any `--harness-arg`s | as its last argument |
 
