@@ -44,6 +44,20 @@ func TestWorkerGetsTheRunSystemPrompt(t *testing.T) {
 		out, code := preflightLaunch(t, bin, root, "--harness", "hermes", "--system-prompt", path, issueFile(t, issue))
 		assertStopped(t, root, out, code, "worker files", "--system-prompt: harness hermes takes no system prompt")
 	})
+	t.Run("resume", func(t *testing.T) { resumedSystemPromptOnACP(t, bin) })
+	t.Run("help", func(t *testing.T) {
+		root := repo(t, "local", atmYAML)
+		out, _ := preflightLaunch(t, bin, root, "--help")
+		if !strings.Contains(out, "[--system-prompt file]") {
+			t.Fatalf("missing flag in usage:\n%s", out)
+		}
+	})
+	t.Run("OpenCode inline config", openCodePromptConfig)
+	t.Run("injection errors", systemPromptInjectionErrors)
+	t.Run("removed after preflight", systemPromptRemovedAfterPreflight)
+}
+
+func resumedSystemPromptOnACP(t *testing.T, bin string) {
 	for _, tc := range []struct {
 		name, resumed string
 		args          []string
@@ -70,16 +84,6 @@ func TestWorkerGetsTheRunSystemPrompt(t *testing.T) {
 				"preflight: worker files: --system-prompt: harness hermes takes no system prompt")
 		})
 	}
-	t.Run("help", func(t *testing.T) {
-		root := repo(t, "local", atmYAML)
-		out, _ := preflightLaunch(t, bin, root, "--help")
-		if !strings.Contains(out, "[--system-prompt file]") {
-			t.Fatalf("missing flag in usage:\n%s", out)
-		}
-	})
-	t.Run("OpenCode inline config", openCodePromptConfig)
-	t.Run("injection errors", systemPromptInjectionErrors)
-	t.Run("removed after preflight", systemPromptRemovedAfterPreflight)
 }
 
 func openCodePromptConfig(t *testing.T) {
