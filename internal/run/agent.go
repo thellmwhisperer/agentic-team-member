@@ -33,8 +33,7 @@ import (
 	"mvdan.cc/sh/v3/syntax"
 )
 
-// skills are the ponytail skills (github.com/DietrichGebert/ponytail, MIT): the implementing agent loads
-// ponytail, the slop detector ponytail-review.
+// skills are the embedded ponytail skills (github.com/DietrichGebert/ponytail, MIT).
 //
 //go:embed ponytail/SKILL.md ponytail-review/SKILL.md
 var skills embed.FS
@@ -108,7 +107,8 @@ func (a agent) argv(clone, skill, final, brief string) (argv []string, stdin str
 		argv = with(argv, a.Model, "--model", a.Model)
 	case "pi":
 		argv = []string{"pi", "-p", "--mode", "json", "--no-extensions", "--no-skills", "--no-prompt-templates",
-			"--no-context-files", "--skill", skill, "--append-system-prompt", system.Prompt}
+			"--no-context-files"}
+		argv = append(with(argv, skill, "--skill", skill), "--append-system-prompt", system.Prompt)
 		argv = with(with(argv, a.Model, "--model", a.Model), a.Effort, "--thinking", a.Effort)
 	}
 	return append(append(argv, a.args...), brief), ""
@@ -162,7 +162,7 @@ func (a agent) run(clone, name, skill, brief string, check func(map[string]any) 
 	if err != nil {
 		return ev, err
 	}
-	if _, acp := config.ACP[a.Harness]; acp { // no skill directory: the brief has the skill
+	if _, acp := config.ACP[a.Harness]; acp && skill != "" { // no skill directory: the brief has the skill
 		brief = withSkill(brief, skill)
 	}
 	final := strings.TrimSuffix(path, ".jsonl") + ".final.md"
@@ -396,6 +396,9 @@ func testFile(r map[string]any) error {
 // placeSkill puts skill where the harness finds it in clone, outside git, records the clone as the agent finds it,
 // and returns the skill's directory.
 func placeSkill(clone, harness, skill string) (string, error) {
+	if skill == "" {
+		return "", before(clone)
+	}
 	if _, acp := config.ACP[harness]; acp { // its skill goes in its brief
 		return "", before(clone)
 	}

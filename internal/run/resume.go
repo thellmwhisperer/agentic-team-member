@@ -134,8 +134,7 @@ func (a agent) afterE2E(r *verdict, clone string, p resumePoint) (map[string]any
 		"\nYour scratch directory for this turn is `" + filepath.Join(a.dir, "worker-scratch") +
 		"`, your `$TMPDIR`: use it for logs, outputs and files you set aside, instead of any previous scratch " +
 		"or the system temp directory."
-	argv, stdin, ok := a.resumeArgv(clone, filepath.Join(clone, skillDirs[a.Harness], "ponytail"),
-		final, p.Session, prompt)
+	argv, stdin, ok := a.resumeArgv(clone, "", final, p.Session, prompt)
 	reason := ""
 	switch {
 	case p.FailedRow != "e2e":
@@ -156,7 +155,7 @@ func (a agent) afterE2E(r *verdict, clone string, p resumePoint) (map[string]any
 	var err error
 	s := timed(func() {
 		if _, err = a.reviewScratch("worker"); err == nil {
-			_, err = placeSkill(clone, a.Harness, "ponytail")
+			_, err = placeSkill(clone, a.Harness, "")
 		}
 		if err == nil {
 			stream, exit, cause, runErr := a.exec(clone, path, argv, stdin, false)

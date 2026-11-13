@@ -64,7 +64,8 @@ func machineRepoConfig(t *testing.T, origin string) {
 		Install: "install-command", Test: "test-command", E2E: "e2e-command", Compile: "compile-command",
 		Typecheck: "typecheck-command", Lint: "lint-command", TestFile: "test-command {file}",
 		TestPatterns: []string{"**/*_test.go"}, DocsPatterns: []string{"**/*.md", "docs/**"},
-		Delivery: "delivery-command", RetiredAgentTimeout: "retired-agent", RetiredCheckTimeout: "retired-check",
+		Delivery: "delivery-command", Ponytail: true,
+		RetiredAgentTimeout: "retired-agent", RetiredCheckTimeout: "retired-check",
 	}
 	flags := config.Agent{Effort: "medium"}
 	assertMachineConfig(t, root, home, flags, want)

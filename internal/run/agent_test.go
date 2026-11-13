@@ -52,7 +52,7 @@ func TestRunDrivesTheAgent(t *testing.T) {
 			`-c model="m" -c model_reasoning_effort="e" --x y <brief>`,
 		"opencode": "run --pure --format json --dir <clone> -m m --variant e --x y <brief>",
 		"pi": "-p --mode json --no-extensions --no-skills --no-prompt-templates --no-context-files " +
-			"--skill <clone>/.atm/skills/ponytail --append-system-prompt <system> --model m --thinking e --x y <brief>",
+			"--append-system-prompt <system> --model m --thinking e --x y <brief>",
 		"cursor": "-p --output-format stream-json --trust --force --workspace <clone> --model m --x y <brief>",
 	}
 	for harness, want := range cases {
@@ -95,7 +95,7 @@ func TestRunDrivesTheAgent(t *testing.T) {
 				t.Fatalf("env: want ATM_FAKE and no CLAUDE_CODE_CHILD_SESSION, got %v", got.Env)
 			}
 			lines := logLines(t, log)
-			if want := map[string]int{"claude": 5, "codex": 5, "pi": 5, "cursor": 6}[harness]; len(lines) != cmp.Or(want, 4) {
+			if want := map[string]int{"claude": 3, "codex": 4, "pi": 3, "cursor": 4}[harness]; len(lines) != cmp.Or(want, 3) {
 				t.Fatalf("want every line of the agent in the log, got %q", lines)
 			}
 			if left := clones(t, root); len(left) != 0 {

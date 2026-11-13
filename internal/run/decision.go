@@ -113,7 +113,7 @@ func (a agent) afterCheck(clone, text, session, finding string, attempt int) (ma
 	path := filepath.Join(a.dir, name+".jsonl")
 	final := filepath.Join(a.dir, name+".final.md")
 	ev := map[string]any{"log": path}
-	skill, err := placeSkill(clone, a.Harness, "ponytail")
+	skill, err := placeSkill(clone, a.Harness, "")
 	if err == nil {
 		_, err = a.reviewScratch("worker")
 	}

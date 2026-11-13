@@ -42,6 +42,7 @@ type Config struct {
 	TestPatterns []string `yaml:"test_patterns"`
 	DocsPatterns []string `yaml:"docs_patterns"`
 	Delivery     string   `yaml:"delivery"`
+	Ponytail     bool     `yaml:"ponytail"` // optional, true by default
 	// Retired keys: a .atm.yaml that still has them loads, and they limit nothing.
 	RetiredAgentTimeout any `yaml:"agent_timeout"`
 	RetiredCheckTimeout any `yaml:"check_timeout"`
@@ -135,7 +136,7 @@ func load(project, home string, flags Agent,
 	if err != nil {
 		return Config{}, err
 	}
-	c := Config{Agent: Agent{Harness: m.Harness, Model: m.Model, Effort: m.Effort}}
+	c := Config{Agent: Agent{Harness: m.Harness, Model: m.Model, Effort: m.Effort}, Ponytail: true}
 	keys, err := decodeProject(&c, m)
 	if err != nil {
 		return c, err

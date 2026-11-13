@@ -197,9 +197,9 @@ var stackedLog = regexp.MustCompile(`(?m)^╭─ Log\* `)
 // render their first line's Markdown, as they do unfolded.
 func TestRealATMFoldedRowsRenderMarkdown(t *testing.T) {
 	a, agentDone, runDone := markdownRun(t, true)
-	// The fake agent's last row, its Skill call, comes before it waits: the rows hold still for the click.
+	// The fake agent's last row, its Read call, comes before it waits: the rows hold still for the click.
 	s := a.drawn(func(s string) bool {
-		return strings.Contains(s, "∴ ") && strings.Contains(s, "Running tests") && strings.Contains(s, "1 tool: Skill")
+		return strings.Contains(s, "∴ ") && strings.Contains(s, "Running tests") && strings.Contains(s, "1 tool: Read")
 	})
 	a.boldRow(s, "∴ ", "the folded thinking row")
 	a.click(rowOf(s, "▸ ∴ "))
@@ -208,7 +208,7 @@ func TestRealATMFoldedRowsRenderMarkdown(t *testing.T) {
 	})
 	a.boldRow(s, "▾ ∴ ", "the unfolded thinking")
 	first, last := rowOf(s, "▾ ∴ Running tests"), rowOf(s, "the agent thinks on")
-	if last != first+2 || rowOf(s, "1 tool: Skill") != last+1 {
+	if last != first+2 || rowOf(s, "1 tool: Read") != last+1 {
 		t.Fatalf("unfolded thinking must keep the paragraph break and end immediately before the tool row:\n%s", s)
 	}
 	if row := logColumn(strings.Split(s, "\n")[first+1]); strings.TrimSpace(strings.Trim(row, "│")) != "" {
@@ -236,7 +236,9 @@ func markdownRun(t *testing.T, holdAgent bool) (a *attached, agentDone, runDone 
 	agentDone = func() {}
 	if holdAgent {
 		t.Setenv("FAKE_AGENT_STREAM", `{"type":"assistant","message":{"role":"assistant","content":[`+
-			`{"type":"thinking","thinking":"**Running tests**\n\nthe agent thinks on\n\n"}]}}`+"\n")
+			`{"type":"thinking","thinking":"**Running tests**\n\nthe agent thinks on\n\n"}]}}`+"\n"+
+			claudeEvent("Read", `{"file_path":"a.txt"}`)+
+			`{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"c1","is_error":false}]}}`+"\n")
 		t.Setenv("FAKE_AGENT_WORK", fmt.Sprintf(`cat "%s" >/dev/null; `, agent)+fixWork)
 		agentDone = func() { free(t, agent) }
 	}

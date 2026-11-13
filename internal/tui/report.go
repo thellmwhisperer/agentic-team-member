@@ -46,6 +46,7 @@ func (m *Model) restoreReport(path string, outcome run.Outcome) {
 	}
 	seen := make(map[string]bool, len(report.Nodes))
 	for _, n := range report.Nodes {
+		m.skipPonytail(n.Name == "ponytail" && n.Result == "skipped")
 		r := m.current(n.Name)
 		if r == nil || seen[n.Name] {
 			clearDuplicate(r, seen[n.Name])

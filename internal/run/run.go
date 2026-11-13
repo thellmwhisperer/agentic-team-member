@@ -65,7 +65,7 @@ func runAt(label, ref string, args []string, out, summary io.Writer) (err error)
 	var i Issue
 	r.step("issue", func() (map[string]any, error) {
 		i, err = theIssue(from, args[len(args)-1], repo)
-		ev := map[string]any{"title": i.Title}
+		ev := map[string]any{"title": i.Title, "ponytail_skipped": !c.Ponytail}
 		if i.Number != 0 {
 			ev["number"] = i.Number
 		}
@@ -94,6 +94,11 @@ func runAt(label, ref string, args []string, out, summary io.Writer) (err error)
 // ponytailStep is the ponytail step of the run r, which records each cut it makes in keep.
 func (a *agent) ponytailStep(r *verdict, root, dir, sha string, i Issue, c config.Config,
 	keep *resumePoint) func(proof) {
+	if !c.Ponytail {
+		reason := "skipped by configuration: ponytail: false"
+		r.node("ponytail").Result, r.node("ponytail").Reason = "skipped", &reason
+		return func(proof) {}
+	}
 	return func(p proof) {
 		r.step("ponytail", func() (map[string]any, error) {
 			ev, err := a.ponytail(root, dir, sha, []proof{p}, i, c)
@@ -329,7 +334,7 @@ func (a agent) runUnit(dir, text string, keep *resumePoint) (map[string]any, err
 	ev := map[string]any{}
 	_, err := w.reviewScratch("worker") // the one writeBrief names
 	if err == nil {
-		ev, err = w.run(dir, "worker", "ponytail", text, testFile)
+		ev, err = w.run(dir, "worker", "", text, testFile)
 	}
 	// A diff never goes for its report's format: without one, the unit goes to Checks with no test file.
 	if errors.As(err, &reportError{}) {
