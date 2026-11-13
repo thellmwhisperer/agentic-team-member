@@ -2,6 +2,7 @@ package tui
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
 	"time"
@@ -12,10 +13,12 @@ import (
 const maxDurationMS = int64(^uint64(0)>>1) / int64(time.Millisecond)
 
 type savedNode struct {
-	Name       string      `json:"name"`
-	Result     string      `json:"result"`
-	DurationMS *int64      `json:"duration_ms"`
-	Rows       []savedNode `json:"rows"`
+	Name          string            `json:"name"`
+	ClonePath     string            `json:"clone"`
+	Result        string            `json:"result"`
+	DurationMS    *int64            `json:"duration_ms"`
+	Rows          []savedNode       `json:"rows"`
+	RejectedFiles []json.RawMessage `json:"rejected_files"`
 }
 
 // restoreReport recovers node results after the daemon lost its in-memory frames. The report has only
@@ -54,6 +57,9 @@ func (m *Model) restoreReport(path string, outcome run.Outcome) {
 			continue
 		}
 		r.state = n.Result
+		if n.Name == "clone" {
+			m.clone = n.ClonePath
+		}
 		if n.Result == "passed" || n.Result == "failed" {
 			r.took, r.hasDuration = savedDuration(n.DurationMS)
 		}
@@ -98,6 +104,9 @@ func (m *Model) restoreRows(n savedNode) {
 				child.took, child.hasDuration = time.Duration(*part.DurationMS)*time.Millisecond, true
 			}
 		}
+	}
+	if n.Name == "ponytail" && n.Result == "passed" && len(n.RejectedFiles) > 0 {
+		m.checkRow(n.Name, fmt.Sprintf("put back %d files", len(n.RejectedFiles))).state = "passed"
 	}
 }
 

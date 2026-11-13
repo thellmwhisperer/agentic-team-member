@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"unicode"
 
@@ -250,12 +251,21 @@ func (m *Model) atm(width, height int) string {
 		}
 		rows = m.atmRow(rows, r, inner)
 	}
+	rows = m.compactPipeline(rows, height-2-len(lines))
 	lines = append(lines, m.pipeline.show(rows, max(1, height-2-len(lines)))...)
 	title := "ATM"
 	if m.focused() == &m.pipeline {
 		title += "*"
 	}
 	return box(bold(cyan, title), strings.Join(lines, "\n"), width, m.border(&m.pipeline))
+}
+
+// compactPipeline gives an ended pipeline's steps room before spending rows on connectors.
+func (m *Model) compactPipeline(rows []paneLine, height int) []paneLine {
+	if m.done && !m.gateLive && len(rows) > height {
+		return slices.DeleteFunc(rows, func(r paneLine) bool { return strings.HasPrefix(r.key, "connector:") })
+	}
+	return rows
 }
 
 // atmRow appends a node row and the wrapped note of a Slop detector phase.

@@ -26,7 +26,7 @@ echo "$PWD $*" >>"$FAKE_NM/log"
 agent_step=${FAKE_NM_STEP:-review}
 [ ! -p "$FAKE_NM/wait-$2" ] || read -r _ <"$FAKE_NM/wait-$2"
 case "$*" in
-"axi status")
+"axi status"|"axi status --run 01M5D0SWRMZ44NM79H2NNC3YZ8")
 	if [ -f "$FAKE_NM/none" ]; then printf 'current_branch: atm/the-unit\nruns_on_current_branch: 0\n'; exit 0; fi
 	n=$(($(cat "$FAKE_NM/n" 2>/dev/null) + 1))
 	echo "$n" >"$FAKE_NM/n"
@@ -38,7 +38,7 @@ case "$*" in
 	printf '  steps[3]{step,status,findings,duration_ms}:\n'
 	printf '    %s,%s,1,1200\n    test,pending,0,0\n    lint,skipped,0,0\n' "$agent_step" "$step"
 	[ ! -f "$FAKE_NM/status.toon" ] || cat "$FAKE_NM/status.toon" ;;
-"axi logs --step "*" --full")
+"axi logs --step "*" --full"|"axi logs --step "*" --full --run 01M5D0SWRMZ44NM79H2NNC3YZ8")
 	cat "$FAKE_NM/review.toon" ;;
 "axi respond "*|"axi answer "*|"axi abort")
 	if [ "$2" = respond ]; then

@@ -86,7 +86,7 @@ func TestDeliveryRowsThroughRealBinaryAndColdAttach(t *testing.T) {
 	if !strings.Contains(shown, "✓ Delivery") {
 		t.Fatalf("atm attach lost Delivery:\n%s", shown)
 	}
-	assertPendingGatePipeline(t, shown[strings.LastIndex(shown, "╭─ ATM"):])
+	assertUnknownGatePipeline(t, shown[strings.LastIndex(shown, "╭─ ATM"):])
 	endDeliveryServer(t, server, top)
 }
 
