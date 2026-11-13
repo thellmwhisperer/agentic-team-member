@@ -28,7 +28,7 @@ var githubURL = regexp.MustCompile(`^(?:[a-z][a-z0-9+.-]*://)?(?:[^/@]+@)?github
 
 // Usage is atm run's command line.
 const Usage = "usage: atm run [--follow] [--base-ref r] [--harness h] [--model m] [--effort e] " +
-	"[--harness-arg a]... [--env KEY=VALUE]... <issue.md | issue number | --resume run>"
+	"[--system-prompt file] [--harness-arg a]... [--env KEY=VALUE]... <issue.md | issue number | --resume run>"
 
 // runAt is atm run with args, its flags and the issue: a file, or an issue number of origin's repository.
 // Its report, briefs and logs go to .atm/runs/<label>/ (runDir): each node's start and end go to out, one JSON
@@ -49,6 +49,11 @@ func runAt(label, ref string, args []string, out, summary io.Writer) (err error)
 	}
 	if from == nil {
 		start = ref
+	} else {
+		a.systemPrompt = from.SystemPrompt
+	}
+	if err := a.readSystemPrompt(); err != nil {
+		return err
 	}
 	repo := GitHubRepo()
 	c, err := configureAgent(root, ref, label, a)

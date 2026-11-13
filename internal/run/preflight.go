@@ -22,6 +22,8 @@ with no clone, no run directory and no agent:
                 skipped when origin is not on GitHub
   worker files  each file a --harness-arg flag names, as --settings or --skill, exists in the base tree
                 (saved base on resume) or is an absolute readable file
+                --system-prompt is a readable file, relative to the launching directory or absolute,
+                and the harness takes a system prompt: hermes does not
   delivery      the first word of delivery is a command sh finds: on PATH, or sh's own, as if or cd
   compile       the compile command of .atm.yaml, if it has one, exits 0 on the base tree
                 (saved base on resume), on this machine`
@@ -30,8 +32,9 @@ with no clone, no run directory and no agent:
 var fileFlags = []string{"--settings", "--skill"}
 
 // preflight checks, in the repository at root, what a run from base ref ref stands on, its agent a with the
-// harness arguments args: the first check that fails is the error, which names it.
-func preflight(root, ref, workerBase string, a agent, args []string) (string, error) {
+// harness arguments args, and what the run it resumes, from, kept: the first check that fails is the error,
+// which names it.
+func preflight(root, ref string, from resumePoint, a *agent, args []string) (string, error) {
 	var c config.Config
 	var sha string
 	for _, check := range []struct {
@@ -57,7 +60,17 @@ func preflight(root, ref, workerBase string, a agent, args []string) (string, er
 			return err
 		}},
 		{"base green", func() error { return baseGreen(sha) }},
-		{"worker files", func() error { return workerFiles(root, cmp.Or(workerBase, sha), args) }},
+		{"worker files", func() error {
+			if err := workerFiles(root, cmp.Or(from.Base, sha), args); err != nil {
+				return err
+			}
+			for _, harness := range []string{from.Agent.Harness, c.Harness} {
+				if _, ok := config.ACP[harness]; ok && (a.systemPromptFile != "" || from.SystemPrompt != nil) {
+					return fmt.Errorf("--system-prompt: harness %s takes no system prompt", harness)
+				}
+			}
+			return a.readSystemPrompt()
+		}},
 		{"delivery", func() error { // sh runs it: its first word is a command sh finds, on PATH or its own
 			word := deliveryWord(c.Delivery)
 			if strings.TrimSpace(c.Delivery) == "" {
@@ -68,7 +81,7 @@ func preflight(root, ref, workerBase string, a agent, args []string) (string, er
 			}
 			return nil
 		}},
-		{"compile", func() error { return compile(root, cmp.Or(workerBase, sha), c.Compile) }},
+		{"compile", func() error { return compile(root, cmp.Or(from.Base, sha), c.Compile) }},
 	} {
 		if err := check.fn(); err != nil {
 			return "", fmt.Errorf("preflight: %s: %w", check.name, err)

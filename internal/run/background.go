@@ -639,10 +639,13 @@ func Start(root string, args []string) (Outcome, error) {
 		}
 	}
 	if err == nil {
-		sha, err = preflight(root, *base, p.Base, *a, append(a.args, p.Args...))
+		sha, err = preflight(root, *base, p, a, append(a.args, p.Args...))
 	}
 	if err != nil {
 		return Outcome{}, err
+	}
+	if a.systemPromptFile != "" {
+		args = append(slices.Clone(args[:len(args)-1]), "--system-prompt", a.systemPrompt.File, args[len(args)-1])
 	}
 	if _, err := strconv.Atoi(args[len(args)-1]); err != nil { // a file, which the background process reads from root
 		if args[len(args)-1], err = filepath.Abs(args[len(args)-1]); err != nil {

@@ -27,7 +27,6 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	system "github.com/thellmwhisperer/agentic-team-member"
 	"github.com/thellmwhisperer/agentic-team-member/internal/config"
 	"mvdan.cc/sh/v3/expand"
 	"mvdan.cc/sh/v3/syntax"
@@ -49,10 +48,12 @@ const tools = "Read,Edit,Write,Bash,Glob,Grep,Skill"
 // the repository it runs in and the run's directory, where its logs go.
 type agent struct {
 	config.Agent
-	args, env []string
-	scratch   string // the call's scratch directory: the one path outside the clone its calls may write to
-	root, dir string
-	follow    bool // atm run --follow: the launching process watches the run itself
+	args, env        []string
+	systemPromptFile string
+	systemPrompt     *runSystemPrompt
+	scratch          string // the call's scratch directory: the one path outside the clone its calls may write to
+	root, dir        string
+	follow           bool // atm run --follow: the launching process watches the run itself
 }
 
 // flags adds the agent's flags to fs.
@@ -60,6 +61,7 @@ func (a *agent) flags(fs *flag.FlagSet) {
 	fs.StringVar(&a.Harness, "harness", "", "agent CLI: claude, codex, opencode, pi, cursor or hermes")
 	fs.StringVar(&a.Model, "model", "", "the agent's model")
 	fs.StringVar(&a.Effort, "effort", "", "the agent's effort")
+	fs.StringVar(&a.systemPromptFile, "system-prompt", "", "a readable file appended after SYSTEM.md for this run")
 	fs.Func("harness-arg", "an argument for the agent CLI, before the brief; repeatable", func(v string) error {
 		a.args = append(a.args, v)
 		return nil
@@ -91,12 +93,12 @@ func (a agent) argv(clone, skill, final, brief string) (argv []string, stdin str
 		argv = []string{"claude", "-p", "--output-format", "stream-json", "--verbose", "--setting-sources", "project",
 			"--strict-mcp-config", "--permission-mode", "acceptEdits", "--tools", tools, "--allowedTools", tools,
 			"--thinking-display", "summarized", // else claude's thinking blocks come empty
-			"--append-system-prompt", system.Prompt}
+			"--append-system-prompt", a.prompt()}
 		argv = with(with(argv, a.Model, "--model", a.Model), a.Effort, "--effort", a.Effort)
 		return append(argv, a.args...), brief
 	case "codex":
 		argv = []string{"codex", "exec", "--json", "-C", clone, "--sandbox", "workspace-write", "-o", final,
-			"-c", "developer_instructions=" + strconv.Quote(system.Prompt)}
+			"-c", "developer_instructions=" + strconv.Quote(a.prompt())}
 		argv = with(argv, a.Model, "-c", "model="+strconv.Quote(a.Model))
 		argv = with(argv, a.Effort, "-c", "model_reasoning_effort="+strconv.Quote(a.Effort))
 	case "opencode":
@@ -113,7 +115,7 @@ func (a agent) argv(clone, skill, final, brief string) (argv []string, stdin str
 	case "pi":
 		argv = []string{"pi", "-p", "--mode", "json", "--no-extensions", "--no-skills", "--no-prompt-templates",
 			"--no-context-files"}
-		argv = append(with(argv, skill, "--skill", skill), "--append-system-prompt", system.Prompt)
+		argv = append(with(argv, skill, "--skill", skill), "--append-system-prompt", a.prompt())
 		argv = with(with(argv, a.Model, "--model", a.Model), a.Effort, "--thinking", a.Effort)
 	}
 	return append(append(argv, a.args...), brief), ""
@@ -349,6 +351,16 @@ func (a agent) exec(
 	}), a.env...)
 	if a.Harness == "claude" { // else a background command outlives its turn, and the run its report
 		cmd.Env = append(cmd.Env, "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1")
+	}
+	var rule string
+	cmd.Env, rule, err = a.systemEnvironment(clone, cmd.Env)
+	defer func() {
+		if rule != "" {
+			_ = os.Remove(rule)
+		}
+	}()
+	if err != nil {
+		return nil, "", "", err
 	}
 	s := &stream{live: relative(clone, liveIn(clone)), clone: clone,
 		scratch: a.scratch}
