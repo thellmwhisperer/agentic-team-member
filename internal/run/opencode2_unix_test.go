@@ -44,13 +44,17 @@ done
 case "$PWD" in "$ATM_OC2_ROOT"/.atm/clones/*) ;; *) fail "wrong working directory: $PWD" ;; esac
 [ "$(git rev-parse --show-toplevel)" = "$PWD" ] || fail 'not in clone root'
 [ ! -t 0 ] && [ -z "$(cat)" ] || fail 'worker must run without interactive input'
-skill=ponytail
+skill=
 case "$1" in *ponytail-review*) skill=ponytail-review ;; esac
-[ -f ".opencode/skills/$skill/SKILL.md" ] || fail "missing $skill skill"
+if [ -n "$skill" ]; then
+  [ -f ".opencode/skills/$skill/SKILL.md" ] || fail "missing $skill skill"
+else
+  [ ! -e .opencode/skills/ponytail ] || fail 'the worker must not get the ponytail skill'
+fi
 printf '%s\n' "$PWD" >> "$ATM_OC2_CALLS"
 echo '{"type":"step_start","timestamp":1,"sessionID":"ses_oc2","part":{"type":"step-start"}}'
 echo '{"type":"reasoning","timestamp":2,"sessionID":"ses_oc2","part":{"type":"reasoning","text":"Checking the clone."}}'
-if [ "$skill" = ponytail ]; then
+if [ -z "$skill" ]; then
   echo fixed > a.txt
   echo 'grep -q fixed a.txt && ! grep -q broken a.txt' > a_test.sh
   echo '{"type":"tool_use","timestamp":3,"sessionID":"ses_oc2","part":{"type":"tool",'\
