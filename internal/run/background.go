@@ -639,7 +639,6 @@ func Start(root string, args []string) (Outcome, error) {
 		}
 	}
 	if err == nil {
-		a.systemPrompt = p.SystemPrompt
 		sha, err = preflight(root, *base, p.Base, a, append(a.args, p.Args...))
 	}
 	if err != nil {

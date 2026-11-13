@@ -1,0 +1,18 @@
+schema: 1
+id: T-PONYTAIL-20261113-223748-2
+status: accepted
+category: alien_code
+title: "Retirados la espera añadida y el cambio de formato ajenos al ticket; prueba restaurada a la base."
+created_at: 2026-11-13
+incident:
+  pattern: "Retirados la espera añadida y el cambio de formato ajenos al ticket; prueba restaurada a la base."
+  what_went_wrong: "A coding agent wrote it and the ponytail pass cut it before delivery."
+  root_cause: "The coding agent wrote more than the issue needed."
+  rule_established: "Cut by the ponytail pass; it does not come back."
+  evidence:
+    - family: speculative_hardening
+      example: "Retirados la espera añadida y el cambio de formato ajenos al ticket; prueba restaurada a la base."
+      artifact: "internal/run/report_rows_unix_test.go"
+match:
+  family: speculative_hardening
+  artifact: "internal/run/report_rows_unix_test.go"
