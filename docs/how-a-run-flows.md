@@ -606,14 +606,17 @@ title shows `⏸ waiting`, and once the answer comes it follows the run again fr
 the gate shows, the pending decision shows in the Findings box above the Gate box. The decision's
 finding keeps only what failed and how to answer; the failed command's output stays in the report. When the run ends,
 a decision still pending leaves the screen and the failure's reason shows in its place.
-On a terminal, the screen quits at the run's end if Delivery never ran with a
+On a terminal, with `screen: close` in `~/.config/atm/config.yaml` (the default),
+the screen quits at the run's end if Delivery never ran with a
 known clone. Otherwise it started querying the gate once, when Delivery first
 ran with a known clone. It keeps
 querying every second, even if no gate run is found or a query fails, and before
 the ATM run ends even if the gate ended. It closes on its own, with no key
 pressed, once a query asked after the ATM run ended finds the gate over, or finds
 no gate run when no gate has ever been shown. Until then, `q` or Ctrl+C detaches. Gate spinners and times advance while the last gate answer showed a
-running gate. The last view stays on the terminal. Off-terminal output returns
+running gate. With `screen: keep`, the completed screen stays open with its boxes
+and keys working until `q` or Ctrl+C; leaving it returns the run's exit code.
+The last view stays on the terminal. Off-terminal output returns
 when the ATM run ends.
 
 Off a terminal, or with `NO_COLOR` or `TERM=dumb`, the screen is plain lines:

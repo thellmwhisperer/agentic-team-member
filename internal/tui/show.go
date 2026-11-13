@@ -19,7 +19,7 @@ import (
 var follow = run.FollowFrom // tests follow a run of their own
 
 // Show shows the screen of run label, of the repository at root, on the terminal in and out until the user
-// closes it or the run and its gate end; detached when the user left it going.
+// closes it or, with screen: close, the run and its gate end; detached when the user left it going.
 // The screen keeps the terminal all along: Delivery's command runs
 // below it, and the gate shows in its pipeline.
 func Show(root, label string, in, out *os.File) (o run.Outcome, detached bool, err error) {
@@ -35,6 +35,10 @@ func Show(root, label string, in, out *os.File) (o run.Outcome, detached bool, e
 		return o, false, err
 	}
 	m := runScreen(root, label, w, h)
+	m.keepScreen, err = config.KeepScreen(os.Getenv("HOME"))
+	if err != nil {
+		return o, false, err
+	}
 	archived := m.done
 	p := tea.NewProgram(m, tea.WithInput(in), tea.WithOutput(out), tea.WithAltScreen(), tea.WithMouseCellMotion())
 	leave, done := make(chan struct{}), make(chan struct{})

@@ -62,9 +62,10 @@ var ACP = map[string]struct {
 var required = []string{"install", "test", "typecheck", "lint", "test_file", "test_patterns", "docs_patterns",
 	"delivery"}
 
-// machine is ~/.config/atm/config.yaml: the agent and repository fallbacks. Other keys land in Unknown.
+// machine is ~/.config/atm/config.yaml: the agent, screen and repository fallbacks. Other keys land in Unknown.
 type machine struct {
 	Harness, Model, Effort string
+	Screen                 string
 	RepositoryOverrides    map[string]yaml.Node `yaml:"repository_overrides"`
 	Unknown                map[string]any       `yaml:",inline"`
 }
@@ -74,8 +75,12 @@ type machine struct {
 func readMachine(home string) (machine, error) {
 	m := machine{Harness: "claude"}
 	path := filepath.Join(home, ".config", "atm", "config.yaml")
-	if _, err := decode(path, &m); err != nil {
+	keys, err := decode(path, &m)
+	if err != nil {
 		return m, err
+	}
+	if _, set := keys["screen"]; set && m.Screen != "close" && m.Screen != "keep" {
+		return m, fmt.Errorf("%s: screen %q: want close or keep", path, m.Screen)
 	}
 	for _, k := range slices.Sorted(maps.Keys(m.Unknown)) {
 		if slices.Contains(required, k) || k == "agent_timeout" || k == "check_timeout" {
@@ -84,6 +89,12 @@ func readMachine(home string) (machine, error) {
 		fmt.Fprintln(os.Stderr, "config: ignored key", k)
 	}
 	return m, nil
+}
+
+// KeepScreen says whether home's machine config keeps the screen open after the run and gate end.
+func KeepScreen(home string) (bool, error) {
+	m, err := readMachine(home)
+	return m.Screen == "keep", err
 }
 
 // Load is the defaults, overridden by home's .config/atm/config.yaml, root's .atm.yaml and the non-empty
