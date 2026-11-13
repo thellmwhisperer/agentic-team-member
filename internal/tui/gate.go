@@ -4,7 +4,9 @@ import (
 	"cmp"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -34,10 +36,29 @@ type gateStep struct {
 var gateStates = map[string]string{"pending": "pending", "running": "running", "awaiting_approval": "waiting",
 	"fixing": "running", "completed": "passed", "failed": "failed", "skipped": "skipped"}
 
-// askGate asks no-mistakes, in clone, for the run of its branch, and for the log of each step it started.
+var gateNames = []string{"intent", "rebase", "review", "test", "document", "lint", "push", "pr", "ci"}
+
+// savedGate asks by the id kept in Delivery's output, from the surviving run directory.
+func savedGate(report string) gate {
+	dir := filepath.Dir(report)
+	b, _ := os.ReadFile(filepath.Join(dir, "delivery-output.txt"))
+	idLine := regexp.MustCompile(`(?m)^\s*id: "([^"]+)"\s*$`).FindSubmatch(b)
+	if len(idLine) > 1 {
+		if g := askGate(dir, "--run", string(idLine[1])); g.ok {
+			return g
+		}
+	}
+	g := gate{}
+	for _, name := range gateNames {
+		g.steps = append(g.steps, gateStep{name: name, state: "unknown"})
+	}
+	return g
+}
+
+// askGate asks no-mistakes in dir for its branch's run, or the explicit runArgs, and each started step's log.
 // ponytail: every started step's log on every ask, one no-mistakes call each; ask only the changed ones if it lags.
-func askGate(clone string) gate {
-	run, tables, err := axi(clone, "status")
+func askGate(dir string, runArgs ...string) gate {
+	run, tables, err := axi(dir, append([]string{"status"}, runArgs...)...)
 	if err != nil || run["run.status"] == "" {
 		return gate{}
 	}
@@ -53,7 +74,7 @@ func askGate(clone string) gate {
 			step.took = took
 		}
 		if step.state != "pending" && step.state != "skipped" {
-			_, tables, _ := axi(clone, "logs", "--step", step.name, "--full")
+			_, tables, _ := axi(dir, append([]string{"logs", "--step", step.name, "--full"}, runArgs...)...)
 			step.log = gateActivities(tables["log"])
 			step.findings = tables["findings"]
 		}
@@ -164,7 +185,7 @@ func (m *Model) gate(g gate) {
 		} else if r.state != "running" {
 			r.start = time.Now().Add(-s.took) // A running step counts on with the screen's clock, as ATM's steps do.
 		}
-		r.state, r.took, r.hasDuration = s.state, s.took, s.took > 0
+		r.state, r.took, r.hasDuration = s.state, s.took, s.took > 0 || s.state == "passed" || s.state == "failed"
 	}
 	m.gateSteps = g.steps
 }

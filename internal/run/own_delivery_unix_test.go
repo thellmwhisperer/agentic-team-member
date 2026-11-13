@@ -32,6 +32,7 @@ case "$1 $2" in
 	[ "$#" = 6 ] && [ "$3" = --intent ] && [ "$5" = --wait ] && [ "$6" = 24h ] || exit 2
 	printf 'axi run --intent\n' >>"$FAKE_NM/delivery-calls"
 	printf '%s' "$4" >"$FAKE_NM/intent"
+	echo 'id: "01M5D0SWRMZ44NM79H2NNC3YZ8"'
 	echo 'review awaiting_approval'
 	exit 0 ;;
 esac

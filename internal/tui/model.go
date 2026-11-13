@@ -210,7 +210,16 @@ type ended struct {
 	err error
 }
 
-func (m *Model) Init() tea.Cmd { return next() }
+func (m *Model) Init() tea.Cmd {
+	if m.done && m.gateSteps == nil {
+		return tea.Quit
+	}
+	if m.done && m.gateLive && m.clone != "" {
+		m.asking = true
+		return tea.Batch(next(), m.ask(0))
+	}
+	return next()
+}
 
 func next() tea.Cmd {
 	return tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg { return tick(t) })

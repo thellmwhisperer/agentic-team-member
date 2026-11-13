@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -33,23 +34,15 @@ func Show(root, label string, in, out *os.File) (o run.Outcome, detached bool, e
 	if err != nil {
 		return o, false, err
 	}
-	m := New(label, w, h)
-	runs, _ := run.RecordedRuns(root)
-	for _, r := range runs {
-		if r.Run == label && r.BaseSHA != "" {
-			c, _, _ := run.BaseConfig(root, r.BaseSHA, os.Getenv("HOME"), config.Agent{})
-			if c.Delivery != "" {
-				for _, name := range []string{"intent", "rebase", "review", "test", "document", "lint", "push", "pr", "ci"} {
-					m.rows = append(m.rows, &row{step: "gate:" + name, label: name, state: "pending"})
-				}
-			}
-			break
-		}
-	}
+	m := runScreen(root, label, w, h)
+	archived := m.done
 	p := tea.NewProgram(m, tea.WithInput(in), tea.WithOutput(out), tea.WithAltScreen(), tea.WithMouseCellMotion())
 	leave, done := make(chan struct{}), make(chan struct{})
 	go func() {
 		defer close(done)
+		if archived {
+			return
+		}
 		// A run that waits for its launcher's answer is not over: the screen follows it again, from the frame
 		// after the last it has, once a second, until it goes on or ends.
 		for seen := 0; ; {
@@ -80,6 +73,32 @@ func Show(root, label string, in, out *os.File) (o run.Outcome, detached bool, e
 	return m.outcome, m.detached, m.err
 }
 
+// runScreen restores an ended run without its daemon or clone; a live run starts with its configured gate pending.
+func runScreen(root, label string, width, height int) *Model {
+	m := New(label, width, height)
+	runs, _ := run.RecordedRuns(root)
+	for _, r := range runs {
+		if r.Run != label {
+			continue
+		}
+		if !r.Ended.IsZero() {
+			m.end(r, nil)
+			if d := m.current("delivery"); d.state == "passed" || d.state == "failed" {
+				m.gate(savedGate(r.Report))
+			}
+		} else if r.BaseSHA != "" {
+			c, _, _ := run.BaseConfig(root, r.BaseSHA, os.Getenv("HOME"), config.Agent{})
+			if c.Delivery != "" {
+				for _, name := range gateNames {
+					m.rows = append(m.rows, &row{step: "gate:" + name, label: name, state: "pending"})
+				}
+			}
+		}
+		break
+	}
+	return m
+}
+
 // Attach shows run label's plain lines on w until it ends.
 func Attach(root, label string, w io.Writer) (run.Outcome, error) {
 	label, err := resolve(root, label)
@@ -88,6 +107,17 @@ func Attach(root, label string, w io.Writer) (run.Outcome, error) {
 	}
 	if label == "" {
 		return run.Outcome{}, errors.New("no run yet")
+	}
+	if m := runScreen(root, label, 0, 0); m.done {
+		for _, r := range m.rows {
+			how := "-"
+			if r.hasDuration {
+				how = run.Human(r.took)
+			}
+			_, _ = fmt.Fprintf(w, "%s  %s  %s  %s\n", strings.ToLower(r.label), states[r.state][0], how, r.state)
+		}
+		_, _ = fmt.Fprintf(w, "RESULT  %s\nreport  %s\n", m.outcome.Outcome, m.outcome.Report)
+		return m.outcome, nil
 	}
 	return run.Attach(root, label, w)
 }

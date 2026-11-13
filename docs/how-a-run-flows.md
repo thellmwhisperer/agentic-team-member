@@ -520,9 +520,17 @@ from status also show for the current gate step when its log has not shown them;
 an ID already in the log is shown only once.
 Before that, from the first frame of a run whose base ref's `.atm.yaml` has a
 delivery, the ATM box shows a pending row below Delivery for each of `intent`,
-`rebase`, `review`, `test`, `document`, `lint`, `push`, `pr` and `ci`; they stay
-pending when ATM's run ends, and the steps no-mistakes reports replace them.
+`rebase`, `review`, `test`, `document`, `lint`, `push`, `pr` and `ci`, and the
+steps no-mistakes reports replace them.
 A run with no delivery shows no gate rows.
+Attaching to a run that has already ended needs neither its background process nor its clone: ATM's rows
+come from `report.json`, and, when Delivery passed or failed, the gate comes from
+`no-mistakes axi status --run <id>` and `no-mistakes axi logs --step <step> --full --run <id>`,
+asked from the run directory with the id on the `id: "<id>"` line of `delivery-output.txt`;
+a gate that still goes on is then followed in the run's clone as above.
+When that line is missing or no-mistakes has no run for the id, every gate row reads `? unknown`.
+Off a terminal, `atm attach` of an ended run prints one line per row with its state and time,
+the gate's included, then `RESULT` and `report` lines.
 The public findings table does not expose a source line number; the screen
 shows the supplied file without inventing a line. Tab switches between the
 ATM and Gate boxes; arrows, PageUp, PageDown, Home and End scroll the focused box.
