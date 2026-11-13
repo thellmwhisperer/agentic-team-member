@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.0](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.8.0...v1.9.0) (2026-11-13)
+
+
+### Features
+
+* atm attach of an ended run shows the whole run, gate included, after its clone is gone ([#677](https://github.com/thellmwhisperer/agentic-team-member/issues/677)) ([79ae971](https://github.com/thellmwhisperer/agentic-team-member/commit/79ae971b54d928f847078b877907d62a3e57b736))
+
 ## [1.8.0](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.7.3...v1.8.0) (2026-11-11)
 
 
