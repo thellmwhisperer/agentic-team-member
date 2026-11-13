@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.1](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.10.0...v1.10.1) (2026-11-13)
+
+
+### Bug Fixes
+
+* OpenCode 2 worker fails on removed CLI flags ([#676](https://github.com/thellmwhisperer/agentic-team-member/issues/676)) ([5d177ac](https://github.com/thellmwhisperer/agentic-team-member/commit/5d177acfcce1ca38de68e14a5bfaedf0f3dd4565))
+
 ## [1.10.0](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.9.0...v1.10.0) (2026-11-13)
 
 
