@@ -116,10 +116,14 @@ func deliveryWord(line string) string {
 }
 
 // BaseConfig is the configuration of the repository at root with .atm.yaml as base ref ref has it, whatever
-// the working tree's says, and that file.
+// the working tree's says, and that file. If absent there, it uses the machine's repository override.
 func BaseConfig(root, ref, home string, flags config.Agent) (config.Config, string, error) {
 	b, err := gitRaw(root, "show", ref+":.atm.yaml")
 	if err != nil {
+		if files, listErr := git(root, "ls-tree", "--name-only", ref, "--", ".atm.yaml"); listErr == nil && files == "" {
+			c, err := config.MachineRepo(root, home, flags)
+			return c, "", err
+		}
 		return config.Config{}, "", fmt.Errorf("base ref %q: %w", ref, err)
 	}
 	c, err := config.Parse(ref+":.atm.yaml", []byte(b), home, flags)
