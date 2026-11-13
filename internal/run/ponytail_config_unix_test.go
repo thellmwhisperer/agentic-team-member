@@ -193,8 +193,9 @@ func assertPonytailConfigScreen(t *testing.T, bin, top string, disabled bool, re
 		}
 		a := &attached{t: t, chunks: make(chan string, 64), rows: 50}
 		a.attach(bin, top, 120, 50, "issue-1")
+		s := a.drawn(func(s string) bool { return strings.Contains(s, "q close") })
+		a.key("q")
 		a.exits()
-		s := a.screen()
 		if !strings.Contains(s, "Checks") || !strings.Contains(s, "Delivery") ||
 			strings.Contains(s, "Slop detector") == disabled {
 			t.Fatalf("wrong ponytail row, reload=%v, disabled=%v:\n%s", reload, disabled, s)
@@ -212,7 +213,7 @@ func assertPonytailConfigPlainScreen(t *testing.T, bin, top string, disabled boo
 	cmd := exec.Command(bin, "attach", "issue-1")
 	cmd.Dir = top
 	b, err := cmd.CombinedOutput()
-	if err != nil || strings.Contains(string(b), "ponytail") == disabled {
+	if err != nil || strings.Contains(string(b), "slop detector") == disabled {
 		t.Fatalf("wrong ponytail row on plain screen: %s, %v", b, err)
 	}
 }
