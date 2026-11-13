@@ -132,6 +132,19 @@ func TestLoadRejectsEffortForCursor(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsOpenCodeEffortWithoutModel(t *testing.T) {
+	root := t.TempDir()
+	write(t, filepath.Join(root, ".atm.yaml"), complete)
+	if _, err := Load(root, t.TempDir(), Agent{Harness: "opencode", Model: "p/m", Effort: "high"}); err != nil {
+		t.Fatalf("opencode with model and effort: %v", err)
+	}
+	_, err := Load(root, t.TempDir(), Agent{Harness: "opencode", Effort: "high"})
+	want := "opencode sets effort through the model: use '<provider/model>#high'"
+	if err == nil || err.Error() != want {
+		t.Fatalf("got %v, want %s", err, want)
+	}
+}
+
 func TestLoadRejectsUnknownHarness(t *testing.T) {
 	root := t.TempDir()
 	write(t, filepath.Join(root, ".atm.yaml"), complete)

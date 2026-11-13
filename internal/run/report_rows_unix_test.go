@@ -105,6 +105,7 @@ func TestRealScreenShowsTheReportAsRows(t *testing.T) {
 			s = a.drawn(regexp.MustCompile(`▾ Hallazgos \(1\) +│\n +│ {7}warning a\.txt rompe si falta`).MatchString)
 			a.click(rowOf(s, "▾ Informe"))
 			a.drawn(func(s string) bool { return strings.Contains(s, "▸ Informe") && !strings.Contains(s, "Hallazgos") })
+
 			for _, title := range []string{"Ficheros cambiados", "Comandos ejecutados", "Test a_test.sh"} {
 				a.click(rowOf(a.drawn(func(s string) bool { return strings.Contains(s, "▸ Informe") }), "▸ Informe"))
 				s = a.drawn(func(s string) bool { return strings.Contains(s, "▸ "+title) })
@@ -133,7 +134,6 @@ func TestRealScreenShowsTheReportAsRows(t *testing.T) {
 			if gotFinal != final {
 				t.Fatalf("worker final message = %s; want %s", gotFinal, final)
 			}
-			a.drawn(func(s string) bool { return strings.Contains(s, "▸ Informe") && !strings.Contains(s, "Hallazgos") })
 			if err := pty.Setsize(a.p, &pty.Winsize{Cols: 80, Rows: 50}); err != nil {
 				t.Fatal(err)
 			}

@@ -50,7 +50,7 @@ func TestRunDrivesTheAgent(t *testing.T) {
 			"--append-system-prompt <system> --model m --effort e --x y",
 		"codex": `exec --json -C <clone> --sandbox workspace-write -o <log>.final.md -c developer_instructions=<system> ` +
 			`-c model="m" -c model_reasoning_effort="e" --x y <brief>`,
-		"opencode": "--standalone run --format json -m m#e --x y <brief>",
+		"opencode": "--standalone run --auto --format json -m m#e --x y <brief>",
 		"pi": "-p --mode json --no-extensions --no-skills --no-prompt-templates --no-context-files " +
 			"--skill <clone>/.atm/skills/ponytail --append-system-prompt <system> --model m --thinking e --x y <brief>",
 		"cursor": "-p --output-format stream-json --trust --force --workspace <clone> --model m --x y <brief>",

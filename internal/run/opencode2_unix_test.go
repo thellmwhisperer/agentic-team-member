@@ -13,21 +13,23 @@ import (
 	"time"
 )
 
-// openCode2CLI rejects removed flags and models standalone's use of the current project's configuration,
-// rather than an existing service's directory, model and permissions. No model or service is contacted.
+// openCode2CLI follows OpenCode v2.3.0's help: it rejects the removed --pure, --dir and --variant, and requires the
+// global --standalone (a private server instead of the background service) and run's --auto (approve permissions
+// not explicitly denied). No model or service is contacted.
 const openCode2CLI = `#!/bin/sh
 set -eu
 fail() { echo "$*" >&2; exit 1; }
 for arg do
   case "$arg" in --pure|--dir|--variant) fail "Unrecognized flag: $arg in command opencode run" ;; esac
 done
-config="$ATM_OC2_SHARED_CONFIG"
-if [ "$1" = --standalone ]; then config="$PWD/opencode.json"; shift; fi
+[ "$1" = --standalone ] || fail 'expected a private server: opencode --standalone'
+shift
 [ "$1" = run ] || fail 'expected opencode run'
 shift
-format= model= agent=
+auto= format= model= agent=
 while [ "$#" -gt 1 ]; do
   case "$1" in
+    --auto) auto=1; shift ;;
     --format) format="$2"; shift 2 ;;
     -m|--model) model="$2"; shift 2 ;;
     --agent) agent="$2"; shift 2 ;;
@@ -35,12 +37,12 @@ while [ "$#" -gt 1 ]; do
   esac
 done
 [ "$#" -eq 1 ] && [ -n "$1" ] || fail 'missing worker brief'
+[ -n "$auto" ] || fail 'worker tools need --auto'
 [ "$format" = json ] || fail 'expected JSON output'
 [ "$model" = "$ATM_OC2_MODEL" ] || fail "wrong model/variant: $model"
 [ "$agent" = local ] || fail "wrong agent: $agent"
 case "$PWD" in "$ATM_OC2_ROOT"/.atm/clones/*) ;; *) fail "wrong working directory: $PWD" ;; esac
 [ "$(git rev-parse --show-toplevel)" = "$PWD" ] || fail 'not in clone root'
-grep -q '"permission": "allow"' "$config" || fail 'unrelated service configuration denies worker tools'
 [ ! -t 0 ] && [ -z "$(cat)" ] || fail 'worker must run without interactive input'
 skill=ponytail
 case "$1" in *ponytail-review*) skill=ponytail-review ;; esac
@@ -82,17 +84,12 @@ func TestRunOpenCode2Compatibility(t *testing.T) {
 func runOpenCode2(t *testing.T, model, effort, selected string) {
 	t.Helper()
 	root := gitT(t, repo(t, "local", atmSet(atmYAML, "delivery", "true")), "rev-parse", "--show-toplevel")
-	writeFixture(t, filepath.Join(root, "opencode.json"), `{"permission": "allow"}`)
-	gitT(t, root, "add", "opencode.json")
-	gitT(t, root, "commit", "-qm", "project worker configuration")
 	fixture := t.TempDir()
 	writeFixture(t, filepath.Join(fixture, "opencode"), openCode2CLI, 0o755)
-	writeFixture(t, filepath.Join(fixture, "shared.json"), `{"permission": "deny", "model": "unrelated/model"}`)
 	call := filepath.Join(fixture, "calls")
 	for k, v := range map[string]string{
 		"PATH":         fixture + string(os.PathListSeparator) + os.Getenv("PATH"),
 		"ATM_OC2_ROOT": root, "ATM_OC2_MODEL": selected, "ATM_OC2_CALLS": call,
-		"ATM_OC2_SHARED_CONFIG": filepath.Join(fixture, "shared.json"),
 	} {
 		t.Setenv(k, v)
 	}

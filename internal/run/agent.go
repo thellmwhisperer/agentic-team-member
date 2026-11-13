@@ -101,7 +101,7 @@ func (a agent) argv(clone, skill, final, brief string) (argv []string, stdin str
 		argv = with(argv, a.Model, "-c", "model="+strconv.Quote(a.Model))
 		argv = with(argv, a.Effort, "-c", "model_reasoning_effort="+strconv.Quote(a.Effort))
 	case "opencode":
-		argv = []string{"opencode", "--standalone", "run", "--format", "json"}
+		argv = []string{"opencode", "--standalone", "run", "--auto", "--format", "json"}
 		model := a.Model
 		if a.Effort != "" {
 			model, _, _ = strings.Cut(model, "#")

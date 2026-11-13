@@ -158,6 +158,8 @@ func harnessError(a Agent) error {
 		return errors.New(acp.Unset)
 	case a.Harness == "cursor" && a.Effort != "":
 		return fmt.Errorf("cursor has no effort flag: put it in the model, as '<model>[effort=%s]'", a.Effort)
+	case a.Harness == "opencode" && a.Effort != "" && a.Model == "":
+		return fmt.Errorf("opencode sets effort through the model: use '<provider/model>#%s'", a.Effort)
 	}
 	return nil
 }
