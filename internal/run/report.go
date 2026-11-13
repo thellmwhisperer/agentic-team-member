@@ -36,6 +36,9 @@ type verdict struct {
 	at         string    // the node that runs
 	row        string    // the row that runs inside it, whose command prints the output events
 
+	SystemPromptFile   string `json:"system_prompt_file,omitempty"`
+	SystemPromptSHA256 string `json:"system_prompt_sha256,omitempty"`
+
 	checkCommands []cmdResult
 	retried       bool // Checks gave its own red its one turn
 
@@ -114,6 +117,9 @@ func (a agent) verdict(out io.Writer) *verdict {
 	r := newVerdict(a.dir, out)
 	r.Agent = &AgentSettings{Harness: a.Harness, Model: a.Model, Effort: a.Effort,
 		HarnessArgs: append([]string{}, a.args...)}
+	if a.systemPrompt != nil {
+		r.SystemPromptFile, r.SystemPromptSHA256 = a.systemPrompt.File, a.systemPrompt.SHA256
+	}
 	return r
 }
 

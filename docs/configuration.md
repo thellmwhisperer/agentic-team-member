@@ -37,7 +37,21 @@ a `.atm.yaml` key there still fails.
 | Built-in defaults | the binary | `harness: claude`, `screen: close` |
 | Your machine | `~/.config/atm/config.yaml` | `harness`, `model`, `effort`, `screen`, `repository_overrides` |
 | The repository | `.atm.yaml` at its root, as the base ref has it committed; otherwise the machine's matching `repository_overrides` entry | keys in [`.atm.yaml`](#atmyaml) below |
-| One run | `atm run` flags | [`--follow`](how-a-run-flows.md#following-one-run), `--base-ref`, `--harness`, `--model`, `--effort`, `--harness-arg`, `--env`, `--resume` |
+| One run | `atm run` flags | [`--follow`](how-a-run-flows.md#following-one-run), `--base-ref`, `--harness`, `--model`, `--effort`, `--system-prompt`, `--harness-arg`, `--env`, `--resume` |
+
+`atm run --system-prompt <file> <issue>` appends the file's full text after
+the embedded `SYSTEM.md` in the worker's system instructions. The file is
+read from the launching directory when relative, or from its absolute path.
+A missing or unreadable file fails the `worker files` pre-run check with
+exit 2 and no run directory. `report.json` records the resolved path as
+`system_prompt_file` and the file bytes' SHA-256 as `system_prompt_sha256`.
+`--resume` keeps the saved text even if the original file changes or disappears.
+
+Claude and pi receive `--append-system-prompt`; Codex receives
+`developer_instructions`. OpenCode receives an instruction file through
+`OPENCODE_CONFIG_CONTENT`, preserving other inline settings and instruction
+files. Cursor receives a temporary always-applied `.cursor/rules/*.mdc`
+rule, excluded from git and removed after each invocation.
 
 ## `~/.config/atm/config.yaml`
 

@@ -361,7 +361,8 @@ func codexResumeRejected(name string, args []string) string {
 
 func recordFakeAgentCall(args []string, stdin []byte, call string) {
 	if path := os.Getenv("FAKE_AGENT_CALL"); path != "" {
-		b, _ := json.Marshal(obj{"args": args, "stdin": string(stdin), "env": os.Environ()})
+		b, _ := json.Marshal(obj{"args": args, "stdin": string(stdin), "env": os.Environ(),
+			"system_prompt": receivedSystemPrompt(filepath.Base(os.Args[0]), args)})
 		_ = os.WriteFile(path+call, b, 0o600)
 	}
 }
