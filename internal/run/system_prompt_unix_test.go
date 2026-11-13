@@ -36,6 +36,13 @@ func TestWorkerGetsTheRunSystemPrompt(t *testing.T) {
 			assertStopped(t, root, out, code, "worker files", "--system-prompt:")
 		})
 	}
+	t.Run("hermes", func(t *testing.T) {
+		root := repo(t, "local", atmYAML)
+		path := filepath.Join(t.TempDir(), "system.md")
+		writeFixture(t, path, "Keep this rule.")
+		out, code := preflightLaunch(t, bin, root, "--harness", "hermes", "--system-prompt", path, issueFile(t, issue))
+		assertStopped(t, root, out, code, "worker files", "--system-prompt: harness hermes takes no system prompt")
+	})
 	t.Run("help", func(t *testing.T) {
 		root := repo(t, "local", atmYAML)
 		out, _ := preflightLaunch(t, bin, root, "--help")
