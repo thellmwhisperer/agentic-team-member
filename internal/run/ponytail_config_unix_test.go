@@ -30,7 +30,8 @@ func ponytailConfigRun(t *testing.T, bin, harness, setting string) {
 	if setting != "absent" {
 		cfg += "ponytail: " + setting + "\n"
 	}
-	top := repo(t, "local", cfg)
+	// serve binds at git's toplevel; t.TempDir can be another spelling of it (Darwin's /var).
+	top := gitT(t, repo(t, "local", cfg), "rev-parse", "--show-toplevel")
 	call := filepath.Join(t.TempDir(), "call")
 	t.Setenv("FAKE_AGENT_CALL", call)
 	t.Setenv("FAKE_ACP_CALL", call)
