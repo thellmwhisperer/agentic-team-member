@@ -106,19 +106,25 @@ var originRepository = regexp.MustCompile(`[:/]([^/:]+/[^/]+?)(?:\.git)?/?$`)
 
 // MachineRepo loads origin's owner/name entry from the machine's repository_overrides when no project file exists.
 func MachineRepo(root, home string, flags Agent) (Config, error) {
-	project := filepath.Join(home, ".config", "atm", "config.yaml")
+	path := filepath.Join(home, ".config", "atm", "config.yaml")
+	origin, _ := exec.Command("git", "-C", root, "remote", "get-url", "origin").Output()
+	key := ""
+	if match := originRepository.FindStringSubmatch(strings.TrimSpace(string(origin))); match != nil {
+		key = match[1]
+	}
+	project := path + " repository_overrides." + key
 	return load(project, home, flags, func(c *Config, m machine) (map[string]any, error) {
-		origin, _ := exec.Command("git", "-C", root, "remote", "get-url", "origin").Output()
-		match := originRepository.FindStringSubmatch(strings.TrimSpace(string(origin)))
-		if match == nil {
-			return nil, nil
+		if key == "" {
+			return nil, fmt.Errorf("config incomplete: no .atm.yaml, and origin names no owner/name "+
+				"to look up in %s repository_overrides", path)
 		}
-		node, ok := m.RepositoryOverrides[match[1]]
+		node, ok := m.RepositoryOverrides[key]
 		if !ok {
-			return nil, nil
+			return nil, fmt.Errorf("config incomplete: no .atm.yaml, and %s has no repository_overrides entry for %s",
+				path, key)
 		}
 		b, _ := yaml.Marshal(node) // Nodes decoded from YAML can be marshalled back to YAML.
-		return decodeBytes(project+" repository_overrides."+match[1], b, c)
+		return decodeBytes(project, b, c)
 	})
 }
 

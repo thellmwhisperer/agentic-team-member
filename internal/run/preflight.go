@@ -122,7 +122,10 @@ func BaseConfig(root, ref, home string, flags config.Agent) (config.Config, stri
 	if err != nil {
 		if files, listErr := git(root, "ls-tree", "--name-only", ref, "--", ".atm.yaml"); listErr == nil && files == "" {
 			c, err := config.MachineRepo(root, home, flags)
-			return c, "", err
+			if err != nil {
+				return c, "", fmt.Errorf("base ref %q: %w", ref, err)
+			}
+			return c, "", nil
 		}
 		return config.Config{}, "", fmt.Errorf("base ref %q: %w", ref, err)
 	}

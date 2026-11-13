@@ -41,8 +41,10 @@ func preflightConfig(t *testing.T, bin string) {
 		root := repo(t, "local", "")
 		writeConfig(t, root, atmYAML)
 		out, code := preflightLaunch(t, bin, root, issueFile(t, issue))
-		assertStopped(t, root, out, code, "config", "config incomplete: "+
-			filepath.Join(os.Getenv("HOME"), ".config", "atm", "config.yaml")+" lacks install")
+		base := gitT(t, root, "rev-parse", "main")
+		assertStopped(t, root, out, code, "config", fmt.Sprintf(`base ref %q: config incomplete: no .atm.yaml, `+
+			"and origin names no owner/name to look up in %s repository_overrides", base,
+			filepath.Join(os.Getenv("HOME"), ".config", "atm", "config.yaml")))
 	})
 	t.Run("a base ref that does not resolve", func(t *testing.T) {
 		root := repo(t, "local", atmYAML)
