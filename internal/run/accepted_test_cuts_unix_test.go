@@ -51,7 +51,8 @@ func TestB(t *testing.T) {
 	ready, delivered := filepath.Join(t.TempDir(), "ready"), filepath.Join(t.TempDir(), "delivered")
 	t.Setenv("ATM_TEST_READY", ready)
 	t.Setenv("ATM_TEST_DELIVERED", delivered)
-	t.Setenv("FAKE_AGENT_WORK", "if test -f first-turn; then test ! -e .claude/skills/ponytail-review || exit 1; touch repaired; "+repair+"\nelse "+
+	t.Setenv("FAKE_AGENT_WORK", "if test -f first-turn; then test ! -e .claude/skills/ponytail-review || exit 1; "+
+		"touch repaired; "+repair+"\nelse "+
 		fixWork+"; touch first-turn; echo '// worker' >> b_test.go; "+initial+"\nfi")
 	if cut == "" {
 		cut = "sed '/cut me/d' b_test.go > b; mv b b_test.go"
