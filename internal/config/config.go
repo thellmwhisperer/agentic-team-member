@@ -11,7 +11,9 @@ import (
 	"io/fs"
 	"maps"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -59,10 +61,11 @@ var ACP = map[string]struct {
 var required = []string{"install", "test", "typecheck", "lint", "test_file", "test_patterns", "docs_patterns",
 	"delivery"}
 
-// machine is ~/.config/atm/config.yaml: the agent. Other keys land in Unknown.
+// machine is ~/.config/atm/config.yaml: the agent and repository fallbacks. Other keys land in Unknown.
 type machine struct {
 	Harness, Model, Effort string
-	Unknown                map[string]any `yaml:",inline"`
+	RepositoryOverrides    map[string]yaml.Node `yaml:"repository_overrides"`
+	Unknown                map[string]any       `yaml:",inline"`
 }
 
 // readMachine reads home's config.yaml. A project key there is an error; any other key it does not know is
@@ -86,22 +89,54 @@ func readMachine(home string) (machine, error) {
 // fields of flags.
 func Load(root, home string, flags Agent) (Config, error) {
 	project := filepath.Join(root, ".atm.yaml")
-	return load(project, home, flags, func(c *Config) (map[string]any, error) { return decode(project, c) })
+	if _, err := os.Stat(project); errors.Is(err, fs.ErrNotExist) {
+		return MachineRepo(root, home, flags)
+	}
+	return load(project, home, flags, func(c *Config, _ machine) (map[string]any, error) { return decode(project, c) })
 }
 
 // Parse is Load with b as .atm.yaml, which project names.
 func Parse(project string, b []byte, home string, flags Agent) (Config, error) {
-	return load(project, home, flags, func(c *Config) (map[string]any, error) { return decodeBytes(project, b, c) })
+	return load(project, home, flags, func(c *Config, _ machine) (map[string]any, error) {
+		return decodeBytes(project, b, c)
+	})
+}
+
+var originRepository = regexp.MustCompile(`[:/]([^/:]+/[^/]+?)(?:\.git)?/?$`)
+
+// MachineRepo loads origin's owner/name entry from the machine's repository_overrides when no project file exists.
+func MachineRepo(root, home string, flags Agent) (Config, error) {
+	path := filepath.Join(home, ".config", "atm", "config.yaml")
+	origin, _ := exec.Command("git", "-C", root, "remote", "get-url", "origin").Output()
+	key := ""
+	if match := originRepository.FindStringSubmatch(strings.TrimSpace(string(origin))); match != nil {
+		key = match[1]
+	}
+	project := path + " repository_overrides." + key
+	return load(project, home, flags, func(c *Config, m machine) (map[string]any, error) {
+		if key == "" {
+			return nil, fmt.Errorf("config incomplete: no .atm.yaml, and origin names no owner/name "+
+				"to look up in %s repository_overrides", path)
+		}
+		node, ok := m.RepositoryOverrides[key]
+		if !ok {
+			return nil, fmt.Errorf("config incomplete: no .atm.yaml, and %s has no repository_overrides entry for %s",
+				path, key)
+		}
+		b, _ := yaml.Marshal(node) // Nodes decoded from YAML can be marshalled back to YAML.
+		return decodeBytes(project, b, c)
+	})
 }
 
 // load is Load with .atm.yaml, which project names, decoded over its argument by decodeProject.
-func load(project, home string, flags Agent, decodeProject func(*Config) (map[string]any, error)) (Config, error) {
+func load(project, home string, flags Agent,
+	decodeProject func(*Config, machine) (map[string]any, error)) (Config, error) {
 	m, err := readMachine(home)
 	if err != nil {
 		return Config{}, err
 	}
 	c := Config{Agent: Agent{Harness: m.Harness, Model: m.Model, Effort: m.Effort}}
-	keys, err := decodeProject(&c)
+	keys, err := decodeProject(&c, m)
 	if err != nil {
 		return c, err
 	}

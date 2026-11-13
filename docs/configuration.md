@@ -35,25 +35,50 @@ a `.atm.yaml` key there still fails.
 | Layer | Where | Sets |
 |-------|-------|------|
 | Built-in defaults | the binary | `harness: claude` |
-| Your machine | `~/.config/atm/config.yaml` | `harness`, `model`, `effort` |
-| The repository | `.atm.yaml` at its root, as the base ref has it committed | keys in [`.atm.yaml`](#atmyaml) below |
+| Your machine | `~/.config/atm/config.yaml` | `harness`, `model`, `effort`, `repository_overrides` |
+| The repository | `.atm.yaml` at its root, as the base ref has it committed; otherwise the machine's matching `repository_overrides` entry | keys in [`.atm.yaml`](#atmyaml) below |
 | One run | `atm run` flags | [`--follow`](how-a-run-flows.md#following-one-run), `--base-ref`, `--harness`, `--model`, `--effort`, `--harness-arg`, `--env`, `--resume` |
 
 ## `~/.config/atm/config.yaml`
 
-Optional. It selects your agent.
+Optional. It selects your agent and can supply configuration for repositories without a committed `.atm.yaml`.
 
 | Key | Meaning |
 |-----|---------|
 | `harness` | The coding agent CLI: `claude`, `codex`, `opencode`, `pi`, `cursor` or `hermes` (local models go through `pi`). Any other fails the run |
 | `model` | Its model; empty is the CLI's default |
 | `effort` | Its effort; empty is the CLI's default |
+| `repository_overrides` | Map from `origin`'s `owner/name` to a complete repository configuration, used only when the base ref has no `.atm.yaml` |
 
 ```yaml
 harness: claude
 model: claude-opus-5-5
 effort: high
 ```
+
+For a repository whose configuration must stay on your machine:
+
+```yaml
+repository_overrides:
+  client/project:
+    install: ''
+    test: go test ./...
+    e2e: ''
+    compile: go vet ./...
+    typecheck: go vet ./...
+    lint: ''
+    test_file: ''
+    test_patterns: ["**/*_test.go"]
+    docs_patterns: ["**/*.md", "docs/**"]
+    delivery: ''
+```
+
+Each entry accepts every [`.atm.yaml` key](#atmyaml), including `harness`,
+`model` and `effort`, with the same validation and run flag precedence.
+HTTPS and SSH origins use the same `owner/name` key, without `.git`.
+A committed `.atm.yaml` wins as a whole; a missing or invalid key in that file
+still fails instead of taking a value from the machine entry. `atm doctor`
+uses the matching entry when there is no working-tree `.atm.yaml`.
 
 ATM opens no terminal tab or split and reports to no terminal multiplexer;
 the launcher owns any tab or pane management. A pane whose root process is
