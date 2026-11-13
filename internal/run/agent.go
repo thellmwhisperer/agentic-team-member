@@ -396,10 +396,7 @@ func testFile(r map[string]any) error {
 // placeSkill puts skill where the harness finds it in clone, outside git, records the clone as the agent finds it,
 // and returns the skill's directory.
 func placeSkill(clone, harness, skill string) (string, error) {
-	if skill == "" {
-		return "", before(clone)
-	}
-	if _, acp := config.ACP[harness]; acp { // its skill goes in its brief
+	if _, acp := config.ACP[harness]; skill == "" || acp { // its skill goes in its brief
 		return "", before(clone)
 	}
 	rel := skillDirs[harness] + "/" + skill

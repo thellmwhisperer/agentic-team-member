@@ -237,8 +237,7 @@ func markdownRun(t *testing.T, holdAgent bool) (a *attached, agentDone, runDone 
 	if holdAgent {
 		t.Setenv("FAKE_AGENT_STREAM", `{"type":"assistant","message":{"role":"assistant","content":[`+
 			`{"type":"thinking","thinking":"**Running tests**\n\nthe agent thinks on\n\n"}]}}`+"\n"+
-			claudeEvent("Read", `{"file_path":"a.txt"}`)+
-			`{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"c1","is_error":false}]}}`+"\n")
+			reportToolCall("claude"))
 		t.Setenv("FAKE_AGENT_WORK", fmt.Sprintf(`cat "%s" >/dev/null; `, agent)+fixWork)
 		agentDone = func() { free(t, agent) }
 	}
