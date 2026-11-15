@@ -2,6 +2,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -19,8 +20,20 @@ func Execute() {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "atm:", err)
 	}
-	os.Exit(run.ExitCode(err))
+	code, e := run.ExitCode(err), exitCode{}
+	if errors.As(err, &e) {
+		code = e.code
+	}
+	os.Exit(code)
 }
+
+// exitCode is an error atm exits with code for.
+type exitCode struct {
+	code int
+	err  error
+}
+
+func (e exitCode) Error() string { return e.err.Error() }
 
 // root is atm with every command; it prints errors to no one, Execute does.
 func root() *cobra.Command {

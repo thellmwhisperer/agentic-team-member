@@ -338,11 +338,12 @@ a time limit, with these variables:
 | `ATM_PONYTAIL` | The findings of all retained cuts, one a line, or empty |
 
 The command's output goes to the screen and to `delivery-output.txt`.
-ATM executes the configured command without recognizing its name or parsing
+The ATM run executes the configured command without recognizing its name or parsing
 its output. Exit zero passes Delivery; a nonzero exit asks the launcher before
-the run can continue or stop. Publishing, review decisions and PR tracking
+the run can continue or stop. Publishing and review decisions
 belong to that command or its launcher. The attached screen observes the gate
-after Delivery passes and the run ends, as described below.
+from Delivery's start, as described in [The screen](#the-screen). Programs use
+[`atm axi watch`](configuration.md#watching-a-gate) for read-only monitoring.
 
 ## Time limits
 

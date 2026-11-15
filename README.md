@@ -129,6 +129,7 @@ agent, model and effort. Both are in [Configuration](docs/configuration.md).
 | `atm attach [run]` | A run's [screen and tool-call controls](docs/how-a-run-flows.md#the-screen), including the gate after Delivery |
 | `atm runs` | Every retained run and its report |
 | `atm axi run`, `atm axi status`, `atm axi runs` | The same for programs, in TOON or JSON |
+| `atm axi watch [run]` | Waits for a run's next gate event; see [Watching a gate](docs/configuration.md#watching-a-gate) |
 | `atm axi plan <plan.json>` | Shows which plan tickets can launch; see [Following a plan](docs/configuration.md#following-a-plan) |
 | `atm update` | Replaces this `atm` with the latest published release |
 | `atm --version` | Prints the version of this `atm` |
