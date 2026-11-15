@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.13.0](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.12.0...v1.13.0) (2026-11-15)
+
+
+### Features
+
+* **cli:** report pull requests waiting for review in axi watch ([#692](https://github.com/thellmwhisperer/agentic-team-member/issues/692)) ([63b9545](https://github.com/thellmwhisperer/agentic-team-member/commit/63b9545b9eee24c7c84c3053fb18f9fc31e64a1f))
+
 ## [1.12.0](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.11.0...v1.12.0) (2026-11-15)
 
 
