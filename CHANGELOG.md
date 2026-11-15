@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.14.0](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.13.0...v1.14.0) (2026-11-15)
+
+
+### Features
+
+* **cli:** report stalled runs in atm axi watch ([#693](https://github.com/thellmwhisperer/agentic-team-member/issues/693)) ([c457e83](https://github.com/thellmwhisperer/agentic-team-member/commit/c457e836db2f0cc5ac2f3455f24252f21272eb6e))
+
 ## [1.13.0](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.12.0...v1.13.0) (2026-11-15)
 
 
