@@ -417,7 +417,7 @@ func watchLookup(run watchSubtest) {
 			t.Fatalf("stderr %q", errOut)
 		}
 	})
-	run("its only flags are --json and --after", func(t *testing.T, w *watchRepo) {
+	run("its only flags are --json, --after and --stall", func(t *testing.T, w *watchRepo) {
 		w.recorded("7-1", "passed", "skipped")
 		for _, args := range [][]string{{"--follow", "7-1"}, {"--after", "merged", "7-1"}, {"7-1", "8-1"}} {
 			if _, errOut, code := w.watched(args...); code != 2 || errOut == "" {
@@ -426,8 +426,9 @@ func watchLookup(run watchSubtest) {
 		}
 		help, _, _ := w.watched("--help")
 		_, flags, _ := strings.Cut(help, "Flags:\n")
-		if !strings.Contains(flags, "--after") || !strings.Contains(flags, "--json") || strings.Count(flags, "--") != 3 {
-			t.Fatalf("watch's flags are not --after, --json and --help:\n%s", help)
+		if !strings.Contains(flags, "--after") || !strings.Contains(flags, "--json") || !strings.Contains(flags, "--stall") ||
+			strings.Count(flags, "--") != 4 {
+			t.Fatalf("watch's flags are not --after, --json, --stall and --help:\n%s", help)
 		}
 	})
 }
