@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.0](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.11.0...v1.12.0) (2026-11-15)
+
+
+### Features
+
+* **cli:** add atm axi watch for gate events ([#690](https://github.com/thellmwhisperer/agentic-team-member/issues/690)) ([6dc3756](https://github.com/thellmwhisperer/agentic-team-member/commit/6dc37565c46a56edc2de384e33e721199c01aa29))
+
 ## [1.11.0](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.10.1...v1.11.0) (2026-11-13)
 
 
