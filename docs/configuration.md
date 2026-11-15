@@ -266,27 +266,33 @@ exits 0, including for `done: failed`. Without a run label it selects the
 newest running run; if none is running it exits 1 with `nothing runs`.
 Name an ended run explicitly to watch its gate after Delivery.
 
-The default output is TOON, `<event>: <step>` or `done: <outcome>`.
+The default output is TOON, `<event>: <step>`, `done: <outcome>`, or
+`review_required: <hold reason>`.
 `--json` instead prints one object with `event`, `run`, `step` and `outcome`;
-unused `step` or `outcome` values are empty strings.
+unused `step` or `outcome` values are empty strings. For `review_required`,
+`step` is empty and `outcome` is `review-required label` or
+`risk level <level> without risk-reviewed`, with `missing` for an unreadable level.
 
 | Event | Meaning |
 |-------|---------|
 | `gate_question` | A gate step is `awaiting_approval` or `fix_review` |
 | `gate_failed` | A gate step failed while the gate itself has not ended |
 | `ci_running` | The `ci` step runs and its last activity does not say `all CI checks passed` |
-| `ci_green_awaiting_merge` | The `ci` step runs, its last activity says `all CI checks passed`, and `gh` confirms an open PR in the same read |
+| `ci_green_awaiting_merge` | The `ci` step runs, its last activity says `all CI checks passed`, and `gh` confirms an open PR with no `review_required` hold in the same read |
+| `review_required` | `gh` reads an open PR that carries `review-required`, or that has no `risk-reviewed` label and a risk level other than exactly `Low` or `Medium`, read as `scripts/arm-auto-merge.sh` reads it; the outcome says which hold it is. It takes precedence over `ci_green_awaiting_merge`, not over `ci_running` |
 | `done` | Outcome `failed` for a failed ATM run or a failed or cancelled gate; `passed` for a completed gate or a passed run with no delivery; `merged` or `closed` when `gh` confirms that PR state for a gate that has not ended |
 
 A terminal gate determines `done` without reading its PR. Otherwise, once
 the gate's `pr` step is completed, watch reads the PR with `gh` before
 selecting an event. A merged or closed PR takes precedence over a waiting
-or failed step.
+or failed step. A waiting or failed step takes precedence over `review_required`.
 
 Use `--after <event>` to skip only that event while the state remains the
 first successfully read state of this invocation. Other events still print.
 Once watch observes a changed state, it stops skipping, even if the original
-state later returns. The accepted event names are those in the table;
+state later returns. A change in the hold reason counts as a changed state,
+so `--after review_required` can return `review_required` again with a new reason.
+The accepted event names are those in the table;
 `--json` and `--after` are its only command-specific flags.
 
 Watch only reads: the recorded run and report, the same no-mistakes status

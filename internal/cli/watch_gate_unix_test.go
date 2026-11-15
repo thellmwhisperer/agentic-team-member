@@ -67,6 +67,12 @@ func gateStatus(status string, steps []string, active ...string) string {
 	return s
 }
 
+// ghView is the gh call watch reads a pull request with.
+const ghView = "pr view atm/the-unit --json state,labels,body,files,headRefName"
+
+// lowRisk is an open pull request whose body says its risk is Low.
+const lowRisk = `{"state":"OPEN","body":"## Risk Assessment\nLow: one line"}`
+
 const allPassed = "3m54s ago: log: all CI checks passed - still monitoring until merged or closed"
 
 // watchRepo is a repository with recorded runs, and the fake no-mistakes and gh the built atm finds on PATH.
@@ -283,7 +289,7 @@ func watchGateEvents(run watchSubtest) {
 			"gate_failed: test\n"},
 		{"ci runs", gateStatus("running", pr, `ci,1m ago: log: waiting for "build", 3 checks`), `{"state":"OPEN"}`,
 			"ci_running: ci\n"},
-		{"ci is green and the pull request waits", gateStatus("running", pr, "ci,"+allPassed), `{"state":"OPEN"}`,
+		{"ci is green and the pull request waits", gateStatus("running", pr, "ci,"+allPassed), lowRisk,
 			"ci_green_awaiting_merge: ci\n"},
 		{"the pull request merged", gateStatus("running", pr, "ci,"+allPassed), `{"state":"MERGED"}`,
 			"done: merged\n"},
@@ -308,10 +314,10 @@ func watchGateEvents(run watchSubtest) {
 	run("ci green, read with gh in the same pass", func(t *testing.T, w *watchRepo) {
 		w.recorded("7-1", "passed", "passed")
 		w.fakeFile("status", gateStatus("running", pr, "ci,"+allPassed))
-		w.fakeFile("pr", `{"state":"OPEN"}`)
+		w.fakeFile("pr", lowRisk)
 		w.expect(`{"event":"ci_green_awaiting_merge","run":"7-1","step":"ci","outcome":""}`+"\n", 0, "--json", "7-1")
 		root, _ := filepath.EvalSymlinks(w.root)
-		want := " no-mistakes axi status --run " + gateID + "\n" + root + " gh pr view atm/the-unit --json state\n"
+		want := " no-mistakes axi status --run " + gateID + "\n" + root + " gh " + ghView + "\n"
 		if calls := w.calls(); !strings.HasSuffix(calls, want) || strings.Count(calls, "\n") != 2 {
 			t.Fatalf("calls:\n%s\nwant one status and its gh read:\n%s", calls, want)
 		}
@@ -457,7 +463,7 @@ func watchUnknown(run watchSubtest) {
 	run("a gh call that fails is unknown", func(t *testing.T, w *watchRepo) {
 		w.recorded("7-1", "passed", "passed")
 		w.fakeFile("status", gateStatus("running", pr, "ci,"+allPassed))
-		w.unknown("pull request: gh pr view atm/the-unit --json state: exit status 1: HTTP 502", "7-1")
+		w.unknown("pull request: gh "+ghView+": exit status 1: HTTP 502", "7-1")
 	})
 	run("a call that hangs is killed at its patience", func(t *testing.T, w *watchRepo) {
 		w.recorded("7-1", "passed", "passed")
@@ -496,7 +502,7 @@ func watchAfterPullRequest(run watchSubtest) {
 		run(step.status+" with an unreadable pull request is unknown", func(t *testing.T, w *watchRepo) {
 			w.recorded("7-1", "passed", "passed")
 			w.fakeFile("status", gateStatus("running", []string{"pr,completed", "ci," + step.status}))
-			w.unknown("pull request: gh pr view atm/the-unit --json state: exit status 1: HTTP 502", "7-1")
+			w.unknown("pull request: gh "+ghView+": exit status 1: HTTP 502", "7-1")
 		})
 		for _, delivery := range []string{"running", "passed"} {
 			for _, outcome := range []string{"merged", "closed"} {
@@ -547,5 +553,104 @@ func watchAfter(run watchSubtest) {
 		if n := strings.Count(w.calls(), "\n"); n != 1 {
 			t.Fatalf("watch skipped an event --after does not name:\n%s", w.calls())
 		}
+	})
+}
+
+// prJSON is gh's reading of a pull request.
+func prJSON(state, body, branch string, labels, files []string) string {
+	var ls, fs []map[string]string
+	for _, l := range labels {
+		ls = append(ls, map[string]string{"name": l})
+	}
+	for _, f := range files {
+		fs = append(fs, map[string]string{"path": f})
+	}
+	b, _ := json.Marshal(map[string]any{"state": state, "body": body, "headRefName": branch, "labels": ls, "files": fs})
+	return string(b)
+}
+
+// reviewCases are open pull requests, and the event atm axi watch prints when their ci is green.
+func reviewCases() []struct{ name, pr, want string } {
+	const (
+		low     = "## Risk Assessment\nLow: one line\n"
+		release = "release-please--branches--main"
+		held    = "review_required: risk level missing without risk-reviewed\n"
+		merges  = "ci_green_awaiting_merge: ci\n"
+	)
+	return []struct{ name, pr, want string }{
+		{"review-required holds it", prJSON("OPEN", low, "atm/the-unit", []string{"review-required"}, nil),
+			"review_required: review-required label\n"},
+		{"review-required holds it, risk-reviewed beside it",
+			prJSON("OPEN", "## Risk Assessment\nHigh\n", "b", []string{"risk-reviewed", "review-required"}, nil),
+			"review_required: review-required label\n"},
+		{"a High level holds it", prJSON("OPEN", "## Risk Assessment\n\nHigh: wide\n", "b", nil, nil),
+			"review_required: risk level High without risk-reviewed\n"},
+		{"a lower case level holds it", prJSON("OPEN", "## Risk Assessment\nlow\n", "b", nil, nil),
+			"review_required: risk level low without risk-reviewed\n"},
+		{"a level read with CRLF lines", prJSON("OPEN", "## Risk Assessment  \r\n\r\nCritical!\r\n", "b", nil, nil),
+			"review_required: risk level Critical without risk-reviewed\n"},
+		{"no Risk Assessment holds it", prJSON("OPEN", "## Summary\nLow\n", "b", nil, nil), held},
+		{"an empty Risk Assessment holds it",
+			prJSON("OPEN", "## Risk Assessment\n\n## Summary\nLow\n", "b", nil, nil), held},
+		{"a Risk Assessment with no word holds it", prJSON("OPEN", "## Risk Assessment\n---\nLow\n", "b", nil, nil),
+			held},
+		{"a release-please pull request with other files holds it",
+			prJSON("OPEN", "", release, nil, []string{"CHANGELOG.md", "main.go"}), held},
+		{"another branch changing only the changelog holds it",
+			prJSON("OPEN", "", "atm/the-unit", nil, []string{"CHANGELOG.md"}), held},
+		{"risk-reviewed lets a High level merge",
+			prJSON("OPEN", "## Risk Assessment\nHigh\n", "b", []string{"risk-reviewed"}, nil), merges},
+		{"Low merges on its own", prJSON("OPEN", low, "b", []string{"other"}, nil), merges},
+		{"Medium merges on its own",
+			prJSON("OPEN", "intro\n## Risk Assessment\nMedium - ok\n## Next\nHigh", "b", nil, nil), merges},
+		{"a release-please pull request of the changelog and the manifest merges on its own",
+			prJSON("OPEN", "", release, nil, []string{"CHANGELOG.md", ".release-please-manifest.json"}), merges},
+		{"a merged pull request is done, label or not",
+			prJSON("MERGED", "", "b", []string{"review-required"}, nil), "done: merged\n"},
+		{"a closed pull request is done, label or not",
+			prJSON("CLOSED", "", "b", []string{"review-required"}, nil), "done: closed\n"},
+	}
+}
+
+// TestWatchReviewRequired drives the built atm axi watch against recorded pull requests whose labels, body and
+// files a fake gh shows: review_required for a pull request held by review-required or by its risk level, and
+// none for one that merges on its own.
+func TestWatchReviewRequired(t *testing.T) {
+	pkg := "github.com/thellmwhisperer/agentic-team-member/internal/cli."
+	bin := buildATM(t, "-X", pkg+"watchEvery=20ms", "-X", pkg+"watchPatience="+watchPatienceForTest.String())
+	run := func(name string, f func(t *testing.T, w *watchRepo)) {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			w := newWatchRepo(t, bin)
+			w.recorded("7-1", "passed", "passed")
+			f(t, w)
+		})
+	}
+	const low = "## Risk Assessment\nLow: one line\n"
+	green := gateStatus("running", pr, "ci,"+allPassed)
+	for _, c := range reviewCases() {
+		run(c.name, func(t *testing.T, w *watchRepo) {
+			w.fakeFile("status", green)
+			w.fakeFile("pr", c.pr)
+			w.expect(c.want, 0, "7-1")
+		})
+	}
+	run("a held pull request whose ci still runs shows ci_running", func(t *testing.T, w *watchRepo) {
+		w.fakeFile("status", gateStatus("running", pr, `ci,1m ago: log: waiting for "build", 3 checks`))
+		w.fakeFile("pr", prJSON("OPEN", low, "b", []string{"review-required"}, nil))
+		w.expect("ci_running: ci\n", 0, "7-1")
+	})
+	run("a held pull request whose ci is done shows review_required, as JSON", func(t *testing.T, w *watchRepo) {
+		w.fakeFile("status", gateStatus("running", pr[:3]))
+		w.fakeFile("pr", prJSON("OPEN", low, "b", []string{"review-required"}, nil))
+		w.expect(`{"event":"review_required","run":"7-1","step":"","outcome":"review-required label"}`+"\n", 0,
+			"--json", "7-1")
+	})
+	run("--after review_required skips it until the hold changes", func(t *testing.T, w *watchRepo) {
+		w.fakeFile("status", green)
+		w.fakeFile("pr-1", prJSON("OPEN", low, "b", []string{"review-required"}, nil))
+		w.fakeFile("pr-2", prJSON("OPEN", low, "b", []string{"review-required"}, nil))
+		w.fakeFile("pr", prJSON("OPEN", "## Risk Assessment\nHigh\n", "b", nil, nil))
+		w.expect("review_required: risk level High without risk-reviewed\n", 0, "--after", "review_required", "7-1")
 	})
 }
