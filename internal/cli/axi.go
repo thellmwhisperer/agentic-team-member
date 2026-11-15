@@ -37,7 +37,7 @@ func axiCmd() *cobra.Command {
 				return err
 			}
 			return o.Err()
-		}}, axiList(true), axiList(false), axiPlan(), axiWatch())
+		}}, axiList(true), axiList(false), axiPlan())
 	return c
 }
 

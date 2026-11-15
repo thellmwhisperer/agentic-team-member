@@ -20,7 +20,16 @@ import (
 // The real binary reads the machine choice, keeps a completed screen interactive,
 // and returns the run's code after q or Ctrl+C. The default still closes itself.
 func TestRealScreenConfig(t *testing.T) {
-	bin := buildATM(t)
+	bin := filepath.Join(t.TempDir(), "atm")
+	args := []string{"build", "-o", bin}
+	if os.Getenv("GOCOVERDIR") != "" {
+		args = append(args, "-cover", "-coverpkg=./...")
+	}
+	build := exec.Command("go", append(args, "./cmd/atm")...)
+	build.Dir = filepath.Join("..", "..")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build atm: %v\n%s", err, out)
+	}
 	for _, mode := range []string{"", "close", "keep"} {
 		t.Run("failed run/"+mode, func(t *testing.T) {
 			testFailedScreenChoice(t, bin, mode)
