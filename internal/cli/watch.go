@@ -218,10 +218,20 @@ func gateEvent(ctx context.Context, root string, values map[string]string, table
 		}
 		open = pr == "OPEN"
 	}
-	if steps["ci"] != "running" {
-		return watchEvent{}, state, nil
+	// ci is green once its last activity says all CI checks passed, and an event then only when gh read its pull
+	// request open
+	green := slices.ContainsFunc(tables["active_steps"], func(a map[string]string) bool {
+		return a["step"] == "ci" && strings.Contains(a["last_activity"], "all CI checks passed")
+	})
+	state += " green:" + strconv.FormatBool(green)
+	switch {
+	case steps["ci"] != "running":
+	case !green:
+		return watchEvent{"ci_running", "ci", ""}, state, nil
+	case open:
+		return watchEvent{"ci_green_awaiting_merge", "ci", ""}, state, nil
 	}
-	return ciEvent(tables["active_steps"], open, state)
+	return watchEvent{}, state, nil
 }
 
 // pullRequest is the state gh reads of branch's pull request, run in root: OPEN, MERGED or CLOSED.
@@ -235,22 +245,6 @@ func pullRequest(ctx context.Context, root, branch string) (string, error) {
 		return "", fmt.Errorf("pull request: %w", err)
 	}
 	return pr.State, nil
-}
-
-// ciEvent is the event of the running ci step, by its last activity in active, the gate's active steps: green
-// once all CI checks passed, and an event then only when gh read its pull request open.
-func ciEvent(active []map[string]string, open bool, state string) (watchEvent, string, error) {
-	green := slices.ContainsFunc(active, func(a map[string]string) bool {
-		return a["step"] == "ci" && strings.Contains(a["last_activity"], "all CI checks passed")
-	})
-	state += " green:" + strconv.FormatBool(green)
-	switch {
-	case !green:
-		return watchEvent{"ci_running", "ci", ""}, state, nil
-	case open:
-		return watchEvent{"ci_green_awaiting_merge", "ci", ""}, state, nil
-	}
-	return watchEvent{}, state, nil
 }
 
 // watchCall runs name args in dir, killed at ctx's deadline, and returns its stdout; its error carries stderr.
