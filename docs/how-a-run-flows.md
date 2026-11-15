@@ -341,8 +341,8 @@ The command's output goes to the screen and to `delivery-output.txt`.
 ATM executes the configured command without recognizing its name or parsing
 its output. Exit zero passes Delivery; a nonzero exit asks the launcher before
 the run can continue or stop. Publishing, review decisions and PR tracking
-belong to that command or its launcher. The attached screen observes the gate
-after Delivery passes and the run ends, as described below.
+belong to that command or its launcher. See [The screen](#the-screen) for how
+the attached screen observes the gate.
 
 ## Time limits
 
