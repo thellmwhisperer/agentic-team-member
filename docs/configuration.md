@@ -276,6 +276,7 @@ unused `step` or `outcome` values are empty strings.
 | `gate_failed` | A gate step failed while the gate itself has not ended |
 | `ci_running` | The `ci` step runs and its last activity does not say `all CI checks passed` |
 | `ci_green_awaiting_merge` | The `ci` step runs, its last activity says `all CI checks passed`, and `gh` confirms an open PR in the same read |
+| `review_required` | `gh` reads an open PR that carries `review-required`, or that has no `risk-reviewed` label and a risk level other than exactly `Low` or `Medium`, read as `scripts/arm-auto-merge.sh` reads it; the outcome says which hold it is. It takes precedence over `ci_green_awaiting_merge`, not over `ci_running` |
 | `done` | Outcome `failed` for a failed ATM run or a failed or cancelled gate; `passed` for a completed gate or a passed run with no delivery; `merged` or `closed` when `gh` confirms that PR state for a gate that has not ended |
 
 A terminal gate determines `done` without reading its PR. Otherwise, once

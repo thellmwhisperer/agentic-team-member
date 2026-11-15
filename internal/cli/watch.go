@@ -26,7 +26,8 @@ import (
 // Strings, so a test's build sets them with -ldflags -X.
 var watchEvery, watchPatience = "5s", "5m"
 
-var watchEvents = []string{"gate_question", "gate_failed", "ci_running", "ci_green_awaiting_merge", "done"}
+var watchEvents = []string{"gate_question", "gate_failed", "ci_running", "ci_green_awaiting_merge", "review_required",
+	"done"}
 
 // watchEvent is a moment of a run's gate a driver acts on: the gate step it is about, or a done run's outcome.
 type watchEvent struct{ event, step, outcome string }
@@ -198,17 +199,20 @@ func gateEvent(ctx context.Context, root string, values map[string]string, table
 	case "failed", "cancelled":
 		return watchEvent{"done", "", "failed"}, state, nil
 	}
-	open := false
+	open, hold := false, ""
 	if steps["pr"] == "completed" {
 		pr, err := pullRequest(ctx, root, values["branch"])
 		if err != nil {
 			return watchEvent{}, "", err
 		}
-		state += " pr:" + pr
-		if pr == "MERGED" || pr == "CLOSED" {
-			return watchEvent{"done", "", strings.ToLower(pr)}, state, nil
+		state += " pr:" + pr.State
+		if pr.State == "MERGED" || pr.State == "CLOSED" {
+			return watchEvent{"done", "", strings.ToLower(pr.State)}, state, nil
 		}
-		open = pr == "OPEN"
+		if open = pr.State == "OPEN"; open {
+			hold = pr.hold()
+			state += " hold:" + hold
+		}
 	}
 	for _, want := range []struct{ event, status string }{{"gate_question", "awaiting_approval"},
 		{"gate_question", "fix_review"}, {"gate_failed", "failed"}} {
@@ -218,33 +222,97 @@ func gateEvent(ctx context.Context, root string, values map[string]string, table
 			}
 		}
 	}
-	// ci is green once its last activity says all CI checks passed, and an event then only when gh read its pull
-	// request open
-	green := slices.ContainsFunc(tables["active_steps"], func(a map[string]string) bool {
+	return ciEvent(steps["ci"] == "running", tables["active_steps"], open, hold, state)
+}
+
+// ciEvent is the event of the ci step, running or not, once the pull request is read: open, and held for the reason
+// hold, or "". ci is green once its last activity, in active, says all CI checks passed, and an event then only when
+// gh read the pull request open.
+func ciEvent(ci bool, active []map[string]string, open bool, hold, state string) (watchEvent, string, error) {
+	green := slices.ContainsFunc(active, func(a map[string]string) bool {
 		return a["step"] == "ci" && strings.Contains(a["last_activity"], "all CI checks passed")
 	})
 	state += " green:" + strconv.FormatBool(green)
 	switch {
-	case steps["ci"] != "running":
-	case !green:
+	case ci && !green:
 		return watchEvent{"ci_running", "ci", ""}, state, nil
-	case open:
+	case hold != "": // a label or a risk level keeps an open pull request from merging, whatever its checks say
+		return watchEvent{"review_required", "", hold}, state, nil
+	case ci && open:
 		return watchEvent{"ci_green_awaiting_merge", "ci", ""}, state, nil
 	}
 	return watchEvent{}, state, nil
 }
 
-// pullRequest is the state gh reads of branch's pull request, run in root: OPEN, MERGED or CLOSED.
-func pullRequest(ctx context.Context, root, branch string) (string, error) {
-	out, err := watchCall(ctx, root, "gh", "pr", "view", branch, "--json", "state")
-	var pr struct{ State string }
+// watchedPR is a pull request as gh reads it.
+type watchedPR struct {
+	State, Body, HeadRefName string
+	Labels                   []struct{ Name string }
+	Files                    []struct{ Path string }
+}
+
+// riskHeading is the line scripts/arm-auto-merge.sh starts reading the risk level after, riskEnd a heading that
+// ends the section, riskWord the level in its first non-empty line.
+var (
+	riskHeading = regexp.MustCompile(`^## Risk Assessment\s*$`)
+	riskEnd     = regexp.MustCompile(`^#+\s`)
+	riskWord    = regexp.MustCompile(`[A-Za-z]+`)
+)
+
+// hold is why the pull request will not merge on its own, as scripts/arm-auto-merge.sh decides it: "" when nothing
+// holds it. The review-required label comes first, then a risk level other than Low and Medium without the
+// risk-reviewed label.
+func (p watchedPR) hold() string {
+	labels := map[string]bool{}
+	for _, l := range p.Labels {
+		labels[l.Name] = true
+	}
+	if labels["review-required"] {
+		return "review-required label"
+	}
+	level := p.riskLevel()
+	if level == "Low" || level == "Medium" || labels["risk-reviewed"] {
+		return ""
+	}
+	return "risk level " + cmp.Or(level, "missing") + " without risk-reviewed"
+}
+
+// riskLevel is the first word of the first non-empty line under the body's Risk Assessment heading; Low for a
+// release-please pull request that changes only the changelog and the manifest.
+func (p watchedPR) riskLevel() string {
+	releaseOnly := p.HeadRefName == "release-please--branches--main"
+	for _, f := range p.Files {
+		releaseOnly = releaseOnly && (f.Path == "CHANGELOG.md" || f.Path == ".release-please-manifest.json")
+	}
+	if releaseOnly {
+		return "Low"
+	}
+	found := false
+	for _, line := range strings.Split(p.Body, "\n") {
+		line = strings.TrimSuffix(line, "\r")
+		switch {
+		case !found:
+			found = riskHeading.MatchString(line)
+		case riskEnd.MatchString(line):
+			return ""
+		case strings.Trim(line, " \t") != "":
+			return riskWord.FindString(line)
+		}
+	}
+	return ""
+}
+
+// pullRequest is the pull request gh reads of branch, run in root.
+func pullRequest(ctx context.Context, root, branch string) (watchedPR, error) {
+	out, err := watchCall(ctx, root, "gh", "pr", "view", branch, "--json", "state,labels,body,files,headRefName")
+	var pr watchedPR
 	if err == nil {
 		err = json.Unmarshal(out, &pr)
 	}
 	if err != nil {
-		return "", fmt.Errorf("pull request: %w", err)
+		return watchedPR{}, fmt.Errorf("pull request: %w", err)
 	}
-	return pr.State, nil
+	return pr, nil
 }
 
 // watchCall runs name args in dir, killed at ctx's deadline, and returns its stdout; its error carries stderr.
