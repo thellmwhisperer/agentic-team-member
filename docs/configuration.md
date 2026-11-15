@@ -284,8 +284,8 @@ unused `step` or `outcome` values are empty strings. For `review_required`,
 | `stalled` | No other event, and for `--stall` nothing moved: the run's step, the size of the agent's stream files (`*.jsonl`, `*.stderr.txt`) in the run's folder, and the gate's run, status, steps and each step's last activity |
 
 `stalled` prints `stalled: <step> for <duration>`, and with `--json` adds
-`for` to the object. Its step is the gate's first step that has not completed,
-or the run's step before the gate. The duration counts from the read where
+`for` to the object. Its step is the gate's first step that is not completed,
+pending or skipped, or the run's step before the gate or when there is none. The duration counts from the read where
 watch last saw a move, since its own first read. A last activity that only
 grows older is no move; one that is younger than before is. A check's output
 is not on disk, so a check that runs longer than `--stall` is `stalled` at
