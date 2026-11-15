@@ -478,8 +478,7 @@ func watchUnknown(run watchSubtest) {
 	})
 }
 
-// watchAfter: --after skips only its event, and only while the state is the one first read
-func watchAfter(run watchSubtest) {
+func watchAfterPullRequest(run watchSubtest) {
 	for _, step := range []struct{ status, event string }{
 		{"awaiting_approval", "gate_question"},
 		{"fix_review", "gate_question"},
@@ -523,6 +522,11 @@ func watchAfter(run watchSubtest) {
 			}
 		}
 	}
+}
+
+// watchAfter: --after skips only its event, and only while the state is the one first read
+func watchAfter(run watchSubtest) {
+	watchAfterPullRequest(run)
 	run("--after skips its event while the state is the first read", func(t *testing.T, w *watchRepo) {
 		w.recorded("7-1", "passed", "passed")
 		waiting := gateStatus("running", []string{"review,awaiting_approval"})
