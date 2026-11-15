@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.14.1](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.14.0...v1.14.1) (2026-11-15)
+
+
+### Bug Fixes
+
+* **cli:** remove broken axi watch command ([#696](https://github.com/thellmwhisperer/agentic-team-member/issues/696)) ([25876ac](https://github.com/thellmwhisperer/agentic-team-member/commit/25876ac0c3a0f3ac39d05b97a2b035fc51169ec4))
+
 ## [1.14.0](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.13.0...v1.14.0) (2026-11-15)
 
 
