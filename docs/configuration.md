@@ -242,6 +242,7 @@ Run repository commands from inside the repository they work on.
 | `atm runs [--json]` | Retained runs; text shows label, `running`, `passed` or `failed at <step>`, duration, agent, issue, next step and report when present, and `serve` last |
 | `atm axi run [--json] [flags] <issue>` | Waits for the run to end, prints its outcome and exits with its code |
 | `atm axi status [--json]`, `atm axi runs [--json]` | The runs going, or retained runs, as a table |
+| `atm axi watch [--json] [--after <event>] [run]` | See [Watching a gate](#watching-a-gate) |
 | `atm axi plan [--json] [--follow] <plan.json>` | Which tickets of a plan can launch now; see [following a plan](#following-a-plan) |
 
 Leaving a screen with `q` or Ctrl-C, or closing the terminal, leaves the run
@@ -256,7 +257,50 @@ have `run`, `issue`, `step`, `duration` and `agent` for `status`, and `run`,
 [report reference](how-a-run-flows.md#the-report) defines the `agent` label,
 how requested settings differ from the observed model, and the `serve` value.
 
-The exit codes are in the [README](../README.md#run-it).
+The run's exit codes are in the [README](../README.md#run-it).
+
+### Watching a gate
+
+`atm axi watch [run]` waits for the next gate event, prints one line, and
+exits 0, including for `done: failed`. Without a run label it selects the
+newest running run; if none is running it exits 1 with `nothing runs`.
+Name an ended run explicitly to watch its gate after Delivery.
+
+The default output is TOON, `<event>: <step>` or `done: <outcome>`.
+`--json` instead prints one object with `event`, `run`, `step` and `outcome`;
+unused `step` or `outcome` values are empty strings.
+
+| Event | Meaning |
+|-------|---------|
+| `gate_question` | A gate step is `awaiting_approval` or `fix_review` |
+| `gate_failed` | A gate step failed while the gate itself has not ended |
+| `ci_running` | The `ci` step runs and its last activity does not say `all CI checks passed` |
+| `ci_green_awaiting_merge` | The `ci` step runs, its last activity says `all CI checks passed`, and `gh` confirms an open PR in the same read |
+| `done` | Outcome `failed` for a failed ATM run or a failed or cancelled gate; `passed` for a completed gate or a passed run with no delivery; `merged` or `closed` when `gh` confirms that PR state for a gate that has not ended |
+
+A terminal gate determines `done` without reading its PR. Otherwise, once
+the gate's `pr` step is completed, watch reads the PR with `gh` before
+selecting an event. A merged or closed PR takes precedence over a waiting
+or failed step.
+
+Use `--after <event>` to skip only that event while the state remains the
+first successfully read state of this invocation. Other events still print.
+Once watch observes a changed state, it stops skipping, even if the original
+state later returns. The accepted event names are those in the table;
+`--json` and `--after` are its only command-specific flags.
+
+Watch only reads: the recorded run and report, the same no-mistakes status
+used by `atm attach`, and the PR. During Delivery it asks for status in the
+clone; after Delivery passes or fails it uses the gate ID recorded in
+`delivery-output.txt`, from the run directory. It writes no run or gate data
+and never answers, merges or relaunches.
+
+Reads repeat every five seconds. An unreadable required report, missing
+gate ID or delivery output, failed gate-status read, status with no run, or
+failed `gh` read produces no event. After five minutes without a good read,
+watch exits 1 with the last error; each no-mistakes or `gh` call is killed
+at that deadline. Successful reads without an event keep watch waiting.
+Invalid arguments or running outside a Git repository exit 2.
 
 ### Saying hello to the agent
 
