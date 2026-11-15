@@ -57,9 +57,6 @@ func axiWatch() *cobra.Command {
 		if *after != "" && !slices.Contains(watchEvents, *after) {
 			return fmt.Errorf("--after: %s is none of %s", *after, strings.Join(watchEvents, ", "))
 		}
-		if *stall < time.Second {
-			return fmt.Errorf("--stall: %s is under a second", *stall)
-		}
 		root, err := toplevel()
 		if err != nil {
 			return err

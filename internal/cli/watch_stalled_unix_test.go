@@ -167,16 +167,11 @@ func watchStillGate(run watchSubtest) {
 		w.fakeFile("each", `sed "s/AGE/$n/" "$FAKE/aged"; exit 0`+"\n")
 		w.stalled("review", "--stall", stallFor.String(), "7-1")
 	})
-	run("--stall is 60 minutes by default, and a second at least", func(t *testing.T, w *watchRepo) {
+	run("--stall is 60 minutes by default", func(t *testing.T, w *watchRepo) {
 		w.recorded("7-1", "running", "not run")
 		help, _, _ := w.watched("--help")
 		if !strings.Contains(help, "--stall duration") || !strings.Contains(help, "(default 1h0m0s)") {
 			t.Fatalf("watch's help does not show --stall at 60 minutes:\n%s", help)
-		}
-		for _, stall := range []string{"500ms", "0s", "-1m", "soon"} {
-			if _, errOut, code := w.watched("--stall", stall, "7-1"); code != 2 || !strings.Contains(errOut, "--stall") {
-				t.Fatalf("--stall %s: exit %d, %q", stall, code, errOut)
-			}
 		}
 	})
 }

@@ -289,7 +289,7 @@ or the run's step before the gate. The duration counts from the read where
 watch last saw a move, since its own first read. A last activity that only
 grows older is no move; one that is younger than before is. A check's output
 is not on disk, so a check that runs longer than `--stall` is `stalled` at
-`checks`. `--stall` is 60 minutes by default and at least a second.
+`checks`. `--stall` is 60 minutes by default.
 
 A terminal gate determines `done` without reading its PR. Otherwise, once
 the gate's `pr` step is completed, watch reads the PR with `gh` before
