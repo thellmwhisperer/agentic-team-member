@@ -24,26 +24,9 @@ Keep the run's report and delivery output for review.
 
 ATM executes the configured delivery command without parsing its output or
 tracking its reviews, pull requests or merges. The launcher owns decisions
-beyond the run, using the delivery tool's own interface.
+and monitoring beyond the run, using the delivery tool's own interface.
 A successful run means that its checks and configured delivery completed;
 it does not imply that a pull request merged.
-
-Watch a run, and the gate after its delivery, with `atm axi watch [run]`,
-and only with it: do not poll `atm status` or the gate yourself. It blocks
-until the run's next event, prints it as one TOON line,
-`<event>: <its gate step, or done's outcome>` (with `--json`, an object with
-`event`, `run`, `step` and `outcome`), and exits 0; with no run named it watches the newest running run. The events
-are `gate_question` (a gate step waits for your answer), `gate_failed`,
-`ci_running`, `ci_green_awaiting_merge` (CI is green and the pull request
-waits), `review_required` (a label or the risk level keeps the pull request
-from merging on its own; its outcome says which), `done` with its outcome: `passed`, `failed`, `merged` or `closed`,
-and `stalled: <step> for <duration>` when nothing of the run moved for
-`--stall` (60 minutes by default; `--json` adds `for`).
-`review_required` prints the hold instead of a gate step: `review-required label` or `risk level <level> without risk-reviewed`.
-Run it again with `--after <event>` to skip the event you just handled while
-nothing else changed; after `stalled`, `--after stalled` prints it again only
-once the run moved and stopped again. Exit 1 means it watches nothing, or read nothing for
-5 minutes, and says why.
 
 Inspect stderr and the process exit as well as events. Exit 0 means success,
 1 means an agent or checks failure, 4 means delivery failed, and 2 means
