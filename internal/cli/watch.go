@@ -198,14 +198,6 @@ func gateEvent(ctx context.Context, root string, values map[string]string, table
 	case "failed", "cancelled":
 		return watchEvent{"done", "", "failed"}, state, nil
 	}
-	for _, want := range []struct{ event, status string }{{"gate_question", "awaiting_approval"},
-		{"gate_question", "fix_review"}, {"gate_failed", "failed"}} {
-		for _, s := range tables["steps"] {
-			if s["status"] == want.status {
-				return watchEvent{want.event, s["step"], ""}, state, nil
-			}
-		}
-	}
 	open := false
 	if steps["pr"] == "completed" {
 		pr, err := pullRequest(ctx, root, values["branch"])
@@ -217,6 +209,14 @@ func gateEvent(ctx context.Context, root string, values map[string]string, table
 			return watchEvent{"done", "", strings.ToLower(pr)}, state, nil
 		}
 		open = pr == "OPEN"
+	}
+	for _, want := range []struct{ event, status string }{{"gate_question", "awaiting_approval"},
+		{"gate_question", "fix_review"}, {"gate_failed", "failed"}} {
+		for _, s := range tables["steps"] {
+			if s["status"] == want.status {
+				return watchEvent{want.event, s["step"], ""}, state, nil
+			}
+		}
 	}
 	// ci is green once its last activity says all CI checks passed, and an event then only when gh read its pull
 	// request open

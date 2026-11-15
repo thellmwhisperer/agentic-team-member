@@ -39,6 +39,9 @@ cat "$FAKE/status"
 // watchGH answers gh pr view with $FAKE/pr, or fails without it.
 const watchGH = `#!/bin/sh
 echo "$(pwd -P) gh $*" >>"$FAKE/calls"
+n=$(($(cat "$FAKE/gh-n" 2>/dev/null) + 1))
+echo "$n" >"$FAKE/gh-n"
+[ ! -f "$FAKE/pr-$n" ] || exec cat "$FAKE/pr-$n"
 [ -f "$FAKE/pr" ] || { echo "HTTP 502: Bad Gateway" >&2; exit 1; }
 cat "$FAKE/pr"
 `
@@ -477,6 +480,49 @@ func watchUnknown(run watchSubtest) {
 
 // watchAfter: --after skips only its event, and only while the state is the one first read
 func watchAfter(run watchSubtest) {
+	for _, step := range []struct{ status, event string }{
+		{"awaiting_approval", "gate_question"},
+		{"fix_review", "gate_question"},
+		{"failed", "gate_failed"},
+	} {
+		run(step.status+" reads an open pull request before its event", func(t *testing.T, w *watchRepo) {
+			w.recorded("7-1", "passed", "passed")
+			w.fakeFile("status", gateStatus("running", []string{"pr,completed", "ci," + step.status}))
+			w.fakeFile("pr", `{"state":"OPEN"}`)
+			w.expect(step.event+": ci\n", 0, "7-1")
+			if calls := w.calls(); strings.Count(calls, " gh pr view ") != 1 {
+				t.Fatalf("watch did not read the pull request before its event:\n%s", calls)
+			}
+		})
+		run(step.status+" with an unreadable pull request is unknown", func(t *testing.T, w *watchRepo) {
+			w.recorded("7-1", "passed", "passed")
+			w.fakeFile("status", gateStatus("running", []string{"pr,completed", "ci," + step.status}))
+			w.unknown("pull request: gh pr view atm/the-unit --json state: exit status 1: HTTP 502", "7-1")
+		})
+		for _, delivery := range []string{"running", "passed"} {
+			for _, outcome := range []string{"merged", "closed"} {
+				run("--after "+step.status+" sees "+outcome+" during "+delivery+" delivery", func(t *testing.T, w *watchRepo) {
+					w.recorded("7-1", delivery, delivery)
+					waiting := gateStatus("running", []string{"pr,completed", "ci," + step.status})
+					w.fakeFile("status-1", waiting)
+					w.fakeFile("status-2", waiting)
+					w.fakeFile("status", gateStatus("completed", []string{"pr,completed", "ci,completed"}))
+					w.fakeFile("pr-1", `{"state":"OPEN"}`)
+					w.fakeFile("pr", `{"state":"`+strings.ToUpper(outcome)+`"}`)
+					want := "done: " + outcome + "\n"
+					args := []string{"--after", step.event, "7-1"}
+					if delivery == "running" {
+						args = append(args, "--json")
+						want = `{"event":"done","run":"7-1","step":"","outcome":"` + outcome + `"}` + "\n"
+					}
+					w.expect(want, 0, args...)
+					if calls := w.calls(); strings.Count(calls, " no-mistakes ") != 2 || strings.Count(calls, " gh pr view ") != 2 {
+						t.Fatalf("watch did not read the pull request on both passes:\n%s", calls)
+					}
+				})
+			}
+		}
+	}
 	run("--after skips its event while the state is the first read", func(t *testing.T, w *watchRepo) {
 		w.recorded("7-1", "passed", "passed")
 		waiting := gateStatus("running", []string{"review,awaiting_approval"})
