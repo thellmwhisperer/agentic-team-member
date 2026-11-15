@@ -242,7 +242,7 @@ Run repository commands from inside the repository they work on.
 | `atm runs [--json]` | Retained runs; text shows label, `running`, `passed` or `failed at <step>`, duration, agent, issue, next step and report when present, and `serve` last |
 | `atm axi run [--json] [flags] <issue>` | Waits for the run to end, prints its outcome and exits with its code |
 | `atm axi status [--json]`, `atm axi runs [--json]` | The runs going, or retained runs, as a table |
-| `atm axi watch [--json] [--after <event>] [run]` | See [Watching a gate](#watching-a-gate) |
+| `atm axi watch [--json] [--after <event>] [--stall <duration>] [run]` | See [Watching a gate](#watching-a-gate) |
 | `atm axi plan [--json] [--follow] <plan.json>` | Which tickets of a plan can launch now; see [following a plan](#following-a-plan) |
 
 Leaving a screen with `q` or Ctrl-C, or closing the terminal, leaves the run
@@ -281,6 +281,15 @@ unused `step` or `outcome` values are empty strings. For `review_required`,
 | `ci_green_awaiting_merge` | The `ci` step runs, its last activity says `all CI checks passed`, and `gh` confirms an open PR with no `review_required` hold in the same read |
 | `review_required` | `gh` reads an open PR that carries `review-required`, or that has no `risk-reviewed` label and a risk level other than exactly `Low` or `Medium`, read as `scripts/arm-auto-merge.sh` reads it; the outcome says which hold it is. It takes precedence over `ci_green_awaiting_merge`, not over `ci_running` |
 | `done` | Outcome `failed` for a failed ATM run or a failed or cancelled gate; `passed` for a completed gate or a passed run with no delivery; `merged` or `closed` when `gh` confirms that PR state for a gate that has not ended |
+| `stalled` | No other event, and for `--stall` nothing moved: the run's step, the size of the agent's stream files (`*.jsonl`, `*.stderr.txt`) in the run's folder, and the gate's run, status, steps and each step's last activity |
+
+`stalled` prints `stalled: <step> for <duration>`, and with `--json` adds
+`for` to the object. Its step is the gate's first step that is not completed,
+pending or skipped, or the run's step before the gate or when there is none. The duration counts from the read where
+watch last saw a move, since its own first read. A last activity that only
+grows older is no move; one that is younger than before is. A check's output
+is not on disk, so a check that runs longer than `--stall` is `stalled` at
+`checks`. `--stall` is 60 minutes by default.
 
 A terminal gate determines `done` without reading its PR. Otherwise, once
 the gate's `pr` step is completed, watch reads the PR with `gh` before
@@ -292,8 +301,10 @@ first successfully read state of this invocation. Other events still print.
 Once watch observes a changed state, it stops skipping, even if the original
 state later returns. A change in the hold reason counts as a changed state,
 so `--after review_required` can return `review_required` again with a new reason.
-The accepted event names are those in the table;
-`--json` and `--after` are its only command-specific flags.
+`--after stalled` instead skips `stalled` until watch
+sees the run move, then prints it once nothing moved for `--stall` again.
+The accepted event names are those in the table; `--json`, `--after` and
+`--stall` are its only command-specific flags.
 
 Watch only reads: the recorded run and report, the same no-mistakes status
 used by `atm attach`, and the PR. During Delivery it asks for status in the

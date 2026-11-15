@@ -27,10 +27,21 @@ import (
 var watchEvery, watchPatience = "5s", "5m"
 
 var watchEvents = []string{"gate_question", "gate_failed", "ci_running", "ci_green_awaiting_merge", "review_required",
-	"done"}
+	"done", "stalled"}
 
-// watchEvent is a moment of a run's gate a driver acts on: the gate step it is about, or a done run's outcome.
-type watchEvent struct{ event, step, outcome string }
+// watchEvent is a moment of a run's gate a driver acts on: the gate step it is about, or a done run's outcome; a
+// stalled run's step, and for how long nothing moved.
+type watchEvent struct{ event, step, outcome, lasted string }
+
+// watchMoves is what says a run moved, as one read sees it: still, its step, the size of each agent stream in its
+// folder, and its gate's run, status, steps and the last activity of each, without its age, which is in ages by
+// step; at, the step a stall is at.
+type watchMoves struct {
+	at, still string
+	ages      map[string]time.Duration
+}
+
+var activityAge = regexp.MustCompile(`^(\S+) ago: `)
 
 var gateRunID = regexp.MustCompile(`(?m)^\s*id: "([^"]+)"\s*$`)
 
@@ -41,6 +52,7 @@ func axiWatch() *cobra.Command {
 		Args: cobra.MaximumNArgs(1)}
 	asJSON := c.Flags().Bool("json", false, "print JSON")
 	after := c.Flags().String("after", "", "skip this event while the run's state is the one watch first read")
+	stall := c.Flags().Duration("stall", time.Hour, "print stalled once nothing of the run moved for this long")
 	c.RunE = func(cmd *cobra.Command, args []string) error {
 		if *after != "" && !slices.Contains(watchEvents, *after) {
 			return fmt.Errorf("--after: %s is none of %s", *after, strings.Join(watchEvents, ", "))
@@ -53,14 +65,18 @@ func axiWatch() *cobra.Command {
 		if err != nil {
 			return exitCode{1, err}
 		}
-		e, err := watch(root, o.Run, *after)
+		e, err := watch(root, o.Run, *after, *stall)
 		if err != nil {
 			return exitCode{1, err}
 		}
-		line := toon(e.event) + ": " + toon(cmp.Or(e.outcome, e.step)) + "\n"
+		value, keys, values := cmp.Or(e.outcome, e.step), []string{"event", "run", "step", "outcome"},
+			[]string{e.event, o.Run, e.step, e.outcome}
+		if e.event == "stalled" {
+			value, keys, values = value+" for "+e.lasted, append(keys, "for"), append(values, e.lasted)
+		}
+		line := toon(e.event) + ": " + toon(value) + "\n"
 		if *asJSON {
-			line = jsonObject([]string{"event", "run", "step", "outcome"}, []string{e.event, o.Run, e.step, e.outcome}) +
-				"\n"
+			line = jsonObject(keys, values) + "\n"
 		}
 		_, err = io.WriteString(cmd.OutOrStdout(), line)
 		return err
@@ -86,18 +102,23 @@ func watched(root, label string) (run.Outcome, error) {
 }
 
 // watch reads run label every watchEvery until it reads an event, which it returns; after, an event skipped while
-// the run's state is the one first read. It fails with the last error after watchPatience without a good read.
-func watch(root, label, after string) (watchEvent, error) {
+// the run's state is the one first read. With no event, it returns stalled once nothing moved for stall; after
+// stalled, only once something moved and then stopped for stall. It fails with the last error after
+// watchPatience without a good read.
+func watch(root, label, after string, stall time.Duration) (watchEvent, error) {
 	every, _ := time.ParseDuration(watchEvery)
 	patience, _ := time.ParseDuration(watchPatience)
 	good, first, skipping := time.Now(), "", after != ""
 	var last error
+	var was watchMoves
+	var moved time.Time
+	changes := -1 // the first read is no change
 	for ; ; time.Sleep(every) {
 		if last != nil && !time.Now().Before(good.Add(patience)) {
 			return watchEvent{}, last
 		}
 		ctx, cancel := context.WithDeadline(context.Background(), good.Add(patience))
-		e, state, err := readWatch(ctx, root, label)
+		e, state, m, err := readWatch(ctx, root, label)
 		killed := ctx.Err() != nil // by watch, at its patience: the error before says more
 		cancel()
 		if err != nil {
@@ -109,22 +130,80 @@ func watch(root, label, after string) (watchEvent, error) {
 		last = nil
 		good, first = time.Now(), cmp.Or(first, state)
 		skipping = skipping && state == first
+		if m.movedSince(was) {
+			moved, changes = good, changes+1
+		}
+		was = m
 		if e.event != "" && (!skipping || e.event != after) {
 			return e, nil
+		}
+		if lasted := good.Sub(moved); lasted >= stall && (after != "stalled" || changes > 0) {
+			return watchEvent{"stalled", m.at, "", lasted.Truncate(time.Second).String()}, nil
 		}
 	}
 }
 
-// readWatch reads run label once: its event, none for no event, and its state, what its events stand on. An
-// error is a state watch cannot read, which has no event.
-func readWatch(ctx context.Context, root, label string) (watchEvent, string, error) {
+// movedSince says whether the run moved from read was to read m: what it shows changed, or the last activity of a
+// gate step is younger than it was.
+func (m watchMoves) movedSince(was watchMoves) bool {
+	for step, age := range m.ages {
+		if before, ok := was.ages[step]; ok && age < before {
+			return true
+		}
+	}
+	return m.still != was.still
+}
+
+// runMoves is what moves of run o recorded in root: its step and the size of each agent stream in its folder,
+// where the agent writes them. A check's output is kept only in the run's process.
+func runMoves(root string, o run.Outcome) watchMoves {
+	m := watchMoves{at: o.Step, still: "step:" + o.Step, ages: map[string]time.Duration{}}
+	dir := filepath.Join(root, ".atm", "runs", o.Run)
+	jsonl, _ := filepath.Glob(filepath.Join(dir, "*.jsonl"))
+	stderr, _ := filepath.Glob(filepath.Join(dir, "*.stderr.txt"))
+	for _, path := range append(jsonl, stderr...) {
+		if info, err := os.Stat(path); err == nil {
+			m.still += " " + filepath.Base(path) + ":" + strconv.FormatInt(info.Size(), 10)
+		}
+	}
+	return m
+}
+
+// gateMoves adds to m what moves of the gate no-mistakes shows in values and tables; a stall is at its first step
+// that has not completed, if any.
+func gateMoves(m watchMoves, values map[string]string, tables map[string][]map[string]string) watchMoves {
+	m.still += " gate:" + values["id"] + " " + values["status"]
+	at := ""
+	for _, s := range tables["steps"] {
+		m.still += " " + s["step"] + ":" + s["status"]
+		if at == "" && !slices.Contains([]string{"completed", "pending", "skipped"}, s["status"]) {
+			at = s["step"]
+		}
+	}
+	m.at = cmp.Or(at, m.at)
+	for _, a := range tables["active_steps"] {
+		activity := a["last_activity"]
+		if age := activityAge.FindStringSubmatch(activity); age != nil {
+			if d, err := time.ParseDuration(age[1]); err == nil {
+				m.ages[a["step"]], activity = d, activity[len(age[0]):]
+			}
+		}
+		m.still += " " + a["step"] + ":" + strconv.Quote(activity)
+	}
+	return m
+}
+
+// readWatch reads run label once: its event, none for no event, its state, what its events stand on, and what
+// moves. An error is a state watch cannot read, which has no event.
+func readWatch(ctx context.Context, root, label string) (watchEvent, string, watchMoves, error) {
 	o, err := watched(root, label)
 	if err != nil || o.Outcome == "failed" { // watch reads the error before the event
-		return watchEvent{"done", "", "failed"}, "failed", err
+		return watchEvent{"done", "", "failed", ""}, "failed", watchMoves{}, err
 	}
+	m := runMoves(root, o)
 	result, clone, err := readReport(o.Report)
 	if err != nil {
-		return watchEvent{}, "", fmt.Errorf("report of %s: %w", label, err)
+		return watchEvent{}, "", m, fmt.Errorf("report of %s: %w", label, err)
 	}
 	dir, args, state := filepath.Dir(o.Report), []string{"axi", "status"}, o.Outcome+" "+result["delivery"]
 	switch result["delivery"] {
@@ -133,15 +212,15 @@ func readWatch(ctx context.Context, root, label string) (watchEvent, string, err
 	case "passed", "failed":
 		id, err := savedGateRun(dir)
 		if err != nil {
-			return watchEvent{}, "", err
+			return watchEvent{}, "", m, err
 		}
 		args = append(args, "--run", id)
 	default: // no gate: an event only once the run passed, with no delivery
 		e := watchEvent{}
 		if o.Outcome == "passed" {
-			e = watchEvent{"done", "", "passed"}
+			e = watchEvent{"done", "", "passed", ""}
 		}
-		return e, state, nil
+		return e, state, m, nil
 	}
 	out, err := watchCall(ctx, dir, "no-mistakes", args...)
 	values, tables := gateRun(string(out))
@@ -149,9 +228,10 @@ func readWatch(ctx context.Context, root, label string) (watchEvent, string, err
 		err = fmt.Errorf("no-mistakes axi status in %s shows no gate run", dir)
 	}
 	if err != nil {
-		return watchEvent{}, "", err
+		return watchEvent{}, "", m, err
 	}
-	return gateEvent(ctx, root, values, tables, state)
+	e, state, err := gateEvent(ctx, root, values, tables, state)
+	return e, state, gateMoves(m, values, tables), err
 }
 
 // readReport is the result of each node in report.json at path, and the run's clone.
@@ -195,9 +275,9 @@ func gateEvent(ctx context.Context, root string, values map[string]string, table
 	}
 	switch values["status"] {
 	case "completed":
-		return watchEvent{"done", "", "passed"}, state, nil
+		return watchEvent{"done", "", "passed", ""}, state, nil
 	case "failed", "cancelled":
-		return watchEvent{"done", "", "failed"}, state, nil
+		return watchEvent{"done", "", "failed", ""}, state, nil
 	}
 	open, hold := false, ""
 	if steps["pr"] == "completed" {
@@ -207,7 +287,7 @@ func gateEvent(ctx context.Context, root string, values map[string]string, table
 		}
 		state += " pr:" + pr.State
 		if pr.State == "MERGED" || pr.State == "CLOSED" {
-			return watchEvent{"done", "", strings.ToLower(pr.State)}, state, nil
+			return watchEvent{"done", "", strings.ToLower(pr.State), ""}, state, nil
 		}
 		if open = pr.State == "OPEN"; open {
 			hold = pr.hold()
@@ -218,7 +298,7 @@ func gateEvent(ctx context.Context, root string, values map[string]string, table
 		{"gate_question", "fix_review"}, {"gate_failed", "failed"}} {
 		for _, s := range tables["steps"] {
 			if s["status"] == want.status {
-				return watchEvent{want.event, s["step"], ""}, state, nil
+				return watchEvent{want.event, s["step"], "", ""}, state, nil
 			}
 		}
 	}
@@ -235,11 +315,11 @@ func ciEvent(ci bool, active []map[string]string, open bool, hold, state string)
 	state += " green:" + strconv.FormatBool(green)
 	switch {
 	case ci && !green:
-		return watchEvent{"ci_running", "ci", ""}, state, nil
+		return watchEvent{"ci_running", "ci", "", ""}, state, nil
 	case hold != "": // a label or a risk level keeps an open pull request from merging, whatever its checks say
-		return watchEvent{"review_required", "", hold}, state, nil
+		return watchEvent{"review_required", "", hold, ""}, state, nil
 	case ci && open:
-		return watchEvent{"ci_green_awaiting_merge", "ci", ""}, state, nil
+		return watchEvent{"ci_green_awaiting_merge", "ci", "", ""}, state, nil
 	}
 	return watchEvent{}, state, nil
 }

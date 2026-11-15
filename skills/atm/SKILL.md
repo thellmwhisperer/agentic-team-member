@@ -36,10 +36,13 @@ until the run's next event, prints it as one TOON line,
 are `gate_question` (a gate step waits for your answer), `gate_failed`,
 `ci_running`, `ci_green_awaiting_merge` (CI is green and the pull request
 waits), `review_required` (a label or the risk level keeps the pull request
-from merging on its own; its outcome says which) and `done` with its outcome: `passed`, `failed`, `merged` or `closed`.
+from merging on its own; its outcome says which), `done` with its outcome: `passed`, `failed`, `merged` or `closed`,
+and `stalled: <step> for <duration>` when nothing of the run moved for
+`--stall` (60 minutes by default; `--json` adds `for`).
 `review_required` prints the hold instead of a gate step: `review-required label` or `risk level <level> without risk-reviewed`.
 Run it again with `--after <event>` to skip the event you just handled while
-nothing else changed. Exit 1 means it watches nothing, or read nothing for
+nothing else changed; after `stalled`, `--after stalled` prints it again only
+once the run moved and stopped again. Exit 1 means it watches nothing, or read nothing for
 5 minutes, and says why.
 
 Inspect stderr and the process exit as well as events. Exit 0 means success,
