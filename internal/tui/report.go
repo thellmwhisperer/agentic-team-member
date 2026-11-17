@@ -16,6 +16,7 @@ type savedNode struct {
 	Name          string            `json:"name"`
 	ClonePath     string            `json:"clone"`
 	Result        string            `json:"result"`
+	Reason        string            `json:"reason"`
 	DurationMS    *int64            `json:"duration_ms"`
 	Rows          []savedNode       `json:"rows"`
 	RejectedFiles []json.RawMessage `json:"rejected_files"`
@@ -83,7 +84,7 @@ func skippedByConfig(nodes []savedNode) bool {
 
 // savedApproval returns the last answer to a failed Checks node of a passed run when it was an approve.
 func savedApproval(n savedNode, decisions []run.Decision, outcome run.Outcome) *run.Decision {
-	if n.Name != "checks" || n.Result != "failed" || !consistentResult(n.Name, "passed", outcome) {
+	if n.Name != "checks" || n.Result != "failed" || !consistentResult(n.Name, "passed", n.Reason, outcome) {
 		return nil
 	}
 	for i := len(decisions) - 1; i >= 0; i-- {
@@ -130,13 +131,13 @@ func clearDuplicate(r *row, duplicate bool) {
 func validSavedNode(n savedNode, outcome run.Outcome) bool {
 	switch n.Result {
 	case "passed", "failed", "skipped", "not run":
-		return consistentResult(n.Name, n.Result, outcome)
+		return consistentResult(n.Name, n.Result, n.Reason, outcome)
 	default: // a stale running report is not evidence that the ended run is still working
 		return false
 	}
 }
 
-func consistentResult(name, result string, outcome run.Outcome) bool {
+func consistentResult(name, result, reason string, outcome run.Outcome) bool {
 	if outcome.Outcome == "failed" && outcome.FailedNode == name {
 		return result == "failed"
 	}
@@ -146,7 +147,8 @@ func consistentResult(name, result string, outcome run.Outcome) bool {
 	case "failed":
 		return outcome.Outcome == "failed" && outcome.FailedNode == name
 	case "skipped":
-		return name == "delivery" && (outcome.Outcome == "passed" || outcome.Outcome == "failed" && outcome.FailedNode == "")
+		return name == "delivery" && (outcome.Outcome == "passed" || outcome.Outcome == "failed" &&
+			(outcome.FailedNode == "" || outcome.FailedNode != name && reason == "skipped by flag: --skip delivery"))
 	case "not run":
 		return outcome.Outcome == "failed"
 	default:

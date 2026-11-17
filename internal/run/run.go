@@ -76,7 +76,8 @@ func runAt(label, ref string, args []string, out, summary io.Writer) (err error)
 	var i Issue
 	r.step("issue", func() (map[string]any, error) {
 		i, err = theIssue(from, args[len(args)-1], repo)
-		ev := map[string]any{"title": i.Title, "ponytail_skipped": !c.Ponytail}
+		ev := map[string]any{"title": i.Title, "ponytail_skipped": !c.Ponytail,
+			"delivery_skipped": skipsStep(skips, "delivery")}
 		if i.Number != 0 {
 			ev["number"] = i.Number
 		}

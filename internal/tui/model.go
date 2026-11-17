@@ -410,6 +410,7 @@ type event struct {
 	Kept                                             bool
 	Agent                                            *run.AgentSettings
 	PonytailSkipped                                  bool `json:"ponytail_skipped"`
+	DeliverySkipped                                  bool `json:"delivery_skipped"`
 	Report                                           json.RawMessage
 	Verdicts                                         []struct{ File, Finding, Verdict string }
 	Context                                          *struct{ Used, Window int }
@@ -424,6 +425,7 @@ func (m *Model) apply(f run.Frame) {
 	at, _ := time.Parse(time.RFC3339Nano, e.TS)
 	m.settings(e.Agent)
 	m.skipPonytail(e.PonytailSkipped)
+	m.skipDelivery(e.DeliverySkipped)
 	m.context(e)
 	switch {
 	case e.Step == "decision":
@@ -463,6 +465,12 @@ func (m *Model) context(e event) {
 func (m *Model) skipPonytail(skip bool) {
 	if skip {
 		m.rows = slices.DeleteFunc(m.rows, func(r *row) bool { return r.step == "ponytail" })
+	}
+}
+
+func (m *Model) skipDelivery(skip bool) {
+	if skip {
+		m.current("delivery").state = "skipped"
 	}
 }
 

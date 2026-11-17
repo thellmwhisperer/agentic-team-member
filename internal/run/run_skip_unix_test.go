@@ -30,6 +30,38 @@ func TestRunSkipFlag(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) { skipRun(t, bin, c) })
 	}
+	t.Run("delivery after checks stop", func(t *testing.T) { skipDeliveryAfterChecksStop(t, bin) })
+}
+
+func skipDeliveryAfterChecksStop(t *testing.T, bin string) {
+	t.Helper()
+	cfg := atmSet(atmSet(atmYAML, "typecheck", "echo failed-check-finding; exit 1"),
+		"delivery", "no-such-command-for-atm delivered")
+	top := gitT(t, repo(t, "local", cfg), "rev-parse", "--show-toplevel")
+	t.Setenv("TERM", "xterm-256color")
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("FAKE_AGENT_WORK", fixWork)
+	ponytailConfigServer(t, bin, top)
+	live := leftAtDecision(t, startFollow(t, bin, top, true, "run", "--skip", "delivery", issueFile(t, issue)))
+	assertDeliverySkippedOnScreen(t, live)
+	cmd := exec.Command(bin, "answer", "issue-1", "stop", "--by", "operator")
+	cmd.Dir = top
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("stop after failed Checks: %v\n%s", err, out)
+	}
+	reopened := decisionTerminal(t, startFollow(t, bin, top, true, "attach", "issue-1"), 1)
+	assertDeliverySkippedOnScreen(t, reopened)
+	assertSkipNode(t, e2eReport(t, top, "issue-1").node("delivery"), "skipped by flag: --skip delivery")
+}
+
+func assertDeliverySkippedOnScreen(t *testing.T, screen string) {
+	t.Helper()
+	for _, line := range strings.Split(screen, "\n") {
+		if strings.Contains(line, "Delivery") && strings.Contains(line, "skipped") {
+			return
+		}
+	}
+	t.Fatalf("Delivery was not shown as skipped:\n%s", screen)
 }
 
 func skipRun(t *testing.T, bin string, c skipCase) {
