@@ -69,6 +69,7 @@ func TestRunTextOverrides(t *testing.T) {
 		}
 	}
 	t.Run("append", textOverrideAppend)
+	t.Run("relative from a subdirectory", textOverrideRelative)
 	t.Run("default rejection", textOverrideDefaultRejection)
 	t.Run("resume", textOverrideResume)
 	t.Run("errors", func(t *testing.T) { textOverrideErrors(t, bin) })
@@ -231,6 +232,27 @@ func textOverrideAppend(t *testing.T) {
 	if i := slices.Index(args, "--append-system-prompt"); i < 0 || args[i+1] != "Replacement.\n\nAppendix." {
 		t.Fatalf("append did not follow the replacement: %q", args)
 	}
+}
+
+func textOverrideRelative(t *testing.T) {
+	root, capture := textOverrideSetup(t, false, false)
+	sub := filepath.Join(root, "sub")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFixture(t, filepath.Join(root, "rules.md"), "Root rules.")
+	writeFixture(t, filepath.Join(sub, "rules.md"), "Sub rules.")
+	bin := followUpsServer(t, root)
+	label, end := promptRun(t, bin, sub, "--system-md", "rules.md", issueFile(t, issue))
+	if end.Outcome != "passed" {
+		t.Fatalf("run: %+v", end)
+	}
+	args := strings.Split(readTextCapture(t, capture, 1, "args"), "\x00")
+	if i := slices.Index(args, "--append-system-prompt"); i < 0 || args[i+1] != "Sub rules." {
+		t.Fatalf("relative --system-md was not read from the launching directory: %q", args)
+	}
+	assertTextOverridesReport(t, root, label, map[string]string{"system-md": filepath.Join(sub, "rules.md")},
+		map[string]string{"system-md": "Sub rules."})
 }
 
 func textOverrideDefaultRejection(t *testing.T) {

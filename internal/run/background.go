@@ -645,9 +645,16 @@ func Start(root string, args []string) (Outcome, error) {
 	if err != nil {
 		return Outcome{}, err
 	}
+	var files []string
 	if a.systemPromptFile != "" {
-		args = append(slices.Clone(args[:len(args)-1]), "--system-prompt", a.systemPrompt.File, args[len(args)-1])
+		files = append(files, "--system-prompt", a.systemPrompt.File)
 	}
+	for _, name := range textNames {
+		if _, ok := a.textFiles[name]; ok {
+			files = append(files, "--"+name, a.texts[name].File)
+		}
+	}
+	args = append(append(slices.Clone(args[:len(args)-1]), files...), args[len(args)-1])
 	if _, err := strconv.Atoi(args[len(args)-1]); err != nil { // a file, which the background process reads from root
 		if args[len(args)-1], err = filepath.Abs(args[len(args)-1]); err != nil {
 			return Outcome{}, err
