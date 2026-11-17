@@ -70,14 +70,7 @@ func preflight(root, ref string, from resumePoint, a *agent, args []string) (str
 			return a.readPrompts()
 		}},
 		{"delivery", func() error { // sh runs it: its first word is a command sh finds, on PATH or its own
-			word := deliveryWord(c.Delivery)
-			if strings.TrimSpace(c.Delivery) == "" {
-				word = "true"
-			}
-			if _, err := command("", "sh", "-c", `command -v "$1"`, "sh", word); err != nil {
-				return fmt.Errorf("%q is not on PATH nor a word of sh", word)
-			}
-			return nil
+			return deliveryOnPath(a.skipping(c).Delivery)
 		}},
 		{"compile", func() error { return compile(root, cmp.Or(from.Base, sha), c.Compile) }},
 	} {
@@ -118,6 +111,18 @@ func systemFlags(appended, systemMD bool, harnesses ...string) error {
 		if systemMD && !appended && (harness == "opencode" || harness == "cursor") {
 			return fmt.Errorf("--system-md: harness %s takes SYSTEM.md only with --system-prompt", harness)
 		}
+	}
+	return nil
+}
+
+// deliveryOnPath checks that the first word of the delivery line is a command sh finds. An empty line passes.
+func deliveryOnPath(line string) error {
+	word := deliveryWord(line)
+	if strings.TrimSpace(line) == "" {
+		word = "true"
+	}
+	if _, err := command("", "sh", "-c", `command -v "$1"`, "sh", word); err != nil {
+		return fmt.Errorf("%q is not on PATH nor a word of sh", word)
 	}
 	return nil
 }

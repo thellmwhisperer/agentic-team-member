@@ -30,7 +30,8 @@ var githubURL = regexp.MustCompile(`^(?:[a-z][a-z0-9+.-]*://)?(?:[^/@]+@)?github
 const Usage = "usage: atm run [--follow] [--base-ref r] [--harness h] [--model m] [--effort e] " +
 	"[--system-prompt file] [--system-md file] [--brief-template file] [--ponytail-brief-template file] " +
 	"[--ponytail-skill file] [--ponytail-review-skill file] [--rejection-message file] " +
-	"[--harness-arg a]... [--env KEY=VALUE]... <issue.md | issue number | --resume run>"
+	"[--harness-arg a]... [--env KEY=VALUE]... [--skip step]... " +
+	"<issue.md | issue number | --resume run>"
 
 // runAt is atm run with args, its flags and the issue: a file, or an issue number of origin's repository.
 // Its report, briefs and logs go to .atm/runs/<label>/ (runDir): each node's start and end go to out, one JSON
@@ -62,6 +63,7 @@ func runAt(label, ref string, args []string, out, summary io.Writer) (err error)
 	if err != nil {
 		return err
 	}
+	c = a.skipping(c)
 	r := a.verdict(out)
 	r.Agent.TextOverrides = a.textMetadata()
 	var dir, sha string
@@ -95,8 +97,34 @@ func runAt(label, ref string, args []string, out, summary io.Writer) (err error)
 	byClone.Store(dir, r)
 	keep := resumePoint{Issue: args[len(args)-1], Original: &i, BaseRef: *base, Base: sha}
 	a.unit(r, root, dir, sha, text, c, &keep, from, a.ponytailStep(r, root, dir, sha, i, c, &keep),
-		func(proof) { deliver(r, root, dir, sha, *base, c.Delivery, i, summary) })
+		func(proof) { deliver(r, root, dir, sha, *base, c.Delivery, i, summary); a.noteDeliverySkip(r) })
 	return r.err
+}
+
+// skippable are the steps --skip accepts: the Agent step and the checks can't be skipped.
+var skippable = []string{"delivery", "ponytail"}
+
+func skipReason(step string) string { return "skipped by flag: --skip " + step }
+
+// skips says whether the run's command line has --skip step.
+func (a *agent) skips(step string) bool { return slices.Contains(a.skip, step) }
+
+// skipping is c with the steps --skip names off, for this run only, whatever .atm.yaml says.
+func (a *agent) skipping(c config.Config) config.Config {
+	c.Ponytail = c.Ponytail && !a.skips("ponytail")
+	if a.skips("delivery") {
+		c.Delivery = ""
+	}
+	return c
+}
+
+// noteDeliverySkip gives the delivery node of r, skipped because the run has no delivery to run, the reason
+// --skip delivery when that is why.
+func (a *agent) noteDeliverySkip(r *verdict) {
+	if n := r.node("delivery"); a.skips("delivery") && n.Result == "skipped" {
+		reason := skipReason("delivery")
+		n.Reason = &reason
+	}
 }
 
 // ponytailStep is the ponytail step of the run r, which records each cut it makes in keep.
@@ -104,6 +132,9 @@ func (a *agent) ponytailStep(r *verdict, root, dir, sha string, i Issue, c confi
 	keep *resumePoint) func(proof) {
 	if !c.Ponytail {
 		reason := "skipped by configuration: ponytail: false"
+		if a.skips("ponytail") {
+			reason = skipReason("ponytail")
+		}
 		r.node("ponytail").Result, r.node("ponytail").Reason = "skipped", &reason
 		return func(proof) {}
 	}
@@ -161,6 +192,13 @@ func parseArgs(args []string) (ordered []string, base, resume *string, a *agent,
 		fs.PrintDefaults()
 	}
 	fs.BoolVar(&a.follow, "follow", false, "print the run's events as JSON until it ends")
+	fs.Func("skip", "a step to skip in this run: "+strings.Join(skippable, ", ")+"; repeatable", func(v string) error {
+		if !slices.Contains(skippable, v) {
+			return fmt.Errorf("--skip: unknown step %q; it accepts: %s", v, strings.Join(skippable, ", "))
+		}
+		a.skip = append(a.skip, v)
+		return nil
+	})
 	a.flags(fs)
 	// flag stops at the first argument that is not one: the issue, after which the flags go on.
 	for err = fs.Parse(args); err == nil && fs.NArg() > 0; err = fs.Parse(fs.Args()[1:]) {
