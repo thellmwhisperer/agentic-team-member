@@ -33,37 +33,38 @@ var funcs = template.FuncMap{
 	},
 }
 
-var (
-	briefTmpl    = template.Must(template.New("brief.md").Funcs(funcs).Parse(briefText))
-	ponytailTmpl = template.Must(template.New("brief-ponytail.md").Funcs(funcs).Parse(ponytailText))
-)
-
 // brief is brief.md for issue i under the repository's config c, whose agent's scratch directory is scratch.
-func brief(i Issue, c config.Config, scratch string) (string, error) {
-	var b strings.Builder
-	err := briefTmpl.Execute(&b, struct {
+func brief(i Issue, c config.Config, scratch, text string) (string, error) {
+	return renderBrief(text, struct {
 		Issue
 		config.Config
 		Scratch string
 	}{i, c, scratch})
-	return b.String(), err
 }
 
 // ponytailBrief is brief-ponytail.md for issue i, under the repository's config c, whose run made diff and proofs.
-func ponytailBrief(i Issue, c config.Config, diff string, proofs []proof) (string, error) {
+func ponytailBrief(i Issue, c config.Config, diff string, proofs []proof, text string) (string, error) {
 	var tests []string
 	for _, p := range proofs {
 		if p.test != "" {
 			tests = append(tests, p.test)
 		}
 	}
-	var b strings.Builder
-	err := ponytailTmpl.Execute(&b, struct {
+	return renderBrief(text, struct {
 		Issue
 		config.Config
 		Diff     string
 		Families []string
 		Tests    []string
 	}{i, c, diff, families, tests})
+}
+
+func renderBrief(text string, data any) (string, error) {
+	t, err := template.New("brief").Funcs(funcs).Parse(text)
+	if err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	err = t.Execute(&b, data)
 	return b.String(), err
 }

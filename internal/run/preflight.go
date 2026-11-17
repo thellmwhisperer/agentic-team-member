@@ -69,7 +69,7 @@ func preflight(root, ref string, from resumePoint, a *agent, args []string) (str
 					return fmt.Errorf("--system-prompt: harness %s takes no system prompt", harness)
 				}
 			}
-			return a.readSystemPrompt()
+			return a.readPrompts()
 		}},
 		{"delivery", func() error { // sh runs it: its first word is a command sh finds, on PATH or its own
 			word := deliveryWord(c.Delivery)

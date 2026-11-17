@@ -239,7 +239,10 @@ func (u acpUpdate) paths() (ps []string) {
 }
 
 // withSkill is brief with skill in it, for an ACP agent, which has no skill directory.
-func withSkill(brief, skill string) string {
+func withSkill(brief, skill string, replacement ...*runSystemPrompt) string {
 	b, _ := skills.ReadFile(skill + "/SKILL.md")
+	if len(replacement) > 0 && replacement[0] != nil {
+		b = []byte(replacement[0].Text)
+	}
 	return brief + "\n## SKILL `" + skill + "`\n" + string(b)
 }

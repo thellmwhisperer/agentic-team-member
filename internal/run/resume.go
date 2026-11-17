@@ -31,7 +31,8 @@ type resumePoint struct {
 	Args      []string       `json:"harness_args,omitempty"`
 	Env       []string       `json:"env,omitempty"`
 
-	SystemPrompt *runSystemPrompt `json:"system_prompt,omitempty"`
+	SystemPrompt  *runSystemPrompt            `json:"system_prompt,omitempty"`
+	TextOverrides map[string]*runSystemPrompt `json:"text_overrides,omitempty"`
 }
 
 // keepWork writes p and the work in clone, on HEAD, to resume/ in the run's directory dir. The work leaves the
@@ -104,6 +105,7 @@ func (r *verdict) resumable(dir string) {
 func (p *resumePoint) worker(a agent, ev map[string]any) {
 	p.Agent, p.Args, p.Env = a.Agent, a.args, a.env
 	p.SystemPrompt = a.systemPrompt
+	p.TextOverrides = a.texts
 	p.Session, _ = ev["session_id"].(string)
 }
 
@@ -157,10 +159,12 @@ func (a agent) afterE2E(r *verdict, clone string, p resumePoint) (map[string]any
 	r.emit(turn, map[string]any{"state": "started", "harness": a.Harness, "output": turn})
 	var err error
 	s := timed(func() {
+		var skill string
 		if _, err = a.reviewScratch("worker"); err == nil {
-			_, err = placeSkill(clone, a.Harness, "")
+			skill, err = a.placeSkill(clone, "")
 		}
 		if err == nil {
+			argv, stdin, _ = a.resumeArgv(clone, skill, final, p.Session, prompt)
 			stream, exit, cause, runErr := a.exec(clone, path, argv, stdin, false)
 			var invalid error
 			invalid, err = a.reported("worker", path, final, exit, cause, runErr, stream, testFile, ev)

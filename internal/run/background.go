@@ -45,10 +45,11 @@ type Outcome struct {
 // AgentSettings is the effective requested selection, kept independently of observed models.
 // A nil selection on an old run means it predates attribution.
 type AgentSettings struct {
-	Harness     string   `json:"harness"`
-	Model       string   `json:"model"`
-	Effort      string   `json:"effort"`
-	HarnessArgs []string `json:"harness_args"`
+	Harness       string              `json:"harness"`
+	Model         string              `json:"model"`
+	Effort        string              `json:"effort"`
+	HarnessArgs   []string            `json:"harness_args"`
+	TextOverrides map[string]textFile `json:"text_overrides,omitempty"`
 }
 
 // AgentLabel is the requested harness and model for run listings; default is display only.

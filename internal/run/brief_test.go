@@ -123,7 +123,7 @@ func TestSuiteRunsOnce(t *testing.T) {
 		t.Fatalf("want ATM's .atm.yaml with test scripts/test.sh and a test_file, got %+v, %v", c, err)
 	}
 	for _, typ := range []string{"", "fix", "feature", "greenfield", "refactor", "tests", "docs", "chore", "unknown"} {
-		got, err := brief(Issue{Title: "Retry", Body: "Retry once.\nType: " + typ}, c, "/scratch")
+		got, err := brief(Issue{Title: "Retry", Body: "Retry once.\nType: " + typ}, c, "/scratch", briefText)
 		if err != nil {
 			t.Fatal(err)
 		}

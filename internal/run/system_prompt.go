@@ -20,9 +20,9 @@ type runSystemPrompt struct {
 	Text   string `json:"text"`
 }
 
-func (a *agent) readSystemPrompt() error {
+func (a *agent) readPrompts() error {
 	if a.systemPromptFile == "" {
-		return nil
+		return a.readTexts()
 	}
 	path, err := filepath.Abs(a.systemPromptFile)
 	var b []byte
@@ -33,20 +33,21 @@ func (a *agent) readSystemPrompt() error {
 		return fmt.Errorf("--system-prompt: %w", err)
 	}
 	a.systemPrompt = &runSystemPrompt{File: path, SHA256: fmt.Sprintf("%x", sha256.Sum256(b)), Text: string(b)}
-	return nil
+	return a.readTexts()
 }
 
 func (a agent) prompt() string {
+	prompt := a.text("system-md", system.Prompt)
 	if a.systemPrompt != nil {
-		return system.Prompt + "\n\n" + a.systemPrompt.Text
+		return prompt + "\n\n" + a.systemPrompt.Text
 	}
-	return system.Prompt
+	return prompt
 }
 
 // systemEnvironment uses OpenCode's system instruction files and Cursor's always-applied system rules.
 // rule is a temporary Cursor rule the caller removes after the invocation.
 func (a agent) systemEnvironment(clone string, env []string) ([]string, string, error) {
-	if a.systemPrompt == nil {
+	if a.systemPrompt == nil && a.texts["system-md"] == nil {
 		return env, "", nil
 	}
 	switch a.Harness {
