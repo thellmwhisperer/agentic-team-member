@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.15.0](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.14.1...v1.15.0) (2026-11-17)
+
+
+### Features
+
+* **tui:** show the worker's context used and window on the Agent row ([#704](https://github.com/thellmwhisperer/agentic-team-member/issues/704)) ([fb52a0c](https://github.com/thellmwhisperer/agentic-team-member/commit/fb52a0c38cd2258c728387a094daab286c2cbfe4))
+
 ## [1.14.1](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.14.0...v1.14.1) (2026-11-15)
 
 
