@@ -47,6 +47,9 @@ func TestRunTextOverrides(t *testing.T) {
 	bin := builtATM(t)
 	t.Run("defaults", func(t *testing.T) { runTextOverride(t, "", "") })
 	for _, name := range overrideFlags {
+		if name == "ponytail-skill" {
+			continue
+		}
 		for _, empty := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/empty=%v", name, empty), func(t *testing.T) {
 				text := "Replacement á \"quoted\" $(literal).\n\n"
@@ -67,15 +70,10 @@ func TestRunTextOverrides(t *testing.T) {
 	}
 	t.Run("append", textOverrideAppend)
 	t.Run("default rejection", textOverrideDefaultRejection)
-	t.Run("no worker skill with review disabled", textOverrideWorkerOnlySkill)
 	t.Run("resume", textOverrideResume)
-	for _, harness := range []string{"pi", "hermes"} {
-		t.Run("fix without skill/"+harness, func(t *testing.T) { textOverrideFixSkill(t, harness) })
-	}
 	t.Run("errors", func(t *testing.T) { textOverrideErrors(t, bin) })
-	for _, text := range []string{"ACP system replacement.\n", ""} {
-		t.Run("ACP system="+text, func(t *testing.T) { textOverrideACP(t, text) })
-	}
+	t.Run("refused", func(t *testing.T) { textOverrideRefused(t, bin) })
+	t.Run("ACP review skill", textOverrideACP)
 }
 
 func textOverrideSetup(t *testing.T, reject, retry bool) (root, capture string) {
@@ -262,6 +260,9 @@ func textOverrideResume(t *testing.T) {
 	paths, texts := map[string]string{}, map[string]string{}
 	args := []string{issueFile(t, issue)}
 	for _, name := range overrideFlags {
+		if name == "ponytail-skill" {
+			continue
+		}
 		paths[name] = filepath.Join(root, name+".md")
 		texts[name] = "Saved " + name + ".\n"
 		if name == "ponytail-brief-template" {
@@ -311,28 +312,12 @@ func textOverrideReplaceOnResume(t *testing.T, bin, root, label, call string, pa
 	assertTextOverridesReport(t, root, resumed, paths, texts)
 }
 
-func textOverrideWorkerOnlySkill(t *testing.T) {
-	root, capture := textOverrideSetup(t, false, false)
-	worker, review := filepath.Join(root, "worker.md"), filepath.Join(root, "review.md")
-	writeFixture(t, worker, "Custom worker skill.")
-	writeFixture(t, review, "")
-	bin := followUpsServer(t, root)
-	_, end := promptRun(t, bin, root, "--ponytail-skill", worker, "--ponytail-review-skill", review, issueFile(t, issue))
-	if end.Outcome != "passed" {
-		t.Fatalf("run: %+v", end)
-	}
-	for n := 1; n <= 2; n++ {
-		for _, skill := range []string{"ponytail", "ponytail-review"} {
-			if got := readTextCapture(t, capture, n, skill); got != "" {
-				t.Fatalf("call %d received skill %s: %q", n, skill, got)
-			}
-		}
-	}
-}
-
 func textOverrideErrors(t *testing.T, bin string) {
 	for _, name := range overrideFlags {
 		for _, kind := range []string{"missing", "unreadable", "directory", "removed after preflight"} {
+			if name == "ponytail-skill" && kind == "removed after preflight" {
+				continue
+			}
 			t.Run(name+"/"+kind, func(t *testing.T) {
 				cfg := atmYAML
 				if kind == "removed after preflight" {
@@ -380,18 +365,12 @@ func textOverrideErrors(t *testing.T, bin string) {
 	}
 }
 
-func textOverrideACP(t *testing.T, systemText string) {
+func textOverrideACP(t *testing.T) {
 	root := repo(t, "local", atmYAML)
 	call := textOverrideHermes(t)
-	args := []string{"--harness", "hermes", issueFile(t, issue)}
-	systemPath := filepath.Join(root, "system.md")
-	writeFixture(t, systemPath, systemText)
-	args = append(args, "--system-md", systemPath)
-	for _, name := range []string{"ponytail-skill", "ponytail-review-skill"} {
-		path := filepath.Join(root, name+".md")
-		writeFixture(t, path, "ACP replacement "+name)
-		args = append(args, "--"+name, path)
-	}
+	path := filepath.Join(root, "review.md")
+	writeFixture(t, path, "ACP replacement ponytail-review-skill")
+	args := []string{"--harness", "hermes", "--ponytail-review-skill", path, issueFile(t, issue)}
 	bin := followUpsServer(t, root)
 	_, end := promptRun(t, bin, root, args...)
 	if end.Outcome != "passed" {
@@ -399,10 +378,10 @@ func textOverrideACP(t *testing.T, systemText string) {
 	}
 	for _, suffix := range []string{"", ".ponytail"} {
 		_, text := promptText(hermesCall(t, call+suffix)["session/prompt"])
-		if systemText != "" && strings.Contains(text, systemText) || strings.Contains(text, system.Prompt) {
+		if strings.Contains(text, system.Prompt) {
 			t.Fatalf("ACP agent received a system text: %q", text)
 		}
-		if strings.Contains(text, "ACP replacement ponytail-skill") || strings.Contains(text, "Forces the laziest") {
+		if strings.Contains(text, "Forces the laziest") {
 			t.Fatalf("ACP agent received the ponytail skill: %q", text)
 		}
 		if suffix == ".ponytail" && !strings.HasSuffix(text, "ACP replacement ponytail-review-skill") {
@@ -423,41 +402,28 @@ func textOverrideHermes(t *testing.T) string {
 	return call
 }
 
-func textOverrideFixSkill(t *testing.T, harness string) {
-	marker := filepath.Join(t.TempDir(), "lint")
-	t.Setenv("ATM_TEXT_LINT", marker)
-	cfg := atmSet(atmYAML, "lint", `test -f "$ATM_TEXT_LINT" || { touch "$ATM_TEXT_LINT"; exit 1; }`)
-	root := repo(t, "local", cfg)
-	call := filepath.Join(t.TempDir(), "call")
-	t.Setenv("FAKE_AGENT_CALL", call)
-	if harness == "hermes" {
-		call = textOverrideHermes(t)
-	}
-	skill := filepath.Join(root, "skill.md")
-	text := "The replacement skill survives a fix.\n"
-	writeFixture(t, skill, text)
-	received := filepath.Join(t.TempDir(), "received-skill")
-	t.Setenv("ATM_TEXT_SKILL", received)
-	if harness == "pi" {
-		t.Setenv("FAKE_AGENT_WORK", `if [ -e .atm/skills/ponytail ]; then touch "$ATM_TEXT_SKILL"; fi; `+fixWork)
-	}
-	bin := followUpsServer(t, root)
-	_, end := promptRun(t, bin, root, "--harness", harness, "--ponytail-skill", skill, issueFile(t, issue))
-	if end.Outcome != "passed" {
-		t.Fatalf("fix run: %+v", end)
-	}
-	if harness == "pi" {
-		if _, err := os.Stat(received); !os.IsNotExist(err) {
-			t.Fatalf("fix received a ponytail skill: %v", err)
-		}
-		args := agentCall(t, call).Args
-		if slices.Contains(args, "--skill") || !strings.Contains(args[len(args)-1], "Fix this failure") {
-			t.Fatalf("fix was sent a skill: %q", args)
-		}
-	} else {
-		_, prompt := promptText(hermesCall(t, call)["session/prompt"])
-		if !strings.Contains(prompt, "Fix this failure") || strings.Contains(prompt, text) {
-			t.Fatalf("ACP fix was sent a skill: %q", prompt)
-		}
+func textOverrideRefused(t *testing.T, bin string) {
+	for _, tc := range []struct {
+		harness, cfg, why, flag string
+	}{
+		{"claude", "", "--ponytail-skill: atm run sends no ponytail skill", "--ponytail-skill"},
+		{"hermes", "", "--system-md: harness hermes takes no SYSTEM.md", "--system-md"},
+		{"opencode", "", "--system-md: harness opencode takes SYSTEM.md only with --system-prompt",
+			"--system-md"},
+		{"cursor", "", "--system-md: harness cursor takes SYSTEM.md only with --system-prompt", "--system-md"},
+		{"claude", "ponytail: false\n", "--ponytail-brief-template: ponytail: false runs no ponytail step",
+			"--ponytail-brief-template"},
+		{"claude", "ponytail: false\n", "--ponytail-review-skill: ponytail: false runs no ponytail step",
+			"--ponytail-review-skill"},
+	} {
+		t.Run(tc.why, func(t *testing.T) {
+			root := repo(t, "local", atmYAML+tc.cfg)
+			stopServing(t, root)
+			path := filepath.Join(root, "override.md")
+			writeFixture(t, path, "replacement")
+			out, code := preflightLaunch(t, bin, root, "--follow", "--harness", tc.harness, tc.flag, path,
+				issueFile(t, issue))
+			assertStopped(t, root, out, code, "worker files", tc.why)
+		})
 	}
 }

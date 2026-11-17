@@ -64,9 +64,26 @@ func preflight(root, ref string, from resumePoint, a *agent, args []string) (str
 			if err := workerFiles(root, cmp.Or(from.Base, sha), args); err != nil {
 				return err
 			}
+			has := func(name string) bool { _, ok := a.textFiles[name]; return ok || from.TextOverrides[name] != nil }
+			if has("ponytail-skill") {
+				return fmt.Errorf("--ponytail-skill: atm run sends no ponytail skill")
+			}
+			for _, name := range []string{"ponytail-brief-template", "ponytail-review-skill"} {
+				if has(name) && !c.Ponytail {
+					return fmt.Errorf("--%s: ponytail: false runs no ponytail step", name)
+				}
+			}
+			appended := a.systemPromptFile != "" || from.SystemPrompt != nil
 			for _, harness := range []string{from.Agent.Harness, c.Harness} {
-				if _, ok := config.ACP[harness]; ok && (a.systemPromptFile != "" || from.SystemPrompt != nil) {
+				_, acp := config.ACP[harness]
+				if acp && appended {
 					return fmt.Errorf("--system-prompt: harness %s takes no system prompt", harness)
+				}
+				if has("system-md") && acp {
+					return fmt.Errorf("--system-md: harness %s takes no SYSTEM.md", harness)
+				}
+				if has("system-md") && !appended && (harness == "opencode" || harness == "cursor") {
+					return fmt.Errorf("--system-md: harness %s takes SYSTEM.md only with --system-prompt", harness)
 				}
 			}
 			return a.readPrompts()
