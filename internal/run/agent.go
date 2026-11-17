@@ -641,6 +641,9 @@ func (s *stream) see(harness string, line []byte) {
 	}
 	s.reach = cmp.Or(s.reach, outside(e.calls(harness), s.clone, s.scratch))
 	s.show(e.activity(harness))
+	for _, ev := range contextUsed(harness, line) { // not show: a message held for its report stays held
+		s.live(ev)
+	}
 }
 
 // agentModel reads only model metadata, never text or a tool's arguments.

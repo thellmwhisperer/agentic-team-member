@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -312,6 +313,7 @@ func (m *Model) row(r *row, width int) string {
 	if word == "approved" {
 		status = bold(states[word][1], strings.TrimSpace(word+" "+r.by))
 	}
+	suffix = rowContext(r, word, width-lipgloss.Width(prefix+r.label+suffix+status)) + suffix
 	if r.step == "ponytail" && r.check {
 		indent := strings.Repeat(" ", lipgloss.Width(prefix))
 		return prefix + strings.ReplaceAll(ansi.Wrap(r.label+suffix+" "+status,
@@ -328,6 +330,40 @@ func (m *Model) row(r *row, width int) string {
 	left := prefix + ansi.Truncate(r.label, labelWidth, "…") + suffix
 	left = ansi.Truncate(left, max(0, width-lipgloss.Width(status)-1), "…")
 	return spread(left, status, width)
+}
+
+// rowContext is the context running row r shows before its duration. It gives way before the label: none unless
+// room, what the label, the duration and the state leave, holds it.
+func rowContext(r *row, word string, room int) string {
+	if word != "running" || r.used == 0 {
+		return ""
+	}
+	context := "  " + paint(dim, contextUsed(r.used, r.window))
+	if lipgloss.Width(context) >= room {
+		return ""
+	}
+	return context
+}
+
+// contextUsed is a model call's context, used tokens of window, ? for a window no harness says.
+func contextUsed(used, window int) string {
+	of := "?"
+	if window > 0 {
+		of = tokens(window)
+	}
+	return tokens(used) + " / " + of
+}
+
+// tokens is n in three significant digits, K for thousands and M for millions: 26872 is 26.9K, 262144 262K.
+func tokens(n int) string {
+	if n < 1000 {
+		return strconv.Itoa(n)
+	}
+	v, unit := float64(n)/1000, "K"
+	if v >= 999.5 {
+		v, unit = v/1000, "M"
+	}
+	return strconv.FormatFloat(v, 'g', 3, 64) + unit
 }
 
 // sidebar says whether there is a box beside the ATM box to show.
