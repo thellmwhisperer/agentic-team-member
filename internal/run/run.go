@@ -28,7 +28,9 @@ var githubURL = regexp.MustCompile(`^(?:[a-z][a-z0-9+.-]*://)?(?:[^/@]+@)?github
 
 // Usage is atm run's command line.
 const Usage = "usage: atm run [--follow] [--base-ref r] [--harness h] [--model m] [--effort e] " +
-	"[--system-prompt file] [--harness-arg a]... [--env KEY=VALUE]... <issue.md | issue number | --resume run>"
+	"[--system-prompt file] [--system-md file] [--brief-template file] [--ponytail-brief-template file] " +
+	"[--ponytail-skill file] [--ponytail-review-skill file] [--rejection-message file] " +
+	"[--harness-arg a]... [--env KEY=VALUE]... <issue.md | issue number | --resume run>"
 
 // runAt is atm run with args, its flags and the issue: a file, or an issue number of origin's repository.
 // Its report, briefs and logs go to .atm/runs/<label>/ (runDir): each node's start and end go to out, one JSON
@@ -50,9 +52,9 @@ func runAt(label, ref string, args []string, out, summary io.Writer) (err error)
 	if from == nil {
 		start = ref
 	} else {
-		a.systemPrompt = from.SystemPrompt
+		a.systemPrompt, a.texts = from.SystemPrompt, from.TextOverrides
 	}
-	if err := a.readSystemPrompt(); err != nil {
+	if err := a.readPrompts(); err != nil {
 		return err
 	}
 	repo := GitHubRepo()
@@ -61,6 +63,7 @@ func runAt(label, ref string, args []string, out, summary io.Writer) (err error)
 		return err
 	}
 	r := a.verdict(out)
+	r.Agent.TextOverrides = a.textMetadata()
 	var dir, sha string
 	defer func() {
 		r.resumable(a.dir)
@@ -86,7 +89,7 @@ func runAt(label, ref string, args []string, out, summary io.Writer) (err error)
 	})
 	var text string
 	r.step("contract", func() (ev map[string]any, err error) {
-		text, ev, err = writeBrief(filepath.Join(a.dir, "brief.md"), i, c)
+		text, ev, err = writeBrief(filepath.Join(a.dir, "brief.md"), i, c, a.text("brief-template", briefText))
 		return ev, err
 	})
 	byClone.Store(dir, r)
@@ -509,8 +512,8 @@ func GitHubRepo() string {
 
 // writeBrief writes at path the brief for issue i under config c. Its scratch is the worker's, next to path, in
 // the run's directory.
-func writeBrief(path string, i Issue, c config.Config) (string, map[string]any, error) {
-	b, err := brief(i, c, filepath.Join(filepath.Dir(path), "worker-scratch"))
+func writeBrief(path string, i Issue, c config.Config, text string) (string, map[string]any, error) {
+	b, err := brief(i, c, filepath.Join(filepath.Dir(path), "worker-scratch"), text)
 	if err == nil {
 		err = os.MkdirAll(filepath.Dir(path), 0o755)
 	}

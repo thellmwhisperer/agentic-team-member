@@ -31,7 +31,8 @@ type resumePoint struct {
 	Args      []string       `json:"harness_args,omitempty"`
 	Env       []string       `json:"env,omitempty"`
 
-	SystemPrompt *runSystemPrompt `json:"system_prompt,omitempty"`
+	SystemPrompt  *runSystemPrompt            `json:"system_prompt,omitempty"`
+	TextOverrides map[string]*runSystemPrompt `json:"text_overrides,omitempty"`
 }
 
 // keepWork writes p and the work in clone, on HEAD, to resume/ in the run's directory dir. The work leaves the
@@ -104,6 +105,7 @@ func (r *verdict) resumable(dir string) {
 func (p *resumePoint) worker(a agent, ev map[string]any) {
 	p.Agent, p.Args, p.Env = a.Agent, a.args, a.env
 	p.SystemPrompt = a.systemPrompt
+	p.TextOverrides = a.texts
 	p.Session, _ = ev["session_id"].(string)
 }
 

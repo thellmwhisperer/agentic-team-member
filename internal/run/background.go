@@ -45,10 +45,11 @@ type Outcome struct {
 // AgentSettings is the effective requested selection, kept independently of observed models.
 // A nil selection on an old run means it predates attribution.
 type AgentSettings struct {
-	Harness     string   `json:"harness"`
-	Model       string   `json:"model"`
-	Effort      string   `json:"effort"`
-	HarnessArgs []string `json:"harness_args"`
+	Harness       string              `json:"harness"`
+	Model         string              `json:"model"`
+	Effort        string              `json:"effort"`
+	HarnessArgs   []string            `json:"harness_args"`
+	TextOverrides map[string]textFile `json:"text_overrides,omitempty"`
 }
 
 // AgentLabel is the requested harness and model for run listings; default is display only.
@@ -644,9 +645,16 @@ func Start(root string, args []string) (Outcome, error) {
 	if err != nil {
 		return Outcome{}, err
 	}
+	var files []string
 	if a.systemPromptFile != "" {
-		args = append(slices.Clone(args[:len(args)-1]), "--system-prompt", a.systemPrompt.File, args[len(args)-1])
+		files = append(files, "--system-prompt", a.systemPrompt.File)
 	}
+	for _, name := range textNames {
+		if _, ok := a.textFiles[name]; ok {
+			files = append(files, "--"+name, a.texts[name].File)
+		}
+	}
+	args = append(append(slices.Clone(args[:len(args)-1]), files...), args[len(args)-1])
 	if _, err := strconv.Atoi(args[len(args)-1]); err != nil { // a file, which the background process reads from root
 		if args[len(args)-1], err = filepath.Abs(args[len(args)-1]); err != nil {
 			return Outcome{}, err

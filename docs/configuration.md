@@ -37,7 +37,7 @@ a `.atm.yaml` key there still fails.
 | Built-in defaults | the binary | `harness: claude`, `screen: close` |
 | Your machine | `~/.config/atm/config.yaml` | `harness`, `model`, `effort`, `screen`, `repository_overrides` |
 | The repository | `.atm.yaml` at its root, as the base ref has it committed; otherwise the machine's matching `repository_overrides` entry | keys in [`.atm.yaml`](#atmyaml) below |
-| One run | `atm run` flags | [`--follow`](how-a-run-flows.md#following-one-run), `--base-ref`, `--harness`, `--model`, `--effort`, `--system-prompt`, `--harness-arg`, `--env`, `--resume` |
+| One run | `atm run` flags | [`--follow`](how-a-run-flows.md#following-one-run), `--base-ref`, `--harness`, `--model`, `--effort`, `--system-prompt`, [text overrides](#text-overrides), `--harness-arg`, `--env`, `--resume` |
 
 `atm run --system-prompt <file> <issue>` appends the file's full text after
 the embedded `SYSTEM.md` in the worker's system instructions. The file is
@@ -54,6 +54,32 @@ Claude and pi receive `--append-system-prompt`; Codex receives
 `OPENCODE_CONFIG_CONTENT`, preserving other inline settings and instruction
 files. Cursor receives a temporary always-applied `.cursor/rules/*.mdc`
 rule, excluded from git and removed after each invocation.
+
+### Text overrides
+
+Each of these `atm run` flags names a file whose full text replaces one
+embedded text for that run; an empty file turns that text off. Without them a
+run sends the embedded defaults.
+
+| Flag | Replaces |
+|------|----------|
+| `--system-md <file>` | `SYSTEM.md`, wherever the harness receives it (still followed by any `--system-prompt` text) |
+| `--brief-template <file>` | The worker brief's Go template, `internal/run/brief.md.tmpl` |
+| `--ponytail-brief-template <file>` | The ponytail brief's Go template, `internal/run/brief-ponytail.md.tmpl` |
+| `--ponytail-review-skill <file>` | The `ponytail-review` skill given to the ponytail step; empty places no skill |
+| `--rejection-message <file>` | The message sent when the agent's final message is rejected; empty fails the step without that retry |
+| `--ponytail-skill <file>` | The `ponytail` skill. `atm run` sends none, so the flag always fails |
+
+Files are read like `--system-prompt`'s: relative to the launching directory,
+and an unreadable file fails the `worker files` pre-run check with exit 2. A
+flag naming a text the run would never send fails that check too:
+`--ponytail-skill` always; `--ponytail-brief-template` and
+`--ponytail-review-skill` under `ponytail: false`; `--system-md` with hermes,
+and with opencode or cursor unless `--system-prompt` is also given. A template
+that does not parse or execute fails the step that renders it.
+`report.json` records each replaced text under `agent.text_overrides`, keyed by
+flag name, with the resolved `file` and its bytes' `sha256`. `--resume` keeps
+the saved texts; a flag given again replaces that text.
 
 ## `~/.config/atm/config.yaml`
 

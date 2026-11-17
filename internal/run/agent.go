@@ -51,6 +51,8 @@ type agent struct {
 	args, env        []string
 	systemPromptFile string
 	systemPrompt     *runSystemPrompt
+	textFiles        map[string]string
+	texts            map[string]*runSystemPrompt
 	scratch          string // the call's scratch directory: the one path outside the clone its calls may write to
 	root, dir        string
 	follow           bool // atm run --follow: the launching process watches the run itself
@@ -62,6 +64,7 @@ func (a *agent) flags(fs *flag.FlagSet) {
 	fs.StringVar(&a.Model, "model", "", "the agent's model")
 	fs.StringVar(&a.Effort, "effort", "", "the agent's effort")
 	fs.StringVar(&a.systemPromptFile, "system-prompt", "", "a readable file appended after SYSTEM.md for this run")
+	a.textFlags(fs)
 	fs.Func("harness-arg", "an argument for the agent CLI, before the brief; repeatable", func(v string) error {
 		a.args = append(a.args, v)
 		return nil
@@ -165,12 +168,13 @@ func codexResume(argv []string, session string) []string {
 func (a agent) run(clone, name, skill, brief string, check func(map[string]any) error) (map[string]any, error) {
 	path := filepath.Join(a.dir, name+".jsonl")
 	ev := map[string]any{"log": path}
-	dir, err := placeSkill(clone, a.Harness, skill)
+	dir, err := a.placeSkill(clone, skill)
+	skill = a.skillName(skill)
 	if err != nil {
 		return ev, err
 	}
 	if _, acp := config.ACP[a.Harness]; acp && skill != "" { // no skill directory: the brief has the skill
-		brief = withSkill(brief, skill)
+		brief = a.withSkill(brief, skill)
 	}
 	final := strings.TrimSuffix(path, ".jsonl") + ".final.md"
 	argv, stdin := a.argv(clone, dir, final, brief)
@@ -188,8 +192,11 @@ func (a agent) run(clone, name, skill, brief string, check func(map[string]any) 
 	if logErr = errors.Join(logErr, f.Close()); logErr != nil {
 		return ev, errors.Join(err, logErr)
 	}
-	prompt := "Your final message was rejected: " + invalid.Error() +
-		". Reply with only the JSON object the brief asks for, nothing else."
+	prompt := a.text("rejection-message", "Your final message was rejected: "+invalid.Error()+
+		". Reply with only the JSON object the brief asks for, nothing else.")
+	if prompt == "" {
+		return ev, reportError{err}
+	}
 	argv, stdin, ok := a.resumeArgv(clone, dir, final, s.session, prompt)
 	if !ok {
 		argv, stdin = a.argv(clone, dir, final, s.final+"\n"+prompt)
@@ -413,7 +420,7 @@ func testFile(r map[string]any) error {
 // placeSkill puts skill where the harness finds it in clone, outside git, records the clone as the agent finds it,
 // and returns the skill's directory. With no skill, it removes the ponytail skills a step placed before,
 // never one git tracks.
-func placeSkill(clone, harness, skill string) (string, error) {
+func placeSkill(clone, harness, skill string, replacement ...*runSystemPrompt) (string, error) {
 	if _, acp := config.ACP[harness]; acp { // its skill goes in its brief
 		return "", before(clone)
 	}
@@ -433,6 +440,9 @@ func placeSkill(clone, harness, skill string) (string, error) {
 	rel := skillDirs[harness] + "/" + skill
 	dir := filepath.Join(clone, filepath.FromSlash(rel))
 	b, err := skills.ReadFile(skill + "/SKILL.md")
+	if len(replacement) > 0 && replacement[0] != nil {
+		b, err = []byte(replacement[0].Text), nil
+	}
 	if err == nil {
 		err = os.MkdirAll(dir, 0o755)
 	}
