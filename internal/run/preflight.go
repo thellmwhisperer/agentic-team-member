@@ -64,27 +64,8 @@ func preflight(root, ref string, from resumePoint, a *agent, args []string) (str
 			if err := workerFiles(root, cmp.Or(from.Base, sha), args); err != nil {
 				return err
 			}
-			has := func(name string) bool { _, ok := a.textFiles[name]; return ok || from.TextOverrides[name] != nil }
-			if has("ponytail-skill") {
-				return fmt.Errorf("--ponytail-skill: atm run sends no ponytail skill")
-			}
-			for _, name := range []string{"ponytail-brief-template", "ponytail-review-skill"} {
-				if has(name) && !c.Ponytail {
-					return fmt.Errorf("--%s: ponytail: false runs no ponytail step", name)
-				}
-			}
-			appended := a.systemPromptFile != "" || from.SystemPrompt != nil
-			for _, harness := range []string{from.Agent.Harness, c.Harness} {
-				_, acp := config.ACP[harness]
-				if acp && appended {
-					return fmt.Errorf("--system-prompt: harness %s takes no system prompt", harness)
-				}
-				if has("system-md") && acp {
-					return fmt.Errorf("--system-md: harness %s takes no SYSTEM.md", harness)
-				}
-				if has("system-md") && !appended && (harness == "opencode" || harness == "cursor") {
-					return fmt.Errorf("--system-md: harness %s takes SYSTEM.md only with --system-prompt", harness)
-				}
+			if err := textFlags(a, from, c); err != nil {
+				return err
 			}
 			return a.readPrompts()
 		}},
@@ -105,6 +86,40 @@ func preflight(root, ref string, from resumePoint, a *agent, args []string) (str
 		}
 	}
 	return sha, nil
+}
+
+// textFlags is why the text flags of agent a, or of the run it resumes, from, name a text a run on config c
+// never sends.
+func textFlags(a *agent, from resumePoint, c config.Config) error {
+	has := func(name string) bool { _, ok := a.textFiles[name]; return ok || from.TextOverrides[name] != nil }
+	if has("ponytail-skill") {
+		return fmt.Errorf("--ponytail-skill: atm run sends no ponytail skill")
+	}
+	for _, name := range []string{"ponytail-brief-template", "ponytail-review-skill"} {
+		if has(name) && !c.Ponytail {
+			return fmt.Errorf("--%s: ponytail: false runs no ponytail step", name)
+		}
+	}
+	return systemFlags(a.systemPromptFile != "" || from.SystemPrompt != nil, has("system-md"),
+		from.Agent.Harness, c.Harness)
+}
+
+// systemFlags is why --system-prompt, when appended, or --system-md, when systemMD, names a text that one of
+// harnesses never receives.
+func systemFlags(appended, systemMD bool, harnesses ...string) error {
+	for _, harness := range harnesses {
+		_, acp := config.ACP[harness]
+		if acp && appended {
+			return fmt.Errorf("--system-prompt: harness %s takes no system prompt", harness)
+		}
+		if systemMD && acp {
+			return fmt.Errorf("--system-md: harness %s takes no SYSTEM.md", harness)
+		}
+		if systemMD && !appended && (harness == "opencode" || harness == "cursor") {
+			return fmt.Errorf("--system-md: harness %s takes SYSTEM.md only with --system-prompt", harness)
+		}
+	}
+	return nil
 }
 
 // compile is why line, the repository's compile command, fails on commit sha's tree in a scratch directory
