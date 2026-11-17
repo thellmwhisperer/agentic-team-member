@@ -51,9 +51,7 @@ func (p *piRPC) serve(in *bufio.Reader) {
 					"error": "steering is off"})
 				continue
 			}
-			emit(obj{"type": "queue_update", "steering": []string{c.Message}, "followUp": []string{}})
-			emit(obj{"id": c.ID, "type": "response", "command": "steer", "success": true,
-				"data": obj{"disposition": "queued"}})
+			emit(obj{"id": c.ID, "type": "response", "command": "steer", "success": true})
 			p.steers <- c.Message
 		case "get_state":
 			emit(obj{"id": c.ID, "type": "response", "command": "get_state", "success": true,
@@ -67,11 +65,8 @@ func (p *piRPC) serve(in *bufio.Reader) {
 func (p *piRPC) deliver() {
 	n, _ := strconv.Atoi(os.Getenv("FAKE_PI_STEERS"))
 	for range n {
-		m := <-p.steers
-		emit(obj{"type": "queue_update", "steering": []string{}, "followUp": []string{}})
-		user := obj{"role": "user", "content": []obj{{"type": "text", "text": m}}}
-		emit(obj{"type": "message_start", "message": user})
-		emit(obj{"type": "message_end", "message": user})
+		emit(obj{"type": "message_end", "message": obj{"role": "user",
+			"content": []obj{{"type": "text", "text": <-p.steers}}}})
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -48,12 +49,14 @@ func (s *stream) piReply(line []byte) []byte {
 	case m.Type == "agent_end":
 		return piLine(map[string]any{"id": piSettled, "type": "get_state"})
 	case m.Type == "message_end" && m.Message.Role == "user":
-		s.delivered(contentText(m.Message.Content))
+		text := contentText(m.Message.Content)
+		s.steered(func(w steerWait) bool { return w.message == text }, nil)
 	case m.Type != "response":
 	case m.Command == "prompt" && !m.Success:
 		s.failure, s.settled = "prompt: "+cmp.Or(m.Error, "failed"), true
 	case m.Command == "steer" && !m.Success:
-		s.steered(m.ID, errors.New("pi refused the message: "+cmp.Or(m.Error, "failed")))
+		s.steered(func(w steerWait) bool { return w.id == m.ID },
+			errors.New("pi refused the message: "+cmp.Or(m.Error, "failed")))
 	case m.ID == piSettled:
 		s.session = cmp.Or(s.session, m.Data.SessionID)
 		s.settled = !m.Data.IsStreaming && !m.Data.IsCompacting && !s.retrying
@@ -85,25 +88,11 @@ func (s *stream) steer(message string) error {
 	return <-w.done
 }
 
-// delivered answers the first steer waiting with text as its message. Under s.mu.
-func (s *stream) delivered(text string) {
-	for i, w := range s.steers {
-		if w.message == text {
-			s.steers = append(s.steers[:i], s.steers[i+1:]...)
-			w.done <- nil
-			return
-		}
-	}
-}
-
-// steered answers the steer id with err. Under s.mu.
-func (s *stream) steered(id string, err error) {
-	for i, w := range s.steers {
-		if w.id == id {
-			s.steers = append(s.steers[:i], s.steers[i+1:]...)
-			w.done <- err
-			return
-		}
+// steered answers with err the first steer waiting that is picks. Under s.mu.
+func (s *stream) steered(is func(w steerWait) bool, err error) {
+	if i := slices.IndexFunc(s.steers, is); i >= 0 {
+		s.steers[i].done <- err
+		s.steers = slices.Delete(s.steers, i, i+1)
 	}
 }
 
