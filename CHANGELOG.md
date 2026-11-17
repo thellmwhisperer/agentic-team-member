@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.17.0](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.16.0...v1.17.0) (2026-11-17)
+
+
+### Features
+
+* **cli:** atm steer sends a message to a running pi worker ([#706](https://github.com/thellmwhisperer/agentic-team-member/issues/706)) ([c9b70b4](https://github.com/thellmwhisperer/agentic-team-member/commit/c9b70b49d0a38e2720fcafcbca21bd136aebb4f0))
+
 ## [1.16.0](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.15.0...v1.16.0) (2026-11-17)
 
 
