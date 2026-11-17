@@ -187,9 +187,9 @@ ends first. Every other harness fails it with
 `<harness> cannot take a message mid-run`, and a run with no agent working with
 `run <run> has no agent working now; the message was not sent`.
 
-pi runs in RPC mode for this: at each `agent_end`, `auto_compaction_end` and
-`auto_retry_end` ATM asks pi's state, and closes its stdin, which ends pi, once pi is neither streaming, compacting nor
-retrying. A `prompt` pi refuses fails the step with
+pi runs in RPC mode for this: at each `agent_end`, `auto_retry_end` and
+`auto_compaction_end` without `willRetry` ATM asks pi's state, and closes its
+stdin, which ends pi, once pi is neither streaming, compacting nor retrying. A `prompt` pi refuses fails the step with
 `<exit>; pi: prompt: <error>; log: <path>`.
 
 ## Checks

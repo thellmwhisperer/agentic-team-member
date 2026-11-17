@@ -7,15 +7,16 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync/atomic"
+	"time"
 )
 
 // piRPC plays pi in RPC mode, as pi 1.5.2 does: its stdin's first line is the prompt command; each steer is
 // answered as queued and kept until the worker's work ends, but one whose message is $FAKE_PI_REFUSE, which it
 // refuses; each get_state is answered as idle, but while it compacts; it exits once its stdin closes.
 type piRPC struct {
-	steers     chan string
-	closed     chan struct{}
-	compacting atomic.Bool
+	steers            chan string
+	closed, compacted chan struct{}
+	compacting        atomic.Bool
 }
 
 var pi *piRPC
@@ -27,7 +28,7 @@ func piPrompt() (prompt string, line []byte) {
 	line, _ = in.ReadBytes('\n')
 	var c struct{ Type, Message string }
 	_ = json.Unmarshal(line, &c)
-	pi = &piRPC{steers: make(chan string, 16), closed: make(chan struct{})}
+	pi = &piRPC{steers: make(chan string, 16), closed: make(chan struct{}), compacted: make(chan struct{}, 1)}
 	if os.Getenv("FAKE_AGENT") == "pi-prompt-fail" {
 		emit(obj{"type": "response", "command": "prompt", "success": false, "error": "No API key for fake"})
 	} else {
@@ -59,8 +60,9 @@ func (p *piRPC) serve(in *bufio.Reader) {
 			compacting := p.compacting.Swap(false)
 			emit(obj{"id": c.ID, "type": "response", "command": "get_state", "success": true,
 				"data": obj{"sessionId": "pi-rpc-session", "isStreaming": false, "isCompacting": compacting}})
-			if compacting {
-				emit(obj{"type": "auto_compaction_end", "aborted": false, "willRetry": false})
+			if overflow := os.Getenv("FAKE_AGENT") == "pi-overflow"; compacting {
+				emit(obj{"type": "auto_compaction_end", "aborted": false, "willRetry": overflow})
+				p.compacted <- struct{}{}
 			}
 		}
 	}
@@ -76,9 +78,28 @@ func (p *piRPC) deliver() {
 	}
 }
 
-// retry plays, with $FAKE_AGENT pi-retry, a model call that fails and that pi retries after its agent_end.
+// retry plays, with $FAKE_AGENT pi-retry, a model call that fails and that pi retries after its agent_end. With
+// pi-overflow, the model call overflows its context: pi compacts, says so at the next get_state, ends the
+// compaction to retry and, 100 ms later, goes on unless its stdin closed, which ends it.
 func (p *piRPC) retry() {
-	if os.Getenv("FAKE_AGENT") != "pi-retry" {
+	switch os.Getenv("FAKE_AGENT") {
+	case "pi-overflow":
+		p.compacting.Store(true)
+		emit(obj{"type": "message_end", "message": obj{"role": "assistant", "stopReason": "error",
+			"errorMessage": "prompt is too long"}})
+		_, _ = os.Stdout.WriteString(`{"type":"agent_end","messages":[]}` + "\n" +
+			`{"type":"auto_compaction_start","reason":"overflow"}` + "\n")
+		<-p.compacted
+		time.Sleep(100 * time.Millisecond)
+		select {
+		case <-p.closed:
+			os.Exit(0)
+		default:
+		}
+		emit(obj{"type": "agent_start"})
+		return
+	case "pi-retry":
+	default:
 		return
 	}
 	emit(obj{"type": "message_end", "message": obj{"role": "assistant", "stopReason": "error",
@@ -90,7 +111,8 @@ func (p *piRPC) retry() {
 
 // end ends the agent's run and waits until ATM closes pi's stdin. With $FAKE_AGENT pi-compact, pi then compacts,
 // as pi does past its threshold, says so at the next get_state, then ends the compaction and stays idle. A worker
-// with $FAKE_PI_LINGER, a directory, then stays alive, as pi may for a moment: it says so in its file ready and ends once a line comes on its FIFO go.
+// with $FAKE_PI_LINGER, a directory, then stays alive, as pi may for a moment: it says so in its file ready and
+// ends once a line comes on its FIFO go.
 func (p *piRPC) end(worker bool) {
 	end := `{"type":"agent_end","messages":[]}` + "\n"
 	switch os.Getenv("FAKE_AGENT") {

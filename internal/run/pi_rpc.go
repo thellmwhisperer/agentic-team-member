@@ -20,16 +20,17 @@ func piLine(m map[string]any) []byte {
 	return append(b, '\n')
 }
 
-// piSettled is the id of the get_state ATM sends at each agent_end, compaction's end and retry's end.
+// piSettled is the id of the get_state ATM sends at each agent_end, retry's end and compaction's end.
 const piSettled = "atm-settled"
 
 // piReply reads one line of pi's stdout and is what ATM writes back, nil for nothing. A failed prompt ends the
-// conversation; agent_end, and the end of a compaction or retry, asks pi's state, whose reply ends it unless pi goes on. A steer's response, or the user
-// message that delivers it, answers the atm steer that sent it.
+// conversation; agent_end, and the end of a retry or of a compaction pi does not retry after, asks pi's state,
+// whose reply ends it unless pi goes on. A steer's response, or the user message that delivers it, answers the atm
+// steer that sent it.
 func (s *stream) piReply(line []byte) []byte {
 	var m struct {
 		ID, Type, Command, Error string
-		Success                  bool
+		Success, WillRetry       bool
 		Data                     struct {
 			SessionID                 string `json:"sessionId"`
 			IsStreaming, IsCompacting bool
@@ -43,6 +44,7 @@ func (s *stream) piReply(line []byte) []byte {
 	switch {
 	case m.Type == "auto_retry_start":
 		s.retrying = true
+	case m.Type == "auto_compaction_end" && m.WillRetry:
 	case m.Type == "auto_retry_end":
 		s.retrying = false
 		fallthrough
