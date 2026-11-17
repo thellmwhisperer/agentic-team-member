@@ -1,0 +1,13 @@
+{
+  "providers": {
+    "llama-cpp": {
+      "baseUrl": "http://127.0.0.1:8080/v1",
+      "api": "openai-completions",
+      "apiKey": "none",
+      "models": [
+        {"id": "qwen3.6-27b", "contextWindow": 262144, "maxTokens": 32768},
+        {"id": "qwen3.6-27b-1m", "contextWindow": 1048576, "maxTokens": 32768}
+      ]
+    }
+  }
+}

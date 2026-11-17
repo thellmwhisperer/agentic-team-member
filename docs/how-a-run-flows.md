@@ -453,7 +453,11 @@ note, and beside it, from 100 columns, the Agent box while an agent works or
 its report remains visible during checks, the Findings box with a failure or
 the slop detector's findings, and the Log box.
 The ATM box's Agent row reads `Agent`; Log headers and Findings references for
-that agent retain `Agent · unit 1`.
+that agent retain `Agent · unit 1`. While the agent runs, the row adds the
+context its last model call used and the model's window, as `26.9K / 262K`,
+from the harness's own usage events; the window reads `?` when the harness's
+configuration does not give it (pi's `models.json` can; Claude's events do
+not). The figure gives way when the row is too narrow for it.
 Above the rows, the issue's title shows on one line beside the state. A
 longer one folds behind `▸`, cut with `…`; `i` or a click on the arrow splits
 it in whole lines behind `▾`, and folds it again. The title stays above the

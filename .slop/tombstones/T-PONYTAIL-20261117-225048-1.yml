@@ -1,0 +1,18 @@
+schema: 1
+id: T-PONYTAIL-20261117-225048-1
+status: accepted
+category: alien_code
+title: "Cut pi's `TotalTokens` field and the fallback that summed the usage only when `totalTokens` was 0. pi's figure is now always `input + output + cacheRead + cacheWrite`, which equals `totalTokens` on every recorded pi line and keeps the event goldens unchanged (-4 lines)."
+created_at: 2026-11-17
+incident:
+  pattern: "Cut pi's `TotalTokens` field and the fallback that summed the usage only when `totalTokens` was 0. pi's figure is now always `input + output + cacheRead + cacheWrite`, which equals `totalTokens` on every recorded pi line and keeps the event goldens unchanged (-4 lines)."
+  what_went_wrong: "A coding agent wrote it and the ponytail pass cut it before delivery."
+  root_cause: "The coding agent wrote more than the issue needed."
+  rule_established: "Cut by the ponytail pass; it does not come back."
+  evidence:
+    - family: speculative_hardening
+      example: "Cut pi's `TotalTokens` field and the fallback that summed the usage only when `totalTokens` was 0. pi's figure is now always `input + output + cacheRead + cacheWrite`, which equals `totalTokens` on every recorded pi line and keeps the event goldens unchanged (-4 lines).\nissue_sentence: While the Agent step runs, its row shows the context used and the window next to the name, e.g. `Agent  26.9K / 262K  4 min 46 s  running`, updated on every model call from the harness's own usage events."
+      artifact: "internal/run/context.go"
+match:
+  family: speculative_hardening
+  artifact: "internal/run/context.go"

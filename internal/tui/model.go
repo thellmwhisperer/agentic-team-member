@@ -22,6 +22,7 @@ type row struct {
 	start                    time.Time
 	took                     time.Duration
 	hasDuration              bool
+	used, window             int // the Agent row's context: tokens its last model call used and its window, 0 unknown
 }
 
 // activity is a line of the Agent box: a tool call, by its id, its result and the first line of its output, or
@@ -411,6 +412,7 @@ type event struct {
 	PonytailSkipped                                  bool `json:"ponytail_skipped"`
 	Report                                           json.RawMessage
 	Verdicts                                         []struct{ File, Finding, Verdict string }
+	Context                                          *struct{ Used, Window int }
 }
 
 // apply reads frame f, when it carries an event: a node's start or end, or what happens inside it.
@@ -422,6 +424,7 @@ func (m *Model) apply(f run.Frame) {
 	at, _ := time.Parse(time.RFC3339Nano, e.TS)
 	m.settings(e.Agent)
 	m.skipPonytail(e.PonytailSkipped)
+	m.context(e)
 	switch {
 	case e.Step == "decision":
 		m.decision(e)
@@ -447,6 +450,13 @@ func (m *Model) apply(f run.Frame) {
 	}
 	if m.running() {
 		m.state = "running"
+	}
+}
+
+// context keeps on the running Agent row the context its worker's last model call used, when e says it.
+func (m *Model) context(e event) {
+	if r := m.current(e.Step); e.Context != nil && e.Step == "agent" && r != nil {
+		r.used, r.window = e.Context.Used, e.Context.Window
 	}
 }
 
@@ -540,7 +550,7 @@ func (m *Model) started(step string, at time.Time) {
 		m.focus = nil
 		m.agent, m.history, m.open = nil, pane{}, nil
 	}
-	r.state, r.start = "running", at
+	r.state, r.start, r.used, r.window = "running", at, 0, 0
 }
 
 // tools is how many tool calls the Agent box has.
