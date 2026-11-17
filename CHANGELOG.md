@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.16.0](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.15.0...v1.16.0) (2026-11-17)
+
+
+### Features
+
+* **run:** let atm run replace or turn off each embedded agent text ([#703](https://github.com/thellmwhisperer/agentic-team-member/issues/703)) ([4f191c7](https://github.com/thellmwhisperer/agentic-team-member/commit/4f191c721118849fb0b0e049f9253b8633790fad))
+
 ## [1.15.0](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.14.1...v1.15.0) (2026-11-17)
 
 
