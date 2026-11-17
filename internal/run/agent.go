@@ -177,7 +177,7 @@ func (a agent) run(clone, name, skill, brief string, check func(map[string]any) 
 		return ev, err
 	}
 	if _, acp := config.ACP[a.Harness]; acp && skill != "" { // no skill directory: the brief has the skill
-		brief = withSkill(brief, skill, a.texts[skill+"-skill"])
+		brief = a.withSkill(brief, skill)
 	}
 	final := strings.TrimSuffix(path, ".jsonl") + ".final.md"
 	argv, stdin := a.argv(clone, dir, final, brief)

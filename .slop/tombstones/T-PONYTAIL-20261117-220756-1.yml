@@ -1,0 +1,18 @@
+schema: 1
+id: T-PONYTAIL-20261117-220756-1
+status: accepted
+category: alien_code
+title: "Eliminados el parámetro variádico y la sustitución duplicada de withSkill; reutiliza a.text."
+created_at: 2026-11-17
+incident:
+  pattern: "Eliminados el parámetro variádico y la sustitución duplicada de withSkill; reutiliza a.text."
+  what_went_wrong: "A coding agent wrote it and the ponytail pass cut it before delivery."
+  root_cause: "The coding agent wrote more than the issue needed."
+  rule_established: "Cut by the ponytail pass; it does not come back."
+  evidence:
+    - family: speculative_feature
+      example: "Eliminados el parámetro variádico y la sustitución duplicada de withSkill; reutiliza a.text.\nissue_sentence: Every text ATM sends to an agent can be replaced or turned off per run"
+      artifact: "internal/run/acp.go"
+match:
+  family: speculative_feature
+  artifact: "internal/run/acp.go"

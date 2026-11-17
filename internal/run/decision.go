@@ -122,7 +122,7 @@ func (a agent) afterCheck(clone, text, session, finding string, attempt int) (ma
 	if err == nil {
 		prompt := text + "\n\nThe launcher chose fix. Fix this failure in one turn:\n" + finding
 		if _, acp := config.ACP[a.Harness]; acp && a.skillName("") != "" {
-			prompt = withSkill(prompt, "ponytail", a.texts["ponytail-skill"])
+			prompt = a.withSkill(prompt, "ponytail")
 		}
 		argv, stdin, ok := a.resumeArgv(clone, skill, final, session, prompt)
 		if session == "" || !ok {
