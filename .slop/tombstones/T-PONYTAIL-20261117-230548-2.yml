@@ -1,0 +1,18 @@
+schema: 1
+id: T-PONYTAIL-20261117-230548-2
+status: accepted
+category: alien_code
+title: "The fake pi no longer emits two `queue_update` events, a `message_start` and the `data.disposition` of the steer response. Neither ATM nor any test reads them. It now delivers a steer as a single `message_end` user message (-5 lines)."
+created_at: 2026-11-17
+incident:
+  pattern: "The fake pi no longer emits two `queue_update` events, a `message_start` and the `data.disposition` of the steer response. Neither ATM nor any test reads them. It now delivers a steer as a single `message_end` user message (-5 lines)."
+  what_went_wrong: "A coding agent wrote it and the ponytail pass cut it before delivery."
+  root_cause: "The coding agent wrote more than the issue needed."
+  rule_established: "Cut by the ponytail pass; it does not come back."
+  evidence:
+    - family: mock_heavy_test
+      example: "The fake pi no longer emits two `queue_update` events, a `message_start` and the `data.disposition` of the steer response. Neither ATM nor any test reads them. It now delivers a steer as a single `message_end` user message (-5 lines)."
+      artifact: "internal/run/testdata/fakeagent/pi.go"
+match:
+  family: mock_heavy_test
+  artifact: "internal/run/testdata/fakeagent/pi.go"

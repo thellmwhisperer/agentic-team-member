@@ -1,0 +1,18 @@
+schema: 1
+id: T-PONYTAIL-20261117-230548-1
+status: accepted
+category: alien_code
+title: "`delivered` and `steered` were the same find-answer-remove loop over `s.steers`, written twice. They are now one `steered(is func(steerWait) bool, err error)` built on `slices.IndexFunc` and `slices.Delete`. A user `message_end` matches a waiting steer by its text, and a refused steer by its id (-11 lines)."
+created_at: 2026-11-17
+incident:
+  pattern: "`delivered` and `steered` were the same find-answer-remove loop over `s.steers`, written twice. They are now one `steered(is func(steerWait) bool, err error)` built on `slices.IndexFunc` and `slices.Delete`. A user `message_end` matches a waiting steer by its text, and a refused steer by its id (-11 lines)."
+  what_went_wrong: "A coding agent wrote it and the ponytail pass cut it before delivery."
+  root_cause: "The coding agent wrote more than the issue needed."
+  rule_established: "Cut by the ponytail pass; it does not come back."
+  evidence:
+    - family: speculative_hardening
+      example: "`delivered` and `steered` were the same find-answer-remove loop over `s.steers`, written twice. They are now one `steered(is func(steerWait) bool, err error)` built on `slices.IndexFunc` and `slices.Delete`. A user `message_end` matches a waiting steer by its text, and a refused steer by its id (-11 lines).\nissue_sentence: During a real pi run, `atm steer <run> \"<message>\"` delivers the message: the worker log shows it as a user message before the next model call, and the run goes on."
+      artifact: "internal/run/pi_rpc.go"
+match:
+  family: speculative_hardening
+  artifact: "internal/run/pi_rpc.go"

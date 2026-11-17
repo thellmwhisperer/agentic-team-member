@@ -85,14 +85,14 @@ func TestACPScratchPermission(t *testing.T) {
 			`{"rawInput":{"command":"cp plan.md /runs/12-24/other/x"}}`, "ro"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			permitAnswer(t, s, c.toolCall,
+			permitAnswer(t, &s, c.toolCall,
 				`{"optionId":"ao","kind":"allow_once"},{"optionId":"ro","kind":"reject_once"}`, c.want)
 		})
 	}
 }
 
 // permitAnswer asks one session/request_permission with the given options and checks the option permit selects.
-func permitAnswer(t *testing.T, s stream, toolCall, options, want string) {
+func permitAnswer(t *testing.T, s *stream, toolCall, options, want string) {
 	t.Helper()
 	params := `{"sessionId":"s1","toolCall":` + toolCall + `,"options":[` + options + `]}`
 	got, _ := json.Marshal(s.permit(json.RawMessage(params)))

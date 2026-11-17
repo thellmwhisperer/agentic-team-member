@@ -125,6 +125,7 @@ agent, model and effort. Both are in [Configuration](docs/configuration.md).
 | `atm run [flags] <issue>` | Runs an issue: a GitHub number or a file with a title and body |
 | `atm run --resume <run>` | Runs a resumable failed run's issue again from its agent's work; see [Resuming a failed run](docs/configuration.md#resuming-a-failed-run) |
 | `atm answer <run> <approve\|fix\|stop> --by <who>` | Answers a failure that asks the launcher; see [Checks](docs/how-a-run-flows.md#checks) |
+| `atm steer <run> "<message>"` | Sends a message to the run's working agent, pi only; see [Steering a working agent](docs/how-a-run-flows.md#steering-a-working-agent) |
 | `atm status` | The runs going |
 | `atm attach [run]` | A run's [screen and tool-call controls](docs/how-a-run-flows.md#the-screen), including the gate after Delivery |
 | `atm runs` | Every retained run and its report |

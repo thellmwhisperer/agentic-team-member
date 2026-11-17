@@ -79,7 +79,7 @@ func (a *agent) flags(fs *flag.FlagSet) {
 }
 
 // argv is the agent's command line, in its most minimal mode, and what goes on its stdin: claude reads the
-// brief there, the others take it as the last argument, but an ACP agent, whose prompt it is. final is where
+// brief there, the others take it as the last argument, but an ACP agent and pi, whose prompt it is. final is where
 // codex writes its last message.
 func (a agent) argv(clone, skill, final, brief string) (argv []string, stdin string) {
 	if acp, ok := config.ACP[a.Harness]; ok {
@@ -115,11 +115,12 @@ func (a agent) argv(clone, skill, final, brief string) (argv []string, stdin str
 	case "cursor":
 		argv = []string{"cursor-agent", "-p", "--output-format", "stream-json", "--trust", "--force", "--workspace", clone}
 		argv = with(argv, a.Model, "--model", a.Model)
-	case "pi":
-		argv = []string{"pi", "-p", "--mode", "json", "--no-extensions", "--no-skills", "--no-prompt-templates",
+	case "pi": // in RPC mode the brief is its stdin's prompt command, and a steer can follow it (atm steer)
+		argv = []string{"pi", "--mode", "rpc", "--no-extensions", "--no-skills", "--no-prompt-templates",
 			"--no-context-files"}
 		argv = append(with(argv, skill, "--skill", skill), "--append-system-prompt", a.prompt())
 		argv = with(with(argv, a.Model, "--model", a.Model), a.Effort, "--thinking", a.Effort)
+		return append(argv, a.args...), brief
 	}
 	return append(append(argv, a.args...), brief), ""
 }
@@ -137,7 +138,7 @@ func (a agent) resumeArgv(clone, skill, final, session, prompt string) (argv []s
 	case a.Harness == "codex":
 		return codexResume(argv, session), "", true
 	case a.Harness == "pi":
-		flag[0] = "--session"
+		return append(argv, "--session", session), stdin, true
 	case a.Harness != "cursor":
 		return nil, "", false
 	}
@@ -375,7 +376,7 @@ func (a agent) exec(
 	if err := s.talk(cmd, f, a.Harness, stdin); err != nil {
 		return nil, "", "", err
 	}
-	err = s.read(cmd, f, stderr, a.Harness)
+	err = a.working(s, func() error { return s.read(cmd, f, stderr, a.Harness) })
 	exit, cause := ended(ctx, cmd.ProcessState)
 	return s.acpEnded(exit, cause, err)
 }
@@ -493,6 +494,12 @@ type stream struct {
 	prompt, stop   string
 	rpc            io.WriteCloser
 	chunk, chunkOf string
+	// pi's: its log, its steers not yet delivered, and whether its agent settled, so its stdin closes.
+	mu                sync.Mutex // its lines and the steers written to rpc
+	log               io.Writer
+	steers            []steerWait
+	steerN            int
+	retrying, settled bool
 }
 
 // read runs cmd and writes each line of its stdout and stderr to log, as it is when JSON, else as a JSON
@@ -503,12 +510,11 @@ func (s *stream) read(cmd *exec.Cmd, log, stderr io.Writer, harness string) erro
 		return err
 	}
 	defer closeGroup()
-	var mu sync.Mutex
 	var werr error
 	emit := func(line string, stdout bool) {
 		line = string(bytes.TrimSpace([]byte(line)))
-		mu.Lock()
-		defer mu.Unlock()
+		s.mu.Lock()
+		defer s.mu.Unlock()
 		s.tail = append(s.tail, line)
 		s.tail = s.tail[max(0, len(s.tail)-20):]
 		b := []byte(line)
@@ -520,7 +526,10 @@ func (s *stream) read(cmd *exec.Cmd, log, stderr io.Writer, harness string) erro
 		if _, err := log.Write(append(b, '\n')); werr == nil {
 			werr = err
 		}
-		if stdout && s.rpc != nil {
+		switch {
+		case stdout && s.rpc != nil && harness == "pi":
+			s.say(cmd, log, s.piReply(b))
+		case stdout && s.rpc != nil:
 			s.say(cmd, log, s.answer(b))
 		}
 	}
@@ -646,7 +655,7 @@ func (s *stream) see(harness string, line []byte) {
 			}
 		}
 	}
-	if s.pending != "" && (harness != "codex" || e.Type != "turn.completed") {
+	if s.pending != "" && !e.followsFinal(harness) {
 		s.flush(e.Type == "result" && (harness == "claude" && ends || harness == "cursor"))
 	}
 	s.reach = cmp.Or(s.reach, outside(e.calls(harness), s.clone, s.scratch))
@@ -654,6 +663,13 @@ func (s *stream) see(harness string, line []byte) {
 	for _, ev := range contextUsed(harness, line) { // not show: a message held for its report stays held
 		s.live(ev)
 	}
+}
+
+// followsFinal says whether e comes after the final message and leaves it as it is: codex's turn.completed, and
+// pi's agent_end and its reply to ATM's get_state.
+func (e event) followsFinal(harness string) bool {
+	return harness == "codex" && e.Type == "turn.completed" ||
+		harness == "pi" && (e.Type == "agent_end" || e.Type == "response")
 }
 
 // agentModel reads only model metadata, never text or a tool's arguments.
