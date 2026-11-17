@@ -64,7 +64,6 @@ func runAt(label, ref string, args []string, out, summary io.Writer) (err error)
 		return err
 	}
 	c, r := prepareSkippedRun(a, c, skips, out)
-	r.Agent.TextOverrides = a.textMetadata()
 	var dir, sha string
 	defer func() {
 		r.resumable(a.dir)
@@ -111,6 +110,7 @@ func skipsStep(skips []string, step string) bool { return slices.Contains(skips,
 func prepareSkippedRun(a *agent, c config.Config, skips []string, out io.Writer) (config.Config, *verdict) {
 	c = skipping(c, skips)
 	r := a.verdict(out)
+	r.Agent.TextOverrides = a.textMetadata()
 	recordSkipped(r, skips)
 	return c, r
 }
