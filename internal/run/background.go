@@ -359,7 +359,7 @@ func (s *server) start(args []string, baseSHA string) (Outcome, error) {
 	}
 	for _, r := range s.runs {
 		if r.Issue == issue && r.answer != nil {
-			if _, _, resume, _, err := parseArgs(args); err == nil && *resume == "" {
+			if _, _, resume, _, _, err := parseArgs(args); err == nil && *resume == "" {
 				return Outcome{}, fmt.Errorf("issue %s has run %s waiting for an answer; "+
 					"use atm answer %s approve|fix|stop --by <who>", issue, r.Run, r.Run)
 			}
@@ -637,17 +637,17 @@ func (s *server) save() {
 // process of the repository at root run it. It returns the run, just started. A run that resumes another takes
 // that one's issue and base ref, and its agent's harness arguments are checked too.
 func Start(root string, args []string) (Outcome, error) {
-	args, base, resume, a, err := parseArgs(args)
+	args, base, resume, a, skips, err := parseArgs(args)
 	var p resumePoint
 	var sha string
 	if err == nil && *resume != "" {
 		if p, err = resumeFrom(root, *resume); err == nil {
-			args, _, _, _, err = parseArgs(append(args, p.Issue)) // and no other
+			args, _, _, _, skips, err = parseArgs(append(args, p.Issue)) // and no other
 			*base = p.BaseRef
 		}
 	}
 	if err == nil {
-		sha, err = preflight(root, *base, p, a, append(a.args, p.Args...))
+		sha, err = preflight(root, *base, p, a, append(a.args, p.Args...), skips)
 	}
 	if err != nil {
 		return Outcome{}, err

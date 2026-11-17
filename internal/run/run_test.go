@@ -416,7 +416,7 @@ func TestRepoTemplate(t *testing.T) {
 }
 
 func Run(label string, args []string, out, summary io.Writer) error {
-	_, base, resume, _, err := parseArgs(args)
+	_, base, resume, _, _, err := parseArgs(args)
 	if err != nil {
 		return err
 	}

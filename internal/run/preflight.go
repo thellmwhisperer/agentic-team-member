@@ -34,7 +34,7 @@ var fileFlags = []string{"--settings", "--skill"}
 // preflight checks, in the repository at root, what a run from base ref ref stands on, its agent a with the
 // harness arguments args, and what the run it resumes, from, kept: the first check that fails is the error,
 // which names it.
-func preflight(root, ref string, from resumePoint, a *agent, args []string) (string, error) {
+func preflight(root, ref string, from resumePoint, a *agent, args, skips []string) (string, error) {
 	var c config.Config
 	var sha string
 	for _, check := range []struct {
@@ -70,7 +70,7 @@ func preflight(root, ref string, from resumePoint, a *agent, args []string) (str
 			return a.readPrompts()
 		}},
 		{"delivery", func() error { // sh runs it: its first word is a command sh finds, on PATH or its own
-			return deliveryOnPath(a.skipping(c).Delivery)
+			return deliveryOnPath(skipping(c, skips).Delivery)
 		}},
 		{"compile", func() error { return compile(root, cmp.Or(from.Base, sha), c.Compile) }},
 	} {

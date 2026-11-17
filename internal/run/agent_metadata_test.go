@@ -146,7 +146,7 @@ func TestAgentMetadataHistoryLiveAndReloaded(t *testing.T) {
 
 func TestAgentMetadataFirstModelPerInvocation(t *testing.T) {
 	root := repo(t, t.TempDir(), atmYAML)
-	_, _, _, a, err := parseArgs([]string{"--harness", "claude", "--model", "requested", "issue.md"})
+	_, _, _, a, _, err := parseArgs([]string{"--harness", "claude", "--model", "requested", "issue.md"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -266,7 +266,7 @@ func TestAgentMetadataStreamShapes(t *testing.T) {
 			root := repo(t, t.TempDir(), atmYAML)
 			t.Setenv("FAKE_AGENT_STREAM", tc.lines+"\n")
 			t.Setenv("FAKE_AGENT_WORK", "true")
-			_, _, _, a, err := parseArgs([]string{"--harness", tc.harness, "--model", "requested", "issue.md"})
+			_, _, _, a, _, err := parseArgs([]string{"--harness", tc.harness, "--model", "requested", "issue.md"})
 			if err != nil {
 				t.Fatal(err)
 			}
