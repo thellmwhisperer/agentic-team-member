@@ -340,7 +340,7 @@ Flags go before or after the issue. A second issue is an error.
 | `--effort <effort>` | from the layers | The agent's effort |
 | `--harness-arg <arg>` | none | One argument for the agent CLI, before the brief. Repeatable |
 | `--env KEY=VALUE` | none | One variable in the agent's environment. Repeatable |
-| `--skip <step>` | none | Skips `ponytail` or `delivery` for this run only, whatever `.atm.yaml` says. Repeatable. The node in `report.json` records `result: "skipped"` and `reason: "skipped by flag: --skip <step>"`. Any other step name fails before the run starts and lists the two it accepts: the Agent step and the checks can't be skipped |
+| `--skip <step>` | none | Repeatable; accepts `ponytail` or `delivery` and overrides `.atm.yaml` for this run. Other names fail before the run starts. The Agent step and checks cannot be skipped. See [step results and screen state](how-a-run-flows.md#the-report) |
 | `--resume <run>` | none | Runs a resumable run's issue again from its agent's work, in place of an issue |
 
 ### Resuming a failed run
