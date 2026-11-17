@@ -69,7 +69,7 @@ detector.
 
 | Step | Who | Blocks on |
 |------|-----|-----------|
-| [Before the run](docs/how-a-run-flows.md#before-the-run) | code | an incomplete `.atm.yaml`, a base whose CI is not green, a missing worker file, a delivery command `sh` cannot find, a `compile` command that fails |
+| [Before the run](docs/how-a-run-flows.md#before-the-run) | code | an incomplete `.atm.yaml`, a base whose CI is not green, a missing worker file, a delivery command `sh` cannot find unless `--skip delivery` is used, a `compile` command that fails |
 | Clone and contract | code | a failed clone or install |
 | Write the fix | **model** | the model decides no edge; an agent that fails or hangs asks the launcher or ends the run, see [Agent](docs/how-a-run-flows.md#agent) |
 | The project's configured `install`, `test`, `e2e`, `typecheck` and `lint` commands | code | a red `test` runs once more; a red `lint`, or a `test` still red, gives the agent one automatic turn; a failure after that asks the launcher |
