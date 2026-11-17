@@ -41,7 +41,7 @@ func skipDeliveryAfterChecksStop(t *testing.T, bin string) {
 	t.Setenv("TERM", "xterm-256color")
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("FAKE_AGENT_WORK", fixWork)
-	ponytailConfigServer(t, bin, top)
+	restart := ponytailConfigServer(t, bin, top)
 	live := leftAtDecision(t, startFollow(t, bin, top, true, "run", "--skip", "delivery", issueFile(t, issue)))
 	assertDeliverySkippedOnScreen(t, live)
 	cmd := exec.Command(bin, "answer", "issue-1", "stop", "--by", "operator")
@@ -49,6 +49,7 @@ func skipDeliveryAfterChecksStop(t *testing.T, bin string) {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("stop after failed Checks: %v\n%s", err, out)
 	}
+	restart()
 	reopened := decisionTerminal(t, startFollow(t, bin, top, true, "attach", "issue-1"), 1)
 	assertDeliverySkippedOnScreen(t, reopened)
 	assertSkipNode(t, e2eReport(t, top, "issue-1").node("delivery"), "skipped by flag: --skip delivery")
