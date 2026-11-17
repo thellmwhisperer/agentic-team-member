@@ -91,7 +91,7 @@ For Hermes's ACP invocation and completion rules, see
 | `claude` | `claude -p --setting-sources project --strict-mcp-config --thinking-display summarized`, tools `Read,Edit,Write,Bash,Glob,Grep,Skill` only; `--harness-arg`s follow this default | on stdin |
 | `codex` | `codex exec`, which still loads your skills | as its last argument |
 | `opencode` | `opencode --standalone run --auto --format json`, in the clone; model and effort use `-m provider/model#variant` | as its last argument |
-| `pi` | `pi -p --no-extensions --no-skills --no-prompt-templates --no-context-files` | as its last argument |
+| `pi` | `pi --mode rpc --no-extensions --no-skills --no-prompt-templates --no-context-files` | as the `prompt` command on its stdin |
 | `cursor` | `cursor-agent -p --output-format stream-json --trust --force --workspace <clone>`, then `--model <model>` when set and any `--harness-arg`s | as its last argument |
 
 For `claude`, ATM sets `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` for every
@@ -171,6 +171,26 @@ An agent that is silent while a child works, such as a test pass, is never
 stopped. A hung worker asks its launcher as a failed check does (see
 [Checks](#checks)): `approve` runs Checks on the work it left, `fix` gives it
 one turn with the finding. Any other hung agent call fails its step.
+
+### Steering a working agent
+
+```text
+atm steer <run> "<message>"
+```
+
+sends a message to the agent the run has working now. Only `pi` takes one: ATM
+writes `{"type": "steer", "message": "..."}` to its stdin, which pi delivers
+after the current turn's tool calls and before its next model call. The steer
+and pi's user message with it are in the agent's `.jsonl` log. `atm steer`
+waits until pi delivers the message, and fails when pi refuses it or its agent
+ends first. Every other harness fails it with
+`<harness> cannot take a message mid-run`, and a run with no agent working with
+`run <run> has no agent working now; the message was not sent`.
+
+pi runs in RPC mode for this: at each `agent_end` ATM asks pi's state, and
+closes its stdin, which ends pi, once pi is neither streaming, compacting nor
+retrying. A `prompt` pi refuses fails the step with
+`<exit>; pi: prompt: <error>; log: <path>`.
 
 ## Checks
 

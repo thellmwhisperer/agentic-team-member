@@ -134,27 +134,42 @@ func (s *stream) answer(line []byte) []byte {
 
 // talk makes cmd's stdin ATM's ACP conversation when harness is an ACP agent, prompt its prompt, and opens it
 // with initialize: protocol version 1, and neither fs nor terminal for the agent.
+// For pi, in RPC mode, it opens it with prompt as its prompt command.
 func (s *stream) talk(cmd *exec.Cmd, log io.Writer, harness, prompt string) (err error) {
-	if _, acp := config.ACP[harness]; !acp {
+	_, acp := config.ACP[harness]
+	if !acp && harness != "pi" {
 		return nil
 	}
-	cmd.Stdin, s.prompt = nil, prompt
-	if s.rpc, err = cmd.StdinPipe(); err == nil { // the pipe holds it until the agent starts
+	cmd.Stdin, s.log = nil, log
+	s.rpc, err = cmd.StdinPipe() // the pipe holds it until the agent starts
+	switch {
+	case err == nil && !acp: // a brief longer than the pipe waits for pi to read it; nothing else is written before it
+		line := piLine(map[string]any{"type": "prompt", "message": prompt})
+		s.mu.Lock()
+		go func() {
+			defer s.mu.Unlock()
+			s.say(cmd, log, line)
+		}()
+	case err == nil:
+		s.prompt = prompt
 		s.say(cmd, log, jsonLine(map[string]any{"id": 1, "method": "initialize",
 			"params": map[string]any{"protocolVersion": 1, "clientCapabilities": map[string]any{}}}))
 	}
 	return err
 }
 
-// say writes msg, if any, to the ACP agent cmd runs, and to log; once the conversation ends, ATM stops the agent.
+// say writes msg, if any, to the agent cmd runs, and to log; once the conversation ends, ATM stops the ACP agent
+// and closes pi's stdin, which ends it.
 func (s *stream) say(cmd *exec.Cmd, log io.Writer, msg []byte) {
 	if msg != nil {
 		_, _ = s.rpc.Write(msg) // a dead agent's failure is its own
 		_, _ = log.Write(msg)
 	}
-	if s.stop != "" {
+	if s.stop != "" || s.settled {
 		_ = s.rpc.Close()
 		s.rpc = nil
+	}
+	if s.stop != "" {
 		_ = cmd.Cancel()
 	}
 }

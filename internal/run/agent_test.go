@@ -51,8 +51,8 @@ func TestRunDrivesTheAgent(t *testing.T) {
 		"codex": `exec --json -C <clone> --sandbox workspace-write -o <log>.final.md -c developer_instructions=<system> ` +
 			`-c model="m" -c model_reasoning_effort="e" --x y <brief>`,
 		"opencode": "--standalone run --auto --format json -m m#e --x y <brief>",
-		"pi": "-p --mode json --no-extensions --no-skills --no-prompt-templates --no-context-files " +
-			"--append-system-prompt <system> --model m --thinking e --x y <brief>",
+		"pi": "--mode rpc --no-extensions --no-skills --no-prompt-templates --no-context-files " +
+			"--append-system-prompt <system> --model m --thinking e --x y",
 		"cursor": "-p --output-format stream-json --trust --force --workspace <clone> --model m --x y <brief>",
 	}
 	for harness, want := range cases {
@@ -86,7 +86,9 @@ func TestRunDrivesTheAgent(t *testing.T) {
 			if args = filepath.ToSlash(strings.ReplaceAll(args, clone, "<clone>")); args != want {
 				t.Fatalf("args:\n%s\nwant\n%s", args, want)
 			}
-			if wantStdin := map[bool]string{true: string(brief)}[harness == "claude"]; got.Stdin != wantStdin {
+			wantStdin := map[string]string{"claude": string(brief),
+				"pi": string(piLine(map[string]any{"type": "prompt", "message": string(brief)}))}[harness]
+			if got.Stdin != wantStdin {
 				t.Fatalf("stdin: %q, want %q", got.Stdin, wantStdin)
 			}
 			if !slices.Contains(got.Env, "ATM_FAKE=a=b") || slices.ContainsFunc(got.Env, func(kv string) bool {
@@ -94,8 +96,8 @@ func TestRunDrivesTheAgent(t *testing.T) {
 			}) {
 				t.Fatalf("env: want ATM_FAKE and no CLAUDE_CODE_CHILD_SESSION, got %v", got.Env)
 			}
-			lines := logLines(t, log)
-			if want := map[string]int{"claude": 3, "codex": 4, "pi": 3, "cursor": 4}[harness]; len(lines) != cmp.Or(want, 3) {
+			lines := logLines(t, log) // pi's too: ATM's prompt and get_state, their responses and agent_end
+			if want := map[string]int{"claude": 3, "codex": 4, "pi": 8, "cursor": 4}[harness]; len(lines) != cmp.Or(want, 3) {
 				t.Fatalf("want every line of the agent in the log, got %q", lines)
 			}
 			if left := clones(t, root); len(left) != 0 {

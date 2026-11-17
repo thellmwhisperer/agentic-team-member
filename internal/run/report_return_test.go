@@ -2,6 +2,7 @@ package run
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -183,6 +184,11 @@ func sentPrompt(harness string, call struct {
 	Stdin string
 	Env   []string
 }) string {
+	if harness == "pi" { // its stdin's prompt command
+		var prompt struct{ Message string }
+		_ = json.Unmarshal([]byte(call.Stdin), &prompt)
+		return prompt.Message
+	}
 	if harness == "claude" || len(call.Args) == 0 {
 		return call.Stdin
 	}

@@ -120,6 +120,10 @@ func fakeAgentCLI(name string) int {
 	if exit, done := fakeAgentMode(mode); done {
 		return exit
 	}
+	if mode == "pi-prompt-fail" {
+		pi.end(false)
+		return 0
+	}
 	fakeAgentSkill(name, args, skill)
 	if skill == "ponytail" && os.Getenv("FAKE_WORKER_TMPDIR") != "" { // the worker logs to its $TMPDIR
 		log := filepath.ToSlash(filepath.Join(os.Getenv("TMPDIR"), "test.log"))
@@ -141,6 +145,10 @@ func fakeAgentCLI(name string) int {
 	if err := exec.Command("sh", "-c", todo).Run(); err != nil {
 		return 1
 	}
+	if name == "pi" && skill == "ponytail" { // the worker's
+		pi.deliver()
+		pi.retry()
+	}
 	text = cmp.Or(map[string]string{"no-report": "Done, nothing to report.", "no-test-file": `{"summary": "s"}`}[mode],
 		workReport(call), text)
 	if name == "codex" {
@@ -154,19 +162,32 @@ func fakeAgentCLI(name string) int {
 		"codex": {{"type": "item.completed", "item": obj{"type": "agent_message", "text": text}},
 			{"type": "turn.completed"}},
 		"opencode": {{"type": "text", "part": obj{"text": text}}},
-		"pi": {{"type": "message_end", "message": obj{"role": "assistant",
+		"pi": {{"type": "message_end", "message": obj{"role": "assistant", "stopReason": "stop",
 			"content": []obj{{"type": "text", "text": text}}}}},
 		"cursor-agent": {{"type": "assistant", "message": obj{"role": "assistant",
 			"content": []obj{{"type": "text", "text": text}}}}, {"type": "result", "result": "not the report"}},
 	}[name] {
 		emit(ev)
 	}
+	if name == "pi" {
+		pi.end(skill == "ponytail") // the worker's
+	}
 	return 0
 }
 
 func fakeAgentTask(name string, args []string, mode *string) (string, string, string, string) {
-	stdin, _ := io.ReadAll(os.Stdin)
-	brief := map[bool]string{true: string(stdin), false: args[len(args)-1]}[name == "claude"]
+	var stdin []byte
+	var brief string
+	switch name {
+	case "pi": // in RPC mode
+		brief, stdin = piPrompt()
+	case "claude":
+		stdin, _ = io.ReadAll(os.Stdin)
+		brief = string(stdin)
+	default:
+		stdin, _ = io.ReadAll(os.Stdin)
+		brief = args[len(args)-1]
+	}
 	skill, call, todo, text, kind := fakeAgentKind(brief, mode)
 	recordFakeAgentCall(args, stdin, call)
 	recordOrder(kind)

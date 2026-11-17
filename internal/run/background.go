@@ -82,7 +82,8 @@ type request struct {
 	BaseSHA string   `json:"base_sha,omitempty"`
 	Answer  string   `json:"answer,omitempty"`
 	By      string   `json:"by,omitempty"`
-	Cmd     string   `json:"cmd"` // run, attach or runs
+	Cmd     string   `json:"cmd"`               // run, attach, runs, answer or steer
+	Message string   `json:"message,omitempty"` // steer: what the working agent is told
 	Args    []string `json:"args,omitempty"`
 	Run     string   `json:"run,omitempty"`
 	From    int      `json:"from,omitempty"` // attach: the first frame to send, after those a screen already has
@@ -309,6 +310,12 @@ func (s *server) handle(c net.Conn) {
 		_ = enc.Encode(reply{Run: &o})
 	case "answer":
 		if err := s.answerRun(req.Run, req.Answer, req.By); err != nil {
+			_ = enc.Encode(reply{Error: err.Error()})
+		} else {
+			_ = enc.Encode(reply{})
+		}
+	case "steer":
+		if err := s.steerRun(req.Run, req.Message); err != nil {
 			_ = enc.Encode(reply{Error: err.Error()})
 		} else {
 			_ = enc.Encode(reply{})
