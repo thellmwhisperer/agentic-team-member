@@ -47,7 +47,7 @@ func (a agent) prompt() string {
 // systemEnvironment uses OpenCode's system instruction files and Cursor's always-applied system rules.
 // rule is a temporary Cursor rule the caller removes after the invocation.
 func (a agent) systemEnvironment(clone string, env []string) ([]string, string, error) {
-	if a.systemPrompt == nil && a.texts["system-md"] == nil {
+	if a.systemPrompt == nil {
 		return env, "", nil
 	}
 	switch a.Harness {

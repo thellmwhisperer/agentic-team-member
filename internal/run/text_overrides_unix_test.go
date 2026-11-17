@@ -67,10 +67,10 @@ func TestRunTextOverrides(t *testing.T) {
 	}
 	t.Run("append", textOverrideAppend)
 	t.Run("default rejection", textOverrideDefaultRejection)
-	t.Run("worker skill with review disabled", textOverrideWorkerOnlySkill)
+	t.Run("no worker skill with review disabled", textOverrideWorkerOnlySkill)
 	t.Run("resume", textOverrideResume)
 	for _, harness := range []string{"pi", "hermes"} {
-		t.Run("fix skill/"+harness, func(t *testing.T) { textOverrideFixSkill(t, harness) })
+		t.Run("fix without skill/"+harness, func(t *testing.T) { textOverrideFixSkill(t, harness) })
 	}
 	t.Run("errors", func(t *testing.T) { textOverrideErrors(t, bin) })
 	for _, text := range []string{"ACP system replacement.\n", ""} {
@@ -113,12 +113,10 @@ func runTextOverride(t *testing.T, name, text string) {
 		review = 3
 	}
 	assertTextOverrideInputs(t, capture, worker, review, name, text)
-	wantSkill := ""
-	if name == "ponytail-skill" {
-		wantSkill = text
-	}
-	if got := readTextCapture(t, capture, worker, "ponytail"); got != wantSkill {
-		t.Fatalf("worker skill received %q, want %q", got, wantSkill)
+	for _, n := range []int{worker, review} {
+		if got := readTextCapture(t, capture, n, "ponytail"); got != "" {
+			t.Fatalf("call %d received a ponytail skill: %q", n, got)
+		}
 	}
 	assertTextOverridesReport(t, root, label, map[string]string{name: path}, map[string]string{name: text})
 	if reject {
@@ -203,13 +201,19 @@ func textOverrideSystem(t *testing.T, harness, text string) {
 	t.Setenv("FAKE_AGENT_CALL", call)
 	writeFixture(t, path, text)
 	bin := followUpsServer(t, root)
-	label, end := promptRun(t, bin, root, "--harness", harness, "--system-md", path, issueFile(t, issue))
+	args, want := []string{"--harness", harness, "--system-md", path}, text
+	if harness == "opencode" || harness == "cursor" {
+		extra := filepath.Join(t.TempDir(), "extra.md")
+		writeFixture(t, extra, "Appendix.")
+		args, want = append(args, "--system-prompt", extra), text+"\n\nAppendix."
+	}
+	label, end := promptRun(t, bin, root, append(args, issueFile(t, issue))...)
 	if end.Outcome != "passed" {
 		t.Fatalf("run: %+v", end)
 	}
 	for _, path := range []string{call, call + ".ponytail"} {
-		if got := recordedSystemPrompt(t, path); got != text {
-			t.Fatalf("system override received %q, want %q", got, text)
+		if got := recordedSystemPrompt(t, path); got != want {
+			t.Fatalf("system override received %q, want %q", got, want)
 		}
 	}
 	assertTextOverridesReport(t, root, label, map[string]string{"system-md": path}, map[string]string{"system-md": text})
@@ -254,7 +258,7 @@ func textOverrideResume(t *testing.T) {
 	t.Setenv("FAKE_AGENT_STREAM", `{"type":"system","session_id":"text-session"}`+"\n")
 	received := filepath.Join(t.TempDir(), "received-skill")
 	t.Setenv("ATM_TEXT_SKILL", received)
-	t.Setenv("FAKE_AGENT_WORK", `cat .claude/skills/ponytail/SKILL.md > "$ATM_TEXT_SKILL"; `+fixWork)
+	t.Setenv("FAKE_AGENT_WORK", `if [ -e .claude/skills/ponytail ]; then touch "$ATM_TEXT_SKILL"; fi; `+fixWork)
 	paths, texts := map[string]string{}, map[string]string{}
 	args := []string{issueFile(t, issue)}
 	for _, name := range overrideFlags {
@@ -282,8 +286,8 @@ func textOverrideResume(t *testing.T) {
 	if end.Outcome != "passed" {
 		t.Fatalf("resume: %+v", end)
 	}
-	if b, err := os.ReadFile(received); err != nil || string(b) != texts["ponytail-skill"] {
-		t.Fatalf("resumed worker skill: %q, %v", b, err)
+	if _, err := os.Stat(received); !os.IsNotExist(err) {
+		t.Fatalf("resumed worker received a ponytail skill: %v", err)
 	}
 	if got := recordedSystemPrompt(t, call+".ponytail"); got != texts["system-md"] {
 		t.Fatalf("resumed system prompt: %q", got)
@@ -317,12 +321,11 @@ func textOverrideWorkerOnlySkill(t *testing.T) {
 	if end.Outcome != "passed" {
 		t.Fatalf("run: %+v", end)
 	}
-	if got := readTextCapture(t, capture, 1, "ponytail"); got != "Custom worker skill." {
-		t.Fatalf("worker skill: %q", got)
-	}
-	for _, skill := range []string{"ponytail", "ponytail-review"} {
-		if got := readTextCapture(t, capture, 2, skill); got != "" {
-			t.Fatalf("review received disabled skill %s: %q", skill, got)
+	for n := 1; n <= 2; n++ {
+		for _, skill := range []string{"ponytail", "ponytail-review"} {
+			if got := readTextCapture(t, capture, n, skill); got != "" {
+				t.Fatalf("call %d received skill %s: %q", n, skill, got)
+			}
 		}
 	}
 }
@@ -394,13 +397,16 @@ func textOverrideACP(t *testing.T, systemText string) {
 	if end.Outcome != "passed" {
 		t.Fatalf("ACP run: %+v", end)
 	}
-	for suffix, name := range map[string]string{"": "ponytail-skill", ".ponytail": "ponytail-review-skill"} {
+	for _, suffix := range []string{"", ".ponytail"} {
 		_, text := promptText(hermesCall(t, call+suffix)["session/prompt"])
-		if !strings.HasPrefix(text, systemText) || strings.Contains(text, system.Prompt) {
-			t.Fatalf("ACP system text was not replaced: %q", text)
+		if systemText != "" && strings.Contains(text, systemText) || strings.Contains(text, system.Prompt) {
+			t.Fatalf("ACP agent received a system text: %q", text)
 		}
-		if !strings.HasSuffix(text, "ACP replacement "+name) || strings.Contains(text, "Forces the laziest") {
-			t.Fatalf("ACP skill was not replaced: %q", text)
+		if strings.Contains(text, "ACP replacement ponytail-skill") || strings.Contains(text, "Forces the laziest") {
+			t.Fatalf("ACP agent received the ponytail skill: %q", text)
+		}
+		if suffix == ".ponytail" && !strings.HasSuffix(text, "ACP replacement ponytail-review-skill") {
+			t.Fatalf("ACP review skill was not replaced: %q", text)
 		}
 	}
 }
@@ -433,7 +439,7 @@ func textOverrideFixSkill(t *testing.T, harness string) {
 	received := filepath.Join(t.TempDir(), "received-skill")
 	t.Setenv("ATM_TEXT_SKILL", received)
 	if harness == "pi" {
-		t.Setenv("FAKE_AGENT_WORK", `cat .atm/skills/ponytail/SKILL.md > "$ATM_TEXT_SKILL"; `+fixWork)
+		t.Setenv("FAKE_AGENT_WORK", `if [ -e .atm/skills/ponytail ]; then touch "$ATM_TEXT_SKILL"; fi; `+fixWork)
 	}
 	bin := followUpsServer(t, root)
 	_, end := promptRun(t, bin, root, "--harness", harness, "--ponytail-skill", skill, issueFile(t, issue))
@@ -441,17 +447,17 @@ func textOverrideFixSkill(t *testing.T, harness string) {
 		t.Fatalf("fix run: %+v", end)
 	}
 	if harness == "pi" {
-		if b, err := os.ReadFile(received); err != nil || string(b) != text {
-			t.Fatalf("fix skill: %q, %v", b, err)
+		if _, err := os.Stat(received); !os.IsNotExist(err) {
+			t.Fatalf("fix received a ponytail skill: %v", err)
 		}
 		args := agentCall(t, call).Args
-		if !slices.Contains(args, "--skill") || !strings.Contains(args[len(args)-1], "Fix this failure") {
-			t.Fatalf("fix was not sent the skill: %q", args)
+		if slices.Contains(args, "--skill") || !strings.Contains(args[len(args)-1], "Fix this failure") {
+			t.Fatalf("fix was sent a skill: %q", args)
 		}
 	} else {
 		_, prompt := promptText(hermesCall(t, call)["session/prompt"])
-		if !strings.Contains(prompt, "Fix this failure") || !strings.HasSuffix(prompt, text) {
-			t.Fatalf("ACP fix was not sent the skill: %q", prompt)
+		if !strings.Contains(prompt, "Fix this failure") || strings.Contains(prompt, text) {
+			t.Fatalf("ACP fix was sent a skill: %q", prompt)
 		}
 	}
 }

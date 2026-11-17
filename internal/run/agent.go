@@ -83,9 +83,6 @@ func (a *agent) flags(fs *flag.FlagSet) {
 // codex writes its last message.
 func (a agent) argv(clone, skill, final, brief string) (argv []string, stdin string) {
 	if acp, ok := config.ACP[a.Harness]; ok {
-		if a.texts["system-md"] != nil && a.prompt() != "" {
-			brief = a.prompt() + "\n\n" + brief
-		}
 		return append(slices.Clone(acp.Argv), a.args...), brief
 	}
 	with := func(argv []string, value string, args ...string) []string {

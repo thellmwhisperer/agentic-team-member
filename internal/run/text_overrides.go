@@ -65,11 +65,7 @@ func (a agent) textMetadata() map[string]textFile {
 	return files
 }
 
-// Workers have no default skill; an explicit replacement opts into ponytail.
 func (a agent) skillName(skill string) string {
-	if skill == "" && a.texts["ponytail-skill"] != nil {
-		skill = "ponytail"
-	}
 	if replacement := a.texts[skill+"-skill"]; replacement != nil && replacement.Text == "" {
 		return ""
 	}

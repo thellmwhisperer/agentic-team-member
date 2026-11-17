@@ -159,12 +159,10 @@ func (a agent) afterE2E(r *verdict, clone string, p resumePoint) (map[string]any
 	r.emit(turn, map[string]any{"state": "started", "harness": a.Harness, "output": turn})
 	var err error
 	s := timed(func() {
-		var skill string
 		if _, err = a.reviewScratch("worker"); err == nil {
-			skill, err = a.placeSkill(clone, "")
+			_, err = placeSkill(clone, a.Harness, "")
 		}
 		if err == nil {
-			argv, stdin, _ = a.resumeArgv(clone, skill, final, p.Session, prompt)
 			stream, exit, cause, runErr := a.exec(clone, path, argv, stdin, false)
 			var invalid error
 			invalid, err = a.reported("worker", path, final, exit, cause, runErr, stream, testFile, ev)

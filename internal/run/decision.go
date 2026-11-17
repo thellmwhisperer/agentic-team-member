@@ -9,8 +9,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/thellmwhisperer/agentic-team-member/internal/config"
 )
 
 // Decision keeps the finding and the launcher's answer in report.json. An empty answer is pending.
@@ -115,15 +113,12 @@ func (a agent) afterCheck(clone, text, session, finding string, attempt int) (ma
 	path := filepath.Join(a.dir, name+".jsonl")
 	final := filepath.Join(a.dir, name+".final.md")
 	ev := map[string]any{"log": path}
-	skill, err := a.placeSkill(clone, "")
+	skill, err := placeSkill(clone, a.Harness, "")
 	if err == nil {
 		_, err = a.reviewScratch("worker")
 	}
 	if err == nil {
 		prompt := text + "\n\nThe launcher chose fix. Fix this failure in one turn:\n" + finding
-		if _, acp := config.ACP[a.Harness]; acp && a.skillName("") != "" {
-			prompt = a.withSkill(prompt, "ponytail")
-		}
 		argv, stdin, ok := a.resumeArgv(clone, skill, final, session, prompt)
 		if session == "" || !ok {
 			argv, stdin = a.argv(clone, skill, final, prompt)
