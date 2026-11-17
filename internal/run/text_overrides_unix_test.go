@@ -391,7 +391,9 @@ func textOverrideTemplateErrors(t *testing.T) {
 					t.Fatalf("invalid template exited %d:\n%s", code, out)
 				}
 				if name == "ponytail-brief-template" {
-					stopCheckRun(t, root, lastRun(t, root, "waiting"))
+					top := gitT(t, root, "rev-parse", "--show-toplevel")
+					t.Chdir(top) // keep the Unix socket name below the platform's path limit
+					stopCheckRun(t, top, lastRun(t, top, "waiting"))
 				}
 			})
 		}
