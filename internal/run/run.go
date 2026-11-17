@@ -63,10 +63,8 @@ func runAt(label, ref string, args []string, out, summary io.Writer) (err error)
 	if err != nil {
 		return err
 	}
-	c = skipping(c, skips)
-	r := a.verdict(out)
+	c, r := prepareSkippedRun(a, c, skips, out)
 	r.Agent.TextOverrides = a.textMetadata()
-	recordSkipped(r, skips)
 	var dir, sha string
 	defer func() {
 		r.resumable(a.dir)
@@ -109,6 +107,13 @@ var skippable = []string{"delivery", "ponytail"}
 func skipReason(step string) string { return "skipped by flag: --skip " + step }
 
 func skipsStep(skips []string, step string) bool { return slices.Contains(skips, step) }
+
+func prepareSkippedRun(a *agent, c config.Config, skips []string, out io.Writer) (config.Config, *verdict) {
+	c = skipping(c, skips)
+	r := a.verdict(out)
+	recordSkipped(r, skips)
+	return c, r
+}
 
 // skipping is c with the steps --skip names off, for this run only, whatever .atm.yaml says.
 func skipping(c config.Config, skips []string) config.Config {

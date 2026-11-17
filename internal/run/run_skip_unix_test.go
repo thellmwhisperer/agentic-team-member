@@ -24,7 +24,8 @@ func TestRunSkipFlag(t *testing.T) {
 		{"ponytail", "", []string{"ponytail"}, "skipped by flag: --skip ponytail", ""},
 		{"ponytail over config false", "ponytail: false\n", []string{"ponytail"}, "skipped by flag: --skip ponytail", ""},
 		{"delivery", "", []string{"delivery"}, "", "skipped by flag: --skip delivery"},
-		{"both, repeated", "", []string{"delivery", "ponytail"}, "skipped by flag: --skip ponytail", "skipped by flag: --skip delivery"},
+		{"both, repeated", "", []string{"delivery", "ponytail"},
+			"skipped by flag: --skip ponytail", "skipped by flag: --skip delivery"},
 		{"no flag", "", nil, "", ""},
 		{"config false, no flag", "ponytail: false\n", nil, "skipped by configuration: ponytail: false", ""},
 	} {
