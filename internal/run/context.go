@@ -13,11 +13,11 @@ type usageLine struct {
 	Message struct {
 		Role, Model, Provider string
 		Usage                 struct {
-			Input, Output, CacheRead, CacheWrite, TotalTokens int // pi
-			InputTokens                                       int `json:"input_tokens"` // claude
-			OutputTokens                                      int `json:"output_tokens"`
-			CacheCreation                                     int `json:"cache_creation_input_tokens"`
-			CacheReadTokens                                   int `json:"cache_read_input_tokens"`
+			Input, Output, CacheRead, CacheWrite int // pi
+			InputTokens                          int `json:"input_tokens"` // claude
+			OutputTokens                         int `json:"output_tokens"`
+			CacheCreation                        int `json:"cache_creation_input_tokens"`
+			CacheReadTokens                      int `json:"cache_read_input_tokens"`
 		}
 	}
 }
@@ -33,10 +33,7 @@ func contextUsed(harness string, line []byte) []map[string]any {
 	u, used, window := e.Message.Usage, 0, 0
 	switch {
 	case harness == "pi" && (e.Type == "message_start" || e.Type == "message_end"):
-		used = u.TotalTokens
-		if used == 0 {
-			used = u.Input + u.Output + u.CacheRead + u.CacheWrite
-		}
+		used = u.Input + u.Output + u.CacheRead + u.CacheWrite
 		window = piWindow(e.Message.Provider, e.Message.Model)
 	case harness == "claude" && e.Type == "assistant":
 		used = u.InputTokens + u.OutputTokens + u.CacheCreation + u.CacheReadTokens
