@@ -471,6 +471,7 @@ func (m *Model) skipPonytail(skip bool) {
 func (m *Model) skipDelivery(skip bool) {
 	if skip {
 		m.current("delivery").state = "skipped"
+		m.rows = slices.DeleteFunc(m.rows, func(r *row) bool { return strings.HasPrefix(r.step, "gate:") })
 	}
 }
 

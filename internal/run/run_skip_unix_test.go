@@ -44,12 +44,12 @@ func skipDeliveryAfterChecksStop(t *testing.T, bin string) {
 	t.Setenv("FAKE_AGENT_WORK", fixWork)
 	restart := ponytailConfigServer(t, bin, top)
 	live := leftAtDecision(t, startFollow(t, bin, top, true, "run", "--skip", "delivery", issueFile(t, issue)))
-	assertDeliverySkippedOnScreen(t, live)
 	cmd := exec.Command(bin, "answer", "issue-1", "stop", "--by", "operator")
 	cmd.Dir = top
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("stop after failed Checks: %v\n%s", err, out)
 	}
+	assertDeliverySkippedOnScreen(t, live)
 	restart()
 	reopened := decisionTerminal(t, startFollow(t, bin, top, true, "attach", "issue-1"), 1)
 	assertDeliverySkippedOnScreen(t, reopened)
@@ -58,6 +58,11 @@ func skipDeliveryAfterChecksStop(t *testing.T, bin string) {
 
 func assertDeliverySkippedOnScreen(t *testing.T, screen string) {
 	t.Helper()
+	for _, line := range strings.Split(screen, "\n") {
+		if strings.Contains(line, "pending") && !strings.Contains(line, "Slop detector") {
+			t.Fatalf("gate steps remain pending after Delivery was skipped:\n%s", screen)
+		}
+	}
 	for _, line := range strings.Split(screen, "\n") {
 		if strings.Contains(line, "Delivery") && strings.Contains(line, "skipped") {
 			return
