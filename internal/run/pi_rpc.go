@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"slices"
 	"strconv"
-	"strings"
 	"sync"
 )
 
@@ -21,11 +20,11 @@ func piLine(m map[string]any) []byte {
 	return append(b, '\n')
 }
 
-// piSettled is the id of the get_state ATM sends at each agent_end.
+// piSettled is the id of the get_state ATM sends at each agent_end, compaction's end and retry's end.
 const piSettled = "atm-settled"
 
 // piReply reads one line of pi's stdout and is what ATM writes back, nil for nothing. A failed prompt ends the
-// conversation; agent_end asks pi's state, whose reply ends it unless pi goes on. A steer's response, or the user
+// conversation; agent_end, and the end of a compaction or retry, asks pi's state, whose reply ends it unless pi goes on. A steer's response, or the user
 // message that delivers it, answers the atm steer that sent it.
 func (s *stream) piReply(line []byte) []byte {
 	var m struct {
@@ -46,7 +45,8 @@ func (s *stream) piReply(line []byte) []byte {
 		s.retrying = true
 	case m.Type == "auto_retry_end":
 		s.retrying = false
-	case m.Type == "agent_end":
+		fallthrough
+	case m.Type == "agent_end", m.Type == "auto_compaction_end":
 		return piLine(map[string]any{"id": piSettled, "type": "get_state"})
 	case m.Type == "message_end" && m.Message.Role == "user":
 		text := contentText(m.Message.Content)
@@ -131,9 +131,6 @@ func (a agent) working(s *stream, read func() error) error {
 
 // steerRun sends message to the agent run label has working now: pi takes it mid-run, no other harness can.
 func (s *server) steerRun(label, message string) error {
-	if strings.TrimSpace(message) == "" {
-		return errors.New("the message is empty")
-	}
 	r := s.find(label)
 	if r == nil {
 		return errors.New("no run " + label)

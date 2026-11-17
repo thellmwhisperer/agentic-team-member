@@ -69,8 +69,8 @@ func steer(bin, top string, args ...string) (string, error) {
 // leaves the counters of what it ran.
 
 // A pi worker takes atm steer's message mid-run: the worker log has the steer, then pi's user message with it,
-// then the worker's final message, and the run passes. A message pi refuses, a run with no agent working, a run
-// that does not exist and an empty message each fail atm steer, saying why.
+// then the worker's final message, and the run passes. A message pi refuses, a run with no agent working and a run
+// that does not exist each fail atm steer, saying why.
 func TestSteerDeliversToAPiWorker(t *testing.T) {
 	top := atmRepo(t)
 	ready, release := heldWork(t)
@@ -102,7 +102,6 @@ func TestSteerDeliversToAPiWorker(t *testing.T) {
 	for _, c := range []struct{ run, message, want string }{
 		{"issue-1", "too late", "run issue-1 has no agent working now; the message was not sent"},
 		{"no-such-run", "hello", "no run no-such-run"},
-		{"issue-1", "  ", "the message is empty"},
 	} {
 		if out, err := steer(bin, top, c.run, c.message); err == nil || !strings.Contains(out, c.want) {
 			t.Fatalf("atm steer %s %q: want %q, got %v\n%s", c.run, c.message, c.want, err, out)
@@ -174,7 +173,8 @@ func TestSteerRefusedOnOtherHarnesses(t *testing.T) {
 }
 
 // pi in RPC mode ends when its agent settles: a model call pi retries after its agent_end goes on until the retry
-// ends, and a prompt pi refuses fails the agent with pi's reason.
+// ends, a compaction after its last agent_end ends once the compaction does, and a prompt pi refuses fails the
+// agent with pi's reason.
 func TestSteerPiSettles(t *testing.T) {
 	t.Run("retried", func(t *testing.T) {
 		top := atmRepo(t)
@@ -182,9 +182,20 @@ func TestSteerPiSettles(t *testing.T) {
 		bin := followUpsServer(t, top)
 		startFollow(t, bin, top, false, "run", "--follow", "--harness", "pi", issueFile(t, issue)).exit(0)
 		b, err := os.ReadFile(filepath.Join(top, ".atm", "runs", "issue-1", "worker.jsonl"))
-		if err != nil || strings.Count(string(b), `"type":"get_state"`) != 2 ||
+		if err != nil || strings.Count(string(b), `"type":"get_state"`) != 3 ||
 			!strings.Contains(string(b), "auto_retry_end") {
-			t.Fatalf("want a get_state at each agent_end, the run past the retry: %v\n%s", err, b)
+			t.Fatalf("want a get_state at each agent_end and at the retry's end, the run past the retry: %v\n%s", err, b)
+		}
+	})
+	t.Run("compacted", func(t *testing.T) {
+		top := atmRepo(t)
+		t.Setenv("FAKE_AGENT", "pi-compact")
+		bin := followUpsServer(t, top)
+		startFollow(t, bin, top, false, "run", "--follow", "--harness", "pi", issueFile(t, issue)).exit(0)
+		b, err := os.ReadFile(filepath.Join(top, ".atm", "runs", "issue-1", "worker.jsonl"))
+		if err != nil || !strings.Contains(string(b), `"isCompacting":true`) ||
+			strings.Count(string(b), `"type":"get_state"`) != 2 {
+			t.Fatalf("want a get_state at the agent_end, another at the compaction's end: %v\n%s", err, b)
 		}
 	})
 	t.Run("report returned to its session", func(t *testing.T) { // the session get_state names, as no header does

@@ -6,14 +6,16 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync/atomic"
 )
 
 // piRPC plays pi in RPC mode, as pi 1.5.2 does: its stdin's first line is the prompt command; each steer is
 // answered as queued and kept until the worker's work ends, but one whose message is $FAKE_PI_REFUSE, which it
-// refuses; each get_state is answered as idle; it exits once its stdin closes.
+// refuses; each get_state is answered as idle, but while it compacts; it exits once its stdin closes.
 type piRPC struct {
-	steers chan string
-	closed chan struct{}
+	steers     chan string
+	closed     chan struct{}
+	compacting atomic.Bool
 }
 
 var pi *piRPC
@@ -54,8 +56,12 @@ func (p *piRPC) serve(in *bufio.Reader) {
 			emit(obj{"id": c.ID, "type": "response", "command": "steer", "success": true})
 			p.steers <- c.Message
 		case "get_state":
+			compacting := p.compacting.Swap(false)
 			emit(obj{"id": c.ID, "type": "response", "command": "get_state", "success": true,
-				"data": obj{"sessionId": "pi-rpc-session", "isStreaming": false, "isCompacting": false}})
+				"data": obj{"sessionId": "pi-rpc-session", "isStreaming": false, "isCompacting": compacting}})
+			if compacting {
+				emit(obj{"type": "auto_compaction_end", "aborted": false, "willRetry": false})
+			}
 		}
 	}
 }
@@ -82,12 +88,17 @@ func (p *piRPC) retry() {
 	emit(obj{"type": "agent_start"})
 }
 
-// end ends the agent's run and waits until ATM closes pi's stdin. A worker with $FAKE_PI_LINGER, a directory,
-// then stays alive, as pi may for a moment: it says so in its file ready and ends once a line comes on its FIFO go.
+// end ends the agent's run and waits until ATM closes pi's stdin. With $FAKE_AGENT pi-compact, pi then compacts,
+// as pi does past its threshold, says so at the next get_state, then ends the compaction and stays idle. A worker
+// with $FAKE_PI_LINGER, a directory, then stays alive, as pi may for a moment: it says so in its file ready and ends once a line comes on its FIFO go.
 func (p *piRPC) end(worker bool) {
 	end := `{"type":"agent_end","messages":[]}` + "\n"
-	if os.Getenv("FAKE_AGENT") == "pi-retry" {
+	switch os.Getenv("FAKE_AGENT") {
+	case "pi-retry":
 		end += `{"type":"auto_retry_end","success":true,"attempt":1}` + "\n"
+	case "pi-compact":
+		p.compacting.Store(true)
+		end += `{"type":"auto_compaction_start","reason":"threshold"}` + "\n"
 	}
 	if os.Getenv("FAKE_AGENT") != "pi-prompt-fail" {
 		_, _ = os.Stdout.WriteString(end)
