@@ -53,17 +53,24 @@ func (s *stream) piReply(line []byte) []byte {
 	case m.Type == "message_end" && m.Message.Role == "user":
 		text := contentText(m.Message.Content)
 		s.steered(func(w steerWait) bool { return w.message == text }, nil)
-	case m.Type != "response":
-	case m.Command == "prompt" && !m.Success:
-		s.failure, s.settled = "prompt: "+cmp.Or(m.Error, "failed"), true
-	case m.Command == "steer" && !m.Success:
-		s.steered(func(w steerWait) bool { return w.id == m.ID },
-			errors.New("pi refused the message: "+cmp.Or(m.Error, "failed")))
-	case m.ID == piSettled:
-		s.session = cmp.Or(s.session, m.Data.SessionID)
-		s.settled = !m.Data.IsStreaming && !m.Data.IsCompacting && !s.retrying
+	case m.Type == "response":
+		s.piResponse(m.ID, m.Command, m.Error, m.Success, m.Data.SessionID, m.Data.IsStreaming || m.Data.IsCompacting)
 	}
 	return nil
+}
+
+// piResponse reads pi's response to a command ATM sent: a failed prompt, a refused steer or the state ATM asked.
+func (s *stream) piResponse(id, command, why string, success bool, session string, busy bool) {
+	switch {
+	case command == "prompt" && !success:
+		s.failure, s.settled = "prompt: "+cmp.Or(why, "failed"), true
+	case command == "steer" && !success:
+		s.steered(func(w steerWait) bool { return w.id == id },
+			errors.New("pi refused the message: "+cmp.Or(why, "failed")))
+	case id == piSettled:
+		s.session = cmp.Or(s.session, session)
+		s.settled = !busy && !s.retrying
+	}
 }
 
 // steerWait is an atm steer waiting until pi delivers its message.

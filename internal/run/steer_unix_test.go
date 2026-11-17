@@ -177,33 +177,21 @@ func TestSteerRefusedOnOtherHarnesses(t *testing.T) {
 // prompt pi refuses fails the agent with pi's reason.
 func TestSteerPiSettles(t *testing.T) {
 	t.Run("retried", func(t *testing.T) {
-		top := atmRepo(t)
-		t.Setenv("FAKE_AGENT", "pi-retry")
-		bin := followUpsServer(t, top)
-		startFollow(t, bin, top, false, "run", "--follow", "--harness", "pi", issueFile(t, issue)).exit(0)
-		b, err := os.ReadFile(filepath.Join(top, ".atm", "runs", "issue-1", "worker.jsonl"))
+		b, err := piWorkerLog(t, "pi-retry")
 		if err != nil || strings.Count(string(b), `"type":"get_state"`) != 3 ||
 			!strings.Contains(string(b), "auto_retry_end") {
 			t.Fatalf("want a get_state at each agent_end and at the retry's end, the run past the retry: %v\n%s", err, b)
 		}
 	})
 	t.Run("compacted", func(t *testing.T) {
-		top := atmRepo(t)
-		t.Setenv("FAKE_AGENT", "pi-compact")
-		bin := followUpsServer(t, top)
-		startFollow(t, bin, top, false, "run", "--follow", "--harness", "pi", issueFile(t, issue)).exit(0)
-		b, err := os.ReadFile(filepath.Join(top, ".atm", "runs", "issue-1", "worker.jsonl"))
+		b, err := piWorkerLog(t, "pi-compact")
 		if err != nil || !strings.Contains(string(b), `"isCompacting":true`) ||
 			strings.Count(string(b), `"type":"get_state"`) != 2 {
 			t.Fatalf("want a get_state at the agent_end, another at the compaction's end: %v\n%s", err, b)
 		}
 	})
 	t.Run("compacted to retry", func(t *testing.T) { // pi goes on after a compaction that overflowed
-		top := atmRepo(t)
-		t.Setenv("FAKE_AGENT", "pi-overflow")
-		bin := followUpsServer(t, top)
-		startFollow(t, bin, top, false, "run", "--follow", "--harness", "pi", issueFile(t, issue)).exit(0)
-		b, err := os.ReadFile(filepath.Join(top, ".atm", "runs", "issue-1", "worker.jsonl"))
+		b, err := piWorkerLog(t, "pi-overflow")
 		if err != nil || !strings.Contains(string(b), `"willRetry":true`) ||
 			strings.Count(string(b), `"type":"get_state"`) != 2 {
 			t.Fatalf("want a get_state at each agent_end, none at the compaction's end, the run past it: %v\n%s", err, b)
@@ -227,17 +215,32 @@ func TestSteerPiSettles(t *testing.T) {
 		t.Setenv("FAKE_AGENT", "pi-prompt-fail")
 		bin := followUpsServer(t, top)
 		f := startFollow(t, bin, top, false, "run", "--follow", "--harness", "pi", issueFile(t, issue))
-		var failed obj
-		for line := range f.lines {
-			var ev obj
-			if json.Unmarshal([]byte(line), &ev) == nil && ev["step"] == "agent" && ev["state"] == "failed" {
-				failed = ev
-			}
-		}
+		failed := agentFailed(f.lines)
 		if why, _ := failed["error"].(string); !strings.Contains(why, "pi: prompt: No API key for fake") {
 			t.Fatalf("want the agent failed with pi's reason, got %v", failed)
 		}
 	})
+}
+
+// agentFailed reads a followed run's events and is the last that failed its agent step, nil for none.
+func agentFailed(lines <-chan string) (failed obj) {
+	for line := range lines {
+		var ev obj
+		if json.Unmarshal([]byte(line), &ev) == nil && ev["step"] == "agent" && ev["state"] == "failed" {
+			failed = ev
+		}
+	}
+	return failed
+}
+
+// piWorkerLog runs an issue on a pi worker the fake agent plays as fake and reads its worker log.
+func piWorkerLog(t *testing.T, fake string) ([]byte, error) {
+	t.Helper()
+	top := atmRepo(t)
+	t.Setenv("FAKE_AGENT", fake)
+	bin := followUpsServer(t, top)
+	startFollow(t, bin, top, false, "run", "--follow", "--harness", "pi", issueFile(t, issue)).exit(0)
+	return os.ReadFile(filepath.Join(top, ".atm", "runs", "issue-1", "worker.jsonl"))
 }
 
 // A steer pi has queued but not delivered when its agent ends fails, and so does one sent after pi settled while
