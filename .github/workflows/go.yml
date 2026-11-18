@@ -31,14 +31,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # macOS splits internal/run in 3 parallel shards: run serially it took 674 s there (PR 518).
-        # Shard 0 runs every other package and the lint.
-        include:
-          - { os: ubuntu-latest, shard: all }
-          - { os: macos-latest, shard: 0 }
-          - { os: macos-latest, shard: 1 }
-          - { os: macos-latest, shard: 2 }
-          - { os: macos-latest, shard: 3 }
+        # Each OS splits internal/run in 3 parallel shards: run serially it took 674 s on macOS (PR 518) and
+        # 865-977 s on Linux. Shard 0 runs every other package and the lint.
+        # A push to main keeps Linux in one job, because the end-to-end coverage profile is built from it.
+        include: ${{ fromJSON(github.event_name == 'push' && '[{"os":"ubuntu-latest","shard":"all"},{"os":"macos-latest","shard":0},{"os":"macos-latest","shard":1},{"os":"macos-latest","shard":2},{"os":"macos-latest","shard":3}]' || '[{"os":"ubuntu-latest","shard":0},{"os":"ubuntu-latest","shard":1},{"os":"ubuntu-latest","shard":2},{"os":"ubuntu-latest","shard":3},{"os":"macos-latest","shard":0},{"os":"macos-latest","shard":1},{"os":"macos-latest","shard":2},{"os":"macos-latest","shard":3}]') }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
