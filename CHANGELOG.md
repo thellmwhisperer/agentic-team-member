@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.18.0](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.17.0...v1.18.0) (2026-11-18)
+
+
+### Features
+
+* **run:** add per-run step skipping ([#705](https://github.com/thellmwhisperer/agentic-team-member/issues/705)) ([daaf9dc](https://github.com/thellmwhisperer/agentic-team-member/commit/daaf9dcc0380295f39316e1187987fcb4c852d48))
+
 ## [1.17.0](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.16.0...v1.17.0) (2026-11-17)
 
 
