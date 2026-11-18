@@ -37,7 +37,7 @@ A resumed clone still starts at its saved base commit.
 | `config` | `.atm.yaml` as the base ref has it is complete. The run uses that file, never the working tree's; a working tree's `.atm.yaml` that differs gets one warning line. A base ref without `.atm.yaml` uses the machine's [`repository_overrides`](configuration.md#configatmconfigyaml) entry instead |
 | `base green` | The latest completed CI run of each workflow on the base ref's head passed or was skipped, as one `gh run list --commit` call says. No completed run, or a `gh` that does not answer, fails. A repository whose origin is not on GitHub skips it with one line saying so |
 | `worker files` | `--settings` and `--skill` accept either a separate value or `=<value>`. Absolute paths are readable on disk; relative paths exist in the resolved base commit, or the run's recorded base commit on resume, relative to the clone root. Only `--settings` values starting with `{` are inline JSON. A [`--system-prompt`](configuration.md#layers) file is readable and no harness of the run is hermes. Each [text override](configuration.md#text-overrides) file is readable and names a text the run sends |
-| `delivery` | The first word of `delivery` is a command `sh` finds, as `command -v` says: on `PATH`, or one of `sh`'s own, as `if` or `cd`. An empty `delivery` passes |
+| `delivery` | Unless the run uses `atm run --skip delivery`, the first word of `delivery` is a command `sh` finds, as `command -v` says: on `PATH`, or one of `sh`'s own, as `if` or `cd`. An empty `delivery` passes |
 | `compile` | The optional `compile` command of `.atm.yaml` exits 0 when `sh` runs it, on this machine, in a scratch copy of the resolved base commit, or the run's recorded base commit on resume, that is removed after. Its output, on either stream, is the reason it fails. No key or an empty one passes |
 
 ## The steps
@@ -54,7 +54,7 @@ Delivery failure waits for the launcher's answer; see [Checks](#checks).
 | Agent | Runs the coding agent in the clone on the brief | It fails to complete successfully, times out or writes outside its clone and scratch directory. A missing or invalid report does not fail it: see [Rejected reports](#rejected-reports) |
 | Checks | Prepares the clone, rejects work with no changes, validates the reported test file, then runs install, test, optional e2e, typecheck and lint; see [Checks](#checks) | Cleanup fails, there are no changes from the base commit, a changed Go test file loses tests, the reported test file is invalid, a command fails, or HEAD moves |
 | Slop detector | Lets a model cut the diff; keeps the cut only if every check still passes | Its agent fails, fails [report validation](#rejected-reports), or anything commits |
-| Delivery | Commits the work on a branch and runs the `delivery` command | The branch or the command fails. Skipped when `delivery` is empty |
+| Delivery | Commits the work on a branch and runs the `delivery` command | The branch or the command fails. Skipped when `delivery` is empty or `atm run --skip delivery` is used |
 
 A run is one unit: the issue's work. A gap the agent sees and does not fix is a
 note in its report's `summary`; ATM takes no action on it. For the configured
@@ -301,7 +301,7 @@ metadata.
 
 ## Slop detector
 
-This step runs unless `.atm.yaml` sets [`ponytail: false`](configuration.md#atmyaml). Once the unit passed, the same agent gets `brief-ponytail.md`, the issue,
+This step runs unless `.atm.yaml` sets [`ponytail: false`](configuration.md#atmyaml) or the run uses `atm run --skip ponytail`. Once the unit passed, the same agent gets `brief-ponytail.md`, the issue,
 the run's diff and the reported test it must not change, with the bundled `ponytail-review` skill: for native agents ATM writes it into the clone, outside git (for Cursor at `.cursor/skills/<skill>/SKILL.md`); Hermes's skill delivery is described in [Hermes](configuration.md#hermes). It may only cut: delete, shrink, or swap in the standard library or
 an existing helper, in the diff's files. The required
 report format is in the [ponytail brief](../internal/run/brief-ponytail.md.tmpl).
@@ -337,7 +337,7 @@ an email ending in `@localhost`, fails the run.
 
 ## Delivery
 
-When `delivery` is set, the clone goes on a branch
+When `delivery` is set and the run does not use `atm run --skip delivery`, the clone goes on a branch
 `atm/<title slug>-<timestamp>`, whatever is left uncommitted is committed as
 the next unit commit, and the clone's `origin` becomes the repository's. A
 repair retries Delivery on the same branch after Checks and the slop detector.
@@ -390,7 +390,7 @@ it is on disk before delivery reads it.
 |-------|-------|
 | `failed_node`, `reason` | The step that failed, if any, and the reason for failure |
 | `agent` | The effective requested `harness`, `model`, `effort` and ordered `harness_args`, after global config, `.atm.yaml` and flags. Unset model and effort stay `""`; no extra arguments is `[]` |
-| `nodes` | Each step's `result` (`passed`, `failed`, `running`, `skipped` or `not run`), `started_at` (UTC, RFC 3339 with milliseconds) when its start is known, and `duration_ms` when it ends; the agent node also has `exit` and `tail` when the agent ran but its step failed, and `"report": "missing"` when the worker's report never came ([Rejected reports](#rejected-reports)). Checks includes an `e2e` row in `rows` when that command ran, passed or failed, with `name`, `result`, `started_at` and `duration_ms`. Delivery has `rows`, each with `name`, `result` (`running`, `passed` or `failed`), `started_at` and `duration_ms`, for each commit or command attempt; earlier attempts keep their result and duration. |
+| `nodes` | Each step's `result` (`passed`, `failed`, `running`, `skipped` or `not run`), `started_at` (UTC, RFC 3339 with milliseconds) when its start is known, and `duration_ms` when it ends. A step skipped by `--skip` records `reason: "skipped by flag: --skip <step>"` even if an earlier step stops the run; the screen shows it as skipped. Configured ponytail skips record their configuration reason. The agent node also has `exit` and `tail` when the agent ran but its step failed, and `"report": "missing"` when the worker's report never came ([Rejected reports](#rejected-reports)). Checks includes an `e2e` row in `rows` when that command ran, passed or failed, with `name`, `result`, `started_at` and `duration_ms`. Delivery has `rows`, each with `name`, `result` (`running`, `passed` or `failed`), `started_at` and `duration_ms`, for each commit or command attempt; earlier attempts keep their result and duration. |
 | `units` | The unit's number (`1`), base commit, reported test file, result, `started_at` and `duration_ms` |
 | `reproofs` | Each rechecked unit's number, base commit, reported test file, result, `started_at` and `duration_ms` after a cut; configured commands are in `commands` |
 | `commands` | Every configured command that ran, the clone's `install` included, with its result, last 60 lines, `started_at` and `duration_ms` |
@@ -506,8 +506,7 @@ output. The Delivery row becomes passed or failed when the command exits,
 except on the screen while the gate it launched goes on, or while the screen
 has asked no-mistakes about the gate and had no answer yet: the row then shows
 running whatever the command's exit said.
-An empty delivery command
-shows `Delivery skipped` without sub-rows.
+An empty delivery command or `atm run --skip delivery` shows `Delivery skipped` without sub-rows.
 
 The Slop detector unfolds into `agent reading the diff`, `N findings`, `judged`,
 `checks run n`, when a cut is kept, `commit`, and, when files were put back,

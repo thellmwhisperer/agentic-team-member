@@ -8,7 +8,7 @@ import (
 
 // Follows says whether args, atm run's command line, ask for --follow.
 func Follows(args []string) bool {
-	_, _, _, a, err := parseArgs(args)
+	_, _, _, a, _, err := parseArgs(args)
 	return err == nil && a.follow
 }
 

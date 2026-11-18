@@ -30,14 +30,15 @@ var githubURL = regexp.MustCompile(`^(?:[a-z][a-z0-9+.-]*://)?(?:[^/@]+@)?github
 const Usage = "usage: atm run [--follow] [--base-ref r] [--harness h] [--model m] [--effort e] " +
 	"[--system-prompt file] [--system-md file] [--brief-template file] [--ponytail-brief-template file] " +
 	"[--ponytail-skill file] [--ponytail-review-skill file] [--rejection-message file] " +
-	"[--harness-arg a]... [--env KEY=VALUE]... <issue.md | issue number | --resume run>"
+	"[--harness-arg a]... [--env KEY=VALUE]... [--skip step]... " +
+	"<issue.md | issue number | --resume run>"
 
 // runAt is atm run with args, its flags and the issue: a file, or an issue number of origin's repository.
 // Its report, briefs and logs go to .atm/runs/<label>/ (runDir): each node's start and end go to out, one JSON
 // object a line, and to report.json there; the summary goes to summary. ExitCode turns its error into atm's
 // exit code. With --resume, it picks up the work a failed run kept.
 func runAt(label, ref string, args []string, out, summary io.Writer) (err error) {
-	args, base, resume, a, err := parseArgs(args)
+	args, base, resume, a, skips, err := parseArgs(args)
 	if err != nil {
 		return err
 	}
@@ -62,8 +63,7 @@ func runAt(label, ref string, args []string, out, summary io.Writer) (err error)
 	if err != nil {
 		return err
 	}
-	r := a.verdict(out)
-	r.Agent.TextOverrides = a.textMetadata()
+	c, r := prepareSkippedRun(a, c, skips, out)
 	var dir, sha string
 	defer func() {
 		r.resumable(a.dir)
@@ -73,7 +73,8 @@ func runAt(label, ref string, args []string, out, summary io.Writer) (err error)
 	var i Issue
 	r.step("issue", func() (map[string]any, error) {
 		i, err = theIssue(from, args[len(args)-1], repo)
-		ev := map[string]any{"title": i.Title, "ponytail_skipped": !c.Ponytail}
+		ev := map[string]any{"title": i.Title, "ponytail_skipped": !c.Ponytail,
+			"delivery_skipped": skipsStep(skips, "delivery")}
 		if i.Number != 0 {
 			ev["number"] = i.Number
 		}
@@ -99,12 +100,49 @@ func runAt(label, ref string, args []string, out, summary io.Writer) (err error)
 	return r.err
 }
 
+// skippable are the steps --skip accepts: the Agent step and the checks can't be skipped.
+var skippable = []string{"delivery", "ponytail"}
+
+func skipReason(step string) string { return "skipped by flag: --skip " + step }
+
+func skipsStep(skips []string, step string) bool { return slices.Contains(skips, step) }
+
+func prepareSkippedRun(a *agent, c config.Config, skips []string, out io.Writer) (config.Config, *verdict) {
+	c = skipping(c, skips)
+	r := a.verdict(out)
+	r.Agent.TextOverrides = a.textMetadata()
+	recordSkipped(r, skips)
+	return c, r
+}
+
+// skipping is c with the steps --skip names off, for this run only, whatever .atm.yaml says.
+func skipping(c config.Config, skips []string) config.Config {
+	c.Ponytail = c.Ponytail && !skipsStep(skips, "ponytail")
+	if skipsStep(skips, "delivery") {
+		c.Delivery = ""
+	}
+	return c
+}
+
+// recordSkipped records every step --skip skips before the run can stop at an earlier step.
+func recordSkipped(r *verdict, skips []string) {
+	for _, step := range skips {
+		n := r.node(step)
+		if n.Result == "not run" {
+			reason := skipReason(step)
+			n.Result, n.Reason = "skipped", &reason
+		}
+	}
+}
+
 // ponytailStep is the ponytail step of the run r, which records each cut it makes in keep.
 func (a *agent) ponytailStep(r *verdict, root, dir, sha string, i Issue, c config.Config,
 	keep *resumePoint) func(proof) {
 	if !c.Ponytail {
-		reason := "skipped by configuration: ponytail: false"
-		r.node("ponytail").Result, r.node("ponytail").Reason = "skipped", &reason
+		if n := r.node("ponytail"); n.Result != "skipped" {
+			reason := "skipped by configuration: ponytail: false"
+			n.Result, n.Reason = "skipped", &reason
+		}
 		return func(proof) {}
 	}
 	return func(p proof) {
@@ -151,7 +189,7 @@ func leave(r *verdict, root, dir, repo string) error {
 
 // parseArgs is atm run's command line: its flags and the issue, in any order. It returns them as flags, then the
 // issue, last.
-func parseArgs(args []string) (ordered []string, base, resume *string, a *agent, err error) {
+func parseArgs(args []string) (ordered []string, base, resume *string, a *agent, skips []string, err error) {
 	fs := flag.NewFlagSet("atm run", flag.ContinueOnError)
 	base = fs.String("base-ref", "main", "the fetched origin branch whose commit the run starts from")
 	resume = fs.String("resume", "", "a run that failed after its agent: its issue again, from its agent's work")
@@ -161,11 +199,18 @@ func parseArgs(args []string) (ordered []string, base, resume *string, a *agent,
 		fs.PrintDefaults()
 	}
 	fs.BoolVar(&a.follow, "follow", false, "print the run's events as JSON until it ends")
+	fs.Func("skip", "a step to skip in this run: "+strings.Join(skippable, ", ")+"; repeatable", func(v string) error {
+		if !slices.Contains(skippable, v) {
+			return fmt.Errorf("--skip: unknown step %q; it accepts: %s", v, strings.Join(skippable, ", "))
+		}
+		skips = append(skips, v)
+		return nil
+	})
 	a.flags(fs)
 	// flag stops at the first argument that is not one: the issue, after which the flags go on.
 	for err = fs.Parse(args); err == nil && fs.NArg() > 0; err = fs.Parse(fs.Args()[1:]) {
 		if ordered != nil {
-			return nil, nil, nil, nil, errors.New(Usage)
+			return nil, nil, nil, nil, nil, errors.New(Usage)
 		}
 		i := len(args) - fs.NArg()
 		ordered = append(append(args[:i:i], args[i+1:]...), args[i])
@@ -176,7 +221,7 @@ func parseArgs(args []string) (ordered []string, base, resume *string, a *agent,
 	case err == nil && ordered == nil:
 		err = errors.New(Usage)
 	}
-	return ordered, base, resume, a, err
+	return ordered, base, resume, a, skips, err
 }
 
 // proof records a unit's base and reported test content for the ponytail test guard.

@@ -37,7 +37,7 @@ a `.atm.yaml` key there still fails.
 | Built-in defaults | the binary | `harness: claude`, `screen: close` |
 | Your machine | `~/.config/atm/config.yaml` | `harness`, `model`, `effort`, `screen`, `repository_overrides` |
 | The repository | `.atm.yaml` at its root, as the base ref has it committed; otherwise the machine's matching `repository_overrides` entry | keys in [`.atm.yaml`](#atmyaml) below |
-| One run | `atm run` flags | [`--follow`](how-a-run-flows.md#following-one-run), `--base-ref`, `--harness`, `--model`, `--effort`, `--system-prompt`, [text overrides](#text-overrides), `--harness-arg`, `--env`, `--resume` |
+| One run | `atm run` flags | [`--follow`](how-a-run-flows.md#following-one-run), `--base-ref`, `--harness`, `--model`, `--effort`, `--system-prompt`, [text overrides](#text-overrides), `--harness-arg`, `--env`, `--skip`, `--resume` |
 
 `atm run --system-prompt <file> <issue>` appends the file's full text after
 the embedded `SYSTEM.md` in the worker's system instructions. The file is
@@ -340,6 +340,7 @@ Flags go before or after the issue. A second issue is an error.
 | `--effort <effort>` | from the layers | The agent's effort |
 | `--harness-arg <arg>` | none | One argument for the agent CLI, before the brief. Repeatable |
 | `--env KEY=VALUE` | none | One variable in the agent's environment. Repeatable |
+| `--skip <step>` | none | Repeatable; accepts `ponytail` or `delivery` and overrides `.atm.yaml` for this run. Other names fail before the run starts. The Agent step and checks cannot be skipped. See [step results and screen state](how-a-run-flows.md#the-report) |
 | `--resume <run>` | none | Runs a resumable run's issue again from its agent's work, in place of an issue |
 
 ### Resuming a failed run
