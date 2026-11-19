@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.21.0](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.20.0...v1.21.0) (2026-11-19)
+
+
+### Features
+
+* **run:** show a codex worker's context used and window in the Agent row ([#719](https://github.com/thellmwhisperer/agentic-team-member/issues/719)) ([9f38b67](https://github.com/thellmwhisperer/agentic-team-member/commit/9f38b67572783926cb5852c62fa2888ffd667906))
+
 ## [1.20.0](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.19.1...v1.20.0) (2026-11-19)
 
 
