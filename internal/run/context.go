@@ -55,11 +55,6 @@ func contextUsed(harness string, line []byte) []map[string]any {
 // piWindow is the context window pi gives model of provider, 0 when it gives none: the models.json entry of a
 // provider added by hand, else the figure pi lists for the model, as built-in providers have none in models.json.
 func piWindow(provider, model string) int {
-	return cmp.Or(piConfiguredWindow(provider, model), piListedWindow(provider, model))
-}
-
-// piConfiguredWindow is the context window pi's models.json gives model of provider, 0 when it gives none.
-func piConfiguredWindow(provider, model string) int {
 	home, _ := os.UserHomeDir()
 	b, _ := os.ReadFile(filepath.Join(cmp.Or(os.Getenv("PI_CODING_AGENT_DIR"), filepath.Join(home, ".pi", "agent")),
 		"models.json"))
@@ -73,31 +68,22 @@ func piConfiguredWindow(provider, model string) int {
 	}
 	_ = json.Unmarshal(b, &models) // none, or not JSON: no window
 	for _, m := range models.Providers[provider].Models {
-		if m.ID == model {
+		if m.ID == model && m.ContextWindow > 0 {
 			return m.ContextWindow
 		}
 	}
-	return 0
+	return piListedWindow(provider, model)
 }
 
-// piListed is what `pi --list-models` said about a model: its window, and when ATM asked, a miss being asked
-// again after a minute.
-type piListed struct {
-	window int
-	at     time.Time
-}
-
-// piListings is each model's piListed, by the pi directory, provider and model.
+// piListings is each model's window `pi --list-models` showed, by the pi directory, provider and model.
 var piListings sync.Map
 
 // piListedWindow is the context window `pi --list-models` shows for model of provider, 0 when pi lists none or
-// cannot run. A figure is kept for the process; a miss for a minute, so each model call does not start pi.
+// cannot run. It is kept for the process, so each model call does not start pi.
 func piListedWindow(provider, model string) int {
 	key := os.Getenv("PI_CODING_AGENT_DIR") + "\x00" + provider + "\x00" + model
 	if v, ok := piListings.Load(key); ok {
-		if l := v.(piListed); l.window > 0 || time.Since(l.at) < time.Minute {
-			return l.window
-		}
+		return v.(int)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -109,7 +95,7 @@ func piListedWindow(provider, model string) int {
 			break
 		}
 	}
-	piListings.Store(key, piListed{window, time.Now()})
+	piListings.Store(key, window)
 	return window
 }
 
@@ -123,5 +109,5 @@ func listedTokens(s string) int {
 		unit, s = 1e6, strings.TrimSuffix(s, "M")
 	}
 	n, _ := strconv.ParseFloat(s, 64) // not a figure: 0
-	return int(max(n, 0)*unit + 0.5)
+	return int(n*unit + 0.5)
 }
