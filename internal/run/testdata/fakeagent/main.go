@@ -97,6 +97,9 @@ func fakeAgentCLI(name string) int {
 		fmt.Printf("provider      model              context  max-out  thinking  images\n%s", os.Getenv("FAKE_PI_MODELS"))
 		return 0
 	}
+	if args := os.Args[1:]; name == "opencode" && len(args) == 3 && args[0] == "api" && args[1] == "--standalone" {
+		return openCodeAPI(args[2])
+	}
 	if fakeAgentSetup(mode) {
 		return 0
 	}

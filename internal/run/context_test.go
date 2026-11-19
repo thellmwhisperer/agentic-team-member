@@ -32,7 +32,7 @@ func TestContextUsedWithoutAPiWindow(t *testing.T) {
 	t.Setenv("PATH", fakes+string(os.PathListSeparator)+os.Getenv("PATH"))
 	for name, dir := range map[string]string{"unlisted": filepath.Join("testdata", "pi-agent"), "none": t.TempDir()} {
 		t.Setenv("PI_CODING_AGENT_DIR", dir)
-		got := contextUsed("pi", line, nil)
+		got := contextUsed("pi", line, nil, "", "")
 		if len(got) != 1 || got[0]["context"].(map[string]any)["used"] != 15 ||
 			got[0]["context"].(map[string]any)["window"] != 0 {
 			t.Fatalf("%s: want 15 used and no window, got %v", name, got)

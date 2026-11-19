@@ -30,8 +30,11 @@ type usageLine struct {
 
 // contextUsed is the screen's event for line of harness's stream when it says how much context a model call used:
 // the tokens used and the model's window, 0 when the harness's own configuration does not say it. None when the
-// line says no usage.
-func contextUsed(harness string, line []byte, env []string) []map[string]any {
+// line says no usage. dir and model are the worker's directory and the model it was given, "" for its default.
+func contextUsed(harness string, line []byte, env []string, dir, model string) []map[string]any {
+	if harness == "opencode" {
+		return openCodeContext(line, env, dir, model)
+	}
 	var e usageLine
 	if json.Unmarshal(line, &e) != nil || e.Message.Role != "assistant" {
 		return nil
@@ -50,6 +53,77 @@ func contextUsed(harness string, line []byte, env []string) []map[string]any {
 		return nil
 	}
 	return []map[string]any{{"context": map[string]any{"used": used, "window": window}}}
+}
+
+// openCodeStep is the fields of an OpenCode 2 step_finish line that say how much context its step used: its cache
+// reads are not in its input.
+type openCodeStep struct {
+	Type string
+	Part struct {
+		Tokens struct {
+			Input, Output, Reasoning int
+			Cache                    struct{ Read, Write int }
+		}
+	}
+}
+
+// openCodeContext is contextUsed for an OpenCode 2 line: its step's tokens, and the window OpenCode 2 gives the
+// worker's model.
+func openCodeContext(line []byte, env []string, dir, model string) []map[string]any {
+	var e openCodeStep
+	_ = json.Unmarshal(line, &e) // not JSON: no step
+	t := e.Part.Tokens
+	if used := t.Input + t.Output + t.Reasoning + t.Cache.Read + t.Cache.Write; e.Type == "step_finish" && used > 0 {
+		return []map[string]any{{"context": map[string]any{"used": used, "window": openCodeWindow(dir, model, env)}}}
+	}
+	return nil
+}
+
+// openCodeModel is the fields of a model in OpenCode 2's API that name it and give its window.
+type openCodeModel struct {
+	ID, ProviderID string
+	Limit          struct{ Context int }
+}
+
+// openCodeWindows is each window OpenCode 2's API gave, by the worker's directory and model.
+var openCodeWindows sync.Map
+
+// openCodeWindow is the limit.context OpenCode 2's API gives, in dir with env, for model, provider/model with any
+// #variant, else for its default model; 0 when it gives none or cannot run. It is kept for the process, so each
+// step does not start opencode.
+func openCodeWindow(dir, model string, env []string) int {
+	model, _, _ = strings.Cut(model, "#") // a variant's window is its model's
+	key := dir + "\x00" + model
+	if v, ok := openCodeWindows.Load(key); ok {
+		return v.(int)
+	}
+	method := "model.list"
+	if model == "" {
+		method = "model.default"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "opencode", "api", "--standalone", method)
+	cmd.Dir, cmd.Env = dir, env
+	out, _ := cmd.Output()
+	var listed struct{ Data []openCodeModel }
+	var given struct{ Data openCodeModel }
+	window := 0
+	if model == "" {
+		_ = json.Unmarshal(out, &given) // none, or not JSON: no window
+		window = given.Data.Limit.Context
+	} else {
+		_ = json.Unmarshal(out, &listed)
+		provider, id, _ := strings.Cut(model, "/")
+		for _, m := range listed.Data {
+			if m.ProviderID == provider && m.ID == id {
+				window = m.Limit.Context
+				break
+			}
+		}
+	}
+	openCodeWindows.Store(key, window)
+	return window
 }
 
 // piWindow is the context window pi gives model of provider, 0 when it gives none: the models.json entry of a

@@ -372,7 +372,7 @@ func (a agent) exec(
 		return nil, "", "", err
 	}
 	s := &stream{live: relative(clone, liveIn(clone)), clone: clone,
-		scratch: a.scratch, env: cmd.Environ()}
+		scratch: a.scratch, env: cmd.Environ(), asked: a.Model}
 	s.started = func(pid int) { go watchHang(ctx, hang, pid, &s.heard) }
 	if err := s.talk(cmd, f, a.Harness, stdin); err != nil {
 		return nil, "", "", err
@@ -479,6 +479,7 @@ func exclude(clone, pattern string) error {
 type stream struct {
 	final   string
 	model   string // first model named by this invocation's stream; never the requested model
+	asked   string // the requested model, "" for the harness's default
 	env     []string
 	clone   string
 	scratch string // this call's directory outside the clone its calls may write in
@@ -662,7 +663,8 @@ func (s *stream) see(harness string, line []byte) {
 	}
 	s.reach = cmp.Or(s.reach, outside(e.calls(harness), s.clone, s.scratch))
 	s.show(e.activity(harness))
-	for _, ev := range contextUsed(harness, line, s.env) { // not show: a message held for its report stays held
+	// not show: a message held for its report stays held
+	for _, ev := range contextUsed(harness, line, s.env, s.clone, s.asked) {
 		s.live(ev)
 	}
 }
