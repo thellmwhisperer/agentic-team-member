@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.19.1](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.19.0...v1.19.1) (2026-11-19)
+
+
+### Bug Fixes
+
+* **run:** show pi built-in provider context windows ([#722](https://github.com/thellmwhisperer/agentic-team-member/issues/722)) ([93aa073](https://github.com/thellmwhisperer/agentic-team-member/commit/93aa073cf4adb45ca7a3a88b3d7153b08da2d244))
+
 ## [1.19.0](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.18.0...v1.19.0) (2026-11-19)
 
 
