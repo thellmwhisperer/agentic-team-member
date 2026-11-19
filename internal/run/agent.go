@@ -498,7 +498,7 @@ type stream struct {
 	final   string
 	model   string   // first model named by this invocation's stream; never the requested model
 	asked   string   // the requested model, "" for the harness's default
-	env     []string // the run's agent's environment, which ATM asks pi, OpenCode and claude for its window with; nil, none
+	env     []string // the run's agent's environment, ATM asks pi, OpenCode and claude for its window with it; nil, none
 	clone   string
 	scratch string // this call's directory outside the clone its calls may write in
 	reach   string
