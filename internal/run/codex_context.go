@@ -12,8 +12,8 @@ import (
 )
 
 // wait tails a codex worker's session while it runs: exec --json only reports usage for the whole turn.
-// Feed complete usage records through emit so both the run's log and the screen keep each model call.
-func (s *stream) wait(cmd *exec.Cmd, harness string, emit func(string, bool)) error {
+// Its usage records go only to the screen: neither the run's log nor its tail is what the agent wrote.
+func (s *stream) wait(cmd *exec.Cmd, harness string) error {
 	if harness != "codex" {
 		return cmd.Wait()
 	}
@@ -46,9 +46,11 @@ func (s *stream) wait(cmd *exec.Cmd, harness string, emit func(string, bool)) er
 			if err != nil {
 				return // keep a partial JSON line until codex completes it
 			}
-			if len(codexContextUsed(pending)) > 0 {
-				emit(string(pending), false)
+			s.mu.Lock()
+			for _, ev := range codexContextUsed(pending) {
+				s.live(ev)
 			}
+			s.mu.Unlock()
 			pending = nil
 		}
 	}

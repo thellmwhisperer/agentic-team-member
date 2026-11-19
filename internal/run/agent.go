@@ -565,7 +565,7 @@ func (s *stream) read(cmd *exec.Cmd, log, stderr io.Writer, harness string) erro
 			if s.started != nil {
 				s.started(cmd.Process.Pid)
 			}
-			err = s.wait(cmd, harness, emit)
+			err = s.wait(cmd, harness)
 		}
 	}
 	// Exited but failed, or left something holding its output: kill what it left, whatever its exit.
@@ -687,10 +687,10 @@ func (s *stream) see(harness string, line []byte) {
 	}
 }
 
-// followsFinal leaves the final message held across codex's turn.completed and session usage records, and
+// followsFinal says whether e comes after the final message and leaves it as it is: codex's turn.completed, and
 // pi's agent_end and its reply to ATM's get_state.
 func (e event) followsFinal(harness string) bool {
-	return harness == "codex" && (e.Type == "turn.completed" || e.Type == "event_msg") ||
+	return harness == "codex" && e.Type == "turn.completed" ||
 		harness == "pi" && (e.Type == "agent_end" || e.Type == "response")
 }
 
