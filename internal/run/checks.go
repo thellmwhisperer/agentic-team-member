@@ -429,8 +429,6 @@ func teeRun(ctx context.Context, w io.Writer, dir, line string, limit time.Durat
 	switch {
 	case errors.Is(ctx.Err(), context.DeadlineExceeded):
 		err = fmt.Errorf("%w after %s", errTimeout, Human(limit))
-	case errors.Is(context.Cause(ctx), errStopped):
-		err = errStopped
 	case ctx.Err() != nil:
 		err = errors.New("interrupted")
 	}

@@ -9,8 +9,8 @@ import (
 )
 
 // The operator stops a run before its delivery with atm stop, or x twice on its screen: its working agent and every
-// process it started are killed, as is a check command running then, and the step running fails with
-// errStopped, as does any step after it, so the run ends failed and asks nothing. Every other run goes on.
+// process it started are killed, as is a check command running then, and the step running fails, so the run ends
+// failed with errStopped and asks nothing. Every other run goes on.
 
 var errStopped = errors.New("stopped by operator")
 
