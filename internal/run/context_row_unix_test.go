@@ -46,14 +46,14 @@ func TestRealScreenAgentRowContext(t *testing.T) {
 			writeFixture(t, partial, "stderr") // the worker keeps running 3 s after its stream
 			t.Setenv("FAKE_AGENT_PARTIAL", partial)
 			t.Setenv("FAKE_AGENT_STREAM", c.stream+"\n")
-			t.Setenv("PI_CODING_AGENT_DIR", models)
+			t.Setenv("PI_CODING_AGENT_DIR", t.TempDir())
 			// pi's own table: a built-in provider's models are not in models.json
 			t.Setenv("FAKE_PI_MODELS", "openai-codex  gpt-5.6-luna   272K  128K  yes  yes\n"+
 				"openai-codex  gpt-6.1-sol    500K  128K  yes  yes\n"+"deepseek      deepseek-flash  1M    384K  yes  yes\n")
 			t.Setenv("TERM", "xterm-256color")
 			top := gitT(t, repo(t, "local", atmYAML), "rev-parse", "--show-toplevel")
 			f := startFollow(t, versionServer(t, top, "follow-test"), top, true,
-				"run", "--harness", c.harness, issueFile(t, issue))
+				"run", "--harness", c.harness, "--env", "PI_CODING_AGENT_DIR="+models, issueFile(t, issue))
 			// At 100 columns the ATM box may leave the context, there a second after the stream, no room beside
 			// the label, which stays whole; wide enough, the context shows.
 			var shown strings.Builder
