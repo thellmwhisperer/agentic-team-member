@@ -51,6 +51,7 @@ func TestRealScreenAgentRowContext(t *testing.T) {
 			t.Setenv("FAKE_PI_MODELS", "openai-codex  gpt-5.6-luna   272K  128K  yes  yes\n"+
 				"openai-codex  gpt-6.1-sol    500K  128K  yes  yes\n"+"deepseek      deepseek-flash  1M    384K  yes  yes\n")
 			t.Setenv("TERM", "xterm-256color")
+			t.Setenv("NO_COLOR", "")
 			top := gitT(t, repo(t, "local", atmYAML), "rev-parse", "--show-toplevel")
 			f := startFollow(t, versionServer(t, top, "follow-test"), top, true,
 				"run", "--harness", c.harness, "--env", "PI_CODING_AGENT_DIR="+models, issueFile(t, issue))
