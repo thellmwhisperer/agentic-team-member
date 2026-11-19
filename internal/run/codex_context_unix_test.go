@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 
 	"github.com/charmbracelet/x/ansi"
@@ -28,7 +27,7 @@ func codexContextRow(t *testing.T) {
 			t.Setenv("FAKE_AGENT_FINAL_STREAM", `{"type":"turn.completed","usage":{"input_tokens":2067781,`+
 				`"cached_input_tokens":2014592,"output_tokens":49888}}`+"\n")
 			top := repo(t, "local", atmYAML)
-			release := holdCodexContextWorker(t)
+			_, release := heldWork(t)
 			defer release()
 			home := filepath.Join(os.Getenv("HOME"), ".codex")
 			args := []string{"run", "--harness", "codex", issueFile(t, issue)}
@@ -74,26 +73,6 @@ func codexContextRow(t *testing.T) {
 				t.Fatalf("last-call context was not recorded in the run: %v\n%s", err, data)
 			}
 		})
-	}
-}
-
-func holdCodexContextWorker(t *testing.T) func() {
-	t.Helper()
-	pipe := filepath.Join(t.TempDir(), "release")
-	if err := syscall.Mkfifo(pipe, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	f, err := os.OpenFile(pipe, os.O_RDWR, 0o600)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = f.Close() })
-	t.Setenv("CODEX_CONTEXT_RELEASE", pipe)
-	t.Setenv("FAKE_AGENT_WORK", `read -r release < "$CODEX_CONTEXT_RELEASE"; `+fixWork)
-	return func() {
-		if _, err := f.WriteString("release\n"); err != nil {
-			t.Fatal(err)
-		}
 	}
 }
 
