@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.19.0](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.18.0...v1.19.0) (2026-11-19)
+
+
+### Features
+
+* **run:** x on the run screen and atm stop stop one run whose agent is working ([#720](https://github.com/thellmwhisperer/agentic-team-member/issues/720)) ([2473918](https://github.com/thellmwhisperer/agentic-team-member/commit/2473918b80bfb1f6196a909b96dc3b687d9334a8))
+
 ## [1.18.0](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.17.0...v1.18.0) (2026-11-18)
 
 
