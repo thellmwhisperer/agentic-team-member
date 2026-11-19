@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -16,7 +17,13 @@ func TestContextUsedMatchesItsEventGoldens(t *testing.T) {
 	t.Setenv("PI_CODING_AGENT_DIR", filepath.Join("testdata", "pi-agent"))
 	t.Setenv("PATH", fakes+string(os.PathListSeparator)+os.Getenv("PATH")) // the fake pi, whose table lists nothing
 	for _, harness := range []string{"pi", "claude"} {
-		b, err := json.Marshal(activityEvents(harness, fixture(t, harness+"-context.jsonl")))
+		var events []map[string]any
+		s := stream{env: os.Environ(), live: func(ev map[string]any) { events = append(events, ev) }}
+		for _, l := range strings.Split(strings.TrimSpace(fixture(t, harness+"-context.jsonl")), "\n") {
+			s.see(harness, []byte(l))
+		}
+		s.finish()
+		b, err := json.Marshal(events)
 		var got []map[string]any
 		if err != nil || json.Unmarshal(b, &got) != nil {
 			t.Fatal(err)
