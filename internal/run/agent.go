@@ -125,6 +125,24 @@ func (a agent) argv(clone, skill, final, brief string) (argv []string, stdin str
 	return append(append(argv, a.args...), brief), ""
 }
 
+// askedOpenCodeModel is the last model flag in the worker's extra arguments, or the run's model.
+func askedOpenCodeModel(model string, args []string) string {
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if value, ok := strings.CutPrefix(arg, "--model="); ok {
+			model = value
+		} else if value, ok := strings.CutPrefix(arg, "-m="); ok {
+			model = value
+		} else if arg == "--model" || arg == "-m" {
+			if i+1 < len(args) {
+				model = args[i+1]
+				i++
+			}
+		}
+	}
+	return model
+}
+
 // resumeArgv continues the harness's session with prompt, the rejected report sent back once. ok is false when
 // the harness keeps no session ATM can continue.
 func (a agent) resumeArgv(clone, skill, final, session, prompt string) (argv []string, stdin string, ok bool) {
@@ -372,7 +390,7 @@ func (a agent) exec(
 		return nil, "", "", err
 	}
 	s := &stream{live: relative(clone, liveIn(clone)), clone: clone,
-		scratch: a.scratch, env: cmd.Environ(), asked: a.Model}
+		scratch: a.scratch, env: cmd.Environ(), asked: askedOpenCodeModel(a.Model, a.args)}
 	s.started = func(pid int) { go watchHang(ctx, hang, pid, &s.heard) }
 	if err := s.talk(cmd, f, a.Harness, stdin); err != nil {
 		return nil, "", "", err

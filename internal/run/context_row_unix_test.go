@@ -52,6 +52,8 @@ func TestRealScreenAgentRowContext(t *testing.T) {
 		{"opencode default model", "opencode", openCode, "Agent  7.42K / 131K  ", false, nil},
 		{"opencode model", "opencode", openCode, "Agent  7.42K / 200K  ", false,
 			[]string{"--model", "opencode/deepseek-v4.1-flash-free", "--effort", "high"}},
+		{"opencode harness arg model", "opencode", openCode, "Agent  7.42K / 200K  ", false,
+			[]string{"--harness-arg=-m", "--harness-arg=opencode/deepseek-v4.1-flash-free"}},
 		{"opencode model without a window", "opencode", openCode, "Agent  7.42K / ?  ", false,
 			[]string{"--model", "local/unlisted-model"}},
 	} {
