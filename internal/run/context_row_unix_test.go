@@ -63,6 +63,7 @@ func TestRealScreenAgentRowContext(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) { showsAgentRowContext(t, c, models, openCodeAPI) })
 	}
+	t.Run("codex", codexContextRow)
 }
 
 type agentRowContext struct {

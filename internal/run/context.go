@@ -35,6 +35,9 @@ func contextUsed(harness string, line []byte, env []string, dir, model string) [
 	if harness == "opencode" {
 		return openCodeContext(line, env, dir, model)
 	}
+	if harness == "codex" {
+		return codexContextUsed(line)
+	}
 	var e usageLine
 	if json.Unmarshal(line, &e) != nil || e.Message.Role != "assistant" {
 		return nil
