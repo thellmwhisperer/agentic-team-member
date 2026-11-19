@@ -565,7 +565,7 @@ func (s *stream) read(cmd *exec.Cmd, log, stderr io.Writer, harness string) erro
 			if s.started != nil {
 				s.started(cmd.Process.Pid)
 			}
-			err = cmd.Wait()
+			err = s.wait(cmd, harness)
 		}
 	}
 	// Exited but failed, or left something holding its output: kill what it left, whatever its exit.

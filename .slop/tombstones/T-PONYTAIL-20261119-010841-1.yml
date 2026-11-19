@@ -1,0 +1,18 @@
+schema: 1
+id: T-PONYTAIL-20261119-010841-1
+status: accepted
+category: alien_code
+title: "Eliminados holdCodexContextWorker y su importación syscall; la prueba reutiliza heldWork."
+created_at: 2026-11-19
+incident:
+  pattern: "Eliminados holdCodexContextWorker y su importación syscall; la prueba reutiliza heldWork."
+  what_went_wrong: "A coding agent wrote it and the ponytail pass cut it before delivery."
+  root_cause: "The coding agent wrote more than the issue needed."
+  rule_established: "Cut by the ponytail pass; it does not come back."
+  evidence:
+    - family: mock_heavy_test
+      example: "Eliminados holdCodexContextWorker y su importación syscall; la prueba reutiliza heldWork.\nissue_sentence: `go test -count=1 -run 'TestRealScreenAgentRowContext/codex' ./internal/run/` fails on `main` and passes with the change, on a recorded real codex session."
+      artifact: "internal/run/codex_context_unix_test.go"
+match:
+  family: mock_heavy_test
+  artifact: "internal/run/codex_context_unix_test.go"
