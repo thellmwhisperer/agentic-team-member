@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.21.1](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.21.0...v1.21.1) (2026-11-19)
+
+
+### Bug Fixes
+
+* **run:** show a claude worker's context window in the Agent row ([#726](https://github.com/thellmwhisperer/agentic-team-member/issues/726)) ([44232ed](https://github.com/thellmwhisperer/agentic-team-member/commit/44232ed657439d7aa34757585b5429c4612518d4))
+
 ## [1.21.0](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.20.0...v1.21.0) (2026-11-19)
 
 
