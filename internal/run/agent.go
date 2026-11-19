@@ -496,9 +496,9 @@ func exclude(clone, pattern string) error {
 // Live gets what each line tells the screen.
 type stream struct {
 	final   string
-	model   string // first model named by this invocation's stream; never the requested model
-	asked   string // the requested model, "" for the harness's default
-	env     []string
+	model   string   // first model named by this invocation's stream; never the requested model
+	asked   string   // the requested model, "" for the harness's default
+	env     []string // the agent's environment, which ATM asks pi, OpenCode and claude for its model's window with
 	clone   string
 	scratch string // this call's directory outside the clone its calls may write in
 	reach   string
@@ -689,11 +689,11 @@ func (s *stream) see(harness string, line []byte) {
 // its report stays held.
 func (s *stream) showContext(harness string, line []byte, e event) {
 	if harness == "claude" && e.Type == "system" && e.Subtype == "init" && e.Model != "" {
-		askClaudeWindow(e.Model)
+		askClaudeWindow(e.Model, s.env)
 	}
 	for _, ev := range contextUsed(harness, line, s.env, s.clone, s.asked) {
 		if harness == "claude" {
-			ev["context"].(map[string]any)["window"] = claudeWindow(cmp.Or(e.Message.Model, s.model))
+			ev["context"].(map[string]any)["window"] = claudeWindow(cmp.Or(e.Message.Model, s.model), s.env)
 		}
 		s.live(ev)
 	}
