@@ -35,6 +35,7 @@ func Show(root, label string, in, out *os.File) (o run.Outcome, detached bool, e
 		return o, false, err
 	}
 	m := runScreen(root, label, w, h)
+	m.stop = func() error { return run.Stop(root, label) }
 	m.keepScreen, err = config.KeepScreen(os.Getenv("HOME"))
 	if err != nil {
 		return o, false, err

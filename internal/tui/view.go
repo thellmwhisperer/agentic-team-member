@@ -152,12 +152,22 @@ func (m *Model) footer() string {
 		text := ansi.TruncateLeft(m.text, max(0, ansi.StringWidth(m.text)-(m.width-2-ansi.StringWidth(prompt)-1)), "")
 		return gap + prompt + text + "█"
 	}
+	if m.stopping && m.stoppable() {
+		return gap + lipgloss.NewStyle().Bold(true).Render("x") + " " +
+			paint(dim, "again stops the run and kills its agent; any other key cancels")
+	}
 	keys := lipgloss.NewStyle().Bold(true).Render("q") + " " + paint(dim, action)
 	if m.agentRuns() {
 		keys += "  " + lipgloss.NewStyle().Bold(true).Render("t") + " " +
 			paint(dim, map[bool]string{true: "hide", false: "show"}[m.unfold]+" tool use")
 		keys += "  " + lipgloss.NewStyle().Bold(true).Render("h") + " " +
 			paint(dim, map[bool]string{true: "hide", false: "show"}[m.unfoldThink]+" thinking")
+	}
+	if m.stoppable() {
+		keys += "  " + lipgloss.NewStyle().Bold(true).Render("x") + " " + paint(dim, "stop")
+	}
+	if m.stopNote != "" {
+		keys += "  " + paint(red, m.stopNote)
 	}
 	return gap + keys + m.gateKeys()
 }

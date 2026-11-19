@@ -137,7 +137,13 @@ func (a agent) afterCheck(clone, text, session, finding string, attempt int) (ma
 	return ev, err
 }
 
+// checkDecision asks the launcher about the failure of the step that just ran, when it is one they answer, and
+// returns their answer. A run the operator stopped asks nothing: it fails as stopped, and no step runs after.
 func (a agent) checkDecision(r *verdict) string {
+	if runCtx(a.dir).Err() != nil {
+		r.err, r.Reason = errStopped, errStopped.Error()
+		return ""
+	}
 	q, ok := r.out.(*screen)
 	hung := r.FailedNode == "agent" && strings.HasPrefix(r.Reason, "hung: ")
 	if !ok || !slices.Contains([]string{"checks", "ponytail", "delivery"}, r.FailedNode) &&

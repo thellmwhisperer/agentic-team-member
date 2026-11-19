@@ -30,7 +30,7 @@ func checks(clone, runDir, sha, base, test string, issue *string, needChange boo
 		Command: func(name, line string, env ...string) (cmdResult, error) {
 			var tail string
 			s, err := row(live, name, func() (err error) {
-				tail, _, err = teeRun(context.Background(), io.Discard, clone, line, 0, env...)
+				tail, _, err = teeRun(runCtx(runDir), io.Discard, clone, line, 0, env...) // atm stop kills it
 				return err
 			})
 			return cmdResult{name, line, outcome(err), tail, s}, wrap(err, name)
@@ -429,6 +429,8 @@ func teeRun(ctx context.Context, w io.Writer, dir, line string, limit time.Durat
 	switch {
 	case errors.Is(ctx.Err(), context.DeadlineExceeded):
 		err = fmt.Errorf("%w after %s", errTimeout, Human(limit))
+	case errors.Is(context.Cause(ctx), errStopped):
+		err = errStopped
 	case ctx.Err() != nil:
 		err = errors.New("interrupted")
 	}

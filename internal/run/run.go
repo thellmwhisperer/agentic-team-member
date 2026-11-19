@@ -307,8 +307,9 @@ func redRow(r *verdict, rows ...string) bool {
 
 // resolve runs check, Checks, and answers its own red once a run, before any question: a red test row runs once
 // more, then a red lint or test row gives the worker the turn fix gives, with its output, and Checks runs again.
+// A run the operator stopped does neither.
 func (a agent) resolve(r *verdict, dir, text string, keep *resumePoint, report *map[string]any, check func()) {
-	if check(); r.retried || !redRow(r, "test", "lint") {
+	if check(); r.retried || !redRow(r, "test", "lint") || runCtx(a.dir).Err() != nil {
 		return
 	}
 	r.retried = true

@@ -192,6 +192,24 @@ pi runs in RPC mode for this: at each `agent_end`, `auto_retry_end` and
 stdin, which ends pi, once pi is neither streaming, compacting nor retrying. A `prompt` pi refuses fails the step with
 `<exit>; pi: prompt: <error>; log: <path>`.
 
+### Stopping a run
+
+```text
+atm stop <run>
+```
+
+stops a run before its delivery, as `x` pressed twice on its screen does (see
+[The screen](#the-screen)). ATM kills its working agent with every process it
+started, as it kills a hung one, and a Checks command running then. The step
+running fails, the run asks nothing and ends failed with reason
+`stopped by operator`, in `report.json` and in `atm runs`. Every other run of
+the same `atm serve` goes on. `atm stop` returns once the run has ended. A run
+that waits for an answer, has reached Delivery or has ended is not stopped:
+`atm stop` fails with
+`run <run> is <outcome> at <step>: only a run going before its delivery stops`.
+A step with no process to kill, such as the clone's, ends first; the run stops
+at its next agent or check.
+
 ## Checks
 
 When the Agent writes outside its clone and scratch directory, its process
@@ -573,6 +591,13 @@ first question again. While the gate goes on, press `x`, then `y`, to abort
 it; any other key cancels the confirmation. Once the gate is over, the footer
 offers no abort and a pending confirmation is dropped. These actions use no-mistakes' commands in the run's
 clone. `q` or Ctrl+C still detaches without aborting.
+
+Before Delivery, the footer offers `x stop`. The first `x` only warns,
+`x again stops the run and kills its agent; any other key cancels`; a second
+`x` stops the run as `atm stop` does (see [Stopping a run](#stopping-a-run)).
+Any other key cancels the warning and does what it does: `q` or Ctrl+C still
+leaves the screen with the run going. When the run cannot be stopped, the
+footer says why.
 
 The Agent box renders the agent's Markdown prose within the panel width as
 `✎` lines; non-empty thinking appears as `∴` lines. By default, consecutive

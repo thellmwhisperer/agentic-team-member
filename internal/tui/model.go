@@ -96,6 +96,11 @@ type Model struct {
 	fixSelected      bool
 	answered         []string
 	text             string // the line typed for the gate so far
+	// stop stops the run, atm stop's request, nil when the screen cannot; stopping once x warned, and stopNote is why
+	// the background process did not stop it.
+	stop     func() error
+	stopping bool
+	stopNote string
 }
 
 type bounds struct{ x, y, width, height int }
@@ -235,6 +240,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmd, ok := m.gateKey(msg); ok {
 			return m, cmd
 		}
+		if cmd, ok := m.stopKey(msg.String()); ok {
+			return m, cmd
+		}
 		if slices.Contains([]string{"q", "ctrl+c"}, msg.String()) {
 			m.detached = !m.done
 			return m, tea.Quit
@@ -254,8 +262,40 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.answered = append(m.answered, string(msg))
 	case gate:
 		return m, m.gateShown(msg)
+	case stopped:
+		m.stopNote = msg.Error()
 	}
 	return m, nil
+}
+
+// stopped is why the background process did not stop the run.
+type stopped struct{ error }
+
+// stoppable says whether x stops the run: it goes, its delivery has not started, and the screen can stop it.
+func (m *Model) stoppable() bool {
+	d := m.current("delivery")
+	return m.stop != nil && !m.done && (d.state == "pending" || d.state == "skipped")
+}
+
+// stopKey takes x before the run's delivery: the first press only warns, the second stops the run, as atm stop,
+// and any other key after the first cancels it and does what it does. ok when the key was the stop's.
+func (m *Model) stopKey(k string) (cmd tea.Cmd, ok bool) {
+	warned := m.stopping
+	m.stopping = false
+	switch {
+	case k != "x" || !m.stoppable():
+		return nil, false
+	case !warned:
+		m.stopping, m.stopNote = true, ""
+		return nil, true
+	}
+	stop := m.stop
+	return func() tea.Msg {
+		if err := stop(); err != nil {
+			return stopped{err}
+		}
+		return nil // the run's end comes as its frames do
+	}, true
 }
 
 // tick advances the clock while the run or the gate goes on, and ticks again while the run goes on or the screen asks.
