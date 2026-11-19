@@ -1,7 +1,7 @@
 {"says":"Reading the run package first."}
-{"context":{"used":22365,"window":0}}
+{"context":{"used":22365,"window":1000000}}
 {"detail":"internal/run/agent.go","id":"toolu_01","result":"running","tool":"Read"}
-{"context":{"used":22365,"window":0}}
+{"context":{"used":22365,"window":1000000}}
 {"detail":"","id":"toolu_01","result":"passed","summary":"package run","tool":""}
 {"thinking":"The parser lives in agent.go."}
-{"context":{"used":23345,"window":0}}
+{"context":{"used":23345,"window":1000000}}

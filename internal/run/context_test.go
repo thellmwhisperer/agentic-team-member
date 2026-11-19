@@ -9,8 +9,10 @@ import (
 )
 
 // The usage on every model call of pi's and claude's streams reaches the screen, with the window pi's models.json
-// gives its model and none for claude, whose stream names no window.
+// gives its model and the one claude says its model has, its stream naming none.
 func TestContextUsedMatchesItsEventGoldens(t *testing.T) {
+	t.Setenv("PATH", fakes+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("FAKE_CLAUDE_WINDOW", "1000000")
 	t.Setenv("PI_CODING_AGENT_DIR", filepath.Join("testdata", "pi-agent"))
 	t.Setenv("PATH", fakes+string(os.PathListSeparator)+os.Getenv("PATH")) // the fake pi, whose table lists nothing
 	for _, harness := range []string{"pi", "claude"} {

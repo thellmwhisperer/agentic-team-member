@@ -54,10 +54,19 @@ const fixWork = "echo fixed > a.txt" + fixTest
 // $FAKE_PONYTAIL as its mode, $FAKE_PONYTAIL_WORK as its work and $FAKE_PONYTAIL_REPORT, or no findings, as
 // its report; its call goes to $FAKE_AGENT_CALL.ponytail. With FAKE_WORKER_TMPDIR set, the worker writes
 // test.log under its $TMPDIR, by a tool call naming its absolute path. $FAKE_AGENT_ORDER, when
-// set, receives one line per call. $FAKE_AGENT_STREAM goes to its stdout after its first
+// set, receives one line per call. claude asked for `--output-format json` answers a window, $FAKE_CLAUDE_WINDOW or 1000000, for its --model, or fails when that is fail. $FAKE_AGENT_STREAM goes to its stdout after its first
 // line, <clone> in it its working directory. With $FAKE_AGENT_PARTIAL naming a file that says stdout or stderr, it
 // writes a dot there every 500ms for 3s, then ends the line, starting no process meanwhile.
 func fakeAgent(name string) int {
+	if name == "claude" && slices.Contains(os.Args[1:], "json") { // ATM asking for a model's window, no worker
+		model := after(os.Args[1:], "--model")
+		if os.Getenv("FAKE_CLAUDE_WINDOW") == "fail" {
+			return 1
+		}
+		window, _ := strconv.Atoi(cmp.Or(os.Getenv("FAKE_CLAUDE_WINDOW"), "1000000"))
+		emit(obj{"type": "result", "result": "OK", "modelUsage": obj{model: obj{"contextWindow": window}}})
+		return 0
+	}
 	if os.Getenv("FAKE_AGENT") != "grandchild" {
 		go watchFakeAgentOwner()
 	}

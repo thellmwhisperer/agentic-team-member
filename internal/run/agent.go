@@ -681,8 +681,20 @@ func (s *stream) see(harness string, line []byte) {
 	}
 	s.reach = cmp.Or(s.reach, outside(e.calls(harness), s.clone, s.scratch))
 	s.show(e.activity(harness))
-	// not show: a message held for its report stays held
+	s.showContext(harness, line, e)
+}
+
+// showContext shows the context line says its model call used. A claude stream says no window, so ATM asks claude
+// for the model's: from its init, while the worker thinks, so the first call shows it. Not show: a message held for
+// its report stays held.
+func (s *stream) showContext(harness string, line []byte, e event) {
+	if harness == "claude" && e.Type == "system" && e.Subtype == "init" && e.Model != "" {
+		askClaudeWindow(e.Model)
+	}
 	for _, ev := range contextUsed(harness, line, s.env, s.clone, s.asked) {
+		if harness == "claude" {
+			ev["context"].(map[string]any)["window"] = claudeWindow(cmp.Or(e.Message.Model, s.model))
+		}
 		s.live(ev)
 	}
 }
