@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.20.0](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.19.1...v1.20.0) (2026-11-19)
+
+
+### Features
+
+* **run:** show OpenCode worker context and window ([#724](https://github.com/thellmwhisperer/agentic-team-member/issues/724)) ([dd1f855](https://github.com/thellmwhisperer/agentic-team-member/commit/dd1f8553d9d073b6b606b904c8ec8a1f8f81ff01))
+
 ## [1.19.1](https://github.com/thellmwhisperer/agentic-team-member/compare/v1.19.0...v1.19.1) (2026-11-19)
 
 
