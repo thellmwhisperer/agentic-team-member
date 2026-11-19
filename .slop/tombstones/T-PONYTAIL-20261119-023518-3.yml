@@ -1,0 +1,18 @@
+schema: 1
+id: T-PONYTAIL-20261119-023518-3
+status: accepted
+category: alien_code
+title: "Cut `max(n, 0)` in `listedTokens`. `pi --list-models` never prints a negative figure, and any non-figure already parses to 0. The result is now `int(n*unit + 0.5)`."
+created_at: 2026-11-19
+incident:
+  pattern: "Cut `max(n, 0)` in `listedTokens`. `pi --list-models` never prints a negative figure, and any non-figure already parses to 0. The result is now `int(n*unit + 0.5)`."
+  what_went_wrong: "A coding agent wrote it and the ponytail pass cut it before delivery."
+  root_cause: "The coding agent wrote more than the issue needed."
+  rule_established: "Cut by the ponytail pass; it does not come back."
+  evidence:
+    - family: speculative_hardening
+      example: "Cut `max(n, 0)` in `listedTokens`. `pi --list-models` never prints a negative figure, and any non-figure already parses to 0. The result is now `int(n*unit + 0.5)`."
+      artifact: "internal/run/context.go"
+match:
+  family: speculative_hardening
+  artifact: "internal/run/context.go"

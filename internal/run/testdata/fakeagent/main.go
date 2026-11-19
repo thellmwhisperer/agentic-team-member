@@ -93,6 +93,10 @@ func watchFakeAgentOwner() {
 
 func fakeAgentCLI(name string) int {
 	mode := os.Getenv("FAKE_AGENT")
+	if args := os.Args[1:]; name == "pi" && slices.Contains(args, "--list-models") { // pi's table, $FAKE_PI_MODELS its rows
+		fmt.Printf("provider      model              context  max-out  thinking  images\n%s", os.Getenv("FAKE_PI_MODELS"))
+		return 0
+	}
 	if fakeAgentSetup(mode) {
 		return 0
 	}
