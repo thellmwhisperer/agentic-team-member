@@ -34,6 +34,9 @@ func TestRealScreenAgentRowContext(t *testing.T) {
 		{"pi built-in provider", "pi", `{"type":"message_start","message":{"role":"assistant","content":[],` +
 			`"provider":"openai-codex","model":"gpt-6.1-sol","usage":{"input":21,"output":0,"cacheRead":5499,` +
 			`"cacheWrite":0}}}`, "Agent  5.52K / 500K  ", false},
+		{"pi model without a listed window", "pi", `{"type":"message_end","message":{"role":"assistant","content":[],` +
+			`"provider":"openai-codex","model":"unlisted-model","usage":{"input":10,"output":5,"cacheRead":0,` +
+			`"cacheWrite":0}}}`, "Agent  15 / ?  ", false},
 		{"pi built-in million window", "pi", `{"type":"message_end","message":{"role":"assistant","content":[],` +
 			`"provider":"deepseek","model":"deepseek-flash","usage":{"input":600,"output":40,"cacheRead":0,"cacheWrite":0}}}`,
 			"Agent  640 / 1M  ", false},
