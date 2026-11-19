@@ -329,7 +329,7 @@ func clonePathRune(r rune) bool {
 // exec runs argv in clone, stdin on its stdin, in its own process group, and returns what its lines said, and
 // how it ended, as ended says; a nil stream when it never got to run. Every line it writes goes to the log at
 // path, in the run's directory, which outlives the clone, and its stderr to <name>.stderr.txt next to it as
-// well. A hang (watchHang), SIGINT and SIGTERM kill the group.
+// well. A hang (watchHang), atm stop, SIGINT and SIGTERM kill the group.
 func (a agent) exec(
 	clone, path string, argv []string, stdin string, appendLog bool,
 ) (*stream, string, string, error) {
@@ -351,6 +351,7 @@ func (a agent) exec(
 	defer stop()
 	ctx, hang := context.WithCancelCause(ctx)
 	defer hang(nil)
+	defer context.AfterFunc(runCtx(a.dir), func() { hang(errStopped) })() // atm stop kills its group too
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir, cmd.Stdin, cmd.WaitDelay = clone, strings.NewReader(stdin), time.Second
 	cmd.Env = append(slices.DeleteFunc(os.Environ(), func(kv string) bool {

@@ -3,6 +3,7 @@ package run
 import (
 	"bufio"
 	"cmp"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -83,7 +84,7 @@ type request struct {
 	BaseSHA string   `json:"base_sha,omitempty"`
 	Answer  string   `json:"answer,omitempty"`
 	By      string   `json:"by,omitempty"`
-	Cmd     string   `json:"cmd"`               // run, attach, runs, answer or steer
+	Cmd     string   `json:"cmd"`               // run, attach, runs, answer, steer or stop
 	Message string   `json:"message,omitempty"` // steer: what the working agent is told
 	Args    []string `json:"args,omitempty"`
 	Run     string   `json:"run,omitempty"`
@@ -181,6 +182,7 @@ type bgRun struct {
 	frames []Frame
 	more   chan struct{}
 	answer chan decisionAnswer
+	stop   context.CancelCauseFunc // ends its runCtx: atm stop
 }
 
 // add puts f on r's screen. Under the server's lock.
@@ -321,6 +323,12 @@ func (s *server) handle(c net.Conn) {
 		} else {
 			_ = enc.Encode(reply{})
 		}
+	case "stop":
+		if err := s.stopRun(req.Run); err != nil {
+			_ = enc.Encode(reply{Error: err.Error()})
+		} else {
+			_ = enc.Encode(reply{})
+		}
 	case "runs":
 		s.Lock()
 		runs := make([]Outcome, len(s.runs))
@@ -381,6 +389,9 @@ func (s *server) start(args []string, baseSHA string) (Outcome, error) {
 	if err := os.MkdirAll(filepath.Dir(r.Report), 0o755); err != nil {
 		return Outcome{}, err
 	}
+	ctx, stop := context.WithCancelCause(context.Background())
+	r.stop = stop
+	stops.Store(runDir(s.root, r.Run), ctx)
 	s.runs = append(s.runs, r)
 	s.save()
 	go s.run(r, args, baseSHA)
@@ -396,6 +407,7 @@ func (s *server) run(r *bgRun, args []string, baseSHA string) {
 		}()
 		return runAt(r.Run, baseSHA, args, &screen{s: s, r: r, events: true}, &screen{s: s, r: r})
 	}()
+	stops.Delete(runDir(s.root, r.Run))
 	_, cannot := resumeFrom(s.root, r.Run)
 	s.Lock()
 	defer s.Unlock()
