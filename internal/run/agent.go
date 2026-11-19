@@ -496,9 +496,9 @@ func exclude(clone, pattern string) error {
 // Live gets what each line tells the screen.
 type stream struct {
 	final   string
-	model   string // first model named by this invocation's stream; never the requested model
-	asked   string // the requested model, "" for the harness's default
-	env     []string
+	model   string   // first model named by this invocation's stream; never the requested model
+	asked   string   // the requested model, "" for the harness's default
+	env     []string // the run's agent's environment, ATM asks pi, OpenCode and claude for its window with it; nil, none
 	clone   string
 	scratch string // this call's directory outside the clone its calls may write in
 	reach   string
@@ -681,8 +681,21 @@ func (s *stream) see(harness string, line []byte) {
 	}
 	s.reach = cmp.Or(s.reach, outside(e.calls(harness), s.clone, s.scratch))
 	s.show(e.activity(harness))
-	// not show: a message held for its report stays held
+	s.showContext(harness, line, e)
+}
+
+// showContext shows the context line says its model call used. A claude stream says no window, so ATM asks claude
+// for the model's, when the stream has the run's env: from its init, while the worker thinks, so the first call shows
+// it. Not show: a message held for its report stays held.
+func (s *stream) showContext(harness string, line []byte, e event) {
+	ask := harness == "claude" && s.env != nil
+	if ask && e.Type == "system" && e.Subtype == "init" && e.Model != "" {
+		askClaudeWindow(e.Model, s.env)
+	}
 	for _, ev := range contextUsed(harness, line, s.env, s.clone, s.asked) {
+		if ask {
+			ev["context"].(map[string]any)["window"] = claudeWindow(cmp.Or(e.Message.Model, s.model), s.env)
+		}
 		s.live(ev)
 	}
 }

@@ -13,12 +13,12 @@ import (
 )
 
 // A real run's Agent row shows, while the worker runs, the context its last model call used and its window: pi's
-// from its models.json, or else the table pi lists for its model, ? for claude, whose stream names none; under a
-// thousand tokens whole, a million in M. An OpenCode 2 worker's is its last step's, of the limit.context OpenCode
-// 2's API gives, in the worker's clone and with its environment, for the model it was given, else its default.
-// testdata/opencode2-context.jsonl is a real OpenCode 2.3.2 run's log, `opencode --standalone run --auto --format
-// json`, and testdata/opencode2-api the answers of its `opencode api --standalone model.default` and model.list,
-// the directory, API keys and endpoints taken out.
+// from its models.json, or else the table pi lists for its model, claude's from claude itself, its stream naming
+// none; under a thousand tokens whole, a million in M. An OpenCode 2 worker's is its last step's, of the
+// limit.context OpenCode 2's API gives, in the worker's clone and with its environment, for the model it was given,
+// else its default. testdata/opencode2-context.jsonl is a real OpenCode 2.3.2 run's log, `opencode --standalone run
+// --auto --format json`, and testdata/opencode2-api the answers of its `opencode api --standalone model.default` and
+// model.list, the directory, API keys and endpoints taken out.
 func TestRealScreenAgentRowContext(t *testing.T) {
 	builtATM(t)
 	models, err := filepath.Abs(filepath.Join("testdata", "pi-agent"))
@@ -33,33 +33,45 @@ func TestRealScreenAgentRowContext(t *testing.T) {
 	for _, c := range []agentRowContext{
 		{"pi", "pi", `{"type":"message_start","message":{"role":"assistant","content":[],"provider":"llama-cpp",` +
 			`"model":"qwen3.6-27b","usage":{"input":21,"output":0,"cacheRead":26851,"cacheWrite":0,` +
-			`"totalTokens":26872}}}`, "Agent  26.9K / 262K  ", true, nil},
+			`"totalTokens":26872}}}`, "Agent  26.9K / 262K  ", true, nil, ""},
 		{"pi million window", "pi", `{"type":"message_end","message":{"role":"assistant","content":[],` +
 			`"provider":"llama-cpp","model":"qwen3.6-27b-1m","usage":{"input":600,"output":40,"cacheRead":0,"cacheWrite":0}}}`,
-			"Agent  640 / 1.05M  ", false, nil},
+			"Agent  640 / 1.05M  ", false, nil, ""},
 		{"pi built-in provider", "pi", `{"type":"message_start","message":{"role":"assistant","content":[],` +
 			`"provider":"openai-codex","model":"gpt-6.1-sol","usage":{"input":21,"output":0,"cacheRead":5499,` +
-			`"cacheWrite":0}}}`, "Agent  5.52K / 500K  ", false, nil},
+			`"cacheWrite":0}}}`, "Agent  5.52K / 500K  ", false, nil, ""},
 		{"pi model without a listed window", "pi", `{"type":"message_end","message":{"role":"assistant","content":[],` +
 			`"provider":"openai-codex","model":"unlisted-model","usage":{"input":10,"output":5,"cacheRead":0,` +
-			`"cacheWrite":0}}}`, "Agent  15 / ?  ", false, nil},
+			`"cacheWrite":0}}}`, "Agent  15 / ?  ", false, nil, ""},
 		{"pi built-in million window", "pi", `{"type":"message_end","message":{"role":"assistant","content":[],` +
 			`"provider":"deepseek","model":"deepseek-flash","usage":{"input":600,"output":40,"cacheRead":0,"cacheWrite":0}}}`,
-			"Agent  640 / 1M  ", false, nil},
+			"Agent  640 / 1M  ", false, nil, ""},
 		{"claude", "claude", `{"type":"assistant","message":{"role":"assistant","model":"claude-opus-5-5","content":[],` +
 			`"usage":{"input_tokens":3,"cache_creation_input_tokens":4120,"cache_read_input_tokens":18234,` +
-			`"output_tokens":8}}}`, "Agent  22.4K / ?  ", false, nil},
-		{"opencode default model", "opencode", openCode, "Agent  7.42K / 131K  ", false, nil},
+			`"output_tokens":8}}}`, "Agent  22.4K / 1M  ", false, nil, ""},
+		{"claude window from its init", "claude", `{"type":"system","subtype":"init","model":"claude-sonnet-5-5"}` + "\n" +
+			`{"type":"assistant","message":{"role":"assistant","content":[],` +
+			`"usage":{"input_tokens":3,"cache_creation_input_tokens":4120,"cache_read_input_tokens":18234,` +
+			`"output_tokens":8}}}`, "Agent  22.4K / 200K  ", false, nil, "200000"},
+		{"claude window it does not say", "claude", `{"type":"assistant","message":{"role":"assistant",` +
+			`"model":"claude-haiku-5-5","content":[],"usage":{"input_tokens":3,"output_tokens":8}}}`,
+			"Agent  11 / ?  ", false, nil, "0"},
+		{"claude that fails to say its window", "claude", `{"type":"assistant","message":{"role":"assistant",` +
+			`"model":"claude-haiku-5-5","content":[],"usage":{"input_tokens":3,"output_tokens":8}}}`,
+			"Agent  11 / ?  ", false, nil, "fail"},
+		{"claude call that names no model", "claude", `{"type":"assistant","message":{"role":"assistant",` +
+			`"content":[],"usage":{"input_tokens":3,"output_tokens":8}}}`, "Agent  11 / ?  ", false, nil, ""},
+		{"opencode default model", "opencode", openCode, "Agent  7.42K / 131K  ", false, nil, ""},
 		{"opencode model", "opencode", openCode, "Agent  7.42K / 200K  ", false,
-			[]string{"--model", "opencode/deepseek-v4.1-flash-free", "--effort", "high"}},
+			[]string{"--model", "opencode/deepseek-v4.1-flash-free", "--effort", "high"}, ""},
 		{"opencode harness arg model", "opencode", openCode, "Agent  7.42K / 200K  ", false,
-			[]string{"--harness-arg=-m", "--harness-arg=opencode/deepseek-v4.1-flash-free"}},
+			[]string{"--harness-arg=-m", "--harness-arg=opencode/deepseek-v4.1-flash-free"}, ""},
 		{"opencode harness arg short model equals", "opencode", openCode, "Agent  7.42K / 200K  ", false,
-			[]string{"--harness-arg=-m=opencode/deepseek-v4.1-flash-free"}},
+			[]string{"--harness-arg=-m=opencode/deepseek-v4.1-flash-free"}, ""},
 		{"opencode harness arg long model equals", "opencode", openCode, "Agent  7.42K / 200K  ", false,
-			[]string{"--harness-arg=--model=opencode/deepseek-v4.1-flash-free"}},
+			[]string{"--harness-arg=--model=opencode/deepseek-v4.1-flash-free"}, ""},
 		{"opencode model without a window", "opencode", openCode, "Agent  7.42K / ?  ", false,
-			[]string{"--model", "local/unlisted-model"}},
+			[]string{"--model", "local/unlisted-model"}, ""},
 	} {
 		t.Run(c.name, func(t *testing.T) { showsAgentRowContext(t, c, models, openCodeAPI) })
 	}
@@ -70,6 +82,7 @@ type agentRowContext struct {
 	name, harness, stream, want string
 	narrow                      bool     // at 100 columns, the context does not fit beside the label
 	args                        []string // the run's model and effort
+	window                      string   // what claude says its model's window is, 1000000 when empty
 }
 
 // showsAgentRowContext runs c's worker, pi's models.json in models and the recorded OpenCode 2 answers in
@@ -83,6 +96,7 @@ func showsAgentRowContext(t *testing.T, c agentRowContext, models, openCodeAPI s
 	// pi's own table: a built-in provider's models are not in models.json
 	t.Setenv("FAKE_PI_MODELS", "openai-codex  gpt-5.6-luna   272K  128K  yes  yes\n"+
 		"openai-codex  gpt-6.1-sol    500K  128K  yes  yes\n"+"deepseek      deepseek-flash  1M    384K  yes  yes\n")
+	t.Setenv("FAKE_CLAUDE_WINDOW", c.window)
 	t.Setenv("TERM", "xterm-256color")
 	t.Setenv("NO_COLOR", "")
 	top := gitT(t, repo(t, "local", atmYAML), "rev-parse", "--show-toplevel")

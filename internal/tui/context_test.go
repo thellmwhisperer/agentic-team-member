@@ -31,7 +31,7 @@ var contextOnRow = regexp.MustCompile(`Agent  (\S+ / \S+)  `)
 func TestAgentRowContext(t *testing.T) {
 	for name, want := range map[string][]string{
 		"pi-context.events.jsonl":     {"26.9K / 262K", "26.9K / 262K", "27.5K / 262K"},
-		"claude-context.events.jsonl": {"22.4K / ?", "22.4K / ?", "23.3K / ?"},
+		"claude-context.events.jsonl": {"22.4K / 1M", "22.4K / 1M", "23.3K / 1M"},
 	} {
 		m := New("issue-1", 120, 40)
 		m.apply(run.Frame{Event: []byte(`{"step":"agent","state":"started","ts":"2026-11-17T21:50:29Z"}`)})

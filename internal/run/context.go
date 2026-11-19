@@ -29,8 +29,9 @@ type usageLine struct {
 }
 
 // contextUsed is the screen's event for line of harness's stream when it says how much context a model call used:
-// the tokens used and the model's window, 0 when the harness's own configuration does not say it. None when the
-// line says no usage. dir and model are the worker's directory and the model it was given, "" for its default.
+// the tokens used and the model's window, 0 when the line and the harness's own configuration do not say it (claude's
+// stream names none: see claudeWindow). None when the line says no usage. dir and model are the worker's directory
+// and the model it was given, "" for its default.
 func contextUsed(harness string, line []byte, env []string, dir, model string) []map[string]any {
 	if harness == "opencode" {
 		return openCodeContext(line, env, dir, model)
@@ -203,4 +204,59 @@ func listedTokens(s string) int {
 	}
 	n, _ := strconv.ParseFloat(s, 64) // not a figure: 0
 	return int(n*unit + 0.5)
+}
+
+// claudeProbes is, by model and environment, the one question ATM asks claude about its window in this process.
+var claudeProbes sync.Map // model and env -> *claudeProbe
+
+// claudeProbe is claude's answer about one model's window, once done is closed; 0 when it gave none.
+type claudeProbe struct {
+	done   chan struct{}
+	window int
+}
+
+// askClaudeWindow starts asking claude, run with the worker's env, once per model, env and process, for the window
+// of model, and returns the question; one with no answer is not asked again. A claude stream says the window only in
+// its final result, after the agent has ended, so ATM asks claude itself, which reads it from the model: the figure
+// is claude's, never ATM's.
+func askClaudeWindow(model string, env []string) *claudeProbe {
+	p := &claudeProbe{done: make(chan struct{})}
+	if got, loaded := claudeProbes.LoadOrStore(model+"\x00"+strings.Join(env, "\x00"), p); loaded {
+		return got.(*claudeProbe)
+	}
+	go func() {
+		defer close(p.done)
+		p.window = probeClaudeWindow(model, env)
+	}()
+	return p
+}
+
+// claudeWindow is the window claude, run with env, says model has, waiting for its answer; 0 when it gave none.
+func claudeWindow(model string, env []string) int {
+	if model == "" {
+		return 0
+	}
+	p := askClaudeWindow(model, env)
+	<-p.done
+	return p.window
+}
+
+// probeClaudeWindow runs claude on model with env in a temporary directory and reads the contextWindow of model in its
+// result's modelUsage; 0 when claude fails or does not say it.
+func probeClaudeWindow(model string, env []string) int {
+	dir, _ := os.MkdirTemp("", "atm-window-") // none: claude runs where ATM does, with no tools
+	defer func() { _ = os.RemoveAll(dir) }()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute) // all claude has to answer
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "claude", "-p", "--output-format", "json", "--setting-sources", "project",
+		"--strict-mcp-config", "--tools", "", "--no-session-persistence", "--model", model)
+	cmd.Dir, cmd.Env, cmd.Stdin, cmd.WaitDelay = dir, env, strings.NewReader(helloBrief), time.Second
+	out, _ := cmd.Output() // failed: no JSON, no window
+	var r struct {
+		ModelUsage map[string]struct {
+			ContextWindow int `json:"contextWindow"`
+		}
+	}
+	_ = json.Unmarshal(out, &r)
+	return r.ModelUsage[model].ContextWindow
 }

@@ -498,11 +498,11 @@ reasoning and cache tokens. ATM gets the window from OpenCode's API in the
 worker's directory and environment: `model.list` for its requested model, or
 `model.default` when no model was requested. Pi reports usage in its events
 and gets its window from `models.json` or the model table of `pi --list-models`;
-Claude's events give no window. Codex's usage and window come from the
-`token_count` records of its session file under `$CODEX_HOME/sessions`
-(`~/.codex` by default), as `exec --json` only totals the turn. The window reads
-`?` when the harness provides none. The figure gives way when the row is too
-narrow for it.
+Claude's events give no window, so ATM asks claude once per model, with the
+worker's environment. Codex's usage and window come from the `token_count`
+records of its session file under `$CODEX_HOME/sessions` (`~/.codex` by
+default), as `exec --json` only totals the turn. The window reads `?` when the
+harness provides none. The figure gives way when the row is too narrow for it.
 Above the rows, the issue's title shows on one line beside the state. A
 longer one folds behind `▸`, cut with `…`; `i` or a click on the arrow splits
 it in whole lines behind `▾`, and folds it again. The title stays above the

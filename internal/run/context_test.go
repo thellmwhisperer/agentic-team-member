@@ -5,16 +5,25 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
 // The usage on every model call of pi's and claude's streams reaches the screen, with the window pi's models.json
-// gives its model and none for claude, whose stream names no window.
+// gives its model and the one claude says its model has, its stream naming none.
 func TestContextUsedMatchesItsEventGoldens(t *testing.T) {
+	t.Setenv("PATH", fakes+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("FAKE_CLAUDE_WINDOW", "1000000")
 	t.Setenv("PI_CODING_AGENT_DIR", filepath.Join("testdata", "pi-agent"))
 	t.Setenv("PATH", fakes+string(os.PathListSeparator)+os.Getenv("PATH")) // the fake pi, whose table lists nothing
 	for _, harness := range []string{"pi", "claude"} {
-		b, err := json.Marshal(activityEvents(harness, fixture(t, harness+"-context.jsonl")))
+		var events []map[string]any
+		s := stream{env: os.Environ(), live: func(ev map[string]any) { events = append(events, ev) }}
+		for _, l := range strings.Split(strings.TrimSpace(fixture(t, harness+"-context.jsonl")), "\n") {
+			s.see(harness, []byte(l))
+		}
+		s.finish()
+		b, err := json.Marshal(events)
 		var got []map[string]any
 		if err != nil || json.Unmarshal(b, &got) != nil {
 			t.Fatal(err)
