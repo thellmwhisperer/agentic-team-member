@@ -428,7 +428,8 @@ ignores.
 
 | Path | Holds | Kept |
 |------|-------|------|
-| `.atm/runs/<label>/` | `report.json`, the briefs, the agent logs, the worker's scratch directory, `delivery-output.txt`, and `resume/` when the run is resumable | Always |
+| `.atm/runs/<label>/` | `report.json`, the briefs, the agent logs, `delivery-output.txt`, and `resume/` when the run is resumable | Always |
+| `.atm/runs/<label>/worker-scratch/` | The worker's scratch directory, its `$TMPDIR` | Removed when the run passes or is stopped; after a failure for any other reason, until the next `atm run` in the repository more than 7 days after the run ended. Each removal is logged in `.atm/runs/<label>/scratch-cleanup.log` |
 | `.atm/clones/atm-run-<timestamp>/` | The run's isolated clone | Removed after the run when no longer needed and cleanup can verify its identity |
 | `.atm/runs.jsonl` | The last state of each retained run, so `atm runs` survives the background process | Every run going and the newest 200 that ended |
 | `.atm/atm.sock`, `.atm/atm.lock`, `.atm/serve.log` | The background process | While it runs; the log stays |
