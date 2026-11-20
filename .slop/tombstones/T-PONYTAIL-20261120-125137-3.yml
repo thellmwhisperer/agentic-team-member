@@ -1,0 +1,18 @@
+schema: 1
+id: T-PONYTAIL-20261120-125137-3
+status: accepted
+category: alien_code
+title: "Quité el argumento redundante del directorio del run. La prueba lo obtiene de la ruta de worker-scratch y conserva todas las comprobaciones."
+created_at: 2026-11-20
+incident:
+  pattern: "Quité el argumento redundante del directorio del run. La prueba lo obtiene de la ruta de worker-scratch y conserva todas las comprobaciones."
+  what_went_wrong: "A coding agent wrote it and the ponytail pass cut it before delivery."
+  root_cause: "The coding agent wrote more than the issue needed."
+  rule_established: "Cut by the ponytail pass; it does not come back."
+  evidence:
+    - family: format_churn
+      example: "Quité el argumento redundante del directorio del run. La prueba lo obtiene de la ruta de worker-scratch y conserva todas las comprobaciones.\nissue_sentence: `report.json`, `worker.jsonl`, `brief.md` and `resume/` stay, and `atm run --resume <run>` of a failed run keeps working after its scratch is removed."
+      artifact: "internal/run/e2e_resume_unix_test.go"
+match:
+  family: format_churn
+  artifact: "internal/run/e2e_resume_unix_test.go"

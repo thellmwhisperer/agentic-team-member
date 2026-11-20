@@ -1,0 +1,18 @@
+schema: 1
+id: T-PONYTAIL-20261120-125137-1
+status: accepted
+category: alien_code
+title: "Quité la refactorización de la revisión de alcance. La limpieza de worker-scratch usa directamente el borrado existente, drop."
+created_at: 2026-11-20
+incident:
+  pattern: "Quité la refactorización de la revisión de alcance. La limpieza de worker-scratch usa directamente el borrado existente, drop."
+  what_went_wrong: "A coding agent wrote it and the ponytail pass cut it before delivery."
+  root_cause: "The coding agent wrote more than the issue needed."
+  rule_established: "Cut by the ponytail pass; it does not come back."
+  evidence:
+    - family: speculative_feature
+      example: "Quité la refactorización de la revisión de alcance. La limpieza de worker-scratch usa directamente el borrado existente, drop."
+      artifact: "internal/run/scope_review.go"
+match:
+  family: speculative_feature
+  artifact: "internal/run/scope_review.go"

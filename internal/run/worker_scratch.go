@@ -58,15 +58,17 @@ func archivedScratchOutcome(dir string) Outcome {
 }
 
 func removeWorkerScratch(dir string) {
-	if err := removeScratch(dir, "worker-scratch"); !os.IsNotExist(err) {
-		recordScratchCleanup(dir, err)
+	root, err := os.OpenRoot(dir)
+	if err == nil {
+		defer func() { _ = root.Close() }()
+		err = drop(root, "worker-scratch", nil)
 	}
-}
-
-func recordScratchCleanup(dir string, err error) {
+	if os.IsNotExist(err) {
+		return
+	}
 	f, openErr := os.OpenFile(filepath.Join(dir, "scratch-cleanup.log"), os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
 	if openErr == nil {
-		defer func() { _ = f.Close() }()
 		_, _ = fmt.Fprintln(f, time.Now().UTC().Format(time.RFC3339), outcome(err), err)
+		_ = f.Close()
 	}
 }
