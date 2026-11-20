@@ -360,6 +360,7 @@ func (s *server) start(args []string, baseSHA string) (Outcome, error) {
 		return Outcome{}, errHandoff
 	}
 	n := 0
+	outcomes := make(map[string]Outcome, len(s.runs))
 	max := func(label string) {
 		if number, err := strconv.Atoi(label[strings.LastIndex(label, "-")+1:]); err == nil && number > n {
 			n = number
@@ -373,6 +374,7 @@ func (s *server) start(args []string, baseSHA string) (Outcome, error) {
 			}
 		}
 		max(r.Run)
+		outcomes[r.Run] = r.Outcome
 	}
 	runsDir := filepath.Join(s.root, ".atm", "runs")
 	entries, err := os.ReadDir(runsDir)
@@ -394,11 +396,15 @@ func (s *server) start(args []string, baseSHA string) (Outcome, error) {
 	stops.Store(runDir(s.root, r.Run), ctx)
 	s.runs = append(s.runs, r)
 	s.save()
-	go s.run(r, args, baseSHA)
+	go func() {
+		sweepWorkerScratch(runsDir, entries, outcomes)
+		s.run(r, args, baseSHA)
+	}()
 	return r.Outcome, nil
 }
 
 func (s *server) run(r *bgRun, args []string, baseSHA string) {
+	dir := runDir(s.root, r.Run)
 	err := func() (err error) {
 		defer func() {
 			if p := recover(); p != nil { // one run's crash ends that run, not every run
@@ -407,7 +413,10 @@ func (s *server) run(r *bgRun, args []string, baseSHA string) {
 		}()
 		return runAt(r.Run, baseSHA, args, &screen{s: s, r: r, events: true}, &screen{s: s, r: r})
 	}()
-	stops.Delete(runDir(s.root, r.Run))
+	if err == nil || errors.Is(err, errStopped) {
+		removeWorkerScratch(dir)
+	}
+	stops.Delete(dir)
 	_, cannot := resumeFrom(s.root, r.Run)
 	s.Lock()
 	defer s.Unlock()

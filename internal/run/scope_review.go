@@ -11,12 +11,7 @@ import (
 // and points the agent's TMPDIR and the clone boundary check at it: a fresh one per call.
 func (a *agent) reviewScratch(name string) (string, error) {
 	dir := filepath.Join(a.dir, name+"-scratch")
-	root, err := os.OpenRoot(a.dir)
-	if err == nil {
-		defer func() { _ = root.Close() }()
-		err = drop(root, name+"-scratch", nil)
-	}
-	if err != nil && !os.IsNotExist(err) {
+	if err := removeScratch(a.dir, name+"-scratch"); err != nil && !os.IsNotExist(err) {
 		return "", err
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -27,4 +22,13 @@ func (a *agent) reviewScratch(name string) (string, error) {
 	}), "TMPDIR="+dir)
 	a.scratch = dir
 	return dir, nil
+}
+
+func removeScratch(dir, name string) error {
+	root, err := os.OpenRoot(dir)
+	if err == nil {
+		defer func() { _ = root.Close() }()
+		err = drop(root, name, nil)
+	}
+	return err
 }

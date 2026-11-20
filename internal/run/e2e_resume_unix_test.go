@@ -125,7 +125,7 @@ func TestRunE2EResume(t *testing.T) {
 				t.Fatal(err)
 			}
 			r = e2eReport(t, top, label)
-			assertE2ETurn(t, tc, call, order, screen.String(), filepath.Join(runDir(top, label), "worker-scratch"))
+			assertE2ETurn(t, tc, call, order, screen.String(), runDir(top, label), end.Outcome == "passed")
 			assertE2EResult(t, tc, r, end)
 		})
 	}
@@ -225,7 +225,7 @@ func (tc e2eResumeCase) config() string {
 	return cfg
 }
 
-func assertE2ETurn(t *testing.T, tc e2eResumeCase, call, order, screen, scratch string) {
+func assertE2ETurn(t *testing.T, tc e2eResumeCase, call, order, screen, dir string, passed bool) {
 	t.Helper()
 	wantCalls := 2
 	if tc.skip != "" {
@@ -237,6 +237,7 @@ func assertE2ETurn(t *testing.T, tc e2eResumeCase, call, order, screen, scratch 
 			t.Fatalf("screen missing %q: %s", want, screen)
 		}
 	} else {
+		scratch := filepath.Join(dir, "worker-scratch")
 		got := agentCall(t, call)
 		want := "Checks failed at e2e: these changed lines are not executed by any end-to-end run of the real binary. " +
 			"Delete them, or write the end-to-end test that reaches them from a real command. " +
@@ -250,15 +251,27 @@ func assertE2ETurn(t *testing.T, tc e2eResumeCase, call, order, screen, scratch 
 		if !slices.Contains(got.Env, "TMPDIR="+scratch) {
 			t.Fatalf("resumed worker did not receive its scratch: %v", got.Env)
 		}
-		if _, err := os.Stat(filepath.Join(scratch, "test.log")); err != nil {
-			t.Fatalf("resumed worker did not write its scratch log: %v", err)
-		}
+		assertResumedScratch(t, dir, scratch, passed)
 		if !strings.Contains(screen, "agent turn after e2e") {
 			t.Fatalf("missing turn event: %s", screen)
 		}
 	}
 	if n := workerCalls(t, order); n != wantCalls {
 		t.Fatalf("worker calls=%d, want %d", n, wantCalls)
+	}
+}
+
+func assertResumedScratch(t *testing.T, dir, scratch string, passed bool) {
+	t.Helper()
+	log := filepath.Join(scratch, "test.log")
+	if passed {
+		b, err := os.ReadFile(filepath.Join(dir, "agent-after-e2e.jsonl"))
+		if err != nil || !bytes.Contains(b, []byte(filepath.ToSlash(log))) {
+			t.Fatalf("resumed worker log does not show the scratch write: %v\n%s", err, b)
+		}
+		assertScratchRemoved(t, scratch)
+	} else if _, err := os.Stat(log); err != nil {
+		t.Fatalf("resumed worker did not write its scratch log: %v", err)
 	}
 }
 
