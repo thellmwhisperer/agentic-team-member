@@ -154,7 +154,9 @@ func fakeAgentCLI(name string) int {
 			} else {
 				fmt.Println(line)
 			}
-			time.Sleep(20 * time.Millisecond)
+			if !logged(os.Getenv("FAKE_AGENT_LOG"), line) {
+				return 1
+			}
 		}
 		return 3
 	}
@@ -426,6 +428,19 @@ func workReport(call string) string {
 func emit(ev obj) {
 	b, _ := json.Marshal(ev)
 	fmt.Println(string(b))
+}
+
+// logged waits, up to 2 minutes, until ATM wrote line to its agent log at path, as the JSON string it writes
+// a line that is not JSON as: stdout and stderr are two pipes, so the next line waits until ATM read this one.
+func logged(path, line string) bool {
+	want := []byte(strconv.Quote(line) + "\n")
+	for deadline := time.Now().Add(2 * time.Minute); time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
+		if b, _ := os.ReadFile(path); bytes.Contains(b, want) {
+			return true
+		}
+	}
+	fmt.Fprintf(os.Stderr, "ATM never logged %s to %q\n", line, path)
+	return false
 }
 
 func after(args []string, flag string) string {

@@ -1,0 +1,18 @@
+schema: 1
+id: T-PONYTAIL-20261122-220843-2
+status: accepted
+category: alien_code
+title: "Deleted `os.Unsetenv(\"GIT_CONFIG_PARAMETERS\")`. It is not global or system git configuration, and nothing replaces it."
+created_at: 2026-11-22
+incident:
+  pattern: "Deleted `os.Unsetenv(\"GIT_CONFIG_PARAMETERS\")`. It is not global or system git configuration, and nothing replaces it."
+  what_went_wrong: "A coding agent wrote it and the ponytail pass cut it before delivery."
+  root_cause: "The coding agent wrote more than the issue needed."
+  rule_established: "Cut by the ponytail pass; it does not come back."
+  evidence:
+    - family: speculative_hardening
+      example: "Deleted `os.Unsetenv(\"GIT_CONFIG_PARAMETERS\")`. It is not global or system git configuration, and nothing replaces it.\nissue_sentence: No test of `internal/run` or `internal/cli` reads the machine's global or system git configuration"
+      artifact: "internal/cli/background_test.go"
+match:
+  family: speculative_hardening
+  artifact: "internal/cli/background_test.go"

@@ -1,0 +1,18 @@
+schema: 1
+id: T-PONYTAIL-20261122-220843-1
+status: accepted
+category: alien_code
+title: "Deleted isolateGit, its own MkdirTemp directory and the gitDir cleanup. TestMain now writes gitConfig into the fakes directory it already creates and removes, and sets GIT_CONFIG_NOSYSTEM and GIT_CONFIG_GLOBAL with `_ = os.Setenv`. It also no longer unsets GIT_CONFIG_SYSTEM, which GIT_CONFIG_NOSYSTEM already overrides, or GIT_CONFIG_COUNT and GIT_CONFIG_PARAMETERS, which are environment settings and not the machine's global or system configuration. No ATM code sets them."
+created_at: 2026-11-22
+incident:
+  pattern: "Deleted isolateGit, its own MkdirTemp directory and the gitDir cleanup. TestMain now writes gitConfig into the fakes directory it already creates and removes, and sets GIT_CONFIG_NOSYSTEM and GIT_CONFIG_GLOBAL with `_ = os.Setenv`. It also no longer unsets GIT_CONFIG_SYSTEM, which GIT_CONFIG_NOSYSTEM already overrides, or GIT_CONFIG_COUNT and GIT_CONFIG_PARAMETERS, which are environment settings and not the machine's global or system configuration. No ATM code sets them."
+  what_went_wrong: "A coding agent wrote it and the ponytail pass cut it before delivery."
+  root_cause: "The coding agent wrote more than the issue needed."
+  rule_established: "Cut by the ponytail pass; it does not come back."
+  evidence:
+    - family: speculative_hardening
+      example: "Deleted isolateGit, its own MkdirTemp directory and the gitDir cleanup. TestMain now writes gitConfig into the fakes directory it already creates and removes, and sets GIT_CONFIG_NOSYSTEM and GIT_CONFIG_GLOBAL with `_ = os.Setenv`. It also no longer unsets GIT_CONFIG_SYSTEM, which GIT_CONFIG_NOSYSTEM already overrides, or GIT_CONFIG_COUNT and GIT_CONFIG_PARAMETERS, which are environment settings and not the machine's global or system configuration. No ATM code sets them.\nissue_sentence: No test of `internal/run` or `internal/cli` reads the machine's global or system git configuration"
+      artifact: "internal/run/run_test.go"
+match:
+  family: speculative_hardening
+  artifact: "internal/run/run_test.go"

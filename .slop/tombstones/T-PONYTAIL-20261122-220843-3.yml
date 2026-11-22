@@ -1,0 +1,18 @@
+schema: 1
+id: T-PONYTAIL-20261122-220843-3
+status: accepted
+category: alien_code
+title: "Replaced the Ticker, defer Stop and select in until with the original deadline loop plus `time.Sleep(10 * time.Millisecond)` as its post statement. It still waits up to 2 minutes and still sleeps between checks."
+created_at: 2026-11-22
+incident:
+  pattern: "Replaced the Ticker, defer Stop and select in until with the original deadline loop plus `time.Sleep(10 * time.Millisecond)` as its post statement. It still waits up to 2 minutes and still sleeps between checks."
+  what_went_wrong: "A coding agent wrote it and the ponytail pass cut it before delivery."
+  root_cause: "The coding agent wrote more than the issue needed."
+  rule_established: "Cut by the ponytail pass; it does not come back."
+  evidence:
+    - family: speculative_hardening
+      example: "Replaced the Ticker, defer Stop and select in until with the original deadline loop plus `time.Sleep(10 * time.Millisecond)` as its post statement. It still waits up to 2 minutes and still sleeps between checks.\nissue_sentence: `until` waits on its condition up to 2 minutes, as `untilShown` does, sleeping between checks"
+      artifact: "internal/run/background_unix_test.go"
+match:
+  family: speculative_hardening
+  artifact: "internal/run/background_unix_test.go"

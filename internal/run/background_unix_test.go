@@ -37,13 +37,13 @@ func alive(pid int) bool {
 	return err == nil || err == syscall.EPERM
 }
 
-// until fails t unless cond holds within 5 s: a killed process is not yet reaped, its new parent reaps it soon
-// after.
+// until fails t unless cond holds within 2 minutes, as untilShown waits, checking it every 10 ms: a killed
+// process is not yet reaped, its new parent reaps it soon after, later on a loaded machine.
 func until(t *testing.T, what string, cond func() bool) {
 	t.Helper()
-	for deadline := time.Now().Add(5 * time.Second); !cond(); {
+	for deadline := time.Now().Add(2 * time.Minute); !cond(); time.Sleep(10 * time.Millisecond) {
 		if time.Now().After(deadline) {
-			t.Fatalf("not within 5 s: %s", what)
+			t.Fatalf("not within 2 minutes: %s", what)
 		}
 	}
 }

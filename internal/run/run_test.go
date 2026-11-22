@@ -56,6 +56,15 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	fakes = dir
+	// Every git of the test process, and of the processes it starts, reads its global configuration from
+	// gitConfig and no system one: the machine's could ignore, convert or sign what a test commits.
+	config, err := gitConfig(dir)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "git configuration:", err)
+		os.Exit(1)
+	}
+	_ = os.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	_ = os.Setenv("GIT_CONFIG_GLOBAL", config)
 	// serve and gh invocations returned above; the fake agents inherit this as their owning test's PID.
 	_ = os.Setenv("ATM_FAKE_OWNER_PID", strconv.Itoa(os.Getpid()))
 	code := m.Run()
@@ -64,6 +73,14 @@ func TestMain(m *testing.M) {
 		_ = os.RemoveAll(repoTemplate.dir)
 	}
 	os.Exit(code)
+}
+
+// gitConfig writes dir/.gitconfig and returns its path: a global configuration whose excludes and attributes
+// files are none, so git reads neither from $XDG_CONFIG_HOME or ~/.config.
+func gitConfig(dir string) (string, error) {
+	path := filepath.Join(dir, ".gitconfig")
+	none := filepath.ToSlash(filepath.Join(dir, "none"))
+	return path, os.WriteFile(path, []byte("[core]\n\texcludesFile = "+none+"\n\tattributesFile = "+none+"\n"), 0o600)
 }
 
 // directGit puts first on PATH the git that macOS's /usr/bin/git, an xcrun shim, runs: the shim costs about 8 ms
@@ -144,6 +161,11 @@ func repo(t *testing.T, origin, atm string) string {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
+	config, err := gitConfig(home) // its own: a test may write the global configuration
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", config)
 	t.Setenv("GIT_AUTHOR_NAME", "atm")
 	t.Setenv("GIT_AUTHOR_EMAIL", "atm@example.com")
 	t.Setenv("GIT_COMMITTER_NAME", "atm")
