@@ -41,13 +41,9 @@ func alive(pid int) bool {
 // process is not yet reaped, its new parent reaps it soon after, later on a loaded machine.
 func until(t *testing.T, what string, cond func() bool) {
 	t.Helper()
-	tick := time.NewTicker(10 * time.Millisecond)
-	defer tick.Stop()
-	for deadline := time.After(2 * time.Minute); !cond(); {
-		select {
-		case <-deadline:
+	for deadline := time.Now().Add(2 * time.Minute); !cond(); time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
 			t.Fatalf("not within 2 minutes: %s", what)
-		case <-tick.C:
 		}
 	}
 }

@@ -434,19 +434,13 @@ func emit(ev obj) {
 // a line that is not JSON as: stdout and stderr are two pipes, so the next line waits until ATM read this one.
 func logged(path, line string) bool {
 	want := []byte(strconv.Quote(line) + "\n")
-	tick := time.NewTicker(5 * time.Millisecond)
-	defer tick.Stop()
-	for deadline := time.After(2 * time.Minute); ; {
+	for deadline := time.Now().Add(2 * time.Minute); time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
 		if b, _ := os.ReadFile(path); bytes.Contains(b, want) {
 			return true
 		}
-		select {
-		case <-deadline:
-			fmt.Fprintf(os.Stderr, "ATM never logged %s to %q\n", line, path)
-			return false
-		case <-tick.C:
-		}
 	}
+	fmt.Fprintf(os.Stderr, "ATM never logged %s to %q\n", line, path)
+	return false
 }
 
 func after(args []string, flag string) string {

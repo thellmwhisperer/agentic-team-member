@@ -1,0 +1,18 @@
+schema: 1
+id: T-PONYTAIL-20261122-220843-4
+status: accepted
+category: alien_code
+title: "Replaced the Ticker, defer Stop and select in logged with a deadline for-loop that calls `time.Sleep(5 * time.Millisecond)`. It still waits up to 2 minutes and prints the same failure message."
+created_at: 2026-11-22
+incident:
+  pattern: "Replaced the Ticker, defer Stop and select in logged with a deadline for-loop that calls `time.Sleep(5 * time.Millisecond)`. It still waits up to 2 minutes and prints the same failure message."
+  what_went_wrong: "A coding agent wrote it and the ponytail pass cut it before delivery."
+  root_cause: "The coding agent wrote more than the issue needed."
+  rule_established: "Cut by the ponytail pass; it does not come back."
+  evidence:
+    - family: speculative_hardening
+      example: "Replaced the Ticker, defer Stop and select in logged with a deadline for-loop that calls `time.Sleep(5 * time.Millisecond)`. It still waits up to 2 minutes and prints the same failure message.\nissue_sentence: `TestRunKeepsTheLastTwentyLinesInCombinedOrder` still checks the last twenty lines of stdout and stderr in the order the agent wrote them"
+      artifact: "internal/run/testdata/fakeagent/main.go"
+match:
+  family: speculative_hardening
+  artifact: "internal/run/testdata/fakeagent/main.go"

@@ -51,7 +51,6 @@ func TestMain(m *testing.M) {
 	// No git of the test process, or of the processes it starts, reads the machine's configuration, which could
 	// ignore, convert or sign what a test commits: no global or system one, and no excludes or attributes file
 	// from $XDG_CONFIG_HOME or ~/.config.
-	_ = os.Unsetenv("GIT_CONFIG_PARAMETERS")
 	for _, kv := range [][2]string{{"GIT_CONFIG_GLOBAL", os.DevNull}, {"GIT_CONFIG_NOSYSTEM", "1"},
 		{"GIT_CONFIG_COUNT", "2"}, {"GIT_CONFIG_KEY_0", "core.excludesFile"}, {"GIT_CONFIG_VALUE_0", os.DevNull},
 		{"GIT_CONFIG_KEY_1", "core.attributesFile"}, {"GIT_CONFIG_VALUE_1", os.DevNull}} {

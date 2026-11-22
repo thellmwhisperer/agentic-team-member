@@ -42,11 +42,6 @@ func TestMain(m *testing.M) {
 	if runtime.GOOS == "darwin" {
 		directGit()
 	}
-	gitDir, err := isolateGit()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "git configuration:", err)
-		os.Exit(1)
-	}
 	// Child test processes inherit HOME from repo(t); keep Go's module cache outside its TempDir.
 	if cache, err := exec.Command("go", "env", "GOMODCACHE").Output(); err != nil {
 		fmt.Fprintln(os.Stderr, "go module cache:", err)
@@ -61,38 +56,23 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	fakes = dir
+	// Every git of the test process, and of the processes it starts, reads its global configuration from
+	// gitConfig and no system one: the machine's could ignore, convert or sign what a test commits.
+	config, err := gitConfig(dir)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "git configuration:", err)
+		os.Exit(1)
+	}
+	_ = os.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	_ = os.Setenv("GIT_CONFIG_GLOBAL", config)
 	// serve and gh invocations returned above; the fake agents inherit this as their owning test's PID.
 	_ = os.Setenv("ATM_FAKE_OWNER_PID", strconv.Itoa(os.Getpid()))
 	code := m.Run()
 	_ = os.RemoveAll(dir)
-	_ = os.RemoveAll(gitDir)
 	if repoTemplate.dir != "" {
 		_ = os.RemoveAll(repoTemplate.dir)
 	}
 	os.Exit(code)
-}
-
-// isolateGit makes every git of the test process, and of the processes it starts, read its global
-// configuration from gitConfig in a new directory, which it returns, and no system one: the machine's could
-// ignore, convert or sign what a test commits.
-func isolateGit() (string, error) {
-	dir, err := os.MkdirTemp("", "atm-git-config-")
-	if err != nil {
-		return "", err
-	}
-	config, err := gitConfig(dir)
-	if err != nil {
-		return dir, err
-	}
-	for _, k := range []string{"GIT_CONFIG_SYSTEM", "GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS"} {
-		if err := os.Unsetenv(k); err != nil {
-			return dir, err
-		}
-	}
-	if err := os.Setenv("GIT_CONFIG_NOSYSTEM", "1"); err != nil {
-		return dir, err
-	}
-	return dir, os.Setenv("GIT_CONFIG_GLOBAL", config)
 }
 
 // gitConfig writes dir/.gitconfig and returns its path: a global configuration whose excludes and attributes
