@@ -195,6 +195,31 @@ esac
 	}
 }
 
+// sayHello runs atm doctor --agent, fails t unless its last line starts with want and it fails unless mode is
+// ok, and returns that line. A hang has a limit of 1 s; killed before it wrote its call, on a loaded machine,
+// it times out again with twice the limit, up to 64 s.
+func sayHello(t *testing.T, mode, want, call string) string {
+	t.Helper()
+	for limit := time.Second; ; limit *= 2 {
+		if mode == "hang" {
+			helloLimit = limit
+		}
+		out, err := atm(t, "doctor", "--agent")
+		got := lastLine(out)
+		if !strings.HasPrefix(got, want) || (mode == "ok") != (err == nil) {
+			t.Fatalf("got %q, err %v, want %q\n%s", got, err, want, out)
+		}
+		// Its directory and its arguments, which end it: the redirection creates the file before pwd and echo
+		// write them.
+		b, _ := os.ReadFile(call)
+		if mode != "hang" || strings.Count(string(b), "\n") >= 2 && strings.HasSuffix(string(b), "\n") ||
+			limit >= time.Minute {
+			return got
+		}
+		t.Logf("the hang was killed after %s, before it wrote its call", limit)
+	}
+}
+
 func TestDoctorAgentSaysHelloTheWayARunDoes(t *testing.T) {
 	for _, c := range []struct{ mode, want string }{
 		{"ok", "ok agent: claude m1 answered in "},
@@ -203,15 +228,8 @@ func TestDoctorAgentSaysHelloTheWayARunDoes(t *testing.T) {
 	} {
 		t.Run(c.mode, func(t *testing.T) {
 			defer func(d time.Duration) { helloLimit = d }(helloLimit)
-			if c.mode == "hang" {
-				helloLimit = time.Second
-			}
 			dir, call := helloRepo(t, c.mode)
-			out, err := atm(t, "doctor", "--agent")
-			got := lastLine(out)
-			if !strings.HasPrefix(got, c.want) || (c.mode == "ok") != (err == nil) {
-				t.Fatalf("got %q, err %v, want %q\n%s", got, err, c.want, out)
-			}
+			got := sayHello(t, c.mode, c.want, call)
 			if c.mode == "no-auth" && !strings.Contains(got, "no auth") {
 				t.Fatalf("want its last lines in %q", got)
 			}

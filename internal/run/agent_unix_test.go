@@ -123,6 +123,8 @@ func assertAgentStderr(t *testing.T, mode, log string) {
 func TestRunKeepsTheLastTwentyLinesInCombinedOrder(t *testing.T) {
 	root := repo(t, "https://example.com/owner/repo.git", atmYAML)
 	t.Setenv("FAKE_AGENT", "tail-sequence")
+	// The sequence agent writes each line once ATM logged the one before, so ATM reads them in that order.
+	t.Setenv("FAKE_AGENT_LOG", filepath.Join(root, ".atm", "runs", "t", "worker.jsonl"))
 	var out bytes.Buffer
 	err := Run("t", []string{issueFile(t, issue)}, &out, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "exit code 3") {
